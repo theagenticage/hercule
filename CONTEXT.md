@@ -349,6 +349,14 @@ _Avoid_: rule, hook
 One node of an execution plan's graph. Two kinds in v1: an action step (calls a Workflow Action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
 _Avoid_: stage, job
 
+**Iteration**:
+One entry of a run into a step, numbered 1, 2, 3 in the order the run came to it. A loop, or an *any* join whose edges fire more than once, gives a step several iterations. Each iteration has its own step record, and `steps.<id>` in an expression reads the latest one that finished.
+_Avoid_: retry (a run never retries a step), turn (a turn belongs to a session)
+
+**Step Record**:
+What one step, or one signal trigger, did in one iteration of a run: its status, times, output or error. Created `pending`, then `running` and `completed`, `failed` or `cancelled`, or `skipped`. Its status only moves forward: a step that runs again gets a new record.
+_Avoid_: step run, step instance
+
 **Workflow Action**:
 What an action step calls: one piece of work with a declared input and output, in the action catalog. A plugin declares one under a bare word and it is named by its qualified id (`github/pr.merge`); the core declares the Built-in Actions. A step writes the action's input as `params`, and the action's answer is the step's output. A step cannot name the action of a plugin that does not run.
 _Avoid_: action (bare, where a Bound Action could be meant), tool, command, task (reserved for Task)
@@ -362,15 +370,15 @@ A step where a run begins: a step with `entry: true`, or a step that no edge lea
 _Avoid_: start step, root step, first step
 
 **Join**:
-How a step with several incoming edges behaves: an *any* join runs a new iteration for every incoming edge that fires (the default); an *all* join runs once, when every incoming edge has fired or can no longer fire.
+How a step with several incoming edges behaves: an *any* join runs a new iteration for every incoming edge that fires (the default); an *all* join runs once, when no incoming edge can fire any more and at least one has fired.
 _Avoid_: gateway, barrier (for the any case)
 
 **Skip**:
-A step not run because its author-written condition was false. A skipped step has no output; the steps after it are written to expect that.
+A step not run because its author-written condition was false when its step record would have started; the record ends `skipped`. A skipped step has no output, and its outgoing edges are evaluated as if it had completed, so the steps after it are written to expect that.
 _Avoid_: bypass
 
 **Terminal Step**:
-A step whose completion completes the run, ending whatever else is still running or waiting.
+A step whose completion completes the run, ending whatever else is still running or waiting. Its output is the run's output. A skipped terminal step does not end the run.
 _Avoid_: end node, exit
 
 **Subscription**:

@@ -6,17 +6,19 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
 import { evaluateExpression, renderTemplate, renderTemplates } from "./index";
+import { provideUnlimitedBudget } from "./testing";
 
 const CONTEXT = {
   inputs: { count: 3, price: 2.5, first: 0, title: "Fix login", labels: ["bug"], urgent: true },
   steps: { create: { output: { id: "t_1", items: [1, 2] } } },
 };
 
-const render = (template: string): unknown => Effect.runSync(renderTemplate(template, CONTEXT));
+const render = (template: string): unknown =>
+  Effect.runSync(provideUnlimitedBudget(renderTemplate(template, CONTEXT)));
 
 /** Returns the message a render failed with. */
 const readFailure = (effect: Effect.Effect<unknown, { readonly message: string }>): string => {
-  const exit = Effect.runSyncExit(effect);
+  const exit = Effect.runSyncExit(provideUnlimitedBudget(effect));
   if (Exit.isSuccess(exit))
     throw new Error(`expected a failure, got ${JSON.stringify(exit.value)}`);
   return Option.getOrThrow(Cause.findErrorOption(exit.cause)).message;
@@ -76,14 +78,16 @@ describe("renderTemplates", () => {
   it("renders every template in the params at any depth and leaves other values alone", () => {
     expect(
       Effect.runSync(
-        renderTemplates(
-          {
-            title: "{{ inputs.title }}",
-            priority: "high",
-            count: 7,
-            provenance: [{ ref: "run {{ inputs.count }}", note: null }],
-          },
-          CONTEXT,
+        provideUnlimitedBudget(
+          renderTemplates(
+            {
+              title: "{{ inputs.title }}",
+              priority: "high",
+              count: 7,
+              provenance: [{ ref: "run {{ inputs.count }}", note: null }],
+            },
+            CONTEXT,
+          ),
         ),
       ),
     ).toEqual({
@@ -124,7 +128,7 @@ describe("numbers in a template, whatever their CEL type", () => {
   });
 
   it("keeps two whole numbers whole, so dividing two literals still drops the remainder", () => {
-    expect(Effect.runSync(evaluateExpression("1 + 2", CONTEXT))).toBe(3n);
+    expect(Effect.runSync(provideUnlimitedBudget(evaluateExpression("1 + 2", CONTEXT)))).toBe(3n);
     expect(render("{{ 7 / 2 }}")).toBe(3);
     expect(render("{{ 7 / 2.0 }}")).toBe(3.5);
   });

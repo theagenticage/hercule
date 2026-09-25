@@ -15,6 +15,7 @@ import type * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
+import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -44,6 +45,7 @@ import {
   EventRoutingInterval,
   LostRunnerSweepInterval,
   resumeUnfinishedRuns,
+  RunFibers,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -177,8 +179,9 @@ export type RunnerArranger = (fields: {
 export type JoinTokenArranger = () => Promise<string>;
 
 /**
- * Runs the boot's idempotent steps again, as a restart does on a database
- * already in use.
+ * Restarts the controller in place: stops the fibers executing runs, then
+ * runs the boot's idempotent steps again, as a restart does on a database
+ * already in use, and resumes the unfinished runs.
  */
 export type RebootArranger = () => Promise<void>;
 
@@ -286,10 +289,16 @@ export const withServer = (
           yield* ensureProviderInstances;
         });
         yield* bootSteps;
-        // A restart also resumes the unfinished runs, which the real
-        // controller does as it starts serving (`serve`), after these steps.
+        // A restart first interrupts every run's fiber and waits until they
+        // have stopped, as a stopping controller does, and resumes the
+        // unfinished runs after the boot's steps, as the real controller
+        // does when it starts serving (`serve`).
+        const runFibers = yield* RunFibers;
         const reboot: RebootArranger = yield* makeRepeatable(
-          Effect.andThen(bootSteps, resumeUnfinishedRuns),
+          Effect.andThen(
+            FiberMap.clear(runFibers),
+            Effect.andThen(bootSteps, resumeUnfinishedRuns),
+          ),
         );
         let listening = serve(bundle);
         const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {

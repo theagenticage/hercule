@@ -396,6 +396,7 @@ const INTERRUPTED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a002";
 const REPEATED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a003";
 const BROKEN_RUN_ID = "0199f0b7-0000-7000-8000-00000000a004";
 const WAITING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a005";
+const STRANDED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a009";
 
 /** Inserts a run row with the status `running`, as the engine leaves one between two steps. */
 const insertRunningRun = (
@@ -543,7 +544,7 @@ describe("a run interrupted by a restart", () => {
     });
   });
 
-  it("fails a run with controller-error, at its current step, when executing it fails for a reason of the controller's own", async () => {
+  it("fails a run with controller-error, at the step record it was executing, when executing it fails for a reason of the controller's own", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: FILE_AND_START_DEFINITION,
@@ -572,6 +573,43 @@ describe("a run interrupted by a restart", () => {
       expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
       expect(expectStatus(run, "failed").failedStepId).toBe("ghost");
       expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
+    });
+  });
+
+  it("fails a running run with controller-error when it has no step record left to execute", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: FILE_AND_START_DEFINITION,
+      });
+
+      // The first step completed, but the record of the step after it is
+      // missing. Routing creates that record in the same transaction, so
+      // these rows stand in for a bug in the engine.
+      const at = new Date().toISOString();
+      await insertRunningRun(harness, {
+        id: STRANDED_RUN_ID,
+        workflowId: workflow.id,
+        plan: FILE_AND_START_DEFINITION,
+        inputs: { title: "Fix login" },
+        at,
+      });
+      await runEffect(
+        harness.sql`
+          INSERT INTO run_steps
+            (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
+          VALUES
+            (unhex(replace(${STRANDED_RUN_ID}, '-', '')), 'create', 1, 'completed', '{}',
+             ${at}, ${at}, ${at})`,
+      );
+
+      await harness.reboot();
+      const run = await waitForRunToFinish(base, token, STRANDED_RUN_ID);
+
+      expect(run.status, JSON.stringify(run)).toBe("failed");
+      expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
+      expect(run.steps.map((record) => [record.stepId, record.status])).toEqual([
+        ["create", "completed"],
+      ]);
     });
   });
 
@@ -623,6 +661,282 @@ describe("a run interrupted by a restart", () => {
         expect(run.steps[0]!.status).toBe("failed");
         expect(expectStatus(run.steps[0], "failed").error.code).toBe("interrupted");
         expect(expectStatus(run.steps[0], "failed").error.message).toMatch(/\S/);
+        expect(executions).toBe(0);
+      },
+      [countingNotesPlugin],
+    );
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Resuming a routed run after a restart.                                    */
+/* ------------------------------------------------------------------------ */
+
+const LOOPING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a006";
+const JOINING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a007";
+const PARALLEL_INTERRUPTED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a008";
+
+/**
+ * Inserts one step record of a run. The records of a run are read in the
+ * order they were inserted, so a test inserts them in the order the engine
+ * would have created them.
+ */
+const insertStepRecord = (
+  harness: ServerHarness,
+  runId: string,
+  record: {
+    readonly stepId: string;
+    readonly iteration: number;
+    readonly status: "pending" | "running" | "completed";
+    readonly output?: unknown;
+    readonly at: string;
+  },
+) => {
+  const startedAt = record.status === "pending" ? null : record.at;
+  const finishedAt = record.status === "completed" ? record.at : null;
+  const output = record.status === "completed" ? JSON.stringify(record.output ?? null) : null;
+  return runEffect(
+    harness.sql`
+      INSERT INTO run_steps
+        (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
+      VALUES
+        (unhex(replace(${runId}, '-', '')), ${record.stepId}, ${record.iteration},
+         ${record.status}, ${output}, ${record.at}, ${startedAt}, ${finishedAt})`,
+  );
+};
+
+/** Inserts how many times a run has followed the edge at `edgeIndex` of its plan. */
+const insertEdgeTraversals = (
+  harness: ServerHarness,
+  runId: string,
+  edgeIndex: number,
+  count: number,
+) =>
+  runEffect(
+    harness.sql`
+      INSERT INTO run_edge_traversals (run_id, edge_index, count)
+      VALUES (unhex(replace(${runId}, '-', '')), ${edgeIndex}, ${count})`,
+  );
+
+describe("a routed run interrupted by a restart", () => {
+  it("continues a loop from its current iteration, with the traversal counts it had", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      // `file` creates a task labelled `loop` and `count` lists them. The
+      // edge back to `file` (index 1) may fire twice, and fires while the
+      // count is below the target of 4. So the loop stops at a count of 3,
+      // with iteration-limit, only if the run keeps the firing it made before
+      // the restart; a run that forgot it would reach 4 and complete.
+      const definition = {
+        name: "Count to the target",
+        inputs: [{ name: "target", schema: { type: "integer", minimum: 1 }, required: true }],
+        steps: [
+          {
+            id: "file",
+            kind: "action",
+            action: "task.create",
+            entry: true,
+            params: { title: "A loop task", description: "", labels: ["loop"] },
+          },
+          { id: "count", kind: "action", action: "task.query", params: { labels: ["loop"] } },
+          buildCreateStep("done"),
+        ],
+        edges: [
+          { from: "file", to: "count" },
+          {
+            from: "count",
+            to: "file",
+            condition: "size(steps.count.output.items) < inputs.target",
+            maxTraversals: 2,
+          },
+          {
+            from: "count",
+            to: "done",
+            condition: "size(steps.count.output.items) >= inputs.target",
+          },
+        ],
+      };
+      const workflow = await createWorkflowOrFail(base, token, { definition });
+      // The task the first round of the loop created.
+      const created = await post(
+        base,
+        "/api/v1/tasks",
+        { title: "A loop task", description: "", labels: ["loop"] },
+        token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const task = (await created.json()) as Task;
+
+      // The rows a run has when the controller stopped after one round of
+      // the loop: the edge back to `file` fired once, and `file`'s second
+      // record waits.
+      const at = new Date().toISOString();
+      await insertRunningRun(harness, {
+        id: LOOPING_RUN_ID,
+        workflowId: workflow.id,
+        plan: definition,
+        inputs: { target: 4 },
+        at,
+      });
+      await insertStepRecord(harness, LOOPING_RUN_ID, {
+        stepId: "file",
+        iteration: 1,
+        status: "completed",
+        output: task,
+        at,
+      });
+      await insertStepRecord(harness, LOOPING_RUN_ID, {
+        stepId: "count",
+        iteration: 1,
+        status: "completed",
+        output: { items: [task] },
+        at,
+      });
+      await insertStepRecord(harness, LOOPING_RUN_ID, {
+        stepId: "file",
+        iteration: 2,
+        status: "pending",
+        at,
+      });
+      await insertEdgeTraversals(harness, LOOPING_RUN_ID, 0, 1);
+      await insertEdgeTraversals(harness, LOOPING_RUN_ID, 1, 1);
+
+      await harness.reboot();
+      const run = await waitForRunToFinish(base, token, LOOPING_RUN_ID);
+
+      expect(expectStatus(run, "failed")).toMatchObject({
+        failureReason: "iteration-limit",
+        failedStepId: "count",
+        failedEdge: { index: 1 },
+      });
+      for (const stepId of ["file", "count"]) {
+        expect(
+          findStepRecords(run, stepId).map((record) => [record.iteration, record.status]),
+          stepId,
+        ).toEqual([
+          [1, "completed"],
+          [2, "completed"],
+          [3, "completed"],
+        ]);
+      }
+      expect(findStepRecords(run, "done")).toEqual([]);
+      expect(run.edgeTraversals).toEqual([3, 2, 0]);
+    });
+  });
+
+  it("keeps a join: all edge that fired before the restart, and runs the join once", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      // `left`'s edge into `merge` fired before the restart, and `right`'s
+      // never fires. So `merge` runs only if the run keeps that firing.
+      const definition = {
+        name: "Join across a restart",
+        steps: [
+          buildCreateStep("left"),
+          buildCreateStep("right"),
+          {
+            id: "merge",
+            kind: "action",
+            action: "task.create",
+            join: "all",
+            params: { title: "Merged {{ steps.left.output.title }}", description: "" },
+          },
+        ],
+        edges: [
+          { from: "left", to: "merge" },
+          { from: "right", to: "merge", condition: "false" },
+        ],
+      };
+      const workflow = await createWorkflowOrFail(base, token, { definition });
+
+      // The rows a run has when the controller stopped after `left`
+      // completed and before `right` started.
+      const at = new Date().toISOString();
+      await insertRunningRun(harness, {
+        id: JOINING_RUN_ID,
+        workflowId: workflow.id,
+        plan: definition,
+        inputs: {},
+        at,
+      });
+      await insertStepRecord(harness, JOINING_RUN_ID, {
+        stepId: "left",
+        iteration: 1,
+        status: "completed",
+        output: { title: "the left task" },
+        at,
+      });
+      await insertStepRecord(harness, JOINING_RUN_ID, {
+        stepId: "right",
+        iteration: 1,
+        status: "pending",
+        at,
+      });
+      await insertEdgeTraversals(harness, JOINING_RUN_ID, 0, 1);
+
+      await harness.reboot();
+      const run = await waitForRunToFinish(base, token, JOINING_RUN_ID);
+
+      expect(run.status, JSON.stringify(run)).toBe("completed");
+      const merges = findStepRecords(run, "merge");
+      expect(merges.map((record) => [record.iteration, record.status])).toEqual([[1, "completed"]]);
+      expect(
+        (expectStatus(merges[0], "completed").output as { readonly title: string }).title,
+      ).toBe("Merged the left task");
+      expect(run.edgeTraversals).toEqual([1, 0]);
+    });
+  });
+
+  it("fails the run with interrupted at the first of several plugin action records that were running, and cancels the others", async () => {
+    let executions = 0;
+    const countingNotesPlugin = buildActionPlugin("notes", {
+      ...NOTE_APPEND_ACTION,
+      execute: () =>
+        Effect.sync(() => {
+          executions += 1;
+          return { noteId: "note-1" };
+        }),
+    });
+
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const definition = {
+          name: "Append two notes side by side",
+          steps: [
+            { id: "first", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "a" } },
+            { id: "second", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "b" } },
+          ],
+        };
+        const workflow = await createWorkflowOrFail(base, token, { definition });
+
+        // The rows a run has when the controller stopped while both plugin
+        // actions were running.
+        const at = new Date().toISOString();
+        await insertRunningRun(harness, {
+          id: PARALLEL_INTERRUPTED_RUN_ID,
+          workflowId: workflow.id,
+          plan: definition,
+          inputs: {},
+          at,
+        });
+        for (const stepId of ["first", "second"]) {
+          await insertStepRecord(harness, PARALLEL_INTERRUPTED_RUN_ID, {
+            stepId,
+            iteration: 1,
+            status: "running",
+            at,
+          });
+        }
+
+        await harness.reboot();
+        const run = await waitForRunToFinish(base, token, PARALLEL_INTERRUPTED_RUN_ID);
+
+        const failed = expectStatus(run, "failed");
+        expect(failed.failureReason).toBe("step-failed");
+        expect(failed.failedStepId).toBe("first");
+        expect(expectStatus(findStepRecords(run, "first")[0], "failed").error.code).toBe(
+          "interrupted",
+        );
+        const second = expectStatus(findStepRecords(run, "second")[0], "cancelled");
+        expect(second.startedAt).toBe(at);
         expect(executions).toBe(0);
       },
       [countingNotesPlugin],

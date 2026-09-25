@@ -13,12 +13,14 @@ import {
   validateCondition,
   validateExpression,
   validateTemplate,
+  evaluateCondition,
   evaluateExpression,
   ExpressionBudget,
   isTemplate,
   parseExpression,
   type ExpressionError,
 } from "./index";
+import { provideUnlimitedBudget } from "./testing";
 
 /** The message an effect failed with, or a thrown report that it succeeded. */
 const readFailureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string => {
@@ -264,15 +266,17 @@ describe("parseExpression", () => {
     const source = `event.kind == "github.pr.opened" && "github:pr:o/r#87" in event.refs`;
     const program = Effect.runSync(parseExpression(source));
 
-    expect(Effect.runSync(evaluateExpression(program, context))).toBe(true);
-    expect(Effect.runSync(evaluateExpression(program, context))).toBe(
-      Effect.runSync(evaluateExpression(source, context)),
+    expect(Effect.runSync(provideUnlimitedBudget(evaluateExpression(program, context)))).toBe(true);
+    expect(Effect.runSync(provideUnlimitedBudget(evaluateExpression(program, context)))).toBe(
+      Effect.runSync(provideUnlimitedBudget(evaluateExpression(source, context))),
     );
     // And a compiled program is called again with another context, which is
     // what compiling it is for.
     expect(
       Effect.runSync(
-        evaluateExpression(program, { event: { kind: "github.pr.closed", refs: [] } }),
+        provideUnlimitedBudget(
+          evaluateExpression(program, { event: { kind: "github.pr.closed", refs: [] } }),
+        ),
       ),
     ).toBe(false);
   });
@@ -298,11 +302,11 @@ describe("evaluateExpression over the wall-clock budget", () => {
    */
   const context = { event: { payload: { items: [0, 1, 2] } } };
   const source = "event.payload.items[0] == 0";
-  const withBudget = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+  const provideZeroBudget = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
     Effect.provideService(effect, ExpressionBudget, Duration.zero);
 
   it("reports the overrun with the budget and the elapsed time, and remembers nothing", () => {
-    const first = readFailureMessage(withBudget(evaluateExpression(source, context)));
+    const first = readFailureMessage(provideZeroBudget(evaluateExpression(source, context)));
 
     expect(first.toLowerCase()).toContain("budget");
     expect(countNumbers(first)).toBeGreaterThanOrEqual(2);
@@ -310,11 +314,63 @@ describe("evaluateExpression over the wall-clock budget", () => {
     // The wrapper does not retire an expression that went over: the same
     // source runs again and reports again, because the router re-evaluates
     // it on the next tick.
-    const second = readFailureMessage(withBudget(evaluateExpression(source, context)));
+    const second = readFailureMessage(provideZeroBudget(evaluateExpression(source, context)));
     expect(second.toLowerCase()).toContain("budget");
 
     // An overrun leaves the shared environment usable for everything else:
-    // the same source, on the shipped budget, answers.
-    expect(Effect.runSync(evaluateExpression(source, context))).toBe(true);
+    // the same source, with no budget, answers.
+    expect(Effect.runSync(provideUnlimitedBudget(evaluateExpression(source, context)))).toBe(true);
   });
+});
+
+describe("evaluateCondition", () => {
+  /** A run's context: its inputs, and `review` as a step that completed. */
+  const context = {
+    inputs: { approve: true, target: 3 },
+    steps: { review: { output: { verdict: "approved", items: [1, 2] } } },
+  };
+
+  it("returns true or false for a condition over the run's inputs and step outputs", () => {
+    expect(
+      Effect.runSync(
+        provideUnlimitedBudget(
+          evaluateCondition('inputs.approve && steps.review.output.verdict == "approved"', context),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      Effect.runSync(
+        provideUnlimitedBudget(
+          evaluateCondition("size(steps.review.output.items) >= inputs.target", context),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns what a has() guard finds for a step that is absent from steps", () => {
+    expect(
+      Effect.runSync(provideUnlimitedBudget(evaluateCondition("!has(steps.fix)", context))),
+    ).toBe(true);
+    expect(
+      Effect.runSync(provideUnlimitedBudget(evaluateCondition("has(steps.review)", context))),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["a read of a step that is absent", "steps.fix.output.verdict == 'approved'"],
+    ["a read of a field that is absent", "steps.review.output.no_such_field == 1"],
+  ])("fails with an expression error on %s", (_description, source) => {
+    expect(readFailureMessage(evaluateCondition(source, context))).toMatch(/\S/);
+  });
+
+  it.each([
+    ["a string", "steps.review.output.verdict"],
+    ["a number", "inputs.target"],
+    ["a list", "steps.review.output.items"],
+  ])(
+    "fails with an expression error when the condition gives %s, not true or false",
+    (_description, source) => {
+      expect(readFailureMessage(evaluateCondition(source, context))).toMatch(/\S/);
+    },
+  );
 });

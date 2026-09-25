@@ -35,6 +35,8 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export { readJsonObject } from "./json-shape";
+export { listJsonLines, type JsonLine } from "./json-lines";
 export { joinCommand } from "./join-command";
 export {
   buildRetireQuestion,
@@ -51,6 +53,7 @@ export {
   describeStepDuration,
   describeStepState,
   describeUnstartedStep,
+  findFailedEdge,
   formatElapsed,
   isRunLive,
   readTimestamps,
@@ -66,7 +69,6 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
-  type TickAlign,
   type Timeline,
 } from "./run-graph";
 export {
@@ -179,6 +181,7 @@ export {
 export {
   abbreviateEdgeCondition,
   buildWorkflowGraph,
+  shortenCondition,
   type WorkflowGraph,
   type WorkflowGraphEdge,
   type WorkflowGraphNode,

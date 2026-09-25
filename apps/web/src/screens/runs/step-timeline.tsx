@@ -1,14 +1,12 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
+import type { CSSProperties, JSX } from "react";
 import {
   buildTimeline,
   describeStepDuration,
-  describeUnstartedStep,
   formatElapsed,
   isRunLive,
-  type TickAlign,
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
-import { WORK_STATE_HUES, cn, type WorkState } from "@hercule/ui";
+import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
 
 /** The widths of the timeline's columns and the spacing around them, in pixels. */
@@ -36,13 +34,6 @@ const TRACK: CSSProperties = {
  * glyph is 0.6em wide, at `text-label`, 10.5px.
  */
 const TICK_LABEL_CHARACTER_WIDTH = 10.5 * 0.6;
-
-/** The shift that puts each end of a tick's label at the tick, by the label's alignment. */
-const TICK_LABEL_SHIFT: Readonly<Record<TickAlign, string>> = {
-  start: "",
-  center: "-translate-x-1/2",
-  end: "-translate-x-full",
-};
 
 /** Converts a fraction of the axis to a CSS length. */
 const formatPercent = (fraction: number): string => `${String(fraction * 100)}%`;
@@ -72,22 +63,9 @@ export function StepTimeline({
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
-  const axis = useRef<HTMLSpanElement>(null);
-  const [axisWidth, setAxisWidth] = useState(0);
   // Measured before the first paint, so the ticks never show at a width they
-  // were not laid out for.
-  useLayoutEffect(() => {
-    const element = axis.current;
-    if (element === null) return;
-    setAxisWidth(element.getBoundingClientRect().width);
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry !== undefined) setAxisWidth(entry.contentRect.width);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+  // were not laid out for. An unmeasured axis gets only the tick at 0.
+  const { observeElement: observeAxis, width: axisWidth = 0 } = useElementWidth();
   const timeline = buildTimeline(run, now, axisWidth / TICK_LABEL_CHARACTER_WIDTH);
   const isLive = isRunLive(run.status);
   const { ticks } = timeline;
@@ -96,15 +74,14 @@ export function StepTimeline({
       <div style={GRID} className="grid h-10 items-end pb-1.5" aria-hidden="true">
         <span />
         <span />
-        <span ref={axis} className="relative h-full">
+        <span ref={observeAxis} className="relative h-full">
           {ticks.map((tick) => (
             <span
               key={tick.position}
               style={{ left: formatPercent(tick.position) }}
-              className={cn(
-                "absolute bottom-0 font-mono text-label text-faint tabular-nums",
-                TICK_LABEL_SHIFT[tick.align],
-              )}
+              // Every label is centred on its tick. The label at either end
+              // of the axis reaches into the empty header cell beside it.
+              className="absolute bottom-0 -translate-x-1/2 font-mono text-label text-faint tabular-nums"
             >
               {tick.label}
             </span>
@@ -119,7 +96,7 @@ export function StepTimeline({
       </div>
       <div className="relative">
         <ul>
-          {timeline.lines.map(({ line, bar }) => {
+          {timeline.lines.map(({ line, bar, note }) => {
             return (
               <li key={line.key} className="border-t border-line-soft">
                 <div style={GRID} className="grid min-h-10 items-center">
@@ -132,13 +109,21 @@ export function StepTimeline({
                         className="absolute inset-y-0 w-px bg-line-soft"
                       />
                     ))}
-                    {bar === undefined ? (
-                      describeUnstartedStep(line.state) === undefined ? null : (
-                        <span className="absolute top-1/2 right-0 mr-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint">
-                          {describeUnstartedStep(line.state)}
-                        </span>
-                      )
-                    ) : (
+                    {note !== undefined ? (
+                      // The note ends at its position by the same fraction of
+                      // its own width as its position is of the axis, so near
+                      // the end of the axis it stays inside the track. Its
+                      // background and padding keep it clear of the gridlines.
+                      <span
+                        style={{
+                          left: formatPercent(note.position),
+                          transform: `translate(-${formatPercent(note.position)}, -50%)`,
+                        }}
+                        className="absolute top-1/2 bg-surface px-1.5 text-fine whitespace-nowrap text-faint"
+                      >
+                        {note.text}
+                      </span>
+                    ) : bar === undefined ? null : (
                       <span
                         // A bar is at least as wide as its round ends, so a step
                         // of a millisecond still shows.

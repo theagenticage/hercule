@@ -1,10 +1,16 @@
 /**
  * A run's plan drawn as the workflow graph, with the run's progress on it:
  * - a step card holds its state mark in its leading slot and its duration at
- *   its end, ticking while the step runs;
- * - a step the run has not reached is a dashed, flat card;
- * - an edge the run went along is solid, one it has not is dashed, and the
- *   dashes of the edge into the running step flow toward it.
+ *   its end, ticking while the step runs, and `×3` after its id when the run
+ *   came to it three times;
+ * - a skipped step is a flat card; a step the run has not reached is a
+ *   dashed, flat card;
+ * - an edge the run went along is solid, and the dashes of an edge into the
+ *   running step flow toward it; an edge the run did not follow and never
+ *   will is dashed and faded, and one it may still follow is dashed;
+ * - a capped edge shows how often the run went along it out of its cap, such
+ *   as `2/3`;
+ * - the edge the run failed at is drawn in the failure colour.
  */
 import { createContext, use, type JSX } from "react";
 import {
@@ -23,34 +29,90 @@ import {
   CARD_PADDING,
   CardText,
   GraphView,
+  LEGIBLE_ZOOM,
+  measureMonoText,
   WORKFLOW_EDGE_STYLE,
   WorkflowNodeCard,
+  type EdgeBadge,
   type EdgeStyle,
+  type PaneSizing,
 } from "../workflow-editor";
 
 /** The leading slot of a step card: the 12px state mark and the gap after it. */
 const MARK_SLOT = 12 + 9;
 /** The trailing slot of a step card: the gap and its duration, `12.3s` at `text-fine`. */
 const DURATION_SLOT = 8 + 46;
+/** The gap before an iteration count, `gap-1.5`, and its font size, `text-fine`. */
+const COUNT_GAP = 6;
+const COUNT_FONT_SIZE = 12;
+
+/** The dashes of an edge the run has not followed. */
+const UNFIRED_DASHES = "3 4";
 
 /** The style of each kind of edge, by how far the run has come along it. */
 const RUN_EDGE_STYLES: Readonly<Record<EdgeTravel, EdgeStyle>> = {
-  // An edge the run has not gone along is the workflow's own edge, dashed.
-  untravelled: { ...WORKFLOW_EDGE_STYLE, dashArray: "3 4" },
   // The muted colour pulled toward the ink, so the path the run took reads
   // before the paths it did not take.
-  travelled: { colour: "color-mix(in oklch, var(--muted), var(--ink) 30%)", width: 1.4 },
+  fired: { colour: "color-mix(in oklch, var(--muted), var(--ink) 30%)", width: 1.4 },
   // The live hue, as on every live thing. The class in the shared stylesheet
   // dashes the curve and moves the dashes toward the running step.
   active: { colour: "var(--live)", width: 1.4, className: "hercule-edge-flow" },
+  // The run will never follow this edge, so it fades behind the edges it
+  // may still follow.
+  notTaken: { ...WORKFLOW_EDGE_STYLE, dashArray: UNFIRED_DASHES, opacity: 0.5 },
+  // The workflow's own edge, dashed.
+  notYet: { ...WORKFLOW_EDGE_STYLE, dashArray: UNFIRED_DASHES },
 };
 
-/** Returns the style of an edge of a run's plan, by how far the run has come along it. */
-const decideRunEdgeStyle = (edge: RunGraphEdge): EdgeStyle => RUN_EDGE_STYLES[edge.travel];
+/**
+ * Returns the style of an edge of a run's plan, by how far the run has come
+ * along it. The edge the run failed at takes the failure colour, and stays
+ * dashed when the run never went along it, as when its condition could not
+ * be evaluated.
+ */
+const decideRunEdgeStyle = (edge: RunGraphEdge): EdgeStyle => {
+  if (!edge.isFailedEdge) return RUN_EDGE_STYLES[edge.travel];
+  return {
+    colour: "var(--fail)",
+    width: 1.4,
+    ...(edge.travel === "notTaken" || edge.travel === "notYet"
+      ? { dashArray: UNFIRED_DASHES }
+      : {}),
+  };
+};
 
-/** Returns the width of a step card's mark and duration. A trigger's card has neither. */
-const measureRunCardSlots = (node: RunGraphNode): number =>
-  node.progress === undefined ? 0 : MARK_SLOT + DURATION_SLOT;
+/**
+ * Returns the badge of a capped edge: how often the run went along it out of
+ * its cap, in the failure colour on the edge whose cap failed the run.
+ */
+const describeRunEdgeBadge = (edge: RunGraphEdge): EdgeBadge | undefined =>
+  edge.traversalBadge === undefined
+    ? undefined
+    : { text: edge.traversalBadge, ...(edge.isOverLimit ? { className: "text-fail" } : {}) };
+
+/**
+ * Returns the width of what a step card holds beside its kind label and id:
+ * its mark, its duration, and its iteration count when it has one. A
+ * trigger's card holds none of them.
+ */
+const measureRunCardSlots = (node: RunGraphNode): number => {
+  if (node.progress === undefined) return 0;
+  const label = node.iterationLabel;
+  const countWidth = label === undefined ? 0 : COUNT_GAP + measureMonoText(label, COUNT_FONT_SIZE);
+  return MARK_SLOT + DURATION_SLOT + countWidth;
+};
+
+/**
+ * How the graph's pane sizes itself. The pane is as tall as the whole plan
+ * needs at the zoom that fits the pane's width, so a plan of one row gets a
+ * short pane and one that branches or loops a taller one. Past the largest
+ * height, the reader pans to see the rest. A plan is never placed below the
+ * legible zoom.
+ */
+const PANE_SIZING: PaneSizing = {
+  heightRange: { min: 120, max: 440 },
+  smallestPlacedZoom: LEGIBLE_ZOOM,
+};
 
 /** A run at the moment it is drawn. */
 interface RunMoment {
@@ -70,7 +132,8 @@ const RunMomentContext = createContext<RunMoment | undefined>(undefined);
 
 /**
  * Renders a run's plan as the workflow graph, with each step's state and
- * duration on its card and each edge drawn by how far the run came along it.
+ * duration on its card and each edge drawn by how far the run came along it,
+ * in a framed pane as tall as the plan needs.
  */
 export function RunGraphView({
   runGraph,
@@ -87,6 +150,9 @@ export function RunGraphView({
         Card={RunNodeCard}
         measureCardSlots={measureRunCardSlots}
         decideEdgeStyle={decideRunEdgeStyle}
+        describeEdgeBadge={describeRunEdgeBadge}
+        sizing={PANE_SIZING}
+        className="overflow-hidden rounded-card border border-line bg-surface"
       />
     </RunMomentContext>
   );
@@ -107,9 +173,12 @@ function RunNodeCard({ node }: { readonly node: RunGraphNode }): JSX.Element {
  *
  * - The state mark sits in the leading slot. A step with no step record has
  *   no mark; its card is flat and dashed, and it recedes once the run ended.
+ * - A skipped step's card is flat, because the step did no work.
  * - The running step's border takes the live hue.
- * - The duration sits at the end, ticking while the step runs. A pending
- *   step shows "pending" there instead.
+ * - The iteration count follows the id when the run came to the step more
+ *   than once.
+ * - The duration sits at the end, ticking while the step runs. A pending or
+ *   skipped step shows its state there instead.
  *
  * Fails when it is rendered outside `RunGraphView`, which provides the run's
  * moment.
@@ -125,6 +194,7 @@ function RunStepCard({
   if (run === undefined) throw new Error("A run's step card is rendered only inside RunGraphView.");
   const { state } = progress;
   const isUnreached = state === "unreached";
+  const isFlat = isUnreached || state === "skipped";
   const duration = describeStepDuration(progress, run.now);
   return (
     <div
@@ -139,9 +209,8 @@ function RunStepCard({
       }}
       className={cn(
         "flex h-full w-full items-center rounded-card border border-line",
-        isUnreached
-          ? "border-dashed border-[color-mix(in_oklch,var(--faint)_60%,transparent)] bg-surface"
-          : "bg-raised shadow-card",
+        isFlat ? "bg-surface" : "bg-raised shadow-card",
+        isUnreached && "border-dashed border-[color-mix(in_oklch,var(--faint)_60%,transparent)]",
         isUnreached && !isRunLive(run.status) && "opacity-60",
       )}
     >
@@ -150,7 +219,7 @@ function RunStepCard({
       </span>
       {/* The spaces keep the state a word of its own when the card is read as text. */}
       <span className="sr-only"> {describeStepState(state, run.status)} </span>
-      <CardText node={node} isFaded={isUnreached} />{" "}
+      <CardText node={node} isFaded={isFlat} note={node.iterationLabel} />{" "}
       <span
         aria-hidden="true"
         className={cn(
@@ -159,7 +228,7 @@ function RunStepCard({
           WORK_STATE_HUES[state] ?? "text-faint",
         )}
       >
-        {duration !== "" ? duration : state === "pending" ? "pending" : ""}
+        {duration !== "" ? duration : state === "pending" || state === "skipped" ? state : ""}
       </span>
     </div>
   );

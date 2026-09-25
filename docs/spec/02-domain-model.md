@@ -156,7 +156,7 @@ Fields: owned by [07-workflows.md](./07-workflows.md) (`StepRecord`): `stepId` (
 
 Status axis (mirrored from 07), monotonic per record: `pending` (a queued iteration behind a busy step) -> `running` -> `completed` | `failed` | `cancelled`; `skipped` is set at creation and final. A re-entered step never leaves `completed`: the next iteration is a new record.
 
-*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* A step record is `pending` from its creation until its action is called, not only as a queued iteration. `error` is `{ code, message }`, not a string. `skipped` is not built yet ([#80](https://github.com/theagenticage/hercule/issues/80)). The rules as built are in [07-workflows.md](./07-workflows.md) section 7.2.
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* A step record is `pending` from its creation until its action is called, not only as a queued iteration. `error` is `{ code, message }`, not a string. ~~`skipped` is not built yet ([#80](https://github.com/theagenticage/hercule/issues/80)).~~ `skipped` is built, and is not set at creation: a record moves `pending → skipped` when its step's condition is false as the record would start *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*. The rules as built are in [07-workflows.md](./07-workflows.md) section 7.2.
 
 ### Session
 

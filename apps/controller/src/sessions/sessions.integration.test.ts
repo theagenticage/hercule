@@ -58,6 +58,7 @@ import {
   reportEvent,
   spawnSession,
   spawnSessionOrFail,
+  waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
@@ -162,11 +163,11 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Four waits, because the longest test here waits for the fleet to be probed
- * and then for three changes of its own. If a test's waits can outlast the
- * timeout, a wait never gets to fail on its own, and the failure names the
- * test instead of the change that never happened. The extra time is for the
- * connection and the HTTP round trips in between.
+ * Sets a timeout long enough for any one wait to fail on its own. Each wait
+ * gives up after `WAIT_DEADLINE_MS`, and a test here takes under a second
+ * when nothing is stuck, even with a dozen waits. So a change that never
+ * happens fails the wait for it, and the error names that change instead of
+ * the test. The rest is margin for a busy machine.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
 
@@ -362,10 +363,18 @@ const listInputs = async (arranged: Arranged, id: string): Promise<ReadonlyArray
   return ((await response.json()) as { items: ReadonlyArray<StoredInput> }).items;
 };
 
-/** Spawns a session, starts it, and waits until it is idle and its prompt's input frame is sent. */
+/**
+ * Spawns a session, starts it, and waits until it is idle and its prompt's
+ * input frame is sent.
+ *
+ * Both waits look for this session's own frame, not for a count of frames. A
+ * test that starts a second session already has the first session's frames on
+ * the wire, so a count of one would be met at once, before this session's
+ * frames arrive.
+ */
 const startSession = async (arranged: Arranged, prompt: string): Promise<Session> => {
   const session = await spawnSessionOrFail(arranged, { prompt });
-  await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+  await waitForStartFrames(arranged, session.id, 1);
   reportEvent(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
     sessionId: session.id,
@@ -376,7 +385,9 @@ const startSession = async (arranged: Arranged, prompt: string): Promise<Session
   // The prompt's input is sent after the transaction that set `idle`
   // commits, so the status does not prove its frame was sent. Every count of
   // input frames below includes this one.
-  await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+  await waitUntil("sent the prompt's input frame", () =>
+    listInputFrames(arranged.wire).find((frame) => frame.sessionId === session.id),
+  );
   return session;
 };
 

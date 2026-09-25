@@ -1,5 +1,6 @@
 /**
- * Runs: a workflow's steps carried out once, one after another.
+ * Runs: a workflow's steps carried out once, following the edges between
+ * them.
  *
  * A run freezes the workflow definition it started from into `plan`, so what
  * a run did can still be read, and drawn, after its workflow is edited or
@@ -10,7 +11,9 @@
  *   steps to execute, and then `completed`, `failed` or `cancelled`;
  * - a step record is `pending` until its action is called, `running` while
  *   its action is being called, and then `completed`, `failed` or
- *   `cancelled`.
+ *   `cancelled`. A step record whose step's condition is false when it would
+ *   start moves from `pending` straight to `skipped`, and its action is never
+ *   called.
  *
  * `run.start` starts a run, either of a stored workflow or of a workflow sent
  * with the request and never stored. It returns the run's id at once and never
@@ -44,7 +47,14 @@ export const RunStatus = Schema.Literals(RUN_STATUSES);
 export type RunStatus = Schema.Schema.Type<typeof RunStatus>;
 
 /** The statuses of a step record, in the order a step record moves through them. */
-const STEP_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
+const STEP_STATUSES = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+] as const;
 
 export const StepStatus = Schema.Literals(STEP_STATUSES);
 
@@ -53,10 +63,15 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
 /**
  * Why a run failed:
  *
- * - `expression-error`: a template in a step's params could not be evaluated.
- *   `failedStepId` names the step.
+ * - `expression-error`: a template in a step's params, or a condition, could
+ *   not be evaluated, or a condition gave something other than true or false.
+ *   `failedStepId` names the step. For an edge's condition it names the
+ *   edge's source step, and `failedEdge` names the edge.
  * - `step-failed`: a step's action failed. `failedStepId` names the step, and
  *   its step record holds the error.
+ * - `iteration-limit`: an edge's condition was true, but the edge had already
+ *   been followed as often as its `maxTraversals` allows. `failedStepId`
+ *   names the edge's source step, and `failedEdge` the edge.
  * - `controller-error`: the controller could not carry out the run for a
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
@@ -64,7 +79,12 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  * The list grows as runs learn to do more; a client shows a reason it does not
  * know as the word itself.
  */
-const FAILURE_REASONS = ["expression-error", "step-failed", "controller-error"] as const;
+const FAILURE_REASONS = [
+  "expression-error",
+  "step-failed",
+  "iteration-limit",
+  "controller-error",
+] as const;
 
 export const FailureReason = Schema.Literals(FAILURE_REASONS);
 
@@ -95,11 +115,26 @@ export const StepError = Schema.Struct({ code: Schema.String, message: Schema.St
 
 export type StepError = Schema.Schema.Type<typeof StepError>;
 
+/**
+ * The edge a run failed at, for a run that failed with `expression-error` in
+ * an edge's condition or with `iteration-limit`:
+ *
+ * - `index`: the edge's index in `plan.edges`;
+ * - `message`: what went wrong at the edge, a sentence for a person: the
+ *   condition's evaluation error, or the `maxTraversals` the run reached.
+ *
+ * A run that failed at a step has no failed edge; its step record holds the
+ * error.
+ */
+export const FailedEdge = Schema.Struct({ index: Schema.Int, message: Schema.String });
+
+export type FailedEdge = Schema.Schema.Type<typeof FailedEdge>;
+
 /** The fields every step record has, whatever its status. */
 const STEP_RECORD_FIELDS = {
   /** The step's id in the plan. */
   stepId: Schema.String,
-  /** Counts the attempts at this step in the run, from 1. */
+  /** Counts the records of this step in the run, from 1. */
   iteration: Schema.Int,
 };
 
@@ -113,6 +148,8 @@ const STEP_RECORD_FIELDS = {
  *   action returned (`null` for an action that returns nothing).
  * - `failed`: `startedAt`, `finishedAt`, and `error`.
  * - `cancelled`: `finishedAt`, and `startedAt` if the step had started.
+ * - `skipped`: `finishedAt` only. The step's condition was false, so its
+ *   action was never called.
  */
 export const StepRecord = Schema.Union([
   Schema.Struct({ ...STEP_RECORD_FIELDS, status: Schema.Literal("pending") }),
@@ -137,6 +174,11 @@ export const StepRecord = Schema.Union([
     startedAt: Schema.optionalKey(Timestamp),
     finishedAt: Timestamp,
   }),
+  Schema.Struct({
+    ...STEP_RECORD_FIELDS,
+    status: Schema.Literal("skipped"),
+    finishedAt: Timestamp,
+  }),
 ]);
 
 export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
@@ -147,29 +189,42 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *
  * - `pending`: no timestamp but `createdAt`.
  * - `running`: `startedAt`.
- * - `completed`: `startedAt` and `finishedAt`.
- * - `failed` at a step (`expression-error` or `step-failed`): `failedStepId`,
- *   `startedAt` and `finishedAt`.
+ * - `completed`: `startedAt` and `finishedAt`, and the fields only a
+ *   completed run has (`output`), which `completedFields` holds.
+ * - `failed` at a step (`expression-error`, `step-failed` or
+ *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
+ *   the fields only a run failed at a step has (`failedEdge`), which
+ *   `failedAtStepFields` holds.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
  * - `cancelled`: `finishedAt`, and `startedAt` if the run had started.
  *
  * A run and a run summary share these rules, so both are built from here.
  */
-const buildRunStatusVariants = <const Fields extends Schema.Struct.Fields>(fields: Fields) =>
+const buildRunStatusVariants = <
+  const Fields extends Schema.Struct.Fields,
+  const CompletedFields extends Schema.Struct.Fields,
+  const FailedAtStepFields extends Schema.Struct.Fields,
+>(
+  fields: Fields,
+  completedFields: CompletedFields,
+  failedAtStepFields: FailedAtStepFields,
+) =>
   [
     Schema.Struct({ ...fields, status: Schema.Literal("pending") }),
     Schema.Struct({ ...fields, status: Schema.Literal("running"), startedAt: Timestamp }),
     Schema.Struct({
       ...fields,
+      ...completedFields,
       status: Schema.Literal("completed"),
       startedAt: Timestamp,
       finishedAt: Timestamp,
     }),
     Schema.Struct({
       ...fields,
+      ...failedAtStepFields,
       status: Schema.Literal("failed"),
-      failureReason: Schema.Literals(["expression-error", "step-failed"]),
+      failureReason: Schema.Literals(["expression-error", "step-failed", "iteration-limit"]),
       failedStepId: Schema.String,
       startedAt: Timestamp,
       finishedAt: Timestamp,
@@ -192,36 +247,60 @@ const buildRunStatusVariants = <const Fields extends Schema.Struct.Fields>(field
 
 /** A run, with its frozen plan and every step record in the order they were created. */
 export const Run = Schema.Union(
-  buildRunStatusVariants({
-    id: Id,
-    /** The workflow the run was started from. It stays set after that workflow is deleted. */
-    workflowId: Schema.NullOr(Id),
-    /** The workflow definition as it was when the run started. */
-    plan: WorkflowDefinition,
-    /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
-    inputs: Schema.Record(Schema.String, Schema.Json),
-    origin: RunOrigin,
-    steps: Schema.Array(StepRecord),
-    createdAt: Timestamp,
-  }),
+  buildRunStatusVariants(
+    {
+      id: Id,
+      /** The workflow the run was started from. It stays set after that workflow is deleted. */
+      workflowId: Schema.NullOr(Id),
+      /** The workflow definition as it was when the run started. */
+      plan: WorkflowDefinition,
+      /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
+      inputs: Schema.Record(Schema.String, Schema.Json),
+      origin: RunOrigin,
+      steps: Schema.Array(StepRecord),
+      /**
+       * How many times the run has followed each edge: one count per edge of
+       * `plan.edges`, in the same order, zeros included.
+       */
+      edgeTraversals: Schema.Array(Schema.Int),
+      createdAt: Timestamp,
+    },
+    {
+      /**
+       * The output of the terminal step that ended the run. Absent when the run
+       * completed without a terminal step, because every branch had finished.
+       */
+      output: Schema.optionalKey(Schema.Json),
+    },
+    {
+      /** The edge the run failed at, when it failed at one. */
+      failedEdge: Schema.optionalKey(FailedEdge),
+    },
+  ),
 );
 
 export type Run = Schema.Schema.Type<typeof Run>;
 
 /**
- * One run in the run list: the run without its plan and step records, which
- * are long. `run.read` returns them.
+ * One run in the run list: the run without its plan, step records and
+ * output, which are long. `run.read` returns them. A summary has no
+ * `failedEdge` either: an edge's index means nothing without the plan it
+ * indexes, so a failed summary carries only its reason and `failedStepId`.
  */
 export const RunSummary = Schema.Union(
-  buildRunStatusVariants({
-    id: Id,
-    /** The workflow the run was started from, or null for a workflow sent with `run.start`. */
-    workflowId: Schema.NullOr(Id),
-    /** The workflow's name as it was when the run started, from the run's plan. */
-    workflowName: Schema.String,
-    origin: RunOrigin,
-    createdAt: Timestamp,
-  }),
+  buildRunStatusVariants(
+    {
+      id: Id,
+      /** The workflow the run was started from, or null for a workflow sent with `run.start`. */
+      workflowId: Schema.NullOr(Id),
+      /** The workflow's name as it was when the run started, from the run's plan. */
+      workflowName: Schema.String,
+      origin: RunOrigin,
+      createdAt: Timestamp,
+    },
+    {},
+    {},
+  ),
 );
 
 export type RunSummary = Schema.Schema.Type<typeof RunSummary>;

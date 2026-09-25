@@ -1,7 +1,8 @@
 import { assert, describe, it } from "vitest";
-import type { StepRecord } from "@hercule/contract";
+import type { Run, StepRecord } from "@hercule/contract";
 import {
   describeFailureReason,
+  findFailedEdge,
   describeRunOrigin,
   describeRunStatus,
   describeStepDuration,
@@ -125,16 +126,91 @@ describe("describeRunStatus", () => {
 describe("describeFailureReason", () => {
   it("describes each reason in plain words", () => {
     assert.strictEqual(describeFailureReason("step-failed"), "step failed");
-    assert.strictEqual(describeFailureReason("expression-error"), "template error");
+    assert.strictEqual(describeFailureReason("expression-error"), "expression error");
     assert.strictEqual(describeFailureReason("controller-error"), "controller error");
+    assert.strictEqual(describeFailureReason("iteration-limit"), "iteration limit");
+  });
+
+  it("does not call an expression error a template error, because a condition fails with it too", () => {
+    assert.notMatch(describeFailureReason("expression-error"), /template/);
+  });
+});
+
+describe("findFailedEdge", () => {
+  /** A loop: `file` leads to `count`, and `count` back to `file` at most 3 times, or on to `escalate`. */
+  const BASE = {
+    id: PARENT,
+    workflowId: null,
+    plan: {
+      name: "File a batch",
+      steps: [
+        { id: "file", kind: "action", action: "task.create" },
+        { id: "count", kind: "action", action: "task.query" },
+        { id: "escalate", kind: "action", action: "task.update" },
+      ],
+      edges: [
+        { from: "file", to: "count" },
+        { from: "count", to: "file", condition: "steps.count.output.more", maxTraversals: 3 },
+        { from: "count", to: "escalate", condition: "!steps.count.output.more" },
+      ],
+    },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    steps: [],
+    edgeTraversals: [4, 3, 0],
+    createdAt: START,
+    startedAt: START,
+    finishedAt: at(100),
+  } as const;
+  const FAILED: Run = {
+    ...BASE,
+    status: "failed",
+    failureReason: "iteration-limit",
+    failedStepId: "count",
+    failedEdge: { index: 1, message: "The edge ran out." },
+  };
+
+  it("finds the edge a run failed at, by its index in the plan", () => {
+    const limit = findFailedEdge(FAILED);
+    assert.deepStrictEqual([limit?.from, limit?.to], ["count", "file"]);
+    const condition = findFailedEdge({
+      ...BASE,
+      status: "failed",
+      failureReason: "expression-error",
+      failedStepId: "count",
+      failedEdge: { index: 2, message: "The condition could not be evaluated." },
+    });
+    assert.deepStrictEqual([condition?.from, condition?.to], ["count", "escalate"]);
+  });
+
+  it("finds no edge for a run that failed at a step, or did not fail", () => {
+    assert.strictEqual(
+      findFailedEdge({
+        ...BASE,
+        status: "failed",
+        failureReason: "step-failed",
+        failedStepId: "file",
+      }),
+      undefined,
+    );
+    assert.strictEqual(findFailedEdge({ ...BASE, status: "completed" }), undefined);
   });
 });
 
 describe("describeUnstartedStep", () => {
-  it("describes why a step has no bar, for a pending and a cancelled step only", () => {
-    assert.strictEqual(describeUnstartedStep("pending"), "pending");
-    assert.strictEqual(describeUnstartedStep("cancelled"), "cancelled before it started");
-    assert.strictEqual(describeUnstartedStep("unreached"), undefined);
+  it("describes why a step has no bar, for a pending, a cancelled, a skipped and a never reached step", () => {
+    assert.strictEqual(describeUnstartedStep("pending", "running"), "pending");
+    assert.strictEqual(
+      describeUnstartedStep("cancelled", "cancelled"),
+      "cancelled before it started",
+    );
+    assert.strictEqual(describeUnstartedStep("skipped", "completed"), "skipped");
+    assert.strictEqual(describeUnstartedStep("unreached", "completed"), "not reached");
+    assert.strictEqual(describeUnstartedStep("completed", "completed"), undefined);
+  });
+
+  it("says nothing of a step a live run has not reached yet, because the run may still reach it", () => {
+    assert.strictEqual(describeUnstartedStep("unreached", "running"), undefined);
   });
 });
 

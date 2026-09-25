@@ -19,6 +19,7 @@ import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { RunGraphView } from "../../../screens/runs/run-graph-view";
 import { RunHeader } from "../../../screens/runs/run-header";
 import { RunInputsCard } from "../../../screens/runs/run-inputs-card";
+import { RunOutputCard } from "../../../screens/runs/run-output-card";
 import { StepList } from "../../../screens/runs/step-list";
 import { StepTimeline } from "../../../screens/runs/step-timeline";
 import { readErrorMessage } from "../../../screens/save-status";
@@ -35,7 +36,8 @@ const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
 /**
  * Renders a run's page: the header, the frozen plan drawn as the workflow
  * graph with each step's progress on it, and below it the steps, as a list or
- * on a timeline, beside the inputs the run started with.
+ * on a timeline, beside the inputs the run started with and, once it has
+ * one, the run's output.
  *
  * While the run is live, one clock ticks for the whole page, so the header,
  * the graph and the steps count the same time. The page owns Cancel and the
@@ -118,9 +120,7 @@ export function RunPage({
             <LaneLabel className="mb-0">Plan</LaneLabel>
             <span className="text-fine text-faint">Frozen when the run started</span>
           </div>
-          <div className="h-[260px] overflow-hidden rounded-card border border-line bg-surface">
-            <RunGraphView runGraph={runGraph} now={now} />
-          </div>
+          <RunGraphView runGraph={runGraph} now={now} />
         </section>
         <div className="flex items-start gap-8">
           <section aria-labelledby="run-steps" className="min-w-0 flex-1">
@@ -151,14 +151,26 @@ export function RunPage({
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}
-          <section aria-labelledby="run-inputs" className="w-[400px] shrink-0">
-            <div className={SECTION_HEADING}>
-              <LaneLabel id="run-inputs" className="mb-0">
-                Inputs
-              </LaneLabel>
-            </div>
-            <RunInputsCard inputs={run.inputs} />
-          </section>
+          <div className="flex w-[400px] shrink-0 flex-col gap-6">
+            <section aria-labelledby="run-inputs">
+              <div className={SECTION_HEADING}>
+                <LaneLabel id="run-inputs" className="mb-0">
+                  Inputs
+                </LaneLabel>
+              </div>
+              <RunInputsCard inputs={run.inputs} />
+            </section>
+            {run.status !== "completed" || run.output === undefined ? null : (
+              <section aria-labelledby="run-output">
+                <div className={SECTION_HEADING}>
+                  <LaneLabel id="run-output" className="mb-0">
+                    Output
+                  </LaneLabel>
+                </div>
+                <RunOutputCard output={run.output} />
+              </section>
+            )}
+          </div>
         </div>
       </div>
     </div>

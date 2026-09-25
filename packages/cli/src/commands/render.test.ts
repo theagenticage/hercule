@@ -376,6 +376,281 @@ describe("hercule run", () => {
     ]);
   });
 
+  it("prints what went wrong at the edge a run failed at", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "A loop", steps: [] },
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "failed",
+          failureReason: "iteration-limit",
+          failedStepId: "count",
+          failedEdge: { index: 2, message: "The edge ran out." },
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(2, 6)).toEqual([
+      "status             failed",
+      "failureReason      iteration-limit",
+      "failedStep         count",
+      "failedEdgeMessage  The edge ran out.",
+    ]);
+  });
+
+  /** A plan whose `file` and `count` steps loop, with `escalate` after the loop. */
+  const LOOP_PLAN = {
+    name: "File a batch",
+    steps: [],
+    edges: [
+      { from: "lookup", to: "file" },
+      { from: "file", to: "count" },
+      {
+        from: "count",
+        to: "file",
+        condition: "size(steps.count.output.items) < 3",
+        maxTraversals: 3,
+      },
+      { from: "count", to: "escalate", condition: "inputs.urgent" },
+    ],
+  };
+
+  /** Returns a completed step record that took 20ms. */
+  const completeStep = (stepId: string, iteration: number) => ({
+    stepId,
+    iteration,
+    status: "completed",
+    startedAt: "2026-09-24T10:00:00.000Z",
+    finishedAt: "2026-09-24T10:00:00.020Z",
+    output: { items: [] },
+  });
+
+  /** Returns the lines `hercule run read` prints for a failed run of `LOOP_PLAN`. */
+  const renderLoopFailure = (failure: Record<string, unknown>): ReadonlyArray<string> =>
+    renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: LOOP_PLAN,
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "failed",
+          failedStepId: "count",
+          steps: [],
+          edgeTraversals: [1, 1, 3, 0],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+          ...failure,
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+
+  it("names the edge a run failed at its iteration limit, as from -> to", () => {
+    const lines = renderLoopFailure({
+      failureReason: "iteration-limit",
+      failedEdge: { index: 2, message: "The edge ran out." },
+    });
+    expect(lines.slice(2, 7)).toEqual([
+      "status             failed",
+      "failureReason      iteration-limit",
+      "failedStep         count",
+      "failedEdge         count -> file",
+      "failedEdgeMessage  The edge ran out.",
+    ]);
+  });
+
+  it("names the edge whose condition failed to evaluate, as from -> to", () => {
+    const lines = renderLoopFailure({
+      failureReason: "expression-error",
+      failedEdge: { index: 3, message: "no such key: urgent" },
+    });
+    expect(lines.slice(2, 7)).toEqual([
+      "status             failed",
+      "failureReason      expression-error",
+      "failedStep         count",
+      "failedEdge         count -> escalate",
+      "failedEdgeMessage  no such key: urgent",
+    ]);
+  });
+
+  it("prints no failedEdge for a step that failed on its own", () => {
+    const lines = renderLoopFailure({ failureReason: "step-failed" });
+    expect(lines.some((line) => line.startsWith("failedEdge"))).toBe(false);
+  });
+
+  it("prints an iteration column when a step ran more than once, and a skipped step's row", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: LOOP_PLAN,
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "completed",
+          steps: [
+            completeStep("lookup", 1),
+            completeStep("file", 1),
+            completeStep("count", 1),
+            completeStep("file", 2),
+            completeStep("count", 2),
+            {
+              stepId: "escalate",
+              iteration: 1,
+              status: "skipped",
+              finishedAt: "2026-09-24T10:00:00.100Z",
+            },
+          ],
+          edgeTraversals: [1, 2, 1, 1],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.100Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(lines.indexOf("steps"))).toEqual([
+      "steps",
+      "step      iteration  status     took  error",
+      "lookup    1          completed  20ms",
+      "file      1          completed  20ms",
+      "count     1          completed  20ms",
+      "file      2          completed  20ms",
+      "count     2          completed  20ms",
+      "escalate  1          skipped",
+    ]);
+  });
+
+  it("prints a skipped step's row without an iteration column when every step ran once", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: LOOP_PLAN,
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "completed",
+          steps: [
+            completeStep("lookup", 1),
+            {
+              stepId: "escalate",
+              iteration: 1,
+              status: "skipped",
+              finishedAt: "2026-09-24T10:00:00.100Z",
+            },
+          ],
+          edgeTraversals: [1, 0, 0, 0],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.100Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(lines.indexOf("steps"))).toEqual([
+      "steps",
+      "step      status     took  error",
+      "lookup    completed  20ms",
+      "escalate  skipped",
+    ]);
+  });
+
+  it("prints the output of a run that a terminal step ended, under the inputs", () => {
+    const readOutput = (output: unknown): ReadonlyArray<string> => {
+      const lines = renderHuman(
+        {
+          kind: "value",
+          value: {
+            id: RUN,
+            workflowId: null,
+            plan: { name: "End early", steps: [] },
+            inputs: {},
+            origin: { kind: "manual", actor: "user" },
+            status: "completed",
+            output,
+            steps: [],
+            edgeTraversals: [],
+            createdAt: "2026-09-24T10:00:00.000Z",
+            startedAt: "2026-09-24T10:00:00.000Z",
+            finishedAt: "2026-09-24T10:00:00.010Z",
+          },
+        },
+        lookUpCommand("run", "read"),
+      );
+      return lines.slice(lines.indexOf("inputs"), lines.indexOf("steps"));
+    };
+    expect(readOutput({ id: RUN, title: "Fix login" })).toEqual([
+      "inputs",
+      "none",
+      "",
+      "output",
+      `id     ${RUN}`,
+      "title  Fix login",
+      "",
+    ]);
+    expect(readOutput(null)).toEqual(["inputs", "none", "", "output", "null", ""]);
+    expect(readOutput([1, 2])).toEqual([
+      "inputs",
+      "none",
+      "",
+      "output",
+      "[",
+      "  1,",
+      "  2",
+      "]",
+      "",
+    ]);
+  });
+
+  it("prints a list of objects in a run's output as indented JSON under the value column", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "File", steps: [] },
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "completed",
+          output: { labels: ["a", "b"], provenance: [{ runId: RUN }] },
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(lines.indexOf("output"), lines.indexOf("steps"))).toEqual([
+      "output",
+      "labels      a,b",
+      "provenance  [",
+      "              {",
+      `                "runId": "${RUN}"`,
+      "              }",
+      "            ]",
+      "",
+    ]);
+  });
+
   it("describes who started a run in the words the web app uses", () => {
     const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
       renderHuman(

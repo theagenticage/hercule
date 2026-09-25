@@ -194,10 +194,10 @@ describe("GET /runs", () => {
       expect(page.nextCursor).toBeUndefined();
       for (const summary of page.items) {
         const run = runs.find((one) => one.id === summary.id)!;
-        // A summary is the run without its plan, inputs and step records,
-        // plus the workflow's name from the plan.
+        // A summary is the run without its plan, inputs, step records and
+        // edge traversal counts, plus the workflow's name from the plan.
         const fields: Record<string, unknown> = { ...run, workflowName: run.plan.name };
-        for (const key of ["plan", "inputs", "steps"]) delete fields[key];
+        for (const key of ["plan", "inputs", "steps", "edgeTraversals"]) delete fields[key];
         expect(summary).toEqual(fields);
       }
 

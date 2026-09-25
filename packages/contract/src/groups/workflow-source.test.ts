@@ -901,33 +901,51 @@ steps:
 `;
 };
 
-/**
- * Returns, for each key count, the fastest of five parses of a wide source.
- * The parses for the different counts take turns, so other load on the
- * machine slows every count alike, and the fastest parse is the one that load
- * slowed least.
- */
-const measureWideParses = (keyCounts: ReadonlyArray<number>): ReadonlyArray<number> => {
-  const sources = keyCounts.map(buildWideSource);
-  const fastest = keyCounts.map(() => Number.POSITIVE_INFINITY);
-  for (let round = 0; round < 5; round += 1) {
-    for (const [index, source] of sources.entries()) {
-      const started = performance.now();
-      parseDefinition(source);
-      fastest[index] = Math.min(fastest[index]!, performance.now() - started);
-    }
-  }
-  return fastest;
+/** Returns the CPU time this process has used so far, user and system together, in milliseconds. */
+const readCpuMilliseconds = (): number => {
+  const { user, system } = process.cpuUsage();
+  return (user + system) / 1000;
 };
 
 /**
- * How many times longer a parse of four times as many keys may take. A linear
- * check takes about four times as long. A check that compares each key with
- * every earlier key, as the YAML parser's own duplicate-key check does, takes
- * about sixteen times as long. Eight leaves room for noise on a busy machine
- * and still catches the quadratic check.
+ * Returns, for each key count, the least CPU time of five parses of a wide
+ * source, in milliseconds.
+ *
+ * CPU time, not wall-clock time, because a busy machine pauses this process to
+ * run others, and a pause lengthens the wall-clock time of a long parse far
+ * more than that of a short one. A paused process uses no CPU time, so the
+ * ratio between the two parses stays the same however busy the machine is.
+ * The parses for the different counts take turns, and the least of five is
+ * kept, so a garbage collection that lands in one parse does not count either.
  */
-const MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS = 8;
+const measureWideParses = (keyCounts: ReadonlyArray<number>): ReadonlyArray<number> => {
+  const sources = keyCounts.map(buildWideSource);
+  const least = keyCounts.map(() => Number.POSITIVE_INFINITY);
+  for (let round = 0; round < 5; round += 1) {
+    for (const [index, source] of sources.entries()) {
+      const started = readCpuMilliseconds();
+      parseDefinition(source);
+      least[index] = Math.min(least[index]!, readCpuMilliseconds() - started);
+    }
+  }
+  return least;
+};
+
+/**
+ * How many times more CPU time a parse of sixteen times as many keys may take.
+ *
+ * - A linear check takes about sixteen times as long. Measured on Bun and on
+ *   Node, with the fixed cost of a parse and garbage collection included, it
+ *   is 13 to 24 times.
+ * - A check that compares each key with every earlier key, as the YAML
+ *   parser's own duplicate-key check does, takes about 256 times as long.
+ *   Measured, it is 100 to 160 times.
+ *
+ * Fifty is more than twice the highest linear ratio measured and half the
+ * lowest quadratic one. The larger source is close to the longest a workflow
+ * may be, so the gap cannot be widened by adding keys.
+ */
+const MAX_GROWTH_FOR_SIXTEEN_TIMES_THE_KEYS = 50;
 
 describe("parsing a source with a duplicate key in a mapping", () => {
   it('rejects the second of two keys that are equal as strings, such as 1 and "1"', () => {
@@ -972,8 +990,8 @@ steps:
   });
 
   it("checks a mapping in time linear in its key count, not quadratic", () => {
-    const [fiveThousand, twentyThousand] = measureWideParses([5_000, 20_000]);
-    expect(twentyThousand! / fiveThousand!).toBeLessThan(MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS);
+    const [narrow, wide] = measureWideParses([1_250, 20_000]);
+    expect(wide! / narrow!).toBeLessThan(MAX_GROWTH_FOR_SIXTEEN_TIMES_THE_KEYS);
 
     const [step] = parseDefinition(buildWideSource(20_000)).steps;
     expect(Object.keys(step?.kind === "action" ? (step.params ?? {}) : {})).toHaveLength(20_000);

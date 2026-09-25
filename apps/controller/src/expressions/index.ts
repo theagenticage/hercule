@@ -463,6 +463,45 @@ export const evaluateExpression = (
   });
 
 /**
+ * Evaluates a condition of a step or an edge against a run's context
+ * (`inputs` and `steps`), and returns whether it holds. Fails with
+ * `ExpressionError` if the condition cannot be evaluated, or if it gives
+ * anything but true or false. A condition whose type is only known at run
+ * time passes validation when it is saved, so this is where a wrong type is
+ * caught.
+ */
+export const evaluateCondition = (
+  source: string,
+  context: Record<string, unknown>,
+): Effect.Effect<boolean, ExpressionError> =>
+  Effect.flatMap(evaluateExpression(source, context), (value) =>
+    typeof value === "boolean"
+      ? Effect.succeed(value)
+      : Effect.fail(
+          new ExpressionError({
+            message: `that expression gave ${describeValueKind(value)}, but a condition must give true or false`,
+          }),
+        ),
+  );
+
+/** Returns the kind of a value an expression gave, in words, such as "a string". */
+const describeValueKind = (value: unknown): string => {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  switch (typeof value) {
+    case "string":
+      return "a string";
+    case "number":
+    case "bigint":
+      return "a number";
+    case "object":
+      return "a map";
+    default:
+      return "a value that is not true or false";
+  }
+};
+
+/**
  * Converts a value an expression returned into JSON. Returns `undefined` when
  * the value has no JSON form.
  *

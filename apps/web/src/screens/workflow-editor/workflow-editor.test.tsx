@@ -963,6 +963,19 @@ describe("the graph", () => {
     expect(await within(graph).findByText("max 3")).toBeDefined();
   });
 
+  it("marks a terminal step's card ENDS RUN, and no other card", async () => {
+    renderGraph(LOOP_SOURCE);
+    const graph = screen.getByRole("region", { name: "Workflow graph" });
+    await within(graph).findByText("task_done");
+
+    const readCardText = (id: string): string =>
+      graph.querySelector(`.react-flow__node[data-id="${id}"]`)?.textContent ?? "";
+    expect(readCardText("task_done")).toMatch(/ends run/i);
+    for (const id of LOOP_NODE_IDS.filter((nodeId) => nodeId !== "task_done")) {
+      expect(readCardText(id), id).not.toMatch(/ends run/i);
+    }
+  });
+
   it("redraws when the source changes to another valid workflow", async () => {
     const { update } = renderGraph(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });

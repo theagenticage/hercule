@@ -9,6 +9,7 @@ import {
   QueuedMark,
   RunGlyph,
   SessionGlyph,
+  SkippedMark,
   TaskGlyph,
   WorkStateMark,
   WorkflowGlyph,
@@ -23,6 +24,7 @@ const stateMarks = {
   done: DoneMark,
   failed: FailedMark,
   cancelled: CancelledMark,
+  skipped: SkippedMark,
 };
 
 const entityGlyphs = {
@@ -74,6 +76,7 @@ describe("the mark family", () => {
       done: "text-ok",
       failed: "text-fail",
       cancelled: "text-faint",
+      skipped: "text-faint",
     };
     for (const [name, hue] of Object.entries(hues)) {
       const Mark = stateMarks[name as keyof typeof stateMarks];
@@ -98,6 +101,18 @@ describe("the mark family", () => {
     expect(readStrokeWidth(decision.querySelector("svg")!)).toBe("1.35");
   });
 
+  it("draws the skipped mark as a double chevron: two strokes pointing onward", () => {
+    const { container } = render(<SkippedMark />);
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("stroke-width")).toBe("1.15");
+    // Two open chevrons, each a move and two lines, drawn with no fill.
+    const drawing = [...svg.querySelectorAll("path")]
+      .map((path) => path.getAttribute("d"))
+      .join(" ");
+    expect(drawing.match(/[Mm]/g)).toHaveLength(2);
+    expect(svg.getAttribute("fill")).toBe("none");
+  });
+
   it("gives the working mark three bars that a stylesheet can animate", () => {
     const { container } = render(<WorkingMark />);
     const svg = container.querySelector("svg")!;
@@ -113,6 +128,7 @@ describe("WorkStateMark", () => {
     ["completed", "done"],
     ["failed", "failed"],
     ["cancelled", "cancelled"],
+    ["skipped", "skipped"],
   ] as const)("draws the %s state with the %s mark", (state, mark) => {
     const { container } = render(<WorkStateMark state={state} />);
     expect(container.querySelector("svg")?.dataset.mark).toBe(mark);

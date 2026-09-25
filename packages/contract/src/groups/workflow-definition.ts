@@ -486,6 +486,30 @@ export const listEntrySteps = (
   return definition.steps.filter((step) => step.entry === true || !ledInto.has(step.id));
 };
 
+/**
+ * Returns every step in `from`, plus every step that one of them has a path
+ * of edges to.
+ *
+ * This is only the walk along the graph: edge conditions and `maxTraversals`
+ * are ignored. Each caller adds its own rules on top. The controller uses it
+ * to decide which steps can still run, and the run graph uses it to show
+ * which edges a live run may still follow.
+ */
+export const collectReachableSteps = (
+  edges: ReadonlyArray<{ readonly from: string; readonly to: string }>,
+  from: Iterable<string>,
+): ReadonlySet<string> => {
+  const reached = new Set(from);
+  // A Set iterator also visits values added during the iteration, so this
+  // loop is a breadth-first search.
+  for (const stepId of reached) {
+    for (const edge of edges) {
+      if (edge.from === stepId) reached.add(edge.to);
+    }
+  }
+  return reached;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

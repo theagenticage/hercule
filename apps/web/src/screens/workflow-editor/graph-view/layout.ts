@@ -259,14 +259,34 @@ export const computeGraphLayout = (
   // dagre sets a centre on every node and points on every edge, and every
   // edge connects two known nodes. So the non-null assertions below are safe.
   const centres = new Map<string, Point>();
+  for (const node of nodes) {
+    const { x, y } = graph.node(node.id);
+    centres.set(node.id, { x: x!, y: y! });
+  }
+  // dagre centres the nodes of a rank on the rank's centre line. They are
+  // moved to share the left edge of the rank's widest node instead, so the
+  // edges into a rank's nodes are all as long as each other. The left edge
+  // of each rank is keyed by the x of the rank's centre line.
+  const rankLefts = new Map<number, number>();
+  for (const node of nodes) {
+    const { x } = centres.get(node.id)!;
+    const left = x - computeLayoutBoxSize(node).width / 2;
+    rankLefts.set(x, Math.min(rankLefts.get(x) ?? left, left));
+  }
   const layoutBoxes = new Map<string, Box>();
   const cards = new Map<string, Box>();
   for (const node of nodes) {
-    const { x, y } = graph.node(node.id);
-    const centre = { x: x!, y: y! };
-    centres.set(node.id, centre);
-    layoutBoxes.set(node.id, buildCentredBox(centre, computeLayoutBoxSize(node)));
-    cards.set(node.id, buildCentredBox(centre, node));
+    const centre = centres.get(node.id)!;
+    const size = computeLayoutBoxSize(node);
+    const box = { x: rankLefts.get(centre.x)!, y: centre.y - size.height / 2, ...size };
+    layoutBoxes.set(node.id, box);
+    // A card sits in the middle of its layout box, which also holds its self-loops.
+    cards.set(node.id, {
+      x: box.x + (box.width - node.width) / 2,
+      y: centre.y - node.height / 2,
+      width: node.width,
+      height: node.height,
+    });
   }
 
   const routes = new Map<string, EdgeRoute>();
@@ -370,14 +390,18 @@ export const computeGraphLayout = (
   // side, far enough to meet the side at a right angle.
   for (const { edge, points, label, direction } of drawnEdges) {
     // Returns the point, level with the handle, where the edge leaves the
-    // node's rank.
+    // node's rank: the rank's side, but at least `STRAIGHT_RUN` from the card.
     const findRankSide = (id: string, side: number, handle: Point): Point => {
       const centre = centres.get(id)!;
-      const reach = Math.max(
-        rankHalfWidths.get(centre.x)!,
-        cards.get(id)!.width / 2 + STRAIGHT_RUN,
-      );
-      return { x: centre.x + side * reach, y: handle.y };
+      const card = cards.get(id)!;
+      const halfWidth = rankHalfWidths.get(centre.x)!;
+      return {
+        x:
+          side > 0
+            ? Math.max(centre.x + halfWidth, card.x + card.width + STRAIGHT_RUN)
+            : Math.min(centre.x - halfWidth, card.x - STRAIGHT_RUN),
+        y: handle.y,
+      };
     };
     // Returns the points that take the edge horizontally across a rank. Each
     // point is repeated, so the curve is already horizontal when it reaches
@@ -457,13 +481,20 @@ export const computeGraphLayout = (
 };
 
 /**
- * The smallest zoom used for automatic placement. A drawing a little wider
- * than its pane is scaled down to fit, so it shows whole when it opens; a
- * drawing that fits only below this zoom is not, because its text would be
- * too small to read. At this zoom a card's id, 12.5px, renders at about
- * 9.4px, and its kind label, 10.5px, at about 7.9px.
+ * The smallest zoom at which a drawing's text is readable. At this zoom a
+ * card's id, 12.5px, renders at about 9.4px, and its kind label, 10.5px, at
+ * about 7.9px. A run's page never places its plan below it: the reader pans a
+ * plan that does not fit at this zoom.
  */
-const LEGIBLE_ZOOM = 0.75;
+export const LEGIBLE_ZOOM = 0.75;
+
+/**
+ * The smallest zoom the reader can zoom out to, and the smallest at which the
+ * workflow editor places a drawing. The editor always shows the whole
+ * workflow when it opens, because the author is looking at the workflow's
+ * shape; the author zooms in to read a part of it.
+ */
+export const MIN_ZOOM = 0.25;
 
 /**
  * The largest zoom for automatic placement and for "Fit to view". A small
@@ -476,6 +507,58 @@ export const LARGEST_PLACED_ZOOM = 1.25;
 /** The margin between the pane's edge and the drawing. */
 const PANE_MARGIN = 16;
 
+/**
+ * Returns the zoom a drawing is placed at, given the largest zoom at which it
+ * fits: that zoom, but never above `LARGEST_PLACED_ZOOM` and never below
+ * `smallestZoom`.
+ */
+const computePlacedZoom = (fittingZoom: number, smallestZoom: number): number =>
+  Math.min(LARGEST_PLACED_ZOOM, Math.max(smallestZoom, fittingZoom));
+
+/**
+ * The room above and below a drawing in a pane sized to it. The "Fit to view"
+ * control sits in the pane's bottom-right corner, 8px from its edges and 28px
+ * high, so a drawing centred with this room above and below never runs under
+ * it.
+ */
+const FIT_CONTROL_ROOM = 40;
+
+/**
+ * How a pane sizes itself to its drawing, rather than filling its parent.
+ */
+export interface PaneSizing {
+  /**
+   * The heights the pane may take. Within them, the pane is as tall as the
+   * whole drawing needs (see `computePaneHeight`).
+   */
+  readonly heightRange: { readonly min: number; readonly max: number };
+  /**
+   * The smallest zoom the drawing is placed at when it opens, and the zoom
+   * the pane's height is computed for when the drawing is too wide to fit.
+   */
+  readonly smallestPlacedZoom: number;
+}
+
+/**
+ * Computes the height of a pane `paneWidth` wide that shows a whole drawing,
+ * within `sizing.heightRange`.
+ *
+ * The drawing is placed at the zoom at which it fills the pane's width, as
+ * `computeDrawingViewport` places it, and the pane is as tall as the drawing
+ * at that zoom plus `FIT_CONTROL_ROOM` above and below. A pane that is not
+ * yet measured has an infinite width, which gives the drawing its largest
+ * zoom. A drawing too wide to fit at `sizing.smallestPlacedZoom` is sized at
+ * that zoom, and the reader pans to see the rest.
+ */
+export const computePaneHeight = (paneWidth: number, drawing: Size, sizing: PaneSizing): number => {
+  const { min, max } = sizing.heightRange;
+  const zoom = computePlacedZoom(
+    (paneWidth - 2 * PANE_MARGIN) / drawing.width,
+    sizing.smallestPlacedZoom,
+  );
+  return Math.min(max, Math.max(min, Math.ceil(drawing.height * zoom + 2 * FIT_CONTROL_ROOM)));
+};
+
 /** A viewport: the offset of the drawing's origin in the pane, and the zoom. */
 export interface DrawingViewport extends Point {
   readonly zoom: number;
@@ -486,17 +569,23 @@ export interface DrawingViewport extends Point {
  * zoomed.
  *
  * The zoom is the largest one, up to `LARGEST_PLACED_ZOOM`, at which the
- * drawing fits the pane with a margin, but never below the legible zoom. On
+ * drawing fits the pane with a margin, but never below `smallestZoom`. On
  * each axis, a drawing that fits at that zoom is centred. A drawing that does
  * not fit starts at the pane's top or left edge, where the triggers are, and
- * the author pans to see the rest.
+ * the reader pans to see the rest.
  */
-export const computeDrawingViewport = (pane: Size, drawing: Size): DrawingViewport => {
-  const fittingZoom = Math.min(
-    (pane.width - 2 * PANE_MARGIN) / drawing.width,
-    (pane.height - 2 * PANE_MARGIN) / drawing.height,
+export const computeDrawingViewport = (
+  pane: Size,
+  drawing: Size,
+  smallestZoom: number,
+): DrawingViewport => {
+  const zoom = computePlacedZoom(
+    Math.min(
+      (pane.width - 2 * PANE_MARGIN) / drawing.width,
+      (pane.height - 2 * PANE_MARGIN) / drawing.height,
+    ),
+    smallestZoom,
   );
-  const zoom = Math.min(LARGEST_PLACED_ZOOM, Math.max(LEGIBLE_ZOOM, fittingZoom));
   const findOffset = (paneSize: number, drawingSize: number): number => {
     const scaledSize = drawingSize * zoom;
     return scaledSize + 2 * PANE_MARGIN <= paneSize ? (paneSize - scaledSize) / 2 : PANE_MARGIN;

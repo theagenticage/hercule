@@ -3,9 +3,12 @@
  * words for its status and its failure, and how long it and its steps took.
  *
  * The rules live here with a test rather than inside a component, so the run
- * list and a run's page can never describe the same run differently.
+ * list and a run's page use the same words for a run's status and failure.
+ * The page says more than the list in one place: for a run that failed at an
+ * edge, the list names only the failed step, and the page also names the
+ * edge, because only the page has the run's plan.
  */
-import type { FailureReason, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
+import type { FailureReason, Run, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
 import { formatDuration } from "./threads/duration";
 
@@ -68,10 +71,10 @@ export interface Timestamps {
 }
 
 /**
- * A run, a run summary or a step record, reduced to the fields its times
- * follow from. The contract gives each status only the times it can have.
+ * A run or a run summary, reduced to the fields its times follow from. The
+ * contract gives each status only the times it can have.
  */
-type TimedRecord =
+type TimedRun =
   | { readonly status: "pending" }
   | { readonly status: "running"; readonly startedAt: string }
   | {
@@ -79,6 +82,12 @@ type TimedRecord =
       readonly startedAt?: string;
       readonly finishedAt: string;
     };
+
+/**
+ * A run, a run summary or a step record, reduced to the fields its times
+ * follow from. Only a step record can be skipped.
+ */
+type TimedRecord = TimedRun | { readonly status: "skipped"; readonly finishedAt: string };
 
 /**
  * Returns when a run, a run summary or a step record started and finished,
@@ -89,6 +98,7 @@ type TimedRecord =
  * - `completed`, `failed` and `cancelled`: `finishedAt`, and `startedAt` when
  *   it had started. A run cancelled before it started, or one the controller
  *   could not start, has none.
+ * - `skipped`: `finishedAt`. A skipped step record never started.
  */
 export const readTimestamps = (record: TimedRecord): Timestamps => {
   switch (record.status) {
@@ -103,6 +113,8 @@ export const readTimestamps = (record: TimedRecord): Timestamps => {
         ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
         finishedAt: record.finishedAt,
       };
+    case "skipped":
+      return { finishedAt: record.finishedAt };
   }
 };
 
@@ -150,7 +162,7 @@ export const describeStepDuration = (times: Timestamps, now: number): string => 
  * after 1.2s", "cancelled after 4.1s". A run cancelled before it started has
  * no duration and is just "cancelled".
  */
-export const describeRunStatus = (run: TimedRecord, now: number): string => {
+export const describeRunStatus = (run: TimedRun, now: number): string => {
   const { startedAt, finishedAt } = readTimestamps(run);
   const elapsed = measureElapsed(startedAt, finishedAt, now);
   if (run.status === "pending" || elapsed === undefined) return run.status;
@@ -168,31 +180,67 @@ export const describeRunStatus = (run: TimedRecord, now: number): string => {
 };
 
 /**
- * Returns a failure reason in a few plain words: "step failed", "template
- * error", or "controller error" for a run the controller could not carry out.
+ * Returns a failure reason in a few plain words: "step failed", "expression
+ * error" for a template or a condition that could not be evaluated,
+ * "iteration limit" for an edge the run was to follow more often than its
+ * `maxTraversals` allows, or "controller error" for a run the controller
+ * could not carry out.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
     case "step-failed":
       return "step failed";
     case "expression-error":
-      return "template error";
+      return "expression error";
+    case "iteration-limit":
+      return "iteration limit";
     case "controller-error":
       return "controller error";
   }
 };
 
+/** An edge of a run's plan, as the workflow definition spells it. */
+type PlanEdge = NonNullable<Run["plan"]["edges"]>[number];
+
 /**
- * Returns the text the timeline shows where a step with no bar would be: "pending"
- * for a step waiting to start, "cancelled before it started" for one the run's
- * cancel reached first, and nothing for any other step.
+ * Returns the edge of the plan a failed run failed at: the edge whose
+ * `maxTraversals` it reached, or whose condition could not be evaluated.
+ * Returns `undefined` for a run that did not fail, or that failed at a step
+ * rather than at an edge.
  */
-export const describeUnstartedStep = (state: WorkState): string | undefined =>
-  state === "pending"
-    ? "pending"
-    : state === "cancelled"
-      ? "cancelled before it started"
-      : undefined;
+export const findFailedEdge = (run: Run): PlanEdge | undefined =>
+  "failedEdge" in run && run.failedEdge !== undefined
+    ? run.plan.edges?.[run.failedEdge.index]
+    : undefined;
+
+/**
+ * Returns the text the timeline shows where a step with no bar would be:
+ * - "pending" for a step waiting to start;
+ * - "cancelled before it started" for one the run's cancel reached first;
+ * - "skipped" for one whose condition was false;
+ * - "not reached" for a step the run ended without reaching.
+ *
+ * Returns `undefined` for a step with a bar, and for a step a live run has
+ * not reached yet, because the run may still reach it.
+ */
+export const describeUnstartedStep = (
+  state: WorkState,
+  runStatus: RunStatus,
+): string | undefined => {
+  switch (state) {
+    case "pending":
+    case "skipped":
+      return state;
+    case "cancelled":
+      return "cancelled before it started";
+    case "unreached":
+      return isRunLive(runStatus) ? undefined : "not reached";
+    case "running":
+    case "completed":
+    case "failed":
+      return undefined;
+  }
+};
 
 /**
  * Returns the word for a step's state: its status as the contract spells it,

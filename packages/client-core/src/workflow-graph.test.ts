@@ -5,7 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@hercule/contract";
-import { abbreviateEdgeCondition, buildWorkflowGraph } from "@hercule/client-core";
+import {
+  abbreviateEdgeCondition,
+  buildWorkflowGraph,
+  shortenCondition,
+} from "@hercule/client-core";
 
 type WorkflowGraph = ReturnType<typeof buildWorkflowGraph>;
 
@@ -108,7 +112,8 @@ describe("buildWorkflowGraph", () => {
         { id: "open_pr", kind: "action" },
         { id: "pr_merged", kind: "signal" },
         { id: "review", kind: "agent" },
-        { id: "task_done", kind: "action" },
+        // A terminal step ends the run when it completes, and its card says so.
+        { id: "task_done", kind: "action", terminal: true },
       ],
       edges: [
         { from: "assigned", to: "implement" },
@@ -215,5 +220,39 @@ describe("abbreviateEdgeCondition", () => {
 
   it("returns undefined for an edge with no condition", () => {
     expect(abbreviateEdgeCondition({ from: "review", to: "merge" })).toBeUndefined();
+  });
+});
+
+describe("shortenCondition", () => {
+  it("returns a condition that fits unchanged", () => {
+    expect(shortenCondition("size(items) > 0")).toBe("size(items) > 0");
+  });
+
+  it("keeps the operator and the right-hand side of a long comparison", () => {
+    expect(shortenCondition("size(items) < inputs.target")).toBe("… < inputs.target");
+    expect(shortenCondition("size(items) >= inputs.target")).toBe("… >= inputs.target");
+  });
+
+  it("keeps the last clause of a long condition with several clauses", () => {
+    expect(shortenCondition('has(steps.review) && verdict == "reject" && score < 3')).toBe(
+      "… && score < 3",
+    );
+  });
+
+  it("cuts at the last comparison when the last clause does not fit", () => {
+    expect(shortenCondition("has(steps.a) && size(items) >= inputs.target")).toBe(
+      "… >= inputs.target",
+    );
+  });
+
+  it("ignores operators inside brackets and strings", () => {
+    expect(shortenCondition('size(a.filter(x, x > 2)) == "b > c && d"')).toBe('… == "b > c && d"');
+  });
+
+  it("keeps the last characters when the end after the operator is still too long", () => {
+    expect(shortenCondition("x == inputs.a_rather_long_field_name")).toBe(
+      "…_rather_long_field_name",
+    );
+    expect(shortenCondition("steps.checks.output.passed_all")).toBe("…hecks.output.passed_all");
   });
 });

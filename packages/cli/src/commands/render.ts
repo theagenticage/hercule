@@ -9,7 +9,9 @@
 import {
   describeRunOrigin,
   describeStepDuration,
+  findFailedEdge,
   formatAge,
+  readJsonObject,
   readTimestamps,
 } from "@hercule/client-core";
 import {
@@ -108,9 +110,15 @@ const renderKeyValues = (
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
-  // Trim like the table's lines, so a key with an empty value has no trailing
-  // padding.
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatValue(item)}`.trimEnd());
+  // A value of several lines keeps its later lines under its first one, in the
+  // value column. Trim like the table's lines, so a key with an empty value has
+  // no trailing padding.
+  const indent = " ".repeat(width + 2);
+  return entries.flatMap(([key, item]) =>
+    formatValue(item)
+      .split("\n")
+      .map((line, index) => `${index === 0 ? key.padEnd(width) + "  " : indent}${line}`.trimEnd()),
+  );
 };
 
 /**
@@ -118,13 +126,18 @@ const renderKeyValues = (
  * The run commands print ids in full, as `run start` prints the id it
  * starts, so an id a reader copies from `run read`, such as a Connection an
  * input names, works in every other command.
+ *
+ * A list that holds an object or a list prints as indented JSON over several
+ * lines, the way the CLI prints JSON elsewhere, because one line of nested
+ * JSON is hard to read.
  */
-const formatKeepingIds = (item: unknown): string =>
-  typeof item === "string"
-    ? item
-    : Array.isArray(item)
-      ? item.map(formatKeepingIds).join(",")
-      : formatCell(item);
+const formatKeepingIds = (item: unknown): string => {
+  if (typeof item === "string") return item;
+  if (!Array.isArray(item)) return formatCell(item);
+  return item.some((element) => typeof element === "object" && element !== null)
+    ? JSON.stringify(item, null, 2)
+    : item.map(formatKeepingIds).join(",");
+};
 
 const isPage = (
   value: unknown,
@@ -307,24 +320,68 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 ];
 
 /**
- * Returns a run's failure reason and the step it failed at, as the fields of
+ * Returns a run's failure reason, the step it failed at, the edge it failed
+ * at as `count -> file`, and what went wrong at that edge, as the fields of
  * `run read`, or no fields for a run that did not fail. A run the controller
- * could not carry out may have failed before it reached any step.
+ * could not carry out may have failed before it reached any step, and only a
+ * run that failed at an edge has a failed edge and its message.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
+  const planEdge = findFailedEdge(run);
   return {
     failureReason: run.failureReason,
     ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+    ...(planEdge === undefined ? {} : { failedEdge: `${planEdge.from} -> ${planEdge.to}` }),
+    ...("failedEdge" in run && run.failedEdge !== undefined
+      ? { failedEdgeMessage: run.failedEdge.message }
+      : {}),
   };
 };
 
 /**
+ * Returns the lines of a run's output under an `output` heading, or no lines
+ * for a run without one: only a run that a terminal step ended has an
+ * output. An object with fields prints as `key  value` lines, like the
+ * inputs; any other value prints as indented JSON.
+ */
+const renderRunOutput = (run: Run): ReadonlyArray<string> => {
+  if (run.status !== "completed" || run.output === undefined) return [];
+  const fields = readJsonObject(run.output);
+  return [
+    "",
+    "output",
+    ...(fields !== undefined && Object.keys(fields).length > 0
+      ? renderKeyValues(fields, formatKeepingIds)
+      : JSON.stringify(run.output, null, 2).split("\n")),
+  ];
+};
+
+/**
+ * Returns the table of a run's step records, one row per record. The
+ * iteration column shows only when a step has more than one record, so a run
+ * with no loops reads as before.
+ */
+const renderStepTable = (steps: Run["steps"], now: number): ReadonlyArray<string> => {
+  const stepIds = new Set(steps.map((record) => record.stepId));
+  const hasRepeats = stepIds.size < steps.length;
+  return renderTable(
+    steps.map((record) => ({
+      step: record.stepId,
+      ...(hasRepeats ? { iteration: record.iteration } : {}),
+      status: record.status,
+      took: describeStepDuration(readTimestamps(record), now),
+      error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
+    })),
+  );
+};
+
+/**
  * Returns the lines printed for `run read`: a summary of the run, the inputs
- * it started with, and a table with one row per step record. A run with no
- * inputs or no step records prints "none" under that heading. The plan and
- * the steps' outputs are left out, because they are long; `--json` prints
- * them.
+ * it started with, the run's output when it has one, and a table with one
+ * row per step record. A run with no inputs or no step records prints "none"
+ * under that heading. The plan and the steps' outputs are left out, because
+ * they are long; `--json` prints them.
  */
 const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderKeyValues(
@@ -344,18 +401,10 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...(Object.keys(run.inputs).length === 0
     ? ["none"]
     : renderKeyValues(run.inputs, formatKeepingIds)),
+  ...renderRunOutput(run),
   "",
   "steps",
-  ...(run.steps.length === 0
-    ? ["none"]
-    : renderTable(
-        run.steps.map((record) => ({
-          step: record.stepId,
-          status: record.status,
-          took: describeStepDuration(readTimestamps(record), now),
-          error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
-        })),
-      )),
+  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
 ];
 
 /** Returns the lines the CLI prints for a successful command without `--json`. */
