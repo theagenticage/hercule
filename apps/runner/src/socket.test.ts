@@ -500,7 +500,12 @@ describe("which controller a runner accepts", () => {
     // a proven connection.
     await delay(Duration.toMillis(DEADLINE) * 4);
     expect(settled, "the runner ended a connection it should have kept").toBeUndefined();
-    expect(stub.received[0]?._tag).toBe("runnerHello");
+    // The hello lists the workspace actions this build implements, so the
+    // controller pins a run that commits only to a runner that can.
+    expect(stub.received[0]).toMatchObject({
+      _tag: "runnerHello",
+      capabilities: expect.arrayContaining(["action:git.commit"]) as unknown,
+    });
 
     stub.hangUp();
     await pending;
