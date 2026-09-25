@@ -9,13 +9,6 @@
  * back - because the wire is the whole authorization boundary.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
-import {
-  ConnectionValidationFailed,
-  HOST_API,
-  registerConnectionType,
-  type Plugin,
-} from "@hercule/plugin-host";
 import type { SessionStart } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import {
@@ -27,11 +20,15 @@ import {
   type Wire,
 } from "../sessions/testing";
 import {
+  createGithubConnection,
+  githubPlugin,
   listFramesTagged,
   provisionWorkspaceOrFail,
   readWorkspace,
   createRepo,
   withFleet,
+  GITHUB_LOGIN,
+  GITHUB_PAT,
   type Frame,
 } from "./testing";
 import {
@@ -40,33 +37,7 @@ import {
   waitForConversationSessions,
 } from "../conversations/testing";
 
-const LOGIN = "octocat";
-const PAT = "ghp_a-token";
 const SECOND_PAT = "ghp_another-token";
-
-/** The GitHub connection type, validating tokens locally rather than against api.github.com. */
-const githubPlugin: Plugin = {
-  manifest: {
-    id: "github",
-    displayName: "GitHub",
-    hostApi: HOST_API,
-    capabilities: ["connections"],
-    configSchema: Schema.Struct({}),
-  },
-  register: (host) =>
-    registerConnectionType(host, {
-      type: "github",
-      displayName: "GitHub",
-      setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] }],
-      validate: (credentials: Record<string, string>) => {
-        const pat = credentials["pat"] ?? "";
-        return pat.startsWith("ghp_")
-          ? Effect.succeed({ displayName: pat === PAT ? LOGIN : "hubot" })
-          : Effect.fail(new ConnectionValidationFailed({ message: "GitHub rejected the token." }));
-      },
-    }),
-  activate: () => Effect.succeed(Effect.void),
-};
 
 const withCredentials = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { plugins: [githubPlugin] });
@@ -80,24 +51,10 @@ const askForCredential = async (wire: Wire, request: Record<string, unknown>): P
   );
 };
 
-const createConnection = async (
-  arranged: Arranged,
-  credentials: Record<string, string>,
-): Promise<string> => {
-  const response = await post(
-    arranged.harness.base,
-    "/api/v1/connections",
-    { type: "github/github", label: "work", labels: ["Code"], credentials },
-    arranged.token,
-  );
-  expect(response.status, await response.clone().text()).toBe(201);
-  return ((await response.json()) as { id: string }).id;
-};
-
 describe("the designated connection of a workspace", () => {
   it("is the connection of its first checkout's resource, and null for a scratch workspace", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
 
       const primary = await provisionWorkspaceOrFail(arranged, {
@@ -125,7 +82,7 @@ describe("the designated connection of a workspace", () => {
 describe("a workspace whose resource moves to another Connection", () => {
   it("keeps the Connection it was opened with, and answers credentials from it", async () => {
     await withCredentials(async (arranged) => {
-      const mine = await createConnection(arranged, { pat: PAT });
+      const mine = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", mine);
       const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
@@ -133,7 +90,7 @@ describe("a workspace whose resource moves to another Connection", () => {
       });
       expect(workspace.designatedConnectionId).toBe(mine);
 
-      const other = await createConnection(arranged, { pat: "ghp_somebody-else" });
+      const other = await createGithubConnection(arranged, { pat: "ghp_somebody-else" });
       const moved = await send("PATCH", arranged.harness.base, `/api/v1/resources/${web}`, {
         body: { connectionId: other },
         token: arranged.token,
@@ -145,7 +102,7 @@ describe("a workspace whose resource moves to another Connection", () => {
         remote: "github.com/acme/web",
         workspaceId: workspace.id,
       });
-      expect(answer["token"]).toBe(PAT);
+      expect(answer["token"]).toBe(GITHUB_PAT);
     });
   });
 });
@@ -155,7 +112,7 @@ describe("a credential asked for by a provisioning workspace", () => {
   // the session start frame, rather than on every credential exchange.
   it("answers with the connection's token and the login it belongs to", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
@@ -166,8 +123,8 @@ describe("a credential asked for by a provisioning workspace", () => {
         remote: "github.com/acme/web",
         workspaceId: workspace.id,
       });
-      expect(answer["token"]).toBe(PAT);
-      expect(answer["username"]).toBe(LOGIN);
+      expect(answer["token"]).toBe(GITHUB_PAT);
+      expect(answer["username"]).toBe(GITHUB_LOGIN);
       expect(answer["name"]).toBeUndefined();
       expect(answer["email"]).toBeUndefined();
       expect(answer["error"]).toBeUndefined();
@@ -176,7 +133,7 @@ describe("a credential asked for by a provisioning workspace", () => {
 
   it("stops answering once the workspace is no longer provisioning", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
@@ -204,7 +161,7 @@ describe("a credential asked for by a provisioning workspace", () => {
 
   it("rejects a remote the workspace has no checkout of, and a remote that matches no resource", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       await createRepo(arranged, "https://github.com/acme/secrets", github);
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -247,7 +204,7 @@ describe("a credential asked for by a provisioning workspace", () => {
 
   it("rejects a workspace that is not on the runner asking", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       const second = await arranged.enlist();
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -268,7 +225,7 @@ describe("a credential asked for by a provisioning workspace", () => {
 describe("a credential asked for by a session", () => {
   it("rejects the token of a session the runner no longer reports", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
@@ -308,7 +265,7 @@ describe("a credential asked for by a session", () => {
 
   it("rejects a token that was never issued", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       await provisionWorkspaceOrFail(arranged, { resourceId: web, runnerId: arranged.runnerId });
 
@@ -325,7 +282,7 @@ describe("a credential asked for by a session", () => {
 describe("the GitHub token a session starts with", () => {
   it("is sent on the start frame, from the workspace's designated connection", async () => {
     await withCredentials(async (arranged) => {
-      const github = await createConnection(arranged, { pat: PAT });
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
 
       const session = await spawnSessionOrFail(arranged, {
@@ -342,12 +299,12 @@ describe("the GitHub token a session starts with", () => {
       } as never);
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
-      expect((start as unknown as Frame)["ghToken"]).toBe(PAT);
+      expect((start as unknown as Frame)["ghToken"]).toBe(GITHUB_PAT);
       // The session commits as the account it pushes with, so the identity
       // is sent on the same frame as the token.
       expect((start as unknown as Frame)["gitIdentity"]).toEqual({
-        name: LOGIN,
-        email: `${LOGIN}@users.noreply.github.com`,
+        name: GITHUB_LOGIN,
+        email: `${GITHUB_LOGIN}@users.noreply.github.com`,
       });
     });
   });
@@ -360,7 +317,7 @@ describe("the GitHub token a session starts with", () => {
       expect((first as unknown as Frame)["ghToken"] ?? null).toBeNull();
       expect((first as unknown as Frame)["gitIdentity"] ?? null).toBeNull();
 
-      const fallback = await createConnection(arranged, { pat: SECOND_PAT });
+      const fallback = await createGithubConnection(arranged, { pat: SECOND_PAT });
       const patched = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
         body: { user: { "github.defaultConnectionId": fallback } },
         token: arranged.token,
@@ -393,7 +350,7 @@ describe("the GitHub token a session starts with", () => {
       expect((first as unknown as Frame)["ghToken"] ?? null).toBeNull();
       expect((first as unknown as Frame)["gitIdentity"] ?? null).toBeNull();
 
-      const fallback = await createConnection(arranged, { pat: SECOND_PAT });
+      const fallback = await createGithubConnection(arranged, { pat: SECOND_PAT });
       const patched = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
         body: { user: { "github.defaultConnectionId": fallback } },
         token: arranged.token,

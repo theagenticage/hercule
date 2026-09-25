@@ -10,9 +10,15 @@
  * provider fixture, and the sweep interval for a test that watches the sweep.
  */
 import { expect } from "vitest";
+import { Effect, Schema } from "effect";
 import type * as Duration from "effect/Duration";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
-import type { Plugin } from "@hercule/plugin-host";
+import {
+  ConnectionValidationFailed,
+  HOST_API,
+  registerConnectionType,
+  type Plugin,
+} from "@hercule/plugin-host";
 import { get, post } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { withFleet as withRunnerFleet, type Arranged, type Wire } from "../sessions/testing";
@@ -66,6 +72,56 @@ export const withFleet = (
       ? {}
       : { workspaceSweepInterval: options.workspaceSweepInterval }),
   });
+
+/** The GitHub login that `githubPlugin` gives a Connection created with `GITHUB_PAT`. */
+export const GITHUB_LOGIN = "octocat";
+export const GITHUB_PAT = "ghp_a-token";
+
+/**
+ * The GitHub Connection type, validating tokens locally rather than against
+ * api.github.com. A token must start with `ghp_`; `GITHUB_PAT` belongs to
+ * `GITHUB_LOGIN`, and any other accepted token to `hubot`.
+ */
+export const githubPlugin: Plugin = {
+  manifest: {
+    id: "github",
+    displayName: "GitHub",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "github",
+      displayName: "GitHub",
+      setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] }],
+      validate: (credentials: Record<string, string>) => {
+        const pat = credentials["pat"] ?? "";
+        return pat.startsWith("ghp_")
+          ? Effect.succeed({ displayName: pat === GITHUB_PAT ? GITHUB_LOGIN : "hubot" })
+          : Effect.fail(new ConnectionValidationFailed({ message: "GitHub rejected the token." }));
+      },
+    }),
+  activate: () => Effect.succeed(Effect.void),
+};
+
+/**
+ * Creates a GitHub Connection with these credentials through the API, and
+ * returns its id. The fleet must run `githubPlugin`.
+ */
+export const createGithubConnection = async (
+  arranged: Arranged,
+  credentials: Record<string, string>,
+): Promise<string> => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/connections",
+    { type: "github/github", label: "work", labels: ["Code"], credentials },
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+};
 
 /** A frame on the wire, read as the object it is rather than as a member of a union. */
 export type Frame = { readonly _tag: string } & Record<string, unknown>;

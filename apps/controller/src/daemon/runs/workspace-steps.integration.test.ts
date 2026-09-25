@@ -15,7 +15,16 @@ import {
   waitForRun,
 } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS, type Arranged, type Wire } from "../../sessions/testing";
-import { createRepo, listFramesTagged, withFleet, type Frame } from "../../workspaces/testing";
+import {
+  createGithubConnection,
+  createRepo,
+  githubPlugin,
+  GITHUB_LOGIN,
+  GITHUB_PAT,
+  listFramesTagged,
+  withFleet,
+  type Frame,
+} from "../../workspaces/testing";
 
 /** What `git.commit` returns, as a runner reports it. */
 const COMMITTED = { sha: "abc123", branch: "hercule/run-x", committed: true };
@@ -101,73 +110,124 @@ describe("workspace steps over the runner socket", () => {
   it(
     "hands the step to its runner after its workspace, continues the run on its result, and says when the step is no longer owed",
     async () => {
+      await withFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const connectionId = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+          const repoId = await createRepo(
+            arranged,
+            "https://github.com/o/commit.git",
+            connectionId,
+          );
+          const runId = await startCommitRun(arranged, repoId);
+          const key = commitKey(runId);
+
+          const start = await waitForStepStart(wire, runId);
+          // The commit is made as the account of the workspace's designated
+          // Connection, as a session in that workspace would commit.
+          expect(start).toMatchObject({
+            ...key,
+            action: "git.commit",
+            input: { message: "Save the work" },
+            gitIdentity: { name: GITHUB_LOGIN, email: `${GITHUB_LOGIN}@users.noreply.github.com` },
+          });
+          // A run's workspace is new, so the runner is sent it before the step
+          // that works in it.
+          const provisionAt = wire.frames.findIndex(
+            (frame) =>
+              frame._tag === "workspaceProvision" && frame.workspaceId === start["workspaceId"],
+          );
+          expect(provisionAt).toBeGreaterThanOrEqual(0);
+          expect(provisionAt).toBeLessThan(
+            wire.frames.indexOf(start as (typeof wire.frames)[number]),
+          );
+          // The step record was committed as running before the frame was sent.
+          expect(await readCommitStatus(arranged, runId)).toBe("running");
+
+          // A runner the run is not pinned to cannot end its step, and is told
+          // to drop it.
+          const other = await arranged.enlist();
+          const result = {
+            _tag: "workspaceStepResult" as const,
+            ...key,
+            outcome: { status: "completed" as const, output: COMMITTED },
+          };
+          other.wire.send(result);
+          await waitForFrame(other.wire, "workspaceStepStop", namesStep(key));
+          expect(await readCommitStatus(arranged, runId)).toBe("running");
+
+          wire.send(result);
+          const ended = await waitForRunTo(
+            arranged,
+            runId,
+            "completed",
+            (run) => run.status === "completed",
+          );
+          expect(findStepRecords(ended, "commit")[0]).toMatchObject({
+            status: "completed",
+            output: COMMITTED,
+          });
+          expect(findStepRecords(ended, "file")[0]).toMatchObject({
+            status: "completed",
+            output: { title: "Committed abc123" },
+          });
+          // Once its end is recorded, the runner may delete the step's result.
+          await waitUntil("stopped the recorded step", () =>
+            countStops(wire, key) === 1 ? true : undefined,
+          );
+
+          // A late copy of the same result changes nothing, and is answered
+          // with a stop too, so the runner still deletes the result.
+          wire.send(result);
+          await waitUntil("stopped the duplicate", () =>
+            countStops(wire, key) === 2 ? true : undefined,
+          );
+          expect(await readRun(arranged.harness.base, arranged.token, runId)).toEqual(ended);
+        },
+        { plugins: [githubPlugin] },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "completes a run whose controller restarted while its step ran, once the runner reconnects",
+    async () => {
       await withFleet(async (arranged) => {
-        const { wire } = arranged;
-        const repoId = await createRepo(arranged, "https://github.com/o/commit.git");
+        const repoId = await createRepo(arranged, "https://github.com/o/restart.git");
         const runId = await startCommitRun(arranged, repoId);
         const key = commitKey(runId);
+        await waitForStepStart(arranged.wire, runId);
 
-        const start = await waitForStepStart(wire, runId);
-        expect(start).toMatchObject({
+        // A stopping controller drops every runner's socket.
+        arranged.wire.close();
+        await waitForRunnerGone(arranged);
+        await arranged.harness.reboot();
+        expect(await readCommitStatus(arranged, runId)).toBe("running");
+
+        // The runner comes back still running the step. It is sent the step
+        // again, and its result ends the step and continues the run.
+        const back = await arranged.reconnect();
+        back.send({ _tag: "workspaceStepsReport", steps: [key] });
+        await waitForStepStart(back, runId);
+        back.send({
+          _tag: "workspaceStepResult",
           ...key,
-          action: "git.commit",
-          input: { message: "Save the work" },
+          outcome: { status: "completed", output: COMMITTED },
         });
-        // A run's workspace is new, so the runner is sent it before the step
-        // that works in it.
-        const provisionAt = wire.frames.findIndex(
-          (frame) =>
-            frame._tag === "workspaceProvision" && frame.workspaceId === start["workspaceId"],
-        );
-        expect(provisionAt).toBeGreaterThanOrEqual(0);
-        expect(provisionAt).toBeLessThan(
-          wire.frames.indexOf(start as (typeof wire.frames)[number]),
-        );
-        // The step record was committed as running before the frame was sent.
-        expect(await readCommitStatus(arranged, runId)).toBe("running");
-
-        // A runner the run is not pinned to cannot end its step, and is told
-        // to drop it.
-        const other = await arranged.enlist();
-        const result = {
-          _tag: "workspaceStepResult" as const,
-          ...key,
-          outcome: { status: "completed" as const, output: COMMITTED },
-        };
-        other.wire.send(result);
-        await waitForFrame(other.wire, "workspaceStepStop", namesStep(key));
-        expect(await readCommitStatus(arranged, runId)).toBe("running");
-
-        wire.send(result);
         const ended = await waitForRunTo(
           arranged,
           runId,
           "completed",
           (run) => run.status === "completed",
         );
-        expect(findStepRecords(ended, "commit")[0]).toMatchObject({
-          status: "completed",
-          output: COMMITTED,
-        });
         expect(findStepRecords(ended, "file")[0]).toMatchObject({
           status: "completed",
           output: { title: "Committed abc123" },
         });
-        // Once its end is recorded, the runner may delete the step's result.
-        await waitUntil("stopped the recorded step", () =>
-          countStops(wire, key) === 1 ? true : undefined,
-        );
-
-        // A late copy of the same result changes nothing, and is answered
-        // with a stop too, so the runner still deletes the result.
-        wire.send(result);
-        await waitUntil("stopped the duplicate", () =>
-          countStops(wire, key) === 2 ? true : undefined,
-        );
-        expect(await readRun(arranged.harness.base, arranged.token, runId)).toEqual(ended);
       });
     },
-    WAIT_DEADLINE_MS * 2,
+    WAIT_DEADLINE_MS * 3,
   );
 
   it(

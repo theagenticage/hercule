@@ -459,7 +459,8 @@ export async function listInstances(options: {
  */
 export async function waitForEnrolledRunner(options: {
   readonly home: string;
-  readonly binary: string;
+  /** The compiled binary to run instead of the dispatcher's source. */
+  readonly binary?: string | undefined;
 }): Promise<string> {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
