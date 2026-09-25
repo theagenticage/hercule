@@ -26,7 +26,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
   ControllerToRunner,
@@ -261,28 +261,39 @@ const readRunner = async (base: string, token: string, id: string): Promise<Runn
 /** The delay between two reads of a runner row while `waitForRunner` polls. */
 const ROW_POLL_INTERVAL_MS = 10;
 
-/** How many times `waitForRunner` reads the row before it gives up. */
-const ROW_POLL_ATTEMPTS = 300;
+/** How long `waitForRunner` polls the row before it fails. */
+const ROW_WAIT_DEADLINE_MS = 10_000;
 
 /**
- * The timeout for a test that calls `waitForRunner` four times. If the test timed
- * out before `waitForRunner` gave up, vitest would stop the test first, and the
- * failure would report the test instead of the row that never changed. Under
- * the load of the full suite, four waits can take longer than vitest's default
- * five seconds. So the timeout covers four full waits plus the setup before
- * them.
+ * Sets the test timeout so that it covers the most row waits one test makes,
+ * five, each up to its deadline, plus the server's setup before them.
+ *
+ * The controller handles a runner's frame on its own schedule, and under the
+ * load of the full suite a few waits and the setup take longer than vitest's
+ * default five seconds. A test timeout shorter than its waits fails a test
+ * that was only slow. It also hides which wait was slow, because vitest
+ * stops the test before the wait can fail with its own error.
  */
-const FOUR_ROW_WAITS_TIMEOUT_MS = ROW_POLL_INTERVAL_MS * ROW_POLL_ATTEMPTS * 4 + 10_000;
+vi.setConfig({ testTimeout: ROW_WAIT_DEADLINE_MS * 5 + 10_000 });
 
-/** Polls the runner until `ready` returns true, and returns it; after the last attempt, returns it as it is. */
+/**
+ * Polls the runner until `ready` returns true, and returns it. Fails after
+ * `ROW_WAIT_DEADLINE_MS` with an error that includes the row as last read.
+ */
 const waitForRunner = async (
   base: string,
   token: string,
   id: string,
   ready: (row: RunnerDetail) => boolean,
 ): Promise<RunnerDetail> => {
+  const deadline = Date.now() + ROW_WAIT_DEADLINE_MS;
   let row = await readRunner(base, token, id);
-  for (let attempt = 0; attempt < ROW_POLL_ATTEMPTS && !ready(row); attempt++) {
+  while (!ready(row)) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `the runner row never became ready; the last read returned ${JSON.stringify(row)}`,
+      );
+    }
     await delay(ROW_POLL_INTERVAL_MS);
     row = await readRunner(base, token, id);
   }
@@ -818,100 +829,96 @@ describe("what a runner reports about its machine", () => {
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
   });
 
-  it(
-    "stores the watermark a runner reports and returns it on the runner",
-    async () => {
-      await withServer(
-        async (harness) => {
-          const token = await completeSetup(harness.base);
-          const joined = await enlist(harness);
-          const { wire } = await greet(harness.base, joined.credential);
+  it("stores the watermark a runner reports and returns it on the runner", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
 
-          const online = await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.connectivity === "online",
-          );
-          // A runner that has only just sent its hello has not reported its
-          // disk space yet.
-          expect(online.watermark).toBeNull();
+        const online = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        // A runner that has only just sent its hello has not reported its
+        // disk space yet.
+        expect(online.watermark).toBeNull();
 
-          // Above the default ten-gibibyte watermark, so the runner is still
-          // accepting work.
-          wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
-          const stored = await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.watermark !== null,
-          );
-          expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
+        // Above the default ten-gibibyte watermark, so the runner is still
+        // accepting work.
+        wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
+        const stored = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark !== null,
+        );
+        expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
 
-          const before = await harness.audit("runner.placementsChanged");
-          // A runner with no earlier report counts as accepting work, so a
-          // first report with plenty of disk changes nothing.
-          expect(before).toHaveLength(0);
+        const before = await harness.audit("runner.placementsChanged");
+        // A runner with no earlier report counts as accepting work, so a
+        // first report with plenty of disk changes nothing.
+        expect(before).toHaveLength(0);
 
-          // The same report again, then a different amount of disk that means
-          // the same for placement. Waiting for the second one to be stored
-          // proves the first was handled and deliberately wrote no audit entry.
-          wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
-          wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(150 * GIB) });
-          const again = await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.watermark?.diskFreeBytes === 150 * GIB,
-          );
-          expect(again.watermark).toEqual(buildResourceReport(150 * GIB));
-          expect(
-            await harness.audit("runner.placementsChanged"),
-            "nothing about placement changed",
-          ).toHaveLength(before.length);
+        // The same report again, then a different amount of disk that means
+        // the same for placement. Waiting for the second one to be stored
+        // proves the first was handled and deliberately wrote no audit entry.
+        wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
+        wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(150 * GIB) });
+        const again = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark?.diskFreeBytes === 150 * GIB,
+        );
+        expect(again.watermark).toEqual(buildResourceReport(150 * GIB));
+        expect(
+          await harness.audit("runner.placementsChanged"),
+          "nothing about placement changed",
+        ).toHaveLength(before.length);
 
-          // The disk filled up, below the default watermark. This changes what
-          // placement may do with the runner, so it is recorded.
-          wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
-          const short = await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.watermark?.diskFreeBytes === 4 * GIB,
-          );
-          expect(short.watermark).toEqual(buildResourceReport(4 * GIB));
+        // The disk filled up, below the default watermark. This changes what
+        // placement may do with the runner, so it is recorded.
+        wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
+        const short = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.watermark?.diskFreeBytes === 4 * GIB,
+        );
+        expect(short.watermark).toEqual(buildResourceReport(4 * GIB));
 
-          const after = await harness.audit("runner.placementsChanged");
-          expect(after).toHaveLength(before.length + 1);
-          const flip = after[after.length - 1];
-          // No user or session asked for this, and a runner is never an actor.
-          expect(flip?.actor).toBe("system");
-          expect(flip?.payload).toMatchObject({
-            runnerId: joined.runnerId,
-            acceptingPlacements: false,
-          });
+        const after = await harness.audit("runner.placementsChanged");
+        expect(after).toHaveLength(before.length + 1);
+        const flip = after[after.length - 1];
+        // No user or session asked for this, and a runner is never an actor.
+        expect(flip?.actor).toBe("system");
+        expect(flip?.payload).toMatchObject({
+          runnerId: joined.runnerId,
+          acceptingPlacements: false,
+        });
 
-          // A `system` actor the event schema cannot encode would fail the
-          // whole page, not just the row, so it is also read back over HTTP.
-          const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
-            items: ReadonlyArray<{
-              kind: string;
-              actor: string | null;
-              payload: Record<string, unknown>;
-            }>;
-          };
-          const recorded = log.items.find((entry) => entry.kind === "runner.placementsChanged");
-          expect(recorded).toBeDefined();
-          expect(recorded!.actor).toBe("system");
-          expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
+        // A `system` actor the event schema cannot encode would fail the
+        // whole page, not just the row, so it is also read back over HTTP.
+        const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
+          items: ReadonlyArray<{
+            kind: string;
+            actor: string | null;
+            payload: Record<string, unknown>;
+          }>;
+        };
+        const recorded = log.items.find((entry) => entry.kind === "runner.placementsChanged");
+        expect(recorded).toBeDefined();
+        expect(recorded!.actor).toBe("system");
+        expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
 
-          wire.close();
-        },
-        { pings: FAST },
-      );
-    },
-    FOUR_ROW_WAITS_TIMEOUT_MS,
-  );
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
 
   it("records a runner whose first report shows no room left", async () => {
     await withServer(
