@@ -7,13 +7,15 @@
  * outside every checkout, so a commit can never pick one up. They are deleted:
  *
  * - all at once, when their workspace is disposed;
- * - one by one, when a stop for the step arrives, because the controller no
- *   longer owes a step it stops.
+ * - one by one, when a stop for the step arrives. The controller stops a
+ *   step when it cancels it, and also once it has recorded how the step
+ *   ended, to say it will never ask for that result again.
  *
- * A primary is never disposed, and the runner cannot tell when the controller
- * has read a result it sent: a result can be lost with the connection, and the
- * controller then asks again on reconnect. So a primary's file stays until a
- * stop for its step arrives. Each file is a few hundred bytes.
+ * The runner cannot tell on its own when the controller has read a result it
+ * sent: a result can be lost with the connection, and the controller then
+ * asks again on reconnect. So a file stays until that stop arrives, or until
+ * its workspace is disposed. The stop matters most for a primary, which is
+ * never disposed.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";

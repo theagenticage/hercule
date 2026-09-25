@@ -27,6 +27,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { describeCause } from "../report";
 import { buildSubstrateEnv, type Workspaces } from "../workspaces";
 import type { WorkspaceAction } from "./action";
+import { switchCheckoutBranch } from "./git";
 import { findWorkspaceAction } from "./registry";
 import { buildStepName, deleteStepResult, readStepResult, writeStepResult } from "./results";
 
@@ -56,8 +57,9 @@ export interface WorkspaceSteps {
   /**
    * Stops the listed steps and deletes their result files. A running step's
    * git is stopped and the step is answered with `interrupted`; a queued step
-   * is dropped without an answer. A step that is unknown or finished needs
-   * nothing more.
+   * is dropped without an answer. A finished step only loses its result
+   * file: the controller also stops every step whose end it has recorded, to
+   * say it will not ask for that result again.
    */
   readonly stop: (frame: WorkspaceStepStop) => Effect.Effect<void>;
   /** Returns the key of every step that is queued or running now. */
@@ -165,29 +167,35 @@ export const makeWorkspaceSteps = (options: {
         ...buildSubstrateEnv(options.baseEnv),
         ...buildGitCredentialEnv({ socketPath: options.socketPath, identity: frame.gitIdentity }),
       };
-      const ran = yield* action
-        .run(frame.input, { workspace, resourceId: frame.resourceId, gitEnv })
-        .pipe(
-          Effect.map((output): WorkspaceStepOutcome => ({ status: "completed", output })),
-          Effect.catchTag("WorkspaceActionFailed", (failure) =>
-            Effect.succeed<WorkspaceStepOutcome>({
-              status: "failed",
-              code: "action_failed",
-              message: failure.message.slice(0, MAX_MESSAGE_LENGTH),
-            }),
-          ),
-          // A bug in the action still ends the step, or the run would wait
-          // for a result that never comes.
-          Effect.catchDefect((defect) =>
-            Effect.succeed<WorkspaceStepOutcome>({
-              status: "failed",
-              code: "action_failed",
-              message: describeCause(Cause.die(defect), MAX_MESSAGE_LENGTH),
-            }),
-          ),
-          // A timeout interrupts the action, which stops its git.
-          Effect.timeoutOption(deadline),
-        );
+      const context = { workspace, resourceId: frame.resourceId, gitEnv };
+      const { checkoutBranch } = frame;
+      // A main workspace is shared, so something else may have switched its
+      // checkout since the run's last step. The switch runs here, under the
+      // workspace's lock, so no other step's git runs in between.
+      const switched =
+        checkoutBranch === undefined ? Effect.void : switchCheckoutBranch(context, checkoutBranch);
+      const ran = yield* switched.pipe(
+        Effect.flatMap(() => action.run(frame.input, context)),
+        Effect.map((output): WorkspaceStepOutcome => ({ status: "completed", output })),
+        Effect.catchTag("WorkspaceActionFailed", (failure) =>
+          Effect.succeed<WorkspaceStepOutcome>({
+            status: "failed",
+            code: "action_failed",
+            message: failure.message.slice(0, MAX_MESSAGE_LENGTH),
+          }),
+        ),
+        // A bug in the action still ends the step, or the run would wait
+        // for a result that never comes.
+        Effect.catchDefect((defect) =>
+          Effect.succeed<WorkspaceStepOutcome>({
+            status: "failed",
+            code: "action_failed",
+            message: describeCause(Cause.die(defect), MAX_MESSAGE_LENGTH),
+          }),
+        ),
+        // A timeout interrupts the action, which stops its git.
+        Effect.timeoutOption(deadline),
+      );
       return Option.getOrElse(ran, (): WorkspaceStepOutcome => ({
         status: "failed",
         code: "timeout",
@@ -302,8 +310,8 @@ export const makeWorkspaceSteps = (options: {
     stop: (frame) =>
       Effect.gen(function* () {
         for (const key of frame.steps) {
-          // The controller no longer owes a step it stops, so it will never
-          // ask for this result again.
+          // Deleted whether the step is running or long finished: the
+          // controller never asks again for the result of a step it stops.
           deleteStepResult(storageDir, key);
           const step = held.get(buildStepName(key));
           // Detached, because stopping git can take the full grace period,

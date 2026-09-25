@@ -152,3 +152,21 @@ export const findCheckoutDir = (
     }),
   );
 };
+
+/**
+ * Switches the step's checkout to `branch`, the way a session start switches
+ * it. Fails with git's error output when the switch fails, for example when
+ * uncommitted changes would be overwritten.
+ *
+ * The switch is never forced: a forced switch can throw away the user's
+ * uncommitted work in a main workspace, and losing that is worse than failing
+ * the step. The `--` ends the options, so git reads `branch` as a branch and
+ * never as a path.
+ */
+export const switchCheckoutBranch = (
+  context: WorkspaceActionContext,
+  branch: string,
+): Effect.Effect<void, WorkspaceActionFailed> =>
+  Effect.flatMap(findCheckoutDir(context), (dir) =>
+    Effect.asVoid(runGitOrFail(dir, ["checkout", branch, "--"], context.gitEnv)),
+  );

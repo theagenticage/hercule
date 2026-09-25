@@ -57,8 +57,11 @@ interface Runner {
   /** Every step result the runner sent, in the order it sent them. */
   readonly sent: Array<WorkspaceStepResult>;
   readonly storageDir: string;
-  /** Provisions an ephemeral workspace with one checkout of a new remote, and returns it. */
-  readonly provisionWorkspace: () => Promise<Workspace>;
+  /**
+   * Provisions a workspace with one checkout of a new remote, and returns it.
+   * An ephemeral one is on `BRANCH`; a primary is on the remote's `main`.
+   */
+  readonly provisionWorkspace: (kind?: "ephemeral" | "primary") => Promise<Workspace>;
 }
 
 interface Workspace {
@@ -91,19 +94,28 @@ const makeRunner = (deadline?: Duration.Duration): Runner => {
     steps.attached((frame) => Effect.sync(() => void sent.push(frame))).pipe(Scope.provide(scope)),
   );
 
-  const provisionWorkspace = async (): Promise<Workspace> => {
+  const provisionWorkspace = async (
+    kind: "ephemeral" | "primary" = "ephemeral",
+  ): Promise<Workspace> => {
     const workspaceId = createId();
+    const resourceId = createId();
+    const remote = makeRemote().url;
     const report = await workspaces.provision(
       buildProvisionFrame({
         workspaceId,
-        kind: "ephemeral",
+        kind,
         checkouts: [
-          buildCheckout({ resourceId: createId(), remote: makeRemote().url, branch: BRANCH }),
+          kind === "ephemeral"
+            ? buildCheckout({ resourceId, remote, branch: BRANCH })
+            : buildCheckout({ resourceId, remote }),
         ],
       }),
     );
     expect(report.status).toBe("ready");
-    const dir = join(storageDir, "workspaces", workspaceId);
+    const dir =
+      kind === "ephemeral"
+        ? join(storageDir, "workspaces", workspaceId)
+        : join(storageDir, "primaries", resourceId);
     const blockCommits = () => {
       const signals = createTemporaryDir("hercule-hook-");
       const reached = join(signals, "reached");
@@ -222,6 +234,38 @@ describe("git.commit", () => {
   });
 });
 
+describe("a workspace step with a checkout branch", () => {
+  it("switches the checkout to that branch before its action runs", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace("primary");
+    runGitOrThrow(workspace.dir, "branch", "feature");
+    const main = runGitOrThrow(workspace.dir, "rev-parse", "main");
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+
+    const outcome = await runStep(runner, {
+      ...buildStart(workspace, { message: "Add a" }),
+      checkoutBranch: "feature",
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", output: { branch: "feature" } });
+    expect(runGitOrThrow(workspace.dir, "log", "-1", "--format=%s", "feature")).toBe("Add a");
+    expect(runGitOrThrow(workspace.dir, "rev-parse", "main")).toBe(main);
+  });
+
+  it("fails with action_failed and git's error output when the switch fails", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace("primary");
+
+    const outcome = await runStep(runner, {
+      ...buildStart(workspace, { message: "Add a" }),
+      checkoutBranch: "no-such-branch",
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
+    expect(outcome.status === "failed" && outcome.message).toContain("no-such-branch");
+  });
+});
+
 describe("a workspace step", () => {
   it("answers a repeated start from its result file, without committing again", async () => {
     const runner = makeRunner();
@@ -238,6 +282,27 @@ describe("a workspace step", () => {
     // The start is answered before it returns, because the file is read at once.
     expect(listResults(runner, frame)).toEqual([first, first]);
     expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(head);
+  });
+
+  it("deletes a finished step's result file when the step is stopped", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    const frame = buildStart(workspace, { message: "Nothing" });
+    await runStep(runner, frame);
+    const file = join(
+      runner.storageDir,
+      "step-results",
+      workspace.workspaceId,
+      `${frame.runId}-commit-1.json`,
+    );
+    expect(existsSync(file)).toBe(true);
+
+    await Effect.runPromise(runner.steps.stop({ _tag: "workspaceStepStop", steps: [frame] }));
+
+    // The controller stops a step once it has recorded how the step ended.
+    expect(existsSync(file)).toBe(false);
+    // The step already sent its result, so the stop sends nothing more.
+    expect(listResults(runner, frame)).toHaveLength(1);
   });
 
   it("stops its git when the step is stopped, and answers interrupted", async () => {
