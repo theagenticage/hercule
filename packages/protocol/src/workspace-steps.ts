@@ -24,6 +24,17 @@ const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 export const MAX_WORKSPACE_STEPS = 256;
 
 /**
+ * Returns the hello capability that stands for one workspace action, such as
+ * `action:git.commit` for `git.commit`.
+ *
+ * A runner lists one for each workspace action its build implements, and the
+ * controller one for each workspace action in its catalog. The negotiated list
+ * then holds exactly the workspace actions both sides know, and a run is
+ * pinned only to a runner whose list holds every workspace action in its plan.
+ */
+export const buildWorkspaceActionCapability = (actionId: string): string => `action:${actionId}`;
+
+/**
  * Identifies one step record of a run. The run id and the step id are storage
  * ids because the runner names the step's result file after them, so neither
  * may escape the directory that file goes in.
