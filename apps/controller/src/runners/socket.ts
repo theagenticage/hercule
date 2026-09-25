@@ -245,14 +245,13 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             if (!greeted) return;
             return yield* connections.reportedSession(runnerId, mine, message);
           case "workspaceStepResult":
-          case "workspaceStepsReport":
-            // The controller sends no workspace step yet, so no runner should
-            // report one. Logged rather than dropped, so a runner that does is
-            // noticed.
+            // Published rather than handled: the runs domain records how a
+            // step ended, not the socket.
             if (!greeted) return;
-            return yield* Effect.logWarning(
-              `Runner ${runnerId} sent ${message._tag}, which this controller does not handle yet`,
-            );
+            return yield* connections.reportedWorkspaceStep(runnerId, mine, message);
+          case "workspaceStepsReport":
+            if (!greeted) return;
+            return yield* connections.reportedWorkspaceSteps(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;

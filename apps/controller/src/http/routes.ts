@@ -55,6 +55,7 @@ import {
   RetirementLayer,
   RunExecutorLayer,
   WorkflowRunsLayer,
+  WorkspaceStepsLayer,
 } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
@@ -615,7 +616,8 @@ export const operationLayers = Layer.mergeAll(
   // execution is carried out by the controller daemon's Run Executor, apart
   // from any request, so the live topics' listener is provided to the service
   // as well: the same instance as the one merged below, because a layer is
-  // built once however many times it is provided.
+  // built once however many times it is provided. A run's workspace steps
+  // reach their runners through the controller daemon's Workspace Steps.
   RunServiceLayer.pipe(
     Layer.provideMerge(
       WorkflowServiceLayer.pipe(
@@ -625,6 +627,7 @@ export const operationLayers = Layer.mergeAll(
     ),
     Layer.provideMerge(TaskServiceLayer),
     Layer.provideMerge(RunExecutorLayer),
+    Layer.provideMerge(WorkspaceStepsLayer),
     Layer.provide(LiveTopicsLayer),
   ),
   LiveTopicsLayer,

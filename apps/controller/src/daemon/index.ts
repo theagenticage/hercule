@@ -26,7 +26,8 @@
  * - `runners/`: handling what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
  * - `workflows/`: what the workflows domain reads from the runs domain;
- * - `runs/`: the Run Executor, which gives each run's execution a fiber.
+ * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
+ *   Workspace Steps, which hands a workspace step to its runner.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -51,7 +52,7 @@ export {
 } from "./events";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export { Inbound, InboundLayer, Retirement, RetirementLayer } from "./runners";
-export { RunExecutorLayer, RunFibers } from "./runs";
+export { RunExecutorLayer, RunFibers, WorkspaceStepsLayer } from "./runs";
 export {
   AssistantSessionsLayer,
   DispatchLayer,

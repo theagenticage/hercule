@@ -2,7 +2,7 @@
  * The only consumer of what the fleet reports:
  *
  * - the sessions a runner holds, and what happens in them;
- * - the result of provisioning a workspace;
+ * - the result of provisioning a workspace, and of each workspace step;
  * - the git credentials a runner asks for;
  * - every change that may have given a runner room for more work.
  *
@@ -75,6 +75,19 @@ const make = Effect.gen(function* () {
         return Effect.flatMap(
           workspaces.credentialAnswer(traffic.runnerId, traffic.request),
           (answer) => Effect.asVoid(connections.tell(traffic.runnerId, answer)),
+        );
+      case "workspaceStepReported":
+        // ROUND 2: `runs.completeStep(traffic.runnerId, traffic.result)`.
+        return Effect.logWarning(
+          `Runner ${traffic.runnerId} reported the result of workspace step ` +
+            `${traffic.result.stepId} of run ${traffic.result.runId}, which is not recorded yet`,
+        );
+      case "workspaceStepsReported":
+        // ROUND 2: `runs.listEndedWorkspaceSteps(traffic.runnerId, traffic.report.steps)`,
+        // then `WorkspaceSteps.stop` for each.
+        return Effect.logWarning(
+          `Runner ${traffic.runnerId} reported ${traffic.report.steps.length} workspace steps ` +
+            "in flight, which are not checked yet",
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's

@@ -43,6 +43,8 @@ import {
   type SessionsReport,
   type CredentialRequest,
   type WorkspaceReport,
+  type WorkspaceStepResult,
+  type WorkspaceStepsReport,
 } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
@@ -104,6 +106,16 @@ export type FleetTraffic =
       readonly _tag: "credentialRequested";
       readonly runnerId: string;
       readonly request: CredentialRequest;
+    }
+  | {
+      readonly _tag: "workspaceStepReported";
+      readonly runnerId: string;
+      readonly result: WorkspaceStepResult;
+    }
+  | {
+      readonly _tag: "workspaceStepsReported";
+      readonly runnerId: string;
+      readonly report: WorkspaceStepsReport;
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
@@ -462,6 +474,28 @@ const make = Effect.gen(function* () {
       request: CredentialRequest,
     ): Effect.Effect<void> =>
       publish(id, connection, { _tag: "credentialRequested", runnerId: id, request }),
+
+    /**
+     * Publishes how one of a runner's workspace steps ended. The runs domain
+     * records it, through the controller daemon.
+     */
+    reportedWorkspaceStep: (
+      id: string,
+      connection: Connection,
+      result: WorkspaceStepResult,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "workspaceStepReported", runnerId: id, result }),
+
+    /**
+     * Publishes the workspace steps a runner says it is running, sent when it
+     * connects. The controller daemon stops each one whose record has ended.
+     */
+    reportedWorkspaceSteps: (
+      id: string,
+      connection: Connection,
+      report: WorkspaceStepsReport,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "workspaceStepsReported", runnerId: id, report }),
 
     /**
      * Publishes that this runner may now have room for work, for example
