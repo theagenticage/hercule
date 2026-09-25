@@ -20,6 +20,7 @@
 /** Each format, and the `Intl.DateTimeFormat` options it uses. */
 const SHAPES = {
   context: { weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+  day: { day: "numeric", month: "short" },
   stamp: {
     day: "numeric",
     month: "short",
@@ -132,6 +133,20 @@ export const chooseStamps = (
     shown = stamp;
     return stamp;
   });
+};
+
+/**
+ * Formats the day an instant falls on in `timezone`: "9 Oct". The year is
+ * left out for the same reason as in `formatStamp`. Returns `undefined` in the
+ * same cases as `formatTimeContext`.
+ */
+export const formatDay = (instant: Date, timezone: string): string | undefined => {
+  const part = buildPartReader("day", instant, timezone);
+  if (part === undefined) return undefined;
+
+  const day = part("day");
+  if (day === "") return undefined;
+  return `${day} ${part("month")}`;
 };
 
 /**

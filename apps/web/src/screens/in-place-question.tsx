@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "@hercule/ui";
 
@@ -22,6 +22,8 @@ import { Button } from "@hercule/ui";
  *   wraps over as many lines as it needs, with the buttons below it.
  * - `disabled` disables both buttons, so the question cannot be answered
  *   while an action the answer would interfere with is still running.
+ * - `children`, when given, sit between the question and the buttons: a
+ *   control that shapes the answer, such as a checkbox.
  */
 export function InPlaceQuestion({
   question,
@@ -31,6 +33,7 @@ export function InPlaceQuestion({
   onAccept,
   stacked = false,
   disabled = false,
+  children,
 }: {
   readonly question: string;
   readonly declineLabel: string;
@@ -39,6 +42,7 @@ export function InPlaceQuestion({
   readonly onAccept: () => void;
   readonly stacked?: boolean;
   readonly disabled?: boolean;
+  readonly children?: ReactNode;
 }): JSX.Element {
   // The first render runs before the decline button takes focus, so the
   // focused element is still the one that asked.
@@ -70,6 +74,7 @@ export function InPlaceQuestion({
       <div className="flex flex-col gap-1.5 text-row text-muted">
         {/* Pretty wrapping keeps the last line from holding a single word. */}
         <p className="text-pretty">{question}</p>
+        {children}
         <div className="flex items-center gap-1.5">{buttons}</div>
       </div>
     );
@@ -80,6 +85,7 @@ export function InPlaceQuestion({
       <span title={question} className="min-w-0 truncate">
         {question}
       </span>
+      {children}
       {buttons}
     </div>
   );

@@ -184,6 +184,13 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 - **The CLI row**: `hercule run start --workflow <id>` runs a stored workflow, by a full id or a tail of eight or more characters; `hercule run start --source-stdin` runs the YAML piped in, once, without storing it. `--inputs` takes the inputs as one JSON object. `definition` is hidden, because a command line sends YAML text. The command prints the new run's id and `hercule run read <id>`.
 - **`run.cancel`** also cancels every unfinished run the cancelled run started, however deep ([./07](./07-workflows.md) section 7.2).
 
+*(Amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260).)* **Cancelling chooses what happens to the run's workspace, and a run says until when it keeps one.**
+
+- **`run.cancel`** takes `{ keepWorkspace? }` in its body, default `false`. It applies to the run and to every descendant run cancelled with it. Not kept, the run's ephemeral workspace is deleted by the next workspace sweep; kept, it is kept like a failed run's ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.7). A primary workspace is never deleted by a run, whatever the choice.
+- **The CLI row** gains `--keep-workspace true`: `hercule run cancel <id> --keep-workspace true`. A boolean on this CLI is always written `--flag true` or `--flag false`; there is no bare flag.
+- **`Run.workspaceKeptUntil`** is present only for a run with an ephemeral workspace that failed, or was cancelled with `keepWorkspace`: the run's `finishedAt` plus the controller setting `workspace.failedRunTtlDays` (default 14), read at the time of the request. It stays after the workspace is deleted, so a client reads the workspace's own `status` and `disposedAt` to learn whether it still exists.
+- **`workspace.dispose`** refuses a workspace whose run is `pending` or `running` with `invalid_state`, and the message says to cancel the run first. Disposing of a kept workspace is how a user dismisses a failed run; there is no dismiss operation for runs.
+
 
 ### session, input, transcript
 

@@ -94,6 +94,7 @@ export {
   type StepLine,
   type Timeline,
 } from "./run-graph";
+export { describeRunWorkspace, type RunWorkspaceReading } from "./run-workspace";
 export {
   buildRunInputDraft,
   buildRunInputs,
@@ -116,6 +117,7 @@ export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-st
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
   chooseStamps,
+  formatDay,
   formatPreciseStamp,
   formatSince,
   formatStamp,

@@ -3,6 +3,7 @@ import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeRunnerWait,
+  describeRunWorkspace,
   formatWorkspaceLabel,
   isNotFound,
   resolveDisplayTimezone,
@@ -103,6 +104,7 @@ function RunScreen(): JSX.Element {
           ? undefined
           : formatWorkspaceLabel(workspace, resources.items, runner === undefined ? [] : [runner])
       }
+      workspaceReading={describeRunWorkspace(run, workspace, timezone)}
       runnerWait={describeRunnerWait(run, runner, actions, timezone)}
       timezone={timezone}
       stepsView={steps}

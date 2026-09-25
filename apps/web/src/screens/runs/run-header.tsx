@@ -25,7 +25,8 @@ const QUIET_LINK =
  * duration, why it failed, who started it and how, when it started and ended,
  * and its id's tail, which the CLI takes. Once the run is pinned to a runner,
  * the next line shows where it works: the runner, linked to its page, with
- * whether the controller can reach it, and the run's workspace. A run that
+ * whether the controller can reach it, the run's workspace, and the note on
+ * what happens to the workspace, such as "Workspace deleted 3 Oct". A run that
  * failed at an edge has a last line: what went wrong there.
  *
  * The title sits where the shell's top bar puts every other screen's title,
@@ -35,6 +36,7 @@ export function RunHeader({
   run,
   runner,
   workspaceLabel,
+  workspaceNote,
   now,
   timezone,
   children,
@@ -44,10 +46,15 @@ export function RunHeader({
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
   readonly workspaceLabel: string | undefined;
+  /** What happens to the run's workspace, such as "Workspace kept for inspection until 9 Oct". */
+  readonly workspaceNote: string | undefined;
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
   readonly timezone: string;
-  /** The actions on the right: Cancel, and the question shown before the run is cancelled. */
+  /**
+   * The actions on the right: Cancel or Delete workspace, and the question
+   * shown before either is done.
+   */
   readonly children: ReactNode;
 }): JSX.Element {
   const origin = describeRunOrigin(run.origin);
@@ -141,6 +148,12 @@ export function RunHeader({
                 {workspaceLabel}
               </span>
             </span>
+          )}
+          {workspaceLabel === undefined || workspaceNote === undefined ? null : (
+            <>
+              <Dot />
+              <span>{workspaceNote}</span>
+            </>
           )}
         </p>
       )}

@@ -270,7 +270,7 @@ Concurrent sessions in one primary workspace are allowed; the UI surfaces the ov
 | `lost` | its runner was retired, or the runner reported the directory gone |
 | `deleted` | torn down by teardown or the TTL reaper; terminal, record kept |
 
-Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (teardown after clean completion, dismissal of the failed run, or reaping); any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`. The status is the material state on the runner and nothing more: whether an ephemeral is kept for inspection is teardown policy read off its run (6.7), never a workspace state (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped).
+Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (teardown after clean completion, ~~dismissal of the failed run~~ `workspace.dispose` on the failed run's kept workspace *(amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260))*, or reaping); any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`. The status is the material state on the runner and nothing more: whether an ephemeral is kept for inspection is teardown policy read off its run (6.7), never a workspace state (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped).
 
 Non-repo resources get no workspaces in v1: folder resources need a versioning story for non-git materials (post-v1), and mailboxes never produce workspaces.
 
@@ -304,7 +304,7 @@ The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#
 | Situation | Ephemeral workspace |
 |---|---|
 | Clean completion | deleted |
-| Failure | kept until the user dismisses the failed run; re-runs provision fresh workspaces |
+| Failure | kept until the user ~~dismisses the failed run~~ deletes it with `workspace.dispose`, or for 14 days *(amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260), below)*; re-runs provision fresh workspaces |
 | Orphaned (owning run gone, session gone, runner restarted mid-job) | collected by the runner's TTL reaper |
 
 Primary workspaces are never torn down by Hercule and bare caches persist for the runner's life (this spec's consolidation; the ticket's teardown rules cover ephemerals only).
@@ -315,7 +315,23 @@ A retired runner's workspaces are marked `lost` in the controller (section 7); t
 
 Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
 
-*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Runs now have workspaces, and the sweep leaves an unfinished run's workspace alone.** The sweep never disposes of a workspace whose run is `pending` or `running`, however long the run has waited. A run can wait for its runner with no time limit (section 5.1), and its workspace holds the work of the steps already done. What happens to a run's workspace once the run ends - deleted on clean completion, kept after a failure, the 14-day window above - is [#260](https://github.com/theagenticage/hercule/issues/260). Until #260 lands, a finished run's ephemeral workspace is orphaned and falls to the 24-hour orphan rule.
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Runs now have workspaces, and the sweep leaves an unfinished run's workspace alone.** The sweep never disposes of a workspace whose run is `pending` or `running`, however long the run has waited. A run can wait for its runner with no time limit (section 5.1), and its workspace holds the work of the steps already done. What happens to a run's workspace once the run ends - deleted on clean completion, kept after a failure, the 14-day window above - is [#260](https://github.com/theagenticage/hercule/issues/260). ~~Until #260 lands, a finished run's ephemeral workspace is orphaned and falls to the 24-hour orphan rule.~~ *(Struck 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260): #260 has landed, below.)*
+
+*(Amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260).)* **The sweep tears down a run's ephemeral workspace by how the run ended.** One rule in one place: the same ten-minute sweep, on an online runner only, so an offline runner needs no special case. A `primary` workspace is never deleted by a run.
+
+| The run is | Its ephemeral workspace | The audit `reason` |
+|---|---|---|
+| `pending` or `running` | never touched, however old | - |
+| `completed` | deleted by the next sweep | `run-completed` |
+| `cancelled`, the workspace not kept | deleted by the next sweep | `run-cancelled` |
+| `failed` | kept for `workspace.failedRunTtlDays` after the run finished (default **14**), then deleted | `run-failed` |
+| `cancelled` with `keepWorkspace` | kept like a failed run's | `run-kept` |
+
+- **The 14-day window is built** as the controller setting `workspace.failedRunTtlDays`, counted from the run's `finishedAt`. The orphan and idle TTLs do not apply to a run's workspace: its run's rule decides. A thread's workspace keeps the reasons `orphan` and `idle`.
+- **Dismissing is `workspace.dispose` on the kept workspace.** There is no dismiss operation for runs. `workspace.dispose` refuses a workspace whose run is `pending` or `running` with `invalid_state`, and the message says to cancel the run first. Cancelling is where the user chooses whether the workspace stays: `run.cancel { keepWorkspace }` ([07-workflows.md](./07-workflows.md) section 7.2).
+- **Deleting after a clean completion can lag by up to ten minutes.** That is the price of one rule in one place.
+- **The sweep also takes `failed` ephemeral workspaces**, not only `ready` ones. A run whose setup command failed leaves a `failed` workspace that may hold files, and it is deleted after the window like any failed run's. A thread's `failed` ephemeral falls to the orphan and idle TTLs like a `ready` one.
+- **The "workspace reaped" note** is read off the workspace itself: its `deleted` status and `disposedAt`. The run needs no column for it. Until the workspace is deleted, a failed or kept run answers `workspaceKeptUntil` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), and the run's page shows both ([14-web-app.md](./14-web-app.md)).
 
 ## 7. Runner lifecycle and connectivity
 

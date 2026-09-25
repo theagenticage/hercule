@@ -7,10 +7,12 @@ import {
   queryKeys,
   type HerculeClient,
   type RunnerWait,
+  type RunWorkspaceReading,
 } from "@hercule/client-core";
 import type { Run, Runner } from "@hercule/contract";
 import {
   Button,
+  Checkbox,
   LaneLabel,
   SegmentedControl,
   SegmentedControlItem,
@@ -41,16 +43,24 @@ const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
  * one, the run's output.
  *
  * While the run is live, one clock ticks for the whole page, so the header,
- * the graph and the steps count the same time. The page owns Cancel and the
- * question shown before the run is cancelled. While the question shows,
- * Cancel is hidden instead of unmounted, so the focus can return to it when
- * the question is declined.
+ * the graph and the steps count the same time.
+ *
+ * The page owns two actions, each with the question shown before it is done:
+ *
+ * - Cancel, while the run is live. When the run's ephemeral workspace exists,
+ *   the question also asks whether to delete it, and deleting is the default.
+ * - Delete workspace, while a failed or kept run's workspace is kept for
+ *   inspection.
+ *
+ * While a question shows, its button is hidden instead of unmounted, so the
+ * focus can return to it when the question is declined.
  */
 export function RunPage({
   client,
   run,
   runner,
   workspaceLabel,
+  workspaceReading,
   runnerWait,
   timezone,
   stepsView,
@@ -62,6 +72,8 @@ export function RunPage({
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
   readonly workspaceLabel: string | undefined;
+  /** What the page shows and offers about the run's workspace. */
+  readonly workspaceReading: RunWorkspaceReading;
   /** The running steps that wait for the run's runner to reconnect, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   readonly timezone: string;
@@ -71,14 +83,24 @@ export function RunPage({
   const queryClient = useQueryClient();
   const isLive = isRunLive(run.status);
   const now = useTickingClock(isLive);
-  const [isAsking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<"cancel" | "delete-workspace" | undefined>(undefined);
+  const [deletesWorkspace, setDeletesWorkspace] = useState(true);
+  const { workspaceId } = run;
 
   const cancel = useMutation({
-    mutationFn: () => client.run.cancel({ params: { id: run.id }, payload: {} }),
+    mutationFn: (keepWorkspace: boolean) =>
+      client.run.cancel({ params: { id: run.id }, payload: { keepWorkspace } }),
     onSuccess: async (cancelled) => {
       queryClient.setQueryData(queryKeys.run(run.id), cancelled);
       await queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
     },
+  });
+
+  const deleteWorkspace = useMutation({
+    mutationFn: (id: string) => client.workspace.dispose({ params: { id } }),
+    // The controller marks the workspace deleted before it answers, so the
+    // refetch already reads when it was deleted.
+    onSuccess: (_, id) => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(id) }),
   });
 
   // The run stays the same object until a refetch changes it, so the graph,
@@ -93,6 +115,7 @@ export function RunPage({
         run={run}
         runner={runner}
         workspaceLabel={workspaceLabel}
+        workspaceNote={workspaceReading.note}
         now={now}
         timezone={timezone}
       >
@@ -101,31 +124,77 @@ export function RunPage({
             {`Not cancelled: ${readErrorMessage(cancel.error)}`}
           </span>
         )}
+        {deleteWorkspace.error === null ? null : (
+          <span role="alert" className="min-w-0 truncate text-fine text-fail">
+            {`Not deleted: ${readErrorMessage(deleteWorkspace.error)}`}
+          </span>
+        )}
         {!isLive ? null : (
           <>
-            {isAsking ? (
+            {asking === "cancel" ? (
               <InPlaceQuestion
                 question="Cancel this run?"
                 declineLabel="Keep running"
                 acceptLabel="Confirm"
                 onDecline={() => {
-                  setAsking(false);
+                  setAsking(undefined);
                 }}
                 onAccept={() => {
-                  setAsking(false);
-                  cancel.mutate();
+                  setAsking(undefined);
+                  cancel.mutate(workspaceReading.asksOnCancel && !deletesWorkspace);
+                }}
+              >
+                {!workspaceReading.asksOnCancel ? null : (
+                  <span className="ml-1.5 shrink-0">
+                    <Checkbox
+                      label="Delete the run's workspace too"
+                      checked={deletesWorkspace}
+                      onChange={(event) => {
+                        setDeletesWorkspace(event.target.checked);
+                      }}
+                    />
+                  </span>
+                )}
+              </InPlaceQuestion>
+            ) : null}
+            <Button
+              hidden={asking === "cancel"}
+              aria-disabled={cancel.isPending}
+              onClick={() => {
+                cancel.reset();
+                setDeletesWorkspace(true);
+                setAsking("cancel");
+              }}
+            >
+              Cancel
+            </Button>
+          </>
+        )}
+        {!workspaceReading.offersDelete || workspaceId === undefined ? null : (
+          <>
+            {asking === "delete-workspace" ? (
+              <InPlaceQuestion
+                question="Delete the run's workspace?"
+                declineLabel="Keep it"
+                acceptLabel="Delete"
+                onDecline={() => {
+                  setAsking(undefined);
+                }}
+                onAccept={() => {
+                  setAsking(undefined);
+                  deleteWorkspace.mutate(workspaceId);
                 }}
               />
             ) : null}
             <Button
-              hidden={isAsking}
-              aria-disabled={cancel.isPending}
+              hidden={asking === "delete-workspace"}
+              aria-disabled={deleteWorkspace.isPending}
               onClick={() => {
-                cancel.reset();
-                setAsking(true);
+                deleteWorkspace.reset();
+                setAsking("delete-workspace");
               }}
             >
-              Cancel
+              Delete workspace
             </Button>
           </>
         )}

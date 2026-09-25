@@ -848,6 +848,110 @@ describe("A run's page > its runner and workspace", () => {
   });
 });
 
+describe("A run's page > what happens to its workspace", () => {
+  const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000002";
+  const WORKSPACE = buildWorkspace({
+    id: WORKSPACE_ID,
+    runnerId: "0199c0ff-3333-7000-8000-000000000002",
+    kind: "ephemeral",
+  });
+  /** The run working in an ephemeral workspace, not yet pinned to a runner. */
+  const IN_WORKSPACE: Run = { ...RUNNING_RUN, workspaceId: WORKSPACE_ID };
+  /** 23:30 UTC on 8 Oct is 9 Oct in Amsterdam, the user's timezone. */
+  const KEPT_UNTIL = "2026-10-08T23:30:00.000Z";
+  const FAILED_KEPT: Run = {
+    ...FAILED_RUN,
+    workspaceId: WORKSPACE_ID,
+    workspaceKeptUntil: KEPT_UNTIL,
+  };
+
+  /**
+   * Opens the page of `run`, whose workspace the stub controller holds as
+   * `workspace` until the workspace is deleted.
+   */
+  const openWithWorkspace = (run: Run, overrides: Readonly<Record<string, Handler>> = {}) => {
+    let workspace = WORKSPACE;
+    return openRunPage(run, {
+      overrides: {
+        [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: () => ({ body: workspace }),
+        [`DELETE /api/v1/workspaces/${WORKSPACE_ID}`]: () => {
+          workspace = { ...WORKSPACE, status: "deleted", disposedAt: "2026-10-03T08:00:00.000Z" };
+          return { body: {} };
+        },
+        "GET /api/v1/resources": { body: { items: [] } },
+        [`POST /api/v1/runs/${run.id}/cancel`]: { body: CANCELLED_RUN },
+        ...overrides,
+      },
+    });
+  };
+
+  const getWorkspaceCheckbox = (): HTMLInputElement =>
+    screen.getByRole("checkbox", { name: "Delete the run's workspace too" });
+
+  it("asks on cancel whether to delete the workspace too, ticked by default, and sends the answer", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(IN_WORKSPACE);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    expect(getWorkspaceCheckbox().checked).toBe(true);
+    await user.click(getWorkspaceCheckbox());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(listCancels(api, IN_WORKSPACE.id).map((call) => call.body)).toEqual([
+        { keepWorkspace: true },
+      ]);
+    });
+  });
+
+  it("deletes the workspace on cancel when the box stays ticked", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(IN_WORKSPACE);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(listCancels(api, IN_WORKSPACE.id).map((call) => call.body)).toEqual([
+        { keepWorkspace: false },
+      ]);
+    });
+  });
+
+  it("does not ask about a workspace when the run has none", async () => {
+    const user = userEvent.setup();
+    await openRunPage(RUNNING_RUN);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("says until when a failed run's workspace is kept, and after Delete workspace, when it was deleted", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(FAILED_KEPT);
+
+    const header = await findPageHeader();
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace kept for inspection until 9 Oct");
+    });
+
+    await user.click(within(header).getByRole("button", { name: "Delete workspace" }));
+    // Nothing is deleted until the question is answered.
+    const confirm = screen.getByRole("button", { name: "Delete" });
+    expect(api.calls.filter((call) => call.method === "DELETE")).toEqual([]);
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace deleted 3 Oct");
+    });
+    expect(readPageText(header)).not.toContain("kept for inspection");
+    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
+    expect(
+      api.calls.filter((call) => call.method === "DELETE").map((call) => call.path),
+    ).toEqual([`/api/v1/workspaces/${WORKSPACE_ID}`]);
+  });
+});
+
 describe("A run's page > the output", () => {
   it("shows the run's output in an Output card under the inputs", async () => {
     await openRunPage(ROUTING_COMPLETED_RUN);
