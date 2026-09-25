@@ -67,7 +67,15 @@ import {
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** The ids of the built-in actions. A step can use them with no plugin enabled. */
-const BUILT_IN_ACTION_IDS = ["run.start", "task.create", "task.query", "task.update", "wait"];
+const BUILT_IN_ACTION_IDS = [
+  "git.commit",
+  "git.push",
+  "run.start",
+  "task.create",
+  "task.query",
+  "task.update",
+  "wait",
+];
 
 /** The event kinds the core emits. A trigger on one of them takes no Connection. */
 const CORE_EVENT_KINDS = [

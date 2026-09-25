@@ -7,6 +7,16 @@
  * built-in actions into the same catalog at every boot, so validation and
  * every action picker read one list.
  *
+ * Every action says where it runs (`runsIn`), and that is a fixed property of
+ * the action, never a choice the step makes:
+ *
+ * - `controller`: the controller calls the action. Every plugin action runs
+ *   here, because plugins load only on the controller (ADR 0006).
+ * - `workspace`: a runner runs the action in the run's workspace. Only the
+ *   core declares such actions, such as `git.commit`. The catalog holds their
+ *   id and schemas, for validation and pickers, and their code is built into
+ *   the runner.
+ *
  * This module sits beside the host rather than inside it, so that all the code
  * for one extension point is in one place. The host calls this module, and
  * this module calls nothing in the host.
@@ -59,6 +69,8 @@ export interface RegisteredWorkflowAction {
    * action. A step can always call a built-in action.
    */
   readonly owner: string;
+  /** Where the action runs: on the controller, or in the run's workspace on a runner. */
+  readonly runsIn: WorkflowActionRunsIn;
   readonly displayName: string;
   readonly description: string;
   /** The schema of the params a step writes, as JSON Schema. */
@@ -101,9 +113,13 @@ const decodeWorkflowActionHeader = Schema.decodeUnknownEffect(WorkflowActionHead
   errors: "all",
 });
 
+/** Where a workflow action runs: on the controller, or in the run's workspace on a runner. */
+export type WorkflowActionRunsIn = "controller" | "workspace";
+
 /** A workflow action as the core or a plugin declares it, with its qualified id. */
 interface DeclaredWorkflowAction {
   readonly id: string;
+  readonly runsIn: WorkflowActionRunsIn;
   readonly displayName: string;
   readonly description: string;
   readonly input: Schema.Top;
@@ -141,6 +157,7 @@ const addWorkflowAction = (
   actions.set(action.id, {
     id: action.id,
     owner,
+    runsIn: action.runsIn,
     displayName: action.displayName,
     description: action.description,
     inputSchema,
@@ -200,6 +217,8 @@ export const registerWorkflowActionContribution = (
       pluginId,
       {
         id,
+        // A plugin runs only on the controller, so its actions do too.
+        runsIn: "controller",
         displayName: names.displayName,
         description: header.description,
         input: contribution.input,
@@ -216,15 +235,31 @@ export const registerWorkflowActionContribution = (
 const MAX_WAIT_SECONDS = 86_400;
 
 /**
- * The built-in workflow actions. Each one but `wait` calls an operation of the
- * public API and has the operation's id, so a step can do nothing that an API
- * request cannot do. `wait` only waits: it acts on nothing, so there is no
- * operation for it to call. More built-in actions are added here as their
- * operations are built.
+ * A built-in action as it is written in the list below. The union makes the
+ * split by `runsIn` hold at compile time:
+ *
+ * - An action that runs on the controller calls an operation of the public
+ *   API and has the operation's id, so a step can do nothing that an API
+ *   request cannot do. The one exception is `wait`, which acts on nothing, so
+ *   there is no operation for it to call. The run engine holds a handler for
+ *   each of these actions.
+ * - An action that runs in the workspace has no operation and no handler on
+ *   the controller. The runner carries it out.
+ */
+type BuiltInWorkflowAction = DeclaredWorkflowAction &
+  (
+    | { readonly runsIn: "controller"; readonly id: OperationId | "wait" }
+    | { readonly runsIn: "workspace"; readonly execute?: never }
+  );
+
+/**
+ * The built-in workflow actions. More are added here as their operations, or
+ * their runner code, are built.
  */
 const BUILT_IN_WORKFLOW_ACTIONS = [
   {
     id: "task.create",
+    runsIn: "controller",
     displayName: "Create a task",
     description:
       "Creates one Task from a title and a description, with an optional priority, labels, project and provenance. The task's provenance also records the run that created it.",
@@ -233,6 +268,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
   },
   {
     id: "task.update",
+    runsIn: "controller",
     displayName: "Update a task",
     description:
       "Changes fields of the Task with the id taskId. Fields left out of the params are not changed.",
@@ -244,6 +280,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
   },
   {
     id: "task.query",
+    runsIn: "controller",
     displayName: "Find tasks",
     description: "Lists the Tasks that match refs, labels, status, project or text.",
     // The operation's filter, without the paging fields. A step uses the
@@ -254,6 +291,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
   },
   {
     id: "run.start",
+    runsIn: "controller",
     displayName: "Start a run",
     description:
       "Starts a run of the stored workflow with the id workflowId, and does not wait for it to finish. The output holds the new run's id.",
@@ -265,6 +303,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
   },
   {
     id: "wait",
+    runsIn: "controller",
     displayName: "Wait",
     description: `Waits the given number of seconds, from 1 to ${MAX_WAIT_SECONDS} (one day), before the run goes on. Cancelling the run ends the wait.`,
     input: Schema.Struct({
@@ -272,17 +311,67 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     }),
     output: Schema.Struct({}),
   },
-] as const satisfies ReadonlyArray<DeclaredWorkflowAction & { readonly id: OperationId | "wait" }>;
+  {
+    id: "git.commit",
+    runsIn: "workspace",
+    displayName: "Commit changes",
+    description:
+      "Commits the changes in the run's workspace to the checkout's branch. paths limits the commit to those paths; without it, every change is committed. resourceId picks the checkout when the workspace has more than one. When there is nothing to commit, the step succeeds with committed false.",
+    input: Schema.Struct({
+      message: Schema.NonEmptyString,
+      paths: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
+      resourceId: Schema.optionalKey(Id),
+    }),
+    output: Schema.Struct({ sha: Schema.String, branch: Schema.String, committed: Schema.Boolean }),
+  },
+  {
+    id: "git.push",
+    runsIn: "workspace",
+    displayName: "Push a branch",
+    description:
+      "Pushes a branch of the run's workspace to its remote: branch, or the checkout's branch when it is left out. resourceId picks the checkout when the workspace has more than one.",
+    input: Schema.Struct({
+      branch: Schema.optionalKey(Schema.NonEmptyString),
+      resourceId: Schema.optionalKey(Id),
+    }),
+    output: Schema.Struct({ branch: Schema.String, sha: Schema.String }),
+  },
+] as const satisfies ReadonlyArray<BuiltInWorkflowAction>;
 
-/** The id of a built-in workflow action. */
-export type BuiltInActionId = (typeof BUILT_IN_WORKFLOW_ACTIONS)[number]["id"];
+type BuiltInWorkflowActionEntry = (typeof BUILT_IN_WORKFLOW_ACTIONS)[number];
 
-const BUILT_IN_ACTION_IDS: ReadonlySet<string> = new Set(
-  BUILT_IN_WORKFLOW_ACTIONS.map((action) => action.id),
-);
+/** The id of a built-in workflow action that runs on the controller, and so has a handler. */
+export type BuiltInControllerActionId = Extract<
+  BuiltInWorkflowActionEntry,
+  { readonly runsIn: "controller" }
+>["id"];
 
-/** Checks whether an action id is one of the built-in actions. */
-export const isBuiltInActionId = (id: string): id is BuiltInActionId => BUILT_IN_ACTION_IDS.has(id);
+/** The id of a built-in workflow action that runs in the run's workspace on a runner. */
+export type WorkspaceActionId = Extract<
+  BuiltInWorkflowActionEntry,
+  { readonly runsIn: "workspace" }
+>["id"];
+
+const listBuiltInActionIds = (runsIn: WorkflowActionRunsIn): ReadonlySet<string> =>
+  new Set(
+    BUILT_IN_WORKFLOW_ACTIONS.filter((action) => action.runsIn === runsIn).map(
+      (action) => action.id,
+    ),
+  );
+
+const BUILT_IN_CONTROLLER_ACTION_IDS = listBuiltInActionIds("controller");
+const WORKSPACE_ACTION_IDS = listBuiltInActionIds("workspace");
+
+/** Checks whether an action id is a built-in action that runs on the controller. */
+export const isBuiltInControllerActionId = (id: string): id is BuiltInControllerActionId =>
+  BUILT_IN_CONTROLLER_ACTION_IDS.has(id);
+
+/**
+ * Checks whether an action id is an action that runs in the run's workspace on
+ * a runner, rather than on the controller. Only built-in actions do.
+ */
+export const runsInWorkspace = (id: string): id is WorkspaceActionId =>
+  WORKSPACE_ACTION_IDS.has(id);
 
 /** Adds the built-in actions, owned by `core`, to the collections of a registration pass. */
 export const registerBuiltInWorkflowActions = (

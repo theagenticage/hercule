@@ -72,14 +72,14 @@ export type RunOutcome =
   | { readonly status: "cancelled" }
   | {
       readonly status: "failed";
-      readonly failureReason: Exclude<FailureReason, "controller-error">;
+      readonly failureReason: Exclude<FailureReason, "controller-error" | "workspace-failed">;
       readonly failedStepId: string;
       /** The edge the run failed at, when it failed at one. */
       readonly failedEdge?: FailedEdge;
     }
   | {
       readonly status: "failed";
-      readonly failureReason: "controller-error";
+      readonly failureReason: "controller-error" | "workspace-failed";
       /** Absent when the run failed outside any step. */
       readonly failedStepId?: string;
     };
@@ -101,6 +101,8 @@ interface RunRow {
   readonly plan: string;
   readonly inputs: string;
   readonly origin: string;
+  readonly runner_id: Uint8Array | null;
+  readonly workspace_id: Uint8Array | null;
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
@@ -140,6 +142,7 @@ interface StepRow {
   readonly step_id: string;
   readonly iteration: number;
   readonly status: StepStatus;
+  readonly input: string | null;
   readonly output: string | null;
   readonly error: string | null;
   readonly started_at: string | null;
@@ -172,7 +175,11 @@ const requireColumn = <A extends string>(value: A | null, table: string, column:
 
 /** Maps a step row to a `StepRecord`. A NULL column becomes an absent field, not `null`. */
 const toStepRecord = (row: StepRow): StepRecord => {
-  const identity = { stepId: row.step_id, iteration: row.iteration };
+  const identity = {
+    stepId: row.step_id,
+    iteration: row.iteration,
+    ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
+  };
   const startedAt = () => requireColumn(row.started_at, "run_steps", "started_at");
   const finishedAt = () => requireColumn(row.finished_at, "run_steps", "finished_at");
   switch (row.status) {
@@ -234,21 +241,34 @@ const parseStatusColumns = (row: StatusColumns) => {
       return { status: "completed", startedAt: startedAt(), finishedAt: finishedAt() } as const;
     case "failed": {
       const failureReason = requireColumn(row.failure_reason, "runs", "failure_reason");
-      return failureReason === "controller-error"
-        ? ({
+      const failedStepIdIfSet =
+        row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id };
+      switch (failureReason) {
+        case "controller-error":
+          return {
             status: "failed",
-            failureReason: "controller-error",
-            ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
+            failureReason,
+            ...failedStepIdIfSet,
             ...startedAtIfSet,
             finishedAt: finishedAt(),
-          } as const)
-        : ({
+          } as const;
+        case "workspace-failed":
+          return {
+            status: "failed",
+            failureReason,
+            ...failedStepIdIfSet,
+            startedAt: startedAt(),
+            finishedAt: finishedAt(),
+          } as const;
+        default:
+          return {
             status: "failed",
             failureReason,
             failedStepId: requireColumn(row.failed_step_id, "runs", "failed_step_id"),
             startedAt: startedAt(),
             finishedAt: finishedAt(),
-          } as const);
+          } as const;
+      }
     }
     case "cancelled":
       return { status: "cancelled", ...startedAtIfSet, finishedAt: finishedAt() } as const;
@@ -274,6 +294,7 @@ const parseRunStatusColumns = (row: RunRow) => {
   if (
     status.status === "failed" &&
     status.failureReason !== "controller-error" &&
+    status.failureReason !== "workspace-failed" &&
     row.failed_edge_index !== null
   ) {
     const message = requireColumn(row.failure_message, "runs", "failure_message");
@@ -302,6 +323,8 @@ const toRun = (
     plan,
     inputs: JSON.parse(row.inputs) as Run["inputs"],
     origin: JSON.parse(row.origin) as RunOrigin,
+    ...(row.runner_id === null ? {} : { runnerId: uuidToString(row.runner_id) }),
+    ...(row.workspace_id === null ? {} : { workspaceId: uuidToString(row.workspace_id) }),
     steps: steps.map(toStepRecord),
     edgeTraversals,
     createdAt: row.created_at,
@@ -372,7 +395,7 @@ const make = Effect.gen(function* () {
           const row = rows[0];
           if (row === undefined) return Option.none();
           const steps = yield* sql<StepRow>`
-            SELECT step_id, iteration, status, output, error, started_at, finished_at
+            SELECT step_id, iteration, status, input, output, error, started_at, finished_at
             FROM run_steps WHERE run_id = ${bytes} ORDER BY rowid
           `;
           const traversals = yield* sql<TraversalRow>`
@@ -631,9 +654,7 @@ const make = Effect.gen(function* () {
     finish: (id: string, ending: RunOutcome, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const failedEdge =
-          ending.status === "failed" && ending.failureReason !== "controller-error"
-            ? ending.failedEdge
-            : undefined;
+          ending.status === "failed" && "failedEdge" in ending ? ending.failedEdge : undefined;
         yield* sql`
           UPDATE runs SET
             status = ${ending.status},

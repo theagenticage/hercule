@@ -17,9 +17,16 @@ export class RunExecutor extends Context.Service<
   {
     /**
      * Starts carrying out `execution`, the effect that executes the run
-     * `runId` from its rows until it has ended, and returns at once. Does
-     * nothing when an execution of that run is already being carried out, so
-     * a run is never executed twice at the same time.
+     * `runId` from its rows until it has ended or has nothing left to do
+     * until something outside it happens, and returns at once.
+     *
+     * When an execution of that run is already being carried out, `execute`
+     * starts no second one, so a run is never executed twice at the same
+     * time. Instead it marks the run as woken: the execution being carried
+     * out reads the run's rows once more before it stops. Without the mark, a
+     * step result committed just as the execution decided it had nothing left
+     * to do would wait until the next restart. Many calls before that read
+     * cost one read, not one each.
      *
      * It returns nothing and is synchronous, so that it can run right after a
      * commit (see `afterCommit`). The request that started the run is answered

@@ -366,6 +366,16 @@ describe("the graphs a run accepts", () => {
           },
           path: ["triggers", "0"],
         },
+        {
+          element: "a workspace action",
+          definition: {
+            name: "Workspace action",
+            steps: [
+              { id: "commit", kind: "action", action: "git.commit", params: { message: "Fix" } },
+            ],
+          },
+          path: ["steps", "0"],
+        },
       ];
 
       for (const { element, definition, path } of fixtures) {

@@ -75,6 +75,9 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  * - `controller-error`: the controller could not carry out the run for a
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
+ * - `workspace-failed`: the run's workspace could not be set up, for example
+ *   because a setup command failed, or the runner that holds it was retired.
+ *   `failedStepId` names the workspace step that was running, if one was.
  *
  * The list grows as runs learn to do more; a client shows a reason it does not
  * know as the word itself.
@@ -84,6 +87,7 @@ const FAILURE_REASONS = [
   "step-failed",
   "iteration-limit",
   "controller-error",
+  "workspace-failed",
 ] as const;
 
 export const FailureReason = Schema.Literals(FAILURE_REASONS);
@@ -136,6 +140,12 @@ const STEP_RECORD_FIELDS = {
   stepId: Schema.String,
   /** Counts the records of this step in the run, from 1. */
   iteration: Schema.Int,
+  /**
+   * The params an action step's action was called with: rendered from their
+   * templates and checked against the action's input schema. Absent until
+   * the step starts, and for an agent step.
+   */
+  input: Schema.optionalKey(Schema.Json),
 };
 
 /**
@@ -197,6 +207,8 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *   `failedAtStepFields` holds.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
+ * - `failed` with `workspace-failed`: `startedAt` and `finishedAt`, and
+ *   `failedStepId` when a workspace step was running.
  * - `cancelled`: `finishedAt`, and `startedAt` if the run had started.
  *
  * A run and a run summary share these rules, so both are built from here.
@@ -239,6 +251,14 @@ const buildRunStatusVariants = <
     }),
     Schema.Struct({
       ...fields,
+      status: Schema.Literal("failed"),
+      failureReason: Schema.Literal("workspace-failed"),
+      failedStepId: Schema.optionalKey(Schema.String),
+      startedAt: Timestamp,
+      finishedAt: Timestamp,
+    }),
+    Schema.Struct({
+      ...fields,
       status: Schema.Literal("cancelled"),
       startedAt: Schema.optionalKey(Timestamp),
       finishedAt: Timestamp,
@@ -257,6 +277,13 @@ export const Run = Schema.Union(
       /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
       inputs: Schema.Record(Schema.String, Schema.Json),
       origin: RunOrigin,
+      /**
+       * The runner the run is pinned to. Set when the run's first workspace
+       * step starts; every workspace step of the run runs there.
+       */
+      runnerId: Schema.optionalKey(Id),
+      /** The run's workspace, set when its first workspace step starts. */
+      workspaceId: Schema.optionalKey(Id),
       steps: Schema.Array(StepRecord),
       /**
        * How many times the run has followed each edge: one count per edge of
@@ -358,6 +385,17 @@ export const RunStarted = Schema.Struct({ runId: Id });
 
 export type RunStarted = Schema.Schema.Type<typeof RunStarted>;
 
+/**
+ * The input of `run.cancel`. `keepWorkspace` keeps the ephemeral workspace
+ * of the run, and of every run cancelled with it, for inspection; by default
+ * it is deleted.
+ */
+export const RunCancelInput = closedStruct({
+  keepWorkspace: Schema.optionalKey(Schema.Boolean),
+});
+
+export type RunCancelInput = Schema.Schema.Type<typeof RunCancelInput>;
+
 export const run = HttpApiGroup.make("run")
   .add(
     /**
@@ -388,11 +426,13 @@ export const run = HttpApiGroup.make("run")
     }),
     /**
      * Cancels a pending or running run and returns it. Its step records that
-     * had not ended are cancelled, and no step starts after it. Fails with
+     * had not ended are cancelled, and no step starts after it. Its ephemeral
+     * workspace is deleted unless `keepWorkspace` is set. Fails with
      * `invalid_state` for a run that has already ended.
      */
     HttpApiEndpoint.post("cancel", "/runs/:id/cancel", {
       params: { id: Id },
+      payload: RunCancelInput,
       success: Run,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

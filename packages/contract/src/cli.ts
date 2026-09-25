@@ -1241,13 +1241,17 @@ export const CLI = {
   },
   "run.cancel": {
     command: "run cancel",
-    help: "Cancels a run that is pending or running. The step running now is cancelled with it, and no later step starts. What a finished step did stays done. Check the result with `hercule run read`.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Cancels a run that is pending or running. The step running now is cancelled with it, and no later step starts. What a finished step did stays done. The run's ephemeral workspace is deleted, unless --keep-workspace keeps it for inspection. Check the result with `hercule run read`.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--keep-workspace", "true"] }],
     fields: {
       id: {
         positional: true,
         help: "The run's id, or a tail of eight or more characters.",
         resolves: "run.query",
+      },
+      keepWorkspace: {
+        flag: "keep-workspace",
+        help: "true keeps the ephemeral workspace of the run, and of every run cancelled with it, until it is disposed or its failed-run window ends.",
       },
     },
     errors: {

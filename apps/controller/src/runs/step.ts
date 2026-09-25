@@ -30,9 +30,9 @@ import { CurrentActor, type RunActor } from "../actor";
 import { nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
-  isBuiltInActionId,
+  isBuiltInControllerActionId,
   PluginHost,
-  type BuiltInActionId,
+  type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
 } from "../plugins";
 import { TaskService } from "../tasks";
@@ -213,7 +213,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * the catalog sits below those domains. The runs domain sits above tasks
      * in the domain graph, so it calls the task service directly.
      */
-    const builtInActions: Record<BuiltInActionId, BuiltInActionHandler> = {
+    const builtInActions: Record<BuiltInControllerActionId, BuiltInActionHandler> = {
       "task.create": {
         inTransaction: true,
         execute: (input) => tasks.create(input as TaskCreateInput),
@@ -332,7 +332,9 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
         };
         // A built-in action is called through the handlers above, and a
         // plugin's action through the `execute` its plugin registered.
-        const builtIn = isBuiltInActionId(step.action) ? builtInActions[step.action] : undefined;
+        const builtIn = isBuiltInControllerActionId(step.action)
+          ? builtInActions[step.action]
+          : undefined;
         const pluginExecute = catalogEntry.execute;
         let execute: Effect.Effect<void, unknown>;
         if (builtIn !== undefined) {

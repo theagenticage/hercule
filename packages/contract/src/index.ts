@@ -335,6 +335,7 @@ export {
   listEntrySteps,
   readFieldNotation,
   WorkflowDefinition,
+  WorkspacePolicy,
   type FieldNotation,
 } from "./groups/workflow-definition";
 export {
@@ -348,6 +349,7 @@ export {
   FailedEdge,
   FailureReason,
   Run,
+  RunCancelInput,
   RUN_SORT_FIELDS,
   RUN_STATUSES,
   RunFilter,

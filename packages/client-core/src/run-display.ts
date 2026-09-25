@@ -183,8 +183,9 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
  * Returns a failure reason in a few plain words: "step failed", "expression
  * error" for a template or a condition that could not be evaluated,
  * "iteration limit" for an edge the run was to follow more often than its
- * `maxTraversals` allows, or "controller error" for a run the controller
- * could not carry out.
+ * `maxTraversals` allows, "controller error" for a run the controller
+ * could not carry out, or "workspace failed" for a run whose workspace could
+ * not be set up or was lost with its runner.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
@@ -196,6 +197,8 @@ export const describeFailureReason = (reason: FailureReason): string => {
       return "iteration limit";
     case "controller-error":
       return "controller error";
+    case "workspace-failed":
+      return "workspace failed";
   }
 };
 

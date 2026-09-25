@@ -94,7 +94,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { AfterCommit, afterCommit, nowIso } from "../db";
-import { isBuiltInActionId } from "../plugins";
+import { isBuiltInControllerActionId } from "../plugins";
 import { RunExecutor } from "./executor";
 import { runRepository, type RunOutcome } from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
@@ -384,7 +384,7 @@ export const makeRunEngine = Effect.gen(function* () {
             const step = run.plan.steps.find((candidate) => candidate.id === record.stepId);
             return (
               record.status === "running" &&
-              !(step?.kind === "action" && isBuiltInActionId(step.action))
+              !(step?.kind === "action" && isBuiltInControllerActionId(step.action))
             );
           });
           if (cutOff !== undefined) {

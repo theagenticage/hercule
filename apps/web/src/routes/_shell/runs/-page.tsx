@@ -64,7 +64,7 @@ export function RunPage({
   const [isAsking, setAsking] = useState(false);
 
   const cancel = useMutation({
-    mutationFn: () => client.run.cancel({ params: { id: run.id } }),
+    mutationFn: () => client.run.cancel({ params: { id: run.id }, payload: {} }),
     onSuccess: async (cancelled) => {
       queryClient.setQueryData(queryKeys.run(run.id), cancelled);
       await queryClient.invalidateQueries({ queryKey: queryKeys.runs() });

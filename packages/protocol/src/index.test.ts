@@ -129,6 +129,12 @@ const CHECKOUT_ID = "0199e0e7-0000-7000-8000-000000000011";
 
 const RESOURCE_ID = "0199e0e7-0000-7000-8000-000000000012";
 
+const STEP_KEY = {
+  runId: "0199e0e7-0000-7000-8000-000000000013",
+  stepId: "commit",
+  iteration: 1,
+} as const;
+
 const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
@@ -183,6 +189,12 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     remote: "github.com/acme/web",
     workspaceId: WORKSPACE_ID,
   },
+  {
+    _tag: "workspaceStepResult",
+    ...STEP_KEY,
+    outcome: { status: "completed", output: { sha: "4b825dc6", branch: "main", committed: true } },
+  },
+  { _tag: "workspaceStepsReport", steps: [STEP_KEY] },
   { _tag: "goodbye" },
 ];
 
@@ -246,6 +258,16 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
+  {
+    _tag: "workspaceStepStart",
+    ...STEP_KEY,
+    workspaceId: WORKSPACE_ID,
+    action: "git.commit",
+    input: { message: "Fix the login form" },
+    resourceId: RESOURCE_ID,
+    gitIdentity: { name: "octocat", email: "octocat@users.noreply.github.com" },
+  },
+  { _tag: "workspaceStepStop", steps: [STEP_KEY] },
 ];
 
 describe("the protocol version", () => {

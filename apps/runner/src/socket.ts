@@ -572,6 +572,25 @@ export const connect = (
             // A git process is waiting for this response. Nothing is kept after
             // it is delivered.
             return yield* Effect.sync(() => options.credentials.deliver(message));
+          case "workspaceStepStart":
+            // This runner build runs no workspace action yet. The protocol's
+            // answer for an action a runner does not implement is this failure.
+            return yield* write(
+              encodeFrameText({
+                _tag: "workspaceStepResult",
+                runId: message.runId,
+                stepId: message.stepId,
+                iteration: message.iteration,
+                outcome: {
+                  status: "failed",
+                  code: "unsupported_action",
+                  message: `This runner cannot run ${message.action}.`,
+                },
+              }),
+            );
+          case "workspaceStepStop":
+            // No step can be running here, since none is ever started.
+            return;
         }
         // Every frame the protocol defines is handled above. This fails to
         // compile when a new frame is added, so it cannot be dropped silently.
