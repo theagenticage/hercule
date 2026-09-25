@@ -34,7 +34,7 @@ import {
   MOSS,
   OPS_PROJECT,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
   WEBSHOP,
   WEBSHOP_PROJECT,
   buildCheckout,
@@ -64,7 +64,7 @@ describe("formatRepoName", () => {
 
 describe("formatWorkspaceName and formatWorkspaceLabel", () => {
   it("names a worktree after its branch", () => {
-    expect(formatWorkspaceName(RUN_3F1)).toBe("hercule/run-3f1");
+    expect(formatWorkspaceName(THREAD_3F1)).toBe("hercule/thread-3f1");
   });
 
   it("names a main workspace after its repo and its runner", () => {
@@ -86,8 +86,8 @@ describe("formatWorkspaceName and formatWorkspaceLabel", () => {
   });
 
   it("lets a worktree's whole name be truncated, because it is one word", () => {
-    expect(buildWorkspaceLabelParts(RUN_3F1, [WEBSHOP], [MOSS])).toEqual({
-      clip: "hercule/run-3f1",
+    expect(buildWorkspaceLabelParts(THREAD_3F1, [WEBSHOP], [MOSS])).toEqual({
+      clip: "hercule/thread-3f1",
       keep: "",
     });
   });
@@ -101,7 +101,7 @@ describe("formatWorkspaceName and formatWorkspaceLabel", () => {
 
 describe("findReadyPrimary", () => {
   it("finds the repo's main workspace on the given runner", () => {
-    expect(findReadyPrimary([PRIMARY, RUN_3F1], WEBSHOP.id, MOSS.id)?.id).toBe(PRIMARY.id);
+    expect(findReadyPrimary([PRIMARY, THREAD_3F1], WEBSHOP.id, MOSS.id)?.id).toBe(PRIMARY.id);
   });
 
   it("returns undefined on another runner, and while the workspace is still being created", () => {
@@ -124,7 +124,7 @@ describe("findBaseBranch", () => {
   });
 
   it("falls back to any runner that has cloned the repo, because the default branch belongs to the remote", () => {
-    expect(findBaseBranch([RUN_3F1], WEBSHOP.id, COVE.id)).toBe("main");
+    expect(findBaseBranch([THREAD_3F1], WEBSHOP.id, COVE.id)).toBe("main");
   });
 
   it("ignores a failed or deleted workspace", () => {
@@ -150,7 +150,7 @@ describe("buildPickKey", () => {
         buildPickKey({ kind: "none" }),
         buildPickKey({ kind: "ephemeral", checkouts: [] }),
         buildPickKey({ kind: "primary", resourceId: WEBSHOP.id }),
-        buildPickKey({ kind: "existing", workspaceId: RUN_3F1.id }),
+        buildPickKey({ kind: "existing", workspaceId: THREAD_3F1.id }),
       ]).size,
     ).toBe(4);
   });
@@ -184,9 +184,9 @@ describe("withBranch", () => {
   });
 
   it("leaves a joined workspace and a pick with no checkout unchanged", () => {
-    expect(withBranch({ kind: "existing", workspaceId: RUN_3F1.id }, "main")).toEqual({
+    expect(withBranch({ kind: "existing", workspaceId: THREAD_3F1.id }, "main")).toEqual({
       kind: "existing",
-      workspaceId: RUN_3F1.id,
+      workspaceId: THREAD_3F1.id,
     });
     expect(withBranch({ kind: "none" }, "main")).toEqual({ kind: "none" });
   });
@@ -194,7 +194,7 @@ describe("withBranch", () => {
 
 describe("findRunnerForPick", () => {
   it("returns the runner of the workspace a thread joins, which never moves", () => {
-    expect(findRunnerForPick({ kind: "existing", workspaceId: RUN_3F1.id }, [RUN_3F1])).toBe(
+    expect(findRunnerForPick({ kind: "existing", workspaceId: THREAD_3F1.id }, [THREAD_3F1])).toBe(
       MOSS.id,
     );
   });
@@ -213,12 +213,12 @@ describe("findDraftSubject", () => {
   it("names the workspace a draft joins, with no project hue", () => {
     expect(
       findDraftSubject(
-        { kind: "existing", workspaceId: RUN_3F1.id },
-        [RUN_3F1],
+        { kind: "existing", workspaceId: THREAD_3F1.id },
+        [THREAD_3F1],
         WEBSHOP_PROJECT.id,
         PROJECTS,
       ),
-    ).toEqual({ label: "hercule/run-3f1", projectId: null, tone: null });
+    ).toEqual({ label: "hercule/thread-3f1", projectId: null, tone: null });
   });
 
   it("names the draft's project, with the hue from the project list", () => {
@@ -275,7 +275,7 @@ describe("buildComposerPlaceholder", () => {
       busy: false,
       active: false,
       pick: { kind: "none" },
-      workspaces: [RUN_3F1],
+      workspaces: [THREAD_3F1],
       ...over,
     });
 
@@ -284,8 +284,8 @@ describe("buildComposerPlaceholder", () => {
   });
 
   it("names the workspace a draft joins, whose files already exist", () => {
-    expect(buildPlaceholder({ pick: { kind: "existing", workspaceId: RUN_3F1.id } })).toBe(
-      "Say what this thread should do in hercule/run-3f1…",
+    expect(buildPlaceholder({ pick: { kind: "existing", workspaceId: THREAD_3F1.id } })).toBe(
+      "Say what this thread should do in hercule/thread-3f1…",
     );
   });
 

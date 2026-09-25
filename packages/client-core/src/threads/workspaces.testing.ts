@@ -117,7 +117,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   ...over,
 });
 
-/** One id for each fixture record, and for each of the two threads in `RUN_3F1`. */
+/** One id for each fixture record, and for each of the two threads in `THREAD_3F1`. */
 export interface WorldIds {
   readonly moss: string;
   readonly cove: string;
@@ -128,9 +128,9 @@ export interface WorldIds {
   readonly runbooks: string;
   readonly primary: string;
   readonly primaryCheckout: string;
-  readonly run3f1: string;
-  readonly run3f1Checkout: string;
-  /** The two threads working in `RUN_3F1`. */
+  readonly thread3f1: string;
+  readonly thread3f1Checkout: string;
+  /** The two threads working in `THREAD_3F1`. */
   readonly flakyThread: string;
   readonly runbookThread: string;
 }
@@ -145,8 +145,8 @@ const SLOTS: WorldIds = {
   runbooks: "res-runbooks",
   primary: "ws-primary",
   primaryCheckout: "co-ws-primary",
-  run3f1: "ws-run-3f1",
-  run3f1Checkout: "co-ws-run-3f1",
+  thread3f1: "ws-thread-3f1",
+  thread3f1Checkout: "co-ws-thread-3f1",
   flakyThread: "s-flaky",
   runbookThread: "s-runbook",
 };
@@ -162,7 +162,7 @@ export interface ThreadsWorld {
   /** webshop's main workspace on moss, sitting on `main`. */
   readonly PRIMARY: Workspace;
   /** A live worktree of webshop on moss, which two threads are working in. */
-  readonly RUN_3F1: Workspace;
+  readonly THREAD_3F1: Workspace;
 }
 
 export const buildThreadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
@@ -193,19 +193,19 @@ export const buildThreadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => 
       runnerId: id.moss,
       checkouts: [
         {
-          ...buildCheckout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/run-3f1"]),
+          ...buildCheckout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/thread-3f1"]),
           checkoutId: id.primaryCheckout,
         },
       ],
     }),
-    RUN_3F1: buildWorkspace({
-      id: id.run3f1,
+    THREAD_3F1: buildWorkspace({
+      id: id.thread3f1,
       runnerId: id.moss,
       kind: "ephemeral",
       checkouts: [
         {
-          ...buildCheckout(WEBSHOP.id, "hercule/run-3f1"),
-          checkoutId: id.run3f1Checkout,
+          ...buildCheckout(WEBSHOP.id, "hercule/thread-3f1"),
+          checkoutId: id.thread3f1Checkout,
           form: "worktree",
         },
       ],
@@ -223,5 +223,5 @@ export const {
   INFRA,
   RUNBOOKS,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
 } = buildThreadsWorld();

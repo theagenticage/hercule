@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { describeFailureReason, type StepLine } from "@hercule/client-core";
+import { describeFailureReason, type RunnerWait, type StepLine } from "@hercule/client-core";
 import type { FailureReason, StepError } from "@hercule/contract";
 import { WorkStateMark, cn } from "@hercule/ui";
 
@@ -46,6 +46,21 @@ export function StepErrorLine({ error }: { readonly error: StepError }): JSX.Ele
       {` · ${error.message}`}
     </p>
   );
+}
+
+/**
+ * Renders the line under a running step that waits for the run's runner, when
+ * `runnerWait` names the step, and nothing otherwise.
+ */
+export function StepWaitLine({
+  line,
+  runnerWait,
+}: {
+  readonly line: StepLine;
+  readonly runnerWait: RunnerWait | undefined;
+}): JSX.Element | null {
+  if (line.state !== "running" || runnerWait?.stepIds.has(line.stepId) !== true) return null;
+  return <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{runnerWait.text}</p>;
 }
 
 /**

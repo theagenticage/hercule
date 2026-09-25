@@ -71,6 +71,7 @@ export {
   describeFailureReason,
   describeRunOrigin,
   describeRunnerWait,
+  type RunnerWait,
   describeRunStatus,
   describeStepDuration,
   describeStepState,

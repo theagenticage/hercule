@@ -233,17 +233,30 @@ describe("describeRunnerWait", () => {
     connectivity: "offline",
     lastSeenAt: "2026-09-24T12:02:00.000Z",
   };
-  /** A run with its `commit` step running, pinned to no runner yet. */
+  const ACTIONS = [
+    { id: "git.commit", runsIn: "workspace" },
+    { id: "task.query", runsIn: "controller" },
+  ] as const;
+  /**
+   * A run pinned to no runner yet, with two steps running: `commit`, which
+   * runs in the workspace, and `note`, which runs on the controller.
+   */
   const UNPINNED: Run = {
     id: PARENT,
     workflowId: null,
     plan: {
       name: "Commit the fix",
-      steps: [{ id: "commit", kind: "action", action: "git.commit" }],
+      steps: [
+        { id: "commit", kind: "action", action: "git.commit" },
+        { id: "note", kind: "action", action: "task.query" },
+      ],
     },
     inputs: {},
     origin: { kind: "manual", actor: "user" },
-    steps: [{ stepId: "commit", iteration: 1, status: "running", startedAt: START }],
+    steps: [
+      { stepId: "commit", iteration: 1, status: "running", startedAt: START },
+      { stepId: "note", iteration: 1, status: "running", startedAt: START },
+    ],
     edgeTraversals: [],
     createdAt: START,
     status: "running",
@@ -251,32 +264,39 @@ describe("describeRunnerWait", () => {
   };
   const PINNED: Run = { ...UNPINNED, runnerId: RUNNER_ID };
 
-  it("says which runner the run waits for, and since when, in the user's timezone", () => {
+  it("names the running workspace steps, the runner they wait for, and since when, in the user's timezone", () => {
+    assert.deepStrictEqual(describeRunnerWait(PINNED, OFFLINE, ACTIONS, "Europe/Amsterdam"), {
+      stepIds: new Set(["commit"]),
+      text: "Waiting for runner mac-mini to reconnect (offline since 24 Sep 14:02)",
+    });
     assert.strictEqual(
-      describeRunnerWait(PINNED, OFFLINE, "Europe/Amsterdam"),
-      "Waiting for runner mac-mini to reconnect (offline since 24 Sep 14:02)",
-    );
-    assert.strictEqual(
-      describeRunnerWait(PINNED, { ...OFFLINE, connectivity: "unreachable" }, "UTC"),
+      describeRunnerWait(PINNED, { ...OFFLINE, connectivity: "unreachable" }, ACTIONS, "UTC")?.text,
       "Waiting for runner mac-mini to reconnect (offline since 24 Sep 12:02)",
     );
     assert.strictEqual(
-      describeRunnerWait(PINNED, { ...OFFLINE, lastSeenAt: null }, "UTC"),
+      describeRunnerWait(PINNED, { ...OFFLINE, lastSeenAt: null }, ACTIONS, "UTC")?.text,
       "Waiting for runner mac-mini to reconnect",
     );
   });
 
-  it("says nothing when the run does not wait for a runner", () => {
+  it("says nothing when no step waits for a runner", () => {
+    const noteOnly: Run = {
+      ...PINNED,
+      steps: [{ stepId: "note", iteration: 1, status: "running", startedAt: START }],
+    };
     const cases: ReadonlyArray<readonly [Run, Runner | undefined]> = [
       [PINNED, { ...OFFLINE, connectivity: "online" }],
       [PINNED, undefined],
       [UNPINNED, OFFLINE],
       [PINNED, { ...OFFLINE, id: PARENT }],
-      [{ ...PINNED, steps: [{ stepId: "commit", iteration: 1, status: "pending" }] }, OFFLINE],
+      // Only a step that runs on the controller is running.
+      [noteOnly, OFFLINE],
       [{ ...PINNED, status: "cancelled", finishedAt: at(10) }, OFFLINE],
     ];
     for (const [run, runner] of cases) {
-      assert.strictEqual(describeRunnerWait(run, runner, "UTC"), undefined);
+      assert.strictEqual(describeRunnerWait(run, runner, ACTIONS, "UTC"), undefined);
     }
+    // An action missing from the catalog is not taken to run in the workspace.
+    assert.strictEqual(describeRunnerWait(PINNED, OFFLINE, [], "UTC"), undefined);
   });
 });

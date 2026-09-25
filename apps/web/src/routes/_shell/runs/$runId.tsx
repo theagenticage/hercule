@@ -1,7 +1,12 @@
 import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { formatWorkspaceLabel, isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
+import {
+  describeRunnerWait,
+  formatWorkspaceLabel,
+  isNotFound,
+  resolveDisplayTimezone,
+} from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
@@ -9,6 +14,7 @@ import {
   runQuery,
   runnerQuery,
   settingsQuery,
+  workflowActionsQuery,
   workspaceQuery,
 } from "../../../app/queries";
 import { RunPage, type StepsView } from "./-page";
@@ -21,16 +27,19 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   // The list is the default and leaves the address without it.
   validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
     search["steps"] === "timeline" ? { steps: "timeline" } : {},
-  // Loads the run, and the runner and workspace it is pinned to, before the
-  // page renders, so the page never waits on them.
+  // Loads the run, the runner and workspace it is pinned to, and the action
+  // catalog before the page renders, so the page never waits on them. The
+  // catalog tells which steps run in the workspace, and so which ones wait
+  // for an offline runner.
   loader: async ({ context: { client, queryClient }, params }) => {
-    const run = await queryClient
-      .ensureQueryData(runQuery(client, params.runId))
-      .catch((error: unknown) => {
+    const [run] = await Promise.all([
+      queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {
         // A link to a run the controller does not have shows that, instead of
         // a load error.
         throw isNotFound(error) ? notFound() : error;
-      });
+      }),
+      queryClient.ensureQueryData(workflowActionsQuery(client)),
+    ]);
     const { runnerId, workspaceId } = run;
     await Promise.all([
       runnerId === undefined ? null : queryClient.ensureQueryData(runnerQuery(client, runnerId)),
@@ -79,6 +88,7 @@ function RunScreen(): JSX.Element {
     enabled: run.workspaceId !== undefined,
   }).data;
   const resources = useQuery({ ...resourcesQuery(client), enabled: workspace !== undefined }).data;
+  const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
 
   return (
     <RunPage
@@ -93,6 +103,7 @@ function RunScreen(): JSX.Element {
           ? undefined
           : formatWorkspaceLabel(workspace, resources.items, runner === undefined ? [] : [runner])
       }
+      runnerWait={describeRunnerWait(run, runner, actions, timezone)}
       timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>

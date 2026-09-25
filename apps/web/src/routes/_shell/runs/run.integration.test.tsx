@@ -767,10 +767,34 @@ describe("A run's page > its runner and workspace", () => {
     negotiatedCapabilities: null,
     protocolVersion: null,
   };
-  /** The running run, pinned to the runner and working in an ephemeral workspace. */
-  const PINNED_RUN: Run = { ...RUNNING_RUN, runnerId: RUNNER_ID, workspaceId: WORKSPACE_ID };
+  /**
+   * The running run, pinned to the runner and working in an ephemeral
+   * workspace, with two steps running: `start`, which commits in the
+   * workspace, and `note`, which runs on the controller.
+   */
+  const PINNED_RUN: Run = {
+    ...RUNNING_RUN,
+    plan: {
+      ...PLAN,
+      steps: [
+        ...PLAN.steps.filter((step) => step.id !== "start"),
+        { id: "start", kind: "action", action: "git.commit" },
+      ],
+    },
+    steps: [
+      CREATE_DONE,
+      { stepId: "note", iteration: 1, status: "running", startedAt: T0 },
+      { stepId: "start", iteration: 1, status: "running", startedAt: addSeconds(T0, 12) },
+    ],
+    runnerId: RUNNER_ID,
+    workspaceId: WORKSPACE_ID,
+  };
+  const ACTIONS = [
+    { id: "git.commit", runsIn: "workspace" },
+    { id: "task.query", runsIn: "controller" },
+  ].map((action) => ({ ...action, displayName: action.id, description: "", inputSchema: {} }));
 
-  it("shows the runner and the workspace, and a running step waits while the runner is offline", async () => {
+  it("shows the runner and the workspace, and a running workspace step waits while the runner is offline", async () => {
     let runner = OFFLINE_RUNNER;
     const { live } = await openRunPage(PINNED_RUN, {
       overrides: {
@@ -789,6 +813,7 @@ describe("A run's page > its runner and workspace", () => {
           }),
         },
         "GET /api/v1/resources": { body: { items: [] } },
+        "GET /api/v1/workflow-actions": { body: ACTIONS },
       },
     });
 
@@ -799,8 +824,15 @@ describe("A run's page > its runner and workspace", () => {
     expect(readPageText(getStepRow("start"))).toMatch(
       /Waiting for runner mac-mini to reconnect \(offline since .+\)/,
     );
-    // Only the running step waits for the runner.
+    // Only a running step that runs in the workspace waits for the runner.
     expect(readPageText(getStepRow("create"))).not.toContain("Waiting for runner");
+    expect(readPageText(getStepRow("note"))).not.toContain("Waiting for runner");
+
+    // The timeline shows the same line, once.
+    await userEvent.setup().click(screen.getByRole("radio", { name: "Timeline" }));
+    await waitFor(() => {
+      expect(readPageText(getStepsRegion()).match(/Waiting for runner mac-mini/g)).toHaveLength(1);
+    });
 
     runner = { ...OFFLINE_RUNNER, connectivity: "online" };
     await waitFor(() => {
@@ -811,7 +843,7 @@ describe("A run's page > its runner and workspace", () => {
     });
 
     await waitFor(() => {
-      expect(readPageText(getStepRow("start"))).not.toContain("Waiting for runner");
+      expect(readPageText(getStepsRegion())).not.toContain("Waiting for runner");
     });
   });
 });

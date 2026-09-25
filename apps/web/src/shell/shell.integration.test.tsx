@@ -505,7 +505,7 @@ describe("the top bar", () => {
  *   and the `+` beside it is a link whose accessible name says what it
  *   opens;
  * - a workspace that is not a main workspace is labelled with its first
- *   checkout's branch (`hercule/run-3f1`), because a `Workspace` record
+ *   checkout's branch (`hercule/thread-3f1`), because a `Workspace` record
  *   has no name of its own.
  * ------------------------------------------------------------------ */
 
@@ -520,8 +520,8 @@ const IDS = {
   infra: "01a06d02-7100-7000-8000-000000000002",
   primary: "01a06d02-7200-7000-8000-000000000001",
   primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
-  run3f1: "01a06d02-7200-7000-8000-000000000002",
-  run3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
+  thread3f1: "01a06d02-7200-7000-8000-000000000002",
+  thread3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
   flakyThread: "01a06d02-7400-7000-8000-000000000001",
   runbookThread: "01a06d02-7400-7000-8000-000000000002",
 };
@@ -534,21 +534,21 @@ const R_WEBSHOP = WORLD.WEBSHOP;
 const R_INFRA = WORLD.INFRA;
 const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000003";
 const W_PRIMARY: Workspace = { ...WORLD.PRIMARY, sessionIds: [BUMP_THE_BUN_PIN] };
-const W_RUN_3F1 = WORLD.RUN_3F1;
+const W_THREAD_3F1 = WORLD.THREAD_3F1;
 
 const grouped: readonly Session[] = [
   buildSession({
     id: IDS.flakyThread,
     title: "Fix flaky webhook tests",
     projectId: WEBSHOP.id,
-    workspaceId: W_RUN_3F1.id,
+    workspaceId: W_THREAD_3F1.id,
     lastActivityAt: "2026-09-10T09:05:00.000Z",
   }),
   buildSession({
     id: IDS.runbookThread,
     title: "Write the retry runbook",
     projectId: WEBSHOP.id,
-    workspaceId: W_RUN_3F1.id,
+    workspaceId: W_THREAD_3F1.id,
     lastActivityAt: "2026-09-10T09:04:00.000Z",
   }),
   buildSession({
@@ -586,7 +586,7 @@ const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<strin
   "GET /api/v1/sessions": { body: { items: grouped } },
   "GET /api/v1/projects": { body: { items: [WEBSHOP, OPS] } },
   "GET /api/v1/resources": { body: { items: [R_WEBSHOP, R_INFRA] } },
-  "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_RUN_3F1] } },
+  "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_THREAD_3F1] } },
   // What the draft route below loads; nothing here is what it asserts on.
   "GET /api/v1/runners": { body: { items: [MOSS] } },
   "GET /api/v1/providers": { body: [] },
@@ -616,7 +616,7 @@ describe("the Threads face groups threads by project and workspace", () => {
   it("groups a project's threads by workspace, and labels a main workspace with its repo and machine", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await getThreadsNav().findByText("hercule/run-3f1");
+    await getThreadsNav().findByText("hercule/thread-3f1");
     // The tooltip shows the whole label. The label is split in two so that a
     // narrow sidebar truncates the repo, not the machine: the machine is what
     // tells two main workspaces of one repo apart. The label does not use the
@@ -632,7 +632,7 @@ describe("the Threads face groups threads by project and workspace", () => {
 
     await getThreadsNav().findByText("no workspace");
     const text = readFaceText();
-    expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
+    expect(text.indexOf("hercule/thread-3f1")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("webshop · moss")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
   });
@@ -641,10 +641,10 @@ describe("the Threads face groups threads by project and workspace", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const plus = await getThreadsNav().findByRole("link", {
-      name: "New thread in hercule/run-3f1",
+      name: "New thread in hercule/thread-3f1",
     });
     expect(plus.getAttribute("href")).toBe(
-      `/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`,
+      `/threads/new?project=${WEBSHOP.id}&workspace=${W_THREAD_3F1.id}`,
     );
   });
 
@@ -661,15 +661,15 @@ describe("the Threads face groups threads by project and workspace", () => {
 
   it("shows the draft being written under the group it will join", async () => {
     await renderApp({
-      path: `/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`,
+      path: `/threads/new?project=${WEBSHOP.id}&workspace=${W_THREAD_3F1.id}`,
       api: stubApi(withProjects()).fetch,
       token: "held",
     });
 
-    await getThreadsNav().findByText("hercule/run-3f1");
+    await getThreadsNav().findByText("hercule/thread-3f1");
     const text = readFaceText();
     expect(text).toContain("New thread draft");
-    expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
+    expect(text.indexOf("hercule/thread-3f1")).toBeLessThan(text.indexOf("New thread draft"));
     // The draft is the group's last row, just as it is the last thread tab.
     expect(text.indexOf("Fix flaky webhook tests")).toBeLessThan(text.indexOf("New thread draft"));
     expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop · moss"));
@@ -679,7 +679,7 @@ describe("the Threads face groups threads by project and workspace", () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const row = await getThreadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
-    expect(row.textContent).not.toContain("hercule/run-3f1");
+    expect(row.textContent).not.toContain("hercule/thread-3f1");
   });
 });
 

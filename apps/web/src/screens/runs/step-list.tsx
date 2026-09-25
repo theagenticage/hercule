@@ -1,15 +1,20 @@
 import { useState, type JSX } from "react";
-import { describeStepState, describeStepDuration, type StepLine } from "@hercule/client-core";
+import {
+  describeStepState,
+  describeStepDuration,
+  type RunnerWait,
+  type StepLine,
+} from "@hercule/client-core";
 import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { JsonText } from "./json-text";
-import { StepCells, StepErrorLine } from "./step-parts";
+import { StepCells, StepErrorLine, StepWaitLine } from "./step-parts";
 
 /**
  * Renders the steps of a run as a list: one row per step record, then the steps the
  * run has not reached. A row shows the step's mark, id, action, state and
- * duration, and under it its error, or while it runs and the run waits for
- * its runner, the line that says so. A row with an output opens to show it.
+ * duration, and under it its error, or while it runs in the workspace and
+ * the run waits for its runner, the line that says so. A row with an output opens to show it.
  */
 export function StepList({
   lines,
@@ -19,8 +24,8 @@ export function StepList({
 }: {
   readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
-  /** The line a running step shows while the run waits for its runner to reconnect. */
-  readonly runnerWait: string | undefined;
+  /** The running steps that wait for the run's runner to reconnect, and the line they show. */
+  readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
@@ -72,9 +77,7 @@ export function StepList({
               </button>
             )}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
-            {line.state !== "running" || runnerWait === undefined ? null : (
-              <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{runnerWait}</p>
-            )}
+            <StepWaitLine line={line} runnerWait={runnerWait} />
             {isOpen ? (
               <JsonText
                 value={output}

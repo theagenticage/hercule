@@ -15,6 +15,7 @@ import type {
   RunStatus,
   Runner,
   StepStatus,
+  WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
 import { formatDuration } from "./threads/duration";
@@ -262,36 +263,56 @@ export const describeUnstartedStep = (
 export const describeStepState = (state: WorkState, runStatus: RunStatus): string =>
   state !== "unreached" ? state : isRunLive(runStatus) ? "not started" : "not reached";
 
+/** The steps of a run that wait for the run's runner, and the line each of them shows. */
+export interface RunnerWait {
+  /** The ids of the running steps whose action runs in the run's workspace. */
+  readonly stepIds: ReadonlySet<string>;
+  /** "Waiting for runner mac-mini to reconnect (offline since 25 Sep 14:02)". */
+  readonly text: string;
+}
+
 /**
- * Returns the line a running step shows while its run waits for the run's
- * runner to come back: "Waiting for runner mac-mini to reconnect (offline
- * since 25 Sep 14:02)", with the time in `timezone`. The part in brackets is
- * left out when the runner has never been seen.
+ * Returns which running steps of a run wait for the run's runner to come
+ * back, and the line they show: "Waiting for runner mac-mini to reconnect
+ * (offline since 25 Sep 14:02)", with the time in `timezone`. The part in
+ * brackets is left out when the runner has never been seen.
  *
- * Returns `undefined` when nothing waits for a runner: the run is not
- * running, it is not pinned to a runner, none of its steps is running, or
- * its runner is online. `runner` is the run's runner as last read; a runner
- * with another id is ignored.
+ * A step waits when its action runs in the workspace, which `actions`, the
+ * action catalog, tells. The run's workspace steps all run on the runner the
+ * run is pinned to, and the controller waits for that runner without limit.
+ * A step that runs on the controller, or whose action is no longer in the
+ * catalog, does not wait.
  *
- * A run is pinned to a runner when its first workspace step starts, and the
- * controller then waits for that runner without limit. The public action
- * catalog does not say whether an action runs in the workspace or on the
- * controller, so every running step of a pinned run is taken to wait for the
- * runner. A controller step that runs while the runner is away shows the
- * line too.
+ * Returns `undefined` when no step waits for a runner: the run is not
+ * running, it is not pinned to a runner, its runner is online, or none of
+ * its running steps runs in the workspace. `runner` is the run's runner as
+ * last read; a runner with another id is ignored.
  */
 export const describeRunnerWait = (
   run: Run,
   runner: Runner | undefined,
+  actions: ReadonlyArray<Pick<WorkflowAction, "id" | "runsIn">>,
   timezone: string,
-): string | undefined => {
+): RunnerWait | undefined => {
   if (run.status !== "running" || runner === undefined || runner.id !== run.runnerId) {
     return undefined;
   }
   if (runner.connectivity === "online") return undefined;
-  if (!run.steps.some((record) => record.status === "running")) return undefined;
+  const workspaceActionIds = new Set(
+    actions.filter((action) => action.runsIn === "workspace").map((action) => action.id),
+  );
+  const stepIds = new Set(
+    run.steps
+      .filter((record) => record.status === "running")
+      .map((record) => record.stepId)
+      .filter((stepId) => {
+        const step = run.plan.steps.find((each) => each.id === stepId);
+        return step?.kind === "action" && workspaceActionIds.has(step.action);
+      }),
+  );
+  if (stepIds.size === 0) return undefined;
   const waiting = `Waiting for runner ${runner.name} to reconnect`;
   const since =
     runner.lastSeenAt === null ? undefined : formatStamp(new Date(runner.lastSeenAt), timezone);
-  return since === undefined ? waiting : `${waiting} (offline since ${since})`;
+  return { stepIds, text: since === undefined ? waiting : `${waiting} (offline since ${since})` };
 };

@@ -34,7 +34,7 @@ import {
 export interface WorkspaceGroup {
   readonly workspaceId: string | null;
   /**
-   * The group's label, such as `hercule/run-3f1`, `webshop · moss` or `no
+   * The group's label, such as `hercule/thread-3f1`, `webshop · moss` or `no
    * workspace`, split into the two parts a narrow sidebar truncates
    * separately. `null` for the no-workspace group when it is the project's
    * only group (the label tells groups apart, and there is nothing to tell

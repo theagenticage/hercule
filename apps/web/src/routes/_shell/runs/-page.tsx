@@ -3,10 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
-  describeRunnerWait,
   isRunLive,
   queryKeys,
   type HerculeClient,
+  type RunnerWait,
 } from "@hercule/client-core";
 import type { Run, Runner } from "@hercule/contract";
 import {
@@ -51,6 +51,7 @@ export function RunPage({
   run,
   runner,
   workspaceLabel,
+  runnerWait,
   timezone,
   stepsView,
   onStepsViewChange,
@@ -61,6 +62,8 @@ export function RunPage({
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
   readonly workspaceLabel: string | undefined;
+  /** The running steps that wait for the run's runner to reconnect, and the line they show. */
+  readonly runnerWait: RunnerWait | undefined;
   readonly timezone: string;
   readonly stepsView: StepsView;
   readonly onStepsViewChange: (view: StepsView) => void;
@@ -158,14 +161,9 @@ export function RunPage({
               </SegmentedControl>
             </div>
             {stepsView === "list" ? (
-              <StepList
-                lines={lines}
-                runStatus={run.status}
-                runnerWait={describeRunnerWait(run, runner, timezone)}
-                now={now}
-              />
+              <StepList lines={lines} runStatus={run.status} runnerWait={runnerWait} now={now} />
             ) : (
-              <StepTimeline run={run} now={now} />
+              <StepTimeline run={run} runnerWait={runnerWait} now={now} />
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}
