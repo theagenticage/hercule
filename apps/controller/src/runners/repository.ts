@@ -264,10 +264,11 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns every runner that is not retired, with whether it is placeable
-     * (see `placeable`) and its negotiated capabilities. A retired runner is
-     * left out because it never connects again. A draining or offline runner
-     * is kept: it may take work again later.
+     * Returns every runner that is neither retired nor reserved, with whether
+     * it is placeable (see `placeable`) and its negotiated capabilities. A
+     * retired runner is left out because it never connects again, and a
+     * reserved one because work that names no runner never goes to it. A
+     * draining or offline runner is kept: it may take work again later.
      */
     listPlacementCandidates: (): Effect.Effect<ReadonlyArray<PlacementCandidate>, SqlError> =>
       Effect.flatMap(
@@ -277,7 +278,7 @@ const make = Effect.gen(function* () {
           readonly negotiated_capabilities: string | null;
         }>`
           SELECT id, (${sql.literal(PLACEABLE)}) AS placeable, negotiated_capabilities
-          FROM runners WHERE lifecycle <> 'retired'
+          FROM runners WHERE lifecycle <> 'retired' AND reserved = 0
         `,
         (rows) =>
           Effect.forEach(rows, (row) => {

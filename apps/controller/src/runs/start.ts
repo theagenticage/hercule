@@ -194,8 +194,9 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
               ),
             );
           }
-          // Only a retired runner can never take the run. An offline or
-          // draining one may come back, and the run waits for it.
+          // A retired runner never takes the run, and neither does a reserved
+          // one, because a run names no runner. An offline or draining one
+          // may come back, and the run waits for it.
           const missingRunner = describeMissingCapableRunner(
             plan,
             yield* runners.listPlacementCandidates(),

@@ -6,7 +6,9 @@
  * a step it cannot run.
  *
  * `run.start` refuses a plan that no runner can run, and pinning fails a run
- * whose only capable runners were retired after it started. Both use the
+ * whose only capable runners were retired or reserved after it started. A
+ * reserved runner never counts, because a run names no runner and is never
+ * pinned to a reserved one. Both use the
  * message `describeMissingCapableRunner` returns, so the user reads the same
  * advice in both places.
  */

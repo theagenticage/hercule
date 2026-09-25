@@ -429,9 +429,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * - `chosen`, with the runner;
    * - `waits` when a capable runner exists but none is placeable now;
    * - `noCapableRunner`, with the message for the user, when no runner that
-   *   is not retired offers every workspace action in the plan. `run.start`
-   *   refuses such a plan, so this means the capable runners were retired
-   *   after the run started.
+   *   is neither retired nor reserved offers every workspace action in the
+   *   plan. `run.start` refuses such a plan, so this means the capable
+   *   runners were retired or reserved after the run started.
    */
   const chooseRunner = (
     plan: WorkflowDefinition,
@@ -469,9 +469,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * workspace, or the step's other fate:
    *
    * - `ended`: the step cannot run in this workspace (see
-   *   `findWorkspaceStepError`), no runner that is not retired can run the
-   *   plan, or the workspace cannot be opened, and the step and the run have
-   *   failed;
+   *   `findWorkspaceStepError`), no runner that is neither retired nor
+   *   reserved can run the plan, or the workspace cannot be opened, and the
+   *   step and the run have failed;
    * - `waitsForRunner`: no runner can take the run now.
    */
   const placeWorkspaceStep = (
