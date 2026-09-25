@@ -59,6 +59,14 @@ export const WorkspaceStepStart = Schema.Struct({
    */
   resourceId: Schema.optionalKey(StorageId),
   /**
+   * The branch the checkout is switched to before the action runs, as a
+   * session start switches it. Set only for a run on a main workspace whose
+   * workflow names a branch: a main workspace is shared, so something else
+   * may have switched it since the last step. An ephemeral checkout is
+   * already on the run's own branch.
+   */
+  checkoutBranch: Schema.optionalKey(Fact),
+  /**
    * Who a commit is made as: the account of the workspace's designated
    * Connection. Absent when no Connection backs the workspace; the machine
    * then leaves git's own identity unchanged rather than inventing one.
