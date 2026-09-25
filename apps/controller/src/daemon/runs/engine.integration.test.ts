@@ -396,6 +396,7 @@ const INTERRUPTED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a002";
 const REPEATED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a003";
 const BROKEN_RUN_ID = "0199f0b7-0000-7000-8000-00000000a004";
 const WAITING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a005";
+const STRANDED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a009";
 
 /** Inserts a run row with the status `running`, as the engine leaves one between two steps. */
 const insertRunningRun = (
@@ -572,6 +573,43 @@ describe("a run interrupted by a restart", () => {
       expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
       expect(expectStatus(run, "failed").failedStepId).toBe("ghost");
       expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
+    });
+  });
+
+  it("fails a running run with controller-error when it has no step record left to execute", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: FILE_AND_START_DEFINITION,
+      });
+
+      // The first step completed, but the record of the step after it is
+      // missing. Routing creates that record in the same transaction, so
+      // these rows stand in for a bug in the engine.
+      const at = new Date().toISOString();
+      await insertRunningRun(harness, {
+        id: STRANDED_RUN_ID,
+        workflowId: workflow.id,
+        plan: FILE_AND_START_DEFINITION,
+        inputs: { title: "Fix login" },
+        at,
+      });
+      await runEffect(
+        harness.sql`
+          INSERT INTO run_steps
+            (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
+          VALUES
+            (unhex(replace(${STRANDED_RUN_ID}, '-', '')), 'create', 1, 'completed', '{}',
+             ${at}, ${at}, ${at})`,
+      );
+
+      await harness.reboot();
+      const run = await waitForRunToFinish(base, token, STRANDED_RUN_ID);
+
+      expect(run.status, JSON.stringify(run)).toBe("failed");
+      expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
+      expect(run.steps.map((record) => [record.stepId, record.status])).toEqual([
+        ["create", "completed"],
+      ]);
     });
   });
 
