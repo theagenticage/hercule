@@ -1,11 +1,11 @@
 /**
  * Starting a run: what `run.start` checks before it writes a run, and the
  * write itself. The run engine (`engine.ts`) serves the operation and the
- * `run.start` action through this, and executes each run once it commits.
+ * `run.start` action through this, and hands each run to the Run Executor
+ * once it commits.
  *
- * Starting a run crosses domains - workflows, runs, Connections, the action
- * catalog and the controller's settings - which is why it is a controller
- * daemon use case.
+ * Starting a run reads the workflows domain, the action catalog and the
+ * controller's settings. All three sit below runs in the domain graph.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -30,12 +30,13 @@ import {
   type Validation,
   type WorkflowDefinition,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../../actor";
-import { afterCommit, nowIso, withTransaction } from "../../db";
-import { PluginHost, type RegisteredWorkflowAction } from "../../plugins";
-import { runRepository } from "../../runs";
-import { Settings, type SettingError } from "../../settings";
-import { workflowRepository, WorkflowService } from "../../workflows";
+import { currentStamp, requireGrant } from "../actor";
+import { afterCommit, nowIso } from "../db";
+import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
+import { Settings, type SettingError } from "../settings";
+import { workflowRepository, WorkflowService } from "../workflows";
+import { runRepository } from "./repository";
+import { commitUninterruptibly } from "./transaction";
 
 /**
  * How many runs deep a run may be when the controller's `run.nestingLimit`
@@ -112,8 +113,8 @@ interface RunToStart {
 
 /**
  * Builds `run.start`. `executeInBackground` is called with the new run's id
- * once the run's rows commit; the engine passes the function that executes a
- * run on a fiber of its own.
+ * once the run's rows commit; the engine passes the function that hands the
+ * run's execution to the Run Executor.
  */
 export const makeRunStart = (executeInBackground: (runId: string) => void) =>
   Effect.gen(function* () {
@@ -165,55 +166,53 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
     ): Effect.Effect<RunStarted, E | Validation | CapExceeded | SettingError | SqlError> =>
       // Uninterruptible, because it only touches the local database: a
       // caller that disconnects while it commits must not leave a committed
-      // run whose fiber was never started.
-      Effect.uninterruptible(
-        withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const plan = yield* readPlan;
-            // What runs cannot do yet is checked only on a valid definition:
-            // an action that does not exist is reported once, as unknown.
-            const invalid = (yield* workflows.validateDefinition(plan)).errors;
-            const problems =
-              invalid.length > 0
-                ? invalid
-                : listUnsupportedElements(plan, yield* host.listActiveWorkflowActions());
-            if (problems.length > 0) {
-              return yield* Effect.fail(
-                createValidationError(
-                  problems,
-                  run.workflowId === null
-                    ? "this workflow cannot run"
-                    : "this workflow cannot run as it is saved now",
-                ),
-              );
-            }
-            yield* checkNesting(run.origin);
-            const inputs = yield* workflows.resolveRunInputs(plan, run.inputs);
-            if (Result.isFailure(inputs)) {
-              return yield* Effect.fail(
-                createValidationError(inputs.failure, "the inputs are not valid"),
-              );
-            }
-            const runId = yield* runs.insert(
-              {
-                workflowId: run.workflowId,
-                plan,
-                inputs: inputs.success,
-                origin: run.origin,
-                entryStepIds: listEntrySteps(plan).map((step) => step.id),
-              },
-              yield* nowIso,
+      // run that was never handed to the Run Executor.
+      commitUninterruptibly(
+        sql,
+        Effect.gen(function* () {
+          const plan = yield* readPlan;
+          // What runs cannot do yet is checked only on a valid definition:
+          // an action that does not exist is reported once, as unknown.
+          const invalid = (yield* workflows.validateDefinition(plan)).errors;
+          const problems =
+            invalid.length > 0
+              ? invalid
+              : listUnsupportedElements(plan, yield* host.listActiveWorkflowActions());
+          if (problems.length > 0) {
+            return yield* Effect.fail(
+              createValidationError(
+                problems,
+                run.workflowId === null
+                  ? "this workflow cannot run"
+                  : "this workflow cannot run as it is saved now",
+              ),
             );
-            // After the commit, so the fiber reads the rows this transaction
-            // wrote. It runs even if the caller disconnects after the commit,
-            // so a run that exists always starts. A run started by a step of
-            // another run commits with that step, so it starts only if the
-            // step completes.
-            yield* afterCommit(() => executeInBackground(runId));
-            return { runId };
-          }),
-        ),
+          }
+          yield* checkNesting(run.origin);
+          const inputs = yield* workflows.resolveRunInputs(plan, run.inputs);
+          if (Result.isFailure(inputs)) {
+            return yield* Effect.fail(
+              createValidationError(inputs.failure, "the inputs are not valid"),
+            );
+          }
+          const runId = yield* runs.insert(
+            {
+              workflowId: run.workflowId,
+              plan,
+              inputs: inputs.success,
+              origin: run.origin,
+              entryStepIds: listEntrySteps(plan).map((step) => step.id),
+            },
+            yield* nowIso,
+          );
+          // After the commit, so the execution reads the rows this
+          // transaction wrote. It runs even if the caller disconnects after
+          // the commit, so a run that exists always starts. A run started by
+          // a step of another run commits with that step, so it starts only
+          // if the step completes.
+          yield* afterCommit(() => executeInBackground(runId));
+          return { runId };
+        }),
       );
 
     /**

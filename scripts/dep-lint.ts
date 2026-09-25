@@ -22,9 +22,11 @@
  * `ReferenceError` no test finds until an import order changes, which is why
  * it is a lint rather than a review note.
  *
- * `src/daemon/`, the controller daemon, is what keeps that graph acyclic: it is
- * the layer above the domains, and holds every sequence that crosses two
- * domains or reaches a runner. Only `http/` imports it; no domain may.
+ * A domain may import another, to read or to write, as long as the graph
+ * stays acyclic. `src/daemon/`, the controller daemon, is the layer above the
+ * domains: it holds the wire to runners, the execution behind the ports
+ * domains declare, the drivers and boot, and the ports that break a cycle
+ * between two domains. Only `http/` imports it; no domain may.
  * Inside it, the same two rules hold one level down: its folders form a DAG,
  * and one folder reaches another only through that folder's `index.ts`.
  *

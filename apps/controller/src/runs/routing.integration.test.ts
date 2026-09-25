@@ -19,8 +19,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Run, StepRecord } from "@hercule/contract";
-import { WAIT_DEADLINE_MS } from "../../sessions/testing";
-import { createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
+import { WAIT_DEADLINE_MS } from "../sessions/testing";
+import { createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
   expectStatus,

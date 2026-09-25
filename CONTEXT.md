@@ -52,6 +52,10 @@ _Avoid_: job, execution, workflow instance
 The executable content a run executes: triggers, graph, actions. Frozen at run start; immutable thereafter. Usually stamped from a workflow, but may be generated ad-hoc by an agent and never stored.
 _Avoid_: recipe, definition (for this), workflow instance
 
+**Run Executor**:
+The port through which the runs domain hands a run's execution to be carried out apart from the request that started it, and stops it when the run is cancelled. The runs domain describes the run's execution as an effect and never decides where it runs; the controller daemon implements the port with one fiber per run. "The run's execution" is that effect, never a name for the run itself.
+_Avoid_: the run's scheduler (the Scheduler is the core component that fires `cron.tick` and scheduled wakes)
+
 **Turn**:
 One user-visible episode of a session: from a user input until the agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once.
 _Avoid_: exchange, round, iteration
@@ -193,7 +197,7 @@ _Avoid_: include file, copy list
 The always-on brain: holds all state, receives events, schedules work. The single source of truth; repos hold no Hercule config.
 
 **Controller Daemon**:
-The layer above the controller's domains (`apps/controller/src/daemon/`): it carries out every piece of work that spans more than one domain, or a domain and a runner, one file per use case. It is the only module that sends frames to runners and the only consumer of what runners report (the providers domain and `runner.refreshFacts` are the last exceptions, tracked in [#209](https://github.com/theagenticage/hercule/issues/209)); the domains below it hold rows and their lifecycle rules and produce frames as values, and a runner publishes what it hears and calls nobody. Writes that cross domains come from above and reads across domains are fine, so the controller's import graph stays a DAG. In prose it is always the **controller daemon**, never bare "daemon".
+The layer above the controller's domains (`apps/controller/src/daemon/`). Domains decide *what* happens; the controller daemon decides *where and how* it runs. It owns the wire to runners (it is the only module that sends frames to runners, and the only one that handles what they report, passing each result to the domain that owns it; the providers domain and `runner.refreshFacts` are the last exceptions, tracked in [#209](https://github.com/theagenticage/hercule/issues/209)), the fibers and process lifetime behind the ports domains declare, the ports that break a cycle between two domains, the drivers that run for the life of the controller, and boot. It holds a domain's orchestration only as the last resort for breaking a cycle in the domain graph. In prose it is always the **controller daemon**, never bare "daemon".
 _Avoid_: "daemon" alone (that is a runner process), orchestrator, god service
 
 **Runner**:

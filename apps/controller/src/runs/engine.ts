@@ -1,13 +1,18 @@
 /**
  * The run engine: starts runs of workflows and executes their steps.
  *
- * A run is only rows (the runs domain). Starting a run (`start.ts`) writes the
- * run and a step record for each entry step, and returns. The engine then
- * executes the run on a fiber of its own, the run's scheduler. The scheduler
- * reads the run and starts a child fiber for each step that has a pending
- * record, so steps on parallel branches run at the same time. A step never
- * has two records running: a record queued behind a running one of the same
- * step starts after it, in iteration order. Each child fiber:
+ * Starting a run (`start.ts`) writes the run and a step record for each entry
+ * step, and returns. Once those rows commit, the engine hands the run's
+ * execution to the Run Executor (`executor.ts`), which carries it out apart
+ * from the request that started the run. The engine decides what a run does;
+ * the controller daemon, which implements the Run Executor, decides where
+ * that work runs.
+ *
+ * The run's execution reads the run and starts a child fiber for each step
+ * that has a pending record, so steps on parallel branches run at the same
+ * time. A step never has two records running: a record queued behind a
+ * running one of the same step starts after it, in iteration order. Each
+ * child fiber:
  *
  * 1. Takes one step record that is pending, or running because a restart
  *    cut it off.
@@ -29,9 +34,9 @@
  *    the run when routing says so. A `terminal` step that completes ends
  *    the run with its output, without following its edges.
  *
- * Each time a child fiber ends, the scheduler reads the run again and starts
- * the child fibers that are now ready, until the run has ended. Then it
- * interrupts the child fibers still executing, as a cancel does.
+ * Each time a child fiber ends, the run's execution reads the run again and
+ * starts the child fibers that are now ready, until the run has ended. Then
+ * it interrupts the child fibers still executing, as a cancel does.
  *
  * Every routing decision is made in a start or an end transaction, against
  * rows read inside it, so the decision and its writes commit together. A
@@ -53,25 +58,22 @@
  *
  * Cancelling a run ends it, its unfinished step records, and every unfinished
  * run its steps started, directly or further down, in one transaction. Then
- * it interrupts the fibers executing them. A plugin's action in flight sees
+ * the Run Executor stops their executions. A plugin's action in flight sees
  * its signal abort. An action that returns after the cancel cannot end its
  * step record any more, so the run stays cancelled and no later step starts.
  *
  * If executing a run fails for a reason of the controller's own, such as a
  * database error or a bug, the run fails with `controller-error` rather than
  * staying `running` until the next restart: at the step whose child fiber
- * failed, or with no failed step when the scheduler itself failed.
+ * failed, or with no failed step when the run's execution itself failed.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
 import * as Cause from "effect/Cause";
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as FiberMap from "effect/FiberMap";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
@@ -90,23 +92,16 @@ import {
   type StepError,
   type Unauthenticated,
 } from "@hercule/contract";
-import { requireGrant } from "../../actor";
-import { AfterCommit, afterCommit, nowIso, withTransaction } from "../../db";
-import { isBuiltInActionId, type PluginHost } from "../../plugins";
-import {
-  isUnfinished,
-  listNextStepRecords,
-  runRepository,
-  type RunOutcome,
-  type UnfinishedStepRecord,
-} from "../../runs";
-import type { Settings } from "../../settings";
-import type { TaskService } from "../../tasks";
-import type { WorkflowService } from "../../workflows";
-import { absorbFailures } from "../absorbing";
+import { requireGrant } from "../actor";
+import { AfterCommit, afterCommit, nowIso } from "../db";
+import { isBuiltInActionId } from "../plugins";
+import { RunExecutor } from "./executor";
+import { runRepository, type RunOutcome } from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
 import { makeRunStart } from "./start";
 import { makeStepExecution, type EngineStepError, type StepRecordKey } from "./step";
+import { isUnfinished, listNextStepRecords, type UnfinishedStepRecord } from "./step-records";
+import { commitUninterruptibly } from "./transaction";
 
 /**
  * The step error for a run that could not be carried out at this step for a
@@ -131,42 +126,21 @@ const describeEnding = (status: RunStatus): string =>
   status === "cancelled" ? "has already been cancelled" : `has already ${status}`;
 
 /**
- * The fibers executing runs, by run id. A run has at most one.
- *
- * It is a service of its own, beside the run engine, so that the test
- * harness can stop every run's fiber to simulate a controller restart
- * without a new process. A real controller never clears it: closing its
- * scope when the controller stops interrupts the fibers, and the rows stay
- * as they are for `resumeUnfinishedRuns` to continue from.
+ * Builds the run engine: `start`, `cancel` and `resumeUnfinished`, which the
+ * run service serves (`service.ts`).
  */
-export class RunFibers extends Context.Service<RunFibers, FiberMap.FiberMap<string>>()(
-  "hercule/controller/daemon/RunFibers",
-) {}
-
-const make = Effect.gen(function* () {
+export const makeRunEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runs = yield* runRepository;
-  // The listener that publishes a committed change on the live topics. A run
-  // executes on a fiber of the engine's own, not of the request that started
-  // it, so the listener is provided to that fiber here.
+  const executor = yield* RunExecutor;
+  // The listener that publishes a committed change on the live topics. A
+  // run's execution is carried out apart from the request that started it,
+  // so the listener is provided to the execution here.
   const afterCommitListener = yield* AfterCommit;
-  const runFibers = yield* RunFibers;
-  const forkRun = yield* FiberMap.runtime(runFibers)<never>();
-  // The fiber that executes a new run is started through a function the
-  // engine defines below, which itself calls `startRun` for the `run.start`
-  // action, so the reference is passed as a function.
-  const startRun = yield* makeRunStart((runId) => executeInBackground(runId));
-
-  /**
-   * Runs one of a run's write sets in a transaction that cannot be
-   * interrupted. Cancelling a run interrupts the fiber executing it, and an
-   * interrupt that landed after the commit and before the transaction's
-   * after-commit work would lose that work: the live announcements, and the
-   * start of a child run that a `run.start` step committed. The write set
-   * only touches the local database, so the interrupt waits a moment at most.
-   */
-  const commitUninterruptibly = <A, E>(effect: Effect.Effect<A, E>) =>
-    Effect.uninterruptible(withTransaction(sql, effect));
+  // A new run is handed to the Run Executor through a function the engine
+  // defines below, which itself calls `start` for the `run.start` action, so
+  // the reference is passed as a function.
+  const start = yield* makeRunStart((runId) => executeInBackground(runId));
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -219,6 +193,7 @@ const make = Effect.gen(function* () {
     failureReason: FailureReason,
   ): Effect.Effect<void, SqlError> =>
     commitUninterruptibly(
+      sql,
       Effect.flatMap(nowIso, (at) => writeStepFailure(runId, attempt, error, failureReason, at)),
     );
 
@@ -279,11 +254,12 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Option.Option<{ readonly run: Run; readonly startedAt: string }>, SqlError> =>
     Effect.catchTag(
       commitUninterruptibly(
+        sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
           const run = Option.getOrThrow(yield* runs.read(runId));
-          // The scheduler never starts a record of a step that has one
-          // running, so this only catches a bug in the scheduler. It is
+          // The run's execution never starts a record of a step that has one
+          // running, so this only catches a bug in `executeRun`. It is
           // checked here, against rows read in the transaction, because a
           // step with two running records would corrupt the run.
           if (
@@ -321,15 +297,14 @@ const make = Effect.gen(function* () {
     );
 
   const executeStep = yield* makeStepExecution({
-    startRun,
-    commitUninterruptibly,
+    start,
     failRun,
     routeAfterStep,
   });
 
   /**
    * Executes one step record of a run, on a child fiber of the run's
-   * scheduler (see `executeRun`). A pending record is started first (see
+   * execution (see `executeRun`). A pending record is started first (see
    * `startStepRecord`). A running record is one a restart cut off, and only
    * a built-in action's record gets here that way: it is executed again.
    *
@@ -361,23 +336,22 @@ const make = Effect.gen(function* () {
 
   /**
    * Executes a run from its rows until it has ended. This is the run's
-   * scheduler.
+   * execution, which the Run Executor carries out.
    *
    * Each step's next record (see `listNextStepRecords`) executes on a child
    * fiber of its own (see `executeRecord`), so steps on parallel branches run
    * at the same time. A step has at most one child fiber, so a record queued
    * behind a running one of the same step waits until that one has ended.
    *
-   * Each time a child fiber ends, the scheduler reads the run again, because
+   * Each time a child fiber ends, the run's execution reads the run again, because
    * that child's transactions may have added records or ended the run. It
    * never decides from an older read: which records are ready is always read
    * from the rows after the last child's writes committed.
    *
-   * When the run has ended, the scheduler returns, and closing its scope
+   * When the run has ended, the execution returns, and closing its scope
    * interrupts the child fibers still executing: a `wait` stops, and a
-   * plugin's action sees its signal abort. Interrupting the scheduler, when
-   * the run is cancelled or the controller stops, interrupts them the same
-   * way.
+   * plugin's action sees its signal abort. Stopping the execution, when the
+   * run is cancelled or the controller stops, interrupts them the same way.
    */
   const executeRun = (runId: string): Effect.Effect<void, SqlError> =>
     Effect.scoped(
@@ -395,7 +369,10 @@ const make = Effect.gen(function* () {
           const run = found.value;
           if (!isUnfinished(run.status)) return;
           if (run.status === "pending") {
-            yield* commitUninterruptibly(Effect.flatMap(nowIso, (at) => runs.start(runId, at)));
+            yield* commitUninterruptibly(
+              sql,
+              Effect.flatMap(nowIso, (at) => runs.start(runId, at)),
+            );
           }
           const ready = listNextStepRecords(run.steps).filter(
             (record) => !busySteps.has(record.stepId),
@@ -437,7 +414,7 @@ const make = Effect.gen(function* () {
           const ended = yield* Queue.take(endedChildren);
           busySteps.delete(ended.record.stepId);
           if (Exit.isSuccess(ended.exit)) continue;
-          // Children are interrupted only after the scheduler has left this
+          // Children are interrupted only after the execution has left this
           // loop, by returning or by being interrupted itself. So a child
           // that ended interrupted while the loop still runs interrupted
           // itself, for example a plugin's action that ended in its own
@@ -456,134 +433,103 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Fails a run that its scheduler could not carry out for a reason of the
+   * Fails a run that its execution could not carry out for a reason of the
    * controller's own, such as a database error or a bug, with
    * `controller-error` and no failed step: the error was not at any one step.
    */
   const failRunUnexpectedly = (runId: string): Effect.Effect<void, SqlError> =>
     commitUninterruptibly(
+      sql,
       Effect.flatMap(nowIso, (at) =>
         writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
       ),
     );
 
   /**
-   * Starts executing a run on a fiber of the engine's own, unless a fiber
-   * already executes it, and returns at once. It is synchronous so that it
-   * can run right after a commit (see `afterCommit`).
+   * Hands a run's execution to the Run Executor, which carries it out apart
+   * from the caller unless it already carries out that run, and returns at
+   * once. It is synchronous so that it can run right after a commit (see
+   * `afterCommit`).
    *
-   * A forked fiber starts running on the caller's thread until its first
-   * wait, and a step's database work never waits. The fiber therefore yields
-   * first, so the request that started the run is answered before any step
-   * runs, rather than after the whole run.
+   * If the execution fails for a reason of the controller's own, the run
+   * fails with `controller-error`. If even that ending cannot be written, the
+   * error is logged: the run then stays unfinished, and the next boot resumes
+   * it. An execution that is stopped simply ends: the cancel that stopped it
+   * has already written the run's ending.
    */
   const executeInBackground = (runId: string): void => {
-    const execution = Effect.catchCause(
-      Effect.andThen(Effect.yieldNow, executeRun(runId)),
-      (cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.andThen(
-              Effect.logError(`Executing run ${runId} failed, so the run fails`, cause),
-              absorbFailures(`Failing run ${runId} failed`, failRunUnexpectedly(runId)),
+    const execution = Effect.catchCause(executeRun(runId), (cause) =>
+      Cause.hasInterrupts(cause)
+        ? Effect.interrupt
+        : Effect.andThen(
+            Effect.logError(`Executing run ${runId} failed, so the run fails`, cause),
+            Effect.catchCause(failRunUnexpectedly(runId), (failure) =>
+              Cause.hasInterrupts(failure)
+                ? Effect.interrupt
+                : Effect.logError(`Failing run ${runId} failed`, failure),
             ),
+          ),
     );
-    forkRun(runId, Effect.provideService(execution, AfterCommit, afterCommitListener), {
-      onlyIfMissing: true,
-    });
-  };
-
-  /**
-   * Stops the fiber executing a run, if one is, without waiting for it to
-   * stop. It is synchronous so that it can run right after a commit.
-   */
-  const stopExecuting = (runId: string): void => {
-    const fiber = FiberMap.getUnsafe(runFibers, runId);
-    if (Option.isSome(fiber)) fiber.value.interruptUnsafe();
+    executor.execute(runId, Effect.provideService(execution, AfterCommit, afterCommitListener));
   };
 
   return {
-    startRun,
+    start,
 
     /**
      * `run.cancel`: cancels a pending or running run and returns it.
      *
      * One transaction cancels the run, every step record of it that has not
      * ended, and every unfinished run that its steps started, directly or
-     * further down, with their step records. Then the fibers executing those
-     * runs are interrupted, which aborts the signal of a plugin action in
-     * flight. A step whose action ends after the cancel cannot end its record
-     * any more, and no later step starts.
+     * further down, with their step records. Then the Run Executor stops
+     * their executions, which aborts the signal of a plugin action in
+     * flight. A step whose action ends after the cancel cannot end its
+     * record any more, and no later step starts.
      *
      * Fails with `NotFound` for an unknown run, and with `InvalidState` for a
      * run that has already ended.
      */
-    cancelRun: (
+    cancel: (
       id: Id,
     ): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.cancel");
-        return yield* Effect.uninterruptible(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const found = yield* runs.read(id);
-              if (Option.isNone(found)) {
-                return yield* Effect.fail(createNotFoundError("no such run"));
-              }
-              const { status } = found.value;
-              if (!isUnfinished(status)) {
-                return yield* Effect.fail(
-                  createInvalidStateError(
-                    `the run ${describeEnding(status)}; only a pending or running run can be cancelled`,
-                  ),
-                );
-              }
-              const at = yield* nowIso;
-              const cancelled = [id, ...(yield* runs.listUnfinishedDescendants(id))];
-              for (const runId of cancelled) {
-                yield* writeRunEnding(runId, { status: "cancelled" }, at);
-              }
-              yield* afterCommit(() => {
-                for (const runId of cancelled) stopExecuting(runId);
-              });
-              // The same transaction found the run above, and runs are never
-              // deleted.
-              return Option.getOrThrow(yield* runs.read(id));
-            }),
-          ),
+        return yield* commitUninterruptibly(
+          sql,
+          Effect.gen(function* () {
+            const found = yield* runs.read(id);
+            if (Option.isNone(found)) {
+              return yield* Effect.fail(createNotFoundError("no such run"));
+            }
+            const { status } = found.value;
+            if (!isUnfinished(status)) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `the run ${describeEnding(status)}; only a pending or running run can be cancelled`,
+                ),
+              );
+            }
+            const at = yield* nowIso;
+            const cancelled = [id, ...(yield* runs.listUnfinishedDescendants(id))];
+            for (const runId of cancelled) {
+              yield* writeRunEnding(runId, { status: "cancelled" }, at);
+            }
+            yield* afterCommit(() => executor.stop(cancelled));
+            // The same transaction found the run above, and runs are never
+            // deleted.
+            return Option.getOrThrow(yield* runs.read(id));
+          }),
         );
       }),
 
     /**
-     * Resumes every run that is pending or running and has no fiber executing
-     * it. The controller calls this when it starts: the rows of a run that a
-     * restart cut off are all there is to continue it from.
+     * Hands every run that is pending or running to the Run Executor, which
+     * skips the ones it already carries out. The controller calls this when
+     * it starts: the rows of a run that a restart cut off are all there is to
+     * continue it from.
      */
-    resumeUnfinishedRuns: Effect.map(runs.listUnfinished(), (ids) => {
+    resumeUnfinished: Effect.map(runs.listUnfinished(), (ids) => {
       for (const runId of ids) executeInBackground(runId);
     }),
   };
 });
-
-/** The run engine: starts runs and executes their steps. */
-export class RunEngine extends Context.Service<RunEngine, Effect.Success<typeof make>>()(
-  "hercule/controller/daemon/RunEngine",
-) {}
-
-export const RunEngineLayer: Layer.Layer<
-  RunEngine | RunFibers,
-  never,
-  SqlClient.SqlClient | WorkflowService | TaskService | PluginHost | Settings | AfterCommit
-> = Layer.effect(RunEngine)(make).pipe(
-  Layer.provideMerge(Layer.effect(RunFibers)(FiberMap.make<string>())),
-);
-
-/**
- * Resumes every unfinished run, as the controller does when it starts
- * serving. A resume that cannot even list the runs is a broken database, which
- * nothing after it could work around, so it dies.
- */
-export const resumeUnfinishedRuns: Effect.Effect<void, never, RunEngine> = Effect.orDie(
-  Effect.flatMap(RunEngine, (engine) => engine.resumeUnfinishedRuns),
-);

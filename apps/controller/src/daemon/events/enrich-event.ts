@@ -2,10 +2,10 @@
  * Enrichment: adds details to an event that is already in the log, then
  * routes that event again.
  *
- * This lives in the daemon rather than in the events domain because routing
- * the event again can write rows in other domains, and a write across domains
- * belongs to the layer above them. The change to the event itself is still
- * made by the events domain, through its service.
+ * This lives in the controller daemon rather than in the events domain
+ * because routing the event again is the event router's work, and the event
+ * router delivers inputs to live sessions on runners. The change to the event
+ * itself is still made by the events domain, through its service.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

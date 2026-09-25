@@ -21,9 +21,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
 import type { Run } from "@hercule/contract";
-import { buildActionPlugin } from "../../plugins/testing";
-import { WAIT_DEADLINE_MS, waitUntil } from "../../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
+import { buildActionPlugin } from "../plugins/testing";
+import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
+import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
@@ -37,7 +37,7 @@ import {
   waitForRun,
   waitForRunToFinish,
 } from "./testing";
-import { runEffect } from "../testing";
+import { runEffect } from "../daemon/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
 

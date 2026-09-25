@@ -52,16 +52,11 @@ import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
-import {
-  Inbound,
-  Pipeline,
-  Provisioning,
-  resumeUnfinishedRuns,
-  sweepSessionsOnLostRunners,
-} from "../daemon";
+import { Inbound, Pipeline, Provisioning, sweepSessionsOnLostRunners } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
+import { resumeUnfinishedRuns } from "../runs";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -235,7 +230,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // like the others without depending on anything before it.
     yield* Effect.forkScoped(Effect.flatMap(Pipeline, (pipeline) => pipeline.driving));
     // Runs a restart cut off continue from their rows. Each run executes on
-    // a fiber of the run engine, so this returns once they are all started.
+    // a fiber of the Run Executor, so this returns once they are all started.
     yield* resumeUnfinishedRuns;
     yield* Effect.flatMap(buildApplication(bundle), HttpServer.serveEffect());
   });

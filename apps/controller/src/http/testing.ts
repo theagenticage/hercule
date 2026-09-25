@@ -44,7 +44,6 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
   LostRunnerSweepInterval,
-  resumeUnfinishedRuns,
   RunFibers,
   SessionInputDeadline,
   WorkspaceSweepInterval,
@@ -80,6 +79,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
 import { operationLayers } from "./routes";

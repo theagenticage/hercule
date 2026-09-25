@@ -24,8 +24,9 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
 import { collectReachableSteps, type FailedEdge, type Run } from "@hercule/contract";
-import { evaluateCondition, type ExpressionError } from "../../expressions";
-import { isUnfinished } from "../../runs";
+import { evaluateCondition, type ExpressionError } from "../expressions";
+import { buildRunContext } from "./run-context";
+import { isUnfinished } from "./step-records";
 
 /**
  * The part of a run that routing reads: its plan, its inputs, its step records
@@ -72,30 +73,6 @@ export interface RoutingDecision {
   readonly readyStepIds: ReadonlyArray<string>;
   readonly ending: RoutingEnding;
 }
-
-/**
- * Builds the context that conditions and templates are evaluated against:
- * the run's `inputs`, and under `steps.<id>` the output of each step's latest
- * finished iteration. A step is absent from `steps` when it has not finished
- * yet, when it never runs, and when its latest finished iteration was
- * skipped, even if an earlier one completed. So `has(steps.x)` tells whether
- * the latest `x` produced an output.
- */
-export const buildRunContext = (run: Pick<Run, "inputs" | "steps">): Record<string, unknown> => {
-  const latest = new Map<string, Run["steps"][number]>();
-  for (const record of run.steps) {
-    if (record.status !== "completed" && record.status !== "skipped") continue;
-    const known = latest.get(record.stepId);
-    if (known === undefined || known.iteration < record.iteration) {
-      latest.set(record.stepId, record);
-    }
-  }
-  const steps: Record<string, unknown> = {};
-  for (const [stepId, record] of latest) {
-    if (record.status === "completed") steps[stepId] = { output: record.output };
-  }
-  return { inputs: run.inputs, steps };
-};
 
 /**
  * Checks whether a step's condition holds, so its record may start. A step

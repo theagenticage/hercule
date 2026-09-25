@@ -1,9 +1,7 @@
 /**
- * The run operations served by the runs domain: `run.query` and `run.read`.
- *
- * Starting a run crosses domains - it reads a workflow, checks Connections,
- * and later calls other domains' services from each step - so it lives in the
- * controller daemon's run engine, not here.
+ * The run operations: `run.start`, `run.cancel`, `run.query` and `run.read`,
+ * and resuming unfinished runs when the controller starts. Starting,
+ * cancelling and resuming are the run engine's (`engine.ts`).
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
@@ -26,15 +24,18 @@ import {
   type Forbidden,
   type NotFound,
   type Run,
-  type RunStatus,
   type RunSummary,
-  type StepRecord,
-  type StepStatus,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { buildPageInputFields, refuseCursor } from "../db";
+import { buildPageInputFields, refuseCursor, type AfterCommit } from "../db";
+import type { PluginHost } from "../plugins";
+import type { Settings } from "../settings";
+import type { TaskService } from "../tasks";
+import type { WorkflowService } from "../workflows";
+import { makeRunEngine } from "./engine";
+import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -52,43 +53,15 @@ export interface RunPage {
   readonly nextCursor?: string;
 }
 
-/**
- * Checks whether a run or a step record can still change: it is pending or
- * running. Only such a run is executed, cancelled or resumed at boot. A run
- * and a step record share these two statuses, so this one check serves both.
- */
-export const isUnfinished = (status: RunStatus | StepStatus): boolean =>
-  status === "pending" || status === "running";
-
-/** A step record that can still change: one that is pending or running. */
-export type UnfinishedStepRecord = Extract<StepRecord, { readonly status: "pending" | "running" }>;
-
-/** Checks whether a step record is pending or running. */
-const isUnfinishedRecord = (record: StepRecord): record is UnfinishedStepRecord =>
-  isUnfinished(record.status);
-
-/**
- * Returns the next record of each step that has one: the step's first record,
- * in the order they were created, that has not ended. A step's records are
- * created and executed in iteration order, so its next record is its running
- * one if it has one, and otherwise its pending one with the lowest iteration.
- * The records are returned in the order they were created; a run whose
- * records have all ended gets an empty list.
- */
-export const listNextStepRecords = (
-  steps: ReadonlyArray<StepRecord>,
-): ReadonlyArray<UnfinishedStepRecord> => {
-  const next = new Map<string, UnfinishedStepRecord>();
-  for (const record of steps) {
-    if (isUnfinishedRecord(record) && !next.has(record.stepId)) next.set(record.stepId, record);
-  }
-  return [...next.values()];
-};
-
 const make = Effect.gen(function* () {
   const runs = yield* runRepository;
+  const engine = yield* makeRunEngine;
 
   return {
+    start: engine.start,
+    cancel: engine.cancel,
+    resumeUnfinished: engine.resumeUnfinished,
+
     /**
      * Returns one page of runs, the newest first unless the caller sorts the
      * other way: the run someone started last is the one they look for.
@@ -134,5 +107,23 @@ export class RunService extends Context.Service<RunService, Effect.Success<typeo
   "hercule/controller/runs/RunService",
 ) {}
 
-export const RunServiceLayer: Layer.Layer<RunService, never, SqlClient.SqlClient> =
-  Layer.effect(RunService)(make);
+export const RunServiceLayer: Layer.Layer<
+  RunService,
+  never,
+  | SqlClient.SqlClient
+  | WorkflowService
+  | TaskService
+  | PluginHost
+  | Settings
+  | AfterCommit
+  | RunExecutor
+> = Layer.effect(RunService)(make);
+
+/**
+ * Resumes every unfinished run, as the controller does when it starts
+ * serving. A resume that cannot even list the runs is a broken database, which
+ * nothing after it could work around, so it dies.
+ */
+export const resumeUnfinishedRuns: Effect.Effect<void, never, RunService> = Effect.orDie(
+  Effect.flatMap(RunService, (runs) => runs.resumeUnfinished),
+);
