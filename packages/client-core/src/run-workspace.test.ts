@@ -79,9 +79,23 @@ describe("describeRunWorkspace", () => {
     }
   });
 
-  it("says nothing about a completed run's workspace that still exists, a lost one, or a primary one", () => {
+  it("says a completed run's workspace, or one a cancel did not keep, will be deleted shortly", () => {
+    const cancelled: Run = { ...COMPLETED, status: "cancelled" };
+    for (const run of [COMPLETED, cancelled]) {
+      assert.deepStrictEqual(describeRunWorkspace(run, EPHEMERAL, ZONE), {
+        asksOnCancel: false,
+        note: "Workspace will be deleted shortly",
+        offersDelete: false,
+      });
+    }
+  });
+
+  it("says nothing about a lost workspace, or a primary one", () => {
     const nothing = { asksOnCancel: false, note: undefined, offersDelete: false };
-    assert.deepStrictEqual(describeRunWorkspace(COMPLETED, EPHEMERAL, ZONE), nothing);
+    assert.deepStrictEqual(
+      describeRunWorkspace(COMPLETED, { ...EPHEMERAL, kind: "primary" }, ZONE),
+      nothing,
+    );
     assert.deepStrictEqual(
       describeRunWorkspace(FAILED, { ...EPHEMERAL, status: "lost" }, ZONE),
       nothing,

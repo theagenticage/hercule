@@ -2,7 +2,8 @@
  * What a run's page says about the run's ephemeral workspace, which the
  * controller deletes once the run no longer needs it:
  *
- * - a completed run's workspace is deleted soon after the run ends;
+ * - a completed run's workspace, and the workspace of a run cancelled without
+ *   keeping it, is deleted soon after the run ends;
  * - a failed run's workspace, and the workspace of a run cancelled with its
  *   workspace kept, is kept for inspection until `workspaceKeptUntil`, then
  *   deleted;
@@ -42,6 +43,8 @@ const NOTHING: RunWorkspaceReading = { asksOnCancel: false, note: undefined, off
  *   own `disposedAt`.
  * - While a failed or kept run's workspace still exists, the note says until
  *   when it is kept, and the page offers to delete it.
+ * - While the workspace of a run that completed, or was cancelled without
+ *   keeping it, still exists, the note says it will be deleted shortly.
  */
 export const describeRunWorkspace = (
   run: Run,
@@ -65,7 +68,13 @@ export const describeRunWorkspace = (
   }
 
   if (isRunLive(run.status)) return { ...NOTHING, asksOnCancel: true };
-  if (run.workspaceKeptUntil === undefined) return NOTHING;
+  // The controller deletes the workspace at its next sweep, which can be
+  // minutes away. No live topic tells an open page when that happens, so the
+  // page can show this note for a while after the deletion, and the words
+  // must not become wrong then.
+  if (run.workspaceKeptUntil === undefined) {
+    return { ...NOTHING, note: "Workspace will be deleted shortly" };
+  }
   const keptUntil = formatDay(new Date(run.workspaceKeptUntil), timezone);
   return {
     asksOnCancel: false,

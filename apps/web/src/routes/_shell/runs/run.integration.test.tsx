@@ -925,11 +925,16 @@ describe("A run's page > what happens to its workspace", () => {
     });
   });
 
-  it("deletes the workspace on cancel when the box stays ticked", async () => {
+  it("deletes the workspace on cancel when the box stays ticked, and says it will be deleted shortly", async () => {
     const user = userEvent.setup();
-    const { api } = await openWithWorkspace(IN_WORKSPACE);
+    const { api } = await openWithWorkspace(IN_WORKSPACE, {
+      [`POST /api/v1/runs/${IN_WORKSPACE.id}/cancel`]: {
+        body: { ...CANCELLED_RUN, workspaceId: WORKSPACE_ID },
+      },
+    });
 
-    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    const header = await findPageHeader();
+    await user.click(within(header).getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
@@ -937,6 +942,11 @@ describe("A run's page > what happens to its workspace", () => {
         { keepWorkspace: false },
       ]);
     });
+    // The workspace exists until the controller's next sweep deletes it.
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace will be deleted shortly");
+    });
+    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
   });
 
   it("does not ask about a workspace when the run has none", async () => {
