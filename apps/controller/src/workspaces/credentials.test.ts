@@ -2,15 +2,16 @@
  * Git credentials, answered by the controller over the runner socket.
  *
  * A runner never holds a token. It asks for one per request, naming the remote
- * git is about to contact and either the session that asked or the workspace
- * it is provisioning. The controller returns a token only when the asker
- * already has a checkout of that remote. These tests drive the exchange the
+ * git is about to contact and either the session that asked or a workspace
+ * the runner is provisioning or running a workspace step in. The controller
+ * returns a token only when the asker already has a checkout of that remote. These tests drive the exchange the
  * way a runner does - a `credentialRequest` on the wire, a `credentialAnswer`
  * back - because the wire is the whole authorization boundary.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionStart } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
+import { findStepRecords, startSentWorkflow, waitForRun } from "../runs/testing";
 import {
   waitForFrames,
   waitForStartFrames,
@@ -218,6 +219,116 @@ describe("a credential asked for by a provisioning workspace", () => {
       });
       expect(answer["error"]).toBe("unauthorized");
       expect(answer["token"]).toBeUndefined();
+    });
+  });
+});
+
+describe("a credential asked for by a runner running a workspace step", () => {
+  /**
+   * Starts a run whose first step pushes in an ephemeral workspace of `repoId`
+   * and whose second step waits an hour on the controller. Returns the run's
+   * id and its workspace's id once the push step has been sent to the runner.
+   * The workspace is then reported ready, so it is no longer `provisioning`
+   * and only the running step can entitle the runner to a credential.
+   */
+  const startPushRun = async (
+    arranged: Arranged,
+    repoId: string,
+  ): Promise<{ readonly runId: string; readonly workspaceId: string }> => {
+    const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+      definition: {
+        name: "Push, then wait",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+        steps: [
+          { id: "push", kind: "action", action: "git.push", params: {} },
+          { id: "pause", kind: "action", action: "wait", params: { seconds: 3600 } },
+        ],
+        edges: [{ from: "push", to: "pause" }],
+      },
+    });
+    const start = await waitUntil("sent the push step", () =>
+      listFramesTagged(arranged.wire, "workspaceStepStart").find(
+        (frame) => frame["runId"] === runId,
+      ),
+    );
+    const workspaceId = String(start["workspaceId"]);
+    arranged.wire.send({
+      _tag: "workspaceReport",
+      workspaceId,
+      status: "ready",
+      checkouts: [],
+    } as never);
+    await waitUntil("made the workspace ready", async () => {
+      const one = await readWorkspace(arranged, workspaceId);
+      return one.status === "ready" ? one : undefined;
+    });
+    return { runId, workspaceId };
+  };
+
+  it("answers while the step runs in that workspace on that runner, and refuses once it has ended", async () => {
+    await withCredentials(async (arranged) => {
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+      const web = await createRepo(arranged, "https://github.com/acme/web", github);
+      const { runId, workspaceId } = await startPushRun(arranged, web);
+
+      const during = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId,
+      });
+      expect(during["token"]).toBe(GITHUB_PAT);
+      expect(during["username"]).toBe(GITHUB_LOGIN);
+
+      arranged.wire.send({
+        _tag: "workspaceStepResult",
+        runId,
+        stepId: "push",
+        iteration: 1,
+        outcome: { status: "completed", output: { branch: `hercule/run-${runId}`, sha: "abc123" } },
+      });
+      await waitForRun(arranged.harness.base, arranged.token, runId, "waiting", (run) =>
+        findStepRecords(run, "pause").some((record) => record.status === "running"),
+      );
+
+      // The run is still running and pinned to this runner, but its running
+      // step is `wait`, which runs on the controller and pushes nothing.
+      const after = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId,
+      });
+      expect(after["error"]).toBe("unauthorized");
+      expect(after["token"]).toBeUndefined();
+    });
+  });
+
+  it("refuses another runner, and a remote the workspace has no checkout of", async () => {
+    await withCredentials(async (arranged) => {
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+      const web = await createRepo(arranged, "https://github.com/acme/web", github);
+      await createRepo(arranged, "https://github.com/acme/secrets", github);
+      const second = await arranged.enlist();
+      const { workspaceId } = await startPushRun(arranged, web);
+
+      const elsewhere = await askForCredential(second.wire, {
+        remote: "github.com/acme/web",
+        workspaceId,
+      });
+      expect(elsewhere["error"]).toBe("unauthorized");
+      expect(elsewhere["token"]).toBeUndefined();
+
+      const foreign = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/secrets",
+        workspaceId,
+      });
+      expect(foreign["error"]).toBe("unauthorized");
+      expect(foreign["token"]).toBeUndefined();
+
+      // The step is still running here, so the same request for the
+      // workspace's own remote is answered.
+      const own = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId,
+      });
+      expect(own["token"]).toBe(GITHUB_PAT);
     });
   });
 });

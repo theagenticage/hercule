@@ -327,7 +327,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     runsIn: "workspace",
     displayName: "Push a branch",
     description:
-      "Pushes a branch of the run's workspace to its remote: branch, or the checkout's branch when it is left out. resourceId picks the checkout when the workspace has more than one.",
+      "Pushes a branch of the run's workspace to the branch of the same name on the checkout's own remote, and sets it as the upstream: branch, or the checkout's branch when it is left out. resourceId picks the checkout when the workspace has more than one. The push is never forced, so a remote branch with commits the checkout lacks fails the step.",
     input: Schema.Struct({
       branch: Schema.optionalKey(Schema.NonEmptyString),
       resourceId: Schema.optionalKey(Id),

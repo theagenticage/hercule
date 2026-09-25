@@ -3,8 +3,10 @@
  *
  * A runner holds no token. It asks for one per request, and the request names
  * the remote git is about to contact and who is asking: a session, identified
- * by the token it was started with, or the runner itself while it provisions a
- * workspace. The credential is valid for that request alone.
+ * by the token it was started with, or the runner itself, naming a workspace.
+ * The runner asks as itself only while it provisions that workspace or runs
+ * a workspace step in it (spec 13 section 9.1). The credential is valid for
+ * that request alone.
  *
  * The rule is simple: the remote must canonicalize to a resource the asker
  * already has a checkout of. Everything else gets `unauthorized`, including a
@@ -24,6 +26,7 @@ import { connectionRepository, isGithubConnection } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
 import { SessionTokens } from "../permissions";
+import { runsInWorkspace } from "../plugins";
 import { canonicalRemoteOf } from "../resources";
 import { Secrets, type SecretDecryptError, type SecretNameError } from "../secrets";
 
@@ -77,10 +80,40 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Checks whether a workspace step runs now in this workspace, in a run
+   * pinned to this runner. A workspace step has no session and so no session
+   * token, and its git asks for credentials as the runner, naming the
+   * workspace. The step's record must be `running`: a step that has ended,
+   * or a controller step of the same run such as `wait`, gets nothing.
+   *
+   * The run's rows are read here directly, as the session's rows are below,
+   * rather than through the runs domain, which itself depends on workspaces.
+   */
+  const isWorkspaceStepRunning = (
+    runnerId: string,
+    workspaceId: Uint8Array,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.map(
+      // `r.status = 'running'` is written out so that SQLite uses the
+      // partial index `runs_pinned_running`.
+      sql<{ readonly action: string | null }>`
+        SELECT (SELECT json_extract(step.value, '$.action')
+                FROM json_each(r.plan, '$.steps') AS step
+                WHERE json_extract(step.value, '$.id') = s.step_id) AS action
+        FROM runs r JOIN run_steps s ON s.run_id = r.id
+        WHERE r.runner_id = ${uuidFromString(runnerId)} AND r.status = 'running'
+          AND r.workspace_id = ${workspaceId} AND s.status = 'running'
+      `,
+      (rows) => rows.some((row) => row.action !== null && runsInWorkspace(row.action)),
+    );
+
+  /**
    * Looks for a workspace in which the asker has a checkout of this canonical
    * remote, and returns the Connection that workspace was opened with. Returns
    * `none` if the asker has no such checkout, or is not who it claims to be;
-   * this function cannot tell the two apart.
+   * this function cannot tell the two apart. A runner that names a workspace
+   * has such a checkout only while the workspace is on that runner and is
+   * either `provisioning` or running a workspace step.
    *
    * The Connection is read from the workspace, not from the resource. A
    * workspace's Connection is fixed when it is opened, so a resource that is
@@ -94,19 +127,30 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Option.Option<{ readonly connectionId: string | null }>, SqlError> =>
     Effect.gen(function* () {
       if ("workspaceId" in request) {
-        const rows = yield* sql<{ readonly connection_id: Uint8Array | null }>`
-          SELECT w.designated_connection_id AS connection_id FROM resources r
+        const workspaceId = uuidFromString(request.workspaceId);
+        const rows = yield* sql<{
+          readonly connection_id: Uint8Array | null;
+          readonly status: string;
+        }>`
+          SELECT w.designated_connection_id AS connection_id, w.status FROM resources r
           JOIN checkouts c ON c.resource_id = r.id
           JOIN workspaces w ON w.id = c.workspace_id
           WHERE r.canonical_remote = ${canonicalRemote}
-            AND w.id = ${uuidFromString(request.workspaceId)}
+            AND w.id = ${workspaceId}
             AND w.runner_id = ${uuidFromString(runnerId)}
-            AND w.status = 'provisioning'
           LIMIT 1
         `;
-        return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+        const row = rows[0];
+        if (row === undefined) return Option.none();
+        if (
+          row.status !== "provisioning" &&
+          !(yield* isWorkspaceStepRunning(runnerId, workspaceId))
+        ) {
+          return Option.none();
+        }
+        return Option.some({
           connectionId: row.connection_id === null ? null : uuidToString(row.connection_id),
-        }));
+        });
       }
 
       // The session-token resolver decides who the asker is, rather than a
