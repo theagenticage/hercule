@@ -14,6 +14,10 @@
  *   from, or NULL for the resource's default branch. A provision sent to a
  *   runner again must be identical to the first one, so the value is kept
  *   rather than only passed through.
+ * - `runs.keep_workspace`: whether the user who cancelled the run chose to
+ *   keep its workspace for inspection. The workspace sweep reads it to decide
+ *   whether a cancelled run's ephemeral workspace is deleted at once or kept
+ *   like a failed run's. It is 0 for every run that was not cancelled.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -25,6 +29,10 @@ export default Effect.gen(function* () {
   yield* sql`ALTER TABLE runs ADD COLUMN workspace_id BLOB`;
   yield* sql`ALTER TABLE run_steps ADD COLUMN input TEXT CHECK (input IS NULL OR json_valid(input))`;
   yield* sql`ALTER TABLE checkouts ADD COLUMN base_branch TEXT`;
+  yield* sql`
+    ALTER TABLE runs ADD COLUMN keep_workspace INTEGER NOT NULL DEFAULT 0
+      CHECK (keep_workspace IN (0, 1))
+  `;
 
   // Serves the workspace steps owed to a runner when it connects, which the
   // controller sends to it again:
