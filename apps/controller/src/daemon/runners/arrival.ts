@@ -30,10 +30,10 @@ const make = Effect.gen(function* () {
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      for (const frame of yield* workspaces.owedProvisioning(runnerId)) {
+      for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
         yield* connections.tell(runnerId, frame);
       }
-      for (const step of yield* runs.owedWorkspaceSteps(runnerId)) {
+      for (const step of yield* runs.listOwedWorkspaceSteps(runnerId)) {
         yield* workspaceSteps.start(step);
       }
       yield* runs.wakeRunsWaitingForRunner();

@@ -44,7 +44,7 @@
  * - After the start transaction commits, the step is handed to its runner
  *   through Workspace Steps (`workspace-steps.ts`), and the child fiber ends.
  *   No fiber waits for the step: its result arrives later from the runner
- *   (`completeStep`), and the end transaction runs then.
+ *   (`recordStepResult`), and the end transaction runs then.
  *
  * Each time a child fiber ends, the run's execution reads the run again and
  * starts the child fibers that are now ready, until the run has ended. Then
@@ -1048,7 +1048,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * An output that does not match the action's output schema fails the
      * step with `unexpected`.
      */
-    completeStep: (runnerId: string, result: WorkspaceStepResult): Effect.Effect<void, SqlError> =>
+    recordStepResult: (runnerId: string, result: WorkspaceStepResult): Effect.Effect<void, SqlError> =>
       Effect.provideService(
         Effect.gen(function* () {
           const { runId, stepId, iteration, outcome } = result;
@@ -1128,7 +1128,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * Run inside a caller's transaction, it joins that transaction, so the
      * workspace's failure and its runs' failures commit together.
      */
-    failWorkspace: (workspaceId: string, message: string): Effect.Effect<void, SqlError> =>
+    failRunsInWorkspace: (workspaceId: string, message: string): Effect.Effect<void, SqlError> =>
       Effect.provideService(
         commitUninterruptibly(
           sql,
@@ -1145,7 +1145,7 @@ export const makeRunEngine = Effect.gen(function* () {
     /**
      * Fails every running run pinned to a runner, inside the caller's
      * transaction, because the runner is gone and its workspaces with it.
-     * Each run fails as `failWorkspace` fails it. Once the caller's
+     * Each run fails as `failRunsInWorkspace` fails it. Once the caller's
      * transaction has committed, their executions stop.
      */
     failRunsPinnedTo: (runnerId: string, message: string): Effect.Effect<void, SqlError> =>
@@ -1161,7 +1161,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * sent with the input stored on its record, so it runs with the same
      * input as the first time.
      */
-    owedWorkspaceSteps: (
+    listOwedWorkspaceSteps: (
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceStepToStart>, SqlError> =>
       Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) =>

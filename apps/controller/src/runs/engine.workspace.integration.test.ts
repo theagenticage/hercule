@@ -5,7 +5,7 @@
  *
  * No runner is connected. Workspace Steps is a fake that records what the
  * run engine hands to runners and asks them to stop, and the test plays the
- * runner by calling `completeStep` with a step's result, as the controller
+ * runner by calling `recordStepResult` with a step's result, as the controller
  * daemon does when a result arrives.
  */
 import { describe, expect, it } from "vitest";
@@ -229,11 +229,11 @@ describe("a workspace step", () => {
 
         // The workspace is still provisioning, so its provision can be sent
         // again, with the run's branch on the checkout.
-        const provision = yield* workspaces.rebuildProvision(start.workspaceId);
+        const provision = yield* workspaces.rebuildOwedProvision(start.workspaceId);
         expect(Option.getOrThrow(provision).checkouts).toMatchObject([
           { resourceId: repoId, branch: `hercule/run-${runId}`, baseBranch: null },
         ]);
-        expect(yield* runs.owedWorkspaceSteps(runnerId)).toEqual([start]);
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([start]);
 
         // A resume leaves a running workspace step to its runner: it neither
         // fails it as cut off nor hands it on a second time.
@@ -249,10 +249,10 @@ describe("a workspace step", () => {
           outcome: { status: "completed" as const, output: COMMITTED },
         };
         // A result from a runner the run is not pinned to is ignored.
-        yield* runs.completeStep(yield* insertRunner(), result);
+        yield* runs.recordStepResult(yield* insertRunner(), result);
         expect(findRecord(yield* readRun(runId), "commit")?.status).toBe("running");
 
-        yield* runs.completeStep(runnerId, result);
+        yield* runs.recordStepResult(runnerId, result);
         const ended = yield* waitForRunToEnd(runId);
         expect(ended.status).toBe("completed");
         expect(findRecord(ended, "commit")).toMatchObject({
@@ -265,7 +265,7 @@ describe("a workspace step", () => {
         });
 
         // The same result again finds the record ended, and changes nothing.
-        yield* runs.completeStep(runnerId, result);
+        yield* runs.recordStepResult(runnerId, result);
         expect(yield* readRun(runId)).toEqual(ended);
       }),
     );
@@ -276,7 +276,7 @@ describe("a workspace step", () => {
       Effect.gen(function* () {
         const { runnerId, runId } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
-        yield* runs.completeStep(runnerId, {
+        yield* runs.recordStepResult(runnerId, {
           runId,
           stepId: "commit",
           iteration: 1,
@@ -313,7 +313,7 @@ describe("a workspace step", () => {
         expect(yield* runs.listEndedWorkspaceSteps(runnerId, [key])).toEqual([
           { runnerId, ...key },
         ]);
-        expect(yield* runs.owedWorkspaceSteps(runnerId)).toEqual([]);
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([]);
       }),
     );
   });
@@ -339,7 +339,7 @@ describe("a workspace step", () => {
         });
         yield* waitForStarts(recorded, 2);
 
-        yield* runs.completeStep(runnerId, {
+        yield* runs.recordStepResult(runnerId, {
           runId,
           stepId: "first",
           iteration: 1,
@@ -371,7 +371,7 @@ describe("a workspace step", () => {
         const [start] = yield* waitForStarts(recorded, 1);
         expect(start).toMatchObject({ runnerId, checkoutBranch: "release" });
         // The step sent again when the runner reconnects carries the branch too.
-        expect(yield* runs.owedWorkspaceSteps(runnerId)).toEqual([start]);
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([start]);
       }),
     );
   });
@@ -381,7 +381,7 @@ describe("a workspace step", () => {
       Effect.gen(function* () {
         const { runnerId, runId, start } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
-        yield* runs.failWorkspace(start.workspaceId, "The clone failed: repository not found.");
+        yield* runs.failRunsInWorkspace(start.workspaceId, "The clone failed: repository not found.");
         const ended = yield* readRun(runId);
         expect(ended).toMatchObject({
           status: "failed",
@@ -406,7 +406,7 @@ describe("a workspace step", () => {
         const ended = yield* readRun(runId);
         expect(ended).toMatchObject({ status: "failed", failureReason: "workspace-failed" });
         expect(findRecord(ended, "commit")?.status).toBe("failed");
-        expect(yield* runs.owedWorkspaceSteps(runnerId)).toEqual([]);
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([]);
       }),
     );
   });

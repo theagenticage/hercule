@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
       // provision goes first, on the same connection, so the runner has the
       // workspace before it is asked to run anything in it. Sending it again
       // is safe: the runner ignores a provision for a workspace it holds.
-      const provision = yield* workspaces.rebuildProvision(step.workspaceId);
+      const provision = yield* workspaces.rebuildOwedProvision(step.workspaceId);
       if (Option.isSome(provision)) yield* connections.tell(step.runnerId, provision.value);
       yield* connections.tell(step.runnerId, yield* buildStartFrame(step));
     });

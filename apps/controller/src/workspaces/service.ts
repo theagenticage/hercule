@@ -234,7 +234,7 @@ interface Expired {
  * Returns the time a finished run's workspace, kept for inspection, is due
  * for deletion: the time the run finished plus the failed-run window.
  */
-const computeKeptUntil = (finishedAt: string, controller: ScopeSettings<"controller">): string =>
+const addFailedRunWindow = (finishedAt: string, controller: ScopeSettings<"controller">): string =>
   new Date(
     Date.parse(finishedAt) +
       (controller["workspace.failedRunTtlDays"] ?? DEFAULT_FAILED_RUN_TTL_DAYS) * DAY_MS,
@@ -264,7 +264,7 @@ const decideExpiry = (
   if (run !== undefined) {
     if (run.status === "completed") return "run-completed";
     if (run.status === "cancelled" && !run.keepsWorkspace) return "run-cancelled";
-    const due = Date.parse(computeKeptUntil(run.finishedAt, controller));
+    const due = Date.parse(addFailedRunWindow(run.finishedAt, controller));
     if (now <= due) return undefined;
     return run.status === "failed" ? "run-failed" : "run-kept";
   }
@@ -705,7 +705,7 @@ const make = Effect.gen(function* () {
      * setting moves the time.
      */
     computeKeptUntil: (finishedAt: string): Effect.Effect<string, SettingError | SqlError> =>
-      Effect.map(settings.all(), (controller) => computeKeptUntil(finishedAt, controller)),
+      Effect.map(settings.all(), (controller) => addFailedRunWindow(finishedAt, controller)),
 
     /**
      * Returns the workspace if the sweep may still dispose of it, or
@@ -772,7 +772,7 @@ const make = Effect.gen(function* () {
      * provisioning needs, so a rebuilt frame is the same as the frame that was
      * sent, and asks for the same clone or worktree.
      */
-    owedProvisioning: (
+    listOwedProvisioning: (
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceProvision>, SqlError> =>
       Effect.flatMap(workspaces.provisioningOn(runnerId), (owed) =>
@@ -786,7 +786,7 @@ const make = Effect.gen(function* () {
      * missed the first frame still provisions the workspace before it is
      * asked to work in it.
      */
-    rebuildProvision: (
+    rebuildOwedProvision: (
       workspaceId: string,
     ): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
       Effect.gen(function* () {

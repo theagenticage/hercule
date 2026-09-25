@@ -89,10 +89,10 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SettingError | SqlError
     > => Effect.flatMap(engine.cancel(id, input), addWorkspaceKeptUntil),
     resumeUnfinished: engine.resumeUnfinished,
-    completeStep: engine.completeStep,
-    failWorkspace: engine.failWorkspace,
+    recordStepResult: engine.recordStepResult,
+    failRunsInWorkspace: engine.failRunsInWorkspace,
     failRunsPinnedTo: engine.failRunsPinnedTo,
-    owedWorkspaceSteps: engine.owedWorkspaceSteps,
+    listOwedWorkspaceSteps: engine.listOwedWorkspaceSteps,
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
 
