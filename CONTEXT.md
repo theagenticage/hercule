@@ -48,6 +48,10 @@ _Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
 One execution of an execution plan, usually stamped from a workflow. Nothing else in the system is called a run.
 _Avoid_: job, execution, workflow instance
 
+**Pinned (Run)**:
+A run is pinned to one runner and one workspace when its first Workspace Step starts. Every later Workspace Step of the run goes there. Retiring that runner fails the run.
+_Avoid_: bound, assigned, sticky
+
 **Execution Plan**:
 The executable content a run executes: triggers, graph, actions. Frozen at run start; immutable thereafter. Usually stamped from a workflow, but may be generated ad-hoc by an agent and never stored.
 _Avoid_: recipe, definition (for this), workflow instance
@@ -380,6 +384,22 @@ _Avoid_: action (bare, where a Bound Action could be meant), tool, command, task
 **Built-in Action**:
 A Workflow Action the core declares: an operation of the public API, with the operation's id (`task.create`), an input drawn from the operation's input, and the operation's output, so a step reaches nothing that an API request cannot. Owned by `core` in the catalog and never disabled.
 _Avoid_: core action, native action, system action
+
+**Controller Action**:
+A Workflow Action that runs on the controller, with the run's context. Every plugin action is one, and so is every Built-in Action that is an operation.
+_Avoid_: server action, local action
+
+**Workspace Action**:
+A Workflow Action that runs on the run's runner, in the run's workspace, such as `git.commit`. Built into the runner in v1; the controller keeps its catalog entry. It runs commands as argument lists, never as shell strings.
+_Avoid_: runner action, remote action, exec
+
+**Workspace Step**:
+A step whose work happens in the run's workspace on a runner: in v1, an action step that calls a Workspace Action. The controller sends it to the run's runner and the runner reports how it ended.
+_Avoid_: remote step, runner step
+
+**Step Key**:
+The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart.
+_Avoid_: step id (bare, which names the step, not the iteration)
 
 **Entry Step**:
 A step where a run begins: a step with `entry: true`, or a step that no edge leads into. A run starts every entry step. A step that only a signal trigger leads into is not one, because it waits for its signal. A workflow in which an edge leads into every step needs `entry: true` on the step where a run begins.

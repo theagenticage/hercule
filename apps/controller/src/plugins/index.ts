@@ -12,6 +12,5 @@ export {
   runsInWorkspace,
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
-  type WorkflowActionRunsIn,
   type WorkspaceActionId,
 } from "./workflow-actions";

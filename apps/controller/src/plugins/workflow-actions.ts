@@ -42,6 +42,7 @@ import {
   TaskFilter,
   TaskUpdateInput,
   type OperationId,
+  type WorkflowActionRunsIn,
 } from "@hercule/contract";
 import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
@@ -112,9 +113,6 @@ const decodeWorkflowActionNames = Schema.decodeUnknownEffect(WorkflowActionNames
 const decodeWorkflowActionHeader = Schema.decodeUnknownEffect(WorkflowActionHeader, {
   errors: "all",
 });
-
-/** Where a workflow action runs: on the controller, or in the run's workspace on a runner. */
-export type WorkflowActionRunsIn = "controller" | "workspace";
 
 /** A workflow action as the core or a plugin declares it, with its qualified id. */
 interface DeclaredWorkflowAction {
