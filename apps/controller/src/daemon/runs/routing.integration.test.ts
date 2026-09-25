@@ -26,6 +26,7 @@ import {
   expectStatus,
   findStepRecords,
   listTasks,
+  queryRuns,
   startRun,
   waitForRunToFinish,
 } from "./testing";
@@ -725,6 +726,15 @@ describe("maxTraversals", () => {
       expect(listStatuses(run, "log")).toEqual(["completed", "completed", "cancelled"]);
       expect(findStepRecords(run, "done")).toEqual([]);
       expect(run.edgeTraversals[2]).toBe(2);
+      // A summary has no plan for the edge's index to point into, so the
+      // run list leaves the failed edge out.
+      const [summary] = (await queryRuns(base, token)).items;
+      expect(summary).toMatchObject({
+        id: run.id,
+        failureReason: "iteration-limit",
+        failedStepId: "count",
+      });
+      expect(summary).not.toHaveProperty("failedEdge");
     });
   });
 

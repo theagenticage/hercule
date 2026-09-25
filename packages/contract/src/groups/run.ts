@@ -193,7 +193,8 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *   completed run has (`output`), which `completedFields` holds.
  * - `failed` at a step (`expression-error`, `step-failed` or
  *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
- *   `failedEdge` when the run failed at an edge.
+ *   the fields only a run failed at a step has (`failedEdge`), which
+ *   `failedAtStepFields` holds.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
  * - `cancelled`: `finishedAt`, and `startedAt` if the run had started.
@@ -203,9 +204,11 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
 const buildRunStatusVariants = <
   const Fields extends Schema.Struct.Fields,
   const CompletedFields extends Schema.Struct.Fields,
+  const FailedAtStepFields extends Schema.Struct.Fields,
 >(
   fields: Fields,
   completedFields: CompletedFields,
+  failedAtStepFields: FailedAtStepFields,
 ) =>
   [
     Schema.Struct({ ...fields, status: Schema.Literal("pending") }),
@@ -219,11 +222,10 @@ const buildRunStatusVariants = <
     }),
     Schema.Struct({
       ...fields,
+      ...failedAtStepFields,
       status: Schema.Literal("failed"),
       failureReason: Schema.Literals(["expression-error", "step-failed", "iteration-limit"]),
       failedStepId: Schema.String,
-      /** The edge the run failed at, when it failed at one. */
-      failedEdge: Schema.optionalKey(FailedEdge),
       startedAt: Timestamp,
       finishedAt: Timestamp,
     }),
@@ -270,6 +272,10 @@ export const Run = Schema.Union(
        */
       output: Schema.optionalKey(Schema.Json),
     },
+    {
+      /** The edge the run failed at, when it failed at one. */
+      failedEdge: Schema.optionalKey(FailedEdge),
+    },
   ),
 );
 
@@ -277,9 +283,9 @@ export type Run = Schema.Schema.Type<typeof Run>;
 
 /**
  * One run in the run list: the run without its plan, step records and
- * output, which are long. `run.read` returns them. A run that failed at an
- * edge keeps `failedEdge` here too, but a summary
- * has no plan to look the edge up in.
+ * output, which are long. `run.read` returns them. A summary has no
+ * `failedEdge` either: an edge's index means nothing without the plan it
+ * indexes, so a failed summary carries only its reason and `failedStepId`.
  */
 export const RunSummary = Schema.Union(
   buildRunStatusVariants(
@@ -292,6 +298,7 @@ export const RunSummary = Schema.Union(
       origin: RunOrigin,
       createdAt: Timestamp,
     },
+    {},
     {},
   ),
 );

@@ -123,8 +123,6 @@ interface SummaryRow {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
-  readonly failed_edge_index: number | null;
-  readonly failure_message: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -215,8 +213,6 @@ interface StatusColumns {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
-  readonly failed_edge_index: number | null;
-  readonly failure_message: string | null;
   readonly started_at: string | null;
   readonly finished_at: string | null;
 }
@@ -250,14 +246,6 @@ const parseStatusColumns = (row: StatusColumns) => {
             status: "failed",
             failureReason,
             failedStepId: requireColumn(row.failed_step_id, "runs", "failed_step_id"),
-            ...(row.failed_edge_index === null
-              ? {}
-              : {
-                  failedEdge: {
-                    index: row.failed_edge_index,
-                    message: requireColumn(row.failure_message, "runs", "failure_message"),
-                  },
-                }),
             startedAt: startedAt(),
             finishedAt: finishedAt(),
           } as const);
@@ -268,11 +256,37 @@ const parseStatusColumns = (row: StatusColumns) => {
 };
 
 /**
+ * Parses the status columns of a run row as `parseStatusColumns` does, and
+ * adds the fields that follow from the status in a run but not in a run
+ * summary:
+ *
+ * - a completed run has an `output` only when its `output` column is set; a
+ *   JSON `null` output is a set column;
+ * - a run failed at a step has a `failedEdge` only when its
+ *   `failed_edge_index` column is set. The engine writes that column and
+ *   `failure_message` together.
+ */
+const parseRunStatusColumns = (row: RunRow) => {
+  const status = parseStatusColumns(row);
+  if (status.status === "completed" && row.output !== null) {
+    return { ...status, output: JSON.parse(row.output) as Schema.Json };
+  }
+  if (
+    status.status === "failed" &&
+    status.failureReason !== "controller-error" &&
+    row.failed_edge_index !== null
+  ) {
+    const message = requireColumn(row.failure_message, "runs", "failure_message");
+    return { ...status, failedEdge: { index: row.failed_edge_index, message } };
+  }
+  return status;
+};
+
+/**
  * Maps a run row, its step rows and its traversal rows to a `Run`. The JSON
  * columns are parsed without being decoded again: the run engine wrote them
  * from values that were already validated. An edge with no traversal row
- * has been followed 0 times. A completed run has an `output` only when its
- * `output` column is set; a JSON `null` output is a set column.
+ * has been followed 0 times.
  */
 const toRun = (
   row: RunRow,
@@ -282,7 +296,6 @@ const toRun = (
   const plan = JSON.parse(row.plan) as WorkflowDefinition;
   const edgeTraversals = (plan.edges ?? []).map(() => 0);
   for (const traversal of traversals) edgeTraversals[traversal.edge_index] = traversal.count;
-  const status = parseStatusColumns(row);
   return {
     id: uuidToString(row.id),
     workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
@@ -292,9 +305,7 @@ const toRun = (
     steps: steps.map(toStepRecord),
     edgeTraversals,
     createdAt: row.created_at,
-    ...(status.status === "completed" && row.output !== null
-      ? { ...status, output: JSON.parse(row.output) as Schema.Json }
-      : status),
+    ...parseRunStatusColumns(row),
   };
 };
 
@@ -405,8 +416,7 @@ const make = Effect.gen(function* () {
         }
         const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
-                 failure_reason, failed_step_id, failed_edge_index, failure_message, created_at,
-                 started_at, finished_at
+                 failure_reason, failed_step_id, created_at, started_at, finished_at
           FROM runs WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
