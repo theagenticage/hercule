@@ -16,6 +16,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import { RUNNER_WORKSPACE_VARIABLE } from "../credentials";
 import { tearDown } from "./dispose";
 import {
   readCurrentBranch,
@@ -322,7 +323,7 @@ export const provisionWorkspace = async (
   // While provisioning, the runner's git carries the workspace id, so the
   // credential helper can prove to the controller which workspace it is
   // creating and get a credential for it.
-  const env = { ...substrate.gitEnv, HERCULE_WORKSPACE_PROVISIONING: frame.workspaceId };
+  const env = { ...substrate.gitEnv, [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId };
   if (frame.kind === "ephemeral") return makeEphemeral(substrate, frame, env);
   const one = frame.checkouts[0];
   if (one === undefined) {

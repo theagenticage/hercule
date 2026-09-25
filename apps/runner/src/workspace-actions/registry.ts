@@ -4,9 +4,10 @@
  */
 import type { WorkspaceAction } from "./action";
 import { gitCommit } from "./git-commit";
+import { gitPush } from "./git-push";
 
 const WORKSPACE_ACTIONS: ReadonlyMap<string, WorkspaceAction> = new Map(
-  [gitCommit].map((action) => [action.id, action]),
+  [gitCommit, gitPush].map((action) => [action.id, action]),
 );
 
 /** The ids of every workspace action this runner build implements. */

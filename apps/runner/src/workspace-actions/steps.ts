@@ -23,7 +23,7 @@ import {
   type WorkspaceStepStart,
   type WorkspaceStepStop,
 } from "@hercule/protocol";
-import { buildGitCredentialEnv } from "../credentials";
+import { buildGitCredentialEnv, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
 import { describeCause } from "../report";
 import { buildSubstrateEnv, type Workspaces } from "../workspaces";
 import type { WorkspaceAction } from "./action";
@@ -162,10 +162,14 @@ export const makeWorkspaceSteps = (options: {
         } as const;
       }
       // Built the way a session's environment is built, so a commit is made
-      // as the same account a session in this workspace commits as.
+      // as the same account a session in this workspace commits as. No
+      // session runs the step, so git's credential helper asks as the
+      // runner, naming the workspace: the controller answers that while a
+      // workspace step of the workspace runs on this runner.
       const gitEnv = {
         ...buildSubstrateEnv(options.baseEnv),
         ...buildGitCredentialEnv({ socketPath: options.socketPath, identity: frame.gitIdentity }),
+        [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId,
       };
       const context = { workspace, resourceId: frame.resourceId, gitEnv };
       const { checkoutBranch } = frame;
@@ -292,9 +296,13 @@ export const makeWorkspaceSteps = (options: {
         }
         // No trace of the step: it never ran here, or the runner crashed
         // while it ran and before its result file was written. Running it
-        // again is safe for `git.commit`: in a checkout that already has the
-        // commit, nothing is left to stage, so the step succeeds with
-        // `committed: false` and HEAD, which is that commit.
+        // again is safe for every action this runner has:
+        //
+        // - `git.commit`: in a checkout that already has the commit, nothing
+        //   is left to stage, so the step succeeds with `committed: false`
+        //   and HEAD, which is that commit;
+        // - `git.push`: a remote that already has the branch's commit
+        //   accepts the same push again and changes nothing.
         const step: HeldStep = {
           key,
           workspaceId: frame.workspaceId,

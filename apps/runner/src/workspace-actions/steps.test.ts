@@ -20,6 +20,7 @@ import type {
 } from "@hercule/protocol";
 import { makeWorkspaces } from "../workspaces";
 import {
+  addBranch,
   buildCheckout,
   buildProvisionFrame,
   cleanTemporaries,
@@ -27,6 +28,7 @@ import {
   createTemporaryDir,
   makeRemote,
   runGitOrThrow,
+  type Remote,
 } from "../workspaces/testing";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./steps";
 
@@ -67,6 +69,8 @@ interface Runner {
 interface Workspace {
   readonly workspaceId: string;
   readonly dir: string;
+  /** The bare repository the workspace's one checkout was cloned from. */
+  readonly remote: Remote;
   /**
    * Makes every commit in this workspace block in its pre-commit hook until
    * `release` runs. Returns the file the hook creates once a commit reaches it.
@@ -99,15 +103,15 @@ const makeRunner = (deadline?: Duration.Duration): Runner => {
   ): Promise<Workspace> => {
     const workspaceId = createId();
     const resourceId = createId();
-    const remote = makeRemote().url;
+    const remote = makeRemote();
     const report = await workspaces.provision(
       buildProvisionFrame({
         workspaceId,
         kind,
         checkouts: [
           kind === "ephemeral"
-            ? buildCheckout({ resourceId, remote, branch: BRANCH })
-            : buildCheckout({ resourceId, remote }),
+            ? buildCheckout({ resourceId, remote: remote.url, branch: BRANCH })
+            : buildCheckout({ resourceId, remote: remote.url }),
         ],
       }),
     );
@@ -131,7 +135,7 @@ const makeRunner = (deadline?: Duration.Duration): Runner => {
       chmodSync(hook, 0o755);
       return { reached, release: () => writeFileSync(released, "") };
     };
-    return { workspaceId, dir, blockCommits };
+    return { workspaceId, dir, remote, blockCommits };
   };
 
   return { steps, sent, storageDir, provisionWorkspace };
@@ -231,6 +235,81 @@ describe("git.commit", () => {
       output: { sha: before, branch: BRANCH, committed: false },
     });
     expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(before);
+  });
+});
+
+/** Returns the sha a completed `git.commit` step reports. */
+const readCommittedSha = (outcome: WorkspaceStepOutcome): string => {
+  expect(outcome.status).toBe("completed");
+  return outcome.status === "completed" ? (outcome.output as { sha: string }).sha : "";
+};
+
+describe("git.push", () => {
+  it("pushes the checkout's branch to its remote under the same name, and sets the upstream", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    const sha = readCommittedSha(
+      await runStep(runner, buildStart(workspace, { message: "Add a" })),
+    );
+
+    const outcome = await runStep(runner, buildStart(workspace, {}, "git.push"));
+
+    expect(outcome).toEqual({ status: "completed", output: { branch: BRANCH, sha } });
+    expect(runGitOrThrow(workspace.remote.path, "rev-parse", `refs/heads/${BRANCH}`)).toBe(sha);
+    expect(runGitOrThrow(workspace.dir, "config", `branch.${BRANCH}.remote`)).toBe("origin");
+    expect(runGitOrThrow(workspace.dir, "config", `branch.${BRANCH}.merge`)).toBe(
+      `refs/heads/${BRANCH}`,
+    );
+  });
+
+  it("pushes the branch its params name rather than the current one", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    runGitOrThrow(workspace.dir, "branch", "feature");
+    const feature = runGitOrThrow(workspace.dir, "rev-parse", "feature");
+
+    const outcome = await runStep(runner, buildStart(workspace, { branch: "feature" }, "git.push"));
+
+    expect(outcome).toEqual({ status: "completed", output: { branch: "feature", sha: feature } });
+    expect(runGitOrThrow(workspace.remote.path, "rev-parse", "refs/heads/feature")).toBe(feature);
+    expect(runGitOrThrow(workspace.remote.path, "branch", "--list", BRANCH)).toBe("");
+  });
+
+  it("never forces: a push the remote refuses as a non-fast-forward fails with git's error output", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    // The remote's branch of the same name holds a commit the checkout does
+    // not have, so a forced push would throw that commit away.
+    const theirs = addBranch(workspace.remote, BRANCH);
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    readCommittedSha(await runStep(runner, buildStart(workspace, { message: "Add a" })));
+
+    const outcome = await runStep(runner, {
+      ...buildStart(workspace, {}, "git.push"),
+      stepId: "push",
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
+    expect(outcome.status === "failed" && outcome.message).toContain("git push failed");
+    expect(outcome.status === "failed" && outcome.message).toContain("rejected");
+    expect(runGitOrThrow(workspace.remote.path, "rev-parse", `refs/heads/${BRANCH}`)).toBe(theirs);
+  });
+
+  it("refuses a branch name git would not accept, or would read as something else, and pushes nothing", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+
+    for (const branch of ["--force", "a..b", "@{-1}", "main:elsewhere"]) {
+      const outcome = await runStep(runner, buildStart(workspace, { branch }, "git.push"));
+
+      expect(outcome).toEqual({
+        status: "failed",
+        code: "action_failed",
+        message: `"${branch}" is not a valid branch name`,
+      });
+    }
+    expect(runGitOrThrow(workspace.remote.path, "branch", "--list")).toBe("* main");
   });
 });
 
