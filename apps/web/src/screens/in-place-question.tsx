@@ -16,6 +16,12 @@ import { Button } from "@hercule/ui";
  *   question shows.
  * - When one question replaces another, give the new one its own React `key`.
  *   It then remounts, takes focus, and remembers its own asking element.
+ * - By default the question and its buttons share one line, and a question
+ *   too long for it is cut short, with the full text in a tooltip. Pass
+ *   `stacked` when every word of the question matters: the question then
+ *   wraps over as many lines as it needs, with the buttons below it.
+ * - `disabled` disables both buttons, so the question cannot be answered
+ *   while an action the answer would interfere with is still running.
  */
 export function InPlaceQuestion({
   question,
@@ -23,24 +29,28 @@ export function InPlaceQuestion({
   acceptLabel,
   onDecline,
   onAccept,
+  stacked = false,
+  disabled = false,
 }: {
   readonly question: string;
   readonly declineLabel: string;
   readonly acceptLabel: string;
   readonly onDecline: () => void;
   readonly onAccept: () => void;
+  readonly stacked?: boolean;
+  readonly disabled?: boolean;
 }): JSX.Element {
   // The first render runs before the decline button takes focus, so the
   // focused element is still the one that asked.
   const [asker] = useState(() => document.activeElement);
-  return (
-    <div className="flex min-w-0 items-center gap-1.5 text-row text-muted">
-      {/* A long question is truncated in a narrow row, so the tooltip shows the full text. */}
-      <span title={question} className="min-w-0 truncate">
-        {question}
-      </span>
+  const buttons = (
+    <>
       <Button
         autoFocus
+        disabled={disabled}
+        // Stacked, the decline button starts the row under the question, so
+        // its text is pulled back to line up with the question's first letter.
+        className={stacked ? "-ml-2" : undefined}
         onClick={() => {
           // The asking element can take focus only after the page re-renders
           // without the question, so that render is flushed first.
@@ -50,9 +60,26 @@ export function InPlaceQuestion({
       >
         {declineLabel}
       </Button>
-      <Button variant="primary" onClick={onAccept}>
+      <Button variant="primary" disabled={disabled} onClick={onAccept}>
         {acceptLabel}
       </Button>
+    </>
+  );
+  if (stacked) {
+    return (
+      <div className="flex flex-col gap-1.5 text-row text-muted">
+        <p>{question}</p>
+        <div className="flex items-center gap-1.5">{buttons}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-row text-muted">
+      {/* A long question is truncated in a narrow row, so the tooltip shows the full text. */}
+      <span title={question} className="min-w-0 truncate">
+        {question}
+      </span>
+      {buttons}
     </div>
   );
 }

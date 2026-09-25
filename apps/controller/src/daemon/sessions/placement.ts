@@ -528,8 +528,12 @@ const make = Effect.gen(function* () {
             payload: open.payload,
             projectId: open.projectId,
             checkoutBranch: opened.checkoutBranch,
-            // The workspace's own connection if it has one, otherwise the
-            // thread default. A session pushes as one account, chosen here.
+            // A session pushes as one GitHub account, chosen here: the
+            // workspace's own connection if it has one, otherwise the
+            // caller's fallback. The fallback is the user's default GitHub
+            // Connection for a Thread and a conversation session, the
+            // parent's connection for a fork, and none for a spawn from an
+            // Agent.
             githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             at,
           });

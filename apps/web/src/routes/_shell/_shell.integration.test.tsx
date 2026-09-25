@@ -13,9 +13,10 @@ const api: Readonly<Record<string, Handler>> = {
       },
     },
   },
-  // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins
-  // and Secrets load data of their own.
+  // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins,
+  // Secrets and Assistants load data of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
+  "GET /api/v1/assistants": { body: { items: [] } },
   "GET /api/v1/runs": { body: { items: [] } },
   "GET /api/v1/workflows": { body: { items: [] } },
   "GET /api/v1/plugins": { body: [] },

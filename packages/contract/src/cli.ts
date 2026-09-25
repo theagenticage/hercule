@@ -213,11 +213,11 @@ export const CLI = {
     fields: {
       controller: {
         flag: "controller",
-        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, workspace expiry and how deep runs may nest (run.nestingLimit).",
+        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry and how deep runs may nest (run.nestingLimit).",
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults, topic order, mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), topic order, mutes.",
       },
     },
     errors: { unauthenticated: "user credential only: a session token is not allowed" },
@@ -1943,6 +1943,7 @@ export const CLI = {
           "segments",
           "--heartbeat",
           '{"enabled":true,"schedule":"0 9 * * 1-5","prompt":"Check in.","target":"web"}',
+          "--system-prompt-stdin",
         ],
         stdin: "You are Ada, a patient helper.",
       },

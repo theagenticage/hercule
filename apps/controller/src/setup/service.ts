@@ -89,7 +89,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Creates the user and the default assistant, finishes onboarding and
+     * Creates the user and the default assistant, marks setup complete and
      * returns a bearer token, so the caller is logged in when this returns.
      * The transport gate verifies the setup token before this runs. Fails
      * with `InvalidState` when setup is already complete, or when there is no

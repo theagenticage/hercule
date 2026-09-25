@@ -2,31 +2,24 @@ import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  filterGitHubConnections,
+  buildIdOptions,
   computeInstanceDefaults,
   computeThreadDefaults,
   buildThreadModelField,
   resolveThreadRowsMode,
 } from "@hercule/client-core";
-import type { AccessMode, ThreadRows, ThreadWorkspace } from "@hercule/contract";
-import { Field, FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
+import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
+import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
 import {
-  connectionsQuery,
   localRunnerQuery,
   profilesQuery,
   providersQuery,
   runnersQuery,
   settingsQuery,
 } from "../../../app/queries";
+import { AccessModeControl } from "../../../screens/access-mode-control";
 import { SaveStatus } from "../../../screens/save-status";
 import { useSaveSettings } from "./-form";
-
-const ACCESS_MODES: readonly AccessMode[] = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
 
 /**
  * The two choices for the workspace default, and the value each one stores.
@@ -46,10 +39,6 @@ export const Route = createFileRoute("/_shell/settings/threads")({
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
-      // The GitHub accounts for the select below. Prefetched rather than
-      // ensured, so if the controller cannot list them only that one field is
-      // empty, instead of the whole screen failing to load.
-      context.queryClient.prefetchQuery(connectionsQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),
@@ -71,7 +60,6 @@ function Threads(): JSX.Element {
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  const githubs = filterGitHubConnections(useQuery(connectionsQuery(client)).data?.items ?? []);
   const { save, saved, failure } = useSaveSettings(client);
 
   const rows = resolveThreadRowsMode(settings.user["ui.threadRows"]);
@@ -148,23 +136,12 @@ function Threads(): JSX.Element {
           </>
         )}
         <Row label="Access mode">
-          <SegmentedControl
-            aria-label="Access mode"
-            // Four hyphenated words must fit in one value column, so the
-            // segments use the smaller text size and less padding. That lets
-            // them fit without breaking a word.
-            className="[&>button]:px-1.5 [&>button]:text-fine"
+          <AccessModeControl
             value={defaults.accessMode}
-            onValueChange={(next) => {
-              save({ user: { "thread.accessMode": next as AccessMode } });
+            onChange={(mode) => {
+              save({ user: { "thread.accessMode": mode } });
             }}
-          >
-            {ACCESS_MODES.map((mode) => (
-              <SegmentedControlItem key={mode} value={mode}>
-                {mode}
-              </SegmentedControlItem>
-            ))}
-          </SegmentedControl>
+          />
         </Row>
         <Row label="Profile" htmlFor="thread-profile">
           <Select
@@ -174,9 +151,12 @@ function Threads(): JSX.Element {
               save({ user: { "thread.profileId": event.target.value } });
             }}
           >
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
+            {buildIdOptions(
+              profiles.map((profile) => ({ id: profile.id, label: profile.name })),
+              defaults.profileId,
+            ).map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
               </option>
             ))}
           </Select>
@@ -191,6 +171,7 @@ function Threads(): JSX.Element {
         <Row label="Workspace">
           <SegmentedControl
             aria-label="Workspace"
+            compact
             // With nothing stored, no segment is selected: the fine print
             // explains what happens then, and a selected segment would show a
             // choice nobody made.
@@ -209,34 +190,6 @@ function Threads(): JSX.Element {
       </FormCard>
 
       <FormCard
-        label="Threads · git"
-        fine="A thread working in a checkout acts through that repo's own Connection. Every other thread acts through this account."
-      >
-        {/* A `Field`, not a `Row` like its siblings: this label is three times
-            longer than the others, and in the rows' 110px label column it
-            would wrap to four lines beside a one-line select. */}
-        <Field id="thread-github" label="GitHub account for threads without a checkout">
-          <Select
-            id="thread-github"
-            value={settings.user["github.defaultConnectionId"] ?? ""}
-            onChange={(event) => {
-              // The setting is nullable, so "No account" clears it rather than
-              // storing an empty string, which the contract's `Id` rejects.
-              const picked = event.target.value;
-              save({ user: { "github.defaultConnectionId": picked === "" ? null : picked } });
-            }}
-          >
-            <option value="">No account</option>
-            {githubs.map((connection) => (
-              <option key={connection.id} value={connection.id}>
-                {connection.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </FormCard>
-
-      <FormCard
         label="Threads · display"
         fine={
           rows === "plain"
@@ -247,7 +200,7 @@ function Threads(): JSX.Element {
         <Row label="Sidebar rows">
           <SegmentedControl
             aria-label="Sidebar rows"
-            className="w-[220px]"
+            compact
             value={rows}
             onValueChange={(next) => {
               save({ user: { "ui.threadRows": next as ThreadRows } });

@@ -314,6 +314,24 @@ describe("every example in the table", () => {
       }
     }
   });
+
+  // An optional stdin field is read only with its `--<flag>-stdin` marker. An
+  // example that pipes content without the marker teaches a command whose
+  // input is dropped without a word.
+  it("reads the stdin of every example that pipes one", async () => {
+    for (const [id, row] of visible) {
+      const command = findCommandByWords((row.command ?? "").split(" "))!;
+      for (const [index, example] of (row.examples ?? []).entries()) {
+        if (example.stdin === undefined) continue;
+        let read = false;
+        await parseArguments(command, example.args, () => {
+          read = true;
+          return Promise.resolve(example.stdin ?? "");
+        });
+        expect(read, `${id} example ${index} pipes stdin that is never read`).toBe(true);
+      }
+    }
+  });
 });
 
 // Help that mentions a command that is not in the tree teaches a misspelling.

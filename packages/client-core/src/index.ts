@@ -12,6 +12,13 @@ export {
   findWebConversation,
   flattenMessagePages,
 } from "./assistants/conversation";
+export {
+  buildAssistantDraft,
+  buildAssistantUpdate,
+  dropSavedEdits,
+  mergeAssistantEdits,
+  type AssistantDraft,
+} from "./assistants/form";
 export { decideAssistantPresence, type AssistantPresence } from "./assistants/presence";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
@@ -42,6 +49,7 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export { buildIdOptions, type IdOption } from "./id-options";
 export { readJsonObject } from "./json-shape";
 export { listJsonLines, type JsonLine } from "./json-lines";
 export { joinCommand } from "./join-command";

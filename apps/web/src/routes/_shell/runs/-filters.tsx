@@ -80,7 +80,7 @@ export function RunFilterBar({
           </Select>
         </Field>
       </div>
-      <div className="ml-auto pb-1">
+      <div className="ml-auto">
         <Button variant="form" onClick={onRun}>
           Run workflow
         </Button>

@@ -297,7 +297,8 @@ export const runnerSessionsQuery = (client: HerculeClient, runnerId: string) =>
   });
 
 /**
- * Reads the permission profiles, for the profile field in Settings > Threads.
+ * Reads the permission profiles, for the profile fields in Settings > Threads
+ * and Settings > Assistants.
  * Profiles have no live topic, so only this browser's own writes update them.
  */
 export const profilesQuery = (client: HerculeClient) =>
@@ -437,8 +438,9 @@ export const runQuery = (client: HerculeClient, id: string) =>
 
 /**
  * Reads every assistant in a single page, oldest first, for the sidebar's
- * Assistants group and the onboarding step. A user keeps a handful of
- * assistants, so one page of the largest size holds them all.
+ * Assistants group, the onboarding step and Settings > Assistants. A user
+ * keeps a handful of assistants, so one page of the largest size holds them
+ * all.
  */
 export const assistantsQuery = (client: HerculeClient) =>
   queryOptions({
