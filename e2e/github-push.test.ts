@@ -481,7 +481,7 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
       expect(session.workspaceId).not.toBeNull();
       // Named after the thread, so the branch checked on GitHub afterwards
       // belongs to this session and nothing else.
-      threadBranch = `hercule/run-${session.id.slice(-8)}`;
+      threadBranch = `hercule/thread-${session.id.slice(-8)}`;
 
       // The thread is stopped whatever happens next: one left running keeps a
       // worktree and, on a real account, keeps spending.

@@ -335,7 +335,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       expect(only!.form).toBe("worktree");
       // The thread's branch belongs to the session alone: the end of the
       // session id tells two threads in one repo apart.
-      expect(only!.branch).toBe(`hercule/run-${spawned.id.slice(-8)}`);
+      expect(only!.branch).toBe(`hercule/thread-${spawned.id.slice(-8)}`);
       // It starts where `main` is, so the worktree came from the cache the
       // clone filled rather than from a repository nobody could reach.
       expect(only!.branches).toContain(only!.branch!);
