@@ -46,8 +46,8 @@ import {
   ProvisioningLayer,
   Retirement,
   RetirementLayer,
-  RunEngine,
-  RunEngineLayer,
+  RunExecutorLayer,
+  WorkflowRunsLayer,
 } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
@@ -297,16 +297,11 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
 const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
   Effect.gen(function* () {
     const runs = yield* RunService;
-    // Starting a run reads the workflow, checks its inputs against other
-    // domains' rows, and executes the steps afterwards; cancelling one stops
-    // the fiber that executes it. Both are the run engine's, a controller
-    // daemon use case.
-    const engine = yield* RunEngine;
     return handlers
-      .handle("start", ({ payload }) => withApiErrors(engine.startRun(payload)))
+      .handle("start", ({ payload }) => withApiErrors(runs.start(payload)))
       .handle("query", ({ query }) => withApiErrors(runs.query(query)))
       .handle("read", ({ params }) => withApiErrors(runs.read(params.id)))
-      .handle("cancel", ({ params }) => withApiErrors(engine.cancelRun(params.id)));
+      .handle("cancel", ({ params }) => withApiErrors(runs.cancel(params.id)));
   }),
 );
 
@@ -557,19 +552,26 @@ export const operationLayers = Layer.mergeAll(
   ProvisioningLayer,
   SubscriptionServiceLayer,
   EventKindsOperationLayer,
-  // The run engine reads workflows and calls the task service from its steps,
-  // so both are provided to it rather than merged next to it. The workflow
-  // service validates each trigger against the same list of event kinds that
-  // `eventKind.query` returns. The engine executes runs on fibers of its own,
-  // so the live topics' listener is provided to it as well: the same instance
-  // as the one merged below, because a layer is built once however many times
-  // it is provided.
-  RunEngineLayer.pipe(
-    Layer.provideMerge(WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer))),
+  // The run service reads workflows and calls the task service from its
+  // steps, so both are provided to it rather than merged next to it. The
+  // workflow service validates each trigger against the same list of event
+  // kinds that `eventKind.query` returns, and asks the runs domain, through
+  // the controller daemon, whether a workflow still has an unfinished run. A run's
+  // execution is carried out by the controller daemon's Run Executor, apart
+  // from any request, so the live topics' listener is provided to the service
+  // as well: the same instance as the one merged below, because a layer is
+  // built once however many times it is provided.
+  RunServiceLayer.pipe(
+    Layer.provideMerge(
+      WorkflowServiceLayer.pipe(
+        Layer.provide(EventKindsOperationLayer),
+        Layer.provide(WorkflowRunsLayer),
+      ),
+    ),
     Layer.provideMerge(TaskServiceLayer),
+    Layer.provideMerge(RunExecutorLayer),
     Layer.provide(LiveTopicsLayer),
   ),
-  RunServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );

@@ -13,9 +13,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Run } from "@hercule/contract";
-import { del, get, readErrorBody } from "../../http/testing";
-import { WAIT_DEADLINE_MS, waitUntil } from "../../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
+import { del, get, readErrorBody } from "../http/testing";
+import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
+import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,

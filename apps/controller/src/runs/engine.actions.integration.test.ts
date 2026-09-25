@@ -11,15 +11,15 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@hercule/contract";
-import { post, send } from "../../http/testing";
-import { spawnAgentWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../../sessions/testing";
+import { post, send } from "../http/testing";
+import { spawnAgentWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import {
   ABSENT_ID,
   createWorkflow,
   createWorkflowOrFail,
   readIssues,
   withSetUpController,
-} from "../../workflows/testing";
+} from "../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
@@ -34,7 +34,7 @@ import {
   withRunFleet,
   expectStatus,
 } from "./testing";
-import { runEffect } from "../testing";
+import { runEffect } from "../daemon/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 

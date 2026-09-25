@@ -11,17 +11,19 @@ import { CurrentActor, type Actor } from "../actor";
 import { AuditLog, EventKindsLayer } from "../events";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
-import { WorkflowService, WorkflowServiceLayer } from "./index";
+import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "./index";
 import { buildFileTaskSource } from "./testing";
 
 type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
 
 /**
  * Uses the real plugin host, because a save validates each step's action
- * against the built-in actions that the host registers.
+ * against the built-in actions that the host registers. No workflow here has
+ * a run, which the HTTP tests of `workflow.delete` cover.
  */
 const layer = WorkflowServiceLayer.pipe(
   Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+  Layer.provide(Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) })),
   Layer.provideMerge(buildPluginStack()),
 );
 

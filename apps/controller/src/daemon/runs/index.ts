@@ -1,5 +1,5 @@
 /**
- * The run engine: starting a run (`start.ts`) and executing its steps
- * (`engine.ts`), with the helpers its tests share (`testing.ts`).
+ * Runs: where a run's execution is carried out. The runs domain decides what
+ * a run does; this folder implements its Run Executor with a fiber per run.
  */
-export { resumeUnfinishedRuns, RunEngine, RunEngineLayer, RunFibers } from "./engine";
+export { RunExecutorLayer, RunFibers } from "./executor";

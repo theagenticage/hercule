@@ -10,20 +10,20 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Run, RunSummary } from "@hercule/contract";
-import { get, readErrorBody } from "../../http/testing";
+import { get, readErrorBody } from "../http/testing";
 import {
   readProfileNamed,
   spawnAgentUnder,
   spawnAgentWithGrants,
   WAIT_DEADLINE_MS,
-} from "../../sessions/testing";
+} from "../sessions/testing";
 import {
   ABSENT_ID,
   buildFileTaskSource,
   createWorkflowOrFail,
   queryWorkflows,
   withSetUpController,
-} from "../../workflows/testing";
+} from "../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,

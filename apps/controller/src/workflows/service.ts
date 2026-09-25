@@ -71,8 +71,8 @@ import { connectionRepository } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, EventKinds } from "../events";
 import { PluginHost } from "../plugins";
-import { runRepository } from "../runs";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
+import { WorkflowRuns } from "./runs";
 import {
   listReferencedAgentIds,
   listReferencedConnectionIds,
@@ -253,7 +253,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const host = yield* PluginHost;
   const eventKinds = yield* EventKinds;
-  const runs = yield* runRepository;
+  const runs = yield* WorkflowRuns;
 
   /**
    * Reads from the database and the plugin host what validating the definition
@@ -608,5 +608,5 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  SqlClient.SqlClient | AuditLog | PluginHost | EventKinds
+  SqlClient.SqlClient | AuditLog | PluginHost | EventKinds | WorkflowRuns
 > = Layer.effect(WorkflowService)(make);

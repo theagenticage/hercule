@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
   formatIssue,
@@ -25,19 +26,20 @@ import {
   type TaskFilter,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
-import { CurrentActor, type RunActor } from "../../actor";
-import { nowIso } from "../../db";
-import { renderTemplates } from "../../expressions";
+import { CurrentActor, type RunActor } from "../actor";
+import { nowIso } from "../db";
+import { renderTemplates } from "../expressions";
 import {
   isBuiltInActionId,
   PluginHost,
   type BuiltInActionId,
   type RegisteredWorkflowAction,
-} from "../../plugins";
-import { runRepository, StepRecordEnded } from "../../runs";
-import { TaskService } from "../../tasks";
-import { buildRunContext } from "./routing";
+} from "../plugins";
+import { TaskService } from "../tasks";
+import { runRepository, StepRecordEnded } from "./repository";
+import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
+import { commitUninterruptibly } from "./transaction";
 
 /**
  * The codes of the step errors the engine writes itself. A step whose action
@@ -174,11 +176,7 @@ const waitFrom = (startedAt: string, seconds: number): Effect.Effect<Record<stri
 /** What executing a step needs from the run engine that calls it. */
 interface StepExecutionNeeds {
   /** `run.start`, which the `run.start` action calls as the run. */
-  readonly startRun: (input: RunStartInput) => Effect.Effect<RunStarted, RunStartError>;
-  /** Commits a write set in a transaction that cannot be interrupted. */
-  readonly commitUninterruptibly: <A, E>(
-    effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | SqlError>;
+  readonly start: (input: RunStartInput) => Effect.Effect<RunStarted, RunStartError>;
   /** Fails the run at a step, in a transaction of its own. */
   readonly failRun: (
     runId: string,
@@ -198,13 +196,9 @@ interface StepExecutionNeeds {
  * Builds `executeStep`, which executes one running step record of a run and
  * records how it ended.
  */
-export const makeStepExecution = ({
-  startRun,
-  commitUninterruptibly,
-  failRun,
-  routeAfterStep,
-}: StepExecutionNeeds) =>
+export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecutionNeeds) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const tasks = yield* TaskService;
     const host = yield* PluginHost;
@@ -216,9 +210,8 @@ export const makeStepExecution = ({
      *
      * They are here rather than on the action catalog's entries (plugins
      * domain) because an action's code must reach the domain it acts on, and
-     * the catalog sits below those domains. The `run.start` action starts a
-     * run, which only the run engine can do, and no domain may import the
-     * controller daemon.
+     * the catalog sits below those domains. The runs domain sits above tasks
+     * in the domain graph, so it calls the task service directly.
      */
     const builtInActions: Record<BuiltInActionId, BuiltInActionHandler> = {
       "task.create": {
@@ -237,7 +230,7 @@ export const makeStepExecution = ({
       // The action returns the first page. A step reads it to decide what the
       // run does next, and the first page is enough for that.
       "task.query": { inTransaction: true, execute: (input) => tasks.query(input as TaskFilter) },
-      "run.start": { inTransaction: true, execute: (input) => startRun(input as RunStartInput) },
+      "run.start": { inTransaction: true, execute: (input) => start(input as RunStartInput) },
       wait: {
         inTransaction: false,
         execute: (input, step) =>
@@ -349,15 +342,15 @@ export const makeStepExecution = ({
             actor,
           );
           execute = builtIn.inTransaction
-            ? commitUninterruptibly(Effect.flatMap(called, completeStep))
-            : Effect.flatMap(called, (output) => commitUninterruptibly(completeStep(output)));
+            ? commitUninterruptibly(sql, Effect.flatMap(called, completeStep))
+            : Effect.flatMap(called, (output) => commitUninterruptibly(sql, completeStep(output)));
         } else if (pluginExecute !== undefined) {
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {
               runId: run.id,
               stepId: attempt.stepId,
             }),
-            (output) => commitUninterruptibly(completeStep(output)),
+            (output) => commitUninterruptibly(sql, completeStep(output)),
           );
         } else {
           return yield* failRun(

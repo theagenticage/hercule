@@ -1,7 +1,7 @@
 /**
  * Reads and writes the `runs`, `run_steps` and `run_edge_traversals` tables.
  * This module has no policy: which status a run or a step record moves to,
- * and when, is decided by the run engine in the controller daemon.
+ * and when, is decided by the run engine (`engine.ts`).
  *
  * Every write announces the run's id on the `run` live topic once it commits,
  * so a screen that shows the run reads it again. The repository announces,

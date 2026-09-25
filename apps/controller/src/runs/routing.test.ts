@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { StepRecord, WorkflowDefinition } from "@hercule/contract";
-import { buildRunContext, decideRouting, type RoutedRun } from "./routing";
+import { decideRouting, type RoutedRun } from "./routing";
 
 const at = "2026-09-25T00:00:00.000Z";
 
@@ -255,22 +255,6 @@ describe("an edge condition that cannot be decided", () => {
       failureReason: "expression-error",
       failedEdge: { index: 1 },
     });
-  });
-});
-
-describe("buildRunContext", () => {
-  it("holds the output of each step's latest iteration, and leaves out a step whose latest iteration was skipped", () => {
-    const context = buildRunContext({
-      inputs: { target: 3 },
-      steps: [
-        buildCompleted("count", 1, { n: 1 }),
-        buildCompleted("count", 2, { n: 2 }),
-        buildCompleted("review", 1, { ok: true }),
-        { stepId: "review", iteration: 2, status: "skipped", finishedAt: at },
-        buildPending("count", 3),
-      ],
-    });
-    expect(context).toEqual({ inputs: { target: 3 }, steps: { count: { output: { n: 2 } } } });
   });
 });
 

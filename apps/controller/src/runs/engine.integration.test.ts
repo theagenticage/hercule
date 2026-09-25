@@ -28,14 +28,10 @@ import {
   post,
   waitWithin,
   type ServerHarness,
-} from "../../http/testing";
-import {
-  buildActionPlugin,
-  NOTE_APPEND_ACTION,
-  NOTE_APPEND_ACTION_ID,
-} from "../../plugins/testing";
-import { WAIT_DEADLINE_MS } from "../../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
+} from "../http/testing";
+import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
+import { WAIT_DEADLINE_MS } from "../sessions/testing";
+import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
   expectRefusedAt,
@@ -48,7 +44,7 @@ import {
   waitForRunToFinish,
   expectStatus,
 } from "./testing";
-import { runEffect } from "../testing";
+import { runEffect } from "../daemon/testing";
 
 /** Long enough for a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });

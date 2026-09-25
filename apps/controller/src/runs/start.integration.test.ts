@@ -12,18 +12,14 @@
  * start the run.
  */
 import { describe, expect, it, vi } from "vitest";
-import { del, readErrorBody } from "../../http/testing";
-import {
-  buildActionPlugin,
-  NOTE_APPEND_ACTION,
-  NOTE_APPEND_ACTION_ID,
-} from "../../plugins/testing";
+import { del, readErrorBody } from "../http/testing";
+import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
 import {
   readProfileNamed,
   spawnAgentUnder,
   WAIT_DEADLINE_MS,
   withAgentFleet,
-} from "../../sessions/testing";
+} from "../sessions/testing";
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
@@ -34,7 +30,7 @@ import {
   localMailPlugin,
   updateWorkflow,
   withSetUpController,
-} from "../../workflows/testing";
+} from "../workflows/testing";
 import {
   buildCreateStep,
   countRuns,
@@ -47,7 +43,7 @@ import {
   startRun,
   waitForRunToFinish,
 } from "./testing";
-import { runEffect } from "../testing";
+import { runEffect } from "../daemon/testing";
 
 /** Long enough for an agent fleet, a session, and a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });

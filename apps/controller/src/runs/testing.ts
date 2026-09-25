@@ -10,12 +10,12 @@ import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
 import type { Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
-import { get, post, type ServerHarness } from "../../http/testing";
-import { buildActionPlugin, createPluginFixture } from "../../plugins/testing";
-import type { RunPage } from "../../runs";
-import { waitUntil, withFleet as sharedWithFleet, type Arranged } from "../../sessions/testing";
-import { readIssues } from "../../workflows/testing";
-import { FACTS, MODELS, PROVIDER, runEffect } from "../testing";
+import { get, post, type ServerHarness } from "../http/testing";
+import { buildActionPlugin, createPluginFixture } from "../plugins/testing";
+import type { RunPage } from "./service";
+import { waitUntil, withFleet as sharedWithFleet, type Arranged } from "../sessions/testing";
+import { readIssues } from "../workflows/testing";
+import { FACTS, MODELS, PROVIDER, runEffect } from "../daemon/testing";
 
 const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
 
