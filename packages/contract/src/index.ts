@@ -325,6 +325,7 @@ export {
 } from "./groups/workflow-source";
 export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
 export {
+  FailedEdge,
   FailureReason,
   Run,
   RUN_SORT_FIELDS,

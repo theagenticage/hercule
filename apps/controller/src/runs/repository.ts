@@ -19,6 +19,7 @@ import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
+  FailedEdge,
   FailureReason,
   Run,
   RunOrigin,
@@ -73,21 +74,14 @@ export type RunOutcome =
       readonly status: "failed";
       readonly failureReason: Exclude<FailureReason, "controller-error">;
       readonly failedStepId: string;
-      /** The index in the plan's edges of the edge the run failed at, when it failed at one. */
-      readonly failedEdgeIndex?: number;
-      /** What went wrong at that edge, when the run failed at one. */
-      readonly failureMessage?: string;
+      /** The edge the run failed at, when it failed at one. */
+      readonly failedEdge?: FailedEdge;
     }
   | {
       readonly status: "failed";
       readonly failureReason: "controller-error";
       /** Absent when the run failed outside any step. */
       readonly failedStepId?: string;
-      // A controller error never happens at an edge, so these two are never
-      // set. They are declared so that `finish` can read them from any
-      // failed outcome.
-      readonly failedEdgeIndex?: undefined;
-      readonly failureMessage?: undefined;
     };
 
 /**
@@ -256,8 +250,14 @@ const parseStatusColumns = (row: StatusColumns) => {
             status: "failed",
             failureReason,
             failedStepId: requireColumn(row.failed_step_id, "runs", "failed_step_id"),
-            ...(row.failed_edge_index === null ? {} : { failedEdgeIndex: row.failed_edge_index }),
-            ...(row.failure_message === null ? {} : { failureMessage: row.failure_message }),
+            ...(row.failed_edge_index === null
+              ? {}
+              : {
+                  failedEdge: {
+                    index: row.failed_edge_index,
+                    message: requireColumn(row.failure_message, "runs", "failure_message"),
+                  },
+                }),
             startedAt: startedAt(),
             finishedAt: finishedAt(),
           } as const);
@@ -620,13 +620,17 @@ const make = Effect.gen(function* () {
     /** Ends a pending or running run. Does nothing to a run that has already ended. */
     finish: (id: string, ending: RunOutcome, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        const failedEdge =
+          ending.status === "failed" && ending.failureReason !== "controller-error"
+            ? ending.failedEdge
+            : undefined;
         yield* sql`
           UPDATE runs SET
             status = ${ending.status},
             failure_reason = ${ending.status === "failed" ? ending.failureReason : null},
             failed_step_id = ${ending.status === "failed" ? (ending.failedStepId ?? null) : null},
-            failed_edge_index = ${ending.status === "failed" ? (ending.failedEdgeIndex ?? null) : null},
-            failure_message = ${ending.status === "failed" ? (ending.failureMessage ?? null) : null},
+            failed_edge_index = ${failedEdge?.index ?? null},
+            failure_message = ${failedEdge?.message ?? null},
             output = ${ending.status === "completed" && ending.output !== undefined ? JSON.stringify(ending.output) : null},
             finished_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ('pending', 'running')

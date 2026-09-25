@@ -321,22 +321,21 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 
 /**
  * Returns a run's failure reason, the step it failed at, the edge it failed
- * at as `count -> file`, and what went wrong there, as the fields of `run
- * read`, or no fields for a run that did not fail. A run the controller could
- * not carry out may have failed before it reached any step, and only a run
- * that failed at an edge has a failed edge and a failure message.
+ * at as `count -> file`, and what went wrong at that edge, as the fields of
+ * `run read`, or no fields for a run that did not fail. A run the controller
+ * could not carry out may have failed before it reached any step, and only a
+ * run that failed at an edge has a failed edge and its message.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
-  const failedEdge = findFailedEdge(run);
+  const planEdge = findFailedEdge(run);
   return {
     failureReason: run.failureReason,
     ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
-    ...(failedEdge === undefined ? {} : { failedEdge: `${failedEdge.from} -> ${failedEdge.to}` }),
-    // A `controller-error` failure has no `failureMessage`; the check narrows the type.
-    ...(run.failureReason === "controller-error" || run.failureMessage === undefined
-      ? {}
-      : { failureMessage: run.failureMessage }),
+    ...(planEdge === undefined ? {} : { failedEdge: `${planEdge.from} -> ${planEdge.to}` }),
+    ...("failedEdge" in run && run.failedEdge !== undefined
+      ? { failedEdgeMessage: run.failedEdge.message }
+      : {}),
   };
 };
 

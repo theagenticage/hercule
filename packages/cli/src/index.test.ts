@@ -1445,8 +1445,7 @@ describe("the run commands", () => {
       status: "failed",
       failureReason: "iteration-limit",
       failedStepId: "count",
-      failedEdgeIndex: 1,
-      failureMessage: "The edge ran out.",
+      failedEdge: { index: 1, message: "The edge ran out." },
       steps: [record("file", 1), record("count", 1), record("file", 2), record("count", 2)],
       edgeTraversals: [2, 1, 0],
     };

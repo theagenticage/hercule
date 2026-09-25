@@ -107,17 +107,11 @@ export function RunHeader({
           {`run ${toIdTail(run.id)}`}
         </span>
       </p>
-      {/* A `controller-error` failure has no `failureMessage`; the check narrows the type. */}
-      {run.status !== "failed" || run.failureReason === "controller-error" ? null : (
-        <FailureMessage message={run.failureMessage} />
-      )}
+      {"failedEdge" in run && run.failedEdge !== undefined ? (
+        <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
+      ) : null}
     </header>
   );
-}
-
-/** Renders what went wrong at the edge a run failed at, or nothing for a run with no message. */
-function FailureMessage({ message }: { readonly message: string | undefined }): JSX.Element | null {
-  return message === undefined ? null : <p className="mt-1 text-fine text-fail">{message}</p>;
 }
 
 /** The separator between the facts of the status line. */

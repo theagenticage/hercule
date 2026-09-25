@@ -204,7 +204,7 @@ describe("maxTraversals", () => {
     expect(decision.ending).toMatchObject({
       _tag: "failed",
       failureReason: "iteration-limit",
-      failedEdgeIndex: 2,
+      failedEdge: { index: 2 },
     });
   });
 
@@ -214,8 +214,10 @@ describe("maxTraversals", () => {
 
   it("names the edge by its steps in the failure message, and counts one firing as 1 time", () => {
     expect(decideWithMore(true, [3, 2, 2]).ending).toMatchObject({
-      message:
-        "The run was to follow the edge from count to file again, but it has already followed it 2 times, the most this edge allows.",
+      failedEdge: {
+        message:
+          "The run was to follow the edge from count to file again, but it has already followed it 2 times, the most this edge allows.",
+      },
     });
     const once = buildPlan(
       ["file", "count"],
@@ -228,8 +230,10 @@ describe("maxTraversals", () => {
       decideRouting({ plan: once, inputs: {}, steps: RECORDS, edgeTraversals: [2, 1] }, "count"),
     );
     expect(decision.ending).toMatchObject({
-      message:
-        "The run was to follow the edge from count to file again, but it has already followed it 1 time, the most this edge allows.",
+      failedEdge: {
+        message:
+          "The run was to follow the edge from count to file again, but it has already followed it 1 time, the most this edge allows.",
+      },
     });
   });
 });
@@ -249,7 +253,7 @@ describe("an edge condition that cannot be decided", () => {
     expect(decision.ending).toMatchObject({
       _tag: "failed",
       failureReason: "expression-error",
-      failedEdgeIndex: 1,
+      failedEdge: { index: 1 },
     });
   });
 });

@@ -768,7 +768,7 @@ describe("a routed run interrupted by a restart", () => {
       expect(expectStatus(run, "failed")).toMatchObject({
         failureReason: "iteration-limit",
         failedStepId: "count",
-        failedEdgeIndex: 1,
+        failedEdge: { index: 1 },
       });
       for (const stepId of ["file", "count"]) {
         expect(

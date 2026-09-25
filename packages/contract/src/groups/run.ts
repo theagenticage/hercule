@@ -66,12 +66,12 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  * - `expression-error`: a template in a step's params, or a condition, could
  *   not be evaluated, or a condition gave something other than true or false.
  *   `failedStepId` names the step. For an edge's condition it names the
- *   edge's source step, and `failedEdgeIndex` names the edge.
+ *   edge's source step, and `failedEdge` names the edge.
  * - `step-failed`: a step's action failed. `failedStepId` names the step, and
  *   its step record holds the error.
  * - `iteration-limit`: an edge's condition was true, but the edge had already
  *   been followed as often as its `maxTraversals` allows. `failedStepId`
- *   names the edge's source step, and `failedEdgeIndex` the edge.
+ *   names the edge's source step, and `failedEdge` the edge.
  * - `controller-error`: the controller could not carry out the run for a
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
@@ -114,6 +114,21 @@ export type RunOrigin = Schema.Schema.Type<typeof RunOrigin>;
 export const StepError = Schema.Struct({ code: Schema.String, message: Schema.String });
 
 export type StepError = Schema.Schema.Type<typeof StepError>;
+
+/**
+ * The edge a run failed at, for a run that failed with `expression-error` in
+ * an edge's condition or with `iteration-limit`:
+ *
+ * - `index`: the edge's index in `plan.edges`;
+ * - `message`: what went wrong at the edge, a sentence for a person: the
+ *   condition's evaluation error, or the `maxTraversals` the run reached.
+ *
+ * A run that failed at a step has no failed edge; its step record holds the
+ * error.
+ */
+export const FailedEdge = Schema.Struct({ index: Schema.Int, message: Schema.String });
+
+export type FailedEdge = Schema.Schema.Type<typeof FailedEdge>;
 
 /** The fields every step record has, whatever its status. */
 const STEP_RECORD_FIELDS = {
@@ -178,7 +193,7 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *   completed run has (`output`), which `completedFields` holds.
  * - `failed` at a step (`expression-error`, `step-failed` or
  *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
- *   `failedEdgeIndex` and `failureMessage` when the run failed at an edge.
+ *   `failedEdge` when the run failed at an edge.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
  * - `cancelled`: `finishedAt`, and `startedAt` if the run had started.
@@ -207,14 +222,8 @@ const buildRunStatusVariants = <
       status: Schema.Literal("failed"),
       failureReason: Schema.Literals(["expression-error", "step-failed", "iteration-limit"]),
       failedStepId: Schema.String,
-      /** The index in `plan.edges` of the edge the run failed at, when it failed at one. */
-      failedEdgeIndex: Schema.optionalKey(Schema.Int),
-      /**
-       * What went wrong at the edge the run failed at, when it failed at one:
-       * the condition's evaluation error, or the `maxTraversals` it reached.
-       * A failure at a step keeps its message on the step record instead.
-       */
-      failureMessage: Schema.optionalKey(Schema.String),
+      /** The edge the run failed at, when it failed at one. */
+      failedEdge: Schema.optionalKey(FailedEdge),
       startedAt: Timestamp,
       finishedAt: Timestamp,
     }),
@@ -269,7 +278,7 @@ export type Run = Schema.Schema.Type<typeof Run>;
 /**
  * One run in the run list: the run without its plan, step records and
  * output, which are long. `run.read` returns them. A run that failed at an
- * edge keeps `failedEdgeIndex` and `failureMessage` here too, but a summary
+ * edge keeps `failedEdge` here too, but a summary
  * has no plan to look the edge up in.
  */
 export const RunSummary = Schema.Union(

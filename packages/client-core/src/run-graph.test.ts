@@ -137,9 +137,11 @@ const DEMO_ITERATION_LIMIT: Run = {
   status: "failed",
   failureReason: "iteration-limit",
   failedStepId: "count",
-  failedEdgeIndex: 3,
-  failureMessage:
-    "The run was to follow the edge from count to file again, but it has already followed it 3 times, the most this edge allows.",
+  failedEdge: {
+    index: 3,
+    message:
+      "The run was to follow the edge from count to file again, but it has already followed it 3 times, the most this edge allows.",
+  },
   startedAt: START,
   finishedAt: at(500),
   steps: loopRecords(4),
@@ -342,9 +344,11 @@ describe("buildRunGraph", () => {
     const failed: Run = {
       ...DEMO_ITERATION_LIMIT,
       failureReason: "expression-error",
-      failedEdgeIndex: 4,
-      failureMessage:
-        "The condition of the edge from count to escalate could not be evaluated: no such key",
+      failedEdge: {
+        index: 4,
+        message:
+          "The condition of the edge from count to escalate could not be evaluated: no such key",
+      },
       steps: loopRecords(1),
       edgeTraversals: [0, 1, 1, 0, 0, 0, 0],
     };

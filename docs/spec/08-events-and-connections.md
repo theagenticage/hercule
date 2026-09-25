@@ -148,7 +148,7 @@ The controller emits events about its own state, connection-less, through the sa
 | Kind | Payload | Emitted when |
 |---|---|---|
 | `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, ~~outputs~~ output?, taskId?, triggerEventId?, startedAt, finishedAt}`; ~~`outputs`~~ `output` = the terminal step's output, absent when the run completed without a terminal step, the name the run record uses *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, `taskId` = the run's Task link | a run reaches `completed` |
-| `run.failed` | the `run.completed` fields plus `failureReason`, `failedStepId?` and `failedEdgeIndex?`, the index in the plan's edges of the edge the run failed at, and `failureMessage?`, why that edge failed *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* | a run reaches `failed` |
+| `run.failed` | the `run.completed` fields plus `failureReason`, `failedStepId?` and `failedEdge?`, the edge the run failed at as its index in the plan's edges and why that edge failed *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* | a run reaches `failed` |
 | `run.cancelled` | the `run.completed` fields | a run reaches `cancelled` (not a failure: a failure-notification workflow must not fire on a deliberate cancel) |
 | `task.created` | full Task snapshot | a Task is created |
 | `task.updated` | `{taskId, changes}`; `changes` carries `{old, new}` per scalar field and `{added, removed}` per array field; one update op = one event; provenance-only appends fire it too | a Task is updated |

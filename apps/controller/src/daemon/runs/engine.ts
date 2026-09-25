@@ -239,8 +239,7 @@ const make = Effect.gen(function* () {
             status: "failed",
             failureReason: ending.failureReason,
             failedStepId: stepId,
-            failedEdgeIndex: ending.failedEdgeIndex,
-            failureMessage: ending.message,
+            failedEdge: ending.failedEdge,
           },
           at,
         );

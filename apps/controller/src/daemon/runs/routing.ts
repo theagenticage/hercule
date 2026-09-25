@@ -23,7 +23,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
-import type { Run, WorkflowDefinition } from "@hercule/contract";
+import type { FailedEdge, Run, WorkflowDefinition } from "@hercule/contract";
 import { evaluateCondition, type ExpressionError } from "../../expressions";
 import { isUnfinished } from "../../runs";
 
@@ -50,10 +50,8 @@ export type RoutingEnding =
        *   already followed the edge as often as its `maxTraversals` allows.
        */
       readonly failureReason: "expression-error" | "iteration-limit";
-      /** The index in the plan's edges of the edge the run failed at. */
-      readonly failedEdgeIndex: number;
-      /** What went wrong at the edge, for the run's `failureMessage`. */
-      readonly message: string;
+      /** The edge the run failed at, and what went wrong there. */
+      readonly failedEdge: FailedEdge;
     };
 
 /**
@@ -242,8 +240,10 @@ export const decideRouting = (
           return buildDecision({
             _tag: "failed",
             failureReason: "expression-error",
-            failedEdgeIndex: index,
-            message: `The condition of the edge from ${edge.from} to ${edge.to} could not be evaluated: ${holds.failure.message}`,
+            failedEdge: {
+              index,
+              message: `The condition of the edge from ${edge.from} to ${edge.to} could not be evaluated: ${holds.failure.message}`,
+            },
           });
         }
         if (!holds.success) continue;
@@ -253,10 +253,12 @@ export const decideRouting = (
         return buildDecision({
           _tag: "failed",
           failureReason: "iteration-limit",
-          failedEdgeIndex: index,
-          // The message names the edge by its steps rather than its index,
-          // because the user reads it on the run's page.
-          message: `The run was to follow the edge from ${edge.from} to ${edge.to} again, but it has already followed it ${edge.maxTraversals === 1 ? "1 time" : `${String(edge.maxTraversals)} times`}, the most this edge allows.`,
+          failedEdge: {
+            index,
+            // The message names the edge by its steps rather than its index,
+            // because the user reads it on the run's page.
+            message: `The run was to follow the edge from ${edge.from} to ${edge.to} again, but it has already followed it ${edge.maxTraversals === 1 ? "1 time" : `${String(edge.maxTraversals)} times`}, the most this edge allows.`,
+          },
         });
       }
       traversals[index] = count + 1;

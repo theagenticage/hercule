@@ -264,7 +264,7 @@ describe("an edge condition", () => {
       expect(failed).toMatchObject({
         failureReason: "expression-error",
         failedStepId: "start",
-        failedEdgeIndex: 1,
+        failedEdge: { index: 1 },
       });
       expect(findStepRecords(run, "check")).toEqual([]);
     });
@@ -299,7 +299,7 @@ describe("a condition that cannot be decided", () => {
         expect(failed).toMatchObject({
           failureReason: "expression-error",
           failedStepId: "start",
-          failedEdgeIndex: 1,
+          failedEdge: { index: 1 },
         });
         expect(listStatuses(run, "start")).toEqual(["completed"]);
         // Edge 0 fired in the same transaction, before edge 1 failed.
@@ -322,8 +322,10 @@ describe("a condition that cannot be decided", () => {
 
       expect(expectStatus(run, "failed")).toMatchObject({
         failureReason: "expression-error",
-        failedEdgeIndex: 0,
-        failureMessage: expect.stringContaining("No such key: no_such_field") as unknown,
+        failedEdge: {
+          index: 0,
+          message: expect.stringContaining("No such key: no_such_field") as unknown,
+        },
       });
     });
   });
@@ -350,7 +352,7 @@ describe("a condition that cannot be decided", () => {
         const failed = expectStatus(run, "failed");
         expect(failed.failureReason).toBe("expression-error");
         expect(failed.failedStepId).toBe("guarded");
-        expect("failedEdgeIndex" in failed, JSON.stringify(run)).toBe(false);
+        expect("failedEdge" in failed, JSON.stringify(run)).toBe(false);
         const [guarded] = findStepRecords(run, "guarded");
         expect(expectStatus(guarded, "failed").error.code).toBe("expression_error");
         expect(listStatuses(run, "start")).toEqual(["completed"]);
@@ -713,7 +715,7 @@ describe("maxTraversals", () => {
       expect(failed).toMatchObject({
         failureReason: "iteration-limit",
         failedStepId: "count",
-        failedEdgeIndex: 2,
+        failedEdge: { index: 2 },
       });
       // The edge fired twice, so `file` ran once as the entry step and twice more.
       expect(listStatuses(run, "file")).toEqual(["completed", "completed", "completed"]);

@@ -10,7 +10,6 @@ import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
 import {
   describeUnstartedStep,
   isRunLive,
-  readFailedEdgeIndex,
   readTimestamps,
   type Timestamps,
   type WorkState,
@@ -145,7 +144,8 @@ export const buildRunGraph = (run: Run): RunGraph => {
   const records = groupRecordsByStep(run.steps);
   const current = new Map([...records].map(([stepId, own]) => [stepId, findCurrentRecord(own)]));
   const stepIds = new Set(run.plan.steps.map((step) => step.id));
-  const failedEdgeIndex = readFailedEdgeIndex(run);
+  const failedEdgeIndex =
+    "failedEdge" in run && run.failedEdge !== undefined ? run.failedEdge.index : undefined;
   const isOverLimitRun = run.status === "failed" && run.failureReason === "iteration-limit";
   const isLive = isRunLive(run.status);
   // The steps that can still run: those with a pending or running record,

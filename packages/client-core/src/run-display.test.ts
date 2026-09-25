@@ -167,7 +167,7 @@ describe("findFailedEdge", () => {
     status: "failed",
     failureReason: "iteration-limit",
     failedStepId: "count",
-    failedEdgeIndex: 1,
+    failedEdge: { index: 1, message: "The edge ran out." },
   };
 
   it("finds the edge a run failed at, by its index in the plan", () => {
@@ -178,7 +178,7 @@ describe("findFailedEdge", () => {
       status: "failed",
       failureReason: "expression-error",
       failedStepId: "count",
-      failedEdgeIndex: 2,
+      failedEdge: { index: 2, message: "The condition could not be evaluated." },
     });
     assert.deepStrictEqual([condition?.from, condition?.to], ["count", "escalate"]);
   });

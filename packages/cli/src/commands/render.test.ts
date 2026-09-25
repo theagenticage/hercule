@@ -389,8 +389,7 @@ describe("hercule run", () => {
           status: "failed",
           failureReason: "iteration-limit",
           failedStepId: "count",
-          failedEdgeIndex: 2,
-          failureMessage: "The edge ran out.",
+          failedEdge: { index: 2, message: "The edge ran out." },
           steps: [],
           edgeTraversals: [],
           createdAt: "2026-09-24T10:00:00.000Z",
@@ -401,10 +400,10 @@ describe("hercule run", () => {
       lookUpCommand("run", "read"),
     );
     expect(lines.slice(2, 6)).toEqual([
-      "status          failed",
-      "failureReason   iteration-limit",
-      "failedStep      count",
-      "failureMessage  The edge ran out.",
+      "status             failed",
+      "failureReason      iteration-limit",
+      "failedStep         count",
+      "failedEdgeMessage  The edge ran out.",
     ]);
   });
 
@@ -462,30 +461,28 @@ describe("hercule run", () => {
   it("names the edge a run failed at its iteration limit, as from -> to", () => {
     const lines = renderLoopFailure({
       failureReason: "iteration-limit",
-      failedEdgeIndex: 2,
-      failureMessage: "The edge ran out.",
+      failedEdge: { index: 2, message: "The edge ran out." },
     });
     expect(lines.slice(2, 7)).toEqual([
-      "status          failed",
-      "failureReason   iteration-limit",
-      "failedStep      count",
-      "failedEdge      count -> file",
-      "failureMessage  The edge ran out.",
+      "status             failed",
+      "failureReason      iteration-limit",
+      "failedStep         count",
+      "failedEdge         count -> file",
+      "failedEdgeMessage  The edge ran out.",
     ]);
   });
 
   it("names the edge whose condition failed to evaluate, as from -> to", () => {
     const lines = renderLoopFailure({
       failureReason: "expression-error",
-      failedEdgeIndex: 3,
-      failureMessage: "no such key: urgent",
+      failedEdge: { index: 3, message: "no such key: urgent" },
     });
     expect(lines.slice(2, 7)).toEqual([
-      "status          failed",
-      "failureReason   expression-error",
-      "failedStep      count",
-      "failedEdge      count -> escalate",
-      "failureMessage  no such key: urgent",
+      "status             failed",
+      "failureReason      expression-error",
+      "failedStep         count",
+      "failedEdge         count -> escalate",
+      "failedEdgeMessage  no such key: urgent",
     ]);
   });
 

@@ -208,22 +208,9 @@ type PlanEdge = NonNullable<Run["plan"]["edges"]>[number];
  * Returns `undefined` for a run that did not fail, or that failed at a step
  * rather than at an edge.
  */
-export const findFailedEdge = (run: Run): PlanEdge | undefined => {
-  const index = readFailedEdgeIndex(run);
-  return index === undefined ? undefined : run.plan.edges?.[index];
-};
-
-/**
- * Returns the index in `plan.edges` of the edge a failed run failed at, or
- * `undefined` for a run that did not fail at an edge.
- *
- * The `controller-error` check is there for the type: that kind of failure
- * has no `failedEdgeIndex`, so the check narrows the run to the failures
- * that do.
- */
-export const readFailedEdgeIndex = (run: Run): number | undefined =>
-  run.status === "failed" && run.failureReason !== "controller-error"
-    ? run.failedEdgeIndex
+export const findFailedEdge = (run: Run): PlanEdge | undefined =>
+  "failedEdge" in run && run.failedEdge !== undefined
+    ? run.plan.edges?.[run.failedEdge.index]
     : undefined;
 
 /**
