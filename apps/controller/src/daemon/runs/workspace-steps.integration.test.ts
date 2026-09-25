@@ -317,17 +317,20 @@ describe("workspace steps over the runner socket", () => {
         );
 
         // A runner that connects again is sent the step it still owes a
-        // result for, after its workspace, which is still provisioning.
+        // result for, after its workspace, which is still provisioning. The
+        // workspace is owed both on its own and as the step's workspace, and
+        // is sent once. Every provision on arrival is sent before any step,
+        // so no second copy can still arrive after the step's frame.
         back.close();
         await waitForRunnerGone(arranged);
         const again = await arranged.reconnect();
         const resent = await waitForStepStart(again, waiting);
         expect(resent).toMatchObject(commitKey(waiting));
-        const provision = listFramesTagged(again, "workspaceProvision").find(
+        const provisions = listFramesTagged(again, "workspaceProvision").filter(
           (frame) => frame["workspaceId"] === resent["workspaceId"],
         );
-        expect(provision).toBeDefined();
-        expect(again.frames.indexOf(provision as (typeof again.frames)[number])).toBeLessThan(
+        expect(provisions).toHaveLength(1);
+        expect(again.frames.indexOf(provisions[0] as (typeof again.frames)[number])).toBeLessThan(
           again.frames.indexOf(resent as (typeof again.frames)[number]),
         );
       });
