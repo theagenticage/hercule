@@ -21,7 +21,7 @@ import { WorkspaceActionFailed, type WorkspaceActionContext } from "./action";
 export const STOP_GRACE: Duration.Duration = Duration.seconds(5);
 
 /** What running git for a workspace action needs: its environment, and how long a stopped git gets before SIGKILL. */
-type GitRun = Pick<WorkspaceActionContext, "gitEnv" | "stopGrace">;
+type GitOptions = Pick<WorkspaceActionContext, "gitEnv" | "stopGrace">;
 
 /** How one git process ended: its exit code and the end of each of its outputs. */
 export interface GitProcessResult {
@@ -61,17 +61,17 @@ const stopProcessGroup = (child: Bun.Subprocess, grace: Duration.Duration): Effe
  * never read as shell syntax.
  *
  * When the effect is interrupted, git's process group is stopped: SIGTERM,
- * then SIGKILL once `run.stopGrace` has passed.
+ * then SIGKILL once `options.stopGrace` has passed.
  */
 export const runGitProcess = (
   dir: string,
   args: ReadonlyArray<string>,
-  run: GitRun,
+  options: GitOptions,
 ): Effect.Effect<GitProcessResult> =>
   Effect.acquireUseRelease(
     Effect.sync(() =>
       Bun.spawn(["git", "-C", dir, ...args], {
-        env: { ...run.gitEnv },
+        env: { ...options.gitEnv },
         detached: true,
         // Nobody can type into git on a runner, so it must never wait for input.
         stdin: "ignore",
@@ -90,7 +90,8 @@ export const runGitProcess = (
           stderr: stderr.text.trim(),
         };
       }),
-    (child, exit) => (Exit.isSuccess(exit) ? Effect.void : stopProcessGroup(child, run.stopGrace)),
+    (child, exit) =>
+      Exit.isSuccess(exit) ? Effect.void : stopProcessGroup(child, options.stopGrace),
   );
 
 /**
@@ -116,9 +117,9 @@ export const buildGitFailure = (
 export const runGitOrFail = (
   dir: string,
   args: ReadonlyArray<string>,
-  run: GitRun,
+  options: GitOptions,
 ): Effect.Effect<GitProcessResult, WorkspaceActionFailed> =>
-  Effect.flatMap(runGitProcess(dir, args, run), (result) =>
+  Effect.flatMap(runGitProcess(dir, args, options), (result) =>
     result.code === 0 ? Effect.succeed(result) : Effect.fail(buildGitFailure(args, result)),
   );
 
