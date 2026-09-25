@@ -106,7 +106,7 @@ import type { WorkflowService } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 import { decideRouting, isStepConditionMet } from "./routing";
 import { makeRunStart } from "./start";
-import { makeStepExecution, type EngineStepError, type StepAttempt } from "./step";
+import { makeStepExecution, type EngineStepError, type StepRecordKey } from "./step";
 
 /**
  * The step error for a run that could not be carried out at this step for a
@@ -176,7 +176,7 @@ const make = Effect.gen(function* () {
    */
   const writeStepFailure = (
     runId: string,
-    attempt: StepAttempt,
+    attempt: StepRecordKey,
     error: StepError,
     failureReason: FailureReason,
     at: string,
@@ -202,7 +202,7 @@ const make = Effect.gen(function* () {
   /** Fails a run at one of its steps (see `writeStepFailure`), in a transaction of its own. */
   const failRun = (
     runId: string,
-    attempt: StepAttempt,
+    attempt: StepRecordKey,
     error: StepError,
     failureReason: FailureReason,
   ): Effect.Effect<void, SqlError> =>
@@ -263,7 +263,7 @@ const make = Effect.gen(function* () {
    */
   const startStepRecord = (
     runId: string,
-    record: StepAttempt,
+    record: StepRecordKey,
   ): Effect.Effect<Option.Option<{ readonly run: Run; readonly startedAt: string }>, SqlError> =>
     Effect.catchTag(
       commitUninterruptibly(

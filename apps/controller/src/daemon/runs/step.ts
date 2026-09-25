@@ -64,8 +64,12 @@ export interface EngineStepError extends StepError {
   readonly code: EngineStepErrorCode;
 }
 
-/** One attempt at a step, as far as ending it needs: which step, which attempt, and when it started, if it has. */
-export interface StepAttempt {
+/**
+ * Identifies one step record of a run: its step and its iteration. It also
+ * carries when the record started, if it has, because ending the record
+ * needs that time.
+ */
+export interface StepRecordKey {
   readonly stepId: string;
   readonly iteration: number;
   readonly startedAt?: string;
@@ -178,7 +182,7 @@ interface StepExecutionNeeds {
   /** Fails the run at a step, in a transaction of its own. */
   readonly failRun: (
     runId: string,
-    attempt: StepAttempt,
+    attempt: StepRecordKey,
     error: StepError,
     failureReason: FailureReason,
   ) => Effect.Effect<void, SqlError>;
@@ -253,7 +257,7 @@ export const makeStepExecution = ({
      * controller, so it is called after its record's `running` commits and
      * outside any transaction, and its record ends in a transaction of its own.
      */
-    return (run: Run, attempt: Required<StepAttempt>): Effect.Effect<void, SqlError> =>
+    return (run: Run, attempt: Required<StepRecordKey>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         // Starting the run checked that every step is an action step, and
         // the plan never changes.
