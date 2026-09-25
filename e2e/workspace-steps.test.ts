@@ -93,6 +93,7 @@ interface Run {
   readonly failedStepId?: string;
   readonly runnerId?: string;
   readonly workspaceId?: string;
+  readonly workspaceKeptUntil?: string;
   readonly steps: ReadonlyArray<StepRecord>;
 }
 
@@ -308,6 +309,133 @@ describe("a run with git.commit and git.push steps in its own workspace", () => 
       expect(commit?.error?.message).toContain("setup-went-wrong");
       // The edge never fired: nothing after the failed step ran.
       expect(run.steps.some((record) => record.stepId !== "commit")).toBe(false);
+    },
+    RUN_DEADLINE_MS + 30_000,
+  );
+});
+
+/**
+ * Stores a workflow that commits in an ephemeral workspace with one checkout
+ * of `resourceId`, then runs `then`, the source lines of one more step with
+ * the id `after`. Returns the workflow's id.
+ */
+const createCommitThenWorkflow = async (
+  resourceId: string,
+  then: ReadonlyArray<string>,
+): Promise<string> => {
+  const source = [
+    "name: Commit, then one more step",
+    "workspace:",
+    "  kind: ephemeral",
+    "  checkouts:",
+    `    - resourceId: ${resourceId}`,
+    "steps:",
+    "  - id: commit",
+    "    kind: action",
+    "    action: git.commit",
+    "    params:",
+    "      message: Save what setup wrote",
+    "  - id: after",
+    ...then,
+    "edges:",
+    "  - from: commit",
+    "    to: after",
+    "",
+  ].join("\n");
+  return parseJsonOutputOrFail<{ readonly workflow: { readonly id: string } }>(
+    await runLoggedInCli(["workflow", "create", "--json"], source),
+  ).workflow.id;
+};
+
+interface Workspace {
+  readonly status: string;
+  readonly disposedAt: string | null;
+}
+
+const readWorkspace = async (workspaceId: string): Promise<Workspace> =>
+  parseJsonOutputOrFail<Workspace>(
+    await runLoggedInCli(["workspace", "read", workspaceId, "--json"]),
+  );
+
+/*
+ * The workspace sweep that deletes a completed run's workspace runs every ten
+ * minutes, and the shipped program has no setting to shorten that, so the
+ * completed-run rule is covered by the sweep's integration tests in
+ * `apps/controller/src/daemon/workspaces/provisioning.integration.test.ts`.
+ * Here the workspace is deleted by hand, which needs no sweep.
+ */
+describe("the workspace of a run that failed or has not finished", () => {
+  it(
+    "keeps a failed run's workspace ready until workspace.dispose deletes it",
+    async () => {
+      const resourceId = await createRepo(
+        "https://hercule.test/acme/kept",
+        "echo from-setup > setup.txt",
+      );
+      // The second step updates a task that does not exist, so it fails.
+      const workflowId = await createCommitThenWorkflow(resourceId, [
+        "    kind: action",
+        "    action: task.update",
+        "    params:",
+        "      taskId: 0199c0ff-7777-7000-8000-000000000001",
+        "      title: Never",
+      ]);
+      const runId = await startRun(workflowId);
+
+      const run = await waitForRunToEnd(runId);
+      expect(run).toMatchObject({ status: "failed", failedStepId: "after" });
+      expect(run.steps.find((record) => record.stepId === "commit")?.status).toBe("completed");
+      const workspaceId = run.workspaceId!;
+      expect(run.workspaceKeptUntil).toBeDefined();
+      expect(await readWorkspace(workspaceId)).toMatchObject({
+        status: "ready",
+        disposedAt: null,
+      });
+
+      const disposed = await runLoggedInCli(["workspace", "dispose", workspaceId]);
+      expect(disposed.code, `${disposed.stdout}\n${disposed.stderr}`).toBe(0);
+      const deleted = await readWorkspace(workspaceId);
+      expect(deleted.status).toBe("deleted");
+      expect(deleted.disposedAt).not.toBeNull();
+    },
+    RUN_DEADLINE_MS + 30_000,
+  );
+
+  it(
+    "refuses workspace.dispose while the run has not finished, and says to cancel the run first",
+    async () => {
+      const resourceId = await createRepo(
+        "https://hercule.test/acme/unfinished",
+        "echo from-setup > setup.txt",
+      );
+      // The second step waits for an hour, so the run is still running.
+      const runId = await startRun(
+        await createCommitThenWorkflow(resourceId, [
+          "    kind: action",
+          "    action: wait",
+          "    params:",
+          "      seconds: 3600",
+        ]),
+      );
+
+      const deadline = Date.now() + RUN_DEADLINE_MS;
+      let run: Run;
+      for (;;) {
+        run = parseJsonOutputOrFail<Run>(await runLoggedInCli(["run", "read", runId, "--json"]));
+        if (run.steps.some((record) => record.stepId === "after")) break;
+        if (Date.now() > deadline)
+          throw new Error(`the commit never finished:\n${JSON.stringify(run)}`);
+        await Bun.sleep(250);
+      }
+      expect(run.status).toBe("running");
+
+      const refused = await runLoggedInCli(["workspace", "dispose", run.workspaceId!]);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain("cancel the run first");
+      expect((await readWorkspace(run.workspaceId!)).status).toBe("ready");
+
+      const cancelled = await runLoggedInCli(["run", "cancel", runId]);
+      expect(cancelled.code, `${cancelled.stdout}\n${cancelled.stderr}`).toBe(0);
     },
     RUN_DEADLINE_MS + 30_000,
   );

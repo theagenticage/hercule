@@ -946,9 +946,9 @@ describe("A run's page > what happens to its workspace", () => {
     });
     expect(readPageText(header)).not.toContain("kept for inspection");
     expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
-    expect(
-      api.calls.filter((call) => call.method === "DELETE").map((call) => call.path),
-    ).toEqual([`/api/v1/workspaces/${WORKSPACE_ID}`]);
+    expect(api.calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
+      `/api/v1/workspaces/${WORKSPACE_ID}`,
+    ]);
   });
 });
 

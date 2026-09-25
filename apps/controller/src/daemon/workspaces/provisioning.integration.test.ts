@@ -138,7 +138,10 @@ const readDeletionReasons = async (arranged: Arranged): Promise<Record<string, u
   return Object.fromEntries(
     log.items
       .filter((entry) => entry.kind === "workspace.deleted")
-      .map((entry) => [entry.payload["workspaceId"], entry.payload["reason"]]),
+      .map((entry): [string, unknown] => [
+        String(entry.payload["workspaceId"]),
+        entry.payload["reason"],
+      ]),
   );
 };
 
