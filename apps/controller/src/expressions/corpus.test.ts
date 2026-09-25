@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
 import { evaluateExpression } from "./index";
+import { provideUnlimitedBudget } from "./testing";
 
 /** One event envelope as expressions see it. `raw` is not part of it. */
 const event = {
@@ -30,7 +31,8 @@ const event = {
 
 const context = { event };
 
-const evaluate = (source: string): unknown => Effect.runSync(evaluateExpression(source, context));
+const evaluate = (source: string): unknown =>
+  Effect.runSync(provideUnlimitedBudget(evaluateExpression(source, context)));
 
 describe("the expression corpus", () => {
   it.each([
@@ -65,7 +67,9 @@ describe("the expression corpus", () => {
   });
 
   it("refuses to read event.raw rather than answering null", () => {
-    const exit = Effect.runSyncExit(evaluateExpression("event.raw", context));
+    const exit = Effect.runSyncExit(
+      provideUnlimitedBudget(evaluateExpression("event.raw", context)),
+    );
 
     expect(Exit.isSuccess(exit)).toBe(false);
     if (Exit.isSuccess(exit)) return;
