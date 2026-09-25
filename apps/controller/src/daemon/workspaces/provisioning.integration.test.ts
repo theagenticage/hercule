@@ -181,8 +181,9 @@ describe("the sweep on the workspaces of runs", () => {
           const completed = await waitForRunTo(arranged, completing, "completed");
           expect(completed.workspaceKeptUntil).toBeUndefined();
 
-          // The pass that deleted the completed run's workspace also saw the
-          // unfinished run's, and kept it.
+          // Once a sweep has deleted the completed run's workspace, the
+          // unfinished run's workspace, which is older, is still ready: the
+          // sweep leaves out the workspace of an unfinished run.
           await waitForDeleted(arranged, completedWorkspace);
           expect((await readWorkspace(arranged, waitingWorkspace)).status).toBe("ready");
 

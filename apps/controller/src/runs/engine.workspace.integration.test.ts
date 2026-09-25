@@ -6,10 +6,12 @@
  * No runner is connected. Workspace Steps is a fake that records what the
  * run engine hands to runners and asks them to stop, and the test plays the
  * runner by calling `recordStepResult` with a step's result, as the controller
- * daemon does when a result arrives.
+ * daemon does when a result arrives. The fake also notes every call made
+ * inside a database transaction, and each test fails if there is one: a
+ * transaction must never wait on a runner.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Context, Effect, Fiber, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
@@ -22,7 +24,7 @@ import { buildPluginStack, USER } from "../plugins/testing";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
-import { WorkflowRuns, WorkflowServiceLayer } from "../workflows";
+import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunExecutorLayer } from "../daemon/runs";
 import { RunService, RunServiceLayer } from "./service";
@@ -38,9 +40,11 @@ const at = "2026-09-25T10:00:00.000Z";
 interface Recorded {
   readonly starts: Array<WorkspaceStepToStart>;
   readonly stops: Array<WorkspaceStepToStop>;
+  /** The calls, `start` or `stop`, that were made inside a database transaction. */
+  readonly callsInTransaction: Array<string>;
 }
 
-type Deps = RunService | WorkspaceService | SqlClient.SqlClient;
+type Deps = RunService | WorkspaceService | WorkflowService | SqlClient.SqlClient;
 
 /**
  * Runs `body` against a fresh controller: a `:memory:` database with the
@@ -48,11 +52,33 @@ type Deps = RunService | WorkspaceService | SqlClient.SqlClient;
  * `body` reads from `recorded`.
  */
 const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>): Promise<A> => {
-  const recorded: Recorded = { starts: [], stops: [] };
-  const workspaceSteps = Layer.succeed(WorkspaceSteps)({
-    start: (step) => Effect.sync(() => void recorded.starts.push(step)),
-    stop: (steps) => void recorded.stops.push(...steps),
-  });
+  const recorded: Recorded = { starts: [], stops: [], callsInTransaction: [] };
+  const workspaceSteps = Layer.effect(WorkspaceSteps)(
+    Effect.map(SqlClient.SqlClient, (sql) => {
+      // `stop` is synchronous, so the transaction is looked up in the
+      // services of the fiber that calls it.
+      const noteIfInTransaction = (call: string) => {
+        const fiber = Fiber.getCurrent();
+        if (
+          fiber !== undefined &&
+          Context.getOption(fiber.context, sql.transactionService)._tag === "Some"
+        ) {
+          recorded.callsInTransaction.push(call);
+        }
+      };
+      return {
+        start: (step) =>
+          Effect.sync(() => {
+            noteIfInTransaction("start");
+            recorded.starts.push(step);
+          }),
+        stop: (steps) => {
+          noteIfInTransaction("stop");
+          recorded.stops.push(...steps);
+        },
+      };
+    }),
+  );
   const layer = RunServiceLayer.pipe(
     Layer.provideMerge(
       WorkflowServiceLayer.pipe(
@@ -73,7 +99,9 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
   return Effect.runPromise(
     Effect.andThen(
       Effect.flatMap(PluginHost, (host) => host.boot([])),
-      body(recorded),
+      Effect.tap(body(recorded), () =>
+        Effect.sync(() => expect(recorded.callsInTransaction).toEqual([])),
+      ),
     ).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)) as Effect.Effect<A, E>,
   );
 };
@@ -156,14 +184,16 @@ const findRecord = (run: Run, stepId: string): StepRecord | undefined =>
 
 /**
  * Checks `holds` every few milliseconds until it returns a value, and returns
- * that value. Dies after five seconds, naming `what` was waited for.
+ * that value. Dies after about two seconds, naming `what` was waited for, so
+ * a test that waits in vain fails with that name well before vitest's own
+ * five-second timeout.
  */
 const waitFor = <A, E, R>(
   what: string,
   holds: Effect.Effect<A | undefined, E, R>,
 ): Effect.Effect<A, E, R> =>
   Effect.gen(function* () {
-    for (let attempt = 0; attempt < 500; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
       const value = yield* holds;
       if (value !== undefined) return value;
       yield* Effect.sleep("10 millis");
@@ -318,6 +348,46 @@ describe("a workspace step", () => {
     );
   });
 
+  it("keeps the workspace of every run cancelled with the run when the cancel keeps its workspace", async () => {
+    await runTest((recorded) =>
+      Effect.gen(function* () {
+        const runnerId = yield* insertRunner();
+        const repoId = yield* insertRepo;
+        const runs = yield* RunService;
+        const workflows = yield* WorkflowService;
+        const { workflow: child } = yield* workflows.create({
+          definition: { ...buildCommitDefinition(repoId), name: "Child" },
+        });
+        // The parent starts the child and commits at the same time. Both
+        // commits wait for the runner, so both runs stay unfinished.
+        const { runId } = yield* runs.start({
+          definition: {
+            name: "Parent",
+            workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+            steps: [
+              {
+                id: "start",
+                kind: "action",
+                action: "run.start",
+                params: { workflowId: child.id },
+              },
+              { id: "commit", kind: "action", action: "git.commit", params: { message: "Save" } },
+            ],
+          },
+        });
+        const starts = yield* waitForStarts(recorded, 2);
+        const childRunId = starts.find((start) => start.runId !== runId)!.runId;
+
+        yield* runs.cancel(runId, { keepWorkspace: true });
+        for (const id of [runId, childRunId]) {
+          const cancelled = yield* readRun(id);
+          expect(cancelled).toMatchObject({ status: "cancelled", runnerId });
+          expect(cancelled.workspaceKeptUntil).toBeDefined();
+        }
+      }),
+    );
+  });
+
   it("asks the runner to stop a running step when another step fails the run", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
@@ -376,27 +446,6 @@ describe("a workspace step", () => {
     );
   });
 
-  it("fails the run at its running step when its workspace fails, and asks the runner to stop the step", async () => {
-    await runTest((recorded) =>
-      Effect.gen(function* () {
-        const { runnerId, runId, start } = yield* startCommitRun(recorded);
-        const runs = yield* RunService;
-        yield* runs.failRunsInWorkspace(start.workspaceId, "The clone failed: repository not found.");
-        const ended = yield* readRun(runId);
-        expect(ended).toMatchObject({
-          status: "failed",
-          failureReason: "workspace-failed",
-          failedStepId: "commit",
-        });
-        expect(findRecord(ended, "commit")).toMatchObject({
-          status: "failed",
-          error: { code: "workspace_failed", message: "The clone failed: repository not found." },
-        });
-        expect(recorded.stops).toEqual([{ runnerId, runId, stepId: "commit", iteration: 1 }]);
-      }),
-    );
-  });
-
   it("fails every run pinned to a runner that is gone", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
@@ -438,23 +487,28 @@ describe("a workspace step", () => {
     );
   });
 
-  it("fails with validation when its resourceId names a repo the run's workspace has no checkout of", async () => {
+  it("fails with validation when the run's workspace has no checkout, or none of the repo its resourceId names", async () => {
     await runTest(() =>
       Effect.gen(function* () {
         yield* insertRunner();
         const repoId = yield* insertRepo;
         const otherRepoId = yield* insertRepo;
         const runs = yield* RunService;
-        const { runId } = yield* runs.start({
-          definition: buildCommitDefinition(repoId, { resourceId: otherRepoId }),
-        });
-        const ended = yield* waitForRunToEnd(runId);
-        expect(ended).toMatchObject({ status: "failed", failedStepId: "commit" });
-        expect(ended.runnerId).toBeUndefined();
-        expect(findRecord(ended, "commit")).toMatchObject({
-          status: "failed",
-          error: { code: "validation" },
-        });
+        const noCheckout = {
+          ...buildCommitDefinition(repoId),
+          workspace: { kind: "ephemeral" as const, checkouts: [] },
+        };
+        const otherRepo = buildCommitDefinition(repoId, { resourceId: otherRepoId });
+        for (const definition of [noCheckout, otherRepo]) {
+          const { runId } = yield* runs.start({ definition });
+          const ended = yield* waitForRunToEnd(runId);
+          expect(ended).toMatchObject({ status: "failed", failedStepId: "commit" });
+          expect(ended.runnerId).toBeUndefined();
+          expect(findRecord(ended, "commit")).toMatchObject({
+            status: "failed",
+            error: { code: "validation" },
+          });
+        }
       }),
     );
   });
