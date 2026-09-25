@@ -39,6 +39,7 @@ import {
   type Issue,
   type WorkflowDefinition,
   type WorkflowIssues,
+  type WorkspacePolicy,
 } from "@hercule/contract";
 import { lintOutputSchema } from "@hercule/protocol";
 import type { AgentKind } from "../agents";
@@ -78,7 +79,6 @@ type Step = WorkflowDefinition["steps"][number];
 type ActionStep = Extract<Step, { readonly kind: "action" }>;
 type AgentStep = Extract<Step, { readonly kind: "agent" }>;
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
-type WorkspacePolicy = NonNullable<WorkflowDefinition["workspace"]>;
 
 /**
  * The workspace actions that work in one git checkout of the run's workspace.

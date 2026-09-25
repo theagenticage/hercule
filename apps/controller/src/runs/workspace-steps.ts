@@ -11,24 +11,16 @@
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
+import type { WorkspaceStepKey } from "@hercule/protocol";
 
-/**
- * Names one step record of a run on the runner that runs it: the run, the
- * step's id in the run's plan, and the iteration of that step.
- */
-export interface WorkspaceStepToStop {
+/** A workspace step to stop: its step key, and the runner that runs it. */
+export interface WorkspaceStepToStop extends WorkspaceStepKey {
   /** The runner the step's run is pinned to. */
   readonly runnerId: string;
-  readonly runId: string;
-  readonly stepId: string;
-  readonly iteration: number;
 }
 
 /** A workspace step to hand to a runner: its step key, and everything the runner needs to run it. */
-export interface WorkspaceStepToStart {
-  readonly runId: string;
-  readonly stepId: string;
-  readonly iteration: number;
+export interface WorkspaceStepToStart extends WorkspaceStepKey {
   /** The runner the step's run is pinned to. */
   readonly runnerId: string;
   /** The run's workspace, on that runner. */

@@ -116,8 +116,9 @@ import {
   type Unauthenticated,
   type Validation,
   type WorkflowDefinition,
+  type WorkspacePolicy,
 } from "@hercule/contract";
-import type { WorkspaceStepKey, WorkspaceStepOutcome } from "@hercule/protocol";
+import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { CurrentActor, requireGrant, type RunActor } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
@@ -131,6 +132,7 @@ import { describeMissingCapableRunner, listCapableRunners } from "./runner-capab
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
+  findActionSchema,
   findActionStep,
   makeStepExecution,
   type EngineStepError,
@@ -161,13 +163,6 @@ const INTERRUPTED: EngineStepError = {
   message:
     "The controller stopped while this step's action was running, so it may or may not have taken effect. Runs never retry an action; start a new run if it is needed.",
 };
-
-type WorkspacePolicy = NonNullable<WorkflowDefinition["workspace"]>;
-
-/** The result of a workspace step as a runner reports it: the step's key and how it ended. */
-export interface WorkspaceStepResult extends WorkspaceStepKey {
-  readonly outcome: WorkspaceStepOutcome;
-}
 
 /**
  * What the start transaction did with a pending step record:
@@ -221,6 +216,28 @@ const readResourceId = (input: Schema.Json): string | undefined => {
  */
 const readCheckoutBranch = (policy: WorkspacePolicy | undefined): string | undefined =>
   policy?.kind === "primary" ? policy.branch : undefined;
+
+/**
+ * Builds the workspace step to hand to a runner from its step record: the
+ * `resourceId` its input names, and the branch its run's workspace policy
+ * switches the checkout to.
+ */
+const buildWorkspaceStepToStart = (
+  step: Omit<WorkspaceStepToStart, "resourceId" | "checkoutBranch">,
+  policy: WorkspacePolicy | undefined,
+): WorkspaceStepToStart => {
+  const resourceId = readResourceId(step.input);
+  const checkoutBranch = readCheckoutBranch(policy);
+  return {
+    ...step,
+    ...(resourceId === undefined ? {} : { resourceId }),
+    ...(checkoutBranch === undefined ? {} : { checkoutBranch }),
+  };
+};
+
+/** Formats a step's key as one string, to compare keys in a set. */
+const formatStepKey = (key: WorkspaceStepKey): string =>
+  `${key.runId}/${key.stepId}/${key.iteration}`;
 
 /** Returns the ids of the repos a run's workspace holds a checkout of. */
 const listPolicyResourceIds = (policy: WorkspacePolicy): ReadonlyArray<string> =>
@@ -628,24 +645,23 @@ export const makeRunEngine = Effect.gen(function* () {
           const placed = yield* placeWorkspaceStep(run, record, step.action, input, at);
           if (placed._tag !== "placed") return placed;
           yield* runs.startStep(runId, record, input, at);
-          const resourceId = readResourceId(input);
-          const checkoutBranch = readCheckoutBranch(run.plan.workspace);
           return {
             _tag: "started",
             run,
             startedAt: at,
             input,
-            workspaceStep: {
-              runId,
-              stepId: record.stepId,
-              iteration: record.iteration,
-              runnerId: placed.runnerId,
-              workspaceId: placed.workspaceId,
-              action: step.action,
-              input,
-              ...(resourceId === undefined ? {} : { resourceId }),
-              ...(checkoutBranch === undefined ? {} : { checkoutBranch }),
-            },
+            workspaceStep: buildWorkspaceStepToStart(
+              {
+                runId,
+                stepId: record.stepId,
+                iteration: record.iteration,
+                runnerId: placed.runnerId,
+                workspaceId: placed.workspaceId,
+                action: step.action,
+                input,
+              },
+              run.plan.workspace,
+            ),
           } as const;
         }),
       ),
@@ -915,11 +931,12 @@ export const makeRunEngine = Effect.gen(function* () {
   ): Effect.Effect<Result.Result<Schema.Json, EngineStepError>> =>
     Effect.gen(function* () {
       const step = findActionStep(run, stepId);
-      const action = (yield* host.listActiveWorkflowActions()).find(
-        (candidate) => candidate.id === step.action,
+      const schema = findActionSchema(
+        yield* host.listActiveWorkflowActions(),
+        step.action,
+        "output",
       );
-      if (action === undefined) return Result.fail(buildActionUnavailableError(step.action));
-      const schema = action.output as unknown as Schema.Codec<unknown, Schema.Json>;
+      if (schema === undefined) return Result.fail(buildActionUnavailableError(step.action));
       const decoded = Schema.decodeUnknownResult(schema)(output);
       if (Result.isFailure(decoded)) {
         return Result.fail<EngineStepError>({
@@ -1048,7 +1065,10 @@ export const makeRunEngine = Effect.gen(function* () {
      * An output that does not match the action's output schema fails the
      * step with `unexpected`.
      */
-    recordStepResult: (runnerId: string, result: WorkspaceStepResult): Effect.Effect<void, SqlError> =>
+    recordStepResult: (
+      runnerId: string,
+      result: Omit<WorkspaceStepResult, "_tag">,
+    ): Effect.Effect<void, SqlError> =>
       Effect.provideService(
         Effect.gen(function* () {
           const { runId, stepId, iteration, outcome } = result;
@@ -1165,23 +1185,13 @@ export const makeRunEngine = Effect.gen(function* () {
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceStepToStart>, SqlError> =>
       Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) =>
-        records.flatMap(({ input, workspaceBranch, ...record }) => {
+        records.flatMap(({ input, workspacePolicy, ...record }) =>
           // A workspace step's record is only ever started with its input
           // stored, so a record without one is not a workspace step's.
-          if (!runsInWorkspace(record.action) || input === undefined) return [];
-          const resourceId = readResourceId(input);
-          return [
-            {
-              ...record,
-              runnerId,
-              input,
-              ...(resourceId === undefined ? {} : { resourceId }),
-              // Only a main workspace policy names a branch, which is the
-              // rule `readCheckoutBranch` applies to a run read whole.
-              ...(workspaceBranch === undefined ? {} : { checkoutBranch: workspaceBranch }),
-            },
-          ];
-        }),
+          !runsInWorkspace(record.action) || input === undefined
+            ? []
+            : [buildWorkspaceStepToStart({ ...record, runnerId, input }, workspacePolicy)],
+        ),
       ),
 
     /**
@@ -1194,25 +1204,11 @@ export const makeRunEngine = Effect.gen(function* () {
       runnerId: string,
       steps: ReadonlyArray<WorkspaceStepKey>,
     ): Effect.Effect<ReadonlyArray<WorkspaceStepToStop>, SqlError> =>
-      Effect.gen(function* () {
-        const ended: Array<WorkspaceStepToStop> = [];
-        for (const step of steps) {
-          const found = UUID_PATTERN.test(step.runId)
-            ? yield* runs.read(step.runId)
-            : Option.none<Run>();
-          const running =
-            Option.isSome(found) &&
-            found.value.status === "running" &&
-            found.value.runnerId === runnerId &&
-            found.value.steps.some(
-              (record) =>
-                record.stepId === step.stepId &&
-                record.iteration === step.iteration &&
-                record.status === "running",
-            );
-          if (!running) ended.push({ runnerId, ...step });
-        }
-        return ended;
+      Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) => {
+        const running = new Set(records.map(formatStepKey));
+        return steps
+          .filter((step) => !running.has(formatStepKey(step)))
+          .map((step) => ({ runnerId, ...step }));
       }),
 
     /**

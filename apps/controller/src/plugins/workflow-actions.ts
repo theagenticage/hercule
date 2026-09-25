@@ -350,6 +350,7 @@ export type WorkspaceActionId = Extract<
   { readonly runsIn: "workspace" }
 >["id"];
 
+/** Returns the ids of the built-in workflow actions that run where `runsIn` says. */
 const listBuiltInActionIds = (runsIn: WorkflowActionRunsIn): ReadonlySet<string> =>
   new Set(
     BUILT_IN_WORKFLOW_ACTIONS.filter((action) => action.runsIn === runsIn).map(

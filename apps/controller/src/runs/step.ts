@@ -104,17 +104,32 @@ export interface InputFailure {
   readonly failureReason: FailureReason;
 }
 
-/**
- * A step's input, prepared: its params rendered from the run and checked
- * against the action's input schema, and the action's catalog entry.
- */
+/** A step's input, prepared: its params rendered from the run and checked against the action's input schema. */
 export interface PreparedInput {
   /** The input, encoded with the action's input schema, as the step record stores it. */
   readonly input: Schema.Json;
-  readonly action: RegisteredWorkflowAction;
 }
 
-/** Returns the action step of a run's plan with this id, and dies if there is none. */
+/**
+ * Returns the input or the output schema of an action in the catalog, or
+ * `undefined` when the action is not in the catalog. The catalog holds any
+ * Effect schema, but what a step record stores is JSON, so the engine reads
+ * the schema as one that encodes to JSON.
+ */
+export const findActionSchema = (
+  actions: ReadonlyArray<RegisteredWorkflowAction>,
+  actionId: string,
+  side: "input" | "output",
+): Schema.Codec<unknown, Schema.Json> | undefined => {
+  const action = actions.find((candidate) => candidate.id === actionId);
+  return action === undefined ? undefined : (action[side] as Schema.Codec<unknown, Schema.Json>);
+};
+
+/**
+ * Returns the action step of a run's plan with this id. Throws when there is
+ * none, which the calling effect turns into a defect: the plan never changes,
+ * so a missing step is a bug.
+ */
 export const findActionStep = (run: Run, stepId: string): ActionStep => {
   // Starting the run checked that every step is an action step, and the plan
   // never changes.
@@ -305,16 +320,17 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "expression-error",
           });
         }
-        const action = (yield* host.listActiveWorkflowActions()).find(
-          (candidate) => candidate.id === step.action,
+        const schema = findActionSchema(
+          yield* host.listActiveWorkflowActions(),
+          step.action,
+          "input",
         );
-        if (action === undefined) {
+        if (schema === undefined) {
           return Result.fail({
             error: buildActionUnavailableError(step.action),
             failureReason: "step-failed",
           });
         }
-        const schema = action.input as Schema.Codec<unknown, Schema.Json>;
         const decoded = Schema.decodeUnknownResult(schema)(rendered.success, {
           errors: "all",
           onExcessProperty: "error",
@@ -328,7 +344,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "step-failed",
           });
         }
-        return Result.succeed({ input: Schema.encodeSync(schema)(decoded.success), action });
+        return Result.succeed({ input: Schema.encodeSync(schema)(decoded.success) });
       });
 
     /**
