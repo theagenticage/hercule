@@ -113,17 +113,18 @@ export const isStepConditionMet = (
 };
 
 /**
- * Returns the `join: all` steps that become ready, in the order their
- * records are to be created. A `join: all` step is ready once, when it has no
- * record yet, every incoming edge is settled, and at least one of them fired.
- * One whose incoming edges are all settled and none fired never runs: it gets
- * no record, and the steps only it leads to can then never run either.
+ * Returns the `join: all` steps that become ready, in plan order. A
+ * `join: all` step is ready once, when it has no record yet, every incoming
+ * edge is settled, and at least one of them fired. One whose incoming edges
+ * are all settled and none fired never runs: it gets no record, and the
+ * steps only it leads to can then never run either.
  *
  * `live` holds the live steps, including the ones that are about to get a
- * record. A ready step becomes live itself, and may leave a later join
- * unsettled, so the steps are taken one at a time, each time one that no
- * other ready step has a path to. There always is one, because a `join: all`
- * step is never inside a loop.
+ * record. A ready step becomes live itself, so a join that another ready
+ * join has a path to is not ready yet: that path leaves one of its incoming
+ * edges unsettled. It becomes ready later, once the join upstream of it has
+ * run. So no step returned has a path to another, and plan order is a safe
+ * order to create their records in.
  */
 const listReadyJoins = (
   run: RoutedRun,
@@ -132,30 +133,23 @@ const listReadyJoins = (
 ): ReadonlyArray<string> => {
   const edges = run.plan.edges ?? [];
   const withRecord = new Set(run.steps.map((record) => record.stepId));
-  const waiting = run.plan.steps.filter((step) => step.join === "all" && !withRecord.has(step.id));
-  const nowLive = new Set(live);
-  const ready: Array<string> = [];
-  for (;;) {
-    const canStillRun = collectReachableSteps(edges, nowLive);
-    const candidates = waiting.filter((step) => {
-      if (nowLive.has(step.id)) return false;
+  const canStillRun = collectReachableSteps(edges, live);
+  const candidates = run.plan.steps
+    .filter((step) => step.join === "all" && !withRecord.has(step.id))
+    .filter((step) => {
       const incoming = edges.flatMap((edge, index) => (edge.to === step.id ? [index] : []));
       return (
         incoming.every((index) => !canStillRun.has(edges[index]!.from)) &&
         incoming.some((index) => (traversals[index] ?? 0) > 0)
       );
-    });
-    const first = candidates.find(
-      (candidate) =>
-        !candidates.some(
-          (other) =>
-            other !== candidate && collectReachableSteps(edges, [other.id]).has(candidate.id),
-        ),
-    );
-    if (first === undefined) return ready;
-    ready.push(first.id);
-    nowLive.add(first.id);
-  }
+    })
+    .map((step) => step.id);
+  const reachableFrom = new Map(
+    candidates.map((stepId) => [stepId, collectReachableSteps(edges, [stepId])]),
+  );
+  return candidates.filter((stepId) =>
+    candidates.every((other) => other === stepId || !reachableFrom.get(other)!.has(stepId)),
+  );
 };
 
 /**
