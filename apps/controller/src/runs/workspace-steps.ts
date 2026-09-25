@@ -39,6 +39,14 @@ export interface WorkspaceStepToStart {
   readonly input: Schema.Json;
   /** The resource whose checkout the action works in, when the step names one. */
   readonly resourceId?: string;
+  /**
+   * The branch the checkout is switched to before the action runs: the
+   * branch a run on a repo's main workspace names. A main workspace is
+   * shared, so something else may have switched it since the run's last
+   * step. Absent for an ephemeral workspace, which is already on the run's
+   * own branch.
+   */
+  readonly checkoutBranch?: string;
 }
 
 /** The Workspace Steps port, which the controller daemon implements. */
@@ -65,13 +73,19 @@ export class WorkspaceSteps extends Context.Service<
     readonly start: (step: WorkspaceStepToStart) => Effect.Effect<void>;
 
     /**
-     * Asks the runners to stop these steps if they are still running, for
-     * example because their run was cancelled, and returns without waiting
-     * for them to stop. A stop that cannot be delivered because the runner is
-     * not connected is not retried: when the runner connects, it reports the
-     * steps it is running, and the controller daemon stops each one whose
-     * record has ended.
+     * Tells the runners that these steps are no longer owed: their records
+     * have ended, for example because their run was cancelled or failed, or
+     * because the runner reported how they ended. A runner stops a step that
+     * is still running, and deletes the result file of one that finished.
+     * Returns at once, without waiting for the stops to be sent. It is
+     * synchronous so that it can run right after a commit (see
+     * `afterCommit`).
+     *
+     * A stop that cannot be delivered because the runner is not connected
+     * is not retried: when the runner connects, it reports the steps it
+     * holds, and the controller daemon stops each one whose record has
+     * ended.
      */
-    readonly stop: (steps: ReadonlyArray<WorkspaceStepToStop>) => Effect.Effect<void>;
+    readonly stop: (steps: ReadonlyArray<WorkspaceStepToStop>) => void;
   }
 >()("hercule/controller/runs/WorkspaceSteps") {}

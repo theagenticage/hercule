@@ -50,7 +50,7 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
   const recorded: Recorded = { starts: [], stops: [] };
   const workspaceSteps = Layer.succeed(WorkspaceSteps)({
     start: (step) => Effect.sync(() => void recorded.starts.push(step)),
-    stop: (steps) => Effect.sync(() => void recorded.stops.push(...steps)),
+    stop: (steps) => void recorded.stops.push(...steps),
   });
   const layer = RunServiceLayer.pipe(
     Layer.provideMerge(
@@ -304,10 +304,68 @@ describe("a workspace step", () => {
     );
   });
 
-  it("fails the run at its running step when its workspace fails", async () => {
+  it("asks the runner to stop a running step when another step fails the run", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
-        const { runId, start } = yield* startCommitRun(recorded);
+        const runnerId = yield* insertRunner;
+        const repoId = yield* insertRepo;
+        const runs = yield* RunService;
+        const commit = (id: string) => ({
+          id,
+          kind: "action" as const,
+          action: "git.commit",
+          params: { message: `Save ${id}` },
+        });
+        const { runId } = yield* runs.start({
+          definition: {
+            name: "Two commits at once",
+            workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+            steps: [commit("first"), commit("second")],
+          },
+        });
+        yield* waitForStarts(recorded, 2);
+
+        yield* runs.completeStep(runnerId, {
+          runId,
+          stepId: "first",
+          iteration: 1,
+          outcome: { status: "failed", code: "action_failed", message: "nothing to commit" },
+        });
+        expect(yield* waitForRunToEnd(runId)).toMatchObject({
+          status: "failed",
+          failedStepId: "first",
+        });
+        // The runner reported how the first step ended, so only the second
+        // is stopped here.
+        expect(recorded.stops).toEqual([{ runnerId, runId, stepId: "second", iteration: 1 }]);
+      }),
+    );
+  });
+
+  it("switches a repo's main workspace to the workflow's branch before each step", async () => {
+    await runTest((recorded) =>
+      Effect.gen(function* () {
+        const runnerId = yield* insertRunner;
+        const repoId = yield* insertRepo;
+        const runs = yield* RunService;
+        yield* runs.start({
+          definition: {
+            ...buildCommitDefinition(repoId),
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+          },
+        });
+        const [start] = yield* waitForStarts(recorded, 1);
+        expect(start).toMatchObject({ runnerId, checkoutBranch: "release" });
+        // The step sent again when the runner reconnects carries the branch too.
+        expect(yield* runs.owedWorkspaceSteps(runnerId)).toEqual([start]);
+      }),
+    );
+  });
+
+  it("fails the run at its running step when its workspace fails, and asks the runner to stop the step", async () => {
+    await runTest((recorded) =>
+      Effect.gen(function* () {
+        const { runnerId, runId, start } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
         yield* runs.failWorkspace(start.workspaceId, "The clone failed: repository not found.");
         const ended = yield* readRun(runId);
@@ -320,6 +378,7 @@ describe("a workspace step", () => {
           status: "failed",
           error: { code: "workspace_failed", message: "The clone failed: repository not found." },
         });
+        expect(recorded.stops).toEqual([{ runnerId, runId, stepId: "commit", iteration: 1 }]);
       }),
     );
   });

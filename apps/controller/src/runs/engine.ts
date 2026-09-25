@@ -210,6 +210,14 @@ const readResourceId = (input: Schema.Json): string | undefined => {
   return typeof resourceId === "string" ? resourceId : undefined;
 };
 
+/**
+ * Returns the branch a run's checkout is switched to before each workspace
+ * step: the branch a policy for a repo's main workspace names, if it names
+ * one. An ephemeral workspace is already on the run's own branch.
+ */
+const readCheckoutBranch = (policy: WorkspacePolicy | undefined): string | undefined =>
+  policy?.kind === "primary" ? policy.branch : undefined;
+
 /** Returns the ids of the repos a run's workspace holds a checkout of. */
 const listPolicyResourceIds = (policy: WorkspacePolicy): ReadonlyArray<string> =>
   policy.kind === "primary"
@@ -261,7 +269,7 @@ const listWorkspaceStepsToStop = (
   if (runnerId === undefined) return [];
   return wasRunning
     .filter((record) => isWorkspaceStep(run.plan, record.stepId))
-    .map((record) => ({ runnerId, runId: run.id, ...record }));
+    .map(({ stepId, iteration }) => ({ runnerId, runId: run.id, stepId, iteration }));
 };
 
 /** Describes how a run ended, for the refusal to cancel it. */
@@ -293,15 +301,37 @@ export const makeRunEngine = Effect.gen(function* () {
    * Ends a run: cancels every step record of it that is still pending or
    * running, and moves the run to `outcome`. Every way a run ends goes
    * through here, inside the transaction that decided it, so a reader never
-   * sees an ended run with a step record still pending or running. Returns
-   * the records that were running when they were cancelled.
+   * sees an ended run with a step record still pending or running.
+   *
+   * Once the transaction has committed, the run's runner is told to stop
+   * the workspace steps whose records were running (see `stopWorkspaceSteps`).
    */
   const writeRunEnding = (
     runId: string,
     outcome: RunOutcome,
     at: string,
-  ): Effect.Effect<ReadonlyArray<StepRecordId>, SqlError> =>
-    Effect.tap(runs.cancelUnfinishedSteps(runId, at), () => runs.finish(runId, outcome, at));
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      // Runs are never deleted, and every caller has found this one.
+      const run = Option.getOrThrow(yield* runs.read(runId));
+      const wasRunning = yield* runs.cancelUnfinishedSteps(runId, at);
+      yield* runs.finish(runId, outcome, at);
+      yield* stopWorkspaceSteps(run, wasRunning);
+    });
+
+  /**
+   * Tells the runner a run is pinned to that the records among `ended`
+   * that belong to workspace steps have ended, once the caller's transaction
+   * has committed. The runner stops such a step if it is still running.
+   * Records of steps that run on the controller are left out.
+   */
+  const stopWorkspaceSteps = (
+    run: Run,
+    ended: ReadonlyArray<StepRecordId>,
+  ): Effect.Effect<void> => {
+    const toStop = listWorkspaceStepsToStop(run, ended);
+    return toStop.length === 0 ? Effect.void : afterCommit(() => workspaceSteps.stop(toStop));
+  };
 
   /**
    * Fails a run at one of its steps, inside the caller's transaction: the
@@ -557,6 +587,7 @@ export const makeRunEngine = Effect.gen(function* () {
           if (placed._tag !== "placed") return placed;
           yield* runs.startStep(runId, record, input, at);
           const resourceId = readResourceId(input);
+          const checkoutBranch = readCheckoutBranch(run.plan.workspace);
           return {
             _tag: "started",
             run,
@@ -571,6 +602,7 @@ export const makeRunEngine = Effect.gen(function* () {
               action: step.action,
               input,
               ...(resourceId === undefined ? {} : { resourceId }),
+              ...(checkoutBranch === undefined ? {} : { checkoutBranch }),
             },
           } as const;
         }),
@@ -798,13 +830,15 @@ export const makeRunEngine = Effect.gen(function* () {
         (record) => record.status === "running" && isWorkspaceStep(run.plan, record.stepId),
       );
       if (running !== undefined) {
-        return yield* writeStepFailure(
+        yield* writeStepFailure(
           runId,
           running,
           { code: "workspace_failed", message },
           "workspace-failed",
           at,
         );
+        // No result from the runner ended this record, so the runner is told.
+        return yield* stopWorkspaceSteps(run, [running]);
       }
       yield* Effect.logWarning(`Run ${runId} failed because its workspace failed: ${message}`);
       yield* writeRunEnding(runId, { status: "failed", failureReason: "workspace-failed" }, at);
@@ -877,7 +911,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * further down, with their step records. Then the Run Executor stops
      * their executions, which aborts the signal of a plugin action in
      * flight, and the runners are asked to stop the workspace steps that
-     * were running. A step whose action ends after the cancel cannot end its
+     * were running (see `writeRunEnding`). A step whose action ends after the cancel cannot end its
      * record any more, and no later step starts.
      *
      * Fails with `NotFound` for an unknown run, and with `InvalidState` for a
@@ -888,8 +922,7 @@ export const makeRunEngine = Effect.gen(function* () {
     ): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.cancel");
-        const toStop: Array<WorkspaceStepToStop> = [];
-        const cancelledRun = yield* commitUninterruptibly(
+        return yield* commitUninterruptibly(
           sql,
           Effect.gen(function* () {
             const found = yield* runs.read(id);
@@ -907,9 +940,7 @@ export const makeRunEngine = Effect.gen(function* () {
             const at = yield* nowIso;
             const cancelled = [id, ...(yield* runs.listUnfinishedDescendants(id))];
             for (const runId of cancelled) {
-              const run = Option.getOrThrow(yield* runs.read(runId));
-              const wasRunning = yield* writeRunEnding(runId, { status: "cancelled" }, at);
-              toStop.push(...listWorkspaceStepsToStop(run, wasRunning));
+              yield* writeRunEnding(runId, { status: "cancelled" }, at);
             }
             yield* afterCommit(() => executor.stop(cancelled));
             // The same transaction found the run above, and runs are never
@@ -917,8 +948,6 @@ export const makeRunEngine = Effect.gen(function* () {
             return Option.getOrThrow(yield* runs.read(id));
           }),
         );
-        if (toStop.length > 0) yield* workspaceSteps.stop(toStop);
-        return cancelledRun;
       }),
 
     /**
@@ -1021,21 +1050,22 @@ export const makeRunEngine = Effect.gen(function* () {
      * workspace failed: it could not be provisioned, or it broke. A run whose
      * workspace step is running fails at that step, with
      * `workspace_failed` and `message`; any other run fails with
-     * `workspace-failed` and no failed step. Then their executions stop.
+     * `workspace-failed` and no failed step. Once the transaction has
+     * committed, their executions stop.
+     *
+     * Run inside a caller's transaction, it joins that transaction, so the
+     * workspace's failure and its runs' failures commit together.
      */
     failWorkspace: (workspaceId: string, message: string): Effect.Effect<void, SqlError> =>
       Effect.provideService(
-        Effect.gen(function* () {
-          const failed = yield* commitUninterruptibly(
-            sql,
-            Effect.gen(function* () {
-              const runIds = yield* runs.listWorkingIn(workspaceId);
-              for (const runId of runIds) yield* failRunInWorkspace(runId, message);
-              return runIds;
-            }),
-          );
-          if (failed.length > 0) executor.stop(failed);
-        }),
+        commitUninterruptibly(
+          sql,
+          Effect.gen(function* () {
+            const runIds = yield* runs.listWorkingIn(workspaceId);
+            for (const runId of runIds) yield* failRunInWorkspace(runId, message);
+            if (runIds.length > 0) yield* afterCommit(() => executor.stop(runIds));
+          }),
+        ),
         AfterCommit,
         afterCommitListener,
       ),
@@ -1063,13 +1093,21 @@ export const makeRunEngine = Effect.gen(function* () {
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceStepToStart>, SqlError> =>
       Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) =>
-        records.flatMap(({ input, ...record }) => {
+        records.flatMap(({ input, workspaceBranch, ...record }) => {
           // A workspace step's record is only ever started with its input
           // stored, so a record without one is not a workspace step's.
           if (!runsInWorkspace(record.action) || input === undefined) return [];
           const resourceId = readResourceId(input);
           return [
-            { ...record, runnerId, input, ...(resourceId === undefined ? {} : { resourceId }) },
+            {
+              ...record,
+              runnerId,
+              input,
+              ...(resourceId === undefined ? {} : { resourceId }),
+              // Only a main workspace policy names a branch, which is the
+              // rule `readCheckoutBranch` applies to a run read whole.
+              ...(workspaceBranch === undefined ? {} : { checkoutBranch: workspaceBranch }),
+            },
           ];
         }),
       ),

@@ -104,6 +104,8 @@ export interface PinnedRunningStep {
   readonly action: string;
   /** The step's input as stored when the record started; absent for a record started before inputs were stored. */
   readonly input?: Schema.Json;
+  /** The branch the run's workspace policy names. Only a policy for a repo's main workspace names one. */
+  readonly workspaceBranch?: string;
 }
 
 /**
@@ -774,8 +776,10 @@ const make = Effect.gen(function* () {
           readonly iteration: number;
           readonly action: string | null;
           readonly input: string | null;
+          readonly workspace_branch: string | null;
         }>`
           SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input,
+                 json_extract(r.plan, '$.workspace.branch') AS workspace_branch,
                  (SELECT json_extract(step.value, '$.action')
                   FROM json_each(r.plan, '$.steps') AS step
                   WHERE json_extract(step.value, '$.id') = s.step_id) AS action
@@ -796,6 +800,9 @@ const make = Effect.gen(function* () {
                     workspaceId: uuidToString(row.workspace_id),
                     action: row.action,
                     ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
+                    ...(row.workspace_branch === null
+                      ? {}
+                      : { workspaceBranch: row.workspace_branch }),
                   },
                 ],
           ),
