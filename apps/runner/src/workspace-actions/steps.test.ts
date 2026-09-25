@@ -18,7 +18,7 @@ import type {
   WorkspaceStepResult,
   WorkspaceStepStart,
 } from "@hercule/protocol";
-import { makeWorkspaces } from "../workspaces";
+import { makeWorkspaces, type Workspaces } from "../workspaces";
 import {
   addBranch,
   buildCheckout,
@@ -62,6 +62,8 @@ const waitUntil = async (ready: () => boolean, what: string): Promise<void> => {
 
 interface Runner {
   readonly steps: WorkspaceSteps;
+  /** The workspaces the steps run in. */
+  readonly workspaces: Workspaces;
   /** Every step result the runner sent, in the order it sent them. */
   readonly sent: Array<WorkspaceStepResult>;
   readonly storageDir: string;
@@ -162,7 +164,7 @@ const makeRunner = (
     return { workspaceId, dir, remote, writePreCommitHook, blockCommits };
   };
 
-  return { steps, sent, storageDir, socketPath, provisionWorkspace };
+  return { steps, workspaces, sent, storageDir, socketPath, provisionWorkspace };
 };
 
 const buildStart = (
@@ -488,17 +490,43 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     }
   });
 
-  it("sends no result when its workspace's provisioning failed, so the workspace's failure ends it", async () => {
+  it("sends no result when its workspace failed to provision, and fails when this runner never had its workspace", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
-    // A workspace this runner does not hold: its provisioning failed and
-    // left nothing behind.
-    const frame = { ...buildStart(workspace, { message: "Add a" }), workspaceId: createId() };
-
-    await startStep(runner, frame);
+    const failing = buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        buildCheckout({
+          resourceId: createId(),
+          remote: makeRemote().url,
+          branch: BRANCH,
+          setupCommand: "exit 3",
+        }),
+      ],
+    });
+    // As the controller sends them: the step right after its workspace's
+    // provisioning, while the provisioning is still running.
+    const inFailed = {
+      ...buildStart(workspace, { message: "Add a" }),
+      workspaceId: failing.workspaceId,
+    };
+    const [report] = await Promise.all([
+      runner.workspaces.provision(failing),
+      startStep(runner, inFailed),
+    ]);
     await waitUntil(() => runner.steps.listInFlight().length === 0, "the step to be dropped");
 
-    expect(runner.sent).toEqual([]);
+    // The failed report ends the run with the setup's own message, so the
+    // step sends nothing that could reach the controller first.
+    expect(report.status).toBe("failed");
+    expect(listResults(runner, inFailed)).toEqual([]);
+
+    // No workspace report will ever end this one, so its result must.
+    const inUnknown = { ...buildStart(workspace, { message: "Add a" }), workspaceId: createId() };
+    const outcome = await runStep(runner, inUnknown);
+
+    expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
+    expect(outcome.status === "failed" && outcome.message).toContain(inUnknown.workspaceId);
   });
 
   it("fails with timeout when its action runs past the deadline", async () => {

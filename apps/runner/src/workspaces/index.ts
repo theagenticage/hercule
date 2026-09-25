@@ -43,6 +43,12 @@ export interface Workspaces {
    */
   readonly waitForProvisioning: (workspaceId: string) => Promise<void>;
   /**
+   * Checks whether the latest provisioning of this workspace on this runner
+   * failed. The failure is forgotten when a later provisioning succeeds, when
+   * the workspace is disposed, and when the runner restarts.
+   */
+  readonly hasFailedProvisioning: (workspaceId: string) => boolean;
+  /**
    * Reads a primary's current branch and its branches again, after a session
    * ran in it. Returns undefined for an ephemeral workspace or an unknown id.
    */
@@ -83,6 +89,12 @@ export const makeWorkspaces = (options: {
    */
   const inFlight = new Map<string, Promise<WorkspaceReport>>();
   /**
+   * The workspaces whose latest provisioning failed. A workspace step for one
+   * of them sends no result: the failed report already ends the run, with
+   * the provisioning's own error message.
+   */
+  const failedProvisionings = new Set<string>();
+  /**
    * Returns the registered workspace, or undefined if this runner does not have
    * it or its directories were removed from disk. A session cannot be placed in
    * a directory that no longer exists, so such a workspace counts as unknown.
@@ -104,7 +116,10 @@ export const makeWorkspaces = (options: {
         entry === undefined ? provisionWorkspace(substrate, frame) : reprovision(substrate, entry);
       inFlight.set(frame.workspaceId, started);
       try {
-        return await started;
+        const report = await started;
+        if (report.status === "failed") failedProvisionings.add(frame.workspaceId);
+        else failedProvisionings.delete(frame.workspaceId);
+        return report;
       } finally {
         inFlight.delete(frame.workspaceId);
       }
@@ -116,6 +131,7 @@ export const makeWorkspaces = (options: {
       // just removed. The provisioning's result is ignored: this call reports
       // the result of the teardown.
       await inFlight.get(frame.workspaceId)?.catch(() => undefined);
+      failedProvisionings.delete(frame.workspaceId);
       return disposeWorkspace(substrate, frame);
     },
     resolve: (workspaceId) => {
@@ -127,6 +143,7 @@ export const makeWorkspaces = (options: {
     waitForProvisioning: async (workspaceId) => {
       await inFlight.get(workspaceId)?.catch(() => undefined);
     },
+    hasFailedProvisioning: (workspaceId) => failedProvisionings.has(workspaceId),
     reportAfterSession: async (workspaceId) => {
       const entry = findStandingWorkspace(workspaceId);
       return entry === undefined || entry.kind !== "primary"

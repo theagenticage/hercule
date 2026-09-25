@@ -176,12 +176,12 @@ export const makeWorkspaceSteps = (options: {
    * Runs the step's action and returns how the step ended. Never fails: a
    * failed action, a timeout and a defect all become a failed outcome.
    *
-   * Returns undefined, and runs nothing, when this runner does not hold the
-   * step's workspace once its provisioning has finished. The step then gets
-   * no result: the provisioning failed, and the failed workspace report fails
-   * the run at this step with the provisioning's own error message, such as
-   * the setup command's output. A result sent here could reach the
-   * controller first and fail the run with a message that hides that error.
+   * Returns undefined, and runs nothing, when the latest provisioning of the
+   * step's workspace on this runner failed. The step then gets no result: the
+   * failed workspace report fails the run at this step with the
+   * provisioning's own error message, such as the setup command's output. A
+   * result sent here could reach the controller first and fail the run with
+   * a message that hides that error.
    */
   const runAction = (
     frame: WorkspaceStepStart,
@@ -191,12 +191,16 @@ export const makeWorkspaceSteps = (options: {
       // The controller sends a step right after its workspace's provisioning
       // frame, and the provisioning may still be cloning.
       yield* Effect.promise(() => workspaces.waitForProvisioning(frame.workspaceId));
+      if (workspaces.hasFailedProvisioning(frame.workspaceId)) return undefined;
       const workspace = workspaces.resolve(frame.workspaceId);
+      // Never had, lost or disposed: no workspace report ends the step then,
+      // so its result must, or the run would wait for it forever.
       if (workspace === undefined) {
-        yield* Effect.logWarning(
-          `Workspace step ${frame.stepId} of run ${frame.runId} did not run: this runner does not hold workspace ${frame.workspaceId}. The workspace's report ends the step.`,
-        );
-        return undefined;
+        return {
+          status: "failed",
+          code: "action_failed",
+          message: `This runner does not hold the run's workspace ${frame.workspaceId}, so the step could not run. Start the run again.`,
+        } as const;
       }
       // Built the way a session's environment is built, so a commit is made
       // as the same account a session in this workspace commits as. No
@@ -264,8 +268,8 @@ export const makeWorkspaceSteps = (options: {
 
   /**
    * Runs a held step: waits for its workspace's lock, runs its action, then
-   * writes, forgets and sends its result. A step whose workspace this runner
-   * does not hold is forgotten with no result. Never fails; a stop
+   * writes, forgets and sends its result. A step whose workspace failed to
+   * provision is forgotten with no result. Never fails; a stop
    * interrupts it.
    */
   const runStep = (
