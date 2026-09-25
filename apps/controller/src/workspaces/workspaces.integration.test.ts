@@ -274,7 +274,7 @@ describe("the runner's workspace report", () => {
         workspaceId,
         status: "ready",
         checkouts: [
-          { checkoutId, branch: "hercule/run-ffffffff", branches: ["main"], defaultBranch: "main" },
+          { checkoutId, branch: "hercule/thread-ffffffff", branches: ["main"], defaultBranch: "main" },
         ],
       } as never);
       arranged.wire.send({

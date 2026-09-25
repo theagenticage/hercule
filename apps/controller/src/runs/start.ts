@@ -89,16 +89,6 @@ const listUnsupportedElements = (
       ];
     }
     const action = actions.find((candidate) => candidate.id === step.action);
-    // The run engine cannot yet send a step to a runner, so an action that
-    // runs in the run's workspace would never finish.
-    if (action?.runsIn === "workspace") {
-      return [
-        {
-          path: [...path, "action"],
-          message: `Runs cannot call ${step.action} yet: it runs in the run's workspace on a runner, which runs cannot use yet. Remove this step to run this workflow.`,
-        },
-      ];
-    }
     // Which of a step's params names the Connection is not settled yet, and
     // an action called without its Connection would fail in ways its author
     // never planned for.

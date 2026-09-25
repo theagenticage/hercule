@@ -55,6 +55,8 @@ export interface StoredCheckout {
   readonly branch: string | null;
   readonly branches: ReadonlyArray<string>;
   readonly defaultBranch: string | null;
+  /** The branch a new branch was asked to start from; `null` means the resource's default. */
+  readonly baseBranch: string | null;
 }
 
 /** One checkout to insert with a new workspace. */
@@ -63,6 +65,7 @@ export interface NewCheckout {
   readonly form: CheckoutForm;
   readonly subdirectory: string | null;
   readonly branch: string | null;
+  readonly baseBranch: string | null;
 }
 
 export interface WorkspacePageRequest {
@@ -170,6 +173,7 @@ interface CheckoutRow {
   readonly branch: string | null;
   readonly branches: string;
   readonly default_branch: string | null;
+  readonly base_branch: string | null;
 }
 
 const COLUMNS =
@@ -182,7 +186,7 @@ const WORKSPACE_COLUMNS = COLUMNS.split(", ")
   .join(", ");
 
 const CHECKOUT_COLUMNS =
-  "id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch";
+  "id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch, base_branch";
 
 const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   id: uuidToString(row.id),
@@ -207,6 +211,7 @@ const toCheckout = (row: CheckoutRow): StoredCheckout => ({
   branch: row.branch,
   branches: JSON.parse(row.branches) as ReadonlyArray<string>,
   defaultBranch: row.default_branch,
+  baseBranch: row.base_branch,
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -321,10 +326,10 @@ const make = Effect.gen(function* () {
           const id = mintUuid();
           yield* sql`
             INSERT INTO checkouts (id, workspace_id, resource_id, form, subdirectory, branch,
-                                   branches, default_branch, position, created_at)
+                                   base_branch, branches, default_branch, position, created_at)
             VALUES (${id}, ${uuidFromString(workspaceId)}, ${uuidFromString(checkout.resourceId)},
                     ${checkout.form}, ${checkout.subdirectory}, ${checkout.branch},
-                    '[]', NULL, ${position}, ${at})
+                    ${checkout.baseBranch}, '[]', NULL, ${position}, ${at})
           `;
           return {
             id: uuidToString(id),
@@ -335,6 +340,7 @@ const make = Effect.gen(function* () {
             branch: checkout.branch,
             branches: [],
             defaultBranch: null,
+            baseBranch: checkout.baseBranch,
           } satisfies StoredCheckout;
         }),
       ),
@@ -358,6 +364,20 @@ const make = Effect.gen(function* () {
           LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
+      ),
+
+    /** Returns the ids of the runners that hold a ready primary of this resource. */
+    listRunnersWithReadyPrimary: (
+      resourceId: string,
+    ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly runner_id: Uint8Array }>`
+          SELECT w.runner_id
+          FROM workspaces w JOIN checkouts c ON c.workspace_id = w.id
+          WHERE w.kind = 'primary' AND w.status = 'ready'
+            AND c.resource_id = ${uuidFromString(resourceId)}
+        `,
+        (rows) => new Set(rows.map((row) => uuidToString(row.runner_id))),
       ),
 
     /** Returns every workspace this runner was asked to provision and has not yet reported on. */
@@ -486,8 +506,14 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every ephemeral workspace the sweep could act on: each one that
-     * is ready, on a runner that is online to receive the dispose frame. The
-     * service decides from the counts which ones to keep.
+     * is ready, on a runner that is online to receive the dispose frame, and
+     * not the workspace of an unfinished run. The service decides from the
+     * counts which ones to keep.
+     *
+     * A run's workspace is left out whatever its age, because a run can sleep
+     * between two steps for longer than any expiry window. Only a running run
+     * holds a workspace, and the run is matched on its runner first so SQLite
+     * reads the `runs_pinned_running` index rather than every run.
      */
     sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
       Effect.map(
@@ -507,6 +533,9 @@ const make = Effect.gen(function* () {
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
           WHERE w.kind = 'ephemeral' AND w.status = 'ready'
             AND ${sql.literal(buildOnlineClause("r"))}
+            AND NOT EXISTS (SELECT 1 FROM runs
+                            WHERE runs.runner_id = w.runner_id AND runs.status = 'running'
+                              AND runs.workspace_id = w.id)
         `,
         (rows) =>
           rows.map((row) => ({

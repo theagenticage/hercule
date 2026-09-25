@@ -11,7 +11,8 @@
  * All workspace decisions are made here. Nothing outside this domain knows how
  * a multi-repo workspace is laid out, what a thread's branch is called, or
  * which Connection the work in a workspace acts through. A spawn passes in
- * what it asked for and the session id, and gets back where the session works.
+ * what it asked for and the branch this module named for it, and gets back
+ * where the session works.
  *
  * A primary is provisioned by name and never torn down: it is the repo's main
  * workspace on that runner, shared by every session that runs in it. An
@@ -146,7 +147,14 @@ const describeUnnameableRepo = (name: string): string =>
  * timestamp, so two threads started in the same millisecond share their first
  * eight characters and would ask one runner for the same branch twice.
  */
-const buildThreadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
+export const buildThreadBranch = (sessionId: string): string =>
+  `hercule/thread-${sessionId.slice(-8)}`;
+
+/**
+ * Builds the name of the branch a run's own worktree is created on. The whole
+ * run id is used, so the branch of a run can be found from the run alone.
+ */
+export const buildRunBranch = (runId: string): string => `hercule/run-${runId}`;
 
 const ALREADY_GONE = "that workspace is already gone";
 
@@ -337,6 +345,29 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Rebuilds the provision frame of a workspace from its rows and the repos
+   * behind its checkouts. The rows hold everything provisioning needs, so the
+   * rebuilt frame is the same as the frame that was first sent, and asks for
+   * the same clone or worktree.
+   */
+  const rebuildProvisionFrame = (
+    workspace: StoredWorkspace,
+  ): Effect.Effect<WorkspaceProvision, SqlError> =>
+    Effect.gen(function* () {
+      const checkouts = (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
+      const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
+      const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
+      for (const checkout of checkouts) {
+        const resource = named.get(checkout.resourceId);
+        // Only a repo is ever checked out, so a checkout of any other kind of
+        // resource cannot be provisioned.
+        if (resource === undefined || resource.kind !== "repo") continue;
+        plans.push({ checkout, resource });
+      }
+      return buildProvisionFrame(workspace, plans);
+    });
+
+  /**
    * Decides where a spawned session works, and writes the rows in the
    * caller's transaction. Returns an `Opened`, with the frame to send once the
    * transaction has committed. Fails with a validation error if the requested
@@ -347,11 +378,11 @@ const make = Effect.gen(function* () {
    * - what the requested workspace means
    * - reading the repos behind it and checking they belong to the project
    * - the layout of a multi-repo workspace
-   * - the branch the thread's own worktree is created on
    * - the Connection the work acts through
    *
-   * The caller passes a session id that does not exist yet, because the
-   * branch is named after the thread.
+   * The caller names the branch a new worktree is created on, because the
+   * branch is named after whatever the workspace is for: a thread
+   * (`buildThreadBranch`) or a run (`buildRunBranch`).
    *
    * For an `existing` workspace, this does not check again whether it is
    * ready: `machineFor` checked that before the session was placed, because
@@ -365,7 +396,8 @@ const make = Effect.gen(function* () {
     readonly heldWorkspaceId: string | null;
     readonly runnerId: string;
     readonly projectId: string | undefined;
-    readonly sessionId: string;
+    /** The branch each checkout of a new ephemeral workspace is created on. */
+    readonly branch: string;
     readonly at: string;
   }): Effect.Effect<Opened, Validation | SqlError> =>
     Effect.gen(function* () {
@@ -466,7 +498,7 @@ const make = Effect.gen(function* () {
         // A single repo is checked out at the root of the workspace; several
         // repos sit side by side, each in a directory named after the repo.
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
-        branch: buildThreadBranch(input.sessionId),
+        branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
       }));
       const opened = yield* openWorkspace(
@@ -669,25 +701,24 @@ const make = Effect.gen(function* () {
     owedProvisioning: (
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceProvision>, SqlError> =>
+      Effect.flatMap(workspaces.provisioningOn(runnerId), (owed) =>
+        Effect.forEach(owed, rebuildProvisionFrame),
+      ),
+
+    /**
+     * Returns the provision frame of one workspace, rebuilt from its rows, if
+     * the workspace is still `provisioning`, and `none` otherwise. A run's
+     * first workspace step sends this before the step itself, so a runner that
+     * missed the first frame still provisions the workspace before it is
+     * asked to work in it.
+     */
+    rebuildProvision: (
+      workspaceId: string,
+    ): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
       Effect.gen(function* () {
-        const owed = yield* workspaces.provisioningOn(runnerId);
-        const frames: Array<WorkspaceProvision> = [];
-        for (const workspace of owed) {
-          const checkouts =
-            (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
-          const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
-          const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
-          for (const checkout of checkouts) {
-            const resource = named.get(checkout.resourceId);
-            if (resource === undefined) continue;
-            // Only a repo is ever checked out, so a checkout of any other kind
-            // of resource cannot be provisioned.
-            if (resource.kind !== "repo") continue;
-            plans.push({ checkout, resource });
-          }
-          frames.push(buildProvisionFrame(workspace, plans));
-        }
-        return frames;
+        const found = yield* workspaces.one(workspaceId);
+        if (Option.isNone(found) || found.value.status !== "provisioning") return Option.none();
+        return Option.some(yield* rebuildProvisionFrame(found.value));
       }),
 
     /**
@@ -744,6 +775,14 @@ const make = Effect.gen(function* () {
       Effect.map(workspaces.one(workspaceId), (found) =>
         Option.isNone(found) ? undefined : found.value.status,
       ),
+
+    /**
+     * Returns the ids of the runners that hold a ready primary of this
+     * resource. A run whose steps work in the main workspace prefers one of
+     * these runners, because its steps can start there without a fresh clone.
+     */
+    listRunnersWithReadyPrimary: (resourceId: string): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      workspaces.listRunnersWithReadyPrimary(resourceId),
 
     /**
      * Returns the id of a workspace's designated Connection: the account the

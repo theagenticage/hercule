@@ -4076,7 +4076,7 @@ describe("session.spawn into a workspace", () => {
         resourceId: web,
         form: "worktree",
         subdirectory: null,
-        branch: `hercule/run-${session.id.slice(-8)}`,
+        branch: `hercule/thread-${session.id.slice(-8)}`,
       });
 
       const frame = await waitForFrameTagged(arranged.wire, "workspaceProvision");
@@ -4133,7 +4133,7 @@ describe("session.spawn into a workspace", () => {
       });
 
       const workspace = await readWorkspace(arranged, String(session.workspaceId));
-      const branch = `hercule/run-${session.id.slice(-8)}`;
+      const branch = `hercule/thread-${session.id.slice(-8)}`;
       expect(workspace.checkouts).toHaveLength(2);
       expect(workspace.checkouts.map((one) => one.subdirectory)).toEqual(["web", "api"]);
       expect(workspace.checkouts.map((one) => one.branch)).toEqual([branch, branch]);

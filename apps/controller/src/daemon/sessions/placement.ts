@@ -70,7 +70,7 @@ import {
   validateOptions,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
-import { WorkspaceService } from "../../workspaces";
+import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
@@ -505,13 +505,14 @@ const make = Effect.gen(function* () {
           }
           // The workspaces domain decides everything about where the session
           // works: what the request means, how the checkouts are laid out,
-          // what the branch is called and which Connection the work uses.
+          // what the thread's branch is called and which Connection the work
+          // uses.
           const opened = yield* workspaces.openFor({
             wish: open.workspace,
             heldWorkspaceId: open.spec.workspaceId,
             runnerId: open.runnerId,
             projectId: open.projectId,
-            sessionId,
+            branch: buildThreadBranch(sessionId),
             at,
           });
           yield* sessions.create({

@@ -51,7 +51,7 @@ import {
   type ExpressionError,
   type ExpressionScope,
 } from "../expressions";
-import type { RegisteredWorkflowAction } from "../plugins";
+import type { RegisteredWorkflowAction, WorkspaceActionId } from "../plugins";
 import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
 /**
@@ -78,6 +78,23 @@ type Step = WorkflowDefinition["steps"][number];
 type ActionStep = Extract<Step, { readonly kind: "action" }>;
 type AgentStep = Extract<Step, { readonly kind: "agent" }>;
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
+type WorkspacePolicy = NonNullable<WorkflowDefinition["workspace"]>;
+
+/**
+ * The workspace actions that work in one git checkout of the run's workspace.
+ * Each takes an optional `resourceId` that picks the checkout.
+ */
+const GIT_ACTION_IDS: ReadonlySet<string> = new Set([
+  "git.commit",
+  "git.push",
+] satisfies ReadonlyArray<WorkspaceActionId>);
+
+/** Checks whether an action works in one git checkout of the run's workspace, such as `git.commit`. */
+export const isGitActionId = (id: string): boolean => GIT_ACTION_IDS.has(id);
+
+/** Returns the number of checkouts a run's workspace has under a policy: one for a main workspace. */
+const countPolicyCheckouts = (policy: WorkspacePolicy): number =>
+  policy.kind === "primary" ? 1 : policy.checkouts.length;
 
 /** Returns the ids of the Agents that a definition's steps refer to, without duplicates. */
 export const listReferencedAgentIds = (definition: WorkflowDefinition): ReadonlyArray<string> => [
@@ -545,6 +562,7 @@ const listActionIssues = (
   index: number,
   references: ResolvedReferences,
   templates: ReadonlyArray<PlacedTemplate>,
+  workspace: WorkspacePolicy | undefined,
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
   const action = references.actions.get(step.action);
@@ -566,7 +584,7 @@ const listActionIssues = (
     .filter((param) => !param.optional && !Object.hasOwn(params, param.name))
     .map((param) => param.name);
   const unknown = Object.keys(params).filter((name) => !takenNames.has(name));
-  const issues: Array<Issue> = [];
+  const issues: Array<Issue> = [...listWorkspaceIssues(step, index, action, workspace)];
   if (missing.length > 0) {
     const isSingleParam = missing.length === 1;
     issues.push({
@@ -632,6 +650,45 @@ const listAgentReferenceIssues = (
 };
 
 /**
+ * Checks that an action which runs in the run's workspace has a workspace to
+ * run in. Returns an issue when:
+ *
+ * - the workflow has no `workspace`, so a run of it has no workspace at all;
+ * - a git action names no `resourceId` while the workspace has more than one
+ *   checkout, so a run could not tell which checkout to work in.
+ *
+ * A git action in a workspace with no checkout is not refused here: it fails
+ * when the step runs, with an error that says the workspace has no checkout.
+ */
+const listWorkspaceIssues = (
+  step: ActionStep,
+  index: number,
+  action: RegisteredWorkflowAction,
+  workspace: WorkspacePolicy | undefined,
+): ReadonlyArray<Issue> => {
+  if (action.runsIn !== "workspace") return [];
+  const path = ["steps", String(index)];
+  if (workspace === undefined) {
+    return [
+      {
+        path: [...path, "action"],
+        message: `The action ${action.id} runs in the run's workspace, and this workflow has no workspace. Add a workspace to the workflow: the repo's main workspace (kind: primary), or a workspace of its own for each run (kind: ephemeral).`,
+      },
+    ];
+  }
+  const checkouts = countPolicyCheckouts(workspace);
+  if (isGitActionId(action.id) && checkouts > 1 && !Object.hasOwn(step.params ?? {}, "resourceId")) {
+    return [
+      {
+        path: [...path, "params"],
+        message: `The workflow's workspace has ${String(checkouts)} checkouts, so the action ${action.id} must say which one it works in. Add resourceId under params, set to the id of one of the workspace's repos.`,
+      },
+    ];
+  }
+  return [];
+};
+
+/**
  * Validates an agent step's Agent and output schema. The Agent must exist and
  * must not be an assistant. The output schema must stay within the JSON
  * Schema subset that every provider accepts, with one issue per broken rule.
@@ -660,13 +717,14 @@ const checkStep = (
   step: Step,
   index: number,
   references: ResolvedReferences,
+  workspace: WorkspacePolicy | undefined,
 ): Effect.Effect<ReadonlyArray<Issue>> => {
   const path = ["steps", String(index)];
   let templates: ReadonlyArray<PlacedTemplate>;
   let issues: ReadonlyArray<Issue>;
   if (step.kind === "action") {
     templates = listTemplates(step.params ?? {}, [...path, "params"]);
-    issues = listActionIssues(step, index, references, templates);
+    issues = listActionIssues(step, index, references, templates, workspace);
   } else {
     templates = [{ path: [...path, "prompt"], template: step.prompt }];
     issues = listAgentIssues(step, index, references);
@@ -750,7 +808,7 @@ export const validateDefinition = (
         checkTrigger(trigger, index, definition, references),
       )).flat(),
       ...(yield* Effect.forEach(definition.steps, (step, index) =>
-        checkStep(step, index, references),
+        checkStep(step, index, references, definition.workspace),
       )).flat(),
       ...(yield* Effect.forEach(definedEdges, (edge, index) =>
         Effect.map(checkEdgeCondition(edge, index), (conditionIssues) => [

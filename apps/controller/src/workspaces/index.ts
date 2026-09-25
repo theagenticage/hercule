@@ -13,4 +13,10 @@
  */
 export { gitCredentials, buildGitIdentity, type GitCredential } from "./credentials";
 export { buildReadyClause, buildResumableClause } from "./repository";
-export { WorkspaceService, WorkspaceServiceLayer, type QueryInput } from "./service";
+export {
+  buildRunBranch,
+  buildThreadBranch,
+  WorkspaceService,
+  WorkspaceServiceLayer,
+  type QueryInput,
+} from "./service";

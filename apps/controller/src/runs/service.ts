@@ -1,7 +1,9 @@
 /**
  * The run operations: `run.start`, `run.cancel`, `run.query` and `run.read`,
- * and resuming unfinished runs when the controller starts. Starting,
- * cancelling and resuming are the run engine's (`engine.ts`).
+ * resuming unfinished runs when the controller starts, and what the
+ * controller daemon calls about workspace steps: their results, the runners
+ * and workspaces that fail under them, and the steps a runner is owed.
+ * Everything but querying and reading is the run engine's (`engine.ts`).
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
@@ -34,9 +36,11 @@ import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
 import type { TaskService } from "../tasks";
 import type { WorkflowService } from "../workflows";
+import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
+import type { WorkspaceSteps } from "./workspace-steps";
 
 const QueryInput = Schema.Struct({
   ...RunFilter.fields,
@@ -61,6 +65,12 @@ const make = Effect.gen(function* () {
     start: engine.start,
     cancel: engine.cancel,
     resumeUnfinished: engine.resumeUnfinished,
+    completeStep: engine.completeStep,
+    failWorkspace: engine.failWorkspace,
+    failRunsPinnedTo: engine.failRunsPinnedTo,
+    owedWorkspaceSteps: engine.owedWorkspaceSteps,
+    listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
+    wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
 
     /**
      * Returns one page of runs, the newest first unless the caller sorts the
@@ -117,6 +127,8 @@ export const RunServiceLayer: Layer.Layer<
   | Settings
   | AfterCommit
   | RunExecutor
+  | WorkspaceService
+  | WorkspaceSteps
 > = Layer.effect(RunService)(make);
 
 /**

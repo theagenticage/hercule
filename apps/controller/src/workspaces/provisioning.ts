@@ -22,15 +22,17 @@ import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
 import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./repository";
 
-/** One checkout to ask the runner for: the row, the repo behind it, and the
- * values the row has no column for. */
+/** One checkout to ask the runner for: the row, and the repo behind it. */
 interface CheckoutPlan {
   readonly checkout: StoredCheckout;
   readonly resource: StoredRepo;
-  /** The branch a new branch starts from; absent means the resource's default. */
-  readonly baseBranch?: string;
 }
 
+/**
+ * Builds the frame that asks a runner to provision a workspace, from its rows
+ * and the repos behind its checkouts. The frame is built only from stored
+ * values, so a frame rebuilt later to be sent again is the same as the first.
+ */
 export const buildProvisionFrame = (
   workspace: StoredWorkspace,
   plans: ReadonlyArray<CheckoutPlan>,
@@ -44,7 +46,7 @@ export const buildProvisionFrame = (
     remote: plan.resource.remote,
     subdirectory: plan.checkout.subdirectory,
     branch: plan.checkout.branch,
-    baseBranch: plan.baseBranch ?? null,
+    baseBranch: plan.checkout.baseBranch,
     setupCommand: plan.resource.setupCommand,
     workspaceInclude: plan.resource.workspaceInclude,
   })),
@@ -95,6 +97,7 @@ export const openWorkspace = (
         form: checkout.form,
         subdirectory: checkout.subdirectory,
         branch: checkout.branch,
+        baseBranch: checkout.baseBranch ?? null,
       })),
       input.at,
     );
@@ -116,7 +119,6 @@ export const openWorkspace = (
         input.checkouts.map((checkout, index) => ({
           checkout: rows[index]!,
           resource: checkout.resource,
-          ...(checkout.baseBranch === undefined ? {} : { baseBranch: checkout.baseBranch }),
         })),
       ),
     };

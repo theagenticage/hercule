@@ -1,8 +1,13 @@
 /**
- * Executing one step record of a run: rendering the step's params, calling
- * its action, and ending the record with what the action returned or how it
- * failed. The run engine (`engine.ts`) calls this on the child fiber that
- * executes the record, after the record has moved to `running`.
+ * Executing one step record of a run that runs on the controller: preparing
+ * the step's input, calling its action, and ending the record with what the
+ * action returned or how it failed.
+ *
+ * The run engine (`engine.ts`) prepares the input in the transaction that
+ * moves the record to `running`, and stores it on the record. It then calls
+ * `executeStep` on the child fiber that executes the record. A step whose
+ * action runs in the run's workspace is prepared the same way, but a runner
+ * executes it, not this module.
  */
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -20,6 +25,7 @@ import {
   type FailureReason,
   type Run,
   type RunStarted,
+  type WorkflowDefinition,
   type RunStartInput,
   type StepError,
   type TaskCreateInput,
@@ -57,9 +63,16 @@ import { commitUninterruptibly } from "./transaction";
  *   carry out the run at this step.
  * - `interrupted`: the controller stopped while a plugin's action was
  *   running.
+ * - `workspace_failed`: the run's workspace could not be set up, or the
+ *   runner that holds it is gone, while the step was running in it.
  */
 type EngineStepErrorCode =
-  "not_found" | "expression_error" | "validation" | "unexpected" | "interrupted";
+  | "not_found"
+  | "expression_error"
+  | "validation"
+  | "unexpected"
+  | "interrupted"
+  | "workspace_failed";
 
 /** A step error the engine writes itself. */
 export interface EngineStepError extends StepError {
@@ -77,11 +90,40 @@ export interface StepRecordKey {
   readonly startedAt?: string;
 }
 
+type ActionStep = Extract<WorkflowDefinition["steps"][number], { readonly kind: "action" }>;
+
 /** The error of a step whose action is not in the catalog, or has nothing to call. */
-const buildActionUnavailableError = (action: string): EngineStepError => ({
+export const buildActionUnavailableError = (action: string): EngineStepError => ({
   code: "not_found",
   message: `The action ${action} is not available.`,
 });
+
+/** Why a step's input could not be prepared: the step error, and the reason the run fails. */
+export interface InputFailure {
+  readonly error: EngineStepError;
+  readonly failureReason: FailureReason;
+}
+
+/**
+ * A step's input, prepared: its params rendered from the run and checked
+ * against the action's input schema, and the action's catalog entry.
+ */
+export interface PreparedInput {
+  /** The input, encoded with the action's input schema, as the step record stores it. */
+  readonly input: Schema.Json;
+  readonly action: RegisteredWorkflowAction;
+}
+
+/** Returns the action step of a run's plan with this id, and dies if there is none. */
+export const findActionStep = (run: Run, stepId: string): ActionStep => {
+  // Starting the run checked that every step is an action step, and the plan
+  // never changes.
+  const step = run.plan.steps.find((candidate) => candidate.id === stepId);
+  if (step === undefined || step.kind !== "action") {
+    throw new Error(`the plan of run ${run.id} has no action step ${stepId}`);
+  }
+  return step;
+};
 
 /** The step error for an action that failed with something other than one of the API's errors, such as a bug. */
 const UNEXPECTED_ACTION_FAILURE: EngineStepError = {
@@ -114,7 +156,7 @@ interface BuiltInActionHandler {
  * actions' services fail with, as its code and message. Returns `undefined`
  * for anything else.
  */
-const describeActionFailure = (failure: unknown): StepError | undefined => {
+export const describeActionFailure = (failure: unknown): StepError | undefined => {
   if (failure instanceof ActionError) return { code: failure.code, message: failure.message };
   if (!isApiError(failure)) return undefined;
   const { code, message } = failure.error;
@@ -193,8 +235,8 @@ interface StepExecutionNeeds {
 }
 
 /**
- * Builds `executeStep`, which executes one running step record of a run and
- * records how it ended.
+ * Builds `prepareInput`, which prepares a step's input, and `executeStep`,
+ * which executes one running step record of a run and records how it ended.
  */
 export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecutionNeeds) =>
   Effect.gen(function* () {
@@ -239,39 +281,78 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     };
 
     /**
-     * Executes one running step record of a run, and records how it ended. A
-     * failure of the step fails the run. This effect itself fails only with a
-     * database error, which is the controller's failure rather than the
-     * step's. Does nothing more once the step record has ended some other way,
-     * for example because the run was cancelled.
+     * Prepares a step's input: renders the step's params from the run's
+     * inputs and the outputs of the steps that have finished, and decodes the
+     * result with the action's input schema. Returns the input encoded again
+     * with that schema, which is what the step record stores, or the failure
+     * the step and its run end with:
+     *
+     * - `expression_error` when a template cannot be rendered;
+     * - `not_found` when the action is not in the catalog;
+     * - `validation` when the rendered params do not match the action's input.
+     */
+    const prepareInput = (
+      run: Run,
+      step: ActionStep,
+    ): Effect.Effect<Result.Result<PreparedInput, InputFailure>> =>
+      Effect.gen(function* () {
+        const rendered = yield* Effect.result(
+          renderTemplates(step.params ?? {}, buildRunContext(run)),
+        );
+        if (Result.isFailure(rendered)) {
+          return Result.fail({
+            error: { code: "expression_error", message: rendered.failure.message },
+            failureReason: "expression-error",
+          });
+        }
+        const action = (yield* host.listActiveWorkflowActions()).find(
+          (candidate) => candidate.id === step.action,
+        );
+        if (action === undefined) {
+          return Result.fail({
+            error: buildActionUnavailableError(step.action),
+            failureReason: "step-failed",
+          });
+        }
+        const schema = action.input as Schema.Codec<unknown, Schema.Json>;
+        const decoded = Schema.decodeUnknownResult(schema)(rendered.success, {
+          errors: "all",
+          onExcessProperty: "error",
+        });
+        if (Result.isFailure(decoded)) {
+          return Result.fail({
+            error: {
+              code: "validation",
+              message: `The rendered params do not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
+            },
+            failureReason: "step-failed",
+          });
+        }
+        return Result.succeed({ input: Schema.encodeSync(schema)(decoded.success), action });
+      });
+
+    /**
+     * Executes one running step record of a run with the input stored on it,
+     * and records how the record ended. A record that stores no input was
+     * started before inputs were stored, so its input is prepared again here.
+     * A failure of the step fails the run. This effect itself fails only with
+     * a database error, which is the controller's failure rather than the
+     * step's. Does nothing more once the step record has ended some other
+     * way, for example because the run was cancelled.
      *
      * A built-in action's effect and the end of its step record commit in one
      * transaction, except for `wait`. A plugin's action reaches outside the
      * controller, so it is called after its record's `running` commits and
      * outside any transaction, and its record ends in a transaction of its own.
      */
-    return (run: Run, attempt: Required<StepRecordKey>): Effect.Effect<void, SqlError> =>
+    const executeStep = (
+      run: Run,
+      attempt: Required<StepRecordKey>,
+      storedInput: Schema.Json | undefined,
+    ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        // Starting the run checked that every step is an action step, and
-        // the plan never changes.
-        const step = run.plan.steps.find((candidate) => candidate.id === attempt.stepId);
-        if (step === undefined || step.kind !== "action") {
-          return yield* Effect.die(
-            `the plan of run ${run.id} has no action step ${attempt.stepId}`,
-          );
-        }
+        const step = findActionStep(run, attempt.stepId);
         const { startedAt } = attempt;
-        const rendered = yield* Effect.result(
-          renderTemplates(step.params ?? {}, buildRunContext(run)),
-        );
-        if (Result.isFailure(rendered)) {
-          return yield* failRun(
-            run.id,
-            attempt,
-            { code: "expression_error", message: rendered.failure.message },
-            "expression-error",
-          );
-        }
         const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
           (action) => action.id === step.action,
         );
@@ -283,8 +364,26 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             "step-failed",
           );
         }
+        let input: Schema.Json;
+        if (storedInput === undefined) {
+          const prepared = yield* prepareInput(run, step);
+          if (Result.isFailure(prepared)) {
+            return yield* failRun(
+              run.id,
+              attempt,
+              prepared.failure.error,
+              prepared.failure.failureReason,
+            );
+          }
+          input = prepared.success.input;
+        } else {
+          input = storedInput;
+        }
+        // The stored input was encoded with this schema, so it decodes; a
+        // failure means the catalog entry changed since, and the step fails
+        // the way a step with params the action does not take would.
         const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
-          rendered.success,
+          input,
           { errors: "all", onExcessProperty: "error" },
         );
         if (Result.isFailure(decoded)) {
@@ -293,13 +392,13 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             attempt,
             {
               code: "validation",
-              message: `The rendered params do not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
+              message: `The step's input does not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
             },
             "step-failed",
           );
         }
         const actor: RunActor = { _tag: "run", runId: run.id, stepId: attempt.stepId };
-        const completeStep = (output: unknown) =>
+        const writeCompletion = (output: unknown) =>
           Effect.gen(function* () {
             const finishedAt = yield* nowIso;
             yield* runs.finishStep(
@@ -344,15 +443,15 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             actor,
           );
           execute = builtIn.inTransaction
-            ? commitUninterruptibly(sql, Effect.flatMap(called, completeStep))
-            : Effect.flatMap(called, (output) => commitUninterruptibly(sql, completeStep(output)));
+            ? commitUninterruptibly(sql, Effect.flatMap(called, writeCompletion))
+            : Effect.flatMap(called, (output) => commitUninterruptibly(sql, writeCompletion(output)));
         } else if (pluginExecute !== undefined) {
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {
               runId: run.id,
               stepId: attempt.stepId,
             }),
-            (output) => commitUninterruptibly(sql, completeStep(output)),
+            (output) => commitUninterruptibly(sql, writeCompletion(output)),
           );
         } else {
           return yield* failRun(
@@ -365,4 +464,6 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
         const failure = yield* Effect.catchCause(Effect.as(execute, undefined), decideStepError);
         if (failure !== undefined) yield* failRun(run.id, attempt, failure, "step-failed");
       });
+
+    return { prepareInput, executeStep };
   });

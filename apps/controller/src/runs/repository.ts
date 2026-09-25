@@ -84,6 +84,28 @@ export type RunOutcome =
       readonly failedStepId?: string;
     };
 
+/** One step record of a run: its step and its iteration. */
+export interface StepRecordId {
+  readonly stepId: string;
+  readonly iteration: number;
+}
+
+/**
+ * A step record that is running in a run pinned to a runner, with what a
+ * runner needs to run it again.
+ */
+export interface PinnedRunningStep {
+  readonly runId: string;
+  readonly stepId: string;
+  readonly iteration: number;
+  /** The run's workspace. */
+  readonly workspaceId: string;
+  /** The id of the step's action in the run's plan. */
+  readonly action: string;
+  /** The step's input as stored when the record started; absent for a record started before inputs were stored. */
+  readonly input?: Schema.Json;
+}
+
 /**
  * A step record was asked to start or to end, but it had already ended, for
  * example because its run was cancelled. A caller that ends a step together
@@ -545,18 +567,22 @@ const make = Effect.gen(function* () {
         : Effect.andThen(insertSteps(runId, stepIds, at), announceChange(runId, "updated")),
 
     /**
-     * Moves a pending step record to running. Fails with `StepRecordEnded` if
-     * the record is not pending any more, so the caller does not call the
-     * step's action for a run that has been cancelled.
+     * Moves a pending step record to running, and stores the step's input:
+     * its params rendered and checked against the action's input schema.
+     * Fails with `StepRecordEnded` if the record is not pending any more, so
+     * the caller does not call the step's action for a run that has been
+     * cancelled.
      */
     startStep: (
       runId: string,
-      step: { readonly stepId: string; readonly iteration: number },
+      step: StepRecordId,
+      input: Schema.Json,
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
         const started = yield* sql`
-          UPDATE run_steps SET status = 'running', started_at = ${at}
+          UPDATE run_steps SET status = 'running', started_at = ${at},
+                               input = ${JSON.stringify(input)}
           WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
             AND iteration = ${step.iteration} AND status = 'pending'
           RETURNING step_id
@@ -640,15 +666,142 @@ const make = Effect.gen(function* () {
             announceChange(runId, "updated"),
           ),
 
-    /** Cancels every step record of a run that is still pending or running. */
-    cancelUnfinishedSteps: (runId: string, at: string): Effect.Effect<void, SqlError> =>
+    /**
+     * Cancels every step record of a run that is still pending or running.
+     * Returns the records that were running, because whatever runs them may
+     * have to be told to stop.
+     */
+    cancelUnfinishedSteps: (
+      runId: string,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<StepRecordId>, SqlError> =>
       Effect.gen(function* () {
-        yield* sql`
+        const cancelled = yield* sql<{
+          readonly step_id: string;
+          readonly iteration: number;
+          readonly started_at: string | null;
+        }>`
           UPDATE run_steps SET status = 'cancelled', finished_at = ${at}
           WHERE run_id = ${uuidFromString(runId)} AND status IN ('pending', 'running')
+          RETURNING step_id, iteration, started_at
+        `;
+        yield* announceChange(runId, "updated");
+        // Only a running record has started, so the start time tells the
+        // two apart after the update.
+        return cancelled
+          .filter((row) => row.started_at !== null)
+          .map((row) => ({ stepId: row.step_id, iteration: row.iteration }));
+      }),
+
+    /**
+     * Pins a running run to a runner and to its workspace there. Every later
+     * step of the run that works in a workspace runs in this one. Does nothing
+     * to a run that is not running or is already pinned.
+     */
+    pin: (
+      runId: string,
+      pinned: { readonly runnerId: string; readonly workspaceId: string },
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`
+          UPDATE runs SET runner_id = ${uuidFromString(pinned.runnerId)},
+                          workspace_id = ${uuidFromString(pinned.workspaceId)}
+          WHERE id = ${uuidFromString(runId)} AND status = 'running' AND runner_id IS NULL
         `;
         yield* announceChange(runId, "updated");
       }),
+
+    /**
+     * Returns the ids of the running runs pinned to a runner. The query names
+     * `runs.status = 'running'` so SQLite reads the `runs_pinned_running`
+     * index.
+     */
+    listPinnedTo: (runnerId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE runner_id = ${uuidFromString(runnerId)} AND runs.status = 'running'
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns the ids of the running runs that work in a workspace. A run is
+     * found through its runner first, so SQLite reads the
+     * `runs_pinned_running` index rather than every run.
+     */
+    listWorkingIn: (workspaceId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE runner_id = (SELECT runner_id FROM workspaces
+                             WHERE id = ${uuidFromString(workspaceId)})
+            AND runs.status = 'running' AND workspace_id = ${uuidFromString(workspaceId)}
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns the ids of the running runs that have a workspace in their plan
+     * but no runner pinned yet. Their next workspace step may be waiting for a
+     * runner to place it on.
+     */
+    listUnpinnedWithWorkspace: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE runner_id IS NULL AND runs.status = 'running'
+            AND json_extract(plan, '$.workspace') IS NOT NULL
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns every running step record in the running runs pinned to a
+     * runner, with the action its step calls and its stored input. The caller
+     * picks out the records of workspace steps.
+     */
+    listRunningStepsPinnedTo: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<PinnedRunningStep>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly run_id: Uint8Array;
+          readonly workspace_id: Uint8Array;
+          readonly step_id: string;
+          readonly iteration: number;
+          readonly action: string | null;
+          readonly input: string | null;
+        }>`
+          SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input,
+                 (SELECT json_extract(step.value, '$.action')
+                  FROM json_each(r.plan, '$.steps') AS step
+                  WHERE json_extract(step.value, '$.id') = s.step_id) AS action
+          FROM runs r JOIN run_steps s ON s.run_id = r.id
+          WHERE r.runner_id = ${uuidFromString(runnerId)} AND r.status = 'running'
+            AND r.workspace_id IS NOT NULL AND s.status = 'running'
+          ORDER BY r.created_at, s.rowid
+        `,
+        (rows) =>
+          rows.flatMap((row) =>
+            row.action === null
+              ? []
+              : [
+                  {
+                    runId: uuidToString(row.run_id),
+                    stepId: row.step_id,
+                    iteration: row.iteration,
+                    workspaceId: uuidToString(row.workspace_id),
+                    action: row.action,
+                    ...(row.input === null
+                      ? {}
+                      : { input: JSON.parse(row.input) as Schema.Json }),
+                  },
+                ],
+          ),
+      ),
 
     /** Ends a pending or running run. Does nothing to a run that has already ended. */
     finish: (id: string, ending: RunOutcome, at: string): Effect.Effect<void, SqlError> =>
