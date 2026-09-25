@@ -145,7 +145,9 @@ export function RunPage({
                 }}
               >
                 {!workspaceReading.asksOnCancel ? null : (
-                  <span className="ml-1.5 shrink-0">
+                  // A flex wrapper, so the label centres on the question's line
+                  // instead of sitting on an inline line box that lifts it.
+                  <span className="ml-1.5 flex shrink-0">
                     <Checkbox
                       label="Delete the run's workspace too"
                       checked={deletesWorkspace}
