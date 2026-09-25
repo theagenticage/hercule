@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import { RunExecutor } from "../../runs";
 
 /**
@@ -20,8 +21,12 @@ export class RunFibers extends Context.Service<RunFibers, FiberMap.FiberMap<stri
 
 /** One run's execution while it is being carried out. */
 interface Execution {
-  /** Whether `execute` was called for the run since the current pass began. */
-  woken: boolean;
+  /**
+   * One message per call to `execute` for the run that the current pass has
+   * not taken yet. A pass that ends with a message left is followed by
+   * another pass.
+   */
+  readonly wakes: Queue.Queue<void>;
 }
 
 const make = Effect.gen(function* () {
@@ -34,15 +39,17 @@ const make = Effect.gen(function* () {
   const executing = new Map<string, Execution>();
 
   /**
-   * Runs `execution` once, and again for as long as the run was woken during
-   * the pass before. The check and the removal from `executing` happen in one
-   * synchronous step, so a wake-up either lands before it, and is seen, or
-   * after it, and starts a new fiber.
+   * Runs `execution` once, and again for as long as the pass before ended
+   * with a wake it did not take. Each pass starts with no wake waiting,
+   * because it reads the run's rows after any wake sent before it. The check
+   * and the removal from `executing` happen in one synchronous step, so a
+   * wake either lands before it, and is seen, or after it, and starts a new
+   * fiber.
    */
   const executeWhileWoken = (
     runId: string,
     mine: Execution,
-    execution: Effect.Effect<void>,
+    execution: (wakes: Queue.Dequeue<void>) => Effect.Effect<void>,
   ): Effect.Effect<void> => {
     // Only this fiber's own entry is removed: after a `stop`, a new fiber may
     // already have put its own entry in its place.
@@ -51,9 +58,9 @@ const make = Effect.gen(function* () {
     };
     return Effect.gen(function* () {
       while (true) {
-        mine.woken = false;
-        yield* execution;
-        if (!mine.woken) {
+        yield* Queue.clear(mine.wakes);
+        yield* execution(mine.wakes);
+        if (Queue.sizeUnsafe(mine.wakes) === 0) {
           forget();
           return;
         }
@@ -69,10 +76,11 @@ const make = Effect.gen(function* () {
     execute: (runId, execution) => {
       const current = executing.get(runId);
       if (current !== undefined) {
-        current.woken = true;
+        Queue.offerUnsafe(current.wakes, undefined);
         return;
       }
-      const mine: Execution = { woken: false };
+      // Unbounded, so offering never waits, and `execute` stays synchronous.
+      const mine: Execution = { wakes: Effect.runSync(Queue.unbounded<void>()) };
       executing.set(runId, mine);
       // A forked fiber starts running on the caller's thread until its first
       // wait, and a step's database work never waits. The fiber therefore

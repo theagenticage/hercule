@@ -48,19 +48,19 @@ describe("RunExecutor", () => {
         const runFibers = yield* RunFibers;
         const controlled = yield* buildControlledExecution;
 
-        executor.execute("run-1", controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
         expect(yield* Queue.take(controlled.started)).toBe(1);
         // Three step results committed while the first pass is running.
-        executor.execute("run-1", controlled.execution);
-        executor.execute("run-1", controlled.execution);
-        executor.execute("run-1", controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
         yield* controlled.finish(1);
         expect(yield* Queue.take(controlled.started)).toBe(2);
         yield* controlled.finish(2);
         yield* FiberMap.awaitEmpty(runFibers);
 
         // The run fell asleep; a later wake-up starts it again.
-        executor.execute("run-1", controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
         expect(yield* Queue.take(controlled.started)).toBe(3);
         return { passes: controlled.passes(), mostAtOnce: controlled.mostAtOnce() };
       }),
@@ -75,10 +75,10 @@ describe("RunExecutor", () => {
         const executor = yield* RunExecutor;
         const controlled = yield* buildControlledExecution;
 
-        executor.execute("run-1", controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
         expect(yield* Queue.take(controlled.started)).toBe(1);
         executor.stop(["run-1"]);
-        executor.execute("run-1", controlled.execution);
+        executor.execute("run-1", () => controlled.execution);
         expect(yield* Queue.take(controlled.started)).toBe(2);
         return controlled.passes();
       }),

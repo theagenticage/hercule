@@ -332,7 +332,12 @@ const make = Effect.gen(function* () {
             return {
               // Read back rather than merged, so the caller gets the written row.
               detail: yield* readRunnerOrFail(id),
-              placements: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
+              // A runner that is no longer reserved can take work that names
+              // no runner, such as a run waiting for one.
+              placements:
+                "maxConcurrentSessions" in changes ||
+                "diskWatermarkBytes" in changes ||
+                edit.reserved === false,
             };
           }),
         );

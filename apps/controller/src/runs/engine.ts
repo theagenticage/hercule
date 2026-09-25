@@ -730,18 +730,21 @@ export const makeRunEngine = Effect.gen(function* () {
    * from the rows after the last child's writes committed.
    *
    * A workspace step's running record gets no child fiber: its runner runs
-   * it, and its result wakes the run. A workspace step that waits for a
-   * runner is tried again only after another child has made progress, or
-   * when a runner arrives and wakes the run. When no child fiber is left and
-   * the run still has such records, the execution returns and the run is
-   * asleep.
+   * it, and its result wakes the run. A wake (see `RunExecutor.execute`)
+   * that arrives while children are still executing makes the execution
+   * read the run again at once, so a step routed to by a workspace step's
+   * result starts without waiting for a long `wait` on another branch. A
+   * workspace step that waits for a runner is tried again only after
+   * another child has made progress, or after a wake. When no child fiber
+   * is left and the run still has such records, the execution returns and
+   * the run is asleep.
    *
    * When the run has ended, the execution returns, and closing its scope
    * interrupts the child fibers still executing: a `wait` stops, and a
    * plugin's action sees its signal abort. Stopping the execution, when the
    * run is cancelled or the controller stops, interrupts them the same way.
    */
-  const executeRun = (runId: string): Effect.Effect<void, SqlError> =>
+  const executeRun = (runId: string, wakes: Queue.Dequeue<void>): Effect.Effect<void, SqlError> =>
     Effect.scoped(
       Effect.gen(function* () {
         const endedChildren = yield* Queue.unbounded<{
@@ -814,7 +817,20 @@ export const makeRunEngine = Effect.gen(function* () {
             );
             return yield* failRunUnexpectedly(runId);
           }
-          const ended = yield* Queue.take(endedChildren);
+          // Waits for a child to end or for a wake, without taking either
+          // message yet: a message taken by the side that lost the race
+          // would be lost.
+          yield* Effect.raceFirst(Queue.peek(endedChildren), Queue.peek(wakes));
+          if (Queue.sizeUnsafe(wakes) > 0) {
+            // A step result or a runner woke the run. The next read of the
+            // run starts the records that are now ready, and a runner may
+            // have become free for the steps that found none.
+            yield* Queue.clear(wakes);
+            stepsWaitingForRunner.clear();
+          }
+          const polled = yield* Queue.poll(endedChildren);
+          if (Option.isNone(polled)) continue;
+          const ended = polled.value;
           busySteps.delete(ended.record.stepId);
           if (Exit.isSuccess(ended.exit)) {
             if (ended.exit.value === "waitsForRunner") {
@@ -927,19 +943,20 @@ export const makeRunEngine = Effect.gen(function* () {
    * has already written the run's ending.
    */
   const executeInBackground = (runId: string): void => {
-    const execution = Effect.catchCause(executeRun(runId), (cause) =>
-      Cause.hasInterrupts(cause)
-        ? Effect.interrupt
-        : Effect.andThen(
-            Effect.logError(`Executing run ${runId} failed, so the run fails`, cause),
-            Effect.catchCause(failRunUnexpectedly(runId), (failure) =>
-              Cause.hasInterrupts(failure)
-                ? Effect.interrupt
-                : Effect.logError(`Failing run ${runId} failed`, failure),
+    executor.execute(runId, (wakes) =>
+      Effect.catchCause(executeRun(runId, wakes), (cause) =>
+        Cause.hasInterrupts(cause)
+          ? Effect.interrupt
+          : Effect.andThen(
+              Effect.logError(`Executing run ${runId} failed, so the run fails`, cause),
+              Effect.catchCause(failRunUnexpectedly(runId), (failure) =>
+                Cause.hasInterrupts(failure)
+                  ? Effect.interrupt
+                  : Effect.logError(`Failing run ${runId} failed`, failure),
+              ),
             ),
-          ),
+      ).pipe(Effect.provideService(AfterCommit, afterCommitListener)),
     );
-    executor.execute(runId, Effect.provideService(execution, AfterCommit, afterCommitListener));
   };
 
   return {
@@ -1201,10 +1218,16 @@ export const makeRunEngine = Effect.gen(function* () {
     /**
      * Hands every running run that has a workspace but no runner yet to the
      * Run Executor, because a runner may now be able to take it. The
-     * controller daemon calls this when a runner connects or becomes
-     * placeable, and when a runner is retired, so a run whose only capable
-     * runner was retired fails instead of waiting for it. A run with nothing
-     * waiting goes back to sleep at once.
+     * controller daemon calls this:
+     *
+     * - when a runner connects;
+     * - when a connected runner may have become placeable, because it was
+     *   undrained, is no longer reserved, or got more room (the runners
+     *   domain publishes each as `placementsChanged`);
+     * - when a runner is retired, so a run whose only capable runner was
+     *   retired fails instead of waiting for it.
+     *
+     * A run with nothing waiting goes back to sleep at once.
      */
     wakeRunsWaitingForRunner: (): Effect.Effect<void, SqlError> =>
       Effect.map(runs.listUnpinnedWithWorkspace(), (ids) => {

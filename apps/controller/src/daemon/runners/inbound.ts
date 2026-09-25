@@ -106,10 +106,12 @@ const make = Effect.gen(function* () {
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's
         // free room takes a transaction and a credential read per session, and
-        // the rest of the fleet must not wait behind one runner.
-        return forkAndAbsorbFailures(
-          "Dispatching to a freed slot failed",
-          dispatch(traffic.runnerId),
+        // the rest of the fleet must not wait behind one runner. The runner
+        // may also have become placeable without reconnecting, for example by
+        // being undrained, so the runs waiting for a runner are woken too.
+        return Effect.andThen(
+          forkAndAbsorbFailures("Dispatching to a freed slot failed", dispatch(traffic.runnerId)),
+          runs.wakeRunsWaitingForRunner(),
         );
     }
   };

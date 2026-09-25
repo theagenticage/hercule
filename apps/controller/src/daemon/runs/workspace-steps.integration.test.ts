@@ -189,19 +189,60 @@ describe("workspace steps over the runner socket", () => {
           });
           // Once its end is recorded, the runner may delete the step's result.
           await waitUntil("stopped the recorded step", () =>
-            countStops(wire, key) === 1 ? true : undefined,
+            countStops(wire, key) >= 1 ? true : undefined,
           );
+          expect(countStops(wire, key)).toBe(1);
 
           // A late copy of the same result changes nothing, and is answered
           // with a stop too, so the runner still deletes the result.
           wire.send(result);
           await waitUntil("stopped the duplicate", () =>
-            countStops(wire, key) === 2 ? true : undefined,
+            countStops(wire, key) >= 2 ? true : undefined,
           );
+          expect(countStops(wire, key)).toBe(2);
           expect(await readRun(arranged.harness.base, arranged.token, runId)).toEqual(ended);
         },
         { plugins: [githubPlugin] },
       );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "hands on a workspace step made ready by a result while another branch of the run still waits",
+    async () => {
+      await withFleet(async (arranged) => {
+        const { wire } = arranged;
+        const repoId = await createRepo(arranged, "https://github.com/o/branches.git");
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Wait on one branch, commit and push on the other",
+            workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+            steps: [
+              { id: "pause", kind: "action", action: "wait", params: { seconds: 3600 } },
+              { id: "commit", kind: "action", action: "git.commit", params: { message: "Save" } },
+              { id: "push", kind: "action", action: "git.push", params: {} },
+            ],
+            edges: [{ from: "commit", to: "push" }],
+          },
+        });
+        await waitForStepStart(wire, runId);
+        wire.send({
+          _tag: "workspaceStepResult",
+          ...commitKey(runId),
+          outcome: { status: "completed", output: COMMITTED },
+        });
+
+        // The push is handed to the runner while the wait on the other branch
+        // is still running, not an hour later when the wait ends.
+        await waitForFrame(
+          wire,
+          "workspaceStepStart",
+          (frame) => frame["runId"] === runId && frame["stepId"] === "push",
+        );
+        const run = await readRun(arranged.harness.base, arranged.token, runId);
+        expect(findStepRecords(run, "pause")[0]?.status).toBe("running");
+      });
     },
     WAIT_DEADLINE_MS * 2,
   );
@@ -385,6 +426,52 @@ describe("workspace steps over the runner socket", () => {
           arranged.runnerId,
         );
         expect(listFramesTagged(older, "workspaceStepStart")).toEqual([]);
+      });
+    },
+    WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "starts a run waiting for its drained runner once it is undrained, and counts no reserved runner",
+    async () => {
+      await withFleet(async (arranged) => {
+        const repoId = await createRepo(arranged, "https://github.com/o/drained.git");
+        const runnerPath = `/api/v1/runners/${arranged.runnerId}`;
+        const change = async (method: "POST" | "PATCH", path: string, body?: unknown) => {
+          const response = await send(method, arranged.harness.base, path, {
+            ...(body === undefined ? {} : { body }),
+            token: arranged.token,
+          });
+          expect(response.status, await response.clone().text()).toBe(200);
+        };
+
+        // A draining runner may take work again, so the run starts and waits.
+        await change("POST", `${runnerPath}/drain`);
+        const runId = await startCommitRun(arranged, repoId);
+        await waitForRunTo(arranged, runId, "running", (run) => run.status === "running");
+        expect(await readCommitStatus(arranged, runId)).toBe("pending");
+        // Undrained, the connected runner takes the run without reconnecting.
+        await change("POST", `${runnerPath}/undrain`);
+        await waitForStepStart(arranged.wire, runId);
+
+        // A run never goes to a reserved runner, so a plan only a reserved
+        // runner can run is refused rather than left waiting forever.
+        const reserved = await arranged.enlist();
+        await change("PATCH", `/api/v1/runners/${reserved.runnerId}`, { reserved: true });
+        await change("POST", `${runnerPath}/retire`, { force: true });
+        const refused = await requestStart(arranged.harness.base, arranged.token, {
+          definition: buildCommitDefinition({
+            kind: "ephemeral",
+            checkouts: [{ resourceId: repoId }],
+          }),
+        });
+        expect(refused.status).toBe(400);
+        expect(await refused.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: { issues: [{ path: [], message: NO_COMMITTING_RUNNER }] },
+          },
+        });
       });
     },
     WAIT_DEADLINE_MS * 3,

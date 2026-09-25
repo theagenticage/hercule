@@ -10,6 +10,7 @@
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as Queue from "effect/Queue";
 
 /** The Run Executor, which the controller daemon implements. */
 export class RunExecutor extends Context.Service<
@@ -22,17 +23,26 @@ export class RunExecutor extends Context.Service<
      *
      * When an execution of that run is already being carried out, `execute`
      * starts no second one, so a run is never executed twice at the same
-     * time. Instead it marks the run as woken: the execution being carried
-     * out reads the run's rows once more before it stops. Without the mark, a
-     * step result committed just as the execution decided it had nothing left
-     * to do would wait until the next restart. Many calls before that read
-     * cost one read, not one each.
+     * time. Instead it wakes the execution being carried out:
+     *
+     * - `execution` is given a queue, `wakes`, and each such call puts a
+     *   message in it. An execution that waits for something can also wait
+     *   for a wake, take it, and read the run's rows again, so a step result
+     *   is acted on while the execution is still busy with other steps.
+     * - When the execution returns with a wake still in the queue, it is
+     *   carried out once more. Without that, a step result committed just
+     *   as the execution decided it had nothing left to do would wait until
+     *   the next restart. Many wakes before that read cost one read, not one
+     *   each.
      *
      * It returns nothing and is synchronous, so that it can run right after a
      * commit (see `afterCommit`). The request that started the run is answered
      * before the execution takes its first step.
      */
-    readonly execute: (runId: string, execution: Effect.Effect<void>) => void;
+    readonly execute: (
+      runId: string,
+      execution: (wakes: Queue.Dequeue<void>) => Effect.Effect<void>,
+    ) => void;
 
     /**
      * Stops the execution of each of these runs that is being carried out, and

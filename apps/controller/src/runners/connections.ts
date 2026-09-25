@@ -499,8 +499,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Publishes that this runner may now have room for work, for example
-     * because its cap was raised or it was undrained. This domain does not
-     * know whether any session is waiting for that room.
+     * because its cap was raised, it was undrained, or it is no longer
+     * reserved. This domain does not know whether any session or run is
+     * waiting for that room.
      */
     placementsChanged: (id: string): Effect.Effect<void> =>
       Effect.asVoid(Queue.offer(fleet, { _tag: "placementsChanged", runnerId: id })),
