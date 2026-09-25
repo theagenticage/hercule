@@ -41,6 +41,7 @@ import {
   Subdirectory,
   type CredentialAnswer,
   type CredentialRequest,
+  type GitIdentity,
   type WorkspaceDispose,
   type WorkspaceProvision,
   type WorkspaceReport,
@@ -860,16 +861,21 @@ const make = Effect.gen(function* () {
       workspaces.listRunnersWithReadyPrimary(resourceId),
 
     /**
-     * Returns the id of a workspace's designated Connection: the account the
-     * work in it commits and pushes as. Returns `null` when no Connection
-     * backs the workspace, or when there is no such workspace. The controller
-     * daemon reads it to put the commit author on a workspace step, the way a
-     * session start does.
+     * Returns the identity a workspace step's commits are made as: that of
+     * the workspace's designated Connection, the account the work in the
+     * workspace commits and pushes as. It is read now rather than stored, the
+     * way a session start reads its account. Returns `undefined` when no
+     * Connection backs the workspace, when there is no such workspace, or
+     * when the Connection has no usable account; the runner then leaves git's
+     * own identity unchanged.
      */
-    readDesignatedConnectionId: (workspaceId: string): Effect.Effect<string | null, SqlError> =>
-      Effect.map(workspaces.one(workspaceId), (found) =>
-        Option.isNone(found) ? null : found.value.designatedConnectionId,
-      ),
+    readCommitAuthor: (workspaceId: string): Effect.Effect<GitIdentity | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const found = yield* workspaces.one(workspaceId);
+        const connectionId = Option.isNone(found) ? null : found.value.designatedConnectionId;
+        if (connectionId === null) return undefined;
+        return (yield* credentials.readGithubAccount(connectionId))?.gitIdentity;
+      }),
 
     /**
      * Marks a workspace as used just now, which keeps the sweep from disposing

@@ -21,7 +21,12 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { CredentialAnswer, CredentialRefusal, CredentialRequest } from "@hercule/protocol";
+import type {
+  CredentialAnswer,
+  CredentialRefusal,
+  CredentialRequest,
+  GitIdentity,
+} from "@hercule/protocol";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
@@ -36,20 +41,24 @@ const PAT = "pat";
 /**
  * Builds the git identity an account commits as: its login, and the noreply
  * address GitHub gives an account that keeps its email private. The runner
- * receives the identity once, at session start; a credential exchange carries
- * the credential and nothing else.
+ * receives the identity with the work it starts, a session or a workspace
+ * step; a credential exchange carries the credential and nothing else.
  */
-export const buildGitIdentity = (
-  login: string,
-): { readonly name: string; readonly email: string } => ({
+const buildGitIdentity = (login: string): GitIdentity => ({
   name: login,
   email: `${login}@users.noreply.github.com`,
 });
 
 /** The token a Connection holds and the login it belongs to. */
-export interface GitCredential {
+interface GitCredential {
   readonly token: string;
   readonly login: string;
+}
+
+/** A GitHub account as work uses it: the token it pushes with and the identity it commits as. */
+export interface GithubAccount {
+  readonly token: string;
+  readonly gitIdentity: GitIdentity;
 }
 
 type CredentialError = SqlError | SecretNameError | SecretDecryptError;
@@ -179,13 +188,13 @@ const make = Effect.gen(function* () {
     findCredential,
 
     /**
-     * Returns the GitHub account a session starts with: the token it pushes
-     * with and the login it commits as. Returns `undefined` if the connection
-     * has no usable token. A connection that cannot be read is logged and
-     * treated the same way, because a session that starts without `GH_TOKEN`
-     * is better than one that does not start.
+     * Returns the GitHub account of a Connection, for work that starts with
+     * it: the token it pushes with and the identity it commits as. Returns
+     * `undefined` if the connection has no usable token. A connection that
+     * cannot be read is logged and treated the same way, because work that
+     * starts without an account is better than work that does not start.
      */
-    githubAccountOf: (connectionId: string): Effect.Effect<GitCredential | undefined> =>
+    readGithubAccount: (connectionId: string): Effect.Effect<GithubAccount | undefined> =>
       Effect.map(
         Effect.catchCause(findCredential(connectionId), (cause) =>
           // An interruption is not an unreadable connection. A cause that
@@ -195,11 +204,17 @@ const make = Effect.gen(function* () {
           Cause.hasInterrupts(cause)
             ? Effect.interrupt
             : Effect.as(
-                Effect.logError("A session's GitHub connection could not be read", cause),
+                Effect.logError("A GitHub connection could not be read", cause),
                 Option.none<GitCredential>(),
               ),
         ),
-        Option.getOrUndefined,
+        (credential) =>
+          Option.isNone(credential)
+            ? undefined
+            : {
+                token: credential.value.token,
+                gitIdentity: buildGitIdentity(credential.value.login),
+              },
       ),
 
     /**

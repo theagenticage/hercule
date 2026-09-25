@@ -10,36 +10,29 @@ import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { WorkspaceStepKey, WorkspaceStepStart } from "@hercule/protocol";
-import type { SessionTokens } from "../../permissions";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceSteps, type WorkspaceStepToStart } from "../../runs";
-import type { Secrets } from "../../secrets";
-import { buildGitIdentity, gitCredentials, WorkspaceService } from "../../workspaces";
+import { WorkspaceService } from "../../workspaces";
 
 const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
-  const credentials = yield* gitCredentials;
   // The port's `stop` is synchronous, so its frames are sent on fibers of
   // their own. They end with the controller.
   const runInBackground = yield* FiberSet.makeRuntime();
 
   /**
-   * Builds the frame that starts a step. The commit author is the account of
-   * the workspace's designated Connection, read now rather than stored, the
-   * way a session start reads it. Without a usable account the frame carries
-   * no identity, and the runner leaves git's own identity unchanged.
+   * Builds the frame that starts a step, with the commit author the
+   * workspaces domain reads for the step's workspace (see
+   * `WorkspaceService.readCommitAuthor`).
    */
   const buildStartFrame = (
     step: WorkspaceStepToStart,
   ): Effect.Effect<WorkspaceStepStart, SqlError> =>
     Effect.gen(function* () {
-      const connectionId = yield* workspaces.readDesignatedConnectionId(step.workspaceId);
-      const account =
-        connectionId === null ? undefined : yield* credentials.githubAccountOf(connectionId);
+      const gitIdentity = yield* workspaces.readCommitAuthor(step.workspaceId);
       return {
         _tag: "workspaceStepStart",
         runId: step.runId,
@@ -50,7 +43,7 @@ const make = Effect.gen(function* () {
         input: step.input,
         ...(step.resourceId === undefined ? {} : { resourceId: step.resourceId }),
         ...(step.checkoutBranch === undefined ? {} : { checkoutBranch: step.checkoutBranch }),
-        ...(account === undefined ? {} : { gitIdentity: buildGitIdentity(account.login) }),
+        ...(gitIdentity === undefined ? {} : { gitIdentity }),
       };
     });
 
@@ -101,5 +94,5 @@ const make = Effect.gen(function* () {
 export const WorkspaceStepsLayer: Layer.Layer<
   WorkspaceSteps,
   never,
-  SqlClient.SqlClient | WorkspaceService | RunnerConnections | Secrets | SessionTokens
+  WorkspaceService | RunnerConnections
 > = Layer.effect(WorkspaceSteps)(make);

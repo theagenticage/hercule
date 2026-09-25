@@ -75,7 +75,7 @@ import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
-import { buildGitIdentity, type GitCredential } from "../workspaces";
+import type { GithubAccount } from "../workspaces";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -175,7 +175,7 @@ export interface StartRequest {
  * domain never reads a secret itself.
  */
 export interface StartNeeds {
-  readonly accountOf: (connectionId: string) => Effect.Effect<GitCredential | undefined>;
+  readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
   /**
    * Returns the provider instance's credentials, decrypted for this frame and
    * stored nowhere. Fails when they cannot be decrypted, which skips the
@@ -785,7 +785,7 @@ const make = Effect.gen(function* () {
             const account =
               row.githubConnectionId === null
                 ? undefined
-                : yield* needs.accountOf(row.githubConnectionId);
+                : yield* needs.readGithubAccount(row.githubConnectionId);
             claimed.push({
               sessionId: row.id,
               frame: {
@@ -798,7 +798,7 @@ const make = Effect.gen(function* () {
                 token,
                 ...(account === undefined
                   ? {}
-                  : { ghToken: account.token, gitIdentity: buildGitIdentity(account.login) }),
+                  : { ghToken: account.token, gitIdentity: account.gitIdentity }),
                 ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
               },
             });

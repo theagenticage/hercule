@@ -30,7 +30,7 @@ import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { gitCredentials } from "../workspaces";
-import type { GitCredential } from "../workspaces";
+import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionObserver } from "./observer";
@@ -236,18 +236,21 @@ const aGithubConnection = Effect.gen(function* () {
 /** Returns no credentials, for the instance these sessions run on. */
 const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
 
-/** Calls `starting` the way the daemon does: inside the caller's transaction. */
+/** The identity the connection's account in these tests commits as. */
+const ALICE = { name: "alice", email: "alice@users.noreply.github.com" };
+
+/** Calls `starting` the way the controller daemon does: inside the caller's transaction. */
 const claimStarting = (
   runnerId: string,
   room: number,
-  accountOf: (connectionId: string) => Effect.Effect<GitCredential | undefined>,
+  readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>,
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const sessions = yield* SessionService;
     return yield* withTransaction(
       sql,
-      sessions.starting(runnerId, room, { accountOf, secretsOf: NO_SECRETS }),
+      sessions.starting(runnerId, room, { readGithubAccount, secretsOf: NO_SECRETS }),
     );
   });
 
@@ -378,31 +381,27 @@ describe("SessionService.starting", () => {
         const claimed = yield* claimStarting(runnerId, 2, (id) =>
           Effect.sync(() => {
             asked.push(id);
-            return { token: "ghpat-alice", login: "alice" };
+            return { token: "ghpat-alice", gitIdentity: ALICE };
           }),
         );
         return { asked, claimed, connected, bare };
       }),
     );
 
-    // `accountOf` was called only for the row with a connection.
+    // The account was read only for the row with a connection.
     expect(result.asked).toEqual([connectionId]);
 
     const frames = mapFramesBySession(result.claimed);
     const account = frames.get(result.connected)!;
     expect(account.ghToken).toBe("ghpat-alice");
-    // The git identity for commits: the login, and GitHub's noreply address.
-    expect(account.gitIdentity).toStrictEqual({
-      name: "alice",
-      email: "alice@users.noreply.github.com",
-    });
+    expect(account.gitIdentity).toStrictEqual(ALICE);
 
     const none = frames.get(result.bare)!;
     expect("ghToken" in none).toBe(false);
     expect("gitIdentity" in none).toBe(false);
   });
 
-  it("omits ghToken and gitIdentity where accountOf finds no account", async () => {
+  it("omits ghToken and gitIdentity where the connection has no account", async () => {
     const connectionId = mintId();
     const result = await run(
       Effect.gen(function* () {
@@ -424,7 +423,7 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // `accountOf` was called, and returned no account.
+    // The account was read, and there was none.
     expect(result.asked).toEqual([connectionId]);
     expect(result.claimed).toHaveLength(1);
     expect(result.claimed[0]!.frame).toMatchObject({ sessionId: result.sessionId });
@@ -547,7 +546,7 @@ describe("SessionService.starting", () => {
         Effect.gen(function* () {
           const credentials = yield* gitCredentials;
           const connectionId = yield* aGithubConnection;
-          const reader = yield* Effect.forkChild(credentials.githubAccountOf(connectionId));
+          const reader = yield* Effect.forkChild(credentials.readGithubAccount(connectionId));
           yield* Deferred.await(entered);
           // The interruption arrives through the dependency itself, as a
           // catchable cause. The reader's error handling must not treat it as
@@ -588,7 +587,7 @@ describe("SessionService.starting", () => {
           const claim = withTransaction(
             sql,
             sessions.starting(runnerId, 1, {
-              accountOf: credentials.githubAccountOf,
+              readGithubAccount: credentials.readGithubAccount,
               secretsOf: NO_SECRETS,
             }),
           );
@@ -733,7 +732,7 @@ const readStatus = (sessionId: string) =>
     Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
   );
 
-/** Calls `endOnLostRunners` the way the daemon does: inside the caller's transaction. */
+/** Calls `endOnLostRunners` the way the controller daemon does: inside the caller's transaction. */
 const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
