@@ -18,6 +18,9 @@
  *   keep its workspace for inspection. The workspace sweep reads it to decide
  *   whether a cancelled run's ephemeral workspace is deleted at once or kept
  *   like a failed run's. It is 0 for every run that was not cancelled.
+ *
+ * It also adds the indexes the queries of these columns, and the workspace
+ * sweep, read through.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -59,5 +62,13 @@ export default Effect.gen(function* () {
   // a workspace.
   yield* sql`
     CREATE INDEX runs_workspace ON runs (workspace_id) WHERE workspace_id IS NOT NULL
+  `;
+
+  // Counts the sessions in a workspace. The workspace sweep counts them, live
+  // and resumable, for every ephemeral workspace it considers, which without
+  // this index scans every session ever run once per workspace. The index is
+  // partial because a session without a workspace is never counted this way.
+  yield* sql`
+    CREATE INDEX sessions_workspace ON sessions (workspace_id) WHERE workspace_id IS NOT NULL
   `;
 });

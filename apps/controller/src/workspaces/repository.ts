@@ -522,7 +522,8 @@ const make = Effect.gen(function* () {
      * An unfinished run's workspace is left out whatever its age, because a
      * run can sleep between two steps for longer than any expiry window. Each
      * workspace belongs to at most one run, found through the
-     * `runs_workspace` index.
+     * `runs_workspace` index; its sessions are counted through the
+     * `sessions_workspace` index.
      */
     sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
       Effect.map(
