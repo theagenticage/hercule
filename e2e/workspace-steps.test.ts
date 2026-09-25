@@ -1,8 +1,8 @@
 /**
  * Tests workspace steps through the shipped program: a workflow run whose
- * `git.commit` step runs in a workspace made for the run on the machine the
- * controller runs for itself, and whose next step is reached through an edge
- * that reads the commit's sha.
+ * `git.commit` and `git.push` steps run in a workspace made for the run on the
+ * machine the controller runs for itself, and whose push is reached through
+ * an edge that reads the commit's sha.
  *
  * Nothing here contacts a network. The repository is a bare one in a
  * temporary directory, reached through git's own `url.<base>.insteadOf`
@@ -141,10 +141,10 @@ const createRepo = async (remote: string, setupCommand: string): Promise<string>
 
 /**
  * Stores a workflow that commits in an ephemeral workspace with one checkout
- * of `resourceId`, then files a task titled with the commit's sha. The edge
- * to the task holds only when the sha is a full 40-character sha, so a
- * completed task shows the commit step's output reached the edge. Returns the
- * workflow's id.
+ * of `resourceId`, pushes the commit, then files a task titled with the
+ * commit's sha. The edge to the push holds only when the sha is a full
+ * 40-character sha, so a completed push shows the commit step's output
+ * reached the edge. Returns the workflow's id.
  */
 const createCommitWorkflow = async (resourceId: string): Promise<string> => {
   const source = [
@@ -159,6 +159,9 @@ const createCommitWorkflow = async (resourceId: string): Promise<string> => {
     "    action: git.commit",
     "    params:",
     "      message: Save what setup wrote",
+    "  - id: push",
+    "    kind: action",
+    "    action: git.push",
     "  - id: file_task",
     "    kind: action",
     "    action: task.create",
@@ -167,8 +170,10 @@ const createCommitWorkflow = async (resourceId: string): Promise<string> => {
     "      description: Filed after the commit.",
     "edges:",
     "  - from: commit",
-    "    to: file_task",
+    "    to: push",
     "    condition: size(steps.commit.output.sha) == 40",
+    "  - from: push",
+    "    to: file_task",
     "",
   ].join("\n");
   return parseJsonOutputOrFail<{ readonly workflow: { readonly id: string } }>(
@@ -234,9 +239,9 @@ afterAll(async () => {
   gitHome.remove();
 });
 
-describe("a run with a git.commit step in its own workspace", () => {
+describe("a run with git.commit and git.push steps in its own workspace", () => {
   it(
-    "commits what the setup command wrote on the run's branch, and routes on the commit's sha",
+    "commits what the setup command wrote on the run's branch, routes on the commit's sha, and pushes the branch",
     async () => {
       const resourceId = await createRepo(
         "https://hercule.test/acme/commit",
@@ -254,7 +259,11 @@ describe("a run with a git.commit step in its own workspace", () => {
         output: { branch: `hercule/run-${runId}`, committed: true },
       });
       const sha = commit!.output!["sha"] as string;
-      // The edge's condition held, so the next step read the same sha.
+      // The edge's condition held, so the push ran and pushed the same commit.
+      expect(run.steps.find((record) => record.stepId === "push")).toMatchObject({
+        status: "completed",
+        output: { branch: `hercule/run-${runId}`, sha },
+      });
       expect(run.steps.find((record) => record.stepId === "file_task")).toMatchObject({
         status: "completed",
         output: { title: `Committed ${sha}` },
@@ -271,6 +280,9 @@ describe("a run with a git.commit step in its own workspace", () => {
       expect(runGit(["show", "--name-only", "--format=", sha], cache)).toBe("setup.txt");
       expect(runGit(["show", `${sha}:setup.txt`], cache)).toBe("from-setup");
       expect(runGit(["rev-parse", `${sha}^`], cache)).toBe(runGit(["rev-parse", "main"], bare));
+
+      // The push put the run's branch on the remote, pointing at the commit.
+      expect(runGit(["rev-parse", `refs/heads/hercule/run-${runId}`], bare)).toBe(sha);
     },
     RUN_DEADLINE_MS + 30_000,
   );
@@ -295,7 +307,7 @@ describe("a run with a git.commit step in its own workspace", () => {
       expect(commit?.error?.code).toBe("workspace_failed");
       expect(commit?.error?.message).toContain("setup-went-wrong");
       // The edge never fired: nothing after the failed step ran.
-      expect(run.steps.some((record) => record.stepId === "file_task")).toBe(false);
+      expect(run.steps.some((record) => record.stepId !== "commit")).toBe(false);
     },
     RUN_DEADLINE_MS + 30_000,
   );

@@ -17,10 +17,15 @@
  * clone that authenticated. The push tests writing, and the test runs it
  * rather than an agent, for the reason given at `pushed` below.
  *
- * The third test is the main one and costs a model turn, so it also needs
+ * The second test is the main one and costs a model turn, so it also needs
  * `HERCULE_LIVE_SESSION_TEST`: a real Claude Code thread in a worktree of the
  * same repository runs `git commit` and `git push` itself, and the branch it
  * leaves on GitHub is read back and deleted.
+ *
+ * The third test runs a workflow whose `git.commit` and `git.push` steps run
+ * in a workspace made for the run, so the push authenticates with the claim
+ * the machine's git sends while it runs a workspace step. It costs no model
+ * token.
  */
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -71,6 +76,9 @@ const branch = `hercule-e2e/${Math.random().toString(16).slice(2, 10)}`;
  */
 let threadBranch: string | undefined;
 
+/** The branch the workflow run pushes, deleted by the suite like the thread's. */
+let runBranch: string | undefined;
+
 const remote = `https://github.com/${repo ?? ""}`;
 
 let controller: Controller;
@@ -80,6 +88,9 @@ let socketPath: string;
 
 /** Long enough for a clone of a small repository over the network. */
 const PROVISION_DEADLINE_MS = 120_000;
+
+/** Long enough for a clone, a commit and a push over the network. */
+const RUN_DEADLINE_MS = 180_000;
 
 /** Long enough for a cold harness to start, run two git commands and reply. */
 const TURN_DEADLINE_MS = 300_000;
@@ -255,6 +266,18 @@ const isClaudeLoggedIn = async (): Promise<boolean> => {
   );
 };
 
+interface Run {
+  readonly status: string;
+  readonly steps: ReadonlyArray<{
+    readonly stepId: string;
+    readonly status: string;
+    readonly output?: Record<string, unknown>;
+  }>;
+}
+
+const readRun = async (id: string): Promise<Run> =>
+  expectJsonOutput<Run>(await runLoggedInCli(["run", "read", id, "--json"]));
+
 const readWorkspace = async (id: string): Promise<Workspace> =>
   expectJsonOutput<Workspace>(await runLoggedInCli(["workspace", "read", id, "--json"]));
 
@@ -280,8 +303,8 @@ beforeAll(async () => {
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
 
   // The repository the push comes from. It is the test's own: the machine's
-  // checkout does not exist until provisioning has finished, and the claim the
-  // helper accepts is only valid until then.
+  // checkout does not exist until provisioning has finished, and outside a
+  // workspace step the claim the helper accepts is only valid until then.
   mkdirSync(sender);
   for (const args of [
     ["init", "--initial-branch=main", "."],
@@ -298,6 +321,7 @@ afterAll(async () => {
     // Whatever the run did, the account is left as it was.
     await removeBranch(branch);
     if (threadBranch !== undefined) await removeBranch(threadBranch);
+    if (runBranch !== undefined) await removeBranch(runBranch);
   }
   await controller?.stop().catch(() => -1);
   state.remove();
@@ -386,10 +410,10 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
      * same helper, the same socket and the same controller check. The live
      * case below covers an agent running `git push` itself.
      *
-     * The workspace claim is only valid while the workspace is
-     * `provisioning`, which lasts as long as the clone takes, so the push is
-     * retried for as long as that is true, rather than tried once in a window
-     * nobody measured.
+     * Outside a workspace step, the workspace claim is only valid while the
+     * workspace is `provisioning`, which lasts as long as the clone takes, so
+     * the push is retried for as long as that is true, rather than tried
+     * once in a window nobody measured.
      */
     const window = Date.now() + PROVISION_DEADLINE_MS;
     // The loop ends only when the push succeeds; every other outcome throws
@@ -399,7 +423,7 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
         ["push", "-u", "origin", `HEAD:refs/heads/${branch}`],
         sender,
         {
-          HERCULE_WORKSPACE_PROVISIONING: answered.id,
+          HERCULE_RUNNER_WORKSPACE: answered.id,
         },
       );
       if (pushed.code === 0) break;
@@ -555,5 +579,89 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
       expectNoTokenIn(state.home);
     },
     PROVISION_DEADLINE_MS + TURN_DEADLINE_MS + 120_000,
+  );
+
+  it(
+    "a workflow run commits and pushes its branch with git.commit and git.push",
+    async () => {
+      // The setup command gives the commit something to hold. It is removed
+      // again afterwards, so the resource is left as the first case recorded it.
+      const updated = await runLoggedInCli([
+        "resource",
+        "update",
+        resourceId,
+        "--setup-command",
+        "echo from-setup > hercule-e2e.txt",
+        "--json",
+      ]);
+      expect(updated.code, `${updated.stdout}\n${updated.stderr}`).toBe(0);
+      try {
+        const source = [
+          "name: Commit and push to GitHub",
+          "workspace:",
+          "  kind: ephemeral",
+          "  checkouts:",
+          `    - resourceId: ${resourceId}`,
+          "steps:",
+          "  - id: commit",
+          "    kind: action",
+          "    action: git.commit",
+          "    params:",
+          "      message: hercule e2e",
+          "  - id: push",
+          "    kind: action",
+          "    action: git.push",
+          "edges:",
+          "  - from: commit",
+          "    to: push",
+          "    condition: size(steps.commit.output.sha) == 40",
+          "",
+        ].join("\n");
+        const workflowId = expectJsonOutput<{ workflow: { id: string } }>(
+          await runLoggedInCli(["workflow", "create", "--json"], source),
+        ).workflow.id;
+        const runId = expectJsonOutput<{ runId: string }>(
+          await runLoggedInCli(["run", "start", "--workflow", workflowId, "--json"]),
+        ).runId;
+        runBranch = `hercule/run-${runId}`;
+
+        const deadline = Date.now() + RUN_DEADLINE_MS;
+        let run = await readRun(runId);
+        while ((run.status === "pending" || run.status === "running") && Date.now() < deadline) {
+          await Bun.sleep(500);
+          run = await readRun(runId);
+        }
+        expect(run.status, `${JSON.stringify(run)}\n${controller.output()}`).toBe("completed");
+        // The edge's condition held, so the push ran and pushed the commit's sha.
+        const sha = run.steps.find((record) => record.stepId === "commit")?.output?.["sha"];
+        expect(run.steps.find((record) => record.stepId === "push")).toMatchObject({
+          status: "completed",
+          output: { branch: runBranch, sha },
+        });
+
+        // The run's branch is on GitHub, and it is the commit the run made.
+        const ref = await fetchGitHub(`/git/ref/heads/${runBranch}`);
+        const body = await ref.text();
+        expect(ref.status, body).toBe(200);
+        expect((JSON.parse(body) as { object: { sha: string } }).object.sha).toBe(sha);
+
+        const deleted = await fetchGitHub(`/git/refs/heads/${runBranch}`, { method: "DELETE" });
+        expect(deleted.status, await deleted.text()).toBe(204);
+        runBranch = undefined;
+      } finally {
+        const reset = await runLoggedInCli([
+          "resource",
+          "update",
+          resourceId,
+          "--setup-command",
+          "null",
+          "--json",
+        ]);
+        expect(reset.code, `${reset.stdout}\n${reset.stderr}`).toBe(0);
+      }
+
+      expectNoTokenIn(state.home);
+    },
+    RUN_DEADLINE_MS + 60_000,
   );
 });
