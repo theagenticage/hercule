@@ -524,22 +524,38 @@ const computePlacedZoom = (fittingZoom: number, smallestZoom: number): number =>
 const FIT_CONTROL_ROOM = 40;
 
 /**
+ * How a pane sizes itself to its drawing, rather than filling its parent.
+ */
+export interface PaneSizing {
+  /**
+   * The heights the pane may take. Within them, the pane is as tall as the
+   * whole drawing needs (see `computePaneHeight`).
+   */
+  readonly heightRange: { readonly min: number; readonly max: number };
+  /**
+   * The smallest zoom the drawing is placed at when it opens, and the zoom
+   * the pane's height is computed for when the drawing is too wide to fit.
+   */
+  readonly smallestPlacedZoom: number;
+}
+
+/**
  * Computes the height of a pane `paneWidth` wide that shows a whole drawing,
- * between `min` and `max`.
+ * within `sizing.heightRange`.
  *
  * The drawing is placed at the zoom at which it fills the pane's width, as
  * `computeDrawingViewport` places it, and the pane is as tall as the drawing
  * at that zoom plus `FIT_CONTROL_ROOM` above and below. A pane that is not
  * yet measured has an infinite width, which gives the drawing its largest
- * zoom. A drawing too wide to fit at the legible zoom is sized at the legible
- * zoom, and the reader pans to see the rest.
+ * zoom. A drawing too wide to fit at `sizing.smallestPlacedZoom` is sized at
+ * that zoom, and the reader pans to see the rest.
  */
-export const computePaneHeight = (
-  paneWidth: number,
-  drawing: Size,
-  { min, max }: { readonly min: number; readonly max: number },
-): number => {
-  const zoom = computePlacedZoom((paneWidth - 2 * PANE_MARGIN) / drawing.width, LEGIBLE_ZOOM);
+export const computePaneHeight = (paneWidth: number, drawing: Size, sizing: PaneSizing): number => {
+  const { min, max } = sizing.heightRange;
+  const zoom = computePlacedZoom(
+    (paneWidth - 2 * PANE_MARGIN) / drawing.width,
+    sizing.smallestPlacedZoom,
+  );
   return Math.min(max, Math.max(min, Math.ceil(drawing.height * zoom + 2 * FIT_CONTROL_ROOM)));
 };
 

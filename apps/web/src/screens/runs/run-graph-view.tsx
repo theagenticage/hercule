@@ -35,6 +35,7 @@ import {
   WorkflowNodeCard,
   type EdgeBadge,
   type EdgeStyle,
+  type PaneSizing,
 } from "../workflow-editor";
 
 /** The leading slot of a step card: the 12px state mark and the gap after it. */
@@ -102,12 +103,16 @@ const measureRunCardSlots = (node: RunGraphNode): number => {
 };
 
 /**
- * The heights of the graph's pane. The pane is as tall as the whole plan
+ * How the graph's pane sizes itself. The pane is as tall as the whole plan
  * needs at the zoom that fits the pane's width, so a plan of one row gets a
  * short pane and one that branches or loops a taller one. Past the largest
- * height, the reader pans to see the rest.
+ * height, the reader pans to see the rest. A plan is never placed below the
+ * legible zoom.
  */
-const PANE_HEIGHT_RANGE = { min: 120, max: 440 };
+const PANE_SIZING: PaneSizing = {
+  heightRange: { min: 120, max: 440 },
+  smallestPlacedZoom: LEGIBLE_ZOOM,
+};
 
 /** A run at the moment it is drawn. */
 interface RunMoment {
@@ -146,8 +151,7 @@ export function RunGraphView({
         measureCardSlots={measureRunCardSlots}
         decideEdgeStyle={decideRunEdgeStyle}
         describeEdgeBadge={describeRunEdgeBadge}
-        heightRange={PANE_HEIGHT_RANGE}
-        smallestPlacedZoom={LEGIBLE_ZOOM}
+        sizing={PANE_SIZING}
         className="overflow-hidden rounded-card border border-line bg-surface"
       />
     </RunMomentContext>

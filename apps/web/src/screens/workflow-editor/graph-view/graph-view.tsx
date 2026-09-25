@@ -48,6 +48,7 @@ import {
   LARGEST_PLACED_ZOOM,
   MIN_ZOOM,
   type EdgeRoute,
+  type PaneSizing,
   type Point,
   type Size,
 } from "./layout";
@@ -538,8 +539,7 @@ export function GraphView<
   measureCardSlots = measureNoCardSlots,
   decideEdgeStyle = decideWorkflowEdgeStyle,
   describeEdgeBadge = describeTraversalLimit,
-  heightRange,
-  smallestPlacedZoom = MIN_ZOOM,
+  sizing,
   className,
 }: {
   readonly graph: {
@@ -557,17 +557,10 @@ export function GraphView<
   /** Returns the badge an edge's label shows, or `undefined` for none. */
   readonly describeEdgeBadge?: (edge: GraphEdge) => EdgeBadge | undefined;
   /**
-   * The heights the drawing's pane may take. Within them, the pane is as tall
-   * as the whole drawing needs at the zoom that fills the pane's width (see
-   * `computePaneHeight`). Without them, the pane fills its parent.
+   * How the pane sizes itself to the drawing. Without it, the pane fills its
+   * parent and the drawing opens whole, however small.
    */
-  readonly heightRange?: { readonly min: number; readonly max: number };
-  /**
-   * The smallest zoom the drawing is placed at when it opens. By default the
-   * whole drawing shows, however small. A pane with a `heightRange` passes
-   * `LEGIBLE_ZOOM`, the zoom its height is computed for.
-   */
-  readonly smallestPlacedZoom?: number;
+  readonly sizing?: PaneSizing;
   /** A class for the pane, such as its border. */
   readonly className?: string;
 }): JSX.Element {
@@ -665,13 +658,13 @@ export function GraphView<
     // React Flow's viewport element, but not its controls. The class name is
     // written out in full because Tailwind reads `_` as a space unless it is
     // escaped, and the viewport's class contains `__`. A height from
-    // `heightRange` overrides `h-full`.
+    // `sizing` overrides `h-full`.
     <div
       // Only a pane that sizes itself to the plan needs its width.
-      ref={heightRange === undefined ? undefined : observePane}
+      ref={sizing === undefined ? undefined : observePane}
       data-stale={isStale ? "" : undefined}
       style={
-        heightRange === undefined
+        sizing === undefined
           ? undefined
           : {
               // An unmeasured pane is taken as infinitely wide, which gives
@@ -679,7 +672,7 @@ export function GraphView<
               height: computePaneHeight(
                 paneWidth ?? Number.POSITIVE_INFINITY,
                 drawing.size,
-                heightRange,
+                sizing,
               ),
             }
       }
@@ -706,7 +699,7 @@ export function GraphView<
         <DrawingPlacement
           size={drawing.size}
           structure={drawing.structure}
-          smallestZoom={smallestPlacedZoom}
+          smallestZoom={sizing?.smallestPlacedZoom ?? MIN_ZOOM}
         />
       </ReactFlow>
     </div>

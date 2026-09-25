@@ -457,7 +457,7 @@ describe("computeDrawingViewport", () => {
 });
 
 describe("computePaneHeight", () => {
-  const RANGE = { min: 120, max: 440 };
+  const SIZING = { heightRange: { min: 120, max: 440 }, smallestPlacedZoom: LEGIBLE_ZOOM };
   /** The room above and below the drawing, clear of the "Fit to view" control. */
   const ROOM = 2 * 40;
 
@@ -465,9 +465,9 @@ describe("computePaneHeight", () => {
     // Two rows of a run's plan, a little narrower than the pane at the legible zoom.
     const plan: Size = { width: 2080, height: 124 };
     const zoom = (1595 - 2 * 16) / 2080;
-    expect(computePaneHeight(1595, plan, RANGE)).toBe(Math.ceil(124 * zoom + ROOM));
+    expect(computePaneHeight(1595, plan, SIZING)).toBe(Math.ceil(124 * zoom + ROOM));
     // The pane shows the drawing whole: placed in a pane of that height, it fills the width.
-    const pane = { width: 1595, height: computePaneHeight(1595, plan, RANGE) };
+    const pane = { width: 1595, height: computePaneHeight(1595, plan, SIZING) };
     expect(computeDrawingViewport(pane, plan, LEGIBLE_ZOOM)).toEqual({
       x: 16,
       y: (pane.height - 124 * zoom) / 2,
@@ -477,20 +477,20 @@ describe("computePaneHeight", () => {
 
   it("gives a small drawing the largest zoom, and one too wide to fit the legible zoom", () => {
     const row: Size = { width: 520, height: 52 };
-    expect(computePaneHeight(1200, row, RANGE)).toBe(Math.ceil(52 * LARGEST_PLACED_ZOOM + ROOM));
+    expect(computePaneHeight(1200, row, SIZING)).toBe(Math.ceil(52 * LARGEST_PLACED_ZOOM + ROOM));
     const wide: Size = { width: 4000, height: 124 };
-    expect(computePaneHeight(1200, wide, RANGE)).toBe(Math.ceil(124 * 0.75 + ROOM));
+    expect(computePaneHeight(1200, wide, SIZING)).toBe(Math.ceil(124 * 0.75 + ROOM));
   });
 
   it("sizes a pane not yet measured for the largest zoom", () => {
     const plan: Size = { width: 2080, height: 124 };
-    expect(computePaneHeight(Number.POSITIVE_INFINITY, plan, RANGE)).toBe(
+    expect(computePaneHeight(Number.POSITIVE_INFINITY, plan, SIZING)).toBe(
       Math.ceil(124 * LARGEST_PLACED_ZOOM + ROOM),
     );
   });
 
   it("keeps the height between the smallest and the largest", () => {
-    expect(computePaneHeight(1200, { width: 300, height: 20 }, RANGE)).toBe(120);
-    expect(computePaneHeight(1200, { width: 1000, height: 600 }, RANGE)).toBe(440);
+    expect(computePaneHeight(1200, { width: 300, height: 20 }, SIZING)).toBe(120);
+    expect(computePaneHeight(1200, { width: 1000, height: 600 }, SIZING)).toBe(440);
   });
 });

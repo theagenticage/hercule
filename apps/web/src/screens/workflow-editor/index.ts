@@ -24,4 +24,4 @@ export {
   type EdgeBadge,
   type EdgeStyle,
 } from "./graph-view/graph-view";
-export { LEGIBLE_ZOOM } from "./graph-view/layout";
+export { LEGIBLE_ZOOM, type PaneSizing } from "./graph-view/layout";
