@@ -572,10 +572,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns whether the run whose workspace this is has not finished yet.
-     * It is `false` for a workspace no run opened.
+     * Checks whether this workspace belongs to a run that has not finished
+     * yet. Returns `false` for a workspace no run opened.
      */
-    isRunUnfinishedIn: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+    hasUnfinishedRun: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runs

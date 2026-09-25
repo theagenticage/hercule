@@ -669,7 +669,7 @@ const make = Effect.gen(function* () {
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
         }
-        if (yield* workspaces.isRunUnfinishedIn(id)) {
+        if (yield* workspaces.hasUnfinishedRun(id)) {
           return yield* Effect.fail(createInvalidStateError(RUN_UNFINISHED));
         }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
