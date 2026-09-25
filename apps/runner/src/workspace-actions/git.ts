@@ -10,7 +10,7 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import { buildTailMessage, drainTail, type GitEnv } from "../workspaces";
+import { buildTailMessage, drainTail } from "../workspaces";
 import { WorkspaceActionFailed, type WorkspaceActionContext } from "./action";
 
 /**
@@ -18,7 +18,10 @@ import { WorkspaceActionFailed, type WorkspaceActionContext } from "./action";
  * is sent SIGKILL. SIGTERM comes first so git can remove its lock files, such
  * as `index.lock`, which would otherwise block the next step in the checkout.
  */
-const STOP_GRACE: Duration.Duration = Duration.seconds(5);
+export const STOP_GRACE: Duration.Duration = Duration.seconds(5);
+
+/** What running git for a workspace action needs: its environment, and how long a stopped git gets before SIGKILL. */
+type GitRun = Pick<WorkspaceActionContext, "gitEnv" | "stopGrace">;
 
 /** How one git process ended: its exit code and the end of each of its outputs. */
 export interface GitProcessResult {
@@ -40,13 +43,13 @@ const signalGroup = (child: Bun.Subprocess, signal: NodeJS.Signals): void => {
   }
 };
 
-/** Sends SIGTERM to the child's process group, waits up to five seconds for the child to exit, then sends SIGKILL. */
-const stopProcessGroup = (child: Bun.Subprocess): Effect.Effect<void> =>
+/** Sends SIGTERM to the child's process group, waits up to `grace` for the child to exit, then sends SIGKILL. */
+const stopProcessGroup = (child: Bun.Subprocess, grace: Duration.Duration): Effect.Effect<void> =>
   Effect.gen(function* () {
     signalGroup(child, "SIGTERM");
     yield* Effect.timeoutOption(
       Effect.promise(() => child.exited),
-      STOP_GRACE,
+      grace,
     );
     signalGroup(child, "SIGKILL");
   });
@@ -58,17 +61,17 @@ const stopProcessGroup = (child: Bun.Subprocess): Effect.Effect<void> =>
  * never read as shell syntax.
  *
  * When the effect is interrupted, git's process group is stopped: SIGTERM,
- * then SIGKILL five seconds later.
+ * then SIGKILL once `run.stopGrace` has passed.
  */
 export const runGitProcess = (
   dir: string,
   args: ReadonlyArray<string>,
-  env: GitEnv,
+  run: GitRun,
 ): Effect.Effect<GitProcessResult> =>
   Effect.acquireUseRelease(
     Effect.sync(() =>
       Bun.spawn(["git", "-C", dir, ...args], {
-        env: { ...env },
+        env: { ...run.gitEnv },
         detached: true,
         // Nobody can type into git on a runner, so it must never wait for input.
         stdin: "ignore",
@@ -87,7 +90,7 @@ export const runGitProcess = (
           stderr: stderr.text.trim(),
         };
       }),
-    (child, exit) => (Exit.isSuccess(exit) ? Effect.void : stopProcessGroup(child)),
+    (child, exit) => (Exit.isSuccess(exit) ? Effect.void : stopProcessGroup(child, run.stopGrace)),
   );
 
 /**
@@ -113,9 +116,9 @@ export const buildGitFailure = (
 export const runGitOrFail = (
   dir: string,
   args: ReadonlyArray<string>,
-  env: GitEnv,
+  run: GitRun,
 ): Effect.Effect<GitProcessResult, WorkspaceActionFailed> =>
-  Effect.flatMap(runGitProcess(dir, args, env), (result) =>
+  Effect.flatMap(runGitProcess(dir, args, run), (result) =>
     result.code === 0 ? Effect.succeed(result) : Effect.fail(buildGitFailure(args, result)),
   );
 
@@ -136,7 +139,7 @@ export const findCheckoutDir = (
     return named === undefined
       ? Effect.fail(
           new WorkspaceActionFailed({
-            message: `the run's workspace has no checkout of resource ${resourceId}`,
+            message: `The run's workspace has no checkout of the resource ${resourceId}. Set the step's resourceId to a resource the workflow's workspace checks out.`,
           }),
         )
       : Effect.succeed(named.path);
@@ -147,8 +150,8 @@ export const findCheckoutDir = (
     new WorkspaceActionFailed({
       message:
         checkouts.length === 0
-          ? "the run's workspace has no checkout"
-          : `the run's workspace has ${String(checkouts.length)} checkouts, so the step must name the resource whose checkout it works in`,
+          ? "The run's workspace has no checkout, so the action has nothing to work in. Add a checkout to the workflow's workspace."
+          : `The run's workspace has ${String(checkouts.length)} checkouts, so the step must name the one it works in. Set the step's resourceId to one of the workspace's resources.`,
     }),
   );
 };
@@ -168,5 +171,5 @@ export const switchCheckoutBranch = (
   branch: string,
 ): Effect.Effect<void, WorkspaceActionFailed> =>
   Effect.flatMap(findCheckoutDir(context), (dir) =>
-    Effect.asVoid(runGitOrFail(dir, ["checkout", branch, "--"], context.gitEnv)),
+    Effect.asVoid(runGitOrFail(dir, ["checkout", branch, "--"], context)),
   );

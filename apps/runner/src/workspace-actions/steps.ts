@@ -27,15 +27,29 @@ import { buildGitCredentialEnv, RUNNER_WORKSPACE_VARIABLE } from "../credentials
 import { describeCause } from "../report";
 import { buildSubstrateEnv, type Workspaces } from "../workspaces";
 import type { WorkspaceAction } from "./action";
-import { switchCheckoutBranch } from "./git";
+import { STOP_GRACE, switchCheckoutBranch } from "./git";
 import { findWorkspaceAction } from "./registry";
 import { buildStepName, deleteStepResult, readStepResult, writeStepResult } from "./results";
 
 /** How long one workspace action may run before it is stopped and its step fails with `timeout`. */
 export const ACTION_DEADLINE: Duration.Duration = Duration.minutes(10);
 
+/**
+ * How many stopped steps this runner remembers, to ignore a start of one that
+ * arrives after its stop. Such a start is at most a few frames late, so the
+ * most recent stops are the ones that matter, and the oldest is forgotten
+ * first.
+ */
+const REMEMBERED_STOPS = 1024;
+
 type Send = (frame: WorkspaceStepResult) => Effect.Effect<void, unknown>;
 
+/**
+ * The workspace steps this runner holds, for the connection to the controller
+ * to drive: it passes on each step start and stop it receives, attaches
+ * itself to receive the results, and lists the steps in flight when it
+ * reconnects.
+ */
 export interface WorkspaceSteps {
   /**
    * Sends step results through `send` for as long as the scope is open. A
@@ -46,6 +60,8 @@ export interface WorkspaceSteps {
   /**
    * Starts a step, unless this runner already knows it:
    *
+   * - a step that was stopped is ignored, because the controller has
+   *   already recorded how it ended;
    * - a step that is queued or running is left alone;
    * - a step that finished is answered from its result file;
    * - any other step is queued behind the steps of its workspace and run.
@@ -59,7 +75,8 @@ export interface WorkspaceSteps {
    * git is stopped and the step is answered with `interrupted`; a queued step
    * is dropped without an answer. A finished step only loses its result
    * file: the controller also stops every step whose end it has recorded, to
-   * say it will not ask for that result again.
+   * say it will not ask for that result again. A later start of a stopped
+   * step is ignored.
    */
   readonly stop: (frame: WorkspaceStepStop) => Effect.Effect<void>;
   /** Returns the key of every step that is queued or running now. */
@@ -109,10 +126,20 @@ export const makeWorkspaceSteps = (options: {
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
   /** Defaults to `ACTION_DEADLINE`. Tests set a shorter one. */
   readonly deadline?: Duration.Duration;
+  /** Defaults to `STOP_GRACE`. Tests set a shorter one. */
+  readonly stopGrace?: Duration.Duration;
 }): WorkspaceSteps => {
   const { storageDir, workspaces } = options;
   const deadline = options.deadline ?? ACTION_DEADLINE;
+  const stopGrace = options.stopGrace ?? STOP_GRACE;
   const held = new Map<string, HeldStep>();
+  /**
+   * The names of the steps stopped most recently, oldest first. A start and
+   * a stop of one step can reach this runner in the wrong order, and a step
+   * the controller has stopped must never run afterwards: its end is already
+   * recorded, and a push would be made that no run knows about.
+   */
+  const stopped = new Set<string>();
   /**
    * One lock per workspace with a step queued or running. The steps of one
    * workspace run one at a time, because two git processes in one checkout
@@ -124,7 +151,11 @@ export const makeWorkspaceSteps = (options: {
   const send = (frame: WorkspaceStepResult): Effect.Effect<void> =>
     sending === undefined ? Effect.void : Effect.ignoreCause(sending(frame));
 
-  const findLock = (workspaceId: string): Semaphore.Semaphore => {
+  /**
+   * Returns the lock of a workspace, and creates it when no step of that
+   * workspace holds one yet.
+   */
+  const ensureWorkspaceLock = (workspaceId: string): Semaphore.Semaphore => {
     const known = locks.get(workspaceId);
     if (known !== undefined) return known;
     const made = Semaphore.makeUnsafe(1);
@@ -144,22 +175,28 @@ export const makeWorkspaceSteps = (options: {
   /**
    * Runs the step's action and returns how the step ended. Never fails: a
    * failed action, a timeout and a defect all become a failed outcome.
+   *
+   * Returns undefined, and runs nothing, when this runner does not hold the
+   * step's workspace once its provisioning has finished. The step then gets
+   * no result: the provisioning failed, and the failed workspace report fails
+   * the run at this step with the provisioning's own error message, such as
+   * the setup command's output. A result sent here could reach the
+   * controller first and fail the run with a message that hides that error.
    */
   const runAction = (
     frame: WorkspaceStepStart,
     action: WorkspaceAction,
-  ): Effect.Effect<WorkspaceStepOutcome> =>
+  ): Effect.Effect<WorkspaceStepOutcome | undefined> =>
     Effect.gen(function* () {
       // The controller sends a step right after its workspace's provisioning
       // frame, and the provisioning may still be cloning.
       yield* Effect.promise(() => workspaces.waitForProvisioning(frame.workspaceId));
       const workspace = workspaces.resolve(frame.workspaceId);
       if (workspace === undefined) {
-        return {
-          status: "failed",
-          code: "action_failed",
-          message: `this runner does not hold workspace ${frame.workspaceId}`,
-        } as const;
+        yield* Effect.logWarning(
+          `Workspace step ${frame.stepId} of run ${frame.runId} did not run: this runner does not hold workspace ${frame.workspaceId}. The workspace's report ends the step.`,
+        );
+        return undefined;
       }
       // Built the way a session's environment is built, so a commit is made
       // as the same account a session in this workspace commits as. No
@@ -171,7 +208,7 @@ export const makeWorkspaceSteps = (options: {
         ...buildGitCredentialEnv({ socketPath: options.socketPath, identity: frame.gitIdentity }),
         [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId,
       };
-      const context = { workspace, resourceId: frame.resourceId, gitEnv };
+      const context = { workspace, resourceId: frame.resourceId, gitEnv, stopGrace };
       const { checkoutBranch } = frame;
       // A main workspace is shared, so something else may have switched its
       // checkout since the run's last step. The switch runs here, under the
@@ -203,7 +240,7 @@ export const makeWorkspaceSteps = (options: {
       return Option.getOrElse(ran, (): WorkspaceStepOutcome => ({
         status: "failed",
         code: "timeout",
-        message: `${frame.action} was still running after ${Duration.format(deadline)} and was stopped`,
+        message: `The action ${frame.action} was still running after ${Duration.format(deadline)}, so it was stopped.`,
       }));
     });
 
@@ -225,19 +262,31 @@ export const makeWorkspaceSteps = (options: {
       yield* send(buildResultFrame(step.key, outcome));
     });
 
+  /**
+   * Runs a held step: waits for its workspace's lock, runs its action, then
+   * writes, forgets and sends its result. A step whose workspace this runner
+   * does not hold is forgotten with no result. Never fails; a stop
+   * interrupts it.
+   */
   const runStep = (
     frame: WorkspaceStepStart,
     action: WorkspaceAction,
     step: HeldStep,
   ): Effect.Effect<void> =>
-    findLock(step.workspaceId)
+    ensureWorkspaceLock(step.workspaceId)
       .withPermits(1)(
         Effect.suspend(() => {
           step.phase = "running";
           return runAction(frame, action);
         }),
       )
-      .pipe(Effect.flatMap((outcome) => Effect.uninterruptible(finishStep(step, outcome))));
+      .pipe(
+        Effect.flatMap((outcome) =>
+          outcome === undefined
+            ? Effect.sync(() => releaseStep(step))
+            : Effect.uninterruptible(finishStep(step, outcome)),
+        ),
+      );
 
   /**
    * Stops one held step, then forgets it. A running step is answered with
@@ -258,7 +307,7 @@ export const makeWorkspaceSteps = (options: {
         buildResultFrame(step.key, {
           status: "failed",
           code: "interrupted",
-          message: "the step was stopped before it finished",
+          message: "The step was stopped before it finished.",
         }),
       );
     });
@@ -280,7 +329,8 @@ export const makeWorkspaceSteps = (options: {
     start: (frame) =>
       Effect.gen(function* () {
         const key = readKey(frame);
-        if (held.has(buildStepName(key))) return;
+        const name = buildStepName(key);
+        if (stopped.has(name) || held.has(name)) return;
         const recorded = readStepResult(storageDir, frame.workspaceId, key);
         if (recorded !== undefined) return yield* send(buildResultFrame(key, recorded));
         const action = findWorkspaceAction(frame.action);
@@ -290,7 +340,7 @@ export const makeWorkspaceSteps = (options: {
             buildResultFrame(key, {
               status: "failed",
               code: "unsupported_action",
-              message: `this runner cannot run ${frame.action}: its build does not implement that action`,
+              message: `This runner cannot run the action ${frame.action}, because its build does not implement it. Update the runner to the controller's version.`,
             }),
           );
         }
@@ -311,7 +361,7 @@ export const makeWorkspaceSteps = (options: {
           stopping: false,
           fiber: undefined,
         };
-        held.set(buildStepName(key), step);
+        held.set(name, step);
         step.fiber = yield* Effect.forkDetach(runStep(frame, action, step));
       }),
 
@@ -321,7 +371,11 @@ export const makeWorkspaceSteps = (options: {
           // Deleted whether the step is running or long finished: the
           // controller never asks again for the result of a step it stops.
           deleteStepResult(storageDir, key);
-          const step = held.get(buildStepName(key));
+          const name = buildStepName(key);
+          stopped.delete(name);
+          stopped.add(name);
+          if (stopped.size > REMEMBERED_STOPS) stopped.delete(stopped.values().next().value!);
+          const step = held.get(name);
           // Detached, because stopping git can take the full grace period,
           // and the connection must go on handling frames meanwhile.
           if (step !== undefined) yield* Effect.forkDetach(stopStep(step));

@@ -4,8 +4,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { GitEnv } from "../workspaces";
-import { WorkspaceActionFailed, type WorkspaceAction } from "./action";
+import { WorkspaceActionFailed, type WorkspaceAction, type WorkspaceActionContext } from "./action";
 import { findCheckoutDir, runGitOrFail, runGitProcess } from "./git";
 
 /**
@@ -39,14 +38,18 @@ const decodeInput = Schema.decodeUnknownEffect(GitPushInput);
 const checkBranchName = (
   dir: string,
   branch: string,
-  env: GitEnv,
+  context: WorkspaceActionContext,
 ): Effect.Effect<void, WorkspaceActionFailed> =>
-  Effect.flatMap(runGitProcess(dir, ["check-ref-format", "--branch", branch], env), (checked) =>
-    checked.code === 0 && checked.stdout === branch
-      ? Effect.void
-      : Effect.fail(
-          new WorkspaceActionFailed({ message: `"${branch}" is not a valid branch name` }),
-        ),
+  Effect.flatMap(
+    runGitProcess(dir, ["check-ref-format", "--branch", branch], context),
+    (checked) =>
+      checked.code === 0 && checked.stdout === branch
+        ? Effect.void
+        : Effect.fail(
+            new WorkspaceActionFailed({
+              message: `"${branch}" is not a valid git branch name, so nothing was pushed. Set the step's branch to a valid git branch name, or leave it out to push the checkout's current branch.`,
+            }),
+          ),
   );
 
 export const gitPush: WorkspaceAction = {
@@ -68,31 +71,31 @@ export const gitPush: WorkspaceAction = {
         Effect.mapError(
           (error) =>
             new WorkspaceActionFailed({
-              message: `the step's params do not fit git.push's input: ${error.message}`,
+              message: `The step's params do not match the input of git.push: ${error.message}`,
             }),
         ),
       );
       const dir = yield* findCheckoutDir(context);
-      const env = context.gitEnv;
       let branch = params.branch;
       if (branch === undefined) {
-        branch = (yield* runGitOrFail(dir, ["branch", "--show-current"], env)).stdout;
+        branch = (yield* runGitOrFail(dir, ["branch", "--show-current"], context)).stdout;
         if (branch === "") {
           return yield* Effect.fail(
             new WorkspaceActionFailed({
-              message: "the checkout is on no branch, and the step names no branch to push",
+              message:
+                "The checkout is on no branch, and the step names no branch to push. Set the step's branch to the branch to push.",
             }),
           );
         }
       } else {
-        yield* checkBranchName(dir, branch, env);
+        yield* checkBranchName(dir, branch, context);
       }
       const ref = `refs/heads/${branch}`;
       // A full refspec, with no leading `+`, so the push is never forced and
       // the name is never read as a tag. It comes after `--`, so git never
       // reads it as an option.
-      yield* runGitOrFail(dir, ["push", "--set-upstream", "--", REMOTE, `${ref}:${ref}`], env);
-      const sha = (yield* runGitOrFail(dir, ["rev-parse", "--verify", `${ref}^{commit}`], env))
+      yield* runGitOrFail(dir, ["push", "--set-upstream", "--", REMOTE, `${ref}:${ref}`], context);
+      const sha = (yield* runGitOrFail(dir, ["rev-parse", "--verify", `${ref}^{commit}`], context))
         .stdout;
       return { branch, sha };
     }),

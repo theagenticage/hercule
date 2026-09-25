@@ -17,6 +17,7 @@ import {
   RunnerToController,
   encodeChallengeBytes,
   type ControllerHello,
+  MAX_WORKSPACE_STEPS,
   type RunnerFacts,
   type ProbeReport,
   type ProbeRequest,
@@ -517,22 +518,28 @@ describe("which controller a runner accepts", () => {
 });
 
 describe("a runner with workspace steps in flight", () => {
-  it("reports them once the controller has proved its identity", async () => {
+  it("reports them once the controller has proved its identity, in frames the protocol accepts", async () => {
     const stub = await stubController();
-    const inFlight = { runId: "run-1", stepId: "commit", iteration: 2 };
+    // More steps than one frame may hold, so the report is split.
+    const inFlight = Array.from({ length: MAX_WORKSPACE_STEPS + 1 }, (_, at) => ({
+      runId: `run-${String(at)}`,
+      stepId: "commit",
+      iteration: 1,
+    }));
     // Running a real step is the job of the workspace steps' own tests. This
     // test checks that the connection reports whatever steps are in flight.
-    const steps: WorkspaceSteps = { ...IDLE_STEPS, listInFlight: () => [inFlight] };
+    const steps: WorkspaceSteps = { ...IDLE_STEPS, listInFlight: () => inFlight };
 
     const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), PATIENT, steps);
 
     await stub.connected();
     await waitUntilProven(stub);
-    await waitUntil(() => stub.received.some((frame) => frame._tag === "workspaceStepsReport"));
-    expect(stub.received.find((frame) => frame._tag === "workspaceStepsReport")).toEqual({
-      _tag: "workspaceStepsReport",
-      steps: [inFlight],
-    });
+    // Every received frame was decoded against the protocol, so a frame
+    // over the limit would not have arrived.
+    const listReported = () =>
+      stub.received.flatMap((frame) => (frame._tag === "workspaceStepsReport" ? frame.steps : []));
+    await waitUntil(() => listReported().length === inFlight.length);
+    expect(listReported()).toEqual(inFlight);
 
     stub.hangUp();
     await pending;

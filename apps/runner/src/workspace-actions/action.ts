@@ -4,6 +4,7 @@
  * controller's catalog declares each one with its input and output schemas;
  * its code lives here.
  */
+import type * as Duration from "effect/Duration";
 import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { GitEnv, Resolved } from "../workspaces";
@@ -24,6 +25,8 @@ export interface WorkspaceActionContext {
    * configuration in the environment, never written to a config file.
    */
   readonly gitEnv: GitEnv;
+  /** How long a stopped git gets to exit after SIGTERM before it is sent SIGKILL. */
+  readonly stopGrace: Duration.Duration;
 }
 
 /**
@@ -35,6 +38,12 @@ export class WorkspaceActionFailed extends Schema.TaggedError<WorkspaceActionFai
   { message: Schema.String },
 ) {}
 
+/**
+ * One workspace action this runner implements: the id the controller's
+ * catalog knows it by, and the code that runs it. The runner looks an action
+ * up by the id a step start names, and answers a step whose action it does
+ * not have with `unsupported_action`.
+ */
 export interface WorkspaceAction {
   /** The action's id in the catalog, such as `git.commit`. */
   readonly id: string;

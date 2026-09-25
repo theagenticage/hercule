@@ -45,6 +45,7 @@ import {
   type RunnerFacts,
   type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
+  MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import type { CredentialRelay } from "./credentials";
@@ -637,13 +638,17 @@ export const connect = (
       yield* Effect.forkIn(supervisor.relay, connection);
       yield* supervisor.report;
       // Like the sessions report: the controller stops every listed step
-      // whose record ended while this runner was away.
-      yield* write(
-        encodeFrameText({
-          _tag: "workspaceStepsReport",
-          steps: options.workspaceSteps.listInFlight(),
-        }),
-      );
+      // whose record ended while this runner was away. One frame holds at
+      // most `MAX_WORKSPACE_STEPS` steps, so a longer list is sent in parts.
+      const inFlight = options.workspaceSteps.listInFlight();
+      for (let at = 0; at < inFlight.length; at += MAX_WORKSPACE_STEPS) {
+        yield* write(
+          encodeFrameText({
+            _tag: "workspaceStepsReport",
+            steps: inFlight.slice(at, at + MAX_WORKSPACE_STEPS),
+          }),
+        );
+      }
       yield* Effect.all(
         [
           reportWatermark({

@@ -5,7 +5,7 @@
  * bare "remote" on disk. A step that must stay running blocks in a pre-commit
  * hook until the test creates a release file, so no test waits a fixed time.
  */
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -37,6 +37,12 @@ afterAll(cleanTemporaries);
 const BRANCH = "hercule/run-3f1a2b4c";
 const IDENTITY = { name: "Hercule Bot", email: "bot@example.invalid" };
 const WAIT_DEADLINE_MS = 20_000;
+/**
+ * Longer than `WAIT_DEADLINE_MS`, so a slow machine fails a test with the
+ * wait's message, which names what it waited for, and not with vitest's
+ * generic timeout.
+ */
+const TEST_TIMEOUT_MS = 30_000;
 
 /** Scopes that attach a test's steps to its list of sent results; closed after each test. */
 const attachments: Array<Scope.Closeable> = [];
@@ -59,6 +65,8 @@ interface Runner {
   /** Every step result the runner sent, in the order it sent them. */
   readonly sent: Array<WorkspaceStepResult>;
   readonly storageDir: string;
+  /** The socket git's credential helper is told to connect to. */
+  readonly socketPath: string;
   /**
    * Provisions a workspace with one checkout of a new remote, and returns it.
    * An ephemeral one is on `BRANCH`; a primary is on the remote's `main`.
@@ -71,25 +79,35 @@ interface Workspace {
   readonly dir: string;
   /** The bare repository the workspace's one checkout was cloned from. */
   readonly remote: Remote;
+  /** Installs `script`, a shell script, as the pre-commit hook of this workspace's checkout. */
+  readonly writePreCommitHook: (script: string) => void;
   /**
    * Makes every commit in this workspace block in its pre-commit hook until
-   * `release` runs. Returns the file the hook creates once a commit reaches it.
+   * `release` runs. Returns the file the hook writes its process id to once
+   * a commit reaches it. With `ignoreSigterm`, the hook and everything it
+   * starts ignore SIGTERM, so only SIGKILL ends them.
    */
-  readonly blockCommits: () => { readonly reached: string; readonly release: () => void };
+  readonly blockCommits: (options?: { readonly ignoreSigterm?: boolean }) => {
+    readonly reached: string;
+    readonly release: () => void;
+  };
 }
 
 /** Creates a runner's workspace steps, attached to a list that collects what they send. */
-const makeRunner = (deadline?: Duration.Duration): Runner => {
+const makeRunner = (
+  options: { readonly deadline?: Duration.Duration; readonly stopGrace?: Duration.Duration } = {},
+): Runner => {
   const storageDir = createTemporaryDir("hercule-storage-");
+  const socketPath = join(storageDir, "daemon.sock");
   const workspaces = makeWorkspaces({ storageDir });
   const steps = makeWorkspaceSteps({
     storageDir,
     workspaces,
-    socketPath: join(storageDir, "daemon.sock"),
+    socketPath,
     // A home with no git configuration, so the machine's own hooks and
     // identity stay out of the test.
     baseEnv: { PATH: process.env["PATH"], HOME: createTemporaryDir("hercule-home-") },
-    ...(deadline === undefined ? {} : { deadline }),
+    ...options,
   });
   const sent: Array<WorkspaceStepResult> = [];
   const scope = Effect.runSync(Scope.make());
@@ -120,25 +138,31 @@ const makeRunner = (deadline?: Duration.Duration): Runner => {
       kind === "ephemeral"
         ? join(storageDir, "workspaces", workspaceId)
         : join(storageDir, "primaries", resourceId);
-    const blockCommits = () => {
-      const signals = createTemporaryDir("hercule-hook-");
-      const reached = join(signals, "reached");
-      const released = join(signals, "released");
+    const writePreCommitHook = (script: string) => {
       const hooksPath = runGitOrThrow(dir, "rev-parse", "--git-path", "hooks");
       const hooks = isAbsolute(hooksPath) ? hooksPath : join(dir, hooksPath);
       mkdirSync(hooks, { recursive: true });
       const hook = join(hooks, "pre-commit");
-      writeFileSync(
-        hook,
-        `#!/bin/sh\ntouch '${reached}'\nwhile [ ! -f '${released}' ]; do sleep 0.02; done\n`,
-      );
+      writeFileSync(hook, `#!/bin/sh\n${script}\n`);
       chmodSync(hook, 0o755);
+    };
+    const blockCommits = ({ ignoreSigterm = false } = {}) => {
+      const signals = createTemporaryDir("hercule-hook-");
+      const reached = join(signals, "reached");
+      const released = join(signals, "released");
+      writePreCommitHook(
+        [
+          ...(ignoreSigterm ? ["trap '' TERM"] : []),
+          `echo $$ > '${reached}'`,
+          `while [ ! -f '${released}' ]; do sleep 0.02; done`,
+        ].join("\n"),
+      );
       return { reached, release: () => writeFileSync(released, "") };
     };
-    return { workspaceId, dir, remote, blockCommits };
+    return { workspaceId, dir, remote, writePreCommitHook, blockCommits };
   };
 
-  return { steps, sent, storageDir, provisionWorkspace };
+  return { steps, sent, storageDir, socketPath, provisionWorkspace };
 };
 
 const buildStart = (
@@ -187,12 +211,22 @@ const runStep = async (
 const listCommittedFiles = (dir: string): ReadonlyArray<string> =>
   runGitOrThrow(dir, "show", "--name-only", "--format=", "HEAD").split("\n").sort();
 
-describe("git.commit", () => {
-  it("commits every change as the step's identity when no paths are given", async () => {
+describe("git.commit", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("commits every change as the step's identity when no paths are given, with git asking this runner for credentials", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
     writeFileSync(join(workspace.dir, "README.md"), "changed\n");
+    // A hook runs with the environment of the git that runs it, so it can
+    // write down what a push's credential helper would be given.
+    const seen = join(createTemporaryDir("hercule-hook-"), "environment");
+    workspace.writePreCommitHook(
+      [
+        `echo "$HERCULE_RUNNER_SOCKET" > '${seen}'`,
+        `echo "$HERCULE_RUNNER_WORKSPACE" >> '${seen}'`,
+        `git config --get-all credential.helper >> '${seen}'`,
+      ].join("\n"),
+    );
 
     const outcome = await runStep(runner, buildStart(workspace, { message: "Add a" }));
 
@@ -205,22 +239,32 @@ describe("git.commit", () => {
     expect(runGitOrThrow(workspace.dir, "log", "-1", "--format=%an <%ae>|%s")).toBe(
       "Hercule Bot <bot@example.invalid>|Add a",
     );
+    const [socket, workspaceId, ...helpers] = readFileSync(seen, "utf8").trimEnd().split("\n");
+    expect(socket).toBe(runner.socketPath);
+    expect(workspaceId).toBe(workspace.workspaceId);
+    // The machine's own config may name helpers first. The empty helper
+    // after them clears them, so git asks only this runner's helper.
+    expect(helpers.slice(-2)).toEqual(["", expect.stringMatching(/ git-credential$/)]);
   });
 
-  it("commits only the given paths", async () => {
+  it("commits only the given paths, and leaves whatever else was staged staged", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
     writeFileSync(join(workspace.dir, "b.txt"), "b\n");
+    // Staged by someone else sharing the checkout, such as a session in a
+    // main workspace.
+    writeFileSync(join(workspace.dir, "c.txt"), "c\n");
+    runGitOrThrow(workspace.dir, "add", "c.txt");
 
     const outcome = await runStep(
       runner,
       buildStart(workspace, { message: "Add a only", paths: ["a.txt"] }),
     );
 
-    expect(outcome.status).toBe("completed");
+    expect(outcome).toMatchObject({ status: "completed", output: { committed: true } });
     expect(listCommittedFiles(workspace.dir)).toEqual(["a.txt"]);
-    expect(runGitOrThrow(workspace.dir, "status", "--porcelain")).toBe("?? b.txt");
+    expect(runGitOrThrow(workspace.dir, "status", "--porcelain")).toBe("A  c.txt\n?? b.txt");
   });
 
   it("reports committed: false and the current commit when there is nothing to commit", async () => {
@@ -244,7 +288,7 @@ const readCommittedSha = (outcome: WorkspaceStepOutcome): string => {
   return outcome.status === "completed" ? (outcome.output as { sha: string }).sha : "";
 };
 
-describe("git.push", () => {
+describe("git.push", { timeout: TEST_TIMEOUT_MS }, () => {
   it("pushes the checkout's branch to its remote under the same name, and sets the upstream", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
@@ -303,17 +347,16 @@ describe("git.push", () => {
     for (const branch of ["--force", "a..b", "@{-1}", "main:elsewhere"]) {
       const outcome = await runStep(runner, buildStart(workspace, { branch }, "git.push"));
 
-      expect(outcome).toEqual({
-        status: "failed",
-        code: "action_failed",
-        message: `"${branch}" is not a valid branch name`,
-      });
+      expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
+      expect(outcome.status === "failed" && outcome.message).toContain(
+        `"${branch}" is not a valid git branch name`,
+      );
     }
     expect(runGitOrThrow(workspace.remote.path, "branch", "--list")).toBe("* main");
   });
 });
 
-describe("a workspace step with a checkout branch", () => {
+describe("a workspace step with a checkout branch", { timeout: TEST_TIMEOUT_MS }, () => {
   it("switches the checkout to that branch before its action runs", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace("primary");
@@ -345,13 +388,24 @@ describe("a workspace step with a checkout branch", () => {
   });
 });
 
-describe("a workspace step", () => {
-  it("answers a repeated start from its result file, without committing again", async () => {
+describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("runs once however often it is started: a start while it runs is ignored, and one after it finished is answered from its result file", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
+    const before = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    const hook = workspace.blockCommits();
     const frame = buildStart(workspace, { message: "Add a" });
-    const first = await runStep(runner, frame);
+    await startStep(runner, frame);
+    await waitUntil(() => existsSync(hook.reached), "the commit to reach its hook");
+
+    // The controller sends the start again, for example after a reconnect.
+    await startStep(runner, frame);
+    hook.release();
+    const first = await waitForResult(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([first]);
+    expect(runGitOrThrow(workspace.dir, "rev-list", "--count", `${before}..HEAD`)).toBe("1");
     const head = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
     // A change that a second run would commit.
     writeFileSync(join(workspace.dir, "b.txt"), "b\n");
@@ -363,10 +417,10 @@ describe("a workspace step", () => {
     expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(head);
   });
 
-  it("deletes a finished step's result file when the step is stopped", async () => {
+  it("deletes a finished step's result file when the step is stopped, and ignores a later start of it", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
-    const frame = buildStart(workspace, { message: "Nothing" });
+    const frame = buildStart(workspace, { message: "Add a" });
     await runStep(runner, frame);
     const file = join(
       runner.storageDir,
@@ -375,6 +429,7 @@ describe("a workspace step", () => {
       `${frame.runId}-commit-1.json`,
     );
     expect(existsSync(file)).toBe(true);
+    const head = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
 
     await Effect.runPromise(runner.steps.stop({ _tag: "workspaceStepStop", steps: [frame] }));
 
@@ -382,26 +437,50 @@ describe("a workspace step", () => {
     expect(existsSync(file)).toBe(false);
     // The step already sent its result, so the stop sends nothing more.
     expect(listResults(runner, frame)).toHaveLength(1);
+
+    // A start that reaches the runner after the step's stop, with a change
+    // in the checkout that running the step again would commit.
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    await startStep(runner, frame);
+
+    expect(runner.steps.listInFlight()).toEqual([]);
+    expect(listResults(runner, frame)).toHaveLength(1);
+    expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(head);
   });
 
-  it("stops its git when the step is stopped, and answers interrupted", async () => {
-    const runner = makeRunner();
+  it("stops its git's whole process group when the step is stopped, with SIGKILL once the grace period has passed, and answers interrupted", async () => {
+    const runner = makeRunner({ stopGrace: Duration.millis(300) });
     const workspace = await runner.provisionWorkspace();
     const before = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
-    const hook = workspace.blockCommits();
+    // The hook ignores SIGTERM, so only the SIGKILL after the grace period
+    // ends it.
+    const hook = workspace.blockCommits({ ignoreSigterm: true });
     const frame = buildStart(workspace, { message: "Never lands" });
     await startStep(runner, frame);
-    await waitUntil(() => existsSync(hook.reached), "the commit to reach its hook");
+    const readHookPid = () => (existsSync(hook.reached) ? readFileSync(hook.reached, "utf8") : "");
+    await waitUntil(() => readHookPid().endsWith("\n"), "the commit to reach its hook");
+    const hookPid = Number(readHookPid());
+    const isHookAlive = () => {
+      try {
+        process.kill(hookPid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
     try {
       await Effect.runPromise(runner.steps.stop({ _tag: "workspaceStepStop", steps: [frame] }));
       const outcome = await waitForResult(runner, frame);
 
       expect(outcome).toMatchObject({ status: "failed", code: "interrupted" });
+      // The hook is a child of git, so only a signal to git's whole process
+      // group reaches it.
+      await waitUntil(() => !isHookAlive(), "the hook to be killed");
       expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(before);
       expect(runner.steps.listInFlight()).toEqual([]);
-      // A stopped step leaves no result file behind, so a later start runs it again.
+      // A stopped step leaves no result file behind.
       const results = join(runner.storageDir, "step-results", workspace.workspaceId);
       expect(existsSync(join(results, `${frame.runId}-commit-1.json`))).toBe(false);
     } finally {
@@ -409,8 +488,21 @@ describe("a workspace step", () => {
     }
   });
 
+  it("sends no result when its workspace's provisioning failed, so the workspace's failure ends it", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    // A workspace this runner does not hold: its provisioning failed and
+    // left nothing behind.
+    const frame = { ...buildStart(workspace, { message: "Add a" }), workspaceId: createId() };
+
+    await startStep(runner, frame);
+    await waitUntil(() => runner.steps.listInFlight().length === 0, "the step to be dropped");
+
+    expect(runner.sent).toEqual([]);
+  });
+
   it("fails with timeout when its action runs past the deadline", async () => {
-    const runner = makeRunner(Duration.millis(300));
+    const runner = makeRunner({ deadline: Duration.millis(300) });
     const workspace = await runner.provisionWorkspace();
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
     const hook = workspace.blockCommits();
