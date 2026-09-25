@@ -94,6 +94,10 @@ export const buildIndexedWorkflowGraph = (definition: WorkflowDefinition): Index
  * the edge leaves `review`, so the prefix `steps.review.output.` is removed,
  * leaving `verdict == "approve"`. What remains is the part that differs
  * between two branches from the same step.
+ *
+ * Unlike `shortenCondition`, which cuts a condition to a fixed length, this
+ * function removes only the source step's own prefix and keeps every other
+ * character.
  */
 export const abbreviateEdgeCondition = (edge: WorkflowGraphEdge): string | undefined =>
   edge.condition?.replace(new RegExp(`(?<![\\w.])steps\\.${edge.from}\\.output\\.`, "g"), "");
@@ -149,6 +153,10 @@ const MAX_CONDITION_CHARACTERS = 24;
  * - the end from the last comparison, its operator and right-hand side:
  *   `… >= inputs.target`;
  * - the condition's last characters, as many as fit.
+ *
+ * Unlike `abbreviateEdgeCondition`, which removes the source step's prefix
+ * and knows nothing about length, this function knows nothing about the
+ * edge and only cuts the text to fit.
  */
 export const shortenCondition = (condition: string): string => {
   const characters = [...condition];
