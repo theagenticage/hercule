@@ -262,6 +262,13 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* Answered. **Transport:** a Unix socket at `<runner storage>/daemon.sock`, mode 0600 in a directory mode 0700, so no other OS user reaches it; no port is bound. **Authentication:** the helper proves nothing itself and the daemon resolves nothing. `hercule git-credential get` sends git's `protocol`/`host`/`path` down the socket together with the `HERCULE_TOKEN` its environment carries - the session token of section 5, minted per session and revoked when it exits - and the daemon relays that as `CredentialRequest { requestId, remote, sessionToken }` to the controller. The controller verifies the token, canonicalises the remote, and answers only when that resource is a checkout of that session's own workspace; anything else is `CredentialAnswer { error }` and the helper prints nothing, which is git's signal to fall through to the machine's own helpers (section 9.5). The machine asks as itself only while it is provisioning a workspace, sending `{ requestId, remote, workspaceId }` in place of the token, and the controller answers only while that workspace is `provisioning` on that runner. Nothing is minted on the runner and no identity is inferred from the OS: a process-tree check was rejected (PID reuse races, double-fork reparenting, and it stops nothing a same-user process could not already do by reading `runner.json`). What stays outside the model is what section 12 already accepts: a same-OS-user process is at parity with the runner, and an agent can always read the token of its own repository.
 
+*(Amended 2026-09-25, [#259](https://github.com/theagenticage/hercule/issues/259).)* The machine also asks as itself while it runs a **workspace step** (section 9.6), because no session runs the step, so no session token exists. It sends the same `{ requestId, remote, workspaceId }` form, naming the run's workspace. No new secret and no new frame are added. The controller answers that form in two cases, and refuses every other with `unauthorized`:
+
+- the workspace is `provisioning` on that runner (as above);
+- a workspace step's record is `running` in that workspace, in a run that is `running` and pinned to that runner.
+
+The remote must still canonicalise to a checkout of that workspace, so the credential only ever works for the workspace's own remotes. A step that has ended, a controller step of the same run (such as `wait`), and another runner naming the workspace all get `unauthorized`. The runner puts the workspace id in the environment of its own git only while it provisions a workspace or runs a workspace step; a session's git carries its session token instead.
+
 ### 9.2 Per-checkout identity
 
 - `credential.useHttpPath=true` makes git include the repository path in the credential lookup, so the helper resolves identity per checkout.
@@ -293,7 +300,7 @@ Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user co
 - **One step per workspace.** A workspace runs one workspace step at a time, so two parallel steps never collide on `index.lock`.
 - **Deadline.** Each action has a 10-minute deadline. Past it the step is stopped as above and fails with `timeout`.
 - **Little output is kept.** A failed step's message holds the tail of git's stderr. Nothing else of stdout or stderr is kept.
-- **Credentials.** `git.commit` needs none. The credentials for a push arrive with `git.push` ([#259](https://github.com/theagenticage/hercule/issues/259)), through the helper of section 9.1.
+- **Credentials.** `git.commit` needs none. ~~The credentials for a push arrive with `git.push` ([#259](https://github.com/theagenticage/hercule/issues/259)), through the helper of section 9.1.~~ *(amended 2026-09-25, [#259](https://github.com/theagenticage/hercule/issues/259))* `git.push` gets its credential through the helper of section 9.1, in the workspace-step case added there: only for the checkout's own remote, and only while the step runs.
 
 ## 10. Taint and provenance in assistant memory
 
