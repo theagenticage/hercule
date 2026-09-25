@@ -84,50 +84,57 @@ export function RunHeader({
       </div>
       <p className="mt-1.5 flex h-5 min-w-0 items-center gap-2 text-meta whitespace-nowrap text-muted">
         <WorkStateMark state={run.status} />
-        <span className={cn("font-emph", WORK_STATE_HUES[run.status] ?? "text-ink")}>
+        <span className={cn("shrink-0 font-emph", WORK_STATE_HUES[run.status] ?? "text-ink")}>
           {describeRunStatus(run, now)}
         </span>
-        {run.status !== "failed" ? null : (
-          <>
-            <Dot />
-            <FailureText
-              reason={run.failureReason}
-              stepId={run.failedStepId}
-              edge={findFailedEdge(run)}
-            />
-          </>
-        )}
         <Dot />
-        <span>
+        {/*
+          The rest of the line is one run of text, so a narrow page cuts it
+          off at its end with a single ellipsis. The facts are in the order
+          they matter, so the ones cut off are the ones that matter least.
+          The smaller monospaced parts have no line height of their own, so
+          they do not make the line taller and push its text off centre.
+        */}
+        <span className="min-w-0 truncate">
+          {run.status !== "failed" ? null : (
+            <>
+              <FailureText
+                reason={run.failureReason}
+                stepId={run.failedStepId}
+                edge={findFailedEdge(run)}
+              />
+              <Dot inline />
+            </>
+          )}
           {"started by "}
           <ActorLink actor={origin.starter} plainClassName="text-ink" />
           {origin.howStarted === undefined ? null : ` ${origin.howStarted}`}
-        </span>
-        <Dot />
-        <span className="font-mono text-fine tabular-nums">
-          <time dateTime={started}>
-            {formatPreciseStamp(new Date(started), timezone) ?? started}
-          </time>
-          {finishedAt === undefined ? null : (
-            <>
-              <span className="text-faint">{" → "}</span>
-              <time dateTime={finishedAt}>
-                {formatPreciseStamp(new Date(finishedAt), timezone, new Date(started)) ??
-                  finishedAt}
-              </time>
-            </>
-          )}
-        </span>
-        <Dot />
-        <span className="font-mono text-fine text-faint" title={run.id}>
-          {`run ${toIdTail(run.id)}`}
+          <Dot inline />
+          <span className="font-mono text-fine leading-none tabular-nums">
+            <time dateTime={started}>
+              {formatPreciseStamp(new Date(started), timezone) ?? started}
+            </time>
+            {finishedAt === undefined ? null : (
+              <>
+                <span className="text-faint">{" → "}</span>
+                <time dateTime={finishedAt}>
+                  {formatPreciseStamp(new Date(finishedAt), timezone, new Date(started)) ??
+                    finishedAt}
+                </time>
+              </>
+            )}
+          </span>
+          <Dot inline />
+          <span className="font-mono text-fine leading-none text-faint" title={run.id}>
+            {`run ${toIdTail(run.id)}`}
+          </span>
         </span>
       </p>
       {runner === undefined && workspaceLabel === undefined ? null : (
         <p className="mt-1 flex h-5 min-w-0 items-center gap-2 text-meta whitespace-nowrap text-muted">
           {runner === undefined ? null : (
             <>
-              <span>
+              <span className="shrink-0">
                 {"on runner "}
                 <Link
                   to="/fleet/$runnerId"
@@ -142,17 +149,21 @@ export function RunHeader({
           )}
           {runner === undefined || workspaceLabel === undefined ? null : <Dot />}
           {workspaceLabel === undefined ? null : (
-            <span className="min-w-0 truncate">
+            // When the line is too narrow for both, the workspace's name gives
+            // way before the note: hovering shows the whole name, and the note
+            // is what the user may act on. The name has no line height of its
+            // own for the same reason as the times on the line above.
+            <span className="min-w-0 shrink-[1000] truncate" title={workspaceLabel}>
               {"in "}
-              <span className="font-mono text-fine text-ink" title={run.workspaceId}>
-                {workspaceLabel}
-              </span>
+              <span className="font-mono text-fine leading-none text-ink">{workspaceLabel}</span>
             </span>
           )}
           {workspaceLabel === undefined || workspaceNote === undefined ? null : (
             <>
               <Dot />
-              <span>{workspaceNote}</span>
+              <span className="min-w-0 truncate" title={workspaceNote}>
+                {workspaceNote}
+              </span>
             </>
           )}
         </p>
@@ -164,10 +175,14 @@ export function RunHeader({
   );
 }
 
-/** The separator between the facts of the status line. */
-function Dot(): JSX.Element {
+/**
+ * Renders the separator between two facts of a header line. Inside a run of
+ * text, where no flex gap spaces the facts, the separator takes the gap's
+ * width as its margins, so both kinds look the same.
+ */
+function Dot({ inline = false }: { readonly inline?: boolean }): JSX.Element {
   return (
-    <span aria-hidden="true" className="text-faint">
+    <span aria-hidden="true" className={cn("text-faint", inline && "mx-2")}>
       ·
     </span>
   );

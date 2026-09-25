@@ -201,7 +201,7 @@ export function RunPage({
           </>
         )}
       </RunHeader>
-      <div className="flex flex-col gap-6 px-8 pt-5">
+      <div className="@container flex flex-col gap-6 px-8 pt-5">
         <section aria-label="Run graph">
           <div className={SECTION_HEADING}>
             <LaneLabel className="mb-0">Plan</LaneLabel>
@@ -209,8 +209,16 @@ export function RunPage({
           </div>
           <RunGraphView runGraph={runGraph} now={now} />
         </section>
-        <div className="flex items-start gap-8">
-          <section aria-labelledby="run-steps" className="min-w-0 flex-1">
+        {/*
+          The inputs sit beside the steps when the page is at least 882px wide:
+          400px for the inputs, the 32px gap, and 450px for the steps. A step
+          row's mark, status, duration, chevron, gaps and padding take 286px of
+          those, which leaves about 160px for the step's id and action. On a
+          narrower page the inputs move below the steps, and both take the
+          full width.
+        */}
+        <div className="flex flex-col gap-6 @min-[882px]:flex-row @min-[882px]:items-start @min-[882px]:gap-8">
+          <section aria-labelledby="run-steps" className="min-w-0 @min-[882px]:flex-1">
             <div className={SECTION_HEADING}>
               <LaneLabel id="run-steps" className="mb-0">
                 Steps
@@ -238,7 +246,7 @@ export function RunPage({
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}
-          <div className="flex w-[400px] shrink-0 flex-col gap-6">
+          <div className="flex flex-col gap-6 @min-[882px]:w-[400px] @min-[882px]:shrink-0">
             <section aria-labelledby="run-inputs">
               <div className={SECTION_HEADING}>
                 <LaneLabel id="run-inputs" className="mb-0">
