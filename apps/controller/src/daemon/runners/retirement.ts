@@ -1,7 +1,7 @@
 /**
- * Retiring a runner: marks it retired and ends the sessions it hosted and the
- * workspaces it held, in one transaction, then tells the runner what to stop
- * once that transaction has committed.
+ * Retiring a runner: marks it retired, ends the sessions it hosted and the
+ * workspaces it held, and fails the runs pinned to it, in one transaction.
+ * Then it tells the runner what to stop once that transaction has committed.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,6 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { RunnerDetail } from "@hercule/contract";
 import { withTransaction } from "../../db";
 import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../../runners";
+import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 
@@ -18,6 +19,7 @@ const make = Effect.gen(function* () {
   const runners = yield* RunnerService;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
+  const runs = yield* RunService;
   const connections = yield* RunnerConnections;
 
   return {
@@ -45,6 +47,9 @@ const make = Effect.gen(function* () {
               // dispatches again, so nothing else would ever end them.
               const toStop = yield* sessions.endOnRunner(detail.id);
               yield* workspaces.lostOnRunner(detail.id, at);
+              // A run pinned to the runner can never run another step in its
+              // workspace, which is lost with the runner.
+              yield* runs.failRunsPinnedTo(detail.id, `runner ${detail.name} was retired`);
               return { detail, toStop };
             }),
           );
@@ -70,5 +75,10 @@ export class Retirement extends Context.Service<Retirement, Effect.Success<typeo
 export const RetirementLayer: Layer.Layer<
   Retirement,
   never,
-  SqlClient.SqlClient | RunnerService | SessionService | WorkspaceService | RunnerConnections
+  | SqlClient.SqlClient
+  | RunnerService
+  | SessionService
+  | WorkspaceService
+  | RunService
+  | RunnerConnections
 > = Layer.effect(Retirement)(make);

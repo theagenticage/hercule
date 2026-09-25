@@ -7,7 +7,9 @@
  * implements belongs to the runs domain, like the Run Executor beside it.
  */
 import * as Effect from "effect/Effect";
+import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { WorkspaceStepKey, WorkspaceStepStart } from "@hercule/protocol";
@@ -21,6 +23,9 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
   const credentials = yield* gitCredentials;
+  // The port's `stop` is synchronous, so its frames are sent on fibers of
+  // their own. They end with the controller.
+  const runInBackground = yield* FiberSet.makeRuntime();
 
   /**
    * Builds the frame that starts a step. The commit author is the account of
@@ -44,6 +49,7 @@ const make = Effect.gen(function* () {
         action: step.action,
         input: step.input,
         ...(step.resourceId === undefined ? {} : { resourceId: step.resourceId }),
+        ...(step.checkoutBranch === undefined ? {} : { checkoutBranch: step.checkoutBranch }),
         ...(account === undefined ? {} : { gitIdentity: buildGitIdentity(account.login) }),
       };
     });
@@ -59,11 +65,8 @@ const make = Effect.gen(function* () {
       // provision goes first, on the same connection, so the runner has the
       // workspace before it is asked to run anything in it. Sending it again
       // is safe: the runner ignores a provision for a workspace it holds.
-      // ROUND 2: switch to `workspaces.rebuildProvision(step.workspaceId)`.
-      const owed = yield* workspaces.owedProvisioning(step.runnerId);
-      for (const frame of owed) {
-        if (frame.workspaceId === step.workspaceId) yield* connections.tell(step.runnerId, frame);
-      }
+      const provision = yield* workspaces.rebuildProvision(step.workspaceId);
+      if (Option.isSome(provision)) yield* connections.tell(step.runnerId, provision.value);
       yield* connections.tell(step.runnerId, yield* buildStartFrame(step));
     });
 
@@ -80,18 +83,17 @@ const make = Effect.gen(function* () {
         ),
       ),
 
-    stop: (steps) =>
-      Effect.gen(function* () {
-        const byRunner = new Map<string, Array<WorkspaceStepKey>>();
-        for (const { runnerId, runId, stepId, iteration } of steps) {
-          const onRunner = byRunner.get(runnerId) ?? [];
-          onRunner.push({ runId, stepId, iteration });
-          byRunner.set(runnerId, onRunner);
-        }
-        for (const [runnerId, onRunner] of byRunner) {
-          yield* connections.tell(runnerId, { _tag: "workspaceStepStop", steps: onRunner });
-        }
-      }),
+    stop: (steps) => {
+      const byRunner = new Map<string, Array<WorkspaceStepKey>>();
+      for (const { runnerId, runId, stepId, iteration } of steps) {
+        const onRunner = byRunner.get(runnerId) ?? [];
+        onRunner.push({ runId, stepId, iteration });
+        byRunner.set(runnerId, onRunner);
+      }
+      for (const [runnerId, onRunner] of byRunner) {
+        runInBackground(connections.tell(runnerId, { _tag: "workspaceStepStop", steps: onRunner }));
+      }
+    },
   });
 });
 

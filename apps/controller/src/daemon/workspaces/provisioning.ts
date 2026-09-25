@@ -2,8 +2,10 @@
  * Workspaces on the fleet:
  *
  * - the two workspace operations a user calls, provision and dispose;
- * - resending pending provisioning to a runner that has just connected;
  * - the sweep that removes workspaces nothing needs any more.
+ *
+ * A runner that connects is sent the provisioning still owed to it by the
+ * arrival in `runners/`, together with the rest of the work owed to it.
  *
  * Every row is committed before its runner is told, because a transaction
  * never waits on a runner. The sweep decides and the runner deletes the
@@ -19,7 +21,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
@@ -38,7 +39,7 @@ import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
 import { withTransaction } from "../../db";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService } from "../../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { absorbFailures } from "../absorbing";
 
 const decodeProvision = Schema.decodeUnknownEffect(WorkspaceProvisionInput);
 
@@ -77,13 +78,6 @@ const make = Effect.gen(function* () {
       yield* connections.tell(gone.runnerId, gone.frame);
     }
   });
-
-  const resendProvisioning = (runnerId: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      for (const frame of yield* workspaces.owedProvisioning(runnerId)) {
-        yield* connections.tell(runnerId, frame);
-      }
-    });
 
   return {
     /**
@@ -134,28 +128,14 @@ const make = Effect.gen(function* () {
         return {};
       }),
 
-    /**
-     * Runs forever. Resends pending provisioning frames to each runner that
-     * connects, and sweeps expired workspaces on an interval.
-     */
-    driving: Effect.all(
-      [
-        Stream.runForEach(connections.arrivals, (runnerId) =>
-          forkAndAbsorbFailures(
-            "Resending pending provisioning to a runner failed",
-            resendProvisioning(runnerId),
-          ),
-        ),
-        Effect.gen(function* () {
-          const interval = yield* WorkspaceSweepInterval;
-          while (true) {
-            yield* Effect.sleep(interval);
-            yield* absorbFailures("Sweeping expired workspaces failed", sweep);
-          }
-        }),
-      ],
-      { concurrency: "unbounded", discard: true },
-    ),
+    /** Runs forever. Sweeps expired workspaces on an interval. */
+    driving: Effect.gen(function* () {
+      const interval = yield* WorkspaceSweepInterval;
+      while (true) {
+        yield* Effect.sleep(interval);
+        yield* absorbFailures("Sweeping expired workspaces failed", sweep);
+      }
+    }),
   };
 });
 
