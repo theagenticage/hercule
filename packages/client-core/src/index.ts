@@ -70,6 +70,7 @@ export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
 export {
   describeFailureReason,
   describeRunOrigin,
+  describeRunnerWait,
   describeRunStatus,
   describeStepDuration,
   describeStepState,
@@ -181,6 +182,7 @@ export {
   formatRepoName,
   findRunnerForPick,
   withBranch,
+  formatWorkspaceLabel,
   formatWorkspaceName,
   type DraftSubject,
   type Phrase,

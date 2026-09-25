@@ -8,9 +8,17 @@
  * edge, the list names only the failed step, and the page also names the
  * edge, because only the page has the run's plan.
  */
-import type { FailureReason, Run, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
+import type {
+  FailureReason,
+  Run,
+  RunOrigin,
+  RunStatus,
+  Runner,
+  StepStatus,
+} from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
 import { formatDuration } from "./threads/duration";
+import { formatStamp } from "./time-context";
 
 /**
  * Where a run or one step of its plan is: its status, or for a step with no
@@ -253,3 +261,37 @@ export const describeUnstartedStep = (
  */
 export const describeStepState = (state: WorkState, runStatus: RunStatus): string =>
   state !== "unreached" ? state : isRunLive(runStatus) ? "not started" : "not reached";
+
+/**
+ * Returns the line a running step shows while its run waits for the run's
+ * runner to come back: "Waiting for runner mac-mini to reconnect (offline
+ * since 25 Sep 14:02)", with the time in `timezone`. The part in brackets is
+ * left out when the runner has never been seen.
+ *
+ * Returns `undefined` when nothing waits for a runner: the run is not
+ * running, it is not pinned to a runner, none of its steps is running, or
+ * its runner is online. `runner` is the run's runner as last read; a runner
+ * with another id is ignored.
+ *
+ * A run is pinned to a runner when its first workspace step starts, and the
+ * controller then waits for that runner without limit. The public action
+ * catalog does not say whether an action runs in the workspace or on the
+ * controller, so every running step of a pinned run is taken to wait for the
+ * runner. A controller step that runs while the runner is away shows the
+ * line too.
+ */
+export const describeRunnerWait = (
+  run: Run,
+  runner: Runner | undefined,
+  timezone: string,
+): string | undefined => {
+  if (run.status !== "running" || runner === undefined || runner.id !== run.runnerId) {
+    return undefined;
+  }
+  if (runner.connectivity === "online") return undefined;
+  if (!run.steps.some((record) => record.status === "running")) return undefined;
+  const waiting = `Waiting for runner ${runner.name} to reconnect`;
+  const since =
+    runner.lastSeenAt === null ? undefined : formatStamp(new Date(runner.lastSeenAt), timezone);
+  return since === undefined ? waiting : `${waiting} (offline since ${since})`;
+};

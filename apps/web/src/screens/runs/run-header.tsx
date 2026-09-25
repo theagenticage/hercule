@@ -8,9 +8,10 @@ import {
   readTimestamps,
   toIdTail,
 } from "@hercule/client-core";
-import type { Run } from "@hercule/contract";
+import type { Run, Runner } from "@hercule/contract";
 import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
 import { ActorLink } from "../actor-link";
+import { Connectivity } from "../connectivity";
 import { FailureText } from "./step-parts";
 
 /** The quiet link style of the breadcrumb back to the run list. */
@@ -22,19 +23,27 @@ const QUIET_LINK =
  * the run list and the workflow's name, with the page's actions on the right.
  * The second line shows where the run is: its status mark and status with its
  * duration, why it failed, who started it and how, when it started and ended,
- * and its id's tail, which the CLI takes. A run that failed at an edge has a
- * third line: what went wrong there.
+ * and its id's tail, which the CLI takes. Once the run is pinned to a runner,
+ * the next line shows where it works: the runner, linked to its page, with
+ * whether the controller can reach it, and the run's workspace. A run that
+ * failed at an edge has a last line: what went wrong there.
  *
  * The title sits where the shell's top bar puts every other screen's title,
  * so the page does not jump when it opens.
  */
 export function RunHeader({
   run,
+  runner,
+  workspaceLabel,
   now,
   timezone,
   children,
 }: {
   readonly run: Run;
+  /** The runner the run is pinned to, once it is pinned and the runner has been read. */
+  readonly runner: Runner | undefined;
+  /** The name of the run's workspace, once it has one and it has been read. */
+  readonly workspaceLabel: string | undefined;
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
   readonly timezone: string;
@@ -107,6 +116,34 @@ export function RunHeader({
           {`run ${toIdTail(run.id)}`}
         </span>
       </p>
+      {runner === undefined && workspaceLabel === undefined ? null : (
+        <p className="mt-1 flex h-5 min-w-0 items-center gap-2 text-meta whitespace-nowrap text-muted">
+          {runner === undefined ? null : (
+            <>
+              <span>
+                {"on runner "}
+                <Link
+                  to="/fleet/$runnerId"
+                  params={{ runnerId: runner.id }}
+                  className={cn("text-ink", QUIET_LINK)}
+                >
+                  {runner.name}
+                </Link>
+              </span>
+              <Connectivity runner={runner} timezone={timezone} />
+            </>
+          )}
+          {runner === undefined || workspaceLabel === undefined ? null : <Dot />}
+          {workspaceLabel === undefined ? null : (
+            <span className="min-w-0 truncate">
+              {"in "}
+              <span className="font-mono text-fine text-ink" title={run.workspaceId}>
+                {workspaceLabel}
+              </span>
+            </span>
+          )}
+        </p>
+      )}
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
       ) : null}

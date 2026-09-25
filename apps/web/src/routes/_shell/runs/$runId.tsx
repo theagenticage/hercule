@@ -1,10 +1,16 @@
 import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { formatWorkspaceLabel, isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { runQuery, settingsQuery } from "../../../app/queries";
+import {
+  resourcesQuery,
+  runQuery,
+  runnerQuery,
+  settingsQuery,
+  workspaceQuery,
+} from "../../../app/queries";
 import { RunPage, type StepsView } from "./-page";
 
 export const Route = createFileRoute("/_shell/runs/$runId")({
@@ -15,22 +21,41 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   // The list is the default and leaves the address without it.
   validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
     search["steps"] === "timeline" ? { steps: "timeline" } : {},
-  // Loads the run before the page renders, so the page never waits on it.
+  // Loads the run, and the runner and workspace it is pinned to, before the
+  // page renders, so the page never waits on them.
   loader: async ({ context: { client, queryClient }, params }) => {
-    await queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {
-      // A link to a run the controller does not have shows that, instead of
-      // a load error.
-      throw isNotFound(error) ? notFound() : error;
-    });
+    const run = await queryClient
+      .ensureQueryData(runQuery(client, params.runId))
+      .catch((error: unknown) => {
+        // A link to a run the controller does not have shows that, instead of
+        // a load error.
+        throw isNotFound(error) ? notFound() : error;
+      });
+    const { runnerId, workspaceId } = run;
+    await Promise.all([
+      runnerId === undefined ? null : queryClient.ensureQueryData(runnerQuery(client, runnerId)),
+      workspaceId === undefined
+        ? null
+        : queryClient.ensureQueryData(workspaceQuery(client, workspaceId)),
+      // A main workspace is named after its repo.
+      workspaceId === undefined ? null : queryClient.ensureQueryData(resourcesQuery(client)),
+    ]);
   },
   component: RunScreen,
   notFoundComponent: MissingRun,
 });
 
 /**
- * Renders a run's page, kept current by the `run` topic: the run engine
- * publishes the run's id on that topic after every change to the run or to
- * one of its step records.
+ * Renders a run's page, kept current by two topics:
+ *
+ * - `run`: the run engine publishes the run's id on it after every change to
+ *   the run or to one of its step records;
+ * - `runner`: the run's runner going offline or coming back changes what a
+ *   running step shows.
+ *
+ * The runner and the workspace are read only once the run is pinned to
+ * them. The loader has read them for a run that already was; a run pinned
+ * while the page is open reads them then, and shows them when they arrive.
  */
 function RunScreen(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
@@ -39,11 +64,21 @@ function RunScreen(): JSX.Element {
   const navigate = Route.useNavigate();
 
   useLiveInvalidation(live, queryClient, "run");
+  useLiveInvalidation(live, queryClient, "runner");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
+  const runner = useQuery({
+    ...runnerQuery(client, run.runnerId ?? ""),
+    enabled: run.runnerId !== undefined,
+  }).data;
+  const workspace = useQuery({
+    ...workspaceQuery(client, run.workspaceId ?? ""),
+    enabled: run.workspaceId !== undefined,
+  }).data;
+  const resources = useQuery({ ...resourcesQuery(client), enabled: workspace !== undefined }).data;
 
   return (
     <RunPage
@@ -52,6 +87,12 @@ function RunScreen(): JSX.Element {
       key={runId}
       client={client}
       run={run}
+      runner={runner}
+      workspaceLabel={
+        workspace === undefined || resources === undefined
+          ? undefined
+          : formatWorkspaceLabel(workspace, resources.items, runner === undefined ? [] : [runner])
+      }
       timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>

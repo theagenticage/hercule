@@ -3,11 +3,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
+  describeRunnerWait,
   isRunLive,
   queryKeys,
   type HerculeClient,
 } from "@hercule/client-core";
-import type { Run } from "@hercule/contract";
+import type { Run, Runner } from "@hercule/contract";
 import {
   Button,
   LaneLabel,
@@ -48,12 +49,18 @@ const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
 export function RunPage({
   client,
   run,
+  runner,
+  workspaceLabel,
   timezone,
   stepsView,
   onStepsViewChange,
 }: {
   readonly client: HerculeClient;
   readonly run: Run;
+  /** The runner the run is pinned to, once it is pinned and the runner has been read. */
+  readonly runner: Runner | undefined;
+  /** The name of the run's workspace, once it has one and it has been read. */
+  readonly workspaceLabel: string | undefined;
   readonly timezone: string;
   readonly stepsView: StepsView;
   readonly onStepsViewChange: (view: StepsView) => void;
@@ -79,7 +86,13 @@ export function RunPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-28">
-      <RunHeader run={run} now={now} timezone={timezone}>
+      <RunHeader
+        run={run}
+        runner={runner}
+        workspaceLabel={workspaceLabel}
+        now={now}
+        timezone={timezone}
+      >
         {cancel.error === null ? null : (
           <span role="alert" className="min-w-0 truncate text-fine text-fail">
             {`Not cancelled: ${readErrorMessage(cancel.error)}`}
@@ -145,7 +158,12 @@ export function RunPage({
               </SegmentedControl>
             </div>
             {stepsView === "list" ? (
-              <StepList lines={lines} runStatus={run.status} now={now} />
+              <StepList
+                lines={lines}
+                runStatus={run.status}
+                runnerWait={describeRunnerWait(run, runner, timezone)}
+                now={now}
+              />
             ) : (
               <StepTimeline run={run} now={now} />
             )}

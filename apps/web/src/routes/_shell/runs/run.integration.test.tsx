@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeActor } from "@hercule/client-core";
-import type { Run, StepStatus, WorkflowDefinition } from "@hercule/contract";
+import { buildCheckout, buildRunner, buildWorkspace } from "@hercule/client-core/threads/testing";
+import type { Run, RunnerDetail, StepStatus, WorkflowDefinition } from "@hercule/contract";
 import {
   buildErrorBody,
   readPageText,
@@ -752,6 +753,66 @@ describe("A run's page > routing in the steps", { timeout: GRAPH_TEST_TIMEOUT_MS
       expect(getStepsRegion().querySelector('svg[data-mark="skipped"]')).not.toBeNull();
     });
     expect(readPageText(getStepsRegion()).toLowerCase()).toMatch(/\bskipped\b/);
+  });
+});
+
+describe("A run's page > its runner and workspace", () => {
+  const RUNNER_ID = "0199c0ff-3333-7000-8000-000000000001";
+  const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000001";
+  const BRANCH = `hercule/run-${RUNNING_RUN.id}`;
+  const OFFLINE_RUNNER: RunnerDetail = {
+    ...buildRunner(RUNNER_ID, "mac-mini"),
+    connectivity: "offline",
+    lastSeenAt: addSeconds(T0, 20),
+    negotiatedCapabilities: null,
+    protocolVersion: null,
+  };
+  /** The running run, pinned to the runner and working in an ephemeral workspace. */
+  const PINNED_RUN: Run = { ...RUNNING_RUN, runnerId: RUNNER_ID, workspaceId: WORKSPACE_ID };
+
+  it("shows the runner and the workspace, and a running step waits while the runner is offline", async () => {
+    let runner = OFFLINE_RUNNER;
+    const { live } = await openRunPage(PINNED_RUN, {
+      overrides: {
+        [`GET /api/v1/runners/${RUNNER_ID}`]: () => ({ body: runner }),
+        [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: {
+          body: buildWorkspace({
+            id: WORKSPACE_ID,
+            runnerId: RUNNER_ID,
+            kind: "ephemeral",
+            checkouts: [
+              {
+                ...buildCheckout(TASK_ID, BRANCH),
+                checkoutId: "0199c0ff-5555-7000-8000-000000000001",
+              },
+            ],
+          }),
+        },
+        "GET /api/v1/resources": { body: { items: [] } },
+      },
+    });
+
+    const header = await findPageHeader();
+    const runnerLink = within(header).getByRole("link", { name: "mac-mini" });
+    expect(runnerLink.getAttribute("href")).toBe(`/fleet/${RUNNER_ID}`);
+    expect(readPageText(header)).toContain(BRANCH);
+    expect(readPageText(getStepRow("start"))).toMatch(
+      /Waiting for runner mac-mini to reconnect \(offline since .+\)/,
+    );
+    // Only the running step waits for the runner.
+    expect(readPageText(getStepRow("create"))).not.toContain("Waiting for runner");
+
+    runner = { ...OFFLINE_RUNNER, connectivity: "online" };
+    await waitFor(() => {
+      expect(live.topics()).toContain("runner");
+    });
+    act(() => {
+      live.push("runner", { _tag: "invalidate", ids: [RUNNER_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(readPageText(getStepRow("start"))).not.toContain("Waiting for runner");
+    });
   });
 });
 

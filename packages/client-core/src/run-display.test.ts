@@ -1,9 +1,10 @@
 import { assert, describe, it } from "vitest";
-import type { Run, StepRecord } from "@hercule/contract";
+import type { Run, Runner, StepRecord } from "@hercule/contract";
 import {
   describeFailureReason,
   findFailedEdge,
   describeRunOrigin,
+  describeRunnerWait,
   describeRunStatus,
   describeStepDuration,
   describeStepState,
@@ -13,6 +14,7 @@ import {
   readTimestamps,
   shouldRunRecede,
 } from "./run-display";
+import { buildRunner } from "./threads/workspaces.testing";
 
 const PARENT = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 const START = "2026-09-24T12:00:00.000Z";
@@ -220,5 +222,61 @@ describe("describeStepState", () => {
     assert.strictEqual(describeStepState("completed", "completed"), "completed");
     assert.strictEqual(describeStepState("unreached", "running"), "not started");
     assert.strictEqual(describeStepState("unreached", "failed"), "not reached");
+  });
+});
+
+describe("describeRunnerWait", () => {
+  const RUNNER_ID = "01a06d02-c111-7a0e-8b3d-9c1f00000001";
+  /** Last seen at 14:02 in Amsterdam. */
+  const OFFLINE: Runner = {
+    ...buildRunner(RUNNER_ID, "mac-mini"),
+    connectivity: "offline",
+    lastSeenAt: "2026-09-24T12:02:00.000Z",
+  };
+  /** A run with its `commit` step running, pinned to no runner yet. */
+  const UNPINNED: Run = {
+    id: PARENT,
+    workflowId: null,
+    plan: {
+      name: "Commit the fix",
+      steps: [{ id: "commit", kind: "action", action: "git.commit" }],
+    },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    steps: [{ stepId: "commit", iteration: 1, status: "running", startedAt: START }],
+    edgeTraversals: [],
+    createdAt: START,
+    status: "running",
+    startedAt: START,
+  };
+  const PINNED: Run = { ...UNPINNED, runnerId: RUNNER_ID };
+
+  it("says which runner the run waits for, and since when, in the user's timezone", () => {
+    assert.strictEqual(
+      describeRunnerWait(PINNED, OFFLINE, "Europe/Amsterdam"),
+      "Waiting for runner mac-mini to reconnect (offline since 24 Sep 14:02)",
+    );
+    assert.strictEqual(
+      describeRunnerWait(PINNED, { ...OFFLINE, connectivity: "unreachable" }, "UTC"),
+      "Waiting for runner mac-mini to reconnect (offline since 24 Sep 12:02)",
+    );
+    assert.strictEqual(
+      describeRunnerWait(PINNED, { ...OFFLINE, lastSeenAt: null }, "UTC"),
+      "Waiting for runner mac-mini to reconnect",
+    );
+  });
+
+  it("says nothing when the run does not wait for a runner", () => {
+    const cases: ReadonlyArray<readonly [Run, Runner | undefined]> = [
+      [PINNED, { ...OFFLINE, connectivity: "online" }],
+      [PINNED, undefined],
+      [UNPINNED, OFFLINE],
+      [PINNED, { ...OFFLINE, id: PARENT }],
+      [{ ...PINNED, steps: [{ stepId: "commit", iteration: 1, status: "pending" }] }, OFFLINE],
+      [{ ...PINNED, status: "cancelled", finishedAt: at(10) }, OFFLINE],
+    ];
+    for (const [run, runner] of cases) {
+      assert.strictEqual(describeRunnerWait(run, runner, "UTC"), undefined);
+    }
   });
 });
