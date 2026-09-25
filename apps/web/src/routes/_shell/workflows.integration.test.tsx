@@ -243,6 +243,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     id: "task.create",
     displayName: "Create a task",
     description: "Files a task.",
+    runsIn: "controller",
     inputSchema: {
       type: "object",
       properties: { title: { type: "string" }, description: { type: "string" } },
@@ -253,12 +254,14 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
     id: "task.update",
     displayName: "Update a task",
     description: "Changes a task.",
+    runsIn: "controller",
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   },
   {
     id: "task.query",
     displayName: "Find tasks",
     description: "Lists tasks.",
+    runsIn: "controller",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
 ];

@@ -2120,6 +2120,7 @@ interface WorkflowActionItem {
   readonly id: string;
   readonly displayName: string;
   readonly description: string;
+  readonly runsIn: string;
   readonly inputSchema: {
     readonly type?: unknown;
     readonly properties?: Record<string, unknown>;
@@ -2174,6 +2175,7 @@ describe("workflowAction.query", () => {
           "displayName",
           "id",
           "inputSchema",
+          "runsIn",
         ]);
         expect(action.displayName.trim(), action.id).not.toBe("");
         expect(action.description.trim(), action.id).not.toBe("");
@@ -2188,6 +2190,11 @@ describe("workflowAction.query", () => {
         "text",
       ]);
       expect(noteAppend.inputSchema.required).toEqual(["text"]);
+
+      // Every plugin action runs on the controller; a git step runs in the workspace.
+      expect(noteAppend.runsIn).toBe("controller");
+      expect(findActionById(actions, "task.create").runsIn).toBe("controller");
+      expect(findActionById(actions, "git.commit").runsIn).toBe("workspace");
 
       // A built-in action's input schema is the input schema of its operation.
       const taskCreate = findActionById(actions, "task.create");

@@ -88,6 +88,7 @@ const openWorkflowPage = async () => {
           id: "task.query",
           displayName: "Find tasks",
           description: "Lists tasks.",
+          runsIn: "controller",
           inputSchema: { type: "object", properties: {}, required: [] },
         },
       ],

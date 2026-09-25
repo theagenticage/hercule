@@ -364,7 +364,7 @@ export {
   StepStatus,
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
-export { WorkflowAction } from "./groups/workflow-action";
+export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {
   TRIGGER_SORT_FIELDS,
