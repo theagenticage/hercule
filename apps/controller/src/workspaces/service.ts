@@ -781,7 +781,9 @@ const make = Effect.gen(function* () {
      * resource. A run whose steps work in the main workspace prefers one of
      * these runners, because its steps can start there without a fresh clone.
      */
-    listRunnersWithReadyPrimary: (resourceId: string): Effect.Effect<ReadonlySet<string>, SqlError> =>
+    listRunnersWithReadyPrimary: (
+      resourceId: string,
+    ): Effect.Effect<ReadonlySet<string>, SqlError> =>
       workspaces.listRunnersWithReadyPrimary(resourceId),
 
     /**

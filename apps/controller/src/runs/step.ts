@@ -156,7 +156,7 @@ interface BuiltInActionHandler {
  * actions' services fail with, as its code and message. Returns `undefined`
  * for anything else.
  */
-export const describeActionFailure = (failure: unknown): StepError | undefined => {
+const describeActionFailure = (failure: unknown): StepError | undefined => {
   if (failure instanceof ActionError) return { code: failure.code, message: failure.message };
   if (!isApiError(failure)) return undefined;
   const { code, message } = failure.error;
@@ -444,7 +444,9 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
           );
           execute = builtIn.inTransaction
             ? commitUninterruptibly(sql, Effect.flatMap(called, writeCompletion))
-            : Effect.flatMap(called, (output) => commitUninterruptibly(sql, writeCompletion(output)));
+            : Effect.flatMap(called, (output) =>
+                commitUninterruptibly(sql, writeCompletion(output)),
+              );
         } else if (pluginExecute !== undefined) {
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {

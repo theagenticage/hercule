@@ -1068,7 +1068,9 @@ export const makeRunEngine = Effect.gen(function* () {
           // stored, so a record without one is not a workspace step's.
           if (!runsInWorkspace(record.action) || input === undefined) return [];
           const resourceId = readResourceId(input);
-          return [{ ...record, runnerId, input, ...(resourceId === undefined ? {} : { resourceId }) }];
+          return [
+            { ...record, runnerId, input, ...(resourceId === undefined ? {} : { resourceId }) },
+          ];
         }),
       ),
 

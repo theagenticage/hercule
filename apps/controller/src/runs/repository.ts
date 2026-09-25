@@ -795,9 +795,7 @@ const make = Effect.gen(function* () {
                     iteration: row.iteration,
                     workspaceId: uuidToString(row.workspace_id),
                     action: row.action,
-                    ...(row.input === null
-                      ? {}
-                      : { input: JSON.parse(row.input) as Schema.Json }),
+                    ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
                   },
                 ],
           ),

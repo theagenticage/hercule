@@ -677,7 +677,11 @@ const listWorkspaceIssues = (
     ];
   }
   const checkouts = countPolicyCheckouts(workspace);
-  if (isGitActionId(action.id) && checkouts > 1 && !Object.hasOwn(step.params ?? {}, "resourceId")) {
+  if (
+    isGitActionId(action.id) &&
+    checkouts > 1 &&
+    !Object.hasOwn(step.params ?? {}, "resourceId")
+  ) {
     return [
       {
         path: [...path, "params"],
