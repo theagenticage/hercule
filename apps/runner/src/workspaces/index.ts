@@ -17,7 +17,9 @@ import {
 } from "./registry";
 import { SETUP_DEADLINE_MS, buildSubstrateEnv, type Substrate } from "./substrate";
 
-export { switchBranch } from "./git";
+export { buildStepResultsDir, buildStepResultsRoot } from "./dispose";
+export { switchBranch, type GitOutcome, type GitEnv } from "./git";
+export { buildTailMessage, drainTail } from "./output";
 export { buildSubstrateEnv } from "./substrate";
 
 /** The directories a session placed in a workspace works with. */
@@ -33,6 +35,13 @@ export interface Workspaces {
   /** Idempotent: disposing an id this runner never had reports it as deleted. */
   readonly dispose: (frame: WorkspaceDispose) => Promise<WorkspaceReport>;
   readonly resolve: (workspaceId: string) => Resolved | undefined;
+  /**
+   * Waits until the provisioning of this workspace that is in progress, if
+   * any, has finished. The controller sends a workspace step right after the
+   * provisioning frame of its workspace, and the step must not look for the
+   * workspace before the provisioning has created it. Never rejects.
+   */
+  readonly waitForProvisioning: (workspaceId: string) => Promise<void>;
   /**
    * Reads a primary's current branch and its branches again, after a session
    * ran in it. Returns undefined for an ephemeral workspace or an unknown id.
@@ -114,6 +123,9 @@ export const makeWorkspaces = (options: {
       return entry === undefined
         ? undefined
         : { root: entry.root, cwd: chooseCwd(entry), checkouts: entry.checkouts };
+    },
+    waitForProvisioning: async (workspaceId) => {
+      await inFlight.get(workspaceId)?.catch(() => undefined);
     },
     reportAfterSession: async (workspaceId) => {
       const entry = findStandingWorkspace(workspaceId);

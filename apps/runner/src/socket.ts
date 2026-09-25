@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
@@ -60,6 +61,7 @@ import {
 import type { LoginAnswer } from "./providers/login";
 import { sessions } from "./sessions";
 import { reportWatermark } from "./watermark";
+import type { WorkspaceSteps } from "./workspace-actions";
 import type { Workspaces } from "./workspaces";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -108,6 +110,8 @@ export interface ConnectOptions {
   readonly scratchDir: string;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
+  /** The workspace steps on this machine. They outlive this connection. */
+  readonly workspaceSteps: WorkspaceSteps;
   /** The socket this machine's credential helper asks for tokens on. */
   readonly socketPath: string;
   /** Forwards a credential helper's request to the controller, and the response back. */
@@ -505,6 +509,13 @@ export const connect = (
             );
           }
           greeted = true;
+          // Step results go out on this connection from now on, before any
+          // step frame is handled, so no answer is lost. Not earlier: a step
+          // started on an earlier connection can finish at any moment, and a
+          // peer that has not proved its identity must not learn of it.
+          yield* options.workspaceSteps
+            .attached((frame) => write(encodeFrameText(frame)))
+            .pipe(Scope.provide(connection));
           proven.openUnsafe();
           return;
         }
@@ -554,13 +565,19 @@ export const connect = (
           case "ack":
             // Acks are for replayable events, which nothing sends yet.
             return;
-          case "workspaceProvision":
+          case "workspaceProvision": {
+            // Started here, before the next frame is handled, and not in the
+            // forked fiber: a workspace step sent right after this frame must
+            // find the provisioning in progress and wait for it, instead of
+            // finding no workspace at all.
+            const provisioning = options.workspaces.provision(message);
             return yield* Effect.asVoid(
               Effect.forkIn(
-                answerWorkspace(message.workspaceId, () => options.workspaces.provision(message)),
+                answerWorkspace(message.workspaceId, () => provisioning),
                 connection,
               ),
             );
+          }
           case "workspaceDispose":
             return yield* Effect.asVoid(
               Effect.forkIn(
@@ -572,25 +589,11 @@ export const connect = (
             // A git process is waiting for this response. Nothing is kept after
             // it is delivered.
             return yield* Effect.sync(() => options.credentials.deliver(message));
+          // A step runs in a fiber of its own, so these return at once.
           case "workspaceStepStart":
-            // This runner build runs no workspace action yet. The protocol's
-            // answer for an action a runner does not implement is this failure.
-            return yield* write(
-              encodeFrameText({
-                _tag: "workspaceStepResult",
-                runId: message.runId,
-                stepId: message.stepId,
-                iteration: message.iteration,
-                outcome: {
-                  status: "failed",
-                  code: "unsupported_action",
-                  message: `This runner cannot run ${message.action}.`,
-                },
-              }),
-            );
+            return yield* options.workspaceSteps.start(message);
           case "workspaceStepStop":
-            // No step can be running here, since none is ever started.
-            return;
+            return yield* options.workspaceSteps.stop(message);
         }
         // Every frame the protocol defines is handled above. This fails to
         // compile when a new frame is added, so it cannot be dropped silently.
@@ -623,6 +626,14 @@ export const connect = (
       // while the socket was down (spec 03 section 2.3).
       yield* Effect.forkIn(supervisor.relay, connection);
       yield* supervisor.report;
+      // Like the sessions report: the controller stops every listed step
+      // whose record ended while this runner was away.
+      yield* write(
+        encodeFrameText({
+          _tag: "workspaceStepsReport",
+          steps: options.workspaceSteps.listInFlight(),
+        }),
+      );
       yield* Effect.all(
         [
           reportWatermark({

@@ -26,17 +26,9 @@ import {
   findStartPoint,
   type GitEnv,
 } from "./git";
+import { buildTailMessage, drainTail } from "./output";
 import { isStillOnDisk, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
 import type { Substrate } from "./substrate";
-
-/**
- * How many of the last lines of a setup command's output the user is shown.
- * The end of the output usually shows why the command failed.
- */
-const SETUP_OUTPUT_LINES = 20;
-
-/** The most output of one setup command kept in memory while it runs. */
-const SETUP_OUTPUT_BYTES = 64 * 1024;
 
 const buildFailedReport = (workspaceId: string, message: string): WorkspaceReport => ({
   _tag: "workspaceReport",
@@ -154,22 +146,6 @@ const copyIncludedFiles = (primaryRoot: string, dir: string): void => {
 };
 
 /**
- * Reads a stream to its end into `held.text`, keeping only the last
- * `SETUP_OUTPUT_BYTES`. An install log can run to megabytes and only its end is
- * ever read, so older output is dropped as it arrives. Both pipes write into
- * the same buffer, so the output stays in the order it arrived.
- */
-const drainInto = async (
-  stream: ReadableStream<Uint8Array>,
-  held: { text: string },
-): Promise<void> => {
-  const decoder = new TextDecoder();
-  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
-    held.text = (held.text + decoder.decode(chunk, { stream: true })).slice(-SETUP_OUTPUT_BYTES);
-  }
-};
-
-/**
  * Kills the setup command's whole process group, not just the shell. A setup
  * command that starts a watcher or a server leaves child processes behind, and
  * killing only the shell would leave them running in the workspace. The child
@@ -220,17 +196,17 @@ const runSetup = async (
     }, substrate.setupDeadlineMs);
   });
   const ran = Promise.all([
-    drainInto(child.stdout, held).catch(() => undefined),
-    drainInto(child.stderr, held).catch(() => undefined),
+    // Both pipes write into one holder, so the output stays in the order it arrived.
+    drainTail(child.stdout, held).catch(() => undefined),
+    drainTail(child.stderr, held).catch(() => undefined),
   ]).then(() => child.exited);
   const code = await Promise.race([ran, stopped]);
   clearTimeout(deadline);
   if (!timedOut && code === 0) return undefined;
-  const lines = held.text.split("\n").filter((line) => line.length > 0);
   const why = timedOut
     ? `the setup command was still running after ${String(Math.round(substrate.setupDeadlineMs / 1000))}s and was stopped:`
     : `the setup command failed with exit code ${String(code)}:`;
-  return [why, ...lines.slice(-SETUP_OUTPUT_LINES)].join("\n");
+  return buildTailMessage(why, held.text);
 };
 
 const makeEphemeral = async (

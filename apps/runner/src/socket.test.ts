@@ -33,6 +33,7 @@ import {
   type ControllerPin,
 } from "./socket";
 import { makeCredentialRelay } from "./credentials";
+import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-actions";
 import { makeWorkspaces } from "./workspaces";
 
 /** This machine's facts. These tests are not about the probe. */
@@ -269,11 +270,22 @@ const HERCULE_TOOL = {
   claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
 };
 
+const workspaces = makeWorkspaces({ storageDir: STORAGE_DIR });
+
+/** The workspace steps of a runner that holds none. */
+const IDLE_STEPS = makeWorkspaceSteps({
+  storageDir: STORAGE_DIR,
+  workspaces,
+  socketPath: `${STORAGE_DIR}/daemon.sock`,
+  baseEnv: {},
+});
+
 /** Runs one connection until it ends, and returns how it ended. */
 const runConnection = (
   pin: ControllerPin,
   probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
   proofDeadline: Duration.Duration = PATIENT,
+  workspaceSteps: WorkspaceSteps = IDLE_STEPS,
 ) =>
   Effect.runPromise(
     Effect.result(
@@ -284,7 +296,8 @@ const runConnection = (
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
-        workspaces: makeWorkspaces({ storageDir: STORAGE_DIR }),
+        workspaces,
+        workspaceSteps,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
         binDir: BIN_DIR,
@@ -495,6 +508,29 @@ describe("which controller a runner accepts", () => {
     // However the connection ended, it was not because the controller was
     // the wrong one.
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("a runner with workspace steps in flight", () => {
+  it("reports them once the controller has proved its identity", async () => {
+    const stub = await stubController();
+    const inFlight = { runId: "run-1", stepId: "commit", iteration: 2 };
+    // Running a real step is the job of the workspace steps' own tests. This
+    // test checks that the connection reports whatever steps are in flight.
+    const steps: WorkspaceSteps = { ...IDLE_STEPS, listInFlight: () => [inFlight] };
+
+    const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), PATIENT, steps);
+
+    await stub.connected();
+    await waitUntilProven(stub);
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "workspaceStepsReport"));
+    expect(stub.received.find((frame) => frame._tag === "workspaceStepsReport")).toEqual({
+      _tag: "workspaceStepsReport",
+      steps: [inFlight],
+    });
+
+    stub.hangUp();
+    await pending;
   });
 });
 
