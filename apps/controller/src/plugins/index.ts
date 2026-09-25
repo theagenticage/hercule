@@ -10,6 +10,7 @@ export { Plugins, PluginsLayer } from "./service";
 export {
   isBuiltInControllerActionId,
   runsInWorkspace,
+  WORKSPACE_ACTION_IDS,
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
   type WorkspaceActionId,

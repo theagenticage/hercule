@@ -124,6 +124,7 @@ import { buildRunBranch, WorkspaceService } from "../workspaces";
 import { RunExecutor } from "./executor";
 import { runRepository, type RunOutcome, type StepRecordId } from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
+import { describeMissingCapableRunner, listCapableRunners } from "./runner-capabilities";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -412,23 +413,47 @@ export const makeRunEngine = Effect.gen(function* () {
     });
 
   /**
-   * Returns the runner a run's workspace goes on, or `undefined` when no
-   * runner can take it now. Only a placeable runner is chosen: online,
+   * Chooses the runner a run's workspace goes on. Only a runner that offers
+   * every workspace action in the plan is considered (see
+   * `runner-capabilities.ts`), and of those only a placeable one: online,
    * active and not reserved. For a repo's main workspace, a runner that
    * already holds it ready is preferred, because the run can start there
    * without a fresh clone. Among equals the choice is the lowest id, so it
-   * does not change from one try to the next.
+   * does not change from one try to the next. Returns:
+   *
+   * - `chosen`, with the runner;
+   * - `waits` when a capable runner exists but none is placeable now;
+   * - `noCapableRunner`, with the message for the user, when no runner that
+   *   is not retired offers every workspace action in the plan. `run.start`
+   *   refuses such a plan, so this means the capable runners were retired
+   *   after the run started.
    */
-  const chooseRunner = (policy: WorkspacePolicy): Effect.Effect<string | undefined, SqlError> =>
+  const chooseRunner = (
+    plan: WorkflowDefinition,
+    policy: WorkspacePolicy,
+  ): Effect.Effect<
+    | { readonly _tag: "chosen"; readonly runnerId: string }
+    | { readonly _tag: "waits" }
+    | { readonly _tag: "noCapableRunner"; readonly message: string },
+    SqlError
+  > =>
     Effect.gen(function* () {
-      const placeable = yield* runners.placeable();
+      const candidates = yield* runners.listPlacementCandidates();
+      const missing = describeMissingCapableRunner(plan, candidates);
+      if (missing !== undefined) return { _tag: "noCapableRunner", message: missing } as const;
+      const placeable = new Set(
+        listCapableRunners(plan, candidates)
+          .filter((candidate) => candidate.placeable)
+          .map((candidate) => candidate.id),
+      );
       const holding =
         policy.kind === "primary"
           ? [...(yield* workspaces.listRunnersWithReadyPrimary(policy.resourceId))].filter(
               (runnerId) => placeable.has(runnerId),
             )
           : [];
-      return [...(holding.length > 0 ? holding : placeable)].sort()[0];
+      const runnerId = [...(holding.length > 0 ? holding : placeable)].sort()[0];
+      return runnerId === undefined ? ({ _tag: "waits" } as const) : { _tag: "chosen", runnerId };
     });
 
   /**
@@ -439,8 +464,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * workspace, or the step's other fate:
    *
    * - `ended`: the step cannot run in this workspace (see
-   *   `findWorkspaceStepError`), or the workspace cannot be opened, and the
-   *   step and the run have failed;
+   *   `findWorkspaceStepError`), no runner that is not retired can run the
+   *   plan, or the workspace cannot be opened, and the step and the run have
+   *   failed;
    * - `waitsForRunner`: no runner can take the run now.
    */
   const placeWorkspaceStep = (
@@ -472,8 +498,19 @@ export const makeRunEngine = Effect.gen(function* () {
       if (run.runnerId !== undefined && run.workspaceId !== undefined) {
         return { _tag: "placed", runnerId: run.runnerId, workspaceId: run.workspaceId } as const;
       }
-      const runnerId = yield* chooseRunner(policy);
-      if (runnerId === undefined) return WAITS_FOR_RUNNER;
+      const chosen = yield* chooseRunner(run.plan, policy);
+      if (chosen._tag === "waits") return WAITS_FOR_RUNNER;
+      if (chosen._tag === "noCapableRunner") {
+        yield* writeStepFailure(
+          run.id,
+          record,
+          { code: "workspace_failed", message: chosen.message },
+          "workspace-failed",
+          at,
+        );
+        return ENDED;
+      }
+      const { runnerId } = chosen;
       const actor: RunActor = { _tag: "run", runId: run.id, stepId: record.stepId };
       const opened = yield* Effect.result(
         Effect.provideService(
@@ -1147,7 +1184,9 @@ export const makeRunEngine = Effect.gen(function* () {
      * Hands every running run that has a workspace but no runner yet to the
      * Run Executor, because a runner may now be able to take it. The
      * controller daemon calls this when a runner connects or becomes
-     * placeable. A run with nothing waiting goes back to sleep at once.
+     * placeable, and when a runner is retired, so a run whose only capable
+     * runner was retired fails instead of waiting for it. A run with nothing
+     * waiting goes back to sleep at once.
      */
     wakeRunsWaitingForRunner: (): Effect.Effect<void, SqlError> =>
       Effect.map(runs.listUnpinnedWithWorkspace(), (ids) => {

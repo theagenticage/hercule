@@ -57,6 +57,17 @@ export interface RunnerHelloRecord {
   readonly facts: RunnerFacts;
 }
 
+/**
+ * A runner that is not retired, as run pinning sees it: whether a placement
+ * that names no runner may choose it now, and the capabilities it negotiated
+ * at its last hello. A runner that has never said hello has none.
+ */
+export interface PlacementCandidate {
+  readonly id: string;
+  readonly placeable: boolean;
+  readonly capabilities: ReadonlyArray<string>;
+}
+
 /** The runner fields to change. A field that is `undefined` is left as it was. */
 export interface RunnerEdit {
   readonly name?: string;
@@ -183,6 +194,13 @@ const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
 export const buildOnlineClause = (alias: string): string =>
   `${alias}.connectivity = 'online' AND ${alias}.lifecycle = 'active'`;
 
+/**
+ * The SQL condition for a runner a placement that names no runner may choose:
+ * online, active, and not reserved. `placeable` and `listPlacementCandidates`
+ * share it, so the two cannot disagree.
+ */
+const PLACEABLE = `${buildOnlineClause("runners")} AND runners.reserved = 0`;
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -240,10 +258,36 @@ const make = Effect.gen(function* () {
     placeable: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM runners
-          WHERE ${sql.literal(buildOnlineClause("runners"))} AND reserved = 0
+          SELECT id FROM runners WHERE ${sql.literal(PLACEABLE)}
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
+      ),
+
+    /**
+     * Returns every runner that is not retired, with whether it is placeable
+     * (see `placeable`) and its negotiated capabilities. A retired runner is
+     * left out because it never connects again. A draining or offline runner
+     * is kept: it may take work again later.
+     */
+    listPlacementCandidates: (): Effect.Effect<ReadonlyArray<PlacementCandidate>, SqlError> =>
+      Effect.flatMap(
+        sql<{
+          readonly id: Uint8Array;
+          readonly placeable: number;
+          readonly negotiated_capabilities: string | null;
+        }>`
+          SELECT id, (${sql.literal(PLACEABLE)}) AS placeable, negotiated_capabilities
+          FROM runners WHERE lifecycle <> 'retired'
+        `,
+        (rows) =>
+          Effect.forEach(rows, (row) => {
+            const id = uuidToString(row.id);
+            return Effect.map(capabilitiesIn(id, row.negotiated_capabilities), (capabilities) => ({
+              id,
+              placeable: row.placeable === 1,
+              capabilities: capabilities ?? [],
+            }));
+          }),
       ),
 
     /** Returns every runner name, so a joining runner can get a free one. */

@@ -1,7 +1,9 @@
 /**
  * Retiring a runner: marks it retired, ends the sessions it hosted and the
  * workspaces it held, and fails the runs pinned to it, in one transaction.
- * Then it tells the runner what to stop once that transaction has committed.
+ * Then it tells the runner what to stop once that transaction has committed,
+ * and wakes the runs waiting for a runner, which may have been waiting for
+ * this one.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -62,6 +64,10 @@ const make = Effect.gen(function* () {
           // Also after the commit: closing the socket for a retirement that then
           // rolled back would disconnect a runner the controller still has.
           yield* connections.hangUp(detail.id);
+          // A run waiting for a runner may have been waiting for this one. If
+          // no runner left can run its workspace actions, it fails now rather
+          // than waiting for a runner that will never come.
+          yield* runs.wakeRunsWaitingForRunner();
           return detail;
         }),
       ),

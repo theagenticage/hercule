@@ -15,8 +15,9 @@ import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
 import { AfterCommit, mintUuid, uuidToString } from "../db";
 import { EventKindsLayer } from "../events";
+import { buildWorkspaceActionCapability } from "@hercule/protocol";
 import { SessionTokensLayer } from "../permissions";
-import { EventKindCatalogLayer, PluginHost } from "../plugins";
+import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -77,18 +78,31 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
   );
 };
 
-/** Inserts an online, active runner and returns its id. */
-const insertRunner = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const id = mintUuid();
-  const name = uuidToString(id);
-  yield* sql`
-    INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
-                         credential_hash, created_at, updated_at)
-    VALUES (${id}, ${name}, 'online', 'active', 0, '[]', ${name}, ${at}, ${at})
-  `;
-  return name;
-});
+/**
+ * The capabilities a runner of this build negotiates at hello: every
+ * workspace action in the catalog.
+ */
+const CURRENT_CAPABILITIES = JSON.stringify(
+  [...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
+);
+
+/**
+ * Inserts an active runner of this build, online unless `connectivity` says
+ * otherwise, and returns its id.
+ */
+const insertRunner = (connectivity: "online" | "offline" = "online") =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const id = mintUuid();
+    const name = uuidToString(id);
+    yield* sql`
+      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                           negotiated_capabilities, credential_hash, created_at, updated_at)
+      VALUES (${id}, ${name}, ${connectivity}, 'active', 0, '[]',
+              ${CURRENT_CAPABILITIES}, ${name}, ${at}, ${at})
+    `;
+    return name;
+  });
 
 /** Inserts a repo and returns its id. */
 const insertRepo = Effect.gen(function* () {
@@ -176,7 +190,7 @@ const waitForStarts = (recorded: Recorded, count: number) =>
 /** Starts a run of the commit workflow on a fresh runner and repo, and waits until its step is handed on. */
 const startCommitRun = (recorded: Recorded) =>
   Effect.gen(function* () {
-    const runnerId = yield* insertRunner;
+    const runnerId = yield* insertRunner();
     const repoId = yield* insertRepo;
     const runs = yield* RunService;
     const { runId } = yield* runs.start({ definition: buildCommitDefinition(repoId) });
@@ -235,7 +249,7 @@ describe("a workspace step", () => {
           outcome: { status: "completed" as const, output: COMMITTED },
         };
         // A result from a runner the run is not pinned to is ignored.
-        yield* runs.completeStep(yield* insertRunner, result);
+        yield* runs.completeStep(yield* insertRunner(), result);
         expect(findRecord(yield* readRun(runId), "commit")?.status).toBe("running");
 
         yield* runs.completeStep(runnerId, result);
@@ -307,7 +321,7 @@ describe("a workspace step", () => {
   it("asks the runner to stop a running step when another step fails the run", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
-        const runnerId = yield* insertRunner;
+        const runnerId = yield* insertRunner();
         const repoId = yield* insertRepo;
         const runs = yield* RunService;
         const commit = (id: string) => ({
@@ -345,7 +359,7 @@ describe("a workspace step", () => {
   it("switches a repo's main workspace to the workflow's branch before each step", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
-        const runnerId = yield* insertRunner;
+        const runnerId = yield* insertRunner();
         const repoId = yield* insertRepo;
         const runs = yield* RunService;
         yield* runs.start({
@@ -400,6 +414,9 @@ describe("a workspace step", () => {
   it("waits for a runner when none can take the run, and starts once one arrives and wakes it", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
+        // A runner that is offline can still take the run later, so the run
+        // starts and waits rather than being refused.
+        yield* insertRunner("offline");
         const repoId = yield* insertRepo;
         const runs = yield* RunService;
         const { runId } = yield* runs.start({ definition: buildCommitDefinition(repoId) });
@@ -413,7 +430,7 @@ describe("a workspace step", () => {
         expect(findRecord(asleep, "commit")?.status).toBe("pending");
         expect(recorded.starts).toEqual([]);
 
-        const runnerId = yield* insertRunner;
+        const runnerId = yield* insertRunner();
         yield* runs.wakeRunsWaitingForRunner();
         const [start] = yield* waitForStarts(recorded, 1);
         expect(start).toMatchObject({ runId, runnerId, stepId: "commit" });
@@ -424,7 +441,7 @@ describe("a workspace step", () => {
   it("fails with validation when its resourceId names a repo the run's workspace has no checkout of", async () => {
     await runTest(() =>
       Effect.gen(function* () {
-        yield* insertRunner;
+        yield* insertRunner();
         const repoId = yield* insertRepo;
         const otherRepoId = yield* insertRepo;
         const runs = yield* RunService;

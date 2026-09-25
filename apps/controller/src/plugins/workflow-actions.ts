@@ -358,7 +358,12 @@ const listBuiltInActionIds = (runsIn: WorkflowActionRunsIn): ReadonlySet<string>
   );
 
 const BUILT_IN_CONTROLLER_ACTION_IDS = listBuiltInActionIds("controller");
-const WORKSPACE_ACTION_IDS = listBuiltInActionIds("workspace");
+
+/**
+ * The ids of every workspace action in the catalog. Only built-in actions run
+ * in a workspace, so this is the whole list.
+ */
+export const WORKSPACE_ACTION_IDS = listBuiltInActionIds("workspace");
 
 /** Checks whether an action id is a built-in action that runs on the controller. */
 export const isBuiltInControllerActionId = (id: string): id is BuiltInControllerActionId =>

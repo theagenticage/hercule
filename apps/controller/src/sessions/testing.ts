@@ -15,6 +15,7 @@ import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  buildWorkspaceActionCapability,
   ControllerToRunner,
   PROTOCOL_VERSION,
   type ControllerToRunner as ControllerMessage,
@@ -30,6 +31,7 @@ import {
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import type { Input, Profile, Session } from "@hercule/contract";
+import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   completeSetup,
@@ -42,6 +44,14 @@ import {
 } from "../http/testing";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
+
+/**
+ * The capabilities a runner of this build lists at hello: every workspace
+ * action the controller's catalog knows.
+ */
+const CURRENT_CAPABILITIES: ReadonlyArray<string> = [...WORKSPACE_ACTION_IDS].map(
+  buildWorkspaceActionCapability,
+);
 
 /**
  * How long `waitUntil` waits for the controller. Suites set vitest's test
@@ -116,15 +126,16 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
 
 /**
- * Opens the socket with a runner credential, sends the hello, and answers
- * every probe with a logged-in report, so the controller can place sessions on
- * this runner.
+ * Opens the socket with a runner credential, sends the hello with
+ * `capabilities`, and answers every probe with a logged-in report, so the
+ * controller can place sessions on this runner.
  */
 const dial = (
   base: string,
   credential: string,
   facts: RunnerFacts,
   models: ReadonlyArray<ModelDescriptor>,
+  capabilities: ReadonlyArray<string> = CURRENT_CAPABILITIES,
 ): Promise<Wire> =>
   new Promise((resolve, reject) => {
     const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`, {
@@ -172,7 +183,7 @@ const dial = (
       writeMessage({
         _tag: "runnerHello",
         protocolVersion: PROTOCOL_VERSION,
-        capabilities: [],
+        capabilities,
         binaryVersion: "0.1.0",
         nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
         facts,
@@ -233,8 +244,14 @@ export interface Arranged {
    * connected, and probed, so a session can be placed on it by name. It is for
    * tests that need two separate runners, because one runner's reports do not
    * cover another runner's sessions.
+   *
+   * It lists the capabilities of a runner of this build at hello, unless
+   * `capabilities` replaces them, for example to play a runner on an older
+   * build that lacks a workspace action.
    */
-  readonly enlist: () => Promise<Enlisted>;
+  readonly enlist: (options?: {
+    readonly capabilities?: ReadonlyArray<string>;
+  }) => Promise<Enlisted>;
 }
 
 /** A second runner, and the id a placement uses for it. */
@@ -288,14 +305,22 @@ export const withFleet = (
     };
     const instances = await waitForEveryInstanceProbed(harness.base, token);
     let machines = 1;
-    const enlist = async (): Promise<Enlisted> => {
+    const enlist = async (
+      options: { readonly capabilities?: ReadonlyArray<string> } = {},
+    ): Promise<Enlisted> => {
       const second = await send("POST", harness.base, "/api/v1/runners/join", {
         body: {},
         token: await harness.joinToken(),
       });
       expect(second.status, await second.clone().text()).toBe(201);
       const enlisted = (await second.json()) as JoinAnswer;
-      const its = await dial(harness.base, enlisted.credential, facts, models);
+      const its = await dial(
+        harness.base,
+        enlisted.credential,
+        facts,
+        models,
+        options.capabilities,
+      );
       its.send({ _tag: "sessionsReport", sessions: [] });
       wires.push(its);
       machines += 1;

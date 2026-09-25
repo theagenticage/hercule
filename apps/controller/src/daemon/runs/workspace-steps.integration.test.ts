@@ -11,6 +11,7 @@ import {
   findStepRecords,
   readRun,
   requestCancel,
+  requestStart,
   startSentWorkflow,
   waitForRun,
 } from "../../runs/testing";
@@ -44,6 +45,9 @@ const buildCommitDefinition = (workspace: Record<string, unknown>) => ({
   ],
   edges: [{ from: "commit", to: "file" }],
 });
+
+/** The message for a run that no runner left can commit for. */
+const NO_COMMITTING_RUNNER = "No runner can run git.commit; update a runner to this version.";
 
 /** Starts a run that commits in an ephemeral workspace with one checkout of a new repo. */
 const startCommitRun = async (arranged: Arranged, repoId: string): Promise<string> =>
@@ -105,6 +109,18 @@ const waitForRunnerGone = (arranged: Arranged): Promise<true> =>
     const runner = (await response.json()) as { readonly connectivity: string };
     return runner.connectivity === "online" ? undefined : true;
   });
+
+/**
+ * Enlists a second runner whose hello lists no workspace action, like a
+ * runner on an older build, then disconnects the fleet's first runner. Only
+ * the older runner is online afterwards.
+ */
+const leaveOnlyAnOlderRunnerOnline = async (arranged: Arranged): Promise<Wire> => {
+  const older = await arranged.enlist({ capabilities: [] });
+  arranged.wire.close();
+  await waitForRunnerGone(arranged);
+  return older.wire;
+};
 
 describe("workspace steps over the runner socket", () => {
   it(
@@ -349,5 +365,74 @@ describe("workspace steps over the runner socket", () => {
       });
     },
     WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "pins a run only to a runner that lists every workspace action in its plan",
+    async () => {
+      await withFleet(async (arranged) => {
+        const repoId = await createRepo(arranged, "https://github.com/o/older.git");
+        const older = await leaveOnlyAnOlderRunnerOnline(arranged);
+        // The online runner cannot commit, and the one that can is away, so
+        // the run waits for it.
+        const runId = await startCommitRun(arranged, repoId);
+        await waitForRunTo(arranged, runId, "running", (run) => run.status === "running");
+        expect(await readCommitStatus(arranged, runId)).toBe("pending");
+
+        const back = await arranged.reconnect();
+        await waitForStepStart(back, runId);
+        expect((await readRun(arranged.harness.base, arranged.token, runId)).runnerId).toBe(
+          arranged.runnerId,
+        );
+        expect(listFramesTagged(older, "workspaceStepStart")).toEqual([]);
+      });
+    },
+    WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "fails a waiting run once its only capable runner is retired, and refuses to start another",
+    async () => {
+      await withFleet(async (arranged) => {
+        const repoId = await createRepo(arranged, "https://github.com/o/retired.git");
+        await leaveOnlyAnOlderRunnerOnline(arranged);
+        const runId = await startCommitRun(arranged, repoId);
+        await waitForRunTo(arranged, runId, "running", (run) => run.status === "running");
+
+        const retired = await send(
+          "POST",
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}/retire`,
+          { body: { force: true }, token: arranged.token },
+        );
+        expect(retired.status, await retired.clone().text()).toBe(200);
+        const ended = await waitForRunTo(
+          arranged,
+          runId,
+          "failed",
+          (run) => run.status === "failed",
+        );
+        expect(ended).toMatchObject({ failureReason: "workspace-failed", failedStepId: "commit" });
+        expect(findStepRecords(ended, "commit")[0]).toMatchObject({
+          status: "failed",
+          error: { code: "workspace_failed", message: NO_COMMITTING_RUNNER },
+        });
+
+        const refused = await requestStart(arranged.harness.base, arranged.token, {
+          definition: buildCommitDefinition({
+            kind: "ephemeral",
+            checkouts: [{ resourceId: repoId }],
+          }),
+        });
+        expect(refused.status).toBe(400);
+        expect(await refused.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: { issues: [{ path: [], message: NO_COMMITTING_RUNNER }] },
+          },
+        });
+      });
+    },
+    WAIT_DEADLINE_MS * 3,
   );
 });

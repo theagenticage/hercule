@@ -35,6 +35,7 @@ import {
   PROTOCOL_VERSION,
   RunnerFactsRequest,
   RunnerToController,
+  buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
   type RunnerHello,
@@ -42,6 +43,7 @@ import {
 import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
+import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -79,8 +81,15 @@ const UNKNOWN_CREDENTIAL = "unknown credential";
 
 const RETIRED = "this runner was retired; run `hercule runner join` to join the fleet again";
 
-/** Empty in v1: capability negotiation exists, but there is nothing to negotiate yet. */
-const CAPABILITIES: ReadonlyArray<string> = [];
+/**
+ * The capabilities this controller offers at hello: one for each workspace
+ * action in its catalog, derived from the catalog so the two never disagree.
+ * The negotiated list then holds the workspace actions the runner implements
+ * and this controller knows, which is what run pinning checks.
+ */
+const CAPABILITIES: ReadonlyArray<string> = [...WORKSPACE_ACTION_IDS].map(
+  buildWorkspaceActionCapability,
+);
 
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION =
