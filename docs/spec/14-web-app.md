@@ -391,6 +391,22 @@ The ringfence exists so a visual drag-and-drop editor can replace the module's i
 
   Tried in the prototypes and not taken: a light that moves around the running card's border, and a view that pans to follow the running step.
 
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* A run now branches, skips steps, loops and ends at a terminal step ([./07-workflows.md](./07-workflows.md) section 7), and its page shows each of these:
+
+- **A step card shows the step's current record**: the running one, else a pending one, else the latest. A step with more than one record carries `×3` after its id, in the faint mono. A skipped record gets the skipped mark ([Design language](#design-language): the double chevron) and a flat card with the word `skipped` where the duration would be.
+- **An edge is drawn in one of four ways**, from the run's `edgeTraversals`:
+  - *fired*: the run followed it at least once. It is solid.
+  - *active*: it fired, and the step it leads to is running now. Its dashes flow toward that step. This replaces "the edge into the running step" above.
+  - *not taken*: it never fired, and it never will: the run has ended, or its source step finished and can no longer run again. Its condition was false, or it was never evaluated, as with a terminal step's edges and the edges after the one a run failed at. It is dashed and faded to half, with its label.
+  - *not yet*: it never fired, the run is live, and the edge may still fire: its source step has not finished, or can still run again because it has a pending or running record or such a step has a path of edges to it (a loop still going round), the same reachability the controller uses to settle a join, ignoring conditions and caps. It is dashed, as before.
+- **A capped edge shows `2/3`**: how often the run followed it, out of its `maxTraversals`, in the outlined badge where the editor shows `max 3`. The edge a run failed at, on its cap or on a condition that could not be evaluated, is drawn in the fail hue. The text of its badge takes the fail hue only when the run failed on the cap (`iteration-limit`).
+- **A terminal step's kind label reads "Action step · Ends run"**, in the run graph and in the editor alike.
+- **The graph's pane fits the plan.** The drawing is zoomed to fit the pane's width, never above 1.25 and never below the legible zoom, 0.75, and the pane is just tall enough for the drawing at that zoom, with room for **Fit to view**: at least 120px, and capped at 440px however tall the plan is. The whole plan shows without panning whenever it fits at the legible zoom; the reader pans only a plan that does not.
+- **A long condition keeps its end.** An edge label longer than 24 characters is cut, where it can, just before an operator, so it starts with an ellipsis and never inside a name: before the last `&&` or `||` (`… && score < 3`), else before the last comparison (`… >= inputs.target`), taking the first of the two cuts whose remainder fits. When neither fits, the label keeps its last 23 characters after the ellipsis. The label's tooltip holds the full condition, in the editor and the run graph alike.
+- **The steps.** On every row of a step with more than one record, in the list and on the timeline, `#2` follows the step id. A skipped row shows the skipped mark and the word `skipped`, and has no duration; on the timeline the word stands at the moment the step was skipped.
+- **The failure.** The header names the edge of a run that failed at one: "iteration limit at count → file", "expression error at count → escalate". The run's `failureMessage` is a line of its own under the status line, in the fail hue. An expression error is no longer called a template error, because a condition fails the same way.
+- **The output.** Under the inputs, an **Output** section shows the run's output, its terminal step's output, as indented JSON, only for a run that has one. A long line wraps inside the card, as a step's output does in the step list. A run with no output shows no section, not an empty one.
+
 ## Onboarding and first run
 
 `hercule serve` auto-initializes and prints a one-time setup URL; from there onboarding is wholly a web app + public API flow, and it creates the default assistant ([./12-assistants.md](./12-assistants.md)). The CLI never prompts, so the future desktop app becomes the installer by reusing these views unchanged. Mechanics of first run and the setup URL: [./15-packaging-and-operations.md](./15-packaging-and-operations.md).

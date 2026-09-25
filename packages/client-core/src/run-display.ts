@@ -5,7 +5,7 @@
  * The rules live here with a test rather than inside a component, so the run
  * list and a run's page can never describe the same run differently.
  */
-import type { FailureReason, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
+import type { FailureReason, Run, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
 import { formatDuration } from "./threads/duration";
 
@@ -177,9 +177,10 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
 };
 
 /**
- * Returns a failure reason in a few plain words: "step failed", "template
- * error", "iteration limit" for an edge the run was to follow more often than
- * its `maxTraversals` allows, or "controller error" for a run the controller
+ * Returns a failure reason in a few plain words: "step failed", "expression
+ * error" for a template or a condition that could not be evaluated,
+ * "iteration limit" for an edge the run was to follow more often than its
+ * `maxTraversals` allows, or "controller error" for a run the controller
  * could not carry out.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
@@ -187,13 +188,31 @@ export const describeFailureReason = (reason: FailureReason): string => {
     case "step-failed":
       return "step failed";
     case "expression-error":
-      return "template error";
+      return "expression error";
     case "iteration-limit":
       return "iteration limit";
     case "controller-error":
       return "controller error";
   }
 };
+
+/** An edge of a run's plan, as the workflow definition spells it. */
+type PlanEdge = NonNullable<Run["plan"]["edges"]>[number];
+
+/**
+ * Returns the edge of the plan a failed run failed at: the edge whose
+ * `maxTraversals` it reached, or whose condition could not be evaluated.
+ * Returns `undefined` for a run that did not fail, or that failed at a step
+ * rather than at an edge.
+ *
+ * The `controller-error` check is there for the type: that kind of failure
+ * has no `failedEdgeIndex`, so the check narrows the run to the failures
+ * that do.
+ */
+export const findFailedEdge = (run: Run): PlanEdge | undefined =>
+  run.status === "failed" && run.failureReason !== "controller-error"
+    ? run.plan.edges?.[run.failedEdgeIndex ?? -1]
+    : undefined;
 
 /**
  * Returns the text the timeline shows where a step with no bar would be: "pending"

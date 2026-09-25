@@ -476,6 +476,42 @@ export const LARGEST_PLACED_ZOOM = 1.25;
 /** The margin between the pane's edge and the drawing. */
 const PANE_MARGIN = 16;
 
+/**
+ * Returns the zoom a drawing is placed at, given the largest zoom at which it
+ * fits: that zoom, but never above `LARGEST_PLACED_ZOOM` and never below the
+ * legible zoom.
+ */
+const computePlacedZoom = (fittingZoom: number): number =>
+  Math.min(LARGEST_PLACED_ZOOM, Math.max(LEGIBLE_ZOOM, fittingZoom));
+
+/**
+ * The room above and below a drawing in a pane sized to it. The "Fit to view"
+ * control sits in the pane's bottom-right corner, 8px from its edges and 28px
+ * high, so a drawing centred with this room above and below never runs under
+ * it.
+ */
+const FIT_CONTROL_ROOM = 40;
+
+/**
+ * Computes the height of a pane `paneWidth` wide that shows a whole drawing,
+ * between `min` and `max`.
+ *
+ * The drawing is placed at the zoom at which it fills the pane's width, as
+ * `computeDrawingViewport` places it, and the pane is as tall as the drawing
+ * at that zoom plus `FIT_CONTROL_ROOM` above and below. A pane that is not
+ * yet measured has an infinite width, which gives the drawing its largest
+ * zoom. A drawing too wide to fit at the legible zoom is sized at the legible
+ * zoom, and the reader pans to see the rest.
+ */
+export const computePaneHeight = (
+  paneWidth: number,
+  drawing: Size,
+  { min, max }: { readonly min: number; readonly max: number },
+): number => {
+  const zoom = computePlacedZoom((paneWidth - 2 * PANE_MARGIN) / drawing.width);
+  return Math.min(max, Math.max(min, Math.ceil(drawing.height * zoom + 2 * FIT_CONTROL_ROOM)));
+};
+
 /** A viewport: the offset of the drawing's origin in the pane, and the zoom. */
 export interface DrawingViewport extends Point {
   readonly zoom: number;
@@ -492,11 +528,12 @@ export interface DrawingViewport extends Point {
  * the author pans to see the rest.
  */
 export const computeDrawingViewport = (pane: Size, drawing: Size): DrawingViewport => {
-  const fittingZoom = Math.min(
-    (pane.width - 2 * PANE_MARGIN) / drawing.width,
-    (pane.height - 2 * PANE_MARGIN) / drawing.height,
+  const zoom = computePlacedZoom(
+    Math.min(
+      (pane.width - 2 * PANE_MARGIN) / drawing.width,
+      (pane.height - 2 * PANE_MARGIN) / drawing.height,
+    ),
   );
-  const zoom = Math.min(LARGEST_PLACED_ZOOM, Math.max(LEGIBLE_ZOOM, fittingZoom));
   const findOffset = (paneSize: number, drawingSize: number): number => {
     const scaledSize = drawingSize * zoom;
     return scaledSize + 2 * PANE_MARGIN <= paneSize ? (paneSize - scaledSize) / 2 : PANE_MARGIN;

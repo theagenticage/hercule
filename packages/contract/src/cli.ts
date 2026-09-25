@@ -1229,7 +1229,7 @@ export const CLI = {
   },
   "run.read": {
     command: "run read",
-    help: "Shows one run: its status, why it failed if it did, and what each step did. The output lists the inputs the run started with, and one line per step with its status, how long it took and its error. --json prints the whole record, including the frozen workflow definition and every step's output.",
+    help: "Shows one run: its status, why it failed if it did, and what each step did. A run that failed at an edge names the edge. The output lists the inputs the run started with, the run's output when a terminal step ended it, and one line per step record with its status, how long it took and its error; when a step ran more than once, each line also shows its iteration. --json prints the whole record, including the frozen workflow definition and every step's output.",
     examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--json"] }],
     fields: {
       id: {

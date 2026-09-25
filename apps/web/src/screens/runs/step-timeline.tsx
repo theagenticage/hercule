@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
+import type { CSSProperties, JSX } from "react";
 import {
   buildTimeline,
   describeStepDuration,
@@ -8,7 +8,7 @@ import {
   type TickAlign,
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
-import { WORK_STATE_HUES, cn, type WorkState } from "@hercule/ui";
+import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
 
 /** The widths of the timeline's columns and the spacing around them, in pixels. */
@@ -72,22 +72,9 @@ export function StepTimeline({
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
-  const axis = useRef<HTMLSpanElement>(null);
-  const [axisWidth, setAxisWidth] = useState(0);
   // Measured before the first paint, so the ticks never show at a width they
-  // were not laid out for.
-  useLayoutEffect(() => {
-    const element = axis.current;
-    if (element === null) return;
-    setAxisWidth(element.getBoundingClientRect().width);
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry !== undefined) setAxisWidth(entry.contentRect.width);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+  // were not laid out for. An unmeasured axis gets only the tick at 0.
+  const { observeElement: observeAxis, width: axisWidth = 0 } = useElementWidth();
   const timeline = buildTimeline(run, now, axisWidth / TICK_LABEL_CHARACTER_WIDTH);
   const isLive = isRunLive(run.status);
   const { ticks } = timeline;
@@ -96,7 +83,7 @@ export function StepTimeline({
       <div style={GRID} className="grid h-10 items-end pb-1.5" aria-hidden="true">
         <span />
         <span />
-        <span ref={axis} className="relative h-full">
+        <span ref={observeAxis} className="relative h-full">
           {ticks.map((tick) => (
             <span
               key={tick.position}
@@ -119,7 +106,7 @@ export function StepTimeline({
       </div>
       <div className="relative">
         <ul>
-          {timeline.lines.map(({ line, bar }) => {
+          {timeline.lines.map(({ line, bar, skippedAt }) => {
             return (
               <li key={line.key} className="border-t border-line-soft">
                 <div style={GRID} className="grid min-h-10 items-center">
@@ -132,7 +119,20 @@ export function StepTimeline({
                         className="absolute inset-y-0 w-px bg-line-soft"
                       />
                     ))}
-                    {bar === undefined ? (
+                    {skippedAt !== undefined ? (
+                      // The word starts where the step was skipped. It is
+                      // shifted left by the same fraction of its own width,
+                      // so near the end of the axis it stays inside the track.
+                      <span
+                        style={{
+                          left: formatPercent(skippedAt),
+                          transform: `translate(-${formatPercent(skippedAt)}, -50%)`,
+                        }}
+                        className="absolute top-1/2 text-fine whitespace-nowrap text-faint"
+                      >
+                        {describeUnstartedStep(line.state)}
+                      </span>
+                    ) : bar === undefined ? (
                       describeUnstartedStep(line.state) === undefined ? null : (
                         <span className="absolute top-1/2 right-0 mr-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint">
                           {describeUnstartedStep(line.state)}

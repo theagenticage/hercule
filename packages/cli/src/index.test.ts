@@ -1390,6 +1390,74 @@ describe("the run commands", () => {
     expect(completed).toContain("you");
   });
 
+  it("prints run read --json as the run itself, with its edge traversals, output, failed edge and skipped steps", async () => {
+    const plan = {
+      name: "File a batch",
+      steps: [
+        { id: "file", kind: "action", action: "task.create" },
+        { id: "count", kind: "action", action: "task.query" },
+        { id: "escalate", kind: "action", action: "task.update", condition: "inputs.urgent" },
+      ],
+      edges: [
+        { from: "file", to: "count" },
+        { from: "count", to: "file", condition: "true", maxTraversals: 1 },
+        { from: "count", to: "escalate" },
+      ],
+    };
+    const record = (stepId: string, iteration: number) => ({
+      stepId,
+      iteration,
+      status: "completed",
+      startedAt: "2026-09-24T10:00:00.000Z",
+      finishedAt: "2026-09-24T10:00:00.020Z",
+      output: { items: [] },
+    });
+    const base = {
+      id: RUN_ID,
+      workflowId: WORKFLOW_ID,
+      plan,
+      inputs: {},
+      origin: { kind: "manual", actor: "user" },
+      createdAt: "2026-09-24T10:00:00.000Z",
+      startedAt: "2026-09-24T10:00:00.000Z",
+      finishedAt: "2026-09-24T10:00:01.000Z",
+    };
+    const completed = {
+      ...base,
+      status: "completed",
+      output: { id: "t_1", status: "in-progress" },
+      steps: [
+        record("file", 1),
+        record("count", 1),
+        record("file", 2),
+        record("count", 2),
+        {
+          stepId: "escalate",
+          iteration: 1,
+          status: "skipped",
+          finishedAt: "2026-09-24T10:00:00.900Z",
+        },
+      ],
+      edgeTraversals: [2, 1, 1],
+    };
+    const failed = {
+      ...base,
+      status: "failed",
+      failureReason: "iteration-limit",
+      failedStepId: "count",
+      failedEdgeIndex: 1,
+      failureMessage: "The edge ran out.",
+      steps: [record("file", 1), record("count", 1), record("file", 2), record("count", 2)],
+      edgeTraversals: [2, 1, 0],
+    };
+
+    for (const run of [completed, failed]) {
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch: stubFetch(() => run) });
+      expect(await main(["--home", home, "run", "read", RUN_ID, "--json"], io)).toBe(0);
+      expect(JSON.parse(io.stdout.join("\n"))).toEqual(run);
+    }
+  });
+
   it("sends run cancel to the run's cancel route and confirms it, without printing the whole run", async () => {
     const fetch = stubFetch(() => ({
       id: RUN_ID,

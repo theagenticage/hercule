@@ -9,6 +9,7 @@
 import {
   describeRunOrigin,
   describeStepDuration,
+  findFailedEdge,
   formatAge,
   readJsonObject,
   readTimestamps,
@@ -308,17 +309,20 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 ];
 
 /**
- * Returns a run's failure reason, the step it failed at, and what went wrong
- * at the edge it failed at, as the fields of `run read`, or no fields for a
- * run that did not fail. A run the controller could not carry out may have
- * failed before it reached any step, and only a run that failed at an edge
- * has a failure message.
+ * Returns a run's failure reason, the step it failed at, the edge it failed
+ * at as `count -> file`, and what went wrong there, as the fields of `run
+ * read`, or no fields for a run that did not fail. A run the controller could
+ * not carry out may have failed before it reached any step, and only a run
+ * that failed at an edge has a failed edge and a failure message.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
+  const failedEdge = findFailedEdge(run);
   return {
     failureReason: run.failureReason,
     ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+    ...(failedEdge === undefined ? {} : { failedEdge: `${failedEdge.from} -> ${failedEdge.to}` }),
+    // A `controller-error` failure has no `failureMessage`; the check narrows the type.
     ...(run.failureReason === "controller-error" || run.failureMessage === undefined
       ? {}
       : { failureMessage: run.failureMessage }),
@@ -341,6 +345,25 @@ const renderRunOutput = (run: Run): ReadonlyArray<string> => {
       ? renderKeyValues(fields, formatKeepingIds)
       : [JSON.stringify(run.output)]),
   ];
+};
+
+/**
+ * Returns the table of a run's step records, one row per record. The
+ * iteration column shows only when a step has more than one record, so a run
+ * with no loops reads as before.
+ */
+const renderStepTable = (steps: Run["steps"], now: number): ReadonlyArray<string> => {
+  const stepIds = new Set(steps.map((record) => record.stepId));
+  const hasRepeats = stepIds.size < steps.length;
+  return renderTable(
+    steps.map((record) => ({
+      step: record.stepId,
+      ...(hasRepeats ? { iteration: record.iteration } : {}),
+      status: record.status,
+      took: describeStepDuration(readTimestamps(record), now),
+      error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
+    })),
+  );
 };
 
 /**
@@ -371,16 +394,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderRunOutput(run),
   "",
   "steps",
-  ...(run.steps.length === 0
-    ? ["none"]
-    : renderTable(
-        run.steps.map((record) => ({
-          step: record.stepId,
-          status: record.status,
-          took: describeStepDuration(readTimestamps(record), now),
-          error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
-        })),
-      )),
+  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
 ];
 
 /** Returns the lines the CLI prints for a successful command without `--json`. */

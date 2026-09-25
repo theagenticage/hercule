@@ -240,7 +240,7 @@ export const decideRouting = (
             _tag: "failed",
             failureReason: "expression-error",
             failedEdgeIndex: index,
-            message: `The condition of edge ${String(index)}, from ${edge.from} to ${edge.to}, failed: ${holds.failure.message}`,
+            message: `The condition of the edge from ${edge.from} to ${edge.to} could not be evaluated: ${holds.failure.message}`,
           });
         }
         if (!holds.success) continue;
@@ -251,7 +251,9 @@ export const decideRouting = (
           _tag: "failed",
           failureReason: "iteration-limit",
           failedEdgeIndex: index,
-          message: `The condition of edge ${String(index)}, from ${edge.from} to ${edge.to}, holds, but the run has already followed the edge ${String(edge.maxTraversals)} times, its maxTraversals.`,
+          // The message names the edge by its steps rather than its index,
+          // because the user reads it on the run's page.
+          message: `The run was to follow the edge from ${edge.from} to ${edge.to} again, but it has already followed it ${edge.maxTraversals === 1 ? "1 time" : `${String(edge.maxTraversals)} times`}, the most this edge allows.`,
         });
       }
       traversals[index] = count + 1;

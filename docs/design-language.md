@@ -158,6 +158,7 @@ drawing: variant D of `prototype/iconography.html` on branch `prototype/iconogra
 | ✓ | done | done |
 | ✕ | failed | failed |
 | – | cancelled | faint |
+| double chevron (») *(added 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80): candidate C of `docs/plans/P022-routing/prototypes/skipped-mark/`; it points onward, the opposite of cancelled's flat stop)* | skipped: a step whose condition was false | faint |
 
 **Entity glyphs** (what kind of thing; ink family only, never a semantic hue):
 rounded square = task, outline triangle = run, speech bubble = session, three-node fork

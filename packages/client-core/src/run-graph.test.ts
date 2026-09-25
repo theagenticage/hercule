@@ -35,14 +35,127 @@ const STEPS: ReadonlyArray<StepRecord> = [
   { stepId: "query", iteration: 1, status: "pending" },
 ];
 
-const RUNNING: Pick<Run, "plan" | "steps" | "status"> = {
+/** The fields of a run that none of these tests read. */
+const RUN_FIELDS = {
+  id: "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e",
+  workflowId: null,
+  inputs: {},
+  origin: { kind: "manual", actor: "user" },
+  createdAt: START,
+} as const;
+
+const RUNNING: Run = {
+  ...RUN_FIELDS,
   plan: PLAN,
   status: "running",
+  startedAt: START,
   steps: STEPS,
+  // `create` went to `label` and to `query`; `query` has not run yet.
+  edgeTraversals: [1, 1, 0],
 };
 
+/**
+ * The demo workflow of the routing ticket. `lookup` finds nothing, so the
+ * branch to `reuse` is not taken; `file` and `count` loop until the count
+ * reaches the target, along an edge that may be followed 3 times; `escalate`
+ * is skipped unless the run is urgent; `finish` ends the run.
+ *
+ * The edges by index: 0 lookup>reuse, 1 lookup>file, 2 file>count,
+ * 3 count>file (the loop, max 3), 4 count>escalate, 5 escalate>settle,
+ * 6 settle>finish.
+ */
+const DEMO_PLAN: Run["plan"] = {
+  name: "File a batch",
+  steps: [
+    { id: "lookup", kind: "action", action: "task.query" },
+    { id: "reuse", kind: "action", action: "task.update", terminal: true },
+    { id: "file", kind: "action", action: "task.create" },
+    { id: "count", kind: "action", action: "task.query" },
+    { id: "escalate", kind: "action", action: "task.update", condition: "inputs.urgent" },
+    { id: "settle", kind: "action", action: "wait" },
+    { id: "finish", kind: "action", action: "task.update", terminal: true },
+  ],
+  edges: [
+    { from: "lookup", to: "reuse", condition: "size(steps.lookup.output.items) > 0" },
+    { from: "lookup", to: "file", condition: "size(steps.lookup.output.items) == 0" },
+    { from: "file", to: "count" },
+    {
+      from: "count",
+      to: "file",
+      condition: "size(steps.count.output.items) < inputs.target",
+      maxTraversals: 3,
+    },
+    { from: "count", to: "escalate", condition: "size(steps.count.output.items) >= inputs.target" },
+    { from: "escalate", to: "settle" },
+    { from: "settle", to: "finish" },
+  ],
+};
+
+/** Returns a completed step record of `stepId`, which ran from `from` to `to` milliseconds. */
+const complete = (stepId: string, iteration: number, from: number, to: number): StepRecord => ({
+  stepId,
+  iteration,
+  status: "completed",
+  startedAt: at(from),
+  finishedAt: at(to),
+  output: { items: [] },
+});
+
+/** The records of `lookup`, then `file` and `count` looping `times` times. */
+const loopRecords = (times: number): ReadonlyArray<StepRecord> => [
+  complete("lookup", 1, 0, 10),
+  ...Array.from({ length: times }, (_, index) => [
+    complete("file", index + 1, 100 * index + 20, 100 * index + 40),
+    complete("count", index + 1, 100 * index + 50, 100 * index + 70),
+  ]).flat(),
+];
+
+/** The demo run, completed: the loop ran 3 times, `escalate` was skipped, `finish` ended the run. */
+const DEMO_COMPLETED: Run = {
+  ...RUN_FIELDS,
+  plan: DEMO_PLAN,
+  status: "completed",
+  startedAt: START,
+  finishedAt: at(1_000),
+  output: { id: "t_1", status: "in-progress" },
+  steps: [
+    ...loopRecords(3),
+    { stepId: "escalate", iteration: 1, status: "skipped", finishedAt: at(400) },
+    complete("settle", 1, 410, 900),
+    complete("finish", 1, 910, 1_000),
+  ],
+  edgeTraversals: [0, 1, 3, 2, 1, 1, 1],
+};
+
+/**
+ * The demo run with a target the loop cannot reach: `count` wanted to go back
+ * to `file` a fourth time, and the run failed at the loop edge.
+ */
+const DEMO_ITERATION_LIMIT: Run = {
+  ...RUN_FIELDS,
+  plan: DEMO_PLAN,
+  status: "failed",
+  failureReason: "iteration-limit",
+  failedStepId: "count",
+  failedEdgeIndex: 3,
+  failureMessage:
+    "The run was to follow the edge from count to file again, but it has already followed it 3 times, the most this edge allows.",
+  startedAt: START,
+  finishedAt: at(500),
+  steps: loopRecords(4),
+  edgeTraversals: [0, 1, 4, 3, 0, 0, 0],
+};
+
+/** Returns a step's node of the graph of `run`. */
+const findNode = (run: Run, stepId: string) =>
+  buildRunGraph(run).nodes.find((node) => node.id === stepId);
+
+/** Returns each edge of the graph of `run` as `from>to travel`. */
+const listEdgeTravel = (run: Run): ReadonlyArray<string> =>
+  buildRunGraph(run).edges.map((edge) => `${edge.from}>${edge.to} ${edge.travel}`);
+
 describe("buildRunGraph", () => {
-  it("gives each step its latest state and times, and leaves the trigger without one", () => {
+  it("gives each step its current state and times, and leaves the trigger without one", () => {
     const nodes = new Map(buildRunGraph(RUNNING).nodes.map((node) => [node.id, node]));
     assert.strictEqual(nodes.get("weekdays")?.progress, undefined);
     assert.strictEqual(buildRunGraph(RUNNING).status, "running");
@@ -56,22 +169,33 @@ describe("buildRunGraph", () => {
     assert.deepStrictEqual(nodes.get("update")?.progress, { state: "unreached" });
   });
 
-  it("marks the edges the run went along, the one into the running step as active", () => {
-    const travel = buildRunGraph(RUNNING).edges.map(
-      (edge) => `${edge.from}>${edge.to} ${edge.travel ?? ""}`,
-    );
-    assert.deepStrictEqual(travel, [
-      "weekdays>create untravelled",
-      "create>label active",
-      "create>query travelled",
-      "query>update untravelled",
-    ]);
+  it("shows a step's running record, else its pending record, else its latest record", () => {
+    const run: Run = {
+      ...RUNNING,
+      steps: [
+        // `create` is busy: its second record waits behind the running first one.
+        { stepId: "create", iteration: 1, status: "running", startedAt: at(0) },
+        { stepId: "create", iteration: 2, status: "pending" },
+        // `label` has finished once and waits to run again.
+        complete("label", 1, 0, 10),
+        { stepId: "label", iteration: 2, status: "pending" },
+        // `query` ran, then its condition was false the second time.
+        complete("query", 1, 0, 10),
+        { stepId: "query", iteration: 2, status: "skipped", finishedAt: at(20) },
+      ],
+    };
+    const nodes = new Map(buildRunGraph(run).nodes.map((node) => [node.id, node]));
+    assert.deepStrictEqual(nodes.get("create")?.progress, { state: "running", startedAt: at(0) });
+    assert.deepStrictEqual(nodes.get("label")?.progress, { state: "pending" });
+    assert.deepStrictEqual(nodes.get("query")?.progress, {
+      state: "skipped",
+      finishedAt: at(20),
+    });
   });
 
-  it("reads a step's latest record when it has several", () => {
+  it("reads a step's running record when an earlier one failed", () => {
     const graph = buildRunGraph({
-      plan: PLAN,
-      status: "running",
+      ...RUNNING,
       steps: [
         {
           stepId: "create",
@@ -88,6 +212,172 @@ describe("buildRunGraph", () => {
       graph.nodes.find((node) => node.id === "create")?.progress?.state,
       "running",
     );
+  });
+
+  it("counts each step's records, so a step that ran several times shows how often", () => {
+    assert.deepStrictEqual(
+      ["lookup", "reuse", "file", "count", "escalate", "settle", "finish"].map(
+        (stepId) => findNode(DEMO_COMPLETED, stepId)?.iterationCount,
+      ),
+      [1, 0, 3, 3, 1, 1, 1],
+    );
+    // Only a step the run came to more than once carries a label for its card.
+    assert.deepStrictEqual(
+      ["lookup", "reuse", "file"].map((stepId) => findNode(DEMO_COMPLETED, stepId)?.iterationLabel),
+      [undefined, undefined, "×3"],
+    );
+  });
+
+  it("marks the terminal steps, which end the run when they complete", () => {
+    assert.deepStrictEqual(
+      ["lookup", "reuse", "file", "finish"].map((stepId) =>
+        Boolean(findNode(DEMO_COMPLETED, stepId)?.terminal),
+      ),
+      [false, true, false, true],
+    );
+  });
+
+  it("marks the edges the run went along, the one into the running step as active", () => {
+    assert.deepStrictEqual(listEdgeTravel(RUNNING), [
+      // A trigger does not fire for a run started by hand.
+      "weekdays>create notYet",
+      "create>label active",
+      "create>query fired",
+      // `query` has not finished, so its edge has not been decided.
+      "query>update notYet",
+    ]);
+  });
+
+  it("draws the edges of a finished run from how often the run followed each one", () => {
+    assert.deepStrictEqual(listEdgeTravel(DEMO_COMPLETED), [
+      // `lookup` finished and did not follow this edge: its condition was false.
+      "lookup>reuse notTaken",
+      "lookup>file fired",
+      "file>count fired",
+      "count>file fired",
+      "count>escalate fired",
+      // A skipped step passes the run on along its edges.
+      "escalate>settle fired",
+      "settle>finish fired",
+    ]);
+  });
+
+  it("makes every followed edge into a running step active, and tells a decided edge from one not yet decided", () => {
+    // The loop's second round: `file` runs again, after `lookup` and `count` sent the run to it.
+    const midLoop: Run = {
+      ...DEMO_COMPLETED,
+      status: "running",
+      steps: [
+        ...loopRecords(1),
+        { stepId: "file", iteration: 2, status: "running", startedAt: at(120) },
+      ],
+      edgeTraversals: [0, 1, 1, 1, 0, 0, 0],
+    };
+    assert.deepStrictEqual(listEdgeTravel(midLoop), [
+      "lookup>reuse notTaken",
+      "lookup>file active",
+      "file>count fired",
+      "count>file active",
+      // `file` runs again and leads back to `count`, so `count` can still go on to `escalate`.
+      "count>escalate notYet",
+      "escalate>settle notYet",
+      "settle>finish notYet",
+    ]);
+
+    // While the step waits to start, the edges into it are followed but not active.
+    const queued: Run = {
+      ...midLoop,
+      steps: [...loopRecords(1), { stepId: "file", iteration: 2, status: "pending" }],
+    };
+    assert.deepStrictEqual(listEdgeTravel(queued).slice(0, 4), [
+      "lookup>reuse notTaken",
+      "lookup>file fired",
+      "file>count fired",
+      "count>file fired",
+    ]);
+  });
+
+  it("draws an edge the run did not follow as not taken once the run has ended", () => {
+    // The run failed in the loop: `count` can no longer run again, and no
+    // step after it ever will.
+    assert.deepStrictEqual(listEdgeTravel(DEMO_ITERATION_LIMIT), [
+      "lookup>reuse notTaken",
+      "lookup>file fired",
+      "file>count fired",
+      "count>file fired",
+      "count>escalate notTaken",
+      "escalate>settle notTaken",
+      "settle>finish notTaken",
+    ]);
+  });
+
+  it("counts a capped edge's traversals against its limit, and no other edge's", () => {
+    const badges = buildRunGraph(DEMO_COMPLETED).edges.map((edge) => edge.traversalBadge);
+    assert.deepStrictEqual(badges, [
+      undefined,
+      undefined,
+      undefined,
+      "2/3",
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    assert.isTrue(buildRunGraph(DEMO_COMPLETED).edges.every((edge) => !edge.isFailedEdge));
+  });
+
+  it("marks the capped edge that failed the run with iteration-limit", () => {
+    const edges = buildRunGraph(DEMO_ITERATION_LIMIT).edges;
+    assert.strictEqual(edges[3]?.traversalBadge, "3/3");
+    assert.deepStrictEqual(
+      edges.map((edge) => edge.isFailedEdge),
+      [false, false, false, true, false, false, false],
+    );
+    assert.deepStrictEqual(
+      edges.map((edge) => edge.isOverLimit),
+      [false, false, false, true, false, false, false],
+    );
+  });
+
+  it("marks the edge whose condition failed the run with expression-error", () => {
+    const failed: Run = {
+      ...DEMO_ITERATION_LIMIT,
+      failureReason: "expression-error",
+      failedEdgeIndex: 4,
+      failureMessage:
+        "The condition of the edge from count to escalate could not be evaluated: no such key",
+      steps: loopRecords(1),
+      edgeTraversals: [0, 1, 1, 0, 0, 0, 0],
+    };
+    const edges = buildRunGraph(failed).edges;
+    assert.deepStrictEqual(
+      edges.map((edge) => edge.isFailedEdge),
+      [false, false, false, false, true, false, false],
+    );
+    // The edge has no limit, so no count shows on it, and the run did not fail on a limit.
+    assert.strictEqual(edges[4]?.traversalBadge, undefined);
+    assert.isTrue(edges.every((edge) => !edge.isOverLimit));
+  });
+
+  it("marks no edge of a run that failed at a step", () => {
+    const failed: Run = {
+      ...RUNNING,
+      status: "failed",
+      failureReason: "step-failed",
+      failedStepId: "label",
+      finishedAt: at(20),
+      steps: [
+        STEPS[0]!,
+        {
+          stepId: "label",
+          iteration: 1,
+          status: "failed",
+          startedAt: at(12),
+          finishedAt: at(20),
+          error: { code: "not_found", message: "no such task" },
+        },
+      ],
+    };
+    assert.isTrue(buildRunGraph(failed).edges.every((edge) => !edge.isFailedEdge));
   });
 });
 
@@ -127,6 +417,32 @@ describe("buildStepLines", () => {
       [{ id: "t_1" }, undefined, at(0), at(10)],
     );
     assert.deepStrictEqual([labelled?.output, labelled?.error], [undefined, error]);
+  });
+
+  it("numbers every line of a step that has more than one record, and no line of any other step", () => {
+    const labels = buildStepLines(DEMO_COMPLETED).map((line) => [line.stepId, line.iterationLabel]);
+    assert.deepStrictEqual(labels, [
+      ["lookup", undefined],
+      ["file", "#1"],
+      ["count", "#1"],
+      ["file", "#2"],
+      ["count", "#2"],
+      ["file", "#3"],
+      ["count", "#3"],
+      ["escalate", undefined],
+      ["settle", undefined],
+      ["finish", undefined],
+      // `reuse` was never reached.
+      ["reuse", undefined],
+    ]);
+  });
+
+  it("shows a skipped step as skipped, finished but never started, with no output", () => {
+    const skipped = buildStepLines(DEMO_COMPLETED).find((line) => line.stepId === "escalate");
+    assert.deepStrictEqual(
+      [skipped?.state, skipped?.startedAt, skipped?.finishedAt, skipped?.output, skipped?.error],
+      ["skipped", undefined, at(400), undefined, undefined],
+    );
   });
 });
 
@@ -303,6 +619,15 @@ describe("buildTimeline", () => {
     assert.deepStrictEqual(
       days.ticks.map((tick) => tick.label),
       ["0", "48h", "96h", "144h", "192h", "240h"],
+    );
+  });
+
+  it("places a skipped record where it was skipped, and no other record", () => {
+    const timeline = buildTimeline(DEMO_COMPLETED, 0, WIDE);
+    const skippedAt = timeline.lines.map((each) => [each.line.stepId, each.skippedAt]);
+    assert.deepStrictEqual(
+      skippedAt.filter(([, at]) => at !== undefined),
+      [["escalate", 0.4]],
     );
   });
 });

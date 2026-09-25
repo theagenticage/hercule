@@ -139,6 +139,14 @@ const COMPLETED_RUN: Run = {
   finishedAt: addSeconds(T0, 14),
 };
 
+/** A completed run whose plan is one row: `create`, then `start`. */
+const ONE_ROW_RUN: Run = {
+  ...COMPLETED_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000005",
+  plan: { ...PLAN, steps: PLAN.steps.filter((step) => step.id !== "note") },
+  steps: COMPLETED_RUN.steps.filter((record) => record.stepId !== "note"),
+};
+
 const STEP_ERROR_MESSAGE = "No task has the id 0199c0ff-7777-7000-8000-00000000dead.";
 
 /** The same run, failed because `start` could not find the task. */
@@ -178,6 +186,128 @@ const CANCELLED_RUN: Run = {
     },
   ],
   finishedAt: addSeconds(T0, 13),
+};
+
+/**
+ * A plan with routing: `lookup` reuses a task it finds, or goes on to `file`
+ * one; `file` and `count` loop until there are enough tasks, at most three
+ * times back; then `escalate` runs only for urgent input, and `settle` leads
+ * to `finish`. `reuse` and `finish` end the run.
+ */
+const ROUTING_PLAN: WorkflowDefinition = {
+  name: WORKFLOW_NAME,
+  inputs: [{ name: "target", schema: { type: "number" }, required: true }],
+  steps: [
+    { id: "lookup", kind: "action", action: "task.query" },
+    { id: "reuse", kind: "action", action: "task.update", terminal: true },
+    { id: "file", kind: "action", action: "task.create" },
+    { id: "count", kind: "action", action: "task.query" },
+    { id: "escalate", kind: "action", action: "task.update", condition: "inputs.urgent" },
+    { id: "settle", kind: "action", action: "task.query" },
+    { id: "finish", kind: "action", action: "task.update", terminal: true },
+  ],
+  edges: [
+    { from: "lookup", to: "reuse", condition: "size(steps.lookup.output.items) > 0" },
+    { from: "lookup", to: "file", condition: "size(steps.lookup.output.items) == 0" },
+    { from: "file", to: "count" },
+    {
+      from: "count",
+      to: "file",
+      condition: "size(steps.count.output.items) < inputs.target",
+      maxTraversals: 3,
+    },
+    { from: "count", to: "escalate", condition: "size(steps.count.output.items) >= inputs.target" },
+    { from: "escalate", to: "settle" },
+    { from: "settle", to: "finish" },
+  ],
+};
+
+/** Returns a completed record of `stepId`, which ran from `from` to `to` seconds after T0. */
+const completeStep = (stepId: string, iteration: number, from: number, to: number) =>
+  ({
+    stepId,
+    iteration,
+    status: "completed",
+    startedAt: addSeconds(T0, from),
+    finishedAt: addSeconds(T0, to),
+    output: { items: [] },
+  }) as const;
+
+/** The records of `lookup`, then `file` and `count` looping `times` times. */
+const listLoopRecords = (times: number) => [
+  completeStep("lookup", 1, 0, 1),
+  ...Array.from({ length: times }, (_, index) => [
+    completeStep("file", index + 1, 10 * index + 2, 10 * index + 4),
+    completeStep("count", index + 1, 10 * index + 5, 10 * index + 7),
+  ]).flat(),
+];
+
+/** What the routing run returned: the task `finish` settled. */
+const ROUTING_OUTPUT = { id: "t_1", status: "in-progress" };
+
+/** The routing run, completed: the loop ran three times, `escalate` was skipped. */
+const ROUTING_COMPLETED_RUN: Run = {
+  ...RUNNING_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000011",
+  plan: ROUTING_PLAN,
+  inputs: { target: 3 },
+  status: "completed",
+  steps: [
+    ...listLoopRecords(3),
+    { stepId: "escalate", iteration: 1, status: "skipped", finishedAt: addSeconds(T0, 28) },
+    completeStep("settle", 1, 29, 30),
+    completeStep("finish", 1, 31, 32),
+  ],
+  edgeTraversals: [0, 1, 3, 2, 1, 1, 1],
+  output: ROUTING_OUTPUT,
+  finishedAt: addSeconds(T0, 32),
+};
+
+/** The routing run in its loop: `file` runs for the third time. */
+const ROUTING_LOOPING_RUN: Run = {
+  ...RUNNING_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000012",
+  plan: ROUTING_PLAN,
+  inputs: { target: 3 },
+  status: "running",
+  steps: [
+    ...listLoopRecords(2),
+    { stepId: "file", iteration: 3, status: "running", startedAt: addSeconds(T0, 22) },
+  ],
+  edgeTraversals: [0, 1, 2, 2, 0, 0, 0],
+};
+
+const ITERATION_LIMIT_MESSAGE =
+  "The run was to follow the edge from count to file again, but it has already followed it 3 times, the most this edge allows.";
+
+/** The routing run with a target the loop cannot reach: it failed at the loop edge. */
+const ITERATION_LIMIT_RUN: Run = {
+  ...RUNNING_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000013",
+  plan: ROUTING_PLAN,
+  inputs: { target: 99 },
+  status: "failed",
+  failureReason: "iteration-limit",
+  failedStepId: "count",
+  failedEdgeIndex: 3,
+  failureMessage: ITERATION_LIMIT_MESSAGE,
+  steps: listLoopRecords(4),
+  edgeTraversals: [0, 1, 4, 3, 0, 0, 0],
+  finishedAt: addSeconds(T0, 40),
+};
+
+const EXPRESSION_ERROR_MESSAGE = "no such key: urgency";
+
+/** The routing run, failed because the condition on `count -> escalate` did not evaluate. */
+const EDGE_EXPRESSION_ERROR_RUN: Run = {
+  ...ITERATION_LIMIT_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000014",
+  inputs: { target: 1 },
+  failureReason: "expression-error",
+  failedEdgeIndex: 4,
+  failureMessage: EXPRESSION_ERROR_MESSAGE,
+  steps: listLoopRecords(1),
+  edgeTraversals: [0, 1, 1, 0, 0, 0, 0],
 };
 
 /* ------------------------------------------------------------------------ */
@@ -241,6 +371,16 @@ const findPageHeader = async (): Promise<HTMLElement> => {
 const findRunGraph = (): Promise<HTMLElement> =>
   screen.findByRole("region", { name: "Run graph" }, { timeout: GRAPH_LOAD_TIMEOUT_MS });
 
+/** Returns the height in pixels of the graph's pane: the region's child that holds the drawing. */
+const readGraphPaneHeight = (graph: HTMLElement): number => {
+  const pane = [...graph.children].find(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.querySelector(".react-flow") !== null,
+  );
+  if (pane === undefined) throw new Error("the run graph region has no pane with the drawing");
+  return Number.parseFloat(pane.style.height);
+};
+
 /** Returns the card of step `stepId` in the run graph: a group named by the step's id. */
 const getGraphCard = (graph: HTMLElement, stepId: string): HTMLElement =>
   within(graph).getByRole("group", { name: stepId });
@@ -262,6 +402,12 @@ const getStepRow = (stepId: string): HTMLElement => {
   if (row === undefined) throw new Error(`no row of the step list is for ${stepId}`);
   return row;
 };
+
+/** Returns every row of the step list for step `stepId`, one per step record. */
+const listStepRows = (stepId: string): readonly HTMLElement[] =>
+  within(getStepsRegion())
+    .queryAllByRole("listitem")
+    .filter((item) => new RegExp(`\\b${stepId}\\b`).test(readPageText(item)));
 
 /** Returns the `run.cancel` requests the page made. */
 const listCancels = (api: { readonly calls: readonly Call[] }, id: string): readonly Call[] =>
@@ -495,5 +641,139 @@ describe("A run's page > the run graph", { timeout: GRAPH_TEST_TIMEOUT_MS }, () 
       expect(readStatusWords(getGraphCard(graph, "start"))).toEqual(["completed"]);
     });
     expect(readStatusWords(getGraphCard(graph, "note"))).toEqual(["completed"]);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Routing: loops, skipped steps, the failed edge and the run's output.     */
+/* ------------------------------------------------------------------------ */
+
+describe("A run's page > routing on the graph", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
+  it("shows ×n on the card of a step that ran more than once, and nothing on a step that ran once", async () => {
+    await openRunPage(ROUTING_COMPLETED_RUN);
+
+    const graph = await findRunGraph();
+    await waitFor(() => {
+      expect(readPageText(getGraphCard(graph, "file"))).toMatch(/×\s?3/);
+    });
+    expect(readPageText(getGraphCard(graph, "count"))).toMatch(/×\s?3/);
+    expect(readPageText(getGraphCard(graph, "lookup"))).not.toContain("×");
+  });
+
+  it("draws a skipped step with the skipped mark and the word skipped", async () => {
+    await openRunPage(ROUTING_COMPLETED_RUN);
+
+    const graph = await findRunGraph();
+    const escalate = getGraphCard(graph, "escalate");
+    await waitFor(() => {
+      expect(readStatusWords(escalate)).toEqual(["skipped"]);
+    });
+    expect(escalate.dataset.state).toBe("skipped");
+    expect(escalate.querySelector('svg[data-mark="skipped"]')).not.toBeNull();
+  });
+
+  it("shows how often the run went along a capped edge out of its cap", async () => {
+    await openRunPage(ROUTING_LOOPING_RUN);
+
+    const graph = await findRunGraph();
+    expect(await within(graph).findByText("2/3")).toBeDefined();
+    expect(within(graph).queryByText("max 3")).toBeNull();
+  });
+
+  it("shows the badge of the edge a run failed on at its iteration limit in the failure colour", async () => {
+    await openRunPage(ITERATION_LIMIT_RUN);
+
+    const graph = await findRunGraph();
+    const badge = await within(graph).findByText("3/3");
+    expect(badge.classList.contains("text-fail")).toBe(true);
+  });
+
+  it("grows the graph pane for a plan with more than one row of steps", async () => {
+    // The pane's height follows the drawing, so a plan that branches into two
+    // rows gets a taller pane than a plan of one row. jsdom measures no width,
+    // so both panes use the same zoom and only the drawings' heights differ.
+    const oneRow = await openRunPage(ONE_ROW_RUN);
+    const oneRowHeight = readGraphPaneHeight(await findRunGraph());
+    oneRow.unmount();
+
+    await openRunPage(ROUTING_COMPLETED_RUN);
+    const twoRowHeight = readGraphPaneHeight(await findRunGraph());
+    expect(twoRowHeight).toBeGreaterThan(oneRowHeight);
+  });
+});
+
+describe("A run's page > routing in the header", () => {
+  it("names the step and the edge of an iteration limit in plain words, and shows the failure message", async () => {
+    await openRunPage(ITERATION_LIMIT_RUN);
+
+    const header = await findPageHeader();
+    expect(readPageText(header)).toMatch(/iteration limit at count\s*→\s*file/i);
+    expect(readPageText(screen.getByRole("main"))).toContain(ITERATION_LIMIT_MESSAGE);
+  });
+
+  it("calls a failed edge condition an expression error, not a template error", async () => {
+    await openRunPage(EDGE_EXPRESSION_ERROR_RUN);
+
+    const header = await findPageHeader();
+    const text = readPageText(header);
+    expect(text).toMatch(/expression error at count\s*→\s*escalate/i);
+    expect(text).not.toMatch(/template/i);
+    expect(readPageText(screen.getByRole("main"))).toContain(EXPRESSION_ERROR_MESSAGE);
+  });
+});
+
+describe("A run's page > routing in the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
+  it("numbers the rows of a step that ran more than once, and not the rows of a step that ran once", async () => {
+    await openRunPage(ROUTING_COMPLETED_RUN);
+    await findPageHeader();
+
+    const fileRows = listStepRows("file");
+    expect(fileRows).toHaveLength(3);
+    expect(fileRows.map((row) => /#\s?(\d+)/.exec(readPageText(row))?.[1])).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(readPageText(getStepRow("lookup"))).not.toMatch(/#\s?\d/);
+  });
+
+  it("shows a skipped row with the skipped mark and the word skipped, in the list and the timeline", async () => {
+    const user = userEvent.setup();
+    await openRunPage(ROUTING_COMPLETED_RUN);
+    await findPageHeader();
+
+    const row = getStepRow("escalate");
+    expect(readStatusWords(row)).toEqual(["skipped"]);
+    expect(row.querySelector('svg[data-mark="skipped"]')).not.toBeNull();
+
+    await user.click(screen.getByRole("radio", { name: "Timeline" }));
+    await waitFor(() => {
+      expect(getStepsRegion().querySelector('svg[data-mark="skipped"]')).not.toBeNull();
+    });
+    expect(readPageText(getStepsRegion()).toLowerCase()).toMatch(/\bskipped\b/);
+  });
+});
+
+describe("A run's page > the output", () => {
+  it("shows the run's output in an Output card under the inputs", async () => {
+    await openRunPage(ROUTING_COMPLETED_RUN);
+    await findPageHeader();
+
+    const output = screen.getByRole("region", { name: "Output" });
+    const text = readPageText(output);
+    expect(text).toContain("t_1");
+    expect(text).toContain("in-progress");
+    const inputs = screen.getByRole("region", { name: "Inputs" });
+    expect(inputs.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it.each([
+    { run: COMPLETED_RUN, status: "completed" },
+    { run: FAILED_RUN, status: "failed" },
+  ])("shows no Output card on a $status run with no output", async ({ run }) => {
+    await openRunPage(run);
+    await findPageHeader();
+
+    expect(screen.queryByRole("region", { name: "Output" })).toBeNull();
   });
 });

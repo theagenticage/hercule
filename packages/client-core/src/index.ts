@@ -52,6 +52,7 @@ export {
   describeStepDuration,
   describeStepState,
   describeUnstartedStep,
+  findFailedEdge,
   formatElapsed,
   isRunLive,
   readTimestamps,
@@ -180,6 +181,7 @@ export {
 export {
   abbreviateEdgeCondition,
   buildWorkflowGraph,
+  shortenCondition,
   type WorkflowGraph,
   type WorkflowGraphEdge,
   type WorkflowGraphNode,

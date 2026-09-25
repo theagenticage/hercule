@@ -10,6 +10,7 @@ import {
   QueuedMark,
   RunGlyph,
   SessionGlyph,
+  SkippedMark,
   TaskGlyph,
   WorkflowGlyph,
   WorkingMark,
@@ -23,6 +24,7 @@ const states: [ReactNode, string][] = [
   [<DoneMark key="done" />, "done"],
   [<FailedMark key="failed" />, "failed"],
   [<CancelledMark key="cancelled" />, "cancelled"],
+  [<SkippedMark key="skipped" />, "skipped"],
 ];
 
 const things: [ReactNode, string][] = [

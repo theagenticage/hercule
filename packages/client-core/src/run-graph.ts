@@ -7,9 +7,9 @@
  * timeline agree on every step's state.
  */
 import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
-import { readTimestamps, type Timestamps, type WorkState } from "./run-display";
+import { isRunLive, readTimestamps, type Timestamps, type WorkState } from "./run-display";
 import {
-  buildWorkflowGraph,
+  buildIndexedWorkflowGraph,
   type WorkflowGraphEdge,
   type WorkflowGraphNode,
 } from "./workflow-graph";
@@ -22,18 +22,44 @@ export interface StepProgress extends Timestamps {
 /** A trigger or a step of a run's plan. A step carries its progress; a trigger has none. */
 export interface RunGraphNode extends WorkflowGraphNode {
   readonly progress: StepProgress | undefined;
+  /** How many step records the step has: how often the run came to it. 0 for a trigger. */
+  readonly iterationCount: number;
+  /**
+   * The text after the step's id on its card, such as `×3` for a step the run
+   * came to three times. `undefined` for a step the run came to at most once.
+   */
+  readonly iterationLabel: string | undefined;
 }
 
 /**
  * How far a run has come along an edge:
- * - `untravelled`: the run has not gone along it;
- * - `travelled`: the run went along it, and the step it leads to is queued or has ended;
- * - `active`: the run went along it, and the step it leads to is running now.
+ * - `fired`: the run followed it at least once;
+ * - `active`: the run followed it, and the step it leads to is running now;
+ * - `notTaken`: the run has not followed it and never will, because the run
+ *   has ended, or because its source step finished and can no longer run
+ *   again. The edge's condition may have been false, or the edge was never
+ *   evaluated at all: a terminal step's edges, and the edges after the one a
+ *   run failed at;
+ * - `notYet`: the run is live, has not followed it, and may still. Its source
+ *   step has not finished yet, or can still run again: the step has a pending
+ *   or running record, or a step with one has a path of edges to it, as in a
+ *   loop that is still going round. An edge from a trigger is `notYet` while
+ *   the run is live: a trigger does not fire for a run started by hand or
+ *   through the API.
  */
-export type EdgeTravel = "untravelled" | "travelled" | "active";
+export type EdgeTravel = "fired" | "active" | "notTaken" | "notYet";
 
 export interface RunGraphEdge extends WorkflowGraphEdge {
   readonly travel: EdgeTravel;
+  /**
+   * How often the run followed an edge with `maxTraversals`, out of that
+   * limit, such as `2/3`. `undefined` for an edge with no limit.
+   */
+  readonly traversalBadge: string | undefined;
+  /** Whether the run failed at this edge, on its limit or on its condition. */
+  readonly isFailedEdge: boolean;
+  /** Whether the run failed because it would have followed this edge more often than its limit allows. */
+  readonly isOverLimit: boolean;
 }
 
 /** A run's plan as a graph, with the run's progress on every step and edge. */
@@ -45,11 +71,15 @@ export interface RunGraph {
 }
 
 /**
- * Returns the latest step record of each step, by step id. A step that runs
- * again gets a new record, and the latest one holds where the step is now.
+ * Returns the record that holds where a step is now, from its records in
+ * the order they were created: the running one, else a pending one, else the
+ * latest. A step can have a record waiting behind the running one, and the
+ * step is still running.
  */
-const findLatestRecords = (steps: ReadonlyArray<StepRecord>): ReadonlyMap<string, StepRecord> =>
-  new Map(steps.map((record) => [record.stepId, record]));
+const findCurrentRecord = (records: ReadonlyArray<StepRecord>): StepRecord | undefined =>
+  records.find((record) => record.status === "running") ??
+  records.find((record) => record.status === "pending") ??
+  records.at(-1);
 
 /** Returns a step's progress from its step record, or `unreached` for a step with none. */
 const readStepProgress = (record: StepRecord | undefined): StepProgress =>
@@ -57,37 +87,110 @@ const readStepProgress = (record: StepRecord | undefined): StepProgress =>
     ? { state: "unreached" }
     : { state: record.status, ...readTimestamps(record) };
 
+/** Returns a run's step records grouped by step id, each group in the order the records were created. */
+const groupRecordsByStep = (
+  steps: ReadonlyArray<StepRecord>,
+): ReadonlyMap<string, ReadonlyArray<StepRecord>> => {
+  const groups = new Map<string, Array<StepRecord>>();
+  for (const record of steps) {
+    const group = groups.get(record.stepId);
+    if (group === undefined) groups.set(record.stepId, [record]);
+    else group.push(record);
+  }
+  return groups;
+};
+
+/**
+ * Returns every step that `from` holds or has a path of edges to, `from`
+ * included. Conditions and `maxTraversals` are ignored, as the controller
+ * does when it decides whether a step can still run.
+ */
+const collectReachableSteps = (
+  edges: ReadonlyArray<WorkflowGraphEdge>,
+  from: Iterable<string>,
+): ReadonlySet<string> => {
+  const reached = new Set(from);
+  // A Set iterator also visits values added during the iteration, so this
+  // loop is a breadth-first search.
+  for (const stepId of reached) {
+    for (const edge of edges) {
+      if (edge.from === stepId) reached.add(edge.to);
+    }
+  }
+  return reached;
+};
+
 /**
  * Builds the graph of a run's plan, as `buildWorkflowGraph` does, with the
  * run's progress on it:
- * - each step carries its state and times, from its latest step record;
- * - each edge between two steps is travelled once the run went from the one
- *   step to the other, and active while the step it leads to runs.
- *
- * An edge from a trigger is never travelled: a trigger does not fire for a
- * run started by hand or through the API.
+ * - each step carries the state and times of its current record (see
+ *   `findCurrentRecord`) and how many records it has;
+ * - each edge carries how far the run came along it (see `EdgeTravel`), from
+ *   the run's count of how often it followed each edge;
+ * - an edge with `maxTraversals` carries that count out of its limit;
+ * - the edge the run failed at, if it failed at one, is marked.
  */
-export const buildRunGraph = (run: Pick<Run, "plan" | "steps" | "status">): RunGraph => {
-  const graph = buildWorkflowGraph(run.plan);
-  const latest = findLatestRecords(run.steps);
+export const buildRunGraph = (run: Run): RunGraph => {
+  const graph = buildIndexedWorkflowGraph(run.plan);
+  const records = groupRecordsByStep(run.steps);
+  const current = new Map([...records].map(([stepId, own]) => [stepId, findCurrentRecord(own)]));
   const stepIds = new Set(run.plan.steps.map((step) => step.id));
+  // The check narrows the type: a `controller-error` failure has no `failedEdgeIndex`.
+  const failedEdgeIndex =
+    run.status === "failed" && run.failureReason !== "controller-error"
+      ? run.failedEdgeIndex
+      : undefined;
+  const isOverLimitRun = run.status === "failed" && run.failureReason === "iteration-limit";
+  const isLive = isRunLive(run.status);
+  // The steps that can still run: those with a pending or running record,
+  // and every step they have a path to.
+  const canStillRun = collectReachableSteps(
+    run.plan.edges ?? [],
+    run.steps
+      .filter((record) => record.status === "pending" || record.status === "running")
+      .map((record) => record.stepId),
+  );
   /**
-   * Decides how far the run has come along the edge from `from` to `to`, from
-   * the latest step record at each end. This handles a linear graph, where
-   * each step runs at most once; loops and joins come with
-   * [#80](https://github.com/theagenticage/hercule/issues/80).
+   * Checks whether a step has finished at least once: completed, or skipped
+   * by its condition. A trigger has no records, so it never has.
    */
-  const decideTravel = (from: string, to: string): EdgeTravel => {
-    const target = latest.get(to);
-    if (latest.get(from)?.status !== "completed" || target === undefined) return "untravelled";
-    return target.status === "running" ? "active" : "travelled";
+  const hasFinished = (stepId: string): boolean =>
+    (records.get(stepId) ?? []).some(
+      (record) => record.status === "completed" || record.status === "skipped",
+    );
+  /** Decides how far the run has come along an edge, from how often it followed the edge. */
+  const decideTravel = (edge: WorkflowGraphEdge, traversals: number): EdgeTravel => {
+    if (traversals > 0) return current.get(edge.to)?.status === "running" ? "active" : "fired";
+    const mayStillFollow = !hasFinished(edge.from) || canStillRun.has(edge.from);
+    return isLive && mayStillFollow ? "notYet" : "notTaken";
   };
   return {
     nodes: graph.nodes.map((node) => {
-      if (!stepIds.has(node.id)) return { ...node, progress: undefined };
-      return { ...node, progress: readStepProgress(latest.get(node.id)) };
+      if (!stepIds.has(node.id)) {
+        return { ...node, progress: undefined, iterationCount: 0, iterationLabel: undefined };
+      }
+      const iterationCount = records.get(node.id)?.length ?? 0;
+      return {
+        ...node,
+        progress: readStepProgress(current.get(node.id)),
+        iterationCount,
+        iterationLabel: iterationCount > 1 ? `×${String(iterationCount)}` : undefined,
+      };
     }),
-    edges: graph.edges.map((edge) => ({ ...edge, travel: decideTravel(edge.from, edge.to) })),
+    edges: graph.edges.map(({ edge, planEdgeIndex }) => {
+      const traversals = planEdgeIndex === undefined ? 0 : (run.edgeTraversals[planEdgeIndex] ?? 0);
+      const isFailedEdge = planEdgeIndex !== undefined && planEdgeIndex === failedEdgeIndex;
+      return {
+        ...edge,
+        travel: decideTravel(edge, traversals),
+        traversalBadge:
+          edge.maxTraversals === undefined
+            ? undefined
+            : `${String(traversals)}/${String(edge.maxTraversals)}`,
+        isFailedEdge,
+        isOverLimit: isFailedEdge && isOverLimitRun,
+      };
+    }),
     status: run.status,
   };
 };
@@ -103,6 +206,12 @@ export interface StepLine extends StepProgress {
   /** Unique within the run. */
   readonly key: string;
   readonly stepId: string;
+  /**
+   * The record's iteration, such as `#2`, on every line of a step that has
+   * more than one record. `undefined` on the line of a step that ran once, so
+   * a run with no loops reads as before.
+   */
+  readonly iterationLabel: string | undefined;
   /** The action an action step calls, as the plan names it. */
   readonly action: string | undefined;
   /** What the action returned, for a completed step; `null` for an action that returns nothing. */
@@ -120,21 +229,24 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
   const actions = new Map(
     run.plan.steps.map((step) => [step.id, step.kind === "action" ? step.action : undefined]),
   );
-  const recorded = new Set(run.steps.map((record) => record.stepId));
+  const records = groupRecordsByStep(run.steps);
   return [
     ...run.steps.map((record): StepLine => ({
       key: `${record.stepId}#${String(record.iteration)}`,
       stepId: record.stepId,
+      iterationLabel:
+        (records.get(record.stepId)?.length ?? 0) > 1 ? `#${String(record.iteration)}` : undefined,
       action: actions.get(record.stepId),
       ...readStepProgress(record),
       output: record.status === "completed" ? record.output : undefined,
       error: record.status === "failed" ? record.error : undefined,
     })),
     ...run.plan.steps
-      .filter((step) => !recorded.has(step.id))
+      .filter((step) => !records.has(step.id))
       .map((step): StepLine => ({
         key: step.id,
         stepId: step.id,
+        iterationLabel: undefined,
         action: actions.get(step.id),
         ...readStepProgress(undefined),
         output: undefined,
@@ -175,7 +287,16 @@ export interface Timeline {
   readonly ticks: ReadonlyArray<TimelineTick>;
   /** How long the run has run up to now, or ran, in milliseconds. It is the length of the axis. */
   readonly elapsedMs: number;
-  readonly lines: ReadonlyArray<{ readonly line: StepLine; readonly bar: TimelineBar | undefined }>;
+  readonly lines: ReadonlyArray<TimelineLine>;
+}
+
+/** A step line on a time axis. */
+export interface TimelineLine {
+  readonly line: StepLine;
+  /** The bar of a record that started, or `undefined` for one that has not. */
+  readonly bar: TimelineBar | undefined;
+  /** Where a skipped record was skipped, as a fraction of the axis, or `undefined` for any other record. */
+  readonly skippedAt: number | undefined;
 }
 
 /**
@@ -326,6 +447,10 @@ export const buildTimeline = (run: Run, now: number, axisWidthInCharacters: numb
     elapsedMs,
     lines: buildStepLines(run).map((line) => ({
       line,
+      skippedAt:
+        line.state === "skipped" && line.finishedAt !== undefined
+          ? measureFraction(Date.parse(line.finishedAt))
+          : undefined,
       bar:
         line.startedAt === undefined
           ? undefined

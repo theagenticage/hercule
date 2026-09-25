@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
   describeRunOrigin,
   describeRunStatus,
+  findFailedEdge,
   formatPreciseStamp,
   readTimestamps,
   toIdTail,
@@ -21,7 +22,8 @@ const QUIET_LINK =
  * the run list and the workflow's name, with the page's actions on the right.
  * The second line shows where the run is: its status mark and status with its
  * duration, why it failed, who started it and how, when it started and ended,
- * and its id's tail, which the CLI takes.
+ * and its id's tail, which the CLI takes. A run that failed at an edge has a
+ * third line: what went wrong there.
  *
  * The title sits where the shell's top bar puts every other screen's title,
  * so the page does not jump when it opens.
@@ -72,7 +74,11 @@ export function RunHeader({
         {run.status !== "failed" ? null : (
           <>
             <Dot />
-            <FailureText reason={run.failureReason} stepId={run.failedStepId} />
+            <FailureText
+              reason={run.failureReason}
+              stepId={run.failedStepId}
+              edge={findFailedEdge(run)}
+            />
           </>
         )}
         <Dot />
@@ -101,8 +107,17 @@ export function RunHeader({
           {`run ${toIdTail(run.id)}`}
         </span>
       </p>
+      {/* A `controller-error` failure has no `failureMessage`; the check narrows the type. */}
+      {run.status !== "failed" || run.failureReason === "controller-error" ? null : (
+        <FailureMessage message={run.failureMessage} />
+      )}
     </header>
   );
+}
+
+/** Renders what went wrong at the edge a run failed at, or nothing for a run with no message. */
+function FailureMessage({ message }: { readonly message: string | undefined }): JSX.Element | null {
+  return message === undefined ? null : <p className="mt-1 text-fine text-fail">{message}</p>;
 }
 
 /** The separator between the facts of the status line. */

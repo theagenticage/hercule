@@ -211,6 +211,27 @@ describe("maxTraversals", () => {
   it("lets the run carry on when the condition is false after the last firing", () => {
     expect(decideWithMore(false, [3, 2, 2]).ending).toEqual({ _tag: "continues" });
   });
+
+  it("names the edge by its steps in the failure message, and counts one firing as 1 time", () => {
+    expect(decideWithMore(true, [3, 2, 2]).ending).toMatchObject({
+      message:
+        "The run was to follow the edge from count to file again, but it has already followed it 2 times, the most this edge allows.",
+    });
+    const once = buildPlan(
+      ["file", "count"],
+      [
+        { from: "file", to: "count" },
+        { from: "count", to: "file", maxTraversals: 1 },
+      ],
+    );
+    const decision = Effect.runSync(
+      decideRouting({ plan: once, inputs: {}, steps: RECORDS, edgeTraversals: [2, 1] }, "count"),
+    );
+    expect(decision.ending).toMatchObject({
+      message:
+        "The run was to follow the edge from count to file again, but it has already followed it 1 time, the most this edge allows.",
+    });
+  });
 });
 
 describe("an edge condition that cannot be decided", () => {

@@ -12,6 +12,7 @@ const meanings = [
   "done",
   "failed",
   "cancelled",
+  "skipped",
 ];
 
 describe("MarksLegend", () => {
@@ -28,7 +29,18 @@ describe("MarksLegend", () => {
     for (const meaning of [...meanings, "task", "run", "session", "workflow"]) {
       expect(screen.getByText(meaning), meaning).toBeTruthy();
     }
-    expect(legend.querySelectorAll("svg[data-mark]")).toHaveLength(11);
+    expect(legend.querySelectorAll("svg[data-mark]")).toHaveLength(12);
+  });
+
+  it("lists skipped among the state marks, after cancelled and before the things", async () => {
+    render(<MarksLegend />);
+    await userEvent.click(screen.getByRole("button", { name: /Marks/ }));
+    const legend = screen.getByRole("dialog");
+    const marks = [...legend.querySelectorAll<SVGElement>("svg[data-mark]")].map(
+      (svg) => svg.dataset.mark,
+    );
+    expect(marks.indexOf("skipped")).toBe(marks.indexOf("cancelled") + 1);
+    expect(marks.indexOf("skipped")).toBeLessThan(marks.indexOf("task"));
   });
 
   it("opens on ? from anywhere on the page", async () => {

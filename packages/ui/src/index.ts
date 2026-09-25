@@ -1,4 +1,5 @@
 export { useMinuteClock, useTickingClock } from "./primitives/clock";
+export { useElementWidth } from "./primitives/element-width";
 export { cn } from "./primitives/cn";
 export { Button, buildButtonClassName, type ButtonVariant } from "./primitives/button";
 export { Checkbox } from "./primitives/checkbox";
@@ -25,6 +26,7 @@ export {
   QueuedMark,
   RunGlyph,
   SessionGlyph,
+  SkippedMark,
   TaskGlyph,
   WorkflowGlyph,
   WorkingMark,
