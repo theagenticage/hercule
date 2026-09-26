@@ -69,12 +69,14 @@ export const Session = Schema.Struct({
    */
   resumable: Schema.Boolean,
   /**
-   * Computed when the session is read, never stored: true when the session
-   * exited before its last start or resume started any turn, inputs wait for
-   * it, and no input has arrived since that exit. Such a session is not resumed
-   * automatically, because it would most likely die the same way again: its
-   * input waits, and the next input anyone sends resumes it with all of it
-   * (the crash-loop guard, spec 12 section 5.1).
+   * Computed when the session is read: true when the session exited before
+   * its last resume started any turn, inputs wait for it, no input has been
+   * stored since that resume, and it could otherwise be resumed (`resumable`).
+   * Such a session is not resumed automatically, because it would most likely
+   * die the same way again: its input waits, and the next input anyone sends
+   * resumes it with all of it (the crash-loop guard, spec 12 section 5.1). An
+   * assistant's owner is told with a "can't be reached" notice when the hold
+   * starts.
    */
   resumeHeld: Schema.Boolean,
   permissionProfileId: Id,

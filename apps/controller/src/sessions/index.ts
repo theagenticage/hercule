@@ -10,7 +10,7 @@
  * status changes that the controller daemon calls while it talks to a runner.
  */
 export { SessionObserver, type SessionEndReason, type SessionExit } from "./observer";
-export { type LostWakeUp, type StoredInput } from "./inputs";
+export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
 export {
   buildContinuingSpec,
   buildConversationTimeouts,

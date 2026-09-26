@@ -34,7 +34,7 @@ import type { GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionObserver } from "./observer";
-import { SessionService, SessionServiceLayer, type Starting } from "./service";
+import { SessionService, SessionServiceLayer, type StartRequest } from "./service";
 
 /** Temporary Hercule Homes for the master key, deleted after each test. */
 let homes: Array<string> = [];
@@ -169,9 +169,6 @@ const insertQueuedSession = (
     return id;
   });
 
-/** The pair `starting` returns for one claimed session. */
-type Claim = Starting;
-
 afterEach(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
   homes = [];
@@ -244,7 +241,7 @@ const claimStarting = (
   runnerId: string,
   room: number,
   accountOf: (connectionId: string) => Effect.Effect<GitCredential | undefined>,
-): Effect.Effect<ReadonlyArray<Claim>, SqlError, SessionService | SqlClient.SqlClient> =>
+): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const sessions = yield* SessionService;
@@ -268,7 +265,7 @@ const readTokenHash = (sessionId: string) =>
   );
 
 /** Returns the frames a claim returned, keyed by session id. */
-const mapFramesBySession = (claimed: ReadonlyArray<Claim>): Map<string, SessionStart> =>
+const mapFramesBySession = (claimed: ReadonlyArray<StartRequest>): Map<string, SessionStart> =>
   new Map(claimed.map((claim) => [claim.sessionId, claim.frame] as const));
 
 describe("SessionService.starting", () => {

@@ -11,16 +11,17 @@
  * afterwards writes nothing.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import type { SessionStop } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
-import { del, get, readErrorBody } from "../http/testing";
+import { del, get, post, readErrorBody } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
   listFrames,
   listInputs,
   readSession,
+  waitUntil,
   reportEvent,
   waitForFrames,
   waitForSession,
@@ -36,6 +37,16 @@ const HELD_INPUT = "0199e0e7-0000-7000-8000-0000000000a1";
 
 /** The id of a second session a test writes straight into the database. */
 const OLDER_SESSION = "0199e0e7-0000-7000-8000-0000000000b1";
+
+/** The refusal of `session.input` on a session whose assistant was deleted. */
+const CONVERSATION_DELETED =
+  "this session answered an assistant's conversation that was deleted; " +
+  "it is kept as history and takes no input";
+
+/** Why the queued-input sweep gives up on input that waits for such a session. */
+const NEVER_RESUMED =
+  "the session could not be resumed: that session answered an assistant's conversation " +
+  "that was deleted, so it is kept as history and is never resumed";
 
 /** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
@@ -70,6 +81,29 @@ const countMessages = async (arranged: Arranged, conversationId: string): Promis
   );
   return rows[0]?.count ?? 0;
 };
+
+/** Reports an idle unload for the idle session at sequence number 2, and waits until it has exited. */
+const exitAfterIdleUnload = async (arranged: Arranged, sessionId: string): Promise<void> => {
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId,
+    at,
+    _tag: "session.exited",
+    reason: "idle_unload",
+  });
+  await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+};
+
+/** Writes the queued input "are you there?" for the session straight into the database. */
+const insertHeldInput = (arranged: Arranged, sessionId: string): Promise<unknown> =>
+  Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql`INSERT INTO session_inputs
+                             (id, session_id, source, actor, text, status, created_at)
+        VALUES (unhex(${HELD_INPUT.replaceAll("-", "")}), unhex(${sessionId.replaceAll("-", "")}),
+                'user', 'user', 'are you there?', 'queued', ${at})`,
+    ),
+  );
 
 describe("assistant.delete", () => {
   it("deletes the assistant without waiting for its busy session to exit, then stops the session and keeps it as history", async () => {
@@ -190,28 +224,13 @@ describe("assistant.delete", () => {
     await withAgentFleet(async (arranged) => {
       const { assistant, conversation } = await readDefaultConversation(arranged);
       const session = await startConversationSession(arranged, conversation.id, "hi");
-      reportEvent(arranged.wire, 2, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "session.exited",
-        reason: "idle_unload",
-      });
-      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      await exitAfterIdleUnload(arranged, session.id);
       // The state between an exit that kept input and the resume that
       // follows it: the session has exited and an input still waits for it.
       // A real exit cannot hold this state for the test, because the exit's
       // own delivery resumes the session as soon as it commits; so the input
       // is written directly.
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`INSERT INTO session_inputs
-                                 (id, session_id, source, actor, text, status, created_at)
-            VALUES (unhex(${HELD_INPUT.replaceAll("-", "")}), unhex(${session.id.replaceAll("-", "")}),
-                    'user', 'user',
-                    'are you there?', 'queued', ${at})`,
-        ),
-      );
+      await insertHeldInput(arranged, session.id);
 
       const response = await del(
         arranged.harness.base,
@@ -229,6 +248,64 @@ describe("assistant.delete", () => {
       expect(await readSession(arranged, session.id)).toMatchObject({ status: "exited" });
       expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
     });
+  });
+
+  it("leaves the session as history that refuses session.input", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistant, conversation } = await readDefaultConversation(arranged);
+      const session = await startConversationSession(arranged, conversation.id, "hi");
+      await exitAfterIdleUnload(arranged, session.id);
+      const deleted = await del(
+        arranged.harness.base,
+        `/api/v1/assistants/${assistant.id}`,
+        arranged.token,
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+      const response = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/input`,
+        { text: "anyone left?" },
+        arranged.token,
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message: CONVERSATION_DELETED,
+      });
+      expect((await listInputs(arranged, session.id)).map((one) => one.text)).toEqual(["hi"]);
+    });
+  });
+
+  it("cancels input that reaches the session after the delete, on the next queued-input sweep, without resuming it", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { assistant, conversation } = await readDefaultConversation(arranged);
+        const session = await startConversationSession(arranged, conversation.id, "hi");
+        await exitAfterIdleUnload(arranged, session.id);
+        const deleted = await del(
+          arranged.harness.base,
+          `/api/v1/assistants/${assistant.id}`,
+          arranged.token,
+        );
+        expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+        // Nothing stores input for such a session today, so the test writes
+        // it directly: the sweep must still handle it without dying.
+        await insertHeldInput(arranged, session.id);
+
+        const cancelled = await waitUntil("cancelled the input", async () =>
+          (await listInputs(arranged, session.id)).find(
+            (one) => one.text === "are you there?" && one.status === "cancelled",
+          ),
+        );
+        expect(cancelled.reason).toBe(NEVER_RESUMED);
+        expect(await readSession(arranged, session.id)).toMatchObject({ status: "exited" });
+        expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
+      },
+      { eventRoutingInterval: Duration.millis(50) },
+    );
   });
 
   it("fails with not_found for an id that names no assistant", async () => {

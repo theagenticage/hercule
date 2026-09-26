@@ -35,5 +35,5 @@ export const buildRoutingTables: Effect.Effect<
 export const buildDeliveries: Effect.Effect<
   ReadonlyArray<Delivery>,
   never,
-  SessionService | Live
+  SqlClient.SqlClient | Live
 > = Effect.map(queuedInputDelivery, (delivery) => [delivery]);

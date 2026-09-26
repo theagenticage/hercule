@@ -41,8 +41,21 @@ export interface SessionExit {
   /** The session as it was just before it exited, so `status` is the status it exited from. */
   readonly session: StoredSession;
   readonly reason: SessionEndReason;
-  /** The runner's error message, for a workspace that could not be made; absent otherwise. */
-  readonly message?: string;
+  /**
+   * `true` when the crash-loop guard now holds the session back from an
+   * automatic resume (`isResumeHeld`): it was resumed for input that still
+   * waits, and it exited before it started a turn. The input waits until
+   * someone sends more.
+   */
+  readonly resumeHeld: boolean;
+}
+
+/** Input that waited for an exited session and was cancelled, because the session cannot be resumed. */
+export interface DroppedInputs {
+  /** The exited session the input waited for. */
+  readonly session: StoredSession;
+  /** The reason the resume was refused. */
+  readonly refusal: string;
 }
 
 /** The party told about what every session does. */
@@ -62,14 +75,7 @@ export class SessionObserver extends Context.Service<
      * unload included.
      */
     readonly sessionExited: (exit: SessionExit) => Effect.Effect<void, SqlError>;
-    /**
-     * Handles input that waited for an exited session and was cancelled,
-     * because the session cannot be resumed. `refusal` is the reason the
-     * resume was refused.
-     */
-    readonly inputsDropped: (
-      session: StoredSession,
-      refusal: string,
-    ) => Effect.Effect<void, SqlError>;
+    /** Handles input that waited for an exited session and was cancelled. */
+    readonly inputsDropped: (dropped: DroppedInputs) => Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/sessions/SessionObserver") {}

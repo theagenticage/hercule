@@ -2,7 +2,8 @@
  * Tests what the conversation messages migration does to a database at the
  * previous head: it adds the `conversation_messages` table with its sender
  * columns, and a `conversation_id` column on sessions that is null for every
- * session that exists already and is indexed for the sessions that have one.
+ * session that exists already and is indexed for the sessions that have one,
+ * and a `crash_guard_armed` flag that starts at 0 for every session.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -115,6 +116,18 @@ describe("the conversation messages migration", () => {
     );
 
     expect(sessions).toEqual([{ conversation_id: null }, { conversation_id: null }]);
+  });
+
+  it("starts the crash-loop guard disarmed on every session that exists already", async () => {
+    const sessions = await seedAndMigrate(
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql<{ readonly crash_guard_armed: number }>`
+          SELECT crash_guard_armed FROM sessions`,
+      ),
+    );
+
+    expect(sessions).toEqual([{ crash_guard_armed: 0 }, { crash_guard_armed: 0 }]);
   });
 
   it("indexes a conversation's sessions by conversation, creation time and id, for linked sessions only", async () => {

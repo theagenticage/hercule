@@ -28,6 +28,15 @@ const NO_TRANSCRIPT =
   "that session left no provider-native session, so its transcript is gone and there is " +
   "nothing to resume";
 
+/**
+ * The error message for a session that answered an assistant's conversation
+ * that was deleted, with its assistant. The session is history: there is no
+ * assistant to resume it as, and nobody reads what it would answer.
+ */
+const CONVERSATION_DELETED =
+  "that session answered an assistant's conversation that was deleted, so it is kept as " +
+  "history and is never resumed";
+
 /** Returns the error message for a session whose workspace is gone. */
 const describeWorkspaceGone = (status: string): string =>
   `that session's workspace is ${status}, so there is nothing left to resume it in`;
@@ -38,6 +47,7 @@ const describeWorkspaceGone = (status: string): string =>
  * error that gives the reason (spec 06 section 5):
  *
  * - the session is still live;
+ * - the session answered an assistant's conversation that was deleted;
  * - the session left no transcript;
  * - its workspace is gone;
  * - its runner is retired, or is draining and takes no new sessions even
@@ -57,6 +67,8 @@ export const resumable: Effect.Effect<
     Effect.gen(function* () {
       if (session.status !== "exited")
         return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
+      if (session.conversationDeleted)
+        return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
       if (session.nativeSessionId === null)
         return yield* Effect.fail(createInvalidStateError(NO_TRANSCRIPT));
       if (!session.resumable) {

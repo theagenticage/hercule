@@ -21,6 +21,7 @@
  *   row.
  */
 import * as Effect from "effect/Effect";
+import * as Struct from "effect/Struct";
 import type { Session } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../providers";
@@ -34,19 +35,15 @@ export const sessionRecordComposer: Effect.Effect<
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
 
-  return Effect.map(
-    host.providers(),
-    (definitions) =>
-      ({
-        providerId,
-        disallowedTools,
-        awaitingNewInput,
-        inputWaiting,
-        ...session
-      }: StoredSession): Session => ({
-        ...session,
-        resumeHeld: isResumeHeld({ status: session.status, awaitingNewInput, inputWaiting }),
-        unenforced: listUnenforcedFields(definitions, providerId, disallowedTools),
-      }),
-  );
+  return Effect.map(host.providers(), (definitions) => (stored: StoredSession): Session => ({
+    ...Struct.omit(stored, [
+      "providerId",
+      "disallowedTools",
+      "crashGuardArmed",
+      "inputWaiting",
+      "conversationDeleted",
+    ]),
+    resumeHeld: isResumeHeld(stored),
+    unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
+  }));
 });

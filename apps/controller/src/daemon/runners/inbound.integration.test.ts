@@ -5,12 +5,11 @@
  *
  * - A conversation's session keeps its waiting input through any exit, and
  *   is resumed in place at once, so the input runs exactly once.
- * - A Thread keeps its waiting input only through an `idle_unload` exit, the
- *   runner taking an idle process down to save memory. Any other exit
- *   cancels it.
- * - The crash-loop guard: a session that exits again before starting any
- *   turn is not resumed for the same input. The input waits for the next
- *   message.
+ * - A Thread keeps no waiting input through an exit, an `idle_unload`
+ *   included: the input is cancelled.
+ * - The crash-loop guard: a resumed session that exits before starting any
+ *   turn is not resumed again for the same input. The input waits for the
+ *   next message.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
@@ -299,28 +298,23 @@ describe("an exit of a Thread with input waiting", () => {
     return { thread, inputId: queued!.id };
   };
 
-  it("resumes the Thread in place after an idle_unload and runs the input once", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { thread, inputId } = await holdQueuedThreadInput(arranged);
+  // An idle unload is no exception: only a conversation's session keeps its
+  // input through an exit.
+  it.each<ExitReason>(["idle_unload", "stopped"])(
+    "cancels the queued input for a %s exit, and does not resume the Thread",
+    async (reason) => {
+      await withAgentFleet(async (arranged) => {
+        const { thread, inputId } = await holdQueuedThreadInput(arranged);
 
-      await reportExit(arranged, thread.id, 3, "idle_unload");
+        await reportExit(arranged, thread.id, 3, reason);
 
-      await expectResumedAndRunOnce(arranged, await readSession(arranged, thread.id), inputId);
-    });
-  });
-
-  it("cancels the queued input for any other exit", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { thread, inputId } = await holdQueuedThreadInput(arranged);
-
-      await reportExit(arranged, thread.id, 3, "stopped");
-
-      const cancelled = await waitUntil("cancelled the queued input", async () => {
-        const row = (await listInputs(arranged, thread.id)).find((one) => one.id === inputId);
-        return row?.status === "cancelled" ? row : undefined;
+        const cancelled = await waitUntil("cancelled the queued input", async () => {
+          const row = (await listInputs(arranged, thread.id)).find((one) => one.id === inputId);
+          return row?.status === "cancelled" ? row : undefined;
+        });
+        expect(cancelled.reason).toContain("exited (");
+        expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
       });
-      expect(cancelled.reason).toContain("exited (");
-      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
-    });
-  });
+    },
+  );
 });

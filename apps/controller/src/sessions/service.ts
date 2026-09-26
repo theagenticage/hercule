@@ -128,7 +128,7 @@ export interface InputPage {
  * the controller daemon chose the runner and opened the workspace before this
  * row is written.
  */
-export interface Opening {
+export interface CreateRequest {
   /**
    * Created by the caller, not by the insert. The workspace is opened in the
    * same transaction, and a thread's own worktree is created on a branch named
@@ -163,7 +163,7 @@ export interface Opening {
 }
 
 /** A session claimed for starting, and the complete frame that starts it. */
-export interface Starting {
+export interface StartRequest {
   readonly sessionId: string;
   readonly frame: SessionStart;
 }
@@ -188,7 +188,7 @@ export interface StartNeeds {
 }
 
 /** One user input to store, and the model selection the session runs under from then on. */
-export interface Taking<E> {
+export interface TakeInputRequest<E> {
   readonly sessionId: string;
   /** The model selection the session runs under from this input on. */
   readonly modelSelection: ModelSelection;
@@ -226,7 +226,7 @@ export interface FoldedReport {
  * committed. Each item affects something outside the session's own rows, such
  * as its workspace or its runner, so this domain does not do it itself.
  */
-export interface Applied {
+export interface AppliedReport {
   /** The session's workspace was used at this time. */
   readonly worked?: { readonly workspaceId: string; readonly at: string };
   /** The session's new status, or `undefined` when this report did not change it. */
@@ -316,27 +316,21 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 
 /**
  * Checks whether a session keeps its inputs that are still waiting when it
- * exits for `reason`, so they go to the next process when it is resumed:
- *
- * - a session that answers an assistant's conversation keeps them whatever
- *   the reason, because they are the owner's messages;
- * - any other session keeps them only through an idle unload, because the
- *   inputs were meant for that session and the unload only saved memory.
- *
- * `reason` is `undefined` when it is not known, which keeps nothing for a
- * session that answers no conversation.
+ * exits, so they go to the next process when it is resumed. Only a session
+ * that answers an assistant's conversation keeps them, whatever the reason,
+ * because they are the owner's messages. A session whose conversation was
+ * deleted keeps nothing: it is history, and nobody reads its answers.
  */
 const keepsInputsOnExit = (
-  session: Pick<StoredSession, "conversationId">,
-  reason: string | undefined,
-): boolean => session.conversationId !== null || reason === "idle_unload";
+  session: Pick<StoredSession, "conversationId" | "conversationDeleted">,
+): boolean => session.conversationId !== null && !session.conversationDeleted;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
-  const one = readSessionOrFail(sessions);
+  const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
   const observer = yield* SessionObserver;
@@ -391,6 +385,10 @@ const make = Effect.gen(function* () {
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
         yield* sessions.resume(sessionId, yield* buildSpec(session), at);
+        // Armed until the resumed process starts a turn or new input is
+        // stored. If it exits before either, it is not resumed again for the
+        // same input (`isResumeHeld`).
+        yield* sessions.setCrashGuardArmed(sessionId, true);
         // The resumed process numbers its events from zero again, so the held
         // ingest state no longer applies. It is dropped once the resume is
         // committed, like any other cache invalidation.
@@ -440,7 +438,7 @@ const make = Effect.gen(function* () {
   const requireChangeableInputs = (
     sessionId: string,
   ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
-    Effect.flatMap(one(sessionId), (session) =>
+    Effect.flatMap(readSession(sessionId), (session) =>
       session.conversationId === null
         ? Effect.void
         : Effect.fail(createInvalidStateError(CONVERSATION_INPUT_FIXED)),
@@ -472,32 +470,32 @@ const make = Effect.gen(function* () {
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
    *
-   * - tells `SessionObserver` that the session exited;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`);
+   * - tells `SessionObserver` that the session exited, and whether the
+   *   crash-loop guard now holds it back from a resume;
    * - forgets its token and ingest state, and announces it once.
    *
-   * `ended` holds the rows as they were just before the end. `message` is the
-   * runner's error for a workspace that could not be made.
+   * `ended` holds the rows as they were just before the end.
    */
   const endSessions = (
     ended: ReadonlyArray<StoredSession>,
     reason: SessionEndReason,
-    options: {
-      readonly message?: string | undefined;
-      readonly cancelReason?: string | undefined;
-    } = {},
+    cancelReason?: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
+        if (!keepsInputsOnExit(session)) {
+          yield* inputs.cancelQueued(session.id, cancelReason);
+        }
+        // Read again after the exit and the cancel: whether the guard holds
+        // the session depends on the input that is still waiting.
+        const after = yield* sessions.one(session.id);
         yield* observer.sessionExited({
           session,
           reason,
-          ...(options.message === undefined ? {} : { message: options.message }),
+          resumeHeld: Option.isSome(after) && isResumeHeld(after.value),
         });
-        if (!keepsInputsOnExit(session, reason)) {
-          yield* inputs.cancelQueued(session.id, options.cancelReason);
-        }
       }
       yield* forgetSessions(ended.map((session) => session.id));
     });
@@ -541,10 +539,7 @@ const make = Effect.gen(function* () {
           // the session's transcript must be notified.
           yield* announce({ _tag: "transcript", sessionId: id });
         }
-        yield* endSessions(ended, "workspace_failed", {
-          message: message ?? undefined,
-          cancelReason: message ?? undefined,
-        });
+        yield* endSessions(ended, "workspace_failed", message ?? undefined);
       }),
     );
 
@@ -621,7 +616,7 @@ const make = Effect.gen(function* () {
     read: (id: Id): Effect.Effect<Session, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
-        return (yield* recordComposer)(yield* one(id));
+        return (yield* recordComposer)(yield* readSession(id));
       }),
 
     /**
@@ -637,7 +632,7 @@ const make = Effect.gen(function* () {
           decodeTranscript(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* readSession(id);
         const listing = yield* refuseCursor(
           sessions.transcript({
             sessionId: id,
@@ -656,7 +651,7 @@ const make = Effect.gen(function* () {
      * stored as `queued`: whether the runner has room for it right now is
      * decided by dispatch, the same way for a new session as for any other.
      */
-    create: (open: Opening): Effect.Effect<void, SqlError> =>
+    create: (open: CreateRequest): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
         yield* sessions.insert({
@@ -715,10 +710,10 @@ const make = Effect.gen(function* () {
       runnerId: string,
       room: number,
       needs: StartNeeds,
-    ): Effect.Effect<ReadonlyArray<Starting>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError> =>
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const claimed: Array<Starting> = [];
+        const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
@@ -928,7 +923,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endOnLostRunners(connected, at);
-        yield* endSessions(ended, "runner_lost", { cancelReason: RUNNER_LOST });
+        yield* endSessions(ended, "runner_lost", RUNNER_LOST);
         yield* Effect.forEach(
           ended,
           ({ id, runnerId }) =>
@@ -962,7 +957,9 @@ const make = Effect.gen(function* () {
      * Sets the access mode and permission profile an exited session resumes
      * under, joining the caller's transaction. The caller also puts the same
      * access mode in the resume spec, so the row shows what the resumed
-     * harness runs under.
+     * harness runs under. It is kept on the service, not read straight from
+     * the repository, because it is a write, and every write to a session
+     * goes through this service.
      *
      * It checks no grant. The caller is the controller daemon, resuming an
      * assistant's session under the assistant's current settings.
@@ -978,7 +975,7 @@ const make = Effect.gen(function* () {
      * transaction, so when the caller fails, for example on an invalid model
      * option, neither the new selection nor the input is stored.
      */
-    takeInput: <E = never>(taking: Taking<E>): Effect.Effect<StoredInput, E | SqlError> =>
+    takeInput: <E = never>(taking: TakeInputRequest<E>): Effect.Effect<StoredInput, E | SqlError> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         const created = yield* inputs.insert({
@@ -989,7 +986,9 @@ const make = Effect.gen(function* () {
           at: taking.at,
           ...(taking.claimed ? { sentAt: taking.at } : {}),
         });
-        yield* sessions.liftResumeHold(taking.sessionId);
+        // Someone is asking again, so the session may be resumed for every
+        // input that waits.
+        yield* sessions.setCrashGuardArmed(taking.sessionId, false);
         // After the insert: a session is resumed only while it has input
         // waiting, and this input is what it resumes for.
         if (taking.buildResumeSpec !== undefined) {
@@ -1022,7 +1021,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const created = yield* inputs.insertMatched(matched);
         if (Option.isNone(created)) return created;
-        yield* sessions.liftResumeHold(matched.sessionId);
+        yield* sessions.setCrashGuardArmed(matched.sessionId, false);
         yield* announce({
           _tag: "record",
           topic: "session",
@@ -1075,7 +1074,7 @@ const make = Effect.gen(function* () {
           );
           if (cancelled === 0) return;
           yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
-          yield* observer.inputsDropped(session, refusal);
+          yield* observer.inputsDropped({ session, refusal });
         }),
       ),
 
@@ -1093,14 +1092,6 @@ const make = Effect.gen(function* () {
           yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
         }
       }),
-
-    /** Returns the ids of the sessions that have a queued input not yet sent. */
-    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      inputs.listSessionsAwaitingInput(),
-
-    /** Checks whether this session has an input that was sent and not yet answered. */
-    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      inputs.holdsInputOnTheWire(sessionId),
 
     queuedInput,
 
@@ -1148,12 +1139,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const now = yield* sessions.one(row.sessionId);
           const dropped =
-            Option.isSome(now) &&
-            now.value.status === "exited" &&
-            !keepsInputsOnExit(
-              now.value,
-              Option.getOrUndefined(yield* sessions.readLastExitReason(row.sessionId)),
-            );
+            Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
           if (dropped) {
             yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
           } else {
@@ -1286,7 +1272,7 @@ const make = Effect.gen(function* () {
       runnerId: string,
       event: ProviderEvent,
       report: FoldedReport,
-    ): Effect.Effect<Applied, SqlError> =>
+    ): Effect.Effect<AppliedReport, SqlError> =>
       Effect.gen(function* () {
         const { session, folded, park } = report;
         const id = session.id;
@@ -1314,10 +1300,11 @@ const make = Effect.gen(function* () {
         let exitedHoldingInput = false;
         if (moved !== undefined) {
           yield* sessions.moved(id, moved, at);
+          // A turn started, so the resumed process did work: the crash-loop
+          // guard no longer applies to it.
+          if (moved === "busy") yield* sessions.setCrashGuardArmed(id, false);
           if (event._tag === "session.exited") {
-            yield* endSessions([session], event.reason, {
-              cancelReason: describeExited(event.reason),
-            });
+            yield* endSessions([session], event.reason, describeExited(event.reason));
             // A session that keeps its input through an exit is resumed for
             // it once this is committed. The caller does that, because it
             // sends frames.
@@ -1369,7 +1356,7 @@ const make = Effect.gen(function* () {
           decodeInputQuery(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* readSession(id);
         const listing = yield* refuseCursor(
           inputs.list({
             sessionId: id,

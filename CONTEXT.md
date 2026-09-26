@@ -69,7 +69,7 @@ Delivering user input into a session's running turn, folding it into that turn i
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session keeps it only through an idle unload.
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -149,7 +149,7 @@ One line of a conversation, stored in order with its sender's role and label: wh
 _Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
 
 **Notice**:
-A conversation message the system writes in one of two cases: "<name> was interrupted: <reason>" when the session exits while a turn runs, and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it or the session holding it cannot be resumed. No other event writes one; a failed turn in a live session shows only its partial reply. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
+A conversation message the system writes in one of two forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails while the session lives; and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it, the session holding it cannot be resumed, or the crash-loop guard holds that session. No other event writes one; a turn the user interrupts shows only its partial reply. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:

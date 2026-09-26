@@ -4,8 +4,14 @@
  * conversation.
  *
  * - A report writes the replies the assistant's reply mode takes from it.
+ * - A turn that fails writes "<name> was interrupted: its turn failed", after
+ *   any reply it produced. A turn the user interrupted writes no notice: the
+ *   user knows why it stopped.
  * - An exit while a turn is running writes "<name> was interrupted: <why>".
- *   Any other exit writes nothing, an idle unload included: the session is
+ * - An exit that leaves the session held back by the crash-loop guard writes
+ *   "<name> can't be reached: <why>": the message waits, and only another
+ *   message tries again.
+ * - Any other exit writes nothing, an idle unload included: the session is
  *   resumed for whatever waits, and nobody was cut off.
  * - Input dropped because the session cannot be resumed writes "<name> can't
  *   be reached: <why>".
@@ -27,7 +33,12 @@ import type { AssistantReply } from "@hercule/contract";
 import { buildSessionStamp } from "../actor";
 import type { ConversationMessages } from "../conversations";
 import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
-import { buildInterruptedText, buildUnreachableText, makeNoticeWriter } from "./notices";
+import {
+  buildInterruptedText,
+  buildTurnFailedText,
+  buildUnreachableText,
+  makeNoticeWriter,
+} from "./notices";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -99,25 +110,49 @@ const make = Effect.gen(function* () {
             actor: buildSessionStamp(session.id),
           });
         }
+        // Written after the partial reply, so the owner reads what the
+        // assistant said and then why it stopped.
+        if (
+          event._tag === "turn.completed" &&
+          event.state !== "completed" &&
+          event.state !== "interrupted"
+        ) {
+          yield* appendNotice({
+            conversationId: answered.value.conversationId,
+            name: answered.value.name,
+            text: buildTurnFailedText(answered.value.name, event.error),
+            sessionId: session.id,
+          });
+        }
       }),
 
     sessionExited: (exit) =>
       Effect.gen(function* () {
-        // Only a running turn has someone waiting on its reply. Whatever else
-        // waits for the session is kept and goes to the resumed process, or
-        // is dropped with its own notice when the session cannot be resumed.
-        if (exit.session.status !== "busy") return;
+        // Only a running turn has someone waiting on its reply, and only a
+        // held session leaves a message waiting with nothing to retry it.
+        // Whatever else waits for the session is kept and goes to the resumed
+        // process, or is dropped with its own notice when the session cannot
+        // be resumed.
+        const busy = exit.session.status === "busy";
+        if (!busy && !exit.resumeHeld) return;
         const answered = yield* readAnsweredConversation(exit.session);
         if (Option.isNone(answered)) return;
+        const { conversationId, name } = answered.value;
         yield* appendNotice({
-          conversationId: answered.value.conversationId,
-          name: answered.value.name,
-          text: buildInterruptedText(answered.value.name, exit.reason, exit.message),
+          conversationId,
+          name,
+          text: busy
+            ? buildInterruptedText(name, exit.reason)
+            : buildUnreachableText(
+                name,
+                "its session exited before it could start a turn; " +
+                  "send another message to try again",
+              ),
           sessionId: exit.session.id,
         });
       }),
 
-    inputsDropped: (session, refusal) =>
+    inputsDropped: ({ session, refusal }) =>
       Effect.gen(function* () {
         const answered = yield* readAnsweredConversation(session);
         if (Option.isNone(answered)) return;

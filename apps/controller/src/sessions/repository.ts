@@ -70,13 +70,19 @@ export interface StoredSession {
   readonly exitedAt: string | null;
   readonly lastActivityAt: string;
   /**
-   * Whether the session's last exit came before its process started any
-   * turn, with no input stored for it since. The crash-loop guard in
-   * `isResumeHeld` reads it. A new input or a resume sets it back to `false`.
+   * Whether the crash-loop guard is armed: the session was resumed, and since
+   * that resume its process has started no turn and no input has been stored
+   * for it. `isResumeHeld` reads it. The service sets it.
    */
-  readonly awaitingNewInput: boolean;
+  readonly crashGuardArmed: boolean;
   /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
   readonly inputWaiting: boolean;
+  /**
+   * Whether the session answered an assistant's conversation that has since
+   * been deleted, with its assistant. Such a session is kept as history and
+   * takes no input. Computed on read.
+   */
+  readonly conversationDeleted: boolean;
   /**
    * The provider behind the session's instance, and the tool families its
    * spec disallowed. Both are used to work out whether the provider enforces
@@ -179,8 +185,9 @@ interface SessionRow {
   readonly started_at: string | null;
   readonly exited_at: string | null;
   readonly last_activity_at: string;
-  readonly awaiting_new_input: number;
+  readonly crash_guard_armed: number;
   readonly input_waiting: number;
+  readonly conversation_deleted: number;
 }
 
 /**
@@ -199,9 +206,11 @@ const buildColumnList = (): string =>
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_request, created_at, started_at, exited_at, " +
-  "last_activity_at, awaiting_new_input, " +
+  "last_activity_at, crash_guard_armed, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
+  "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
+  "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
   `(${buildResumableClause("sessions")}) AS resumable`;
 
 const toSession = (row: SessionRow): StoredSession => ({
@@ -228,8 +237,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   startedAt: row.started_at,
   exitedAt: row.exited_at,
   lastActivityAt: row.last_activity_at,
-  awaitingNewInput: row.awaiting_new_input === 1,
+  crashGuardArmed: row.crash_guard_armed === 1,
   inputWaiting: row.input_waiting === 1,
+  conversationDeleted: row.conversation_deleted === 1,
   providerId: row.provider_id,
   disallowedTools:
     row.disallowed_tools === null
@@ -337,8 +347,7 @@ const make = Effect.gen(function* () {
           last_activity_at = ${at},
           open_request = NULL,
           token_hash = NULL,
-          exited_at = ${at},
-          awaiting_new_input = 1 - turn_started_in_process
+          exited_at = ${at}
         WHERE id IN ${sql.in(rows.map((row) => row.id))} AND status <> 'exited'
       `;
       return rows.map(toSession);
@@ -546,22 +555,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the reason on the newest `session.exited` row of the session's
-     * stream, or `none` when the stream has none. An exit the controller
-     * decided on its own, such as a lost runner, writes no such row.
-     */
-    readLastExitReason: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly reason: string | null }>`
-          SELECT json_extract(event, '$.reason') AS reason FROM session_stream
-          WHERE session_id = ${uuidFromString(sessionId)}
-            AND json_extract(event, '$._tag') = 'session.exited'
-          ORDER BY position DESC LIMIT 1
-        `,
-        (rows) => Option.fromNullishOr(rows[0]?.reason),
-      ),
-
-    /**
      * Returns the session's ingest state: the highest sequence number already
      * written, and the offset added to the current process's sequence numbers.
      *
@@ -604,10 +597,6 @@ const make = Effect.gen(function* () {
      * - `startedAt` is written once, when the session first becomes `idle` or
      *   `busy`. A session resumed later keeps its first start time.
      * - `exitedAt` is the last exit, so every move to `exited` sets it again.
-     * - A move to `busy` means a turn started, so it marks the current
-     *   process as having started one.
-     * - A move to `exited` before the process started any turn sets
-     *   `awaitingNewInput`, for the crash-loop guard.
      * - A status with no process behind it clears the token hash in the same
      *   write. The table's constraint rejects the row otherwise (migration
      *   0023).
@@ -625,10 +614,6 @@ const make = Effect.gen(function* () {
           started_at = CASE WHEN started_at IS NULL AND ${status} IN ('idle', 'busy') THEN ${at}
                             ELSE started_at END,
           exited_at = CASE WHEN ${status} = 'exited' THEN ${at} ELSE exited_at END,
-          turn_started_in_process = CASE WHEN ${status} = 'busy' THEN 1
-                                         ELSE turn_started_in_process END,
-          awaiting_new_input = CASE WHEN ${status} = 'exited' THEN 1 - turn_started_in_process
-                                    ELSE awaiting_new_input END,
           token_hash = CASE WHEN ${status} IN ('starting', 'idle', 'busy') THEN token_hash
                             ELSE NULL END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
@@ -671,9 +656,7 @@ const make = Effect.gen(function* () {
      * `exited`, and the one exception to the rule in `moved`.
      *
      * It decides nothing: whether the session may be resumed is the service's
-     * check, made in the same transaction just before this write. The new
-     * process has started no turn yet, and nothing holds it back any more, so
-     * both flags of the crash-loop guard are cleared.
+     * check, made in the same transaction just before this write.
      *
      * An exited row holds no token hash (migration 0023), so a token that
      * leaked before the exit stays invalid once the session is back on the
@@ -692,23 +675,20 @@ const make = Effect.gen(function* () {
           spec = ${spec},
           last_activity_at = ${at},
           open_request = NULL,
-          turn_started_in_process = 0,
-          awaiting_new_input = 0,
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
     /**
-     * Lifts the crash-loop guard's hold on the session, because an input was
-     * just stored for it. Someone is asking again, so the session may be
-     * resumed for every input that waits. The caller runs it in the
-     * transaction that stores the input.
+     * Stores whether the session's crash-loop guard is armed. It decides
+     * nothing: the service decides when the guard is armed and when it is
+     * not.
      */
-    liftResumeHold: (sessionId: string): Effect.Effect<void, SqlError> =>
+    setCrashGuardArmed: (sessionId: string, armed: boolean): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE sessions SET awaiting_new_input = 0
-        WHERE id = ${uuidFromString(sessionId)} AND awaiting_new_input = 1
+        UPDATE sessions SET crash_guard_armed = ${armed ? 1 : 0}
+        WHERE id = ${uuidFromString(sessionId)}
       `),
 
     /**

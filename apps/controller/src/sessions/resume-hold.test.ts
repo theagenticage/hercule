@@ -2,24 +2,29 @@
 import { describe, expect, it } from "vitest";
 import { isResumeHeld } from "./resume-hold";
 
-/** An exited session whose last process started no turn, with input from before the exit. */
+/** A resumed session that exited before starting a turn, with input waiting for it. */
 const crashedBeforeWork = {
   status: "exited",
-  awaitingNewInput: true,
+  crashGuardArmed: true,
   inputWaiting: true,
+  resumable: true,
 } as const;
 
 describe("holding a session back from a resume", () => {
-  it("holds a session that exited before starting a turn, for input from before the exit", () => {
+  it("holds a resumed session that exited before starting a turn, for input from before the exit", () => {
     expect(isResumeHeld(crashedBeforeWork)).toBe(true);
   });
 
-  it("does not hold a session whose last process started a turn, or that got new input", () => {
-    expect(isResumeHeld({ ...crashedBeforeWork, awaitingNewInput: false })).toBe(false);
+  it("does not hold a session whose guard is not armed", () => {
+    expect(isResumeHeld({ ...crashedBeforeWork, crashGuardArmed: false })).toBe(false);
   });
 
   it("does not hold a session with no input waiting", () => {
     expect(isResumeHeld({ ...crashedBeforeWork, inputWaiting: false })).toBe(false);
+  });
+
+  it("does not hold a session that could not be resumed anyway", () => {
+    expect(isResumeHeld({ ...crashedBeforeWork, resumable: false })).toBe(false);
   });
 
   it("does not hold a session that has not exited", () => {

@@ -49,6 +49,7 @@ import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
+  inputRepository,
   isResumeHeld,
   readSessionOrFail,
   sessionRecordComposer,
@@ -112,6 +113,14 @@ const NOT_BUSY = "only a busy session can be steered";
 const USE_CONVERSATION_SEND =
   "this session belongs to an assistant's conversation; send the message with conversation.send";
 
+/**
+ * The refusal of `session.input` on a session whose assistant, and with it
+ * the conversation the session answered, was deleted.
+ */
+const CONVERSATION_DELETED =
+  "this session answered an assistant's conversation that was deleted; " +
+  "it is kept as history and takes no input";
+
 const NO_OPEN_REQUEST = "that session is not waiting on a decision";
 
 /**
@@ -136,7 +145,8 @@ type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.Sc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
-  const one = readSessionOrFail(yield* sessionRepository);
+  const readSession = readSessionOrFail(yield* sessionRepository);
+  const inputs = yield* inputRepository;
   const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
@@ -216,7 +226,7 @@ const make = Effect.gen(function* () {
     row: StoredInput,
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
-      const session = yield* one(row.sessionId);
+      const session = yield* readSession(row.sessionId);
       const answer = yield* deliverTo(session, row);
       const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
       if (delivery !== undefined) {
@@ -276,8 +286,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = session.agentId === null ? Option.none() : yield* agents.read(session.agentId);
       // A conversation's session is spawned from its assistant, and the
-      // assistant's conversations and their sessions' input go when it is
-      // deleted, so nothing resumes a session whose assistant is gone.
+      // assistant's conversations go when it is deleted. The resume check
+      // (`resumable`) refuses a session whose conversation is gone, so
+      // nothing resumes a session whose assistant is gone.
       if (Option.isNone(found))
         return yield* Effect.die("a conversation's session has no assistant");
       const assistant = found.value;
@@ -363,13 +374,13 @@ const make = Effect.gen(function* () {
     sessionId: string,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      const session = yield* one(sessionId);
+      const session = yield* readSession(sessionId);
       if (session.status === "idle") {
         // The runner takes one input per turn. An input is already sent and
         // unanswered, so its turn has not started yet, and a second input
         // sent now would have to be held by the runner. The next pass sends
         // it, once the runner has reported what it did with the first.
-        if (yield* sessions.holdsInputOnTheWire(sessionId)) return;
+        if (yield* inputs.holdsInputOnTheWire(sessionId)) return;
         // A runner that is not connected cannot be sent anything. Claiming a
         // row only to put it straight back would rewrite the row, and notify
         // every client watching the session, on every pass while the runner
@@ -393,7 +404,8 @@ const make = Effect.gen(function* () {
       }
       // Checked again, with the rest of the rule, inside the resume's
       // transaction. Checked here too, so a held session, which every tick
-      // reaches, costs no spec build.
+      // reaches, costs no spec build. The owner was told at the exit that
+      // put the hold on, with a "can't be reached" notice.
       if (isResumeHeld(session)) return;
       const { nativeSessionId } = check;
       const resumed = yield* withTransaction(
@@ -503,7 +515,7 @@ const make = Effect.gen(function* () {
     inputId: string,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      const session = yield* one(sessionId);
+      const session = yield* readSession(sessionId);
       switch (session.status) {
         case "busy":
           return yield* sessions.queuedInput(sessionId, inputId).pipe(
@@ -523,6 +535,8 @@ const make = Effect.gen(function* () {
         case "queued":
           return yield* dispatch(session.runnerId);
         case "starting":
+          // The runner's `session.started` makes the session idle, and the
+          // flush on that change sends the oldest waiting input.
           return;
         case "idle":
         case "exited":
@@ -566,7 +580,9 @@ const make = Effect.gen(function* () {
             // The session left `queued` after it was read. If it has exited,
             // this stop changes nothing and records nothing. Otherwise
             // dispatch sent it to its runner, which is told to stop it below.
-            return (yield* one(session.id)).status === "exited" ? ("exited" as const) : undefined;
+            return (yield* readSession(session.id)).status === "exited"
+              ? ("exited" as const)
+              : undefined;
           }),
         );
         if (ended !== undefined) return ended;
@@ -617,27 +633,26 @@ const make = Effect.gen(function* () {
       InvalidState | Validation | NotFound | SqlError | SettingError | Schema.SchemaError
     > =>
       Effect.gen(function* () {
-        const session = yield* one(sessionId);
-        let nativeSessionId: string | undefined;
-        if (session.status === "exited") {
-          const resumed = yield* resumableNativeSession(session).pipe(
-            Effect.map(Option.some),
-            Effect.catchIf(
-              (error): error is InvalidState => error instanceof InvalidState,
-              () => Effect.succeed(Option.none<string>()),
-            ),
-          );
-          if (Option.isNone(resumed)) return Option.none();
-          nativeSessionId = resumed.value;
-        }
-        const resumeFrom = nativeSessionId;
+        const session = yield* readSession(sessionId);
+        // `undefined` for a session that has not exited, and `null` for an
+        // exited session that cannot be resumed.
+        const nativeSessionId =
+          session.status === "exited"
+            ? yield* resumableNativeSession(session).pipe(
+                Effect.catchIf(
+                  (error): error is InvalidState => error instanceof InvalidState,
+                  () => Effect.succeed(null),
+                ),
+              )
+            : undefined;
+        if (nativeSessionId === null) return Option.none();
         const stored = yield* sessions.takeInput({
           sessionId,
           modelSelection: session.modelSelection,
           buildResumeSpec:
-            resumeFrom === undefined
+            nativeSessionId === undefined
               ? undefined
-              : (now: StoredSession) => buildConversationResumeSpec(now, resumeFrom),
+              : (now: StoredSession) => buildConversationResumeSpec(now, nativeSessionId),
           text,
           at: yield* nowIso,
           claimed: false,
@@ -664,7 +679,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const session = yield* one(id);
+            const session = yield* readSession(id);
             if (session.status === "exited")
               return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
             const modelSelection = yield* resolveModelSelection(session, given);
@@ -708,7 +723,10 @@ const make = Effect.gen(function* () {
         const { session, row } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const session = yield* one(id);
+            const session = yield* readSession(id);
+            if (session.conversationDeleted) {
+              return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
+            }
             if (session.conversationId !== null) {
               return yield* Effect.fail(createInvalidStateError(USE_CONVERSATION_SEND));
             }
@@ -749,7 +767,7 @@ const make = Effect.gen(function* () {
     steer: (sessionId: Id, inputId: Id): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.steer");
-        const session = yield* one(sessionId);
+        const session = yield* readSession(sessionId);
         // Look the row up before checking the session's status, so an input id
         // from another session fails with not_found, whatever this session's
         // status is.
@@ -770,7 +788,7 @@ const make = Effect.gen(function* () {
     interrupt: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
-        const session = yield* one(id);
+        const session = yield* readSession(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         yield* interruptTurn(session);
@@ -794,7 +812,7 @@ const make = Effect.gen(function* () {
           decodeRespond(input),
           createDecodeValidationError,
         );
-        const session = yield* one(id);
+        const session = yield* readSession(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         const open = session.openRequest;
@@ -844,12 +862,12 @@ const make = Effect.gen(function* () {
     stop: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.stop");
-        const session = yield* one(id);
+        const session = yield* readSession(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         const stopped = yield* stopSession(session);
         if (stopped === "unreachable") return yield* Effect.fail(createInvalidStateError(GONE));
-        return (yield* recordComposer)(yield* one(id));
+        return (yield* recordComposer)(yield* readSession(id));
       }),
 
     stopSession,

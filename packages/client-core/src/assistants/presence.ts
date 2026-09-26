@@ -14,7 +14,9 @@ import { WORKING_STATUSES } from "../threads/status";
  *   assistant has no session yet and the next message starts one;
  * - "unavailable": the session has exited and cannot be resumed, or it is
  *   held by the crash-loop guard. The next message starts a new session, or
- *   resumes the held one.
+ *   resumes the held one. For a held session, the owner was told with the
+ *   notice "<name> can't be reached: its session exited before it could
+ *   start a turn; send another message to try again".
  */
 export type AssistantPresence = "working" | "idle" | "asleep" | "unavailable";
 

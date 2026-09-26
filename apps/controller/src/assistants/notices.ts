@@ -5,11 +5,12 @@
  *
  * There are exactly two notices, and no caller writes the wording itself:
  *
- * - "<name> was interrupted: <why>", when a session exits while a turn is
- *   running, so a reply was cut off;
+ * - "<name> was interrupted: <why>", when a reply was cut off: the session
+ *   exited while a turn was running, or the turn failed;
  * - "<name> can't be reached: <why>", when a message could not be delivered:
- *   no session could take it, or the session that held it ended and cannot
- *   be resumed.
+ *   no session could take it, the session that held it ended and cannot be
+ *   resumed, or the session exited before it could start a turn and is held
+ *   back from resuming.
  *
  * A notice is stamped with the system.
  */
@@ -28,25 +29,27 @@ const EXIT_REASON_TEXTS: Record<SessionEndReason, string> = {
   crash: "its session crashed",
   process_exit: "its harness process exited",
   stopped: "its session was stopped",
+  // Never shown: an idle unload only unloads an idle session, so no turn is cut off.
   idle_unload: "its session was unloaded while idle",
   runner_restart: "its runner restarted",
   inactivity_timeout: "its session timed out",
   absolute_timeout: "its session reached its time limit",
+  // Never shown: only a session with a workspace can hit it, and a conversation's has none.
   workspace_failed: "its workspace could not be made",
   runner_retired: "its runner was retired",
   runner_lost: "its runner could not be reached",
 };
 
+/** Builds the notice text for a turn cut off by a session's exit for `reason`. */
+export const buildInterruptedText = (name: string, reason: SessionEndReason): string =>
+  `${name} was interrupted: ${EXIT_REASON_TEXTS[reason]}`;
+
 /**
- * Builds the notice text for a turn cut off by a session's exit. `message` is
- * the runner's error, when it gave one.
+ * Builds the notice text for a turn that failed while its session lives.
+ * `error` is the runner's error message, when the report carried one.
  */
-export const buildInterruptedText = (
-  name: string,
-  reason: SessionEndReason,
-  message: string | undefined,
-): string =>
-  `${name} was interrupted: ${EXIT_REASON_TEXTS[reason]}${message === undefined ? "" : `: ${message}`}`;
+export const buildTurnFailedText = (name: string, error: string | undefined): string =>
+  `${name} was interrupted: its turn failed${error === undefined ? "" : `: ${error}`}`;
 
 /** Builds the notice text for a message that could not be delivered, for the reason `why`. */
 export const buildUnreachableText = (name: string, why: string): string =>

@@ -429,37 +429,61 @@ const insertResumableSession = Effect.gen(function* () {
 });
 
 describe("resuming an exited session", () => {
-  it("puts the session back on the queue, and holds it back after an exit before any turn until new input", async () => {
-    // The crash-loop guard reads the flag: an exit before the process started
-    // a turn sets it, and a resume or a new input clears it.
+  it("puts the session back on the queue, and stores the crash-loop guard as the service sets it", async () => {
+    // The repository decides nothing about the guard: a resume or an exit
+    // leaves the flag as it is, and only `setCrashGuardArmed` changes it.
     const rows = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* insertResumableSession;
-        const exitedBeforeWork = yield* sessions.one(sessionId);
+        const exited = yield* sessions.one(sessionId);
         yield* sessions.resume(sessionId, "{}", at);
         const resumed = yield* sessions.one(sessionId);
-        yield* sessions.moved(sessionId, "busy", at);
+        yield* sessions.setCrashGuardArmed(sessionId, true);
         yield* sessions.moved(sessionId, "exited", at);
-        const exitedAfterWork = yield* sessions.one(sessionId);
-        yield* sessions.resume(sessionId, "{}", at);
-        yield* sessions.moved(sessionId, "exited", at);
-        const exitedAgain = yield* sessions.one(sessionId);
-        yield* sessions.liftResumeHold(sessionId);
-        const lifted = yield* sessions.one(sessionId);
-        return [exitedBeforeWork, resumed, exitedAfterWork, exitedAgain, lifted].map((row) =>
-          Option.map(row, (one) => [one.status, one.awaitingNewInput]),
+        const armed = yield* sessions.one(sessionId);
+        yield* sessions.setCrashGuardArmed(sessionId, false);
+        const disarmed = yield* sessions.one(sessionId);
+        return [exited, resumed, armed, disarmed].map((row) =>
+          Option.map(row, (stored) => [stored.status, stored.crashGuardArmed]),
         );
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(rows).toEqual([
-      Option.some(["exited", true]),
-      Option.some(["queued", false]),
       Option.some(["exited", false]),
+      Option.some(["queued", false]),
       Option.some(["exited", true]),
       Option.some(["exited", false]),
     ]);
+  });
+});
+
+describe("whether a session's conversation was deleted", () => {
+  it("is true only for a session whose conversation no longer exists", async () => {
+    const deleted = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const answersNone = yield* sessions.one(sessionId);
+        const conversation = mintUuid();
+        yield* sql`
+          INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+          VALUES (${conversation}, ${mintUuid()}, 'web', NULL, ${at})
+        `;
+        yield* sql`UPDATE sessions SET conversation_id = ${conversation}
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        const answersOne = yield* sessions.one(sessionId);
+        yield* sql`DELETE FROM conversations WHERE id = ${conversation}`;
+        const answeredDeleted = yield* sessions.one(sessionId);
+        return [answersNone, answersOne, answeredDeleted].map((row) =>
+          Option.map(row, (stored) => stored.conversationDeleted),
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(deleted).toEqual([Option.some(false), Option.some(false), Option.some(true)]);
   });
 });
 
