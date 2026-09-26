@@ -144,7 +144,7 @@ describe("the turns of a Thread", () => {
         _tag: "session.started",
         providerRefs: { nativeSessionId: "native-thread" },
       });
-      await waitForSession(arranged, thread.id, (one) => one.status === "idle");
+      await waitForSession(arranged, thread.id, (one) => one.status === "busy");
 
       await runTurn(arranged, thread.id, 2, "t1", ["a", "b"]);
 

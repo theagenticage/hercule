@@ -1278,7 +1278,10 @@ const spawnSession = async (arranged: Arranged, prompt: string): Promise<Session
   return (await response.json()) as Session;
 };
 
-/** Spawns a session and waits until the runner has reported it started. */
+/**
+ * Spawns a session and waits until the runner has reported it started and
+ * answered that its prompt opened a turn, which makes the session `busy`.
+ */
 const spawnRunningSession = async (arranged: Arranged): Promise<Session> => {
   const session = await spawnSession(arranged, "hello");
   await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
@@ -1290,7 +1293,7 @@ const spawnRunningSession = async (arranged: Arranged): Promise<Session> => {
   });
   return await waitUntil("started the session", async () => {
     const one = await readSession(arranged, session.id);
-    return one.status === "idle" ? one : undefined;
+    return one.status === "busy" ? one : undefined;
   });
 };
 

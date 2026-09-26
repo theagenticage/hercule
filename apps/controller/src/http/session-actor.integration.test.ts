@@ -149,7 +149,7 @@ describe("the token the controller mints for a session", () => {
         _tag: "session.started",
         providerRefs: { nativeSessionId: "native-1" },
       });
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
 
       const fresh = await get(arranged.harness.base, "/api/v1/tasks", next);
       expect(fresh.status, await fresh.clone().text()).toBe(200);

@@ -57,7 +57,7 @@ const NEVER_STARTED =
   "provider-native session, so its transcript is gone and there is nothing to resume); " +
   "send the message again to start a new session";
 
-/** The conversation of these tests: the default assistant's, renamed to Ada, and its session, idle after "hi". */
+/** The conversation of these tests: the default assistant's, renamed to Ada, and its session, busy with the turn "hi" opened. */
 interface AdaConversation {
   readonly conversation: Conversation;
   readonly session: Session;
@@ -65,8 +65,10 @@ interface AdaConversation {
 
 /**
  * Renames the default assistant to Ada, sets its reply mode, and starts its
- * conversation session with the message "hi". The runner's next sequence number
- * for the session is 2.
+ * conversation session with the message "hi". The runner answers that "hi"
+ * opened a turn and reports nothing more, so the session is `busy` until the
+ * test reports that turn's end. The runner's next sequence number for the
+ * session is 2.
  */
 const startAda = async (
   arranged: Arranged,
@@ -155,7 +157,7 @@ const expectSessionNotice = async (
   });
 };
 
-/** Reports a turn start at sequence number 2 and waits until the session is busy. */
+/** Reports the start of the turn "hi" opened, at sequence number 2, and waits until the session is busy. */
 const startTurn = async (arranged: Arranged, sessionId: string): Promise<void> => {
   reportEvent(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
@@ -310,6 +312,37 @@ describe("a session that exits while busy", () => {
   );
 });
 
+describe("a session that exits after the runner opened a turn, before the turn started", () => {
+  it("writes that the assistant was interrupted, because the turn counts as running from the runner's answer", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation, session } = await startAda(arranged);
+      const next = await runTurn(arranged, session.id, 2, "t1", ["hello"]);
+      await sendMessage(arranged, conversation.id, "are you there?");
+      // The runner answers that the message opened a turn, and exits before
+      // it reports `turn.started`, as a harness can that starts its turn
+      // after it answers.
+      await waitUntil("delivered the message as a new turn", async () =>
+        (await listInputs(arranged, session.id)).find(
+          (one) => one.text === "are you there?" && one.delivery === "opened",
+        ),
+      );
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+
+      await reportExit(arranged, session.id, next, "crash");
+
+      const answers = await waitUntil("wrote the notice", async () => {
+        const found = await listAnswers(arranged, conversation.id);
+        return found.length > 1 ? found : undefined;
+      });
+      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
+        ["assistant", "hello"],
+        ["notice", "Ada was interrupted: its session crashed"],
+      ]);
+      expect(answers[1]).toMatchObject({ sessionId: session.id, turnId: null, actor: "system" });
+    });
+  });
+});
+
 describe("a session stopped before a runner took it", () => {
   it("writes that the assistant can't be reached, because the message that queued it is never taken", async () => {
     await withAgentFleet(async (arranged) => {
@@ -443,6 +476,7 @@ describe("a session that exits while idle with a message still waiting", () => {
   it("writes no notice and resumes the session for the message the runner refused", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
+      const next = await runTurn(arranged, session.id, 2, "t1", []);
       arranged.wire.answering(() => ({ message: "the harness is not ready" }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitUntil("stored the refusal on the input", async () =>
@@ -453,7 +487,7 @@ describe("a session that exits while idle with a message still waiting", () => {
 
       // Not `reportExit`: the session is resumed straight after the exit, so
       // it may never be seen as exited.
-      reportEvent(arranged.wire, 2, {
+      reportEvent(arranged.wire, next, {
         eventId: crypto.randomUUID(),
         sessionId: session.id,
         at,
@@ -476,7 +510,8 @@ describe("a resumed session that exits before it starts a turn", () => {
   it("writes that the assistant can't be reached, and resumes it again for the owner's next message", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
-      await reportExit(arranged, session.id, 2, "idle_unload");
+      const next = await runTurn(arranged, session.id, 2, "t1", []);
+      await reportExit(arranged, session.id, next, "idle_unload");
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitForStartFrames(arranged, session.id, 2);
 
@@ -517,7 +552,7 @@ describe("a Thread", () => {
         _tag: "session.started",
         providerRefs: { nativeSessionId: "native-thread" },
       });
-      await waitForSession(arranged, thread.id, (one) => one.status === "idle");
+      await waitForSession(arranged, thread.id, (one) => one.status === "busy");
 
       const next = await runTurn(arranged, thread.id, 2, "t1", [], {
         state: "failed",

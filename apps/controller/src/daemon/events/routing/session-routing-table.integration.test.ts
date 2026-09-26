@@ -18,6 +18,7 @@ import {
 import {
   waitUntilCaughtUp,
   emitManualEvent,
+  endPromptTurn,
   exitSession,
   waitForFrameCarrying,
   waitForHealth,
@@ -54,6 +55,7 @@ describe("the session routing table's sweep", () => {
       const sleeping = await subscribeAgent(arranged, resumable, REF);
       const doomed = await subscribeAgent(arranged, gone, REF);
 
+      await endPromptTurn(arranged, idle);
       await exitSession(arranged, resumable, 2);
       expect((await readSession(arranged, resumable.session.id)).resumable).toBe(true);
       await exitSession(arranged, gone, 1);
@@ -187,6 +189,7 @@ describe("a condition the router cannot evaluate", () => {
       const sound = await spawnSubscriber(arranged, "sound-holder");
       const failing = await subscribeAgent(arranged, broken, REF);
       const working = await subscribeAgent(arranged, sound, REF);
+      await endPromptTurn(arranged, sound);
       await storeCondition(arranged.harness, failing, UNKNOWN_FUNCTION);
 
       const eventId = await emitManualEvent(arranged, [REF], "still delivered");

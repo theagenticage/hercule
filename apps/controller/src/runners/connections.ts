@@ -76,11 +76,15 @@ export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | S
  * sit above sessions instead of below. The connection is included so the
  * consumer can mark it as caught up, keyed by connection like every other
  * write here.
+ *
+ * A `sessionInputResult` is session traffic as well as an answer: whether an
+ * input opened a turn changes the session's status, and a status must be
+ * written in the order the runner reported things.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
   readonly connection: Connection;
-  readonly frame: SessionEvent | SessionsReport;
+  readonly frame: SessionEvent | SessionsReport | SessionInputResult;
 }
 
 /**
@@ -425,7 +429,7 @@ const make = Effect.gen(function* () {
     reportedSession: (
       id: string,
       connection: Connection,
-      frame: SessionEvent | SessionsReport,
+      frame: SessionEvent | SessionsReport | SessionInputResult,
     ): Effect.Effect<void> =>
       Effect.suspend(() =>
         reachable.get(id)?.connection === connection

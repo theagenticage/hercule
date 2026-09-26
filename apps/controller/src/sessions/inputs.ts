@@ -257,6 +257,15 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
+    /** Returns the id of the session an input belongs to, or `none` when there is no such input. */
+    findSessionId: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          SELECT session_id FROM session_inputs WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.session_id)),
+      ),
+
     /** Returns one input of a session. An input id that belongs to another session returns `none`. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(

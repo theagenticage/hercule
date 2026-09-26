@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   at,
   readSession,
+  waitForSession,
   reportEvent,
   waitForStartFrames,
   WAIT_DEADLINE_MS,
@@ -18,9 +19,9 @@ import {
 import { post } from "../../../http/testing";
 import {
   emitManualEvent,
+  endPromptTurn,
   exitSession,
   waitForFrameCarrying,
-  listInputFrames,
   makeBusy,
   REF,
   waitForMatchedInputRows,
@@ -41,7 +42,7 @@ describe("the delivery of a queued input", () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
-      expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
+      await endPromptTurn(arranged, agent);
 
       await emitManualEvent(arranged, [REF], "delivered at once");
 
@@ -75,13 +76,14 @@ describe("the delivery of a queued input", () => {
       expect(listFramesCarrying(arranged, "the older one")).toEqual([]);
       expect(listFramesCarrying(arranged, "the newer one")).toEqual([]);
 
-      // The end of the turn releases them, oldest first.
+      // The end of the turn releases the oldest one. The runner answers that
+      // it opened a turn, so the newer one waits for that turn to end.
       reportTurnCompleted(arranged, agent.session.id, 3);
+      await waitForFrameCarrying(arranged, "the older one");
+      await waitOutSeveralTicks();
+      expect(listFramesCarrying(arranged, "the newer one")).toEqual([]);
+      reportTurnCompleted(arranged, agent.session.id, 4);
       await waitForFrameCarrying(arranged, "the newer one");
-      const sent = listInputFrames(arranged).map((frame) => frame.input.text);
-      expect(sent.findIndex((text) => text.includes("the older one"))).toBeLessThan(
-        sent.findIndex((text) => text.includes("the newer one")),
-      );
       const rows = await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) =>
         found.every((row) => row.status === "delivered"),
       );
@@ -93,6 +95,7 @@ describe("the delivery of a queued input", () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      await endPromptTurn(arranged, agent);
       // The fake runner accepts the frame and reports nothing, so as far as the
       // controller knows, the turn has not started.
       arranged.wire.answering(() => undefined);
@@ -108,8 +111,11 @@ describe("the delivery of a queued input", () => {
       await waitOutSeveralTicks();
       expect(listFramesCarrying(arranged, "the newer one")).toEqual([]);
 
-      // The runner finally replies, which lets the next row be sent.
+      // The runner finally answers that the input opened a turn, and the end
+      // of that turn lets the next row be sent.
       arranged.wire.release("opened");
+      await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
+      reportTurnCompleted(arranged, agent.session.id, 3);
       await waitForFrameCarrying(arranged, "the newer one");
     });
   });

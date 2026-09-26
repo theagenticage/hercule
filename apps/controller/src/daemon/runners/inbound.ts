@@ -106,6 +106,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      if (traffic.frame._tag === "sessionInputResult") {
+        return yield* sessions.applyInputResult(traffic.runnerId, traffic.frame);
+      }
       const { seq, event } = traffic.frame;
       // The fold reads and publishes but writes nothing, so it runs outside
       // the transaction. A browser watching the session gets the delta

@@ -67,8 +67,8 @@ const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecor
 const at = "2026-09-16T10:00:00.000Z";
 
 /**
- * Spawns a thread in a worktree of its own, and waits until it is started and
- * idle on the runner.
+ * Spawns a thread in a worktree of its own, and waits until it is started on
+ * the runner and busy with the turn its prompt opened.
  */
 const spawnThreadIn = async (
   arranged: Arranged,
@@ -94,7 +94,7 @@ const spawnThreadIn = async (
       arranged.token,
     );
     const one = (await response.json()) as Session;
-    return one.status === "idle" ? one : undefined;
+    return one.status === "busy" ? one : undefined;
   });
   return session;
 };

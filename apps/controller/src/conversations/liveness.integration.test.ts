@@ -82,7 +82,7 @@ describe("a message after the runner unloaded the idle session", () => {
         _tag: "session.started",
         providerRefs: { nativeSessionId: "N" },
       });
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
       await runTurn(arranged, session.id, 2, "t2", ["answer two"]);
 
       const turns = await waitUntil("wrote the second turn", async () => {

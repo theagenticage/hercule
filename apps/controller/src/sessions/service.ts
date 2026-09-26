@@ -31,6 +31,7 @@ import {
   type ProviderEvent,
   type SessionBinding,
   type SessionInput,
+  type SessionInputResult,
   type SessionInterrupt,
   type SessionRespond,
   type SessionStart,
@@ -1123,6 +1124,44 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+        }),
+      ),
+
+    /**
+     * Applies a runner's result for one input to the input's session, in
+     * order with the session's events. An input that opened a turn moves an
+     * `idle` session to `busy`. From that answer until the turn ends, a turn
+     * is running, even before the runner reports `turn.started`, so an exit
+     * in between is an exit during a turn and the owner is told.
+     *
+     * Any other result changes nothing here, because the send that waits for
+     * the result records it on the input. The session is also left alone
+     * when:
+     *
+     * - it is already `busy`: the runner reported `turn.started` before this
+     *   result;
+     * - it is in any other status but `idle`, such as `exited`;
+     * - another runner holds it now, so the result is stale.
+     */
+    applyInputResult: (
+      runnerId: string,
+      result: SessionInputResult,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (!result.ok || result.delivery !== "opened") return;
+          const sessionId = yield* inputs.findSessionId(result.requestId);
+          if (Option.isNone(sessionId)) return;
+          const found = yield* sessions.one(sessionId.value);
+          if (Option.isNone(found)) return;
+          const session = found.value;
+          if (session.runnerId !== runnerId || session.status !== "idle") return;
+          yield* sessions.moved(session.id, "busy", yield* nowIso);
+          // A turn opened, so the process did work: the crash-loop guard no
+          // longer applies to it, as when `turn.started` moves it to `busy`.
+          yield* sessions.setCrashGuardArmed(session.id, false);
+          yield* announce({ _tag: "record", topic: "session", id: session.id, kind: "updated" });
         }),
       ),
 

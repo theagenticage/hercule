@@ -221,8 +221,14 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "loginUrl":
           case "loginFailed":
           case "loginResult":
-          case "sessionInputResult":
             if (!greeted) return;
+            return yield* connections.reportedAnswer(runnerId, mine, message);
+          case "sessionInputResult":
+            // Both an answer to the caller that sent the input, and a report
+            // about the session: an input that opened a turn makes the
+            // session busy, in order with the session's events.
+            if (!greeted) return;
+            yield* connections.reportedSession(runnerId, mine, message);
             return yield* connections.reportedAnswer(runnerId, mine, message);
           case "workspaceReport":
             // Published rather than handled, like a session event: the
