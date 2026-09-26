@@ -27,9 +27,9 @@ import {
 } from "@hercule/contract";
 import {
   decodeCursor,
-  decodeIdCursor,
+  decodeIntegerKeyCursor,
   encodeCursor,
-  encodeIdCursor,
+  encodeIntegerKeyCursor,
   buildKeyset,
   buildPage,
   uuidFromString,
@@ -108,6 +108,17 @@ export interface NewSession {
   readonly modelSelection: ModelSelection;
   readonly parentSessionId: string | undefined;
   readonly at: string;
+}
+
+/**
+ * What a session may do: the access mode it asked for, the one it runs under
+ * after the provider's fallback, and the permission profile its token is
+ * bound to.
+ */
+export interface SessionAccess {
+  readonly requestedAccessMode: AccessMode;
+  readonly accessMode: AccessMode;
+  readonly permissionProfileId: string;
 }
 
 /**
@@ -468,7 +479,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope = buildTranscriptScope(request.sessionId, request.direction);
         const after =
-          request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeIntegerKeyCursor(request.cursor, scope);
         const { keyset, order } = buildKeyset(
           sql,
           ["position"],
@@ -495,7 +508,7 @@ const make = Effect.gen(function* () {
                 event: JSON.parse(row.event) as ProviderEvent,
               })),
             ),
-          (last) => encodeIdCursor(scope, last.position),
+          (last) => encodeIntegerKeyCursor(scope, last.position),
         );
       }),
 
@@ -671,6 +684,21 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET model_selection = ${JSON.stringify(modelSelection)}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Sets the access mode the session asked for, the one it runs under, and
+     * the permission profile its token is bound to. Only a resume calls this,
+     * before the session starts again, because a running harness keeps the
+     * mode it was started with.
+     */
+    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          requested_access_mode = ${access.requestedAccessMode},
+          access_mode = ${access.accessMode},
+          permission_profile_id = ${uuidFromString(access.permissionProfileId)}
         WHERE id = ${uuidFromString(sessionId)}
       `),
 

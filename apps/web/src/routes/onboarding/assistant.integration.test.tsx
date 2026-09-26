@@ -126,7 +126,7 @@ describe("the assistant step", () => {
     ).toBeDefined();
     expect(
       screen.getByText(
-        "Your assistant is a chat that lives in this controller. You can rename it later in Settings > Assistants.",
+        "Your assistant is an agent you talk to in this controller. You can rename it later in Settings > Assistants.",
       ),
     ).toBeDefined();
     expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("Hercule");

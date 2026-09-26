@@ -708,6 +708,8 @@ describe("Assistant conversation: the row under the last bubble", () => {
 
     const row = await screen.findByRole("link", { name: /Ada needs your approval/ });
     expect(row.getAttribute("href")).toBe(`/threads/${SESSION_ID}`);
+    // Underlined, so the row reads as a link rather than a status line.
+    expect(screen.getByText("Ada needs your approval").className).toMatch(/\bunderline\b/);
     expect(screen.queryByText("Ada is working…")).toBeNull();
     for (const each of buildApprovalCard(REQUEST).rows) {
       expect(

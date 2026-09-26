@@ -2,10 +2,9 @@ import type { JSX, ReactNode } from "react";
 
 /**
  * The card at the bottom of a thread or an assistant's conversation: the
- * thread's composer, the conversation's composer, and the line an assistant's
- * session shows in the composer's place. Its first child is the text line and
- * its second the row of controls; with the same padding, the three cards have
- * the same height and their text sits on the same baseline.
+ * thread's composer and the conversation's composer. Its first child is the
+ * text line and its second the row of controls; with the same padding, the
+ * two cards have the same height and their text sits on the same baseline.
  *
  * The card is stacked above what docks to it (the lip below the thread's
  * composer, a permission request above it), so they tuck under its edge and

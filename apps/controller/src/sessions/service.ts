@@ -82,6 +82,7 @@ import {
   readSessionOrFail,
   sessionRepository,
   type QueuePosition,
+  type SessionAccess,
   type StoredSession,
 } from "./repository";
 import { fold, computeOpenRequestAfter, startTracking, type Folded, type Tracked } from "./stream";
@@ -262,6 +263,17 @@ const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already been sent to the runner";
 
+/**
+ * The refusal of `input.update` and `input.cancel` on a session that answers
+ * an assistant's conversation. The conversation already shows the input as
+ * the owner's message. A changed text would reach the assistant as words the
+ * owner never wrote there, and a cancelled one would leave the owner with no
+ * reply and no notice.
+ */
+const CONVERSATION_INPUT_FIXED =
+  "this input is the owner's message in an assistant's conversation, so it cannot be changed or cancelled; " +
+  "to correct or withdraw it, send a follow-up message with conversation.send";
+
 /** Why an input was cancelled on a session that `endOnLostRunners` ended. */
 const RUNNER_LOST =
   "that session's runner was not heard from for longer than the session's absolute timeout, " +
@@ -373,6 +385,22 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Checks that the queued inputs of a session may be changed or cancelled.
+   * Fails with `NotFound` when there is no such session, and with
+   * `InvalidState` when the session answers an assistant's conversation:
+   * input to an assistant goes only through `conversation.send`, and the
+   * conversation keeps what was sent.
+   */
+  const requireChangeableInputs = (
+    sessionId: string,
+  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+    Effect.flatMap(one(sessionId), (session) =>
+      session.conversationId === null
+        ? Effect.void
+        : Effect.fail(createInvalidStateError(CONVERSATION_INPUT_FIXED)),
+    );
+
+  /**
    * Announces each session that moved to `exited` and forgets its token and
    * ingest state, without touching its inputs. `endSessions` adds the rest of
    * the cleanup; an unloaded session keeps its inputs for the resume.
@@ -394,20 +422,6 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /**
-   * Does the cleanup after sessions move to `exited`, whatever ended them.
-   * Every path that ends a session calls this, in the transaction that ended
-   * it. For each session, it:
-   *
-   * - tells `SessionEndings` that the session ended, with the inputs no turn
-   *   has started from;
-   * - cancels its inputs not yet sent, storing `cancelReason` on them when
-   *   one is given;
-   * - forgets its token and ingest state, and announces it once.
-   *
-   * `ended` holds the rows as they were just before the end. `message` is the
-   * runner's error for a workspace that could not be made.
-   */
   /**
    * Returns the inputs of a session that no turn has started from: the ones
    * still queued, then the ones the runner accepted as a new turn's start
@@ -431,6 +445,20 @@ const make = Effect.gen(function* () {
       return [...queued, ...opened.slice(started)];
     });
 
+  /**
+   * Does the cleanup after sessions move to `exited`, whatever ended them.
+   * Every path that ends a session calls this, in the transaction that ended
+   * it. For each session, it:
+   *
+   * - tells `SessionEndings` that the session ended, with the inputs no turn
+   *   has started from;
+   * - cancels its inputs not yet sent, storing `cancelReason` on them when
+   *   one is given;
+   * - forgets its token and ingest state, and announces it once.
+   *
+   * `ended` holds the rows as they were just before the end. `message` is the
+   * runner's error for a workspace that could not be made.
+   */
   const endSessions = (
     ended: ReadonlyArray<StoredSession>,
     reason: SessionEndReason,
@@ -909,6 +937,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Sets the access mode and permission profile an exited session resumes
+     * under, joining the caller's transaction. The caller also puts the same
+     * access mode in the resume spec, so the row shows what the resumed
+     * harness runs under.
+     *
+     * It checks no grant. The caller is the controller daemon, resuming an
+     * assistant's session under the assistant's current settings.
+     */
+    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      sessions.setAccess(sessionId, access),
+
+    /**
      * Stores one user input and the model selection the session runs under
      * from then on. For an exited session, it also puts the session back on
      * the queue with its resume spec. Joins the caller's transaction, so when
@@ -1294,6 +1334,12 @@ const make = Effect.gen(function* () {
         return toPageOutput(listing);
       }),
 
+    /**
+     * Replaces the text of an input still waiting on its session, and returns
+     * the changed input. Fails with `InvalidState` when the input was already
+     * sent, delivered or cancelled, or when the session answers an
+     * assistant's conversation.
+     */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.update");
@@ -1301,7 +1347,7 @@ const make = Effect.gen(function* () {
           decodeInputUpdate(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* requireChangeableInputs(id);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -1313,13 +1359,19 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Cancels an input still waiting on its session, and returns the
+     * cancelled input. Fails with `InvalidState` when the input was already
+     * sent, delivered or cancelled, or when the session answers an
+     * assistant's conversation.
+     */
     cancelInput: (
       sessionId: Id,
       inputId: Id,
     ): Effect.Effect<Input, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
-        yield* one(sessionId);
+        yield* requireChangeableInputs(sessionId);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

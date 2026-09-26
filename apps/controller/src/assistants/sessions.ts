@@ -52,13 +52,20 @@ export class AssistantSessions extends Context.Service<
      *   example because its runner is draining, so nothing was stored.
      *
      * Joins the caller's transaction, so the resume check and the write see
-     * the same rows. A resume reads the controller settings and the stored
-     * spec, so it can also fail with their errors.
+     * the same rows. A resume runs under the assistant's current access mode
+     * and permission profile, so a change to either reaches the session at its
+     * next resume. A resume reads the controller settings, the stored spec
+     * and the provider, so it can also fail with their errors, and with
+     * `InvalidState` when the provider supports no access mode at or below
+     * the assistant's.
      */
     readonly give: (request: {
       readonly sessionId: string;
       readonly text: string;
-    }) => Effect.Effect<"given" | "unresumable", SettingError | SqlError | Schema.SchemaError>;
+    }) => Effect.Effect<
+      "given" | "unresumable",
+      InvalidState | Validation | SettingError | SqlError | Schema.SchemaError
+    >;
 
     /**
      * Stops the session and waits until it has exited, at most the stop

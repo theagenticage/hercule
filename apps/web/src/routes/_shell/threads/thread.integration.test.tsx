@@ -3056,13 +3056,13 @@ const ASSISTANT_ROUTES: Readonly<Record<string, Handler>> = {
   [`GET /api/v1/assistants/${ADA.id}`]: { body: ADA },
 };
 
-/** Returns the header's crumb link, the one outside the sidebar that names Assistants. */
-const findAssistantsCrumb = async (): Promise<HTMLElement> =>
+/** Returns the header's crumb link, the one outside the sidebar that names Ada. */
+const findAssistantCrumb = async (): Promise<HTMLElement> =>
   waitFor(() => {
     const found = screen
-      .getAllByRole("link", { name: /^Assistants/ })
+      .getAllByRole("link", { name: "Ada" })
       .filter((link) => link.closest("nav") === null)[0];
-    if (found === undefined) throw new Error("no Assistants crumb link outside the sidebar");
+    if (found === undefined) throw new Error("no Ada crumb link outside the sidebar");
     return found;
   });
 
@@ -3075,16 +3075,18 @@ describe("Thread: the session view of an assistant's session", () => {
     detail: { command: "ls -la" },
   };
 
-  it("shows Assistants / as the crumb, linking to the assistant's conversation", async () => {
+  it("shows Assistants / Ada / as the crumb, the name linking to the assistant's conversation", async () => {
     await openApp(
       buildAssistantSession({ status: "idle" }),
       buildTwoCompletedTurns(),
       ASSISTANT_ROUTES,
     );
 
-    const crumb = await findAssistantsCrumb();
+    const crumb = await findAssistantCrumb();
     expect(crumb.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
-    expect(readPageText(crumb.closest("div"))).toMatch(/^Assistants \/ Answer Ada's conversation/);
+    expect(readPageText(crumb.closest("div"))).toMatch(
+      /^Assistants \/ Ada \/ Answer Ada's conversation/,
+    );
     expect(screen.queryByText("Threads /")).toBeNull();
   });
 
@@ -3095,11 +3097,30 @@ describe("Thread: the session view of an assistant's session", () => {
       ASSISTANT_ROUTES,
     );
 
-    expect(await screen.findByText("This session answers Ada's chat.")).toBeDefined();
-    const open = screen.getByRole("link", { name: "Open chat" });
+    expect(
+      await screen.findByText("This session replies in your conversation with Ada."),
+    ).toBeDefined();
+    const open = screen.getByRole("link", { name: "Open conversation" });
     expect(open.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  // Added in the branch review of #92: the controller refuses input.update and
+  // input.cancel on a conversation's session, because the conversation
+  // already shows a queued input as the owner's message.
+  it("shows a queued input with no Steer and no Cancel", async () => {
+    const fixture = buildAssistantSession({ status: "busy" });
+    await openApp(fixture, buildTwoCompletedTurns(), {
+      ...ASSISTANT_ROUTES,
+      [`GET /api/v1/sessions/${fixture.id}/inputs`]: {
+        body: { items: [buildQueuedInput({ sessionId: fixture.id, text: "Book Friday" })] },
+      },
+    });
+
+    await screen.findByText("Book Friday");
+    expect(screen.queryByRole("button", { name: /steer/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
   });
 
   it("still shows the permission card for an open request, and sends its answer to session.respond", async () => {
@@ -3142,7 +3163,7 @@ describe("Thread: the session view of an assistant's session", () => {
       [`POST /api/v1/sessions/${fixture.id}/interrupt`]: { body: fixture },
     });
 
-    await screen.findByText("This session answers Ada's chat.");
+    await screen.findByText("This session replies in your conversation with Ada.");
     await user.click(screen.getByRole("button", { name: /^stop$/i }));
 
     await waitFor(() => {
@@ -3175,7 +3196,7 @@ describe("Thread: the session view of an assistant's session", () => {
       ASSISTANT_ROUTES,
     );
 
-    await screen.findByText("This session answers Ada's chat.");
+    await screen.findByText("This session replies in your conversation with Ada.");
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
@@ -3192,12 +3213,14 @@ describe("Thread: the session view of an assistant's session", () => {
     });
 
     expect(
-      await screen.findByText("This session answered an assistant that was deleted."),
+      await screen.findByText(
+        "This session replied in a conversation with an assistant that was deleted.",
+      ),
     ).toBeDefined();
     const crumb = screen.getByText("Assistants /");
     expect(readPageText(crumb.parentElement)).toMatch(/^Assistants \/ Answer Ada's conversation/);
     expect(crumb.querySelector("a")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Open chat" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open conversation" })).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 

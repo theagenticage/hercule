@@ -1986,7 +1986,7 @@ export const CLI = {
       },
       heartbeat: {
         flag: "heartbeat",
-        help: "When it wakes by itself and what it is told then, as inline JSON with enabled, schedule, prompt and target; leave it off to wake every hour from 07:00 to 23:00 (0 7-23 * * *) in your timezone, in the web chat.",
+        help: "When it wakes by itself and what it is told then, as inline JSON with enabled, schedule, prompt and target; leave it off to wake every hour from 07:00 to 23:00 (0 7-23 * * *) in your timezone, in the web conversation.",
       },
       rotation: {
         flag: "rotation",
@@ -2004,7 +2004,7 @@ export const CLI = {
   },
   "assistant.update": {
     command: "assistant update",
-    help: "Edits an assistant; a field you leave out is not changed. The next session it starts uses the new values.",
+    help: "Edits an assistant; a field you leave out is not changed. A new reply mode applies at once. A new access mode or profile reaches its current session when that session next resumes, after an idle unload or a stop. The other fields reach only the next new session.",
     examples: [
       { args: ["1f3a9c2e", "--reply", "segments"] },
       {
@@ -2083,7 +2083,7 @@ export const CLI = {
 
   "conversation.query": {
     command: "conversation list",
-    help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web chat is the only channel so far.",
+    help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web channel is the only one so far.",
     examples: [{ args: [] }, { args: ["--assistant", "1f3a9c2e"] }],
     fields: {
       assistantId: {

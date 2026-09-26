@@ -4,8 +4,10 @@
  *
  * `conversation.send` is the only way to give such a session input, so every
  * message the owner sends is stored in the conversation. `session.input` and
- * `session.continue` are refused. The operations that only steer, answer or
- * end what the session is already doing work as they do for a Thread.
+ * `session.continue` are refused, and so are `input.update` and
+ * `input.cancel`, because the conversation already shows the queued input as
+ * sent. The operations that only steer, answer or end what the session is
+ * already doing work as they do for a Thread.
  */
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -45,6 +47,11 @@ const USE_CONVERSATION_SEND =
 const CONVERSATION_FORK_REFUSED =
   "forking a conversation's session is not supported; " +
   "to branch off, spawn a Thread with `session.spawn` and give it the context it needs";
+
+/** The refusal of `input.update` and `input.cancel` on a conversation's session. */
+const CONVERSATION_INPUT_FIXED =
+  "this input is the owner's message in an assistant's conversation, so it cannot be changed or cancelled; " +
+  "to correct or withdraw it, send a follow-up message with conversation.send";
 
 /** The request the busy session in these tests is parked on. */
 const REQUEST_ID = "req-1";
@@ -122,6 +129,54 @@ describe("session.input and session.continue on a conversation's session", () =>
   });
 });
 
+describe("input.update and input.cancel on a conversation's session", () => {
+  it("refuses input.update with invalid_state, and leaves the queued text as sent", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startBusySession(arranged);
+      const inputId = await queueMessage(arranged, session, "book Friday");
+
+      const response = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/inputs/${inputId}`,
+        { token: arranged.token, body: { text: "book Monday" } },
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message: CONVERSATION_INPUT_FIXED,
+      });
+      expect(
+        (await listInputs(arranged, session.id)).find((one) => one.id === inputId),
+      ).toMatchObject({ text: "book Friday", status: "queued" });
+    });
+  });
+
+  it("refuses input.cancel with invalid_state, and leaves the input queued", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startBusySession(arranged);
+      const inputId = await queueMessage(arranged, session, "never mind");
+
+      const response = await send(
+        "DELETE",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/inputs/${inputId}`,
+        { token: arranged.token },
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message: CONVERSATION_INPUT_FIXED,
+      });
+      expect(
+        (await listInputs(arranged, session.id)).find((one) => one.id === inputId),
+      ).toMatchObject({ status: "queued" });
+    });
+  });
+});
+
 describe("the operations a conversation's session allows, as for a Thread", () => {
   it("interrupts the running turn", async () => {
     await withAgentFleet(async (arranged) => {
@@ -189,25 +244,6 @@ describe("the operations a conversation's session allows, as for a Thread", () =
         requestId: REQUEST_ID,
         decision: "allow",
       });
-    });
-  });
-
-  it("cancels a queued input", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-      const inputId = await queueMessage(arranged, session, "never mind");
-
-      const response = await send(
-        "DELETE",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/inputs/${inputId}`,
-        { token: arranged.token },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      expect(
-        (await listInputs(arranged, session.id)).find((one) => one.id === inputId),
-      ).toMatchObject({ status: "cancelled" });
     });
   });
 

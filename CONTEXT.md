@@ -141,8 +141,20 @@ A rule mapping part of a channel connection (all its DMs, or a nested place: a s
 _Avoid_: registration, route (bare)
 
 **Conversation**:
-One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. Its messages are conversation input, never events.
+One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events.
 _Avoid_: chat, thread (reserved for provider-native objects)
+
+**Conversation Message**:
+One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
+_Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
+
+**Notice**:
+A conversation message the system writes when the assistant cannot answer, reading "<name> couldn't answer: <why>": a turn failed or was interrupted, the session ended while the owner waited, or a waiting message could not be delivered. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
+_Avoid_: notification (Hercule's central message to its user), error message, alert
+
+**Idle Unload**:
+Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation.
+_Avoid_: sleep, hibernate, suspend, rotation
 
 **Rotation**:
 Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
@@ -261,7 +273,7 @@ The merged declared-plus-probed facts about a provider instance on a specific ru
 _Avoid_: provider status
 
 **Channel**:
-A chat surface Hercule speaks through (Discord, Slack).
+A chat surface Hercule speaks through (Discord, Slack). The web channel is the built-in one: the web app's own conversation with an assistant, with no Connection or plugin behind it.
 
 **Live Topic**:
 A named stream a connected client watches over its live connection: a session transcript, the event feed, notifications. A client viewing concern only; not a Subscription, which is a domain claim on events held by a run or session.
@@ -395,7 +407,7 @@ _Avoid_: rate limit (bare), throttle
 
 **Notification**:
 A persisted message from Hercule to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
-_Avoid_: alert, ping
+_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer)
 
 **Bound Action**:
 One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions.

@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ConversationActivity } from "@hercule/client-core";
-import { DecisionMark, WorkingMark, buildButtonClassName } from "@hercule/ui";
+import { DecisionMark, WorkingMark } from "@hercule/ui";
 
 /**
  * The row under the conversation's last message, while the assistant is
@@ -32,13 +32,17 @@ export function ActivityRow({
       );
     case "awaiting-approval":
       return (
+        // Underlined like the other links inside text (the actor links), so
+        // it reads as a way to the permission request, not as a status.
         <Link
           to="/threads/$sessionId"
           params={{ sessionId: activity.sessionId }}
-          className={buildButtonClassName("primary", "-ml-2 self-start text-meta")}
+          className="flex items-center gap-2 self-start rounded-control text-meta text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
         >
           <DecisionMark />
-          {name} needs your approval
+          <span className="underline decoration-line underline-offset-[3px]">
+            {name} needs your approval
+          </span>
         </Link>
       );
     case "quiet":

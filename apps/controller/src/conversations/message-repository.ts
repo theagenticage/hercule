@@ -14,8 +14,8 @@ import type { ConversationMessage, ConversationSenderRole, SortDirection } from 
 import {
   buildKeyset,
   buildPage,
-  decodeIdCursor,
-  encodeIdCursor,
+  decodeIntegerKeyCursor,
+  encodeIntegerKeyCursor,
   mintUuid,
   uuidFromString,
   uuidToString,
@@ -134,7 +134,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope = buildCursorScope(request.conversationId, request.direction);
         const after =
-          request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeIntegerKeyCursor(request.cursor, scope);
         const { keyset, order } = buildKeyset(
           sql,
           ["position"],
@@ -151,7 +153,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toMessage)),
-          (last) => encodeIdCursor(scope, last.position),
+          (last) => encodeIntegerKeyCursor(scope, last.position),
         );
       }),
 

@@ -215,21 +215,23 @@ export const decodeOwnedCursor = (
 
 /**
  * Encodes the cursor for a list sorted by one unique integer column, such as
- * an id or a position: that column's value on the page's last row.
+ * an event's id or a message's position: that column's value on the page's
+ * last row. The scope's `field` names the column; the payload holds only its
+ * value, tagged `key` so it is never read as an offset cursor.
  */
-export const encodeIdCursor = (scope: CursorScope, id: number): string =>
-  sealCursor(scope, ["id", id]);
+export const encodeIntegerKeyCursor = (scope: CursorScope, key: number): string =>
+  sealCursor(scope, ["key", key]);
 
 /**
- * Decodes a cursor from `encodeIdCursor` into its integer key. Fails with
- * `CursorError` if the cursor is malformed or belongs to another scope.
+ * Decodes a cursor from `encodeIntegerKeyCursor` into its integer key. Fails
+ * with `CursorError` if the cursor is malformed or belongs to another scope.
  */
-export const decodeIdCursor = (
+export const decodeIntegerKeyCursor = (
   cursor: string,
   scope: CursorScope,
 ): Effect.Effect<number, CursorError> =>
   openCursor(cursor, scope, (payload) =>
-    payload.length === 2 && payload[0] === "id" && isPosition(payload[1]) ? payload[1] : undefined,
+    payload.length === 2 && payload[0] === "key" && isPosition(payload[1]) ? payload[1] : undefined,
   );
 
 /**

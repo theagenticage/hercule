@@ -144,7 +144,9 @@ export function AssistantForm({
         <Row label="Persona" htmlFor="assistant-persona">
           <Textarea
             id="assistant-persona"
-            rows={5}
+            // Eight rows show the six-line default persona whole, with room
+            // to add to it before the box scrolls.
+            rows={8}
             value={draft.systemPrompt}
             onChange={(event) => {
               recordEdits({ systemPrompt: event.target.value });
@@ -211,6 +213,12 @@ export function AssistantForm({
             ))}
           </SegmentedControl>
         </Row>
+        {/* A running harness keeps what it was started with, so the form says
+            when each kind of change takes effect rather than letting a saved
+            access mode look like it already applies. */}
+        <p className="text-fine text-faint">
+          {`Reply applies at once. Access mode and permission profile apply when ${assistant.name}'s session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.`}
+        </p>
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" variant="form" disabled={update.isPending || !hasChanges}>

@@ -456,18 +456,6 @@ describe("the idle unload timeout", () => {
       expect((await readSettings(base, token)).controller["session.idleUnloadMinutes"]).toBe(20);
     });
   });
-
-  it("refuses the old assistant idle timeout as an unknown key", async () => {
-    await withSettings(async (base, token) => {
-      const response = await patchSettings(base, token, {
-        controller: { "assistant.idleTimeoutMinutes": 15 },
-      });
-      expect(await readErrorCode(response)).toBe("validation");
-      expect((await readSettings(base, token)).controller).not.toHaveProperty(
-        "assistant.idleTimeoutMinutes",
-      );
-    });
-  });
 });
 
 describe("the workspace expiry windows", () => {

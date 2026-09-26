@@ -21,7 +21,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { Prompt } from "./session";
 
-/** The channels a conversation can be in. The web chat is the only one so far. */
+/** The channels a conversation can be in. The web channel is the only one so far. */
 export const ConversationChannel = Schema.Literal("web");
 
 export type ConversationChannel = Schema.Schema.Type<typeof ConversationChannel>;
@@ -31,7 +31,7 @@ export const Conversation = Schema.Struct({
   /** The assistant that answers here. */
   assistantId: Id,
   channel: ConversationChannel,
-  /** The container within the channel, such as a Discord channel; null for the web chat. */
+  /** The container within the channel, such as a Discord channel; null for the web channel. */
   containerKey: Schema.NullOr(Schema.String),
   createdAt: Timestamp,
 });
@@ -59,7 +59,7 @@ export type ConversationSenderRole = Schema.Schema.Type<typeof ConversationSende
 export const ConversationMessage = Schema.Struct({
   id: Id,
   conversationId: Id,
-  /** The container within the channel the message was sent in; null for the web chat. */
+  /** The container within the channel the message was sent in; null for the web channel. */
   containerKey: Schema.NullOr(Schema.String),
   /** The message's place in its conversation: 1 for the first, one higher for each after it. */
   position: Schema.Int,

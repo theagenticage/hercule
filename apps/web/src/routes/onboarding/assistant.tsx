@@ -79,7 +79,7 @@ function AssistantStep(): JSX.Element {
   return (
     <CenteredScreen
       title="Name your assistant"
-      lead="Your assistant is a chat that lives in this controller. You can rename it later in Settings > Assistants."
+      lead="Your assistant is an agent you talk to in this controller. You can rename it later in Settings > Assistants."
     >
       <form className="flex flex-col gap-4" onSubmit={submit}>
         <Field

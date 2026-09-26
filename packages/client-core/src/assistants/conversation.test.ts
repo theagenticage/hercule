@@ -6,11 +6,18 @@
  *   `conversation.queryMessages`, read newest first, into one list, oldest
  *   first.
  * - `findAnsweredAssistantId(session)` names the assistant a session answered.
+ * - `canSteerOrCancelQueuedInputs(session)` tells whether the session view
+ *   offers Steer and Cancel on queued inputs.
  */
 import { describe, expect, it } from "vitest";
 import type { Conversation, ConversationMessage } from "@hercule/contract";
 import { buildSession } from "../threads/workspaces.testing";
-import { findAnsweredAssistantId, findWebConversation, flattenMessagePages } from "./conversation";
+import {
+  canSteerOrCancelQueuedInputs,
+  findAnsweredAssistantId,
+  findWebConversation,
+  flattenMessagePages,
+} from "./conversation";
 
 const WEB: Conversation = {
   id: "01a06d02-c000-7000-8000-000000000001",
@@ -73,5 +80,21 @@ describe("findAnsweredAssistantId", () => {
 
   it("returns null for a Thread", () => {
     expect(findAnsweredAssistantId(buildSession({ id: "t1" }))).toBeNull();
+  });
+});
+
+describe("canSteerOrCancelQueuedInputs", () => {
+  it("returns true for a Thread", () => {
+    expect(canSteerOrCancelQueuedInputs(buildSession({ id: "t1" }))).toBe(true);
+  });
+
+  it("returns true for a session that runs an agent outside a conversation", () => {
+    expect(canSteerOrCancelQueuedInputs(buildSession({ id: "s1", agentId: "ada" }))).toBe(true);
+  });
+
+  it("returns false for a session in a conversation", () => {
+    const session = buildSession({ id: "s1", agentId: "ada", conversationId: "c1" });
+
+    expect(canSteerOrCancelQueuedInputs(session)).toBe(false);
   });
 });

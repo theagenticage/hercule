@@ -154,7 +154,7 @@ describe("the assistants migration", () => {
       expect(outcomes).toEqual(["accepted", "refused"]);
     });
 
-    it("refuses a web conversation with a container key, because the web chat has no containers", async () => {
+    it("refuses a web conversation with a container key, because the web channel has no containers", async () => {
       const outcome = await seedAndMigrate(
         insertConversation("0199a000-0000-7000-8000-0000000000c1", "a-container"),
       );

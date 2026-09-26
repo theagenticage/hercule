@@ -210,8 +210,14 @@ const make = Effect.gen(function* () {
    * Returns the texts the reply mode turns into replies for one report, in
    * the order they are written:
    *
-   * - `turn-end`: when the turn ends, however it ends, the turn's last
-   *   assistant text;
+   * - `turn-end`, when the turn completes: the turn's last assistant text.
+   *   The texts before it are the narration between tool calls, and the
+   *   last one is the answer.
+   * - `turn-end`, when the turn fails or is interrupted: every assistant text
+   *   of the turn, in order, as one reply with a blank line between texts.
+   *   A turn cut short has no answer, so its last text is just the fragment
+   *   that happened to follow the last tool call. Showing all of it shows
+   *   the owner everything the assistant said before the notice.
    * - `segments`: when an assistant message is completed, its text.
    *
    * A report of anything else, or with no assistant text, gives none. The
@@ -224,8 +230,12 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
       if (reply === "turn-end" && event._tag === "turn.completed") {
-        const texts = yield* readAssistantTexts(sql, session.id, event.turnId);
-        return texts.slice(-1).map((last) => last.text);
+        const texts = (yield* readAssistantTexts(sql, session.id, event.turnId)).map(
+          (item) => item.text,
+        );
+        if (event.state === "completed") return texts.slice(-1);
+        const partialReply = texts.filter((text) => text !== "").join("\n\n");
+        return partialReply === "" ? [] : [partialReply];
       }
       if (
         reply === "segments" &&

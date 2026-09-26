@@ -59,8 +59,8 @@ import {
 import { currentStamp, requireGrant, type Actor } from "../actor";
 import {
   announce,
-  decodeIdCursor,
-  encodeIdCursor,
+  decodeIntegerKeyCursor,
+  encodeIntegerKeyCursor,
   buildKeyset,
   nowIso,
   buildPage,
@@ -189,7 +189,7 @@ const make = Effect.gen(function* () {
         const after =
           decoded.cursor === undefined
             ? undefined
-            : yield* decodeIdCursor(decoded.cursor, scope).pipe(
+            : yield* decodeIntegerKeyCursor(decoded.cursor, scope).pipe(
                 Effect.catchTag("CursorError", (error) =>
                   Effect.fail(
                     createValidationError([{ path: ["cursor"], message: error.message }]),
@@ -228,7 +228,7 @@ const make = Effect.gen(function* () {
           rows,
           limit,
           (read) => Effect.succeed(read.map(toEvent)),
-          (last) => encodeIdCursor(scope, last.id),
+          (last) => encodeIntegerKeyCursor(scope, last.id),
         );
         return {
           items: page.items,

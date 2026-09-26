@@ -11,7 +11,7 @@
  * agent, which the column's default records.
  *
  * A conversation is one assistant's exchange in one channel container. The web
- * chat is the only channel so far, and it has no containers, so
+ * channel is the only channel so far, and it has no containers, so
  * `container_key` is null there, which a CHECK enforces. An assistant has at
  * most one web conversation, which the partial unique index enforces.
  *

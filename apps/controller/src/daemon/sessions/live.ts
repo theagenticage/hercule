@@ -26,6 +26,7 @@ import {
   createDecodeValidationError,
   createInvalidStateError,
   createValidationError,
+  findNearestSupportedAccessMode,
   Id,
   InvalidState,
   NotFound,
@@ -40,6 +41,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../../actor";
+import { agentRepository } from "../../agents";
 import { AssistantMessages } from "../../assistants";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
@@ -147,6 +149,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const { dispatch } = yield* Dispatch;
   const assistantMessages = yield* AssistantMessages;
+  const agents = yield* agentRepository;
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -250,6 +253,64 @@ const make = Effect.gen(function* () {
         session.conversationId,
       );
       return JSON.stringify(encodeSpec(spec));
+    });
+
+  /**
+   * Builds the spec an assistant's session resumes with, and returns it as
+   * JSON. It is the stored spec, like any resume, except for what the
+   * assistant may do: the access mode and the permission profile are read
+   * from the assistant as it is now, and written to the session row in the
+   * caller's transaction.
+   *
+   * An assistant keeps one session for a long time, resuming it after every
+   * idle unload, so a change to the assistant would otherwise never reach it.
+   * A running harness cannot change its access mode, which is why the change
+   * waits for the resume.
+   *
+   * Fails with `InvalidState` when the provider supports no access mode at or
+   * below the assistant's, as a new session would.
+   */
+  const buildConversationResumeSpec = (
+    session: StoredSession,
+    nativeSessionId: string,
+  ): Effect.Effect<
+    string,
+    InvalidState | Validation | NotFound | SqlError | SettingError | Schema.SchemaError
+  > =>
+    Effect.gen(function* () {
+      const found = session.agentId === null ? Option.none() : yield* agents.read(session.agentId);
+      // A conversation's session is spawned from its assistant, and the
+      // assistant's conversations and their sessions' input go when it is
+      // deleted, so nothing resumes a session whose assistant is gone.
+      if (Option.isNone(found))
+        return yield* Effect.die("a conversation's session has no assistant");
+      const assistant = found.value;
+      const { definition } = yield* resolved(session.instanceId);
+      const accessMode = findNearestSupportedAccessMode(
+        assistant.accessMode,
+        definition.declared.accessModes,
+      );
+      if (accessMode === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            `${definition.displayName} supports no access mode at or below ${assistant.accessMode}`,
+          ),
+        );
+      }
+      yield* sessions.setAccess(session.id, {
+        requestedAccessMode: assistant.accessMode,
+        accessMode,
+        permissionProfileId: assistant.permissionProfileId,
+      });
+      const spec = buildContinuingSpec(
+        yield* sessions.readSpec(session.id),
+        yield* settings.all(),
+        session.modelSelection,
+        nativeSessionId,
+        "resume",
+        session.conversationId,
+      );
+      return JSON.stringify(encodeSpec({ ...spec, accessMode }));
     });
 
   /**
@@ -415,7 +476,10 @@ const make = Effect.gen(function* () {
      *
      * - a session that has exited but can be resumed goes back on the queue
      *   in place, with a resume spec, in the same transaction; its delivery
-     *   dispatches it, and the input is sent once the resumed harness is idle;
+     *   dispatches it, and the input is sent once the resumed harness is idle.
+     *   It resumes under the assistant's current access mode and permission
+     *   profile, and fails with `InvalidState` when the provider supports no
+     *   access mode at or below the assistant's;
      * - any other session gets its delivery from `deliverQueuedInput`, which
      *   sends the input at once to an idle session and leaves it queued for a
      *   busy or starting one.
@@ -430,7 +494,7 @@ const make = Effect.gen(function* () {
       text: string,
     ): Effect.Effect<
       Option.Option<Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError>>,
-      NotFound | SqlError | SettingError | Schema.SchemaError
+      InvalidState | Validation | NotFound | SqlError | SettingError | Schema.SchemaError
     > =>
       Effect.gen(function* () {
         const session = yield* one(sessionId);
@@ -452,7 +516,7 @@ const make = Effect.gen(function* () {
           resumeSpec:
             nativeSessionId === undefined
               ? undefined
-              : yield* buildResumeSpec(session, session.modelSelection, nativeSessionId),
+              : yield* buildConversationResumeSpec(session, nativeSessionId),
           text,
           at: yield* nowIso,
           claimed: false,

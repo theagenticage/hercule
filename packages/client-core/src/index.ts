@@ -8,6 +8,7 @@
 export { describeActor, type ActorReading } from "./actor-display";
 export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
 export {
+  canSteerOrCancelQueuedInputs,
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
@@ -104,7 +105,7 @@ export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
-export { decideSessionsEmptyState } from "./sessions-empty-state";
+export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {

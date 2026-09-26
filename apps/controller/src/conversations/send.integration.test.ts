@@ -288,6 +288,48 @@ describe("conversation.send to a conversation with a current session", () => {
     });
   });
 
+  it("resumes under the access mode and permission profile the assistant has now", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistant, conversation } = await readDefaultConversation(arranged);
+      const session = await startConversationSession(arranged, conversation.id, "hi");
+      expect(session).toMatchObject({
+        requestedAccessMode: "full-access",
+        accessMode: "full-access",
+      });
+      const next = await runTurn(arranged, session.id, 2, "t1", ["hello"]);
+      reportEvent(arranged.wire, next, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.exited",
+        reason: "idle_unload",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      const profile = await createProfile(arranged, "careful", ["agent.read"]);
+      const updated = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/assistants/${assistant.id}`,
+        {
+          body: { accessMode: "approval-required", permissionProfileId: profile.id },
+          token: arranged.token,
+        },
+      );
+      expect(updated.status, await updated.clone().text()).toBe(200);
+
+      await sendMessage(arranged, conversation.id, "again");
+
+      const frames = await waitForStartFrames(arranged, session.id, 2);
+      expect(frames[1]!.spec.accessMode).toBe("approval-required");
+      expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
+      expect(await readSession(arranged, session.id)).toMatchObject({
+        requestedAccessMode: "approval-required",
+        accessMode: "approval-required",
+        permissionProfileId: profile.id,
+      });
+    });
+  });
+
   it("places a new session after one that exited not resumable, and gives the next message to the newest", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);

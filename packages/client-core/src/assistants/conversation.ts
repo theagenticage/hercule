@@ -1,6 +1,7 @@
 /**
  * The reads behind an assistant's conversation screen: which conversation it
- * shows, the messages it draws, and which assistant a session answered.
+ * shows, the messages it draws, which assistant a session answered, and
+ * whether a session's queued inputs may be steered or cancelled.
  */
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
 
@@ -30,3 +31,13 @@ export const flattenMessagePages = (
  */
 export const findAnsweredAssistantId = (session: Session): string | null =>
   session.conversationId === null ? null : session.agentId;
+
+/**
+ * Checks whether the session view offers Steer and Cancel on the session's
+ * queued inputs. Returns false for a session that answers an assistant's
+ * conversation: its queued inputs are the owner's messages, which the
+ * conversation already shows as sent, so the owner corrects one by sending
+ * another message in the conversation instead.
+ */
+export const canSteerOrCancelQueuedInputs = (session: Session): boolean =>
+  session.conversationId === null;

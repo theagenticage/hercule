@@ -17,7 +17,7 @@
  * the same token create one user rather than one each.
  *
  * The default assistant, `Hercule`, is created in that same transaction, so a
- * finished setup always has an assistant to chat with. It is created from its
+ * finished setup always has an assistant to talk to. It is created from its
  * name alone, like any other, and stamped with the new user.
  *
  * The onboarding steps beyond the timezone are the web app's, not setup's.

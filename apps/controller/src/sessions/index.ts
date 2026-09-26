@@ -22,6 +22,7 @@ export {
   LIVE_SESSION_STATUSES,
   readSessionOrFail,
   sessionRepository,
+  type SessionAccess,
   type SessionRows,
   type StoredSession,
 } from "./repository";

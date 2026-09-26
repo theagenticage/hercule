@@ -74,3 +74,19 @@ export const decideSessionsEmptyState = (
     offers,
   };
 };
+
+/**
+ * Checks whether any online runner has a logged-in harness, which is what a
+ * thread needs before it can start. Unlike `decideSessionsEmptyState`, this
+ * looks at every runner, because a thread can run on any machine in the fleet,
+ * not only on this one.
+ */
+export const hasLoggedInRunner = (
+  runners: ReadonlyArray<Runner>,
+  instances: ReadonlyArray<ProviderInstance>,
+): boolean =>
+  runners.some(
+    (runner) =>
+      runner.connectivity === "online" &&
+      buildProviderRows(runner, instances).some((row) => row.loggedIn),
+  );

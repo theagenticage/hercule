@@ -8,6 +8,7 @@ import {
   buildThreadGroups,
   decideAssistantPresence,
   findAnsweredAssistantId,
+  hasLoggedInRunner,
   type DraftPlace,
   type HerculeClient,
   type Live,
@@ -68,11 +69,20 @@ export function ThreadsFace({
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
-  const runners = useQuery(runnersQuery(client)).data?.items ?? [];
+  const runnersRead = useQuery(runnersQuery(client)).data;
+  const runners = runnersRead?.items ?? [];
   const assistants = useQuery(assistantsQuery(client)).data?.items ?? [];
   // The provider catalogs let a meta row show the model's display name
   // (`Claude Sonnet 5`) instead of the slug a request uses.
-  const instances = useQuery(providersQuery(client)).data ?? [];
+  const instancesRead = useQuery(providersQuery(client)).data;
+  const instances = instancesRead ?? [];
+  // The empty list explains what a thread needs only while that is missing,
+  // and only once both lists have loaded, so the hint never flashes up on a
+  // fleet that already has a logged-in harness.
+  const needsLogin =
+    runnersRead !== undefined &&
+    instancesRead !== undefined &&
+    !hasLoggedInRunner(runners, instances);
   // The runner on this browser's machine. It decides whether the project's
   // main workspace already exists where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
@@ -165,13 +175,17 @@ export function ThreadsFace({
       <div data-thread-rows={rows} className="min-h-0 flex-1 overflow-auto">
         {groups.length === 0 ? (
           <>
-            <p className="px-2.5 py-1 text-fine text-faint">No threads yet</p>
-            {/* The bottom padding matches a thread row's, so the Assistants
-                header below sits as far from this text as it would from the
-                last row of a thread group. */}
-            <p className="px-2.5 pt-1 pb-[7px] text-fine text-faint">
-              A thread needs a runner with a provider login on it.
+            {/* The last line's bottom padding matches a thread row's, so the
+                Assistants header below sits as far from this text as it would
+                from the last row of a thread group. */}
+            <p className={cn("px-2.5 pt-1 text-fine text-faint", needsLogin ? "pb-1" : "pb-[7px]")}>
+              No threads yet
             </p>
+            {needsLogin ? (
+              <p className="px-2.5 pt-1 pb-[7px] text-fine text-faint">
+                A thread needs a runner with a provider login on it.
+              </p>
+            ) : null}
           </>
         ) : (
           groups.map((group) => (

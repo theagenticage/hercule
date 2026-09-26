@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Assistant, Session, Workspace } from "@hercule/contract";
+import type { Assistant, ProviderInstance, Session, Workspace } from "@hercule/contract";
 import { formatAge } from "@hercule/client-core";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -825,18 +825,18 @@ describe("the Threads face's Assistants group", () => {
     expect(rows[1]!.textContent).toContain("web");
   });
 
-  // Review round 1 of #92 slice 3 (D-78): the idle dot is faint, and
-  // neither dot moves, because a loaded session is a state, not work
-  // happening. The title used to say "muted" and checked only the live dot.
-  it("paints a live assistant's dot in the live colour and an idle assistant's dot faint, both still", async () => {
+  // Neither dot moves, because a loaded session is a state, not work
+  // happening. The idle dot is a hollow faint ring, the idle mark of a thread
+  // row, because a faint filled dot was hard to tell from the live one.
+  it("paints a live assistant's dot in the live colour and an idle assistant's as a faint ring, both still", async () => {
     await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
 
     await getThreadsNav().findByText("Assistants");
     const live = readDotClasses(getAssistantRow(ADA));
     const idle = readDotClasses(getAssistantRow(BOB));
     expect(live).toMatch(/\bbg-live\b/);
-    expect(idle).toMatch(/\bbg-faint\b/);
-    expect(idle).not.toMatch(/\bbg-live\b/);
+    expect(idle).toMatch(/\bborder-faint\b/);
+    expect(idle).not.toMatch(/\bbg-/);
     expect(live).not.toMatch(MOTION);
     expect(idle).not.toMatch(MOTION);
   });
@@ -915,5 +915,73 @@ describe("the Threads face's Assistants group", () => {
     });
     expect(getThreadsNav().queryByText("Assistants")).toBeNull();
     expect(listAssistantRows()).toEqual([]);
+  });
+});
+
+/** A Claude Code instance, logged in on moss when `loggedIn` is true and never probed otherwise. */
+const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
+  id: "01a06d02-1000-7000-8000-000000000001",
+  providerId: "claude-code",
+  name: "Claude Code",
+  config: {},
+  displayName: "Claude Code",
+  binaryName: "claude",
+  declared: {
+    steering: "native",
+    fork: "native",
+    modelSwitch: "in-session",
+    accessModes: {
+      "approval-required": "native",
+      "auto-accept-edits": "native",
+      auto: "native",
+      "full-access": "native",
+    },
+    mcpPassthrough: "native",
+    disallowedTools: "native",
+    structuredOutput: "supported",
+  },
+  secretFields: [],
+  snapshots: loggedIn
+    ? [
+        {
+          runnerId: MOSS.id,
+          probedAt: "2026-09-05T09:14:00.000Z",
+          harnessVersion: "2.1.263",
+          versionVerdict: "ok",
+          auth: { status: "ok", identity: "rogier@example.com" },
+          models: [],
+        },
+      ]
+    : [],
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
+});
+
+describe("the Threads face with no threads", () => {
+  const HINT = "A thread needs a runner with a provider login on it.";
+
+  it("says what a thread needs while no runner has a logged-in harness", async () => {
+    const routes = {
+      ...buildShellRoutes(),
+      "GET /api/v1/runners": { body: { items: [MOSS] } },
+      "GET /api/v1/providers": { body: [buildClaudeCode(false)] },
+    };
+    await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
+
+    expect(await getThreadsNav().findByText(HINT)).toBeDefined();
+  });
+
+  it("leaves the hint out once a runner has a logged-in harness", async () => {
+    const routes = {
+      ...buildShellRoutes(),
+      "GET /api/v1/runners": { body: { items: [MOSS] } },
+      "GET /api/v1/providers": { body: [buildClaudeCode(true)] },
+    };
+    await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
+
+    // The Sessions route's loader reads both lists before the screen renders,
+    // so the face has them by the time its empty text shows.
+    await getThreadsNav().findByText("No threads yet");
+    expect(getThreadsNav().queryByText(HINT)).toBeNull();
   });
 });

@@ -1,8 +1,9 @@
 /**
  * The conversation operations (`conversation.query`, `read`, `queryMessages`
- * and `send`), and the conversation writes the assistants domain makes when
- * an assistant is created or deleted. Appending a message is
- * `ConversationMessages`, which `send` uses too.
+ * and `send`), and the conversation writes that the domain implementing
+ * `ConversationResponder` makes when the answering party is created or
+ * deleted. Appending a message is `ConversationMessages`, which `send` uses
+ * too.
  *
  * A conversation is one exchange in one channel container. This domain is a
  * plain messenger: it stores what is said and hands each sent message to

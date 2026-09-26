@@ -304,6 +304,20 @@ describe("Settings > Assistants: the list and the form", () => {
     expect(readCheckedSegment("Reply")).toBe("Segments");
   });
 
+  it("says when each kind of change reaches the assistant's session", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+
+    await selectAssistant(user, "Bob");
+
+    expect(
+      screen.getByText(
+        "Reply applies at once. Access mode and permission profile apply when Bob's session next resumes, " +
+          "after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
+      ),
+    ).toBeDefined();
+  });
+
   it("saves only the changed name and reply", async () => {
     const user = userEvent.setup();
     const { api } = await openScreen([ADA, BOB]);

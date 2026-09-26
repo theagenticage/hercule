@@ -21,7 +21,6 @@ import { AssistantSessions } from "../../assistants";
 import { afterCommit } from "../../db";
 import { runnerRepository } from "../../runners";
 import { sessionRepository } from "../../sessions";
-import type { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
 import { Live } from "./live";
 import { Placement } from "./placement";
@@ -153,5 +152,5 @@ const make = Effect.gen(function* () {
 export const AssistantSessionsLayer: Layer.Layer<
   AssistantSessions,
   never,
-  SqlClient.SqlClient | WorkspaceService | Placement | Live
+  SqlClient.SqlClient | Placement | Live
 > = Layer.effect(AssistantSessions)(make);

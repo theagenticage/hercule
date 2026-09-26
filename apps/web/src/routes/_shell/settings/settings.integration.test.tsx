@@ -112,9 +112,30 @@ describe("Settings > Profile", () => {
     );
     await renderApp({ path: "/settings/profile", api: api.fetch, token: "held" });
 
+    await user.selectOptions(screen.getByLabelText("Timezone"), "Pacific/Auckland");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("the settings table is locked");
+  });
+
+  it("turns Save off while the timezone is the stored one, and again after it saves", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(buildController());
+    await renderApp({ path: "/settings/profile", api: api.fetch, token: "held" });
+
+    const save = screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
+    expect(save.disabled).toBe(true);
+
+    const field = screen.getByLabelText("Timezone");
+    await user.selectOptions(field, "Pacific/Auckland");
+    expect(save.disabled).toBe(false);
+    await user.selectOptions(field, "Europe/Amsterdam");
+    expect(save.disabled).toBe(true);
+
+    await user.selectOptions(field, "Pacific/Auckland");
+    await user.click(save);
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(save.disabled).toBe(true);
   });
 });
 

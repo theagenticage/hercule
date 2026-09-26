@@ -33,7 +33,11 @@ function Profile(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const { save, saving, saved, failure } = useSaveSettings(client);
 
-  const [timezone, setTimezone] = useState(settings.user.timezone ?? FALLBACK_TIMEZONE);
+  const storedTimezone = settings.user.timezone ?? FALLBACK_TIMEZONE;
+  const [timezone, setTimezone] = useState(storedTimezone);
+  // Save is off while the field holds the stored zone, as on Settings >
+  // Assistants: there is nothing to send.
+  const hasChanges = timezone !== storedTimezone;
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -74,10 +78,12 @@ function Profile(): JSX.Element {
             <TimezoneField value={timezone} onChange={setTimezone} />
           </Row>
           <div className="flex items-center gap-3 pt-2">
-            <Button type="submit" variant="form" disabled={saving}>
+            <Button type="submit" variant="form" disabled={saving || !hasChanges}>
               Save
             </Button>
-            <SaveStatus saved={saved} failure={failure} />
+            {/* "Saved." describes the last save, so it goes once the field is
+                edited again. */}
+            <SaveStatus saved={saved && !hasChanges} failure={failure} />
           </div>
         </FormCard>
       </form>

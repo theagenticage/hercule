@@ -39,6 +39,9 @@ const SYSTEM_PROMPT =
 const HEARTBEAT_PROMPT =
   "This is a scheduled heartbeat, not a message from the user. Check what you are waiting on: runs you started, subscriptions you hold, tasks you own, reminders that are due. Do not invent work and do not repeat old tasks from earlier in this conversation. If nothing needs the user's attention, reply exactly `NO_REPLY`. Otherwise write only the message the user should read: what changed, what you propose, plus any small updates worth mentioning alongside it. If a decision is needed, create a notification so it reaches the user wherever they are.";
 
+/** A time before any record a test creates. */
+const LONG_AGO = "2000-01-01T00:00:00.000Z";
+
 /** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
@@ -320,9 +323,17 @@ describe("assistant.update", () => {
       await withAssistants(async (arranged) => {
         const created = await createAssistant(arranged, { name: "Ada" });
         const fields: Record<string, unknown> = await build(arranged);
-        // Timestamps have millisecond precision, so without a pause the update
-        // could land in the same millisecond as the create.
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        // Timestamps have millisecond precision, so the update could land in
+        // the same millisecond as the create. The agent row, which holds the
+        // assistant's updatedAt, is moved into the past instead of waiting,
+        // because the controller runs on a real listener that no test clock
+        // can drive.
+        await Effect.runPromise(
+          Effect.orDie(
+            arranged.harness.sql`UPDATE agents SET updated_at = ${LONG_AGO}
+                                 WHERE id = ${uuidFromString(created.id)}`,
+          ),
+        );
 
         const response = await requestUpdate(arranged, created.id, fields);
         expect(response.status, await response.clone().text()).toBe(200);
@@ -331,7 +342,8 @@ describe("assistant.update", () => {
         const { updatedAt, ...rest } = updated;
         const { updatedAt: createdUpdatedAt, ...createdRest } = created;
         expect(rest).toEqual({ ...createdRest, ...fields });
-        expect(Date.parse(updatedAt)).toBeGreaterThan(Date.parse(createdUpdatedAt));
+        expect(updatedAt).not.toBe(LONG_AGO);
+        expect(Date.parse(updatedAt)).toBeGreaterThanOrEqual(Date.parse(createdUpdatedAt));
         expect(await readAssistant(arranged, created.id)).toEqual(updated);
 
         const audited = await arranged.harness.audit("assistant.updated");

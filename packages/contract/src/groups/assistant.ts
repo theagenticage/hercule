@@ -54,7 +54,7 @@ export const Heartbeat = Schema.Struct({
   timezone: Schema.optionalKey(Timezone),
   /** The text the assistant is given at each heartbeat. */
   prompt: Prompt,
-  /** Where a heartbeat's reply goes. The web chat is the only channel so far. */
+  /** Where a heartbeat's reply goes. The web channel is the only one so far. */
   target: Schema.Literal("web"),
 });
 

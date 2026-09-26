@@ -8,7 +8,7 @@ import { HeaderRow } from "../header-row";
  * The thread's header row, as set by spec 14 §The thread surface: the project
  * crumb, then the title, then the actions on the right. A thread with no
  * project shows `Threads /` as its crumb. An assistant's session shows
- * `Assistants /`, linking to the assistant's conversation.
+ * `Assistants / <name> /`, the name linking to the assistant's conversation.
  *
  * When the thread's workspace holds more than one thread, the title becomes
  * the active tab, with the other threads beside it in the workspace's order.
