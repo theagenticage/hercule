@@ -1,7 +1,9 @@
 /**
  * Converts a stored session into the `Session` record the API returns.
  *
- * Every field on the record comes from the row, except `unenforced`. The list
+ * Every field on the record comes from the row, except `unenforced` and
+ * `resumeHeld`. `resumeHeld` is the crash-loop guard's rule applied to the
+ * row, so every reader of the record agrees with the controller about it. The list
  * of spec fields the session's provider ignores is read from the provider
  * definition on every read. So when a new binary's adapter starts enforcing a
  * field, the field drops off the list.
@@ -23,6 +25,7 @@ import type { Session } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../providers";
 import type { StoredSession } from "./repository";
+import { isResumeHeld } from "./resume-hold";
 
 export const sessionRecordComposer: Effect.Effect<
   Effect.Effect<(stored: StoredSession) => Session>,
@@ -34,8 +37,15 @@ export const sessionRecordComposer: Effect.Effect<
   return Effect.map(
     host.providers(),
     (definitions) =>
-      ({ providerId, disallowedTools, ...session }: StoredSession): Session => ({
+      ({
+        providerId,
+        disallowedTools,
+        awaitingNewInput,
+        inputWaiting,
+        ...session
+      }: StoredSession): Session => ({
         ...session,
+        resumeHeld: isResumeHeld({ status: session.status, awaitingNewInput, inputWaiting }),
         unenforced: listUnenforcedFields(definitions, providerId, disallowedTools),
       }),
   );

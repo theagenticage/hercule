@@ -148,7 +148,7 @@ export const assistant = HttpApiGroup.make("assistant")
     HttpApiEndpoint.delete("delete", "/assistants/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

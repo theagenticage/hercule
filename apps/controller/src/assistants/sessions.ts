@@ -68,13 +68,13 @@ export class AssistantSessions extends Context.Service<
     >;
 
     /**
-     * Stops the session and waits until it has exited, at most the stop
-     * deadline.
-     * A queued session is ended at once, and an exited one is left alone.
-     * Must not run inside a transaction, because it waits on the runner.
-     * Fails with `InvalidState` naming the runner when the runner is not
-     * connected or the session does not exit in time.
+     * Stops the session once the caller's transaction commits, and does not
+     * wait for it to exit. Nothing is sent if the transaction rolls back. A
+     * queued session is ended at once, and an exited one is left alone. A
+     * runner that is not connected when the stop is sent is not told; the
+     * failure is logged, and the session ends by its own idle unload or
+     * timeout.
      */
-    readonly stop: (sessionId: string) => Effect.Effect<void, InvalidState | SqlError>;
+    readonly stop: (sessionId: string) => Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/assistants/AssistantSessions") {}

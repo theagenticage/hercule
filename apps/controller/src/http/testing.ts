@@ -41,7 +41,6 @@ import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
-  AssistantStopDeadline,
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
   LostRunnerSweepInterval,
@@ -68,7 +67,7 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
-import { AssistantSessionEndingsLayer } from "../assistants";
+import { AssistantSessionObserverLayer } from "../assistants";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
@@ -112,9 +111,10 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        // Joined to the assistants domain's notices, as the real boot does.
+        // Observed by the assistants domain, as in the real boot, so a
+        // session's replies and notices reach its conversation.
         SessionServiceLayer.pipe(
-          Layer.provide(AssistantSessionEndingsLayer),
+          Layer.provide(AssistantSessionObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
         WorkspaceServiceLayer,
@@ -255,8 +255,6 @@ export interface ServerOptions {
   readonly loginDeadline?: Duration.Duration;
   /** How long a delivered input waits for the runner to report what it did with it. */
   readonly inputDeadline?: Duration.Duration;
-  /** How long `assistant.delete` waits for a session to stop. The default 30 seconds is too long for a test. */
-  readonly assistantStopDeadline?: Duration.Duration;
   /** The default ten minutes is longer than a test can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The default second is too long for a test that waits several ticks. */
@@ -327,22 +325,7 @@ export const withServer = (
             Effect.andThen(bootSteps, resumeUnfinishedRuns),
           ),
         );
-        let listening = serve(bundle);
-        const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {
-          if (value !== undefined) listening = Effect.provideService(listening, key, value);
-        };
-        provideIfSet(RunnerPingSchedule, options.pings);
-        provideIfSet(RunnerFactsDeadline, options.factsDeadline);
-        provideIfSet(ProviderProbeDeadline, options.probeDeadline);
-        provideIfSet(ProviderProbeInterval, options.probeInterval);
-        provideIfSet(ProviderLoginDeadline, options.loginDeadline);
-        provideIfSet(SessionInputDeadline, options.inputDeadline);
-        provideIfSet(AssistantStopDeadline, options.assistantStopDeadline);
-        provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
-        provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
-        provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
-        provideIfSet(ExpressionBudget, options.expressionBudget);
-        yield* listening;
+        yield* serve(bundle);
         const base = yield* baseUrl;
         // Reads the audit log through the service that wrote it, like any other
         // reader.
@@ -402,9 +385,35 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
+      provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));
 };
+
+/**
+ * Provides the timings a test overrides to everything the server runs,
+ * whether it runs in a request or on a fiber a service started when its layer
+ * was built. A timing left unset keeps its default.
+ */
+const provideTimings =
+  (options: ServerOptions) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
+    let provided = effect;
+    const provideIfSet = <V>(key: Context.Reference<V>, value: V | undefined): void => {
+      if (value !== undefined) provided = Effect.provideService(provided, key, value);
+    };
+    provideIfSet(RunnerPingSchedule, options.pings);
+    provideIfSet(RunnerFactsDeadline, options.factsDeadline);
+    provideIfSet(ProviderProbeDeadline, options.probeDeadline);
+    provideIfSet(ProviderProbeInterval, options.probeInterval);
+    provideIfSet(ProviderLoginDeadline, options.loginDeadline);
+    provideIfSet(SessionInputDeadline, options.inputDeadline);
+    provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
+    provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
+    provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
+    provideIfSet(ExpressionBudget, options.expressionBudget);
+    return provided;
+  };
 
 /**
  * Sends a request with a JSON body, and optionally a bearer token.

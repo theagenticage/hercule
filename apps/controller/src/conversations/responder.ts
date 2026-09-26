@@ -15,7 +15,6 @@ import type {
   ConversationMessage,
   Forbidden,
   Internal,
-  InvalidState,
   Unauthenticated,
   Validation,
 } from "@hercule/contract";
@@ -25,8 +24,7 @@ import type {
  * for a failure the sender cannot act on, such as an unreadable setting; the
  * responder logs the cause before it fails.
  */
-export type ResponderError =
-  Unauthenticated | Forbidden | Validation | InvalidState | Internal | SqlError;
+export type ResponderError = Unauthenticated | Forbidden | Validation | Internal | SqlError;
 
 /** The party that answers the messages sent in a conversation. */
 export class ConversationResponder extends Context.Service<

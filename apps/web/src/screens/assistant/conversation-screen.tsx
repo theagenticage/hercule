@@ -164,8 +164,8 @@ export function ConversationScreen({
           ) : null}
           {lines.length === 0 ? (
             <p className="my-auto text-center text-row text-muted">
-              Send a message to start. {assistant.name} goes idle after a quiet spell and picks up
-              where it left off.
+              Send a message to start. {assistant.name} falls asleep after a quiet spell and picks
+              up where it left off.
             </p>
           ) : (
             lines.map((message) => <ConversationMessageView key={message.id} message={message} />)

@@ -19,7 +19,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { AssistantMessages } from "../../assistants";
 import { withTransaction } from "../../db";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { SessionService } from "../../sessions";
@@ -34,7 +33,6 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const { dispatch } = yield* Dispatch;
   const { flush, deliverQueuedInput } = yield* Live;
-  const assistantMessages = yield* AssistantMessages;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -124,11 +122,6 @@ const make = Effect.gen(function* () {
           if (applied.worked !== undefined) {
             yield* workspaces.touched(applied.worked.workspaceId, applied.worked.at);
           }
-          // Same transaction again, so a conversation's messages and the
-          // transcript they are read from never disagree after a crash. The
-          // assistants domain decides what the report means for the
-          // conversation.
-          yield* assistantMessages.recordSessionReport(report.session, event);
           return applied;
         }),
       );
@@ -146,11 +139,11 @@ const make = Effect.gen(function* () {
           dispatch(traffic.runnerId),
         );
       }
-      // A session the runner unloaded while input waited for it is resumed
-      // in place, so the input runs.
-      if (applied.unloadedHoldingInput === true) {
+      // A session that exited while input waited for it is resumed in place,
+      // so the input runs, unless the session service holds it back.
+      if (applied.exitedHoldingInput === true) {
         yield* forkAndAbsorbFailures(
-          "Resuming an unloaded session for its waiting input failed",
+          "Resuming an exited session for its waiting input failed",
           deliverQueuedInput(event.sessionId),
         );
       }
@@ -174,11 +167,5 @@ export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make
 export const InboundLayer: Layer.Layer<
   Inbound,
   never,
-  | SqlClient.SqlClient
-  | RunnerConnections
-  | SessionService
-  | WorkspaceService
-  | Dispatch
-  | Live
-  | AssistantMessages
+  SqlClient.SqlClient | RunnerConnections | SessionService | WorkspaceService | Dispatch | Live
 > = Layer.effect(Inbound)(make);

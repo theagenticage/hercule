@@ -4,10 +4,6 @@
  * produce.
  */
 export { AssistantService, AssistantServiceLayer } from "./service";
-export {
-  AssistantMessages,
-  AssistantMessagesLayer,
-  AssistantSessionEndingsLayer,
-} from "./assistant-messages";
+export { AssistantSessionObserverLayer } from "./session-observer";
 export { AssistantResponderLayer } from "./responder";
 export { AssistantSessions } from "./sessions";

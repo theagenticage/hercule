@@ -111,6 +111,13 @@ export const USER_ACTOR = "user";
 export const SYSTEM_ACTOR = "system";
 
 /**
+ * Returns the actor stamp of the session with this id, `session:<id>`. A write
+ * the session caused without a request of its own, such as the reply taken
+ * from its turn, is stamped with it.
+ */
+export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
+
+/**
  * Returns the actor stamp for an actor: `session:<id>` for a session,
  * `run:<id>` for a run, and the bare word `user` for the user. The id lets a
  * reader of the event log or of a task's provenance trace a change back to the
@@ -127,7 +134,7 @@ export const buildActorStamp = (actor: UserActor | SessionActor | RunActor): str
     case "user":
       return USER_ACTOR;
     case "session":
-      return `session:${actor.sessionId}`;
+      return buildSessionStamp(actor.sessionId);
     case "run":
       return `run:${actor.runId}`;
   }

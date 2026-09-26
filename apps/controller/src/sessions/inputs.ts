@@ -305,32 +305,6 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns every input of the session that the runner accepted as the
-     * start of a new turn (delivery `opened`), in the order it accepted them.
-     */
-    listOpenedTurns: (sessionId: string): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
-      Effect.map(
-        sql<InputRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)}
-            AND status = 'delivered' AND delivery = 'opened'
-          ORDER BY delivered_at, created_at, id
-        `,
-        (rows) => rows.map(toInput),
-      ),
-
-    /** Returns every input of the session that is still queued, sent to the runner or not, oldest first. */
-    listQueued: (sessionId: string): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
-      Effect.map(
-        sql<InputRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
-          ORDER BY created_at, id
-        `,
-        (rows) => rows.map(toInput),
-      ),
-
-    /**
      * Marks an input as sent, just before its frame goes out to the runner.
      * Returns the row as the update found it, not a copy read earlier, which
      * an edit in between could have changed. Returns `none` when the input was
@@ -339,9 +313,9 @@ const make = Effect.gen(function* () {
      *
      * An input of an exited session is never claimed, and returns `none`. A
      * caller that read the session as idle can race the runner's report that
-     * unloaded it. The input then stays waiting, and the resume that follows
-     * the unload sends it to the new process. Claimed, it would go to a
-     * process that is gone.
+     * it exited. The input then stays waiting, and the resume that follows
+     * the exit sends it to the new process. Claimed, it would go to a process
+     * that is gone.
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
@@ -364,8 +338,8 @@ const make = Effect.gen(function* () {
      *
      * `sentAt` is when the send being answered claimed the row, and works as
      * for `requeue`: the row changes only while it still holds that claim. A
-     * late answer from a process that was unloaded in the meantime must not
-     * mark as delivered a row that was released and sent again.
+     * late answer to a send that was given up must not mark as delivered a
+     * row that was sent again since.
      */
     delivered: (
       id: string,
@@ -385,27 +359,14 @@ const make = Effect.gen(function* () {
      * the input is sent again. Until then, a caller sees the reason.
      *
      * `sentAt` is when the failed send claimed the row. The row changes only
-     * while it still holds that claim: a session that was unloaded and resumed
-     * in the meantime has released the row and may have sent it again, and
-     * that newer send must not be undone.
+     * while it still holds that claim: a row that was put back to waiting in
+     * the meantime may have been sent again, and that newer send must not be
+     * undone.
      */
     requeue: (id: string, sentAt: string | null, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
-
-    /**
-     * Puts every input of the session that was sent but not answered back to
-     * waiting. Used when the runner unloaded an idle session: the process that
-     * received the input is gone without starting a turn for it, and the
-     * session resumes, so the input is sent again to the resumed process.
-     */
-    releaseSent: (sessionId: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET sent_at = NULL
-        WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
-          AND sent_at IS NOT NULL
       `),
 
     rewrite: (id: string, text: string): Effect.Effect<void, SqlError> =>

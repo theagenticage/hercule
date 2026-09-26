@@ -82,6 +82,7 @@ const BASE_SESSION: Session = {
   title: "Fix the login bug",
   status: "busy",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,

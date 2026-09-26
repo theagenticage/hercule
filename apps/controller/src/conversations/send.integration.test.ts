@@ -10,7 +10,7 @@
  * never blocks the conversation: the next send places a new session.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import type { SessionInput } from "@hercule/protocol";
 import { readErrorBody, send } from "../http/testing";
 import {
@@ -111,7 +111,7 @@ describe("conversation.send to a conversation with no session", () => {
     });
   });
 
-  it("fails with invalid_state and keeps neither the message nor a session when no runner can take it", async () => {
+  it("keeps the message and writes that the assistant can't be reached when no runner can take it", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);
       // `reserved` is set on the row, because `runner.update` does not allow
@@ -126,12 +126,13 @@ describe("conversation.send to a conversation with no session", () => {
 
       const response = await requestSend(arranged, conversation.id, "hi");
 
-      expect(response.status).toBe(409);
-      expect(await readErrorBody(response)).toMatchObject({
-        code: "invalid_state",
-        message: NO_RUNNER,
-      });
-      expect((await listMessages(arranged, conversation.id)).items).toEqual([]);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const messages = (await listMessages(arranged, conversation.id, "sort=position:asc")).items;
+      expect(messages.map((one) => [one.senderRole, one.text])).toEqual([
+        ["owner", "hi"],
+        ["notice", `Hercule can't be reached: ${NO_RUNNER}`],
+      ]);
+      expect(messages[1]).toMatchObject({ actor: "system", sessionId: null });
       expect(await listSessions(arranged)).toEqual([]);
     });
   });
@@ -199,7 +200,7 @@ describe("conversation.send to a conversation with a current session", () => {
     });
   });
 
-  it("queues the message as the user's input on a busy session", async () => {
+  it("steers the message into the running turn of a busy session", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);
       const session = await startConversationSession(arranged, conversation.id, "hi");
@@ -214,9 +215,15 @@ describe("conversation.send to a conversation with a current session", () => {
 
       await sendMessage(arranged, conversation.id, "later");
 
-      expect(await listInputs(arranged, session.id)).toContainEqual(
-        expect.objectContaining({ text: "later", source: "user", status: "queued" }),
+      const steered = await waitUntil("steered the message into the turn", async () =>
+        (await listInputs(arranged, session.id)).find(
+          (one) => one.text === "later" && one.status === "delivered",
+        ),
       );
+      expect(steered.source).toBe("user");
+      expect(
+        listInputFramesFor(arranged, session.id).filter((frame) => frame.input.text === "later"),
+      ).toHaveLength(1);
       expect(await listConversationSessions(arranged, conversation.id)).toHaveLength(1);
     });
   });
@@ -412,51 +419,56 @@ describe("conversation.send when the current session cannot be resumed", () => {
     });
   });
 
-  it("cancels a message held through an idle unload when the session cannot be resumed, and writes a notice", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation } = await readDefaultConversation(arranged);
-      const session = await startConversationSession(arranged, conversation.id, "hi");
-      const next = await runTurn(arranged, session.id, 2, "t1", ["hello"]);
-      // The runner never answers the next input, so the message is still
-      // held when the runner unloads the session.
-      arranged.wire.answering(() => undefined);
-      await sendMessage(arranged, conversation.id, "again");
-      await waitUntil(
-        "sent the second message's input frame",
-        () => listInputFramesFor(arranged, session.id)[1],
-      );
-      await drainRunner(arranged);
+  it("cancels a message held through an idle unload when the session cannot be resumed, and writes that the assistant can't be reached", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversation } = await readDefaultConversation(arranged);
+        const session = await startConversationSession(arranged, conversation.id, "hi");
+        const next = await runTurn(arranged, session.id, 2, "t1", ["hello"]);
+        // The runner never answers the next input, so the message is still
+        // held when the runner unloads the session.
+        arranged.wire.answering(() => undefined);
+        await sendMessage(arranged, conversation.id, "again");
+        await waitUntil(
+          "sent the second message's input frame",
+          () => listInputFramesFor(arranged, session.id)[1],
+        );
+        await drainRunner(arranged);
 
-      reportEvent(arranged.wire, next, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "session.exited",
-        reason: "idle_unload",
-      });
+        reportEvent(arranged.wire, next, {
+          eventId: crypto.randomUUID(),
+          sessionId: session.id,
+          at,
+          _tag: "session.exited",
+          reason: "idle_unload",
+        });
 
-      const notice = await waitUntil("wrote the notice", async () =>
-        (await listMessages(arranged, conversation.id)).items.find(
-          (one) => one.senderRole === "notice",
-        ),
-      );
-      expect(notice).toMatchObject({
-        senderLabel: "Hercule",
-        text:
-          "Hercule couldn't answer: its session could not be resumed " +
-          "(that runner is draining and takes no new sessions); " +
-          "send the message again to start a new session",
-        sessionId: session.id,
-        actor: "system",
-      });
-      const held = (await listInputs(arranged, session.id)).find((one) => one.text === "again");
-      expect(held).toMatchObject({
-        status: "cancelled",
-        reason:
-          "the session could not be resumed: that runner is draining and takes no new sessions",
-      });
-      expect((await readSession(arranged, session.id)).status).toBe("exited");
-    });
+        const notice = await waitUntil("wrote the notice", async () =>
+          (await listMessages(arranged, conversation.id)).items.find(
+            (one) => one.senderRole === "notice",
+          ),
+        );
+        expect(notice).toMatchObject({
+          senderLabel: "Hercule",
+          text:
+            "Hercule can't be reached: its session could not be resumed " +
+            "(that runner is draining and takes no new sessions); " +
+            "send the message again to start a new session",
+          sessionId: session.id,
+          actor: "system",
+        });
+        const held = (await listInputs(arranged, session.id)).find((one) => one.text === "again");
+        expect(held).toMatchObject({
+          status: "cancelled",
+          reason:
+            "the session could not be resumed: that runner is draining and takes no new sessions",
+        });
+        expect((await readSession(arranged, session.id)).status).toBe("exited");
+        // The session is only checked for a resume once the send gives up on
+        // the unanswered frame, so the send's deadline is kept short.
+      },
+      { inputDeadline: Duration.millis(300) },
+    );
   });
 });
 

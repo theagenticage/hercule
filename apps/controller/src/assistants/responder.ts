@@ -1,6 +1,6 @@
 /**
  * How an assistant answers a message sent in its conversation: it gives the
- * text to the conversation's current session, or starts a new session with
+ * text to the conversation's newest session, or starts a new session with
  * it.
  *
  * This is the assistants domain's implementation of the conversations
@@ -12,7 +12,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import {
   createInternalError,
@@ -21,9 +21,12 @@ import {
   Unauthenticated,
   Validation,
 } from "@hercule/contract";
+import { agentRepository } from "../agents";
+import type { ConversationMessages } from "../conversations";
 import { ConversationResponder, type ResponderError } from "../conversations";
+import { withTransaction } from "../db";
 import { sessionRepository } from "../sessions";
-import { readCurrentSession } from "./current-session";
+import { buildUnreachableText, makeNoticeWriter } from "./notices";
 import { AssistantSessions } from "./sessions";
 
 /**
@@ -39,7 +42,6 @@ const hideInternalErrors = <E>(
     error instanceof Unauthenticated ||
     error instanceof Forbidden ||
     error instanceof Validation ||
-    error instanceof InvalidState ||
     isSqlError(error)
       ? Effect.fail(error)
       : Effect.andThen(
@@ -49,8 +51,11 @@ const hideInternalErrors = <E>(
   );
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const rows = yield* sessionRepository;
+  const agents = yield* agentRepository;
   const sessions = yield* AssistantSessions;
+  const { appendNotice } = yield* makeNoticeWriter;
 
   return ConversationResponder.of({
     // Runs in the send's transaction, so two sends at once see each other's
@@ -58,23 +63,54 @@ const make = Effect.gen(function* () {
     messageSent: (conversation, message) =>
       hideInternalErrors(
         Effect.gen(function* () {
-          const current = yield* readCurrentSession(rows, conversation.id);
-          if (Option.isSome(current)) {
-            const given = yield* sessions.give({
-              sessionId: current.value.id,
-              text: message.text,
-            });
-            if (given === "given") return;
-            // The session has exited and cannot be resumed, for example
-            // because its runner is draining. It is left as history, and a
-            // new session answers the message instead. Nothing was stored
-            // for the old session, so the user gets one answer and no notice.
-          }
-          yield* sessions.start({
-            conversationId: conversation.id,
-            assistantId: conversation.assistantId,
-            text: message.text,
-          });
+          // A savepoint, so a delivery that fails part way leaves nothing
+          // behind, and the notice below is the only write besides the
+          // message itself.
+          const delivered = withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const newest = yield* rows.newestInConversation(conversation.id);
+              if (Option.isSome(newest)) {
+                const given = yield* sessions.give({
+                  sessionId: newest.value.id,
+                  text: message.text,
+                });
+                if (given === "given") return;
+                // The session has exited and cannot be resumed, for example
+                // because its runner is draining. It is left as history, and
+                // a new session answers the message instead. Nothing was
+                // stored for the old session, so the owner gets one answer
+                // and no notice.
+              }
+              yield* sessions.start({
+                conversationId: conversation.id,
+                assistantId: conversation.assistantId,
+                text: message.text,
+              });
+            }),
+          );
+          // The message is kept either way: it is the conversation's record
+          // of what the owner said. When no session can take it, for example
+          // because no runner is connected, the conversation says so, and
+          // the owner sends it again once the cause is fixed.
+          yield* Effect.catchIf(
+            delivered,
+            (error): error is InvalidState => error instanceof InvalidState,
+            (error) =>
+              Effect.gen(function* () {
+                const agent = yield* agents.read(conversation.assistantId);
+                // The send read the conversation in this transaction, and an
+                // assistant's agent row goes in the same transaction as its
+                // conversations.
+                if (Option.isNone(agent))
+                  return yield* Effect.die("a conversation has no assistant");
+                yield* appendNotice({
+                  conversationId: conversation.id,
+                  name: agent.value.name,
+                  text: buildUnreachableText(agent.value.name, error.error.message),
+                });
+              }),
+          );
         }),
       ),
   });
@@ -88,5 +124,5 @@ const make = Effect.gen(function* () {
 export const AssistantResponderLayer: Layer.Layer<
   ConversationResponder,
   never,
-  SqlClient.SqlClient | AssistantSessions
+  SqlClient.SqlClient | AssistantSessions | ConversationMessages
 > = Layer.effect(ConversationResponder)(make);

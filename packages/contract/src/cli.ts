@@ -2065,7 +2065,7 @@ export const CLI = {
 
   "assistant.delete": {
     command: "assistant delete",
-    help: "Deletes an assistant, its conversations and their messages. A session still running for it is stopped first. Its sessions and their transcripts stay, and keep the assistant's id as a record of where they came from.",
+    help: "Deletes an assistant, its conversations and their messages. A session still running for it is told to stop once the delete is done; the delete does not wait for it, and whatever that session reports afterwards is not written anywhere. Its sessions and their transcripts stay, and keep the assistant's id as a record of where they came from.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2074,10 +2074,6 @@ export const CLI = {
         help: "The assistant's id, or a tail of eight or more characters.",
         resolves: "assistant.query",
       },
-    },
-    errors: {
-      invalid_state:
-        "the assistant's session did not stop in time, so nothing was deleted; the message names its runner, and the delete can be tried again once that runner is reachable",
     },
   },
 
@@ -2108,7 +2104,7 @@ export const CLI = {
   },
   "conversation.queryMessages": {
     command: "conversation message list",
-    help: "Lists a conversation's messages, newest first. They are what the owner said, what the assistant answered, and any notice that it could not answer.",
+    help: "Lists a conversation's messages, newest first. They are what the owner said, what the assistant answered, and any notice: that the assistant was interrupted, or can't be reached.",
     examples: [{ args: ["7b41d0a5"] }, { args: ["7b41d0a5", "--sort", "position:asc"] }],
     fields: {
       id: {
@@ -2121,7 +2117,7 @@ export const CLI = {
   },
   "conversation.send": {
     command: "conversation send",
-    help: "Sends a message to a conversation as its owner. The assistant answers in its session: one is started if none is running, and one that went idle is resumed. Prints the stored message; the answer arrives later, and `hercule conversation message list` shows it.",
+    help: "Sends a message to a conversation as its owner. The assistant answers in its newest session: a busy session has the message steered into its running turn, an idle one starts a turn with it, and one that exited is resumed in place when it can be; otherwise a new session is started. Prints the stored message; the answer arrives later, and `hercule conversation message list` shows it. The message is always kept: when no session can take it, for example because no runner is connected, the conversation gets a notice that says why.",
     examples: [{ args: ["7b41d0a5"], stdin: "What is on my list for today?" }],
     fields: {
       id: {
@@ -2135,8 +2131,6 @@ export const CLI = {
     errors: {
       forbidden:
         "only a user credential may send: the message is recorded as the owner's, so an agent's session token is refused",
-      invalid_state:
-        "no runner can start the assistant's session; the error message gives the reason, such as no connected runner being logged in to its provider instance",
     },
   },
 
@@ -2466,7 +2460,7 @@ export const CLI = {
   },
   "input.steer": {
     command: "input steer",
-    help: "Delivers a Queued Input into the session's running turn now. It is folded into that turn instead of waiting for the turn to end. Only a busy session can be steered, and only where the provider supports it.",
+    help: "Gets a Queued Input into the session's running turn now, instead of waiting for the turn to end. Only a busy session can be steered, and every provider can be: one that steers natively folds the input into the running turn, and for any other the running turn is interrupted and the input is sent as the next turn, which is reported as `queued`.",
     examples: [{ args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"] }],
     fields: {
       id: {
@@ -2482,7 +2476,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session is not busy, its provider does not steer into a running turn, or the input is no longer waiting",
+        "the session is not busy, its runner is not connected or refused the input, or the input is no longer waiting",
     },
   },
 

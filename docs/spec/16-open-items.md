@@ -32,6 +32,7 @@ Not design questions. The constraint is stated where one exists.
 - 08 §3: whether security audit entries become matchable platform events - not in v1, additive later.
 - 14 §App shell (composer): the voice button is a placeholder for dictation, kept for the shape; no v1 feature is specced behind it.
 - 11 §5, 13 §6.1: the contract has no error shape for "the credential is good and the profile holds the grant, but the operation is the user's own" - `session.spawn` by a session actor, `secret.set`, `apiKey.create`, `conversation.send` *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*. Today it is 403 `forbidden` naming the operation's grant, with a message saying no grant confers it; `auth.wsTicket` is the exception and answers 401, because its requirement is `authenticated` and there is no grant for a 403 to name. A refusal code of its own would be additive. *(Noted 2026-09-15, [#68](https://github.com/theagenticage/hercule/issues/68).)*
+- 12 §2: a web conversation's `containerKey` is written as `null` by the conversation message writer, because the web channel has no platform container. Channel conversations (Discord, Slack) must write their container's key when they land; nothing reads it yet *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*.
 
 ## C. Verify at build time
 
@@ -61,6 +62,10 @@ Not design questions. The constraint is stated where one exists.
 
 - ~~07 §8, [#79](https://github.com/theagenticage/hercule/issues/79): a `workflow.run` step can start a run of its own workflow, directly or through another workflow, so one run can start runs without end, and with two such steps their number doubles each time. Nothing bounds it yet: cancelling a run does not cancel the runs its steps started, and `workflow.delete` is refused while any run of the workflow is live, so the way out is to edit the step away. Conditions ([#80](https://github.com/theagenticage/hercule/issues/80)) are how such a chain would end on purpose; whether runs also need a depth limit, or cancel should reach child runs, is a design question for then. *(Noted 2026-09-24.)*~~ Resolved 2026-09-24 by [#79](https://github.com/theagenticage/hercule/issues/79): a run may be at most `run.nestingLimit` runs deep (a controller setting, default 5), and a `run.start` step that would start a deeper run fails with `cap_exceeded`. Cancelling a run also cancels every unfinished run it started, however deep ([./07-workflows.md](./07-workflows.md) sections 7.2 and 8). A run that fails or completes still leaves its children running, because a `run.start` step does not wait for its child.
 
+- 12 §10: `assistant.delete` tells the assistant's live sessions to stop after the delete commits and does not wait. A session whose runner is not connected at that moment is not stopped: it runs on until its idle unload or its runner restarts, and whatever it reports afterwards is written nowhere, because its conversation is gone. The warning is logged. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
+- 12 §9: a message the runner accepted as a new turn, in a session that exits before the runner reports `turn.started`, is neither answered nor explained: it counts as delivered, so it is not resumed for, and no turn was running, so no "was interrupted" notice is written. The window is the time between the runner's answer and the turn's start. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
+- 06 §5: a conversation input on the wire when its session exits waits for its answer, or for its deadline (`SessionInputDeadline`, 10 seconds), before it is put back and the session is resumed for it. The owner sees no reply for that long. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
+
 ## Not yet specified (map fog)
 
 In scope, not yet sharp enough to ticket; listed on the map under **Not yet specified**:
@@ -70,6 +75,7 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - Execution-plan snapshot dedup/GC; content-hash dedup is the known escape hatch if per-run copies ever hurt.
 - `auth.wsTicket` (11 §auth) has no schema in `packages/contract`; it is added by the ticket that builds the live overlay and its `client-core` client. *(Noted 2026-09-04, [#58](https://github.com/theagenticage/hercule/issues/58).)*
 - Task and Project pruning: both soft-delete in v1 ([Domain model residue](https://github.com/theagenticage/hercule/issues/46)) and events live as long as a live Task refers to them (04 §Retention), so the log's real bound becomes task retention; the idea on record is hard-pruning deleted tasks with their runs and events after something like a year. Sharpens with dogfooding.
+- Holding an owner's message while the owner is still typing, so a quick follow-up joins the first message instead of steering the turn that message just opened. Today every message is delivered at once: steered into a running turn, or sent as a new turn. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
 
 ## Pending prototypes
 

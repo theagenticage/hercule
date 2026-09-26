@@ -1,21 +1,22 @@
 /**
- * Tests the notices an assistant's conversation gets when a turn or the
- * session ends without an answer, from what the fake runner reports on the
- * runner socket, against a real controller.
+ * Tests the notices an assistant's conversation gets when a session ends, from
+ * what the fake runner reports on the runner socket, against a real
+ * controller.
  *
  * A notice is a conversation message from the assistant, with sender role
- * `notice`, whose text is that the assistant couldn't answer, and why. A
- * failure is never silent in the conversation:
+ * `notice`, stamped with the system. There are two:
  *
- * - a failed or interrupted turn writes one, even after it wrote reply text;
- * - a session that ends while someone waits on it writes one, however it
- *   ends: an exit the runner reports, a stop before a runner took it, a
- *   runner that restarted, was retired or was lost, or a workspace that could
- *   not be made. Someone waits while the session is queued, starting or
- *   busy, or while a message sent to it is still unanswered.
+ * - "<name> was interrupted: <why>", when the session exits while a turn is
+ *   running, however it ends: an exit the runner reports, a runner that
+ *   restarted, was retired or was lost, or a workspace that could not be made;
+ * - "<name> can't be reached: <why>", when a message waits for a session that
+ *   exited and cannot be resumed, such as one that exited before it ever
+ *   started.
  *
- * An exit while idle with no message waiting, and an idle unload, write none,
- * because nobody is waiting. A Thread writes none at all.
+ * A turn that fails or is interrupted while the session lives writes no
+ * notice, only the reply text it produced. An exit while idle writes none, a
+ * message still waiting included: the message is kept for the resumed
+ * process. A Thread writes none at all.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
@@ -25,7 +26,6 @@ import { post, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
-  listFrames,
   listInputs,
   reportEvent,
   spawnSessionOrFail,
@@ -45,6 +45,16 @@ import {
 } from "../conversations/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
+
+/**
+ * The notice for the message that queued a session that exited before it
+ * started. The message is kept for a resume, but a session that never started
+ * has no transcript to resume, so the queued-input sweep gives up on it.
+ */
+const NEVER_STARTED =
+  "Ada can't be reached: its session could not be resumed (that session left no " +
+  "provider-native session, so its transcript is gone and there is nothing to resume); " +
+  "send the message again to start a new session";
 
 /** The conversation of these tests: the default assistant's, renamed to Ada, and its session, idle after "hi". */
 interface AdaConversation {
@@ -121,13 +131,13 @@ const queueAdaSession = async (arranged: Arranged, conversationId: string): Prom
 
 /**
  * Waits for the one notice of the conversation and checks that the system
- * wrote it about `sessionId`, with `why` as the reason and no turn id.
+ * wrote it about `sessionId`, with the text `text` and no turn id.
  */
 const expectSessionNotice = async (
   arranged: Arranged,
   conversationId: string,
   sessionId: string,
-  why: string,
+  text: string,
 ): Promise<void> => {
   const answers = await waitUntil("wrote the notice", async () => {
     const found = await listAnswers(arranged, conversationId);
@@ -137,7 +147,7 @@ const expectSessionNotice = async (
   expect(answers[0]).toMatchObject({
     senderRole: "notice",
     senderLabel: "Ada",
-    text: `Ada couldn't answer: ${why}`,
+    text,
     sessionId,
     turnId: null,
     actor: "system",
@@ -173,52 +183,18 @@ const reportExit = async (
   await waitForSession(arranged, sessionId, (one) => one.status === "exited");
 };
 
-describe("a turn that ends without an answer", () => {
-  it("writes a notice with the turn's error and id when the turn fails", async () => {
+describe("a turn that fails or is interrupted while the session lives", () => {
+  it("writes no notice when the turn fails", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
 
       await runTurn(arranged, session.id, 2, "t1", [], { state: "failed", error: "rate limited" });
 
-      const answers = await listAnswers(arranged, conversation.id);
-      expect(answers).toHaveLength(1);
-      expect(answers[0]).toMatchObject({
-        senderRole: "notice",
-        senderLabel: "Ada",
-        text: "Ada couldn't answer: rate limited",
-        sessionId: session.id,
-        turnId: "t1",
-        actor: "system",
-      });
+      expect(await listAnswers(arranged, conversation.id)).toEqual([]);
     });
   });
 
-  it("records that the turn failed when the failed turn has no error", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, session } = await startAda(arranged);
-
-      await runTurn(arranged, session.id, 2, "t1", [], { state: "failed" });
-
-      expect((await listAnswers(arranged, conversation.id)).map((one) => one.text)).toEqual([
-        "Ada couldn't answer: the turn failed",
-      ]);
-    });
-  });
-
-  it("records that the turn was interrupted when the turn is interrupted", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, session } = await startAda(arranged);
-
-      await runTurn(arranged, session.id, 2, "t1", [], { state: "interrupted" });
-
-      const answers = await listAnswers(arranged, conversation.id);
-      expect(answers.map((one) => [one.senderRole, one.text, one.turnId])).toEqual([
-        ["notice", "Ada couldn't answer: the turn was interrupted", "t1"],
-      ]);
-    });
-  });
-
-  it("in segments mode, keeps the reply already stored and writes the notice after it", async () => {
+  it("in segments mode, keeps the reply already stored and writes no notice", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged, "segments");
 
@@ -228,14 +204,11 @@ describe("a turn that ends without an answer", () => {
       });
 
       const answers = await listAnswers(arranged, conversation.id);
-      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
-        ["assistant", "a"],
-        ["notice", "Ada couldn't answer: rate limited"],
-      ]);
+      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([["assistant", "a"]]);
     });
   });
 
-  it("in turn-end mode, writes the turn's text as the reply and then the notice", async () => {
+  it("in turn-end mode, writes the failed turn's text as the reply and no notice", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged, "turn-end");
 
@@ -245,17 +218,14 @@ describe("a turn that ends without an answer", () => {
       });
 
       const answers = await listAnswers(arranged, conversation.id);
-      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
-        ["assistant", "b"],
-        ["notice", "Ada couldn't answer: rate limited"],
-      ]);
+      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([["assistant", "b"]]);
     });
   });
 
   // A turn is split into several texts by its tool calls. A completed turn's
   // reply is its last text (AC-15), but an interrupted one has no answer, so
   // its reply is all it said, not the fragment after the last tool call.
-  it("in turn-end mode, writes every text of an interrupted turn as one reply, then the notice", async () => {
+  it("in turn-end mode, writes every text of an interrupted turn as one reply", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged, "turn-end");
 
@@ -266,7 +236,6 @@ describe("a turn that ends without an answer", () => {
       const answers = await listAnswers(arranged, conversation.id);
       expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
         ["assistant", "1 2 3\n\n4 5 6\n\n7 8"],
-        ["notice", "Ada couldn't answer: the turn was interrupted"],
       ]);
     });
   });
@@ -297,29 +266,16 @@ describe("a session that exits while busy", () => {
         expect(answers[0]).toMatchObject({
           senderRole: "notice",
           senderLabel: "Ada",
-          text: `Ada couldn't answer: ${text}`,
+          text: `Ada was interrupted: ${text}`,
           turnId: null,
         });
       });
     },
   );
-
-  it("writes no notice for an idle unload", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, session } = await startAda(arranged);
-      // The runner only unloads an idle session. Reporting the unload while
-      // busy shows that the reason alone keeps the notice out.
-      await startTurn(arranged, session.id);
-
-      await reportExit(arranged, session.id, 3, "idle_unload");
-
-      expect(await listAnswers(arranged, conversation.id)).toEqual([]);
-    });
-  });
 });
 
 describe("a session stopped before a runner took it", () => {
-  it("writes the notice a stopped session gets, because the message that queued it goes unanswered", async () => {
+  it("writes that the assistant can't be reached, because the message that queued it is never taken", async () => {
     await withAgentFleet(async (arranged) => {
       const conversation = await renameToAda(arranged);
       const session = await queueAdaSession(arranged, conversation.id);
@@ -334,13 +290,13 @@ describe("a session stopped before a runner took it", () => {
 
       expect(stopped.status, await stopped.clone().text()).toBe(200);
       expect((await stopped.json()) as Session).toMatchObject({ status: "exited" });
-      await expectSessionNotice(arranged, conversation.id, session.id, "its session was stopped");
+      await expectSessionNotice(arranged, conversation.id, session.id, NEVER_STARTED);
     });
   });
 });
 
 describe("a session its runner stops holding", () => {
-  it("writes a notice when the runner reports its sessions without this one", async () => {
+  it("writes that the assistant was interrupted when the runner reports its sessions without this one", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       await startTurn(arranged, session.id);
@@ -350,11 +306,16 @@ describe("a session its runner stops holding", () => {
       arranged.wire.send({ _tag: "sessionsReport", sessions: [] });
 
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      await expectSessionNotice(arranged, conversation.id, session.id, "its runner restarted");
+      await expectSessionNotice(
+        arranged,
+        conversation.id,
+        session.id,
+        "Ada was interrupted: its runner restarted",
+      );
     });
   });
 
-  it("writes a notice when its runner is retired while it is busy", async () => {
+  it("writes that the assistant was interrupted when its runner is retired while it is busy", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       await startTurn(arranged, session.id);
@@ -368,11 +329,16 @@ describe("a session its runner stops holding", () => {
 
       expect(retired.status, await retired.clone().text()).toBe(200);
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      await expectSessionNotice(arranged, conversation.id, session.id, "its runner was retired");
+      await expectSessionNotice(
+        arranged,
+        conversation.id,
+        session.id,
+        "Ada was interrupted: its runner was retired",
+      );
     });
   });
 
-  it("writes a notice when its runner is retired while it waits in the queue", async () => {
+  it("writes that the assistant can't be reached when its runner is retired while it waits in the queue", async () => {
     await withAgentFleet(async (arranged) => {
       const conversation = await renameToAda(arranged);
       const session = await queueAdaSession(arranged, conversation.id);
@@ -386,11 +352,11 @@ describe("a session its runner stops holding", () => {
 
       expect(retired.status, await retired.clone().text()).toBe(200);
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      await expectSessionNotice(arranged, conversation.id, session.id, "its runner was retired");
+      await expectSessionNotice(arranged, conversation.id, session.id, NEVER_STARTED);
     });
   });
 
-  it("writes a notice when its runner is lost for longer than the session's time limit", async () => {
+  it("writes that the assistant was interrupted when its runner is lost for longer than the session's time limit", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { conversation, session } = await startAda(arranged);
@@ -411,7 +377,7 @@ describe("a session its runner stops holding", () => {
           arranged,
           conversation.id,
           session.id,
-          "its runner could not be reached",
+          "Ada was interrupted: its runner could not be reached",
         );
       },
       { lostRunnerSweepInterval: Duration.millis(50) },
@@ -420,7 +386,7 @@ describe("a session its runner stops holding", () => {
 });
 
 describe("a session whose workspace could not be made", () => {
-  it("writes a notice with the runner's error", async () => {
+  it("writes that the assistant was interrupted, with the runner's error", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       await startTurn(arranged, session.id);
@@ -453,7 +419,7 @@ describe("a session whose workspace could not be made", () => {
         arranged,
         conversation.id,
         session.id,
-        "its workspace could not be made: fatal: could not read from remote repository",
+        "Ada was interrupted: its workspace could not be made: fatal: could not read from remote repository",
       );
     });
   });
@@ -477,53 +443,8 @@ describe("a session that exits while idle", () => {
   );
 });
 
-describe("a session that exits while idle with a message still unanswered", () => {
-  it("writes a notice when the message was sent and the runner never answered it", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, session } = await startAda(arranged);
-      arranged.wire.answering(() => undefined);
-      await sendMessage(arranged, conversation.id, "are you there?");
-      await waitUntil("sent the message's input frame", () =>
-        listFrames(arranged.wire, "sessionInput").length > 0 ? true : undefined,
-      );
-
-      await reportExit(arranged, session.id, 2, "crash");
-
-      await expectSessionNotice(arranged, conversation.id, session.id, "its session crashed");
-    });
-  });
-
-  it("writes a notice when the runner accepted the message but no turn started from it", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, session } = await startAda(arranged);
-      const next = await runTurn(arranged, session.id, 2, "t1", ["hello"]);
-      await sendMessage(arranged, conversation.id, "are you there?");
-      await waitUntil("the runner accepted the message as a new turn", async () =>
-        (await listInputs(arranged, session.id)).find(
-          (one) => one.text === "are you there?" && one.status === "delivered",
-        ),
-      );
-
-      await reportExit(arranged, session.id, next, "crash");
-
-      const answers = await waitUntil("wrote the notice", async () => {
-        const found = await listAnswers(arranged, conversation.id);
-        return found.length > 1 ? found : undefined;
-      });
-      expect(answers).toHaveLength(2);
-      expect(answers[0]!.text).toBe("hello");
-      expect(answers[1]).toMatchObject({
-        senderRole: "notice",
-        senderLabel: "Ada",
-        text: "Ada couldn't answer: its session crashed",
-        sessionId: session.id,
-        turnId: null,
-        actor: "system",
-      });
-    });
-  });
-
-  it("writes a notice when the runner refused the message and it still waits", async () => {
+describe("a session that exits while idle with a message still waiting", () => {
+  it("writes no notice and keeps the message for the next resume when the runner refused it", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       arranged.wire.answering(() => ({ message: "the harness is not ready" }));
@@ -536,7 +457,17 @@ describe("a session that exits while idle with a message still unanswered", () =
 
       await reportExit(arranged, session.id, 2, "stopped");
 
-      await expectSessionNotice(arranged, conversation.id, session.id, "its session was stopped");
+      // The session exited before it started any turn, so the crash-loop
+      // guard holds it until the owner sends another message. A retry that
+      // was on the wire at the exit is answered and put back, never dropped.
+      const held = await waitForSession(arranged, session.id, (one) => one.resumeHeld);
+      expect(held.status).toBe("exited");
+      await waitUntil("kept the message waiting", async () =>
+        (await listInputs(arranged, session.id)).find(
+          (one) => one.text === "are you there?" && one.status === "queued" && one.sentAt === null,
+        ),
+      );
+      expect(await listAnswers(arranged, conversation.id)).toEqual([]);
     });
   });
 });

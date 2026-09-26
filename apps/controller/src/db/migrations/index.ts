@@ -40,6 +40,7 @@ import routing from "./0029-routing";
 import strandedRunsCompleted from "./0030-stranded-runs-completed";
 import assistants from "./0031-assistants";
 import conversationMessages from "./0032-conversation-messages";
+import crashLoopGuard from "./0033-crash-loop-guard";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -74,6 +75,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [30, "stranded-runs-completed", Effect.succeed(strandedRunsCompleted)],
   [31, "assistants", Effect.succeed(assistants)],
   [32, "conversation-messages", Effect.succeed(conversationMessages)],
+  [33, "crash-loop-guard", Effect.succeed(crashLoopGuard)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

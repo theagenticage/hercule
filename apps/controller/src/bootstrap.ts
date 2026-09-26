@@ -26,7 +26,7 @@ import type { Plugin } from "@hercule/plugin-host";
 import type { HomePaths } from "@hercule/home";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
-import { AssistantSessionEndingsLayer } from "./assistants";
+import { AssistantSessionObserverLayer } from "./assistants";
 import { ConversationMessagesLayer } from "./conversations";
 import {
   createDatabaseError,
@@ -316,13 +316,14 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * The session service tells the assistants domain about every session
-     * that ends, so a conversation whose session ended while the user waited
-     * gets a notice. The sessions domain cannot import the assistants domain,
+     * The session service tells the assistants domain, through the sessions
+     * domain's `SessionObserver` port, about every report and every exit, and
+     * about inputs it drops, so an assistant's replies and notices reach its
+     * conversation. The sessions domain cannot import the assistants domain,
      * so the two are joined here.
      */
     const sessionService = SessionServiceLayer.pipe(
-      Layer.provide(AssistantSessionEndingsLayer),
+      Layer.provide(AssistantSessionObserverLayer),
       Layer.provide(ConversationMessagesLayer),
     );
 

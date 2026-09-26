@@ -28,6 +28,7 @@ const buildSession = (tail: string) => ({
   title: "a thread",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: buildId("dddddddd"),
   agentId: null,
   conversationId: null,

@@ -41,7 +41,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { announce, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import { announce, buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
 import { Users } from "../users";
 import { ConversationMessages } from "./conversation-messages";
 import { messageRepository } from "./message-repository";
@@ -226,12 +226,14 @@ const make = Effect.gen(function* () {
      * Creates a conversation, returns it, and nudges the `conversation` topic.
      * It is not an operation, so it checks no grant and opens no transaction:
      * its caller is an operation that has checked its own grant and runs it
-     * inside its own transaction. `at` is the caller's time, so the
-     * conversation begins at the same moment as whatever the caller creates
-     * with it.
+     * inside its own transaction.
      */
-    create: (input: NewConversation): Effect.Effect<Conversation, SqlError> =>
-      Effect.tap(conversations.insert(input), (conversation) => nudge(conversation.id, "created")),
+    create: (input: Omit<NewConversation, "at">): Effect.Effect<Conversation, SqlError> =>
+      Effect.flatMap(nowIso, (at) =>
+        Effect.tap(conversations.insert({ ...input, at }), (conversation) =>
+          nudge(conversation.id, "created"),
+        ),
+      ),
 
     /**
      * Returns every conversation the assistant answers, oldest first. It is

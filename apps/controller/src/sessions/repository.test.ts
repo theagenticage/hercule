@@ -429,38 +429,68 @@ const insertResumableSession = Effect.gen(function* () {
 });
 
 describe("resuming an exited session", () => {
-  it("does nothing when no input is waiting for it", async () => {
-    // A resume decided before a delete, or before a newer session took the
-    // conversation, can land after the waiting input was cancelled. The
-    // session must stay exited rather than start a process with nothing to do.
-    const { resumed, status } = await run(
+  it("puts the session back on the queue, and holds it back after an exit before any turn until new input", async () => {
+    // The crash-loop guard reads the flag: an exit before the process started
+    // a turn sets it, and a resume or a new input clears it.
+    const rows = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* insertResumableSession;
-        const resumed = yield* sessions.resume(sessionId, "{}", at);
-        const row = yield* sessions.one(sessionId);
-        return { resumed, status: Option.map(row, (one) => one.status) };
+        const exitedBeforeWork = yield* sessions.one(sessionId);
+        yield* sessions.resume(sessionId, "{}", at);
+        const resumed = yield* sessions.one(sessionId);
+        yield* sessions.moved(sessionId, "busy", at);
+        yield* sessions.moved(sessionId, "exited", at);
+        const exitedAfterWork = yield* sessions.one(sessionId);
+        yield* sessions.resume(sessionId, "{}", at);
+        yield* sessions.moved(sessionId, "exited", at);
+        const exitedAgain = yield* sessions.one(sessionId);
+        yield* sessions.liftResumeHold(sessionId);
+        const lifted = yield* sessions.one(sessionId);
+        return [exitedBeforeWork, resumed, exitedAfterWork, exitedAgain, lifted].map((row) =>
+          Option.map(row, (one) => [one.status, one.awaitingNewInput]),
+        );
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(resumed).toBe(false);
-    expect(status).toEqual(Option.some("exited"));
+    expect(rows).toEqual([
+      Option.some(["exited", true]),
+      Option.some(["queued", false]),
+      Option.some(["exited", false]),
+      Option.some(["exited", true]),
+      Option.some(["exited", false]),
+    ]);
   });
+});
 
-  it("puts the session back on the queue when an input is waiting for it", async () => {
-    const { resumed, status } = await run(
+describe("whether an input waits on a session", () => {
+  it("is true while an input is queued, sent or not, and false once none is", async () => {
+    const waiting = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const inputs = yield* inputRepository;
         const sessionId = yield* insertResumableSession;
-        yield* inputs.insert({ sessionId, source: "user", actor: "user", text: "hi", at });
-        const resumed = yield* sessions.resume(sessionId, "{}", at);
-        const row = yield* sessions.one(sessionId);
-        return { resumed, status: Option.map(row, (one) => one.status) };
+        // An exited session's input is never claimed, so the session is put
+        // back on the queue first.
+        yield* sessions.resume(sessionId, "{}", at);
+        const empty = yield* sessions.one(sessionId);
+        const sent = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "user",
+          text: "a",
+          at,
+        });
+        yield* inputs.claim(sent.id, at);
+        const onTheWire = yield* sessions.one(sessionId);
+        yield* inputs.cancelWithReason(sent.id, at, "the session exited");
+        const cancelled = yield* sessions.one(sessionId);
+        return [empty, onTheWire, cancelled].map((row) =>
+          Option.map(row, (one) => one.inputWaiting),
+        );
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(resumed).toBe(true);
-    expect(status).toEqual(Option.some("queued"));
+    expect(waiting).toEqual([Option.some(false), Option.some(true), Option.some(false)]);
   });
 });

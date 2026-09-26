@@ -68,6 +68,15 @@ export const Session = Schema.Struct({
    * means the next `session.input` resumes it in place.
    */
   resumable: Schema.Boolean,
+  /**
+   * Computed when the session is read, never stored: true when the session
+   * exited before its last start or resume started any turn, inputs wait for
+   * it, and no input has arrived since that exit. Such a session is not resumed
+   * automatically, because it would most likely die the same way again: its
+   * input waits, and the next input anyone sends resumes it with all of it
+   * (the crash-loop guard, spec 12 section 5.1).
+   */
+  resumeHeld: Schema.Boolean,
   permissionProfileId: Id,
   /** The Agent this session was spawned from; `null` for a Thread. Kept only as a record of origin. */
   agentId: Schema.NullOr(Id),
@@ -239,7 +248,8 @@ export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>
  * needs the `session.steer` grant. `opened` and `steered` are the runner's own
  * words for what it did with the input. `queued` is the controller's word for
  * an input the session cannot take yet, including the input that resumes an
- * exited session.
+ * exited session, and a steer on a provider that does not steer natively: the
+ * running turn is interrupted, and the input is sent as the next turn.
  */
 export const SessionInputOutcome = Schema.Struct({
   inputId: Id,

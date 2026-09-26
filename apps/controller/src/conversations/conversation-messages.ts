@@ -1,7 +1,7 @@
 /**
  * The service that appends a message to a conversation. Every writer of a
  * message goes through it: the owner's send, an assistant's reply, and a
- * notice that an assistant couldn't answer.
+ * notice that an assistant was interrupted or can't be reached.
  *
  * This is a service of its own, apart from `ConversationService`, because
  * the writers of replies and notices sit below the conversation service in

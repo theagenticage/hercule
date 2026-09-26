@@ -4,6 +4,14 @@ import { cn } from "@hercule/ui";
 import { HeaderRow } from "../header-row";
 import { PresenceDot } from "./presence-dot";
 
+/** The hue of the presence word: the dot's hue, with muted text for asleep. */
+const WORD_CLASSES: Readonly<Record<AssistantPresence, string>> = {
+  working: "text-live",
+  idle: "text-live",
+  asleep: "text-muted",
+  unavailable: "text-fail",
+};
+
 /**
  * The conversation screen's header row: the `Assistants /` crumb, the
  * assistant's name, and its presence word. It is the thread's header row, so
@@ -27,7 +35,7 @@ export function ConversationChrome({
           <span
             className={cn(
               "flex shrink-0 items-center gap-1.5 text-meta font-normal",
-              presence === "live" ? "text-live" : "text-muted",
+              WORD_CLASSES[presence],
             )}
           >
             <PresenceDot presence={presence} />

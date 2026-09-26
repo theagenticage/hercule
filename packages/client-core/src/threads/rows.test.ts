@@ -24,6 +24,7 @@ const BASE: Session = {
   title: "Fix the login bug",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "profile-unrestricted",
   agentId: null,
   conversationId: null,

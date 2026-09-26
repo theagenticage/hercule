@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
-  createInvalidStateError,
+  createValidationError,
   type Conversation,
   type ConversationMessage,
 } from "@hercule/contract";
@@ -50,9 +50,7 @@ interface ResponderCall {
  * A call that arrives before the send's changes are published ran inside the
  * send's transaction.
  */
-const buildRecorders = (
-  answer: Effect.Effect<void, ReturnType<typeof createInvalidStateError>>,
-) => {
+const buildRecorders = (answer: Effect.Effect<void, ReturnType<typeof createValidationError>>) => {
   const calls: Array<ResponderCall> = [];
   const published: Array<Change> = [];
   const responder = Layer.succeed(ConversationResponder, {
@@ -146,7 +144,7 @@ describe("ConversationService.send", () => {
   });
 
   it("fails with the responder's error and keeps no message when the responder refuses", async () => {
-    const refusal = createInvalidStateError("no runner");
+    const refusal = createValidationError([{ path: ["text"], message: "refused" }]);
     const refusing = buildRecorders(Effect.fail(refusal));
 
     const { error, remaining } = await runWith(
@@ -170,7 +168,9 @@ describe("ConversationService.send", () => {
     let refuse = true;
     const recorders = buildRecorders(
       Effect.suspend(() =>
-        refuse ? Effect.fail(createInvalidStateError("no runner")) : Effect.void,
+        refuse
+          ? Effect.fail(createValidationError([{ path: ["text"], message: "refused" }]))
+          : Effect.void,
       ),
     );
 

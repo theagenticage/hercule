@@ -481,13 +481,13 @@ describe("spawning a thread from a terminal", () => {
  * conversation's sessions.
  */
 describe("the assistant and conversation rows", () => {
-  it("explains an assistant delete refused because its session did not stop", () => {
+  // The delete never waits for a session to stop, so it is never refused
+  // for one, and the row explains no refusal.
+  it("deletes an assistant by its id, and says the delete does not wait for its session", () => {
     const row = table["assistant.delete"];
     expect(row?.fields?.["id"]?.positional).toBe(true);
-    expect(
-      row?.errors?.["invalid_state"]?.trim(),
-      "assistant.delete has no invalid_state help",
-    ).toBeTruthy();
+    expect(row?.errors).toBeUndefined();
+    expect(row?.help).toContain("does not wait");
     expect(row?.examples?.map((example) => example.args)).toContainEqual(["1f3a9c2e"]);
   });
 

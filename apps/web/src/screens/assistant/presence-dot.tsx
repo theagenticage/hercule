@@ -3,23 +3,31 @@ import type { AssistantPresence } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 
 /**
- * The 6px dot beside an assistant's name: filled with the live hue while the
- * assistant is live, and a hollow faint ring while it is idle. The ring is the
- * idle mark a thread row uses, and a filled dot and a ring stay easy to tell
- * apart where two hues at this size would not. The dot is still in both
- * states. "Live" means the assistant has a session loaded and could answer,
- * not that work is happening, and static things have no motion; the working
- * mark in the conversation shows when a turn runs.
+ * The classes of the dot for each presence. The shape says whether a session
+ * is loaded: a filled dot while it is (working or idle), a hollow ring while
+ * it is not (asleep or unavailable). The hue and the motion tell the two of
+ * each pair apart:
+ *
+ * - working: the live hue, pulsing, because work is happening;
+ * - idle: the live hue, still;
+ * - asleep: the faint ring an idle thread row carries;
+ * - unavailable: a ring in the fail hue, because the next message may not
+ *   reach the assistant the way it used to.
  */
+const DOT_CLASSES: Readonly<Record<AssistantPresence, string>> = {
+  working: "hercule-live-dot bg-live",
+  idle: "bg-live",
+  asleep: "border-[1.5px] border-faint",
+  unavailable: "border-[1.5px] border-fail",
+};
+
+/** The 6px dot beside an assistant's name, drawn for its presence. */
 export function PresenceDot({ presence }: { readonly presence: AssistantPresence }): JSX.Element {
   return (
     <span
       aria-hidden="true"
       data-presence={presence}
-      className={cn(
-        "size-1.5 shrink-0 rounded-full",
-        presence === "live" ? "bg-live" : "border-[1.5px] border-faint",
-      )}
+      className={cn("size-1.5 shrink-0 rounded-full", DOT_CLASSES[presence])}
     />
   );
 }

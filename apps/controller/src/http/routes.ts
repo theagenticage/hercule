@@ -23,12 +23,7 @@ import {
   type Internal,
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
-import {
-  AssistantMessagesLayer,
-  AssistantResponderLayer,
-  AssistantService,
-  AssistantServiceLayer,
-} from "../assistants";
+import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
@@ -569,22 +564,19 @@ export const operationLayers = Layer.mergeAll(
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
-  // and matched inputs are delivered through `Live` too. The inbound driver
-  // also hands each session report to `AssistantMessages`, and setup creates
-  // the first assistant. So those are provided to the group rather than merged
+  // and matched inputs are delivered through `Live` too. Setup creates the
+  // first assistant. So those are provided to the group rather than merged
   // next to it, each above what it uses:
   //
   // - an assistant's create makes its conversation;
   // - a conversation hands each sent message to the assistant's responder;
   // - the assistant's responder and its delete reach sessions through the
   //   controller daemon's `AssistantSessions`, which uses placement and `Live`;
-  // - the inbound driver writes an assistant's replies and the notices for a
-  //   failed or interrupted turn, and `Live` the notice for input it could not
-  //   resume, through `AssistantMessages`, which appends through
-  //   `ConversationMessages`, as a send does. The notice for a session that
-  //   ended while the user waited is written by the session service itself,
-  //   through the sessions domain's `SessionEndings` port, which boot
-  //   provides with the session service;
+  // - the responder writes the notice for a message it could not deliver
+  //   through `ConversationMessages`, as a send appends. An assistant's
+  //   replies and its other notices are written by the session service
+  //   itself, through the sessions domain's `SessionObserver` port, which
+  //   boot provides with the session service;
   // - placement and `Live` both use dispatch, which is provided last.
   Layer.mergeAll(
     InboundLayer,
@@ -609,7 +601,6 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(AssistantSessionsLayer),
     Layer.provideMerge(PlacementLayer),
     Layer.provideMerge(LiveLayer),
-    Layer.provideMerge(AssistantMessagesLayer),
     Layer.provideMerge(ConversationMessagesLayer),
     Layer.provideMerge(DispatchLayer),
   ),

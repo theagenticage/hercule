@@ -65,11 +65,11 @@ A provider-held question a session is parked on until an answer arrives; surface
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
-Delivering user input into a session's running turn, folding it into that turn instead of opening a new one.
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked.
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered.
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session keeps it only through an idle unload.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -149,12 +149,12 @@ One line of a conversation, stored in order with its sender's role and label: wh
 _Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
 
 **Notice**:
-A conversation message the system writes when the assistant cannot answer, reading "<name> couldn't answer: <why>": a turn failed or was interrupted, the session ended while the owner waited, or a waiting message could not be delivered. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
+A conversation message the system writes in one of two cases: "<name> was interrupted: <reason>" when the session exits while a turn runs, and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it or the session holding it cannot be resumed. No other event writes one; a failed turn in a live session shows only its partial reply. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:
-Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation.
-_Avoid_: sleep, hibernate, suspend, rotation
+Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
+_Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
 Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.

@@ -74,6 +74,7 @@ const buildConversationSession = (overrides: Partial<Session>): Session => ({
   title: "Answer Ada's conversation",
   status: "idle",
   resumable: true,
+  resumeHeld: false,
   permissionProfileId: ADA.permissionProfileId,
   agentId: ADA.id,
   conversationId: WEB.id,
@@ -261,7 +262,7 @@ const isSend = (call: Call): boolean =>
   call.method === "POST" && call.path === `/api/v1/conversations/${WEB.id}/messages`;
 
 describe("Assistant conversation: an empty conversation", () => {
-  it("shows the Assistants crumb, the assistant's name and the presence word idle", async () => {
+  it("shows the Assistants crumb, the assistant's name and the presence word asleep", async () => {
     await openConversation();
 
     const crumb = await waitFor(() => {
@@ -273,14 +274,14 @@ describe("Assistant conversation: an empty conversation", () => {
     });
     const chrome = readPageText(crumb.parentElement);
     expect(chrome).toMatch(/^Assistants(?: \/)? Ada\b/);
-    expect(chrome).toContain("idle");
+    expect(chrome).toContain("asleep");
   });
 
   it("explains how to start above the composer, which is addressed to the assistant", async () => {
     await openConversation();
 
     const hint = await findOnScreen(
-      "Send a message to start. Ada goes idle after a quiet spell and picks up where it left off.",
+      "Send a message to start. Ada falls asleep after a quiet spell and picks up where it left off.",
     );
     expectInDocumentOrder([hint, await findComposer()]);
     expect(screen.queryByRole("button", { name: "Show earlier messages" })).toBeNull();
@@ -403,8 +404,8 @@ describe("Assistant conversation: sending", () => {
       {},
       {
         [`POST /api/v1/conversations/${WEB.id}/messages`]: {
-          status: 409,
-          body: buildErrorBody("invalid_state", "the assistant is being deleted"),
+          status: 404,
+          body: buildErrorBody("not_found", "no conversation has that id"),
         },
       },
     );
@@ -413,14 +414,14 @@ describe("Assistant conversation: sending", () => {
     await user.type(composer, "hi");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    const error = await screen.findByText(/the assistant is being deleted/);
+    const error = await screen.findByText(/no conversation has that id/);
     expectInDocumentOrder([error, composer]);
     expect(composer.value).toBe("hi");
   });
 });
 
 describe("Assistant conversation: messages", () => {
-  const NOTICE = "Ada couldn't answer: the turn was interrupted";
+  const NOTICE = "Ada was interrupted: its session was stopped";
 
   const MESSAGES = [
     buildMessage(1, { senderRole: "owner", text: "a" }),

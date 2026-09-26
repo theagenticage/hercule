@@ -38,6 +38,7 @@ const BASE_SESSION: Session = {
   title: "Fix the login bug",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,
@@ -705,9 +706,10 @@ describe("Create new thread opens the project picker", () => {
  * assistant's conversation.
  *
  * The spec gives the dot's tones but not how to find them. These tests
- * assume that the live dot is painted with the live colour (a `bg-live`
- * class), the way the fleet's connectivity dot is, and that an idle dot
- * is not.
+ * assume that the dot carries its presence in `data-presence`, that a
+ * loaded session's dot is painted with the live colour (a `bg-live`
+ * class), the way the fleet's connectivity dot is, and that the dot of
+ * an assistant with no loaded session is not.
  * ------------------------------------------------------------------ */
 
 const BASE_ASSISTANT: Assistant = {
@@ -737,7 +739,7 @@ const BOB: Assistant = {
   updatedAt: "2026-09-04T09:00:00.000Z",
 };
 
-/** Ada's session, answering her web conversation. It is working, so Ada is live. */
+/** Ada's session, answering her web conversation. It is busy, so Ada is working. */
 const ADA_SESSION = buildSession({
   id: "01a06d02-2000-7000-8000-00000000000a",
   title: "Answer Ada's conversation",
@@ -747,11 +749,13 @@ const ADA_SESSION = buildSession({
   lastActivityAt: "2026-09-06T11:00:00.000Z",
 });
 
-/** Bob's only session, which has exited, so Bob is idle. */
+/** Bob's only session, which has exited and can be resumed, so Bob is asleep. */
 const BOB_SESSION = buildSession({
   id: "01a06d02-2000-7000-8000-00000000000b",
   title: "Answer Bob's conversation",
   status: "exited",
+  resumable: true,
+  nativeSessionId: "native-bob",
   agentId: BOB.id,
   conversationId: "01a06d02-c000-7000-8000-000000000002",
   lastActivityAt: "2026-09-05T11:00:00.000Z",
@@ -825,20 +829,49 @@ describe("the Threads face's Assistants group", () => {
     expect(rows[1]!.textContent).toContain("web");
   });
 
-  // Neither dot moves, because a loaded session is a state, not work
-  // happening. The idle dot is a hollow faint ring, the idle mark of a thread
-  // row, because a faint filled dot was hard to tell from the live one.
-  it("paints a live assistant's dot in the live colour and an idle assistant's as a faint ring, both still", async () => {
+  // The shape says whether a session is loaded: filled while it is, a
+  // hollow ring while it is not. Only the working dot moves, because only
+  // then is work happening.
+  it.each<{ presence: string; session: Partial<Session>; dot: RegExp; moves: boolean }>([
+    { presence: "working", session: { status: "busy" }, dot: /\bbg-live\b/, moves: true },
+    { presence: "idle", session: { status: "idle" }, dot: /\bbg-live\b/, moves: false },
+    {
+      presence: "asleep",
+      session: { status: "exited", resumable: true },
+      dot: /\bborder-faint\b/,
+      moves: false,
+    },
+    {
+      presence: "unavailable",
+      session: { status: "exited", resumable: false },
+      dot: /\bborder-fail\b/,
+      moves: false,
+    },
+  ])(
+    "paints the dot of an assistant that is $presence",
+    async ({ presence, session, dot, moves }) => {
+      const sessions = [THREAD, { ...ADA_SESSION, ...session }];
+      await renderApp({
+        path: "/",
+        api: stubApi(withAssistants([ADA], sessions)).fetch,
+        token: "held",
+      });
+
+      await getThreadsNav().findByText("Assistants");
+      const row = getAssistantRow(ADA);
+      const classes = readDotClasses(row);
+      expect(row.querySelector("[data-presence]")?.getAttribute("data-presence")).toBe(presence);
+      expect(classes).toMatch(dot);
+      if (moves) expect(classes).toMatch(MOTION);
+      else expect(classes).not.toMatch(MOTION);
+    },
+  );
+
+  it("draws an asleep assistant's dot as a ring, with no fill", async () => {
     await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
 
     await getThreadsNav().findByText("Assistants");
-    const live = readDotClasses(getAssistantRow(ADA));
-    const idle = readDotClasses(getAssistantRow(BOB));
-    expect(live).toMatch(/\bbg-live\b/);
-    expect(idle).toMatch(/\bborder-faint\b/);
-    expect(idle).not.toMatch(/\bbg-/);
-    expect(live).not.toMatch(MOTION);
-    expect(idle).not.toMatch(MOTION);
+    expect(readDotClasses(getAssistantRow(BOB))).not.toMatch(/\bbg-/);
   });
 
   it("opens the assistant's conversation when its row is clicked", async () => {
@@ -857,7 +890,7 @@ describe("the Threads face's Assistants group", () => {
     });
   });
 
-  it("turns the dot idle, without a reload, when a session nudge reports the assistant's session exited", async () => {
+  it("turns the dot asleep, without a reload, when a session nudge reports the assistant's session exited", async () => {
     let sessions: readonly Session[] = [THREAD, ADA_SESSION, BOB_SESSION];
     const api = stubApi({
       ...withAssistants([ADA, BOB]),

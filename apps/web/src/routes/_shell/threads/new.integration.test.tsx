@@ -186,6 +186,7 @@ const NEW_SESSION: Session = {
   title: "Fix the login bug",
   status: "starting",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: PROFILE_UNRESTRICTED.id,
   agentId: null,
   conversationId: null,

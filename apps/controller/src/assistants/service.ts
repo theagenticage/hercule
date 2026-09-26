@@ -1,7 +1,7 @@
 /**
  * The assistant operations: `assistant.query`, `read`, `create`, `update` and
  * `delete`. The conversation messages an assistant's sessions write are
- * `AssistantMessages`.
+ * written by `AssistantSessionObserverLayer`.
  *
  * An assistant is an agent the user talks to through a conversation. It is stored as two rows that
  * share one id: an agent row of kind `assistant`, written through the agents
@@ -96,13 +96,6 @@ export interface AssistantPage {
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_ASSISTANT = "no such assistant";
-
-/**
- * The refusal of a delete when a message started one of the assistant's
- * sessions again while the delete waited for the sessions to stop.
- */
-const ANSWERING_AGAIN =
-  "the assistant started answering a new message while it was being deleted; delete it again";
 
 /** Why the queued inputs of a deleted assistant's sessions were cancelled. */
 const ASSISTANT_DELETED = "the assistant was deleted";
@@ -310,7 +303,6 @@ const make = Effect.gen(function* () {
               assistantId: agent.id,
               channel: "web",
               containerKey: null,
-              at,
             });
             yield* nudge(agent.id, "created");
             yield* audit.append({
@@ -392,43 +384,31 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes an assistant, its agent row, its conversations and their
-     * messages, and cancels any input still queued on its sessions. Its
-     * sessions and their transcripts stay, as history.
+     * messages, in one transaction, and cancels any input still waiting on
+     * its sessions. Its sessions and their transcripts stay, as history.
      *
-     * First, outside any transaction, every session of its conversations
-     * that has not exited is stopped, and the delete waits for each to exit.
-     * That is usually only the current session, but an older one can still be
-     * running, for example while its stop is under way.
-     * Only then are the rows deleted, in one transaction. Fails with:
-     *
-     * - `NotFound` if the assistant does not exist;
-     * - `InvalidState` if a session does not stop in time, or a message
-     *   started a session again while the delete waited. Nothing is deleted.
+     * Every session of its conversations that has not exited is stopped
+     * once the transaction commits, and the delete does not wait for the
+     * sessions to exit. That is usually only the newest session, but an older
+     * one can still be running, for example while an earlier stop is under
+     * way. A report that arrives from one of those sessions afterwards
+     * writes nothing, because its conversation is gone. Fails with
+     * `NotFound` if the assistant does not exist.
      */
-    delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("assistant.delete");
-        yield* readAssistantOrFail(id);
-        // Stopping waits on a runner, and a transaction never waits on
-        // anything outside the database.
-        for (const conversation of yield* conversations.listForAssistant(id)) {
-          for (const session of yield* sessionRows.listLiveInConversation(conversation.id)) {
-            yield* sessions.stop(session.id);
-          }
-        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const { agent } = yield* readAssistantOrFail(id);
-            const owned = yield* conversations.listForAssistant(id);
-            for (const conversation of owned) {
-              const live = yield* sessionRows.listLiveInConversation(conversation.id);
-              if (live.length > 0) {
-                return yield* Effect.fail(createInvalidStateError(ANSWERING_AGAIN));
+            for (const conversation of yield* conversations.listForAssistant(id)) {
+              for (const session of yield* sessionRows.listLiveInConversation(conversation.id)) {
+                yield* sessions.stop(session.id);
               }
               // An exited session can still hold input, such as a message
-              // held for a session the runner unloaded while idle. Left
-              // queued, it would resume the session after the assistant is
+              // waiting for a session that was unloaded while idle. Left
+              // waiting, it would resume the session after the assistant is
               // gone.
               yield* sessionService.cancelConversationInputs(conversation.id, ASSISTANT_DELETED);
               yield* conversations.delete(conversation.id);

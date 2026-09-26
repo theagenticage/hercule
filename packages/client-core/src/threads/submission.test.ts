@@ -23,6 +23,7 @@ const SESSION: Session = {
   title: "Fix the login bug",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "p-unrestricted",
   agentId: null,
   conversationId: null,

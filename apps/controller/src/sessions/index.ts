@@ -9,7 +9,7 @@
  * that a request calls directly. It also builds the frames and makes the
  * status changes that the controller daemon calls while it talks to a runner.
  */
-export { SessionEndings, type SessionEnding, type SessionEndReason } from "./endings";
+export { SessionObserver, type SessionEndReason, type SessionExit } from "./observer";
 export { type LostWakeUp, type StoredInput } from "./inputs";
 export {
   buildContinuingSpec,
@@ -18,6 +18,7 @@ export {
   validateOptions,
 } from "./options";
 export { sessionRecordComposer } from "./records";
+export { isResumeHeld } from "./resume-hold";
 export {
   LIVE_SESSION_STATUSES,
   readSessionOrFail,

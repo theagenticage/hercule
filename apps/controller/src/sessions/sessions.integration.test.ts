@@ -1401,7 +1401,7 @@ describe("input.steer", () => {
     });
   });
 
-  it("rejects an input on a provider that does not support steering", async () => {
+  it("interrupts the running turn and sends the input as the next turn, on a provider that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
@@ -1420,8 +1420,34 @@ describe("input.steer", () => {
 
       const response = await steerInput(arranged, session.id, inputId);
 
-      expect(response.status, await response.clone().text()).toBe(409);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({ inputId, result: "queued" });
+      const [interrupt] = await waitForFrames<SessionInterruptFrame>(
+        arranged.wire,
+        "sessionInterrupt",
+        1,
+      );
+      expect(interrupt!.sessionId).toBe(session.id);
+      // Nothing is sent into the turn being interrupted.
       expect(listInputFrames(arranged.wire)).toHaveLength(before);
+
+      // The interrupted turn ends, and the input goes in as the next turn.
+      reportEvent(arranged.wire, 3, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+      const delivered = await waitUntil("sent the input as the next turn", async () => {
+        const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+        return row?.status === "delivered" ? row : undefined;
+      });
+      expect(delivered.delivery).toBe("opened");
+      expect(
+        listInputFrames(arranged.wire).filter((one) => one.input.text === "steer me"),
+      ).toHaveLength(1);
     });
   });
 
@@ -2546,10 +2572,10 @@ describe("the queue when the session becomes idle, one input at a time", () => {
 
       reportEvent(arranged.wire, ...buildTranscript(session.id)[0]!);
 
-      const onWire = await waitUntil("sent the oldest input", async () => {
-        const found = await listInputs(arranged, session.id);
-        return typeof found[0]!.sentAt === "string" ? found : undefined;
-      });
+      // The claim commits `sent_at` before the frame is written, so wait for
+      // the frame: once it is on the wire, the claim is already stored.
+      await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      const onWire = await listInputs(arranged, session.id);
       expect(listInputFrames(arranged.wire)).toHaveLength(1);
       expect(onWire.map((row) => [row.text, row.status, typeof row.sentAt === "string"])).toEqual([
         ["one", "queued", true],

@@ -872,6 +872,7 @@ describe("hercule session spawn --agent", () => {
     title: "Assess this task.",
     status: "starting",
     resumable: false,
+    resumeHeld: false,
     permissionProfileId: AGENT.permissionProfileId,
     agentId: AGENT.id,
     conversationId: null,

@@ -6,7 +6,8 @@
  * message the owner sends is stored in the conversation. `session.input` and
  * `session.continue` are refused, and so are `input.update` and
  * `input.cancel`, because the conversation already shows the queued input as
- * sent. The operations that only steer, answer or end what the session is
+ * sent. A message sent while the session is busy is steered into the running
+ * turn; one the runner refused to steer waits in the queue. The operations that only steer, answer or end what the session is
  * already doing work as they do for a Thread.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -73,16 +74,27 @@ const startBusySession = async (arranged: Arranged): Promise<Session> => {
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
 
-/** Queues a message for a busy conversation session through `conversation.send`, and returns its input's id. */
+/**
+ * Sends a message to a busy conversation session through `conversation.send`,
+ * and returns its input's id. The send steers the message into the running
+ * turn, so the runner refuses the steer here, and the message is left queued
+ * and unsent. The runner accepts every later input.
+ */
 const queueMessage = async (
   arranged: Arranged,
   session: Session,
   text: string,
 ): Promise<string> => {
+  arranged.wire.answering(() => ({ message: "no steering now" }));
   await sendMessage(arranged, session.conversationId!, text);
-  const row = (await listInputs(arranged, session.id)).find((one) => one.text === text);
-  expect(row, text).toBeDefined();
-  return row!.id;
+  const row = await waitUntil("put the refused steer back in the queue", async () => {
+    const found = (await listInputs(arranged, session.id)).find((one) => one.text === text);
+    return found?.status === "queued" && found.sentAt === null && found.reason !== null
+      ? found
+      : undefined;
+  });
+  arranged.wire.answering(() => "opened");
+  return row.id;
 };
 
 describe("session.input and session.continue on a conversation's session", () => {

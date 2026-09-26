@@ -5,10 +5,10 @@
  *   while it still holds the claim of the send being answered;
  * - `claim` never claims an input of a session that has exited.
  *
- * The case they guard against: an input is sent, the runner unloads the idle
- * session before answering, the row is released and sent again to the
- * resumed process. A late answer about the first send carries the first
- * claim's time, and must leave the second send alone.
+ * The case they guard against: an input is sent, the send is given up and
+ * the row goes back to waiting, and the row is sent again. A late answer
+ * about the first send carries the first claim's time, and must leave the
+ * second send alone.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -63,14 +63,14 @@ const insertSessionWithInput = Effect.gen(function* () {
 });
 
 /**
- * Writes a session and one input for it, sends the input, releases the send
- * the way an idle unload does, and sends it again. Returns the input's id.
+ * Writes a session and one input for it, sends the input, puts it back to
+ * waiting the way a failed send does, and sends it again. Returns both ids.
  */
 const arrangeInputSentTwice = Effect.gen(function* () {
   const inputs = yield* inputRepository;
   const { sessionId, inputId } = yield* insertSessionWithInput;
   yield* inputs.claim(inputId, FIRST_SEND);
-  yield* inputs.releaseSent(sessionId);
+  yield* inputs.requeue(inputId, FIRST_SEND, "the runner did not answer in time");
   yield* inputs.claim(inputId, SECOND_SEND);
   return { sessionId, inputId };
 });
@@ -160,8 +160,8 @@ describe("an answer to the send that holds the row", () => {
 
 describe("claiming an input", () => {
   it("claims nothing once the session has exited, and leaves the input waiting", async () => {
-    // A claim decided before an idle unload can land after it. The input then
-    // stays queued, and the resume that follows the unload sends it.
+    // A claim decided before an exit can land after it. The input then stays
+    // queued, and the resume that follows the exit sends it.
     const { claimed, row } = await Effect.runPromise(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;

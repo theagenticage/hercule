@@ -33,7 +33,7 @@ import { gitCredentials } from "../workspaces";
 import type { GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
-import { SessionEndings } from "./endings";
+import { SessionObserver } from "./observer";
 import { SessionService, SessionServiceLayer, type Starting } from "./service";
 
 /** Temporary Hercule Homes for the master key, deleted after each test. */
@@ -69,10 +69,14 @@ const buildHomeLayer = (): Layer.Layer<HerculeHome> =>
 const buildRealSecretsLayer = () =>
   secretsLayer.pipe(Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))));
 
-/** Ignores every ending: these tests do not look at what another domain does with one. */
-const ignoreEndings = Layer.succeed(
-  SessionEndings,
-  SessionEndings.of({ sessionEnded: () => Effect.void }),
+/** Ignores everything it is told: these tests do not look at what another domain does with it. */
+const ignoreSessions = Layer.succeed(
+  SessionObserver,
+  SessionObserver.of({
+    sessionReported: () => Effect.void,
+    sessionExited: () => Effect.void,
+    inputsDropped: () => Effect.void,
+  }),
 );
 
 const layer = SessionServiceLayer.pipe(
@@ -80,7 +84,7 @@ const layer = SessionServiceLayer.pipe(
     Layer.mergeAll(
       AuditLogLayer,
       SessionTokensLayer,
-      ignoreEndings,
+      ignoreSessions,
       buildHostLayer(buildRealSecretsLayer()),
     ),
   ),
@@ -199,7 +203,7 @@ const buildGatedCredentialStack = (
       Layer.mergeAll(
         AuditLogLayer,
         SessionTokensLayer,
-        ignoreEndings,
+        ignoreSessions,
         gatedSecrets,
         buildHostLayer(gatedSecrets),
       ),

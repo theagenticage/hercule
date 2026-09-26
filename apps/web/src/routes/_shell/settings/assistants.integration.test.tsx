@@ -972,11 +972,8 @@ describe("Settings > Assistants: after a delete", () => {
     const user = userEvent.setup();
     await openScreen([ADA, BOB], {
       [ADA_DELETE]: {
-        status: 409,
-        body: buildErrorBody(
-          "invalid_state",
-          "the assistant's session did not stop; try again when runner laptop is reachable",
-        ),
+        status: 404,
+        body: buildErrorBody("not_found", "no assistant has that id"),
       },
     });
     await selectAssistant(user, "Ada");
@@ -984,9 +981,7 @@ describe("Settings > Assistants: after a delete", () => {
     await user.click(screen.getByRole("button", { name: "Delete assistant" }));
     await user.click(await screen.findByRole("button", { name: "Delete" }));
 
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "the assistant's session did not stop; try again when runner laptop is reachable",
-    );
+    expect((await screen.findByRole("alert")).textContent).toBe("no assistant has that id");
     expect(await findAssistantRow("Ada")).toBeDefined();
     expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("Ada");
     expect(screen.getByRole("button", { name: "Delete assistant" })).toHaveProperty(

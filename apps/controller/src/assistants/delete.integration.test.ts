@@ -2,17 +2,18 @@
  * Tests `assistant.delete` over HTTP, against a real controller and one fake
  * runner on the socket.
  *
- * Deleting an assistant first stops its running session and waits for the
- * runner to report the exit, then deletes the agent, the assistant, its
- * conversations and their messages in one go. The session and its transcript
- * stay, as history, and input still waiting for a session is cancelled, so
- * no session comes back for an assistant that is gone. When the session does
- * not stop by the deadline, nothing is deleted.
+ * Deleting an assistant deletes the agent, the assistant, its conversations
+ * and their messages in one transaction, and sends a stop for every running
+ * session once that transaction commits, without waiting for the sessions to
+ * exit. The sessions and their transcripts stay, as history. Input still
+ * waiting for a session is cancelled, so no session comes back for an
+ * assistant that is gone, and a report that arrives from a stopped session
+ * afterwards writes nothing.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect } from "effect";
+import { Effect } from "effect";
 import type { SessionStop } from "@hercule/protocol";
-import type { Runner, Session } from "@hercule/contract";
+import type { Session } from "@hercule/contract";
 import { del, get, readErrorBody } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -26,20 +27,9 @@ import {
   withAgentFleet,
   type Arranged,
 } from "../sessions/testing";
-import {
-  listMessages,
-  readDefaultConversation,
-  startConversationSession,
-} from "../conversations/testing";
+import { readDefaultConversation, startConversationSession } from "../conversations/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-/**
- * How long the delete waits for a session to stop before it gives up. The
- * controller's deadline is 30 seconds; these tests replace it with a shorter
- * one, so the timeout test does not wait that long.
- */
-const STOP_DEADLINE_MS = 1_000;
 
 /** The id of an input a test writes straight into the database. */
 const HELD_INPUT = "0199e0e7-0000-7000-8000-0000000000a1";
@@ -70,29 +60,29 @@ const startBusySession = async (arranged: Arranged, conversationId: string): Pro
 const readStatus = async (arranged: Arranged, path: string): Promise<number> =>
   (await get(arranged.harness.base, path, arranged.token)).status;
 
+/** Counts the conversation's messages in the database, which the API no longer serves once it is deleted. */
+const countMessages = async (arranged: Arranged, conversationId: string): Promise<number> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM conversation_messages WHERE conversation_id = unhex(${conversationId.replaceAll("-", "")})`,
+    ),
+  );
+  return rows[0]?.count ?? 0;
+};
+
 describe("assistant.delete", () => {
-  it("stops the busy session, waits for its exit, then deletes the assistant and keeps the session as history", async () => {
+  it("deletes the assistant without waiting for its busy session to exit, then stops the session and keeps it as history", async () => {
     await withAgentFleet(async (arranged) => {
       const { assistant, conversation } = await readDefaultConversation(arranged);
       const session = await startBusySession(arranged, conversation.id);
 
-      const deleting = del(
+      // The runner has not reported any exit when the delete answers.
+      const response = await del(
         arranged.harness.base,
         `/api/v1/assistants/${assistant.id}`,
         arranged.token,
       );
-      const [stop] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
-      expect(stop!.sessionId).toBe(session.id);
-      // Nothing is deleted while the session is still running.
-      expect(await readStatus(arranged, `/api/v1/assistants/${assistant.id}`)).toBe(200);
-      reportEvent(arranged.wire, 3, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "session.exited",
-        reason: "stopped",
-      });
-      const response = await deleting;
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect(await readStatus(arranged, `/api/v1/assistants/${assistant.id}`)).toBe(404);
@@ -101,19 +91,54 @@ describe("assistant.delete", () => {
       expect(await readStatus(arranged, `/api/v1/conversations/${conversation.id}/messages`)).toBe(
         404,
       );
-      const audited = await arranged.harness.audit("assistant.deleted");
-      expect(audited).toHaveLength(1);
-      // The stop is audited as any stop is, as the user who asked for the delete.
+      expect(await arranged.harness.audit("assistant.deleted")).toHaveLength(1);
+      const [stop] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      expect(stop!.sessionId).toBe(session.id);
+      // The stop is audited as any stop is, as the user who asked for the
+      // delete, although it is sent after the delete's request has ended.
       const stops = await arranged.harness.audit("session.stopped");
       expect(stops).toHaveLength(1);
       expect(stops[0]?.actor).toBe("user");
 
-      const kept = await readSession(arranged, session.id);
-      expect(kept).toMatchObject({
-        status: "exited",
-        agentId: assistant.id,
-        conversationId: conversation.id,
+      // The turn's last words and the exit arrive after the delete. They are
+      // kept in the transcript, and nothing is written to the conversation
+      // that is gone.
+      const base = () => ({ eventId: crypto.randomUUID(), sessionId: session.id, at });
+      const itemId = "t1-item-1";
+      reportEvent(arranged.wire, 3, {
+        ...base(),
+        _tag: "item.started",
+        turnId: "t1",
+        itemId,
+        kind: "assistant_message",
       });
+      reportEvent(arranged.wire, 4, {
+        ...base(),
+        _tag: "content.delta",
+        turnId: "t1",
+        itemId,
+        streamKind: "assistant_text",
+        delta: "late",
+      });
+      reportEvent(arranged.wire, 5, {
+        ...base(),
+        _tag: "item.completed",
+        turnId: "t1",
+        itemId,
+        kind: "assistant_message",
+        status: "completed",
+      });
+      reportEvent(arranged.wire, 6, {
+        ...base(),
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+      reportEvent(arranged.wire, 7, { ...base(), _tag: "session.exited", reason: "stopped" });
+      const kept = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+
+      expect(kept).toMatchObject({ agentId: assistant.id, conversationId: conversation.id });
+      expect(await countMessages(arranged, conversation.id)).toBe(0);
       const transcript = await get(
         arranged.harness.base,
         `/api/v1/sessions/${session.id}/transcript`,
@@ -126,50 +151,14 @@ describe("assistant.delete", () => {
     });
   });
 
-  it(
-    "fails with invalid_state naming the runner and deletes nothing when the session does not stop by the deadline",
-    async () => {
-      await withAgentFleet(
-        async (arranged) => {
-          const { assistant, conversation } = await readDefaultConversation(arranged);
-          await startBusySession(arranged, conversation.id);
-          const runner = (await (
-            await get(arranged.harness.base, `/api/v1/runners/${arranged.runnerId}`, arranged.token)
-          ).json()) as Runner;
-
-          // The runner receives the stop frame and never reports the exit.
-          const response = await del(
-            arranged.harness.base,
-            `/api/v1/assistants/${assistant.id}`,
-            arranged.token,
-          );
-
-          expect(response.status).toBe(409);
-          expect(await readErrorBody(response)).toMatchObject({
-            code: "invalid_state",
-            message: `the assistant's session did not stop; try again when runner ${runner.name} is reachable`,
-          });
-          expect(await readStatus(arranged, `/api/v1/assistants/${assistant.id}`)).toBe(200);
-          expect(await readStatus(arranged, `/api/v1/conversations/${conversation.id}`)).toBe(200);
-          expect(
-            (await listMessages(arranged, conversation.id)).items.map((one) => one.text),
-          ).toEqual(["hi"]);
-          expect(await arranged.harness.audit("assistant.deleted")).toEqual([]);
-        },
-        { assistantStopDeadline: Duration.millis(STOP_DEADLINE_MS) },
-      );
-    },
-    STOP_DEADLINE_MS + WAIT_DEADLINE_MS * 3 + 10_000,
-  );
-
-  it("stops every session of the conversation that has not exited, not only the current one", async () => {
+  it("stops every session of the conversation that has not exited, not only the newest one, without waiting for them to exit", async () => {
     await withAgentFleet(async (arranged) => {
       const { assistant, conversation } = await readDefaultConversation(arranged);
       const session = await startBusySession(arranged, conversation.id);
       // A second session of the same conversation, still busy: an older one
       // whose stop is still under way. Only a copy of the row can arrange it,
-      // because a conversation starts a new session only once its current one
-      // has exited.
+      // because a conversation starts a new session only once its newest one
+      // has exited and cannot be resumed.
       const hex = (id: string) => id.replaceAll("-", "");
       await Effect.runPromise(
         Effect.orDie(
@@ -185,34 +174,15 @@ describe("assistant.delete", () => {
         ),
       );
 
-      const deleting = del(
+      const response = await del(
         arranged.harness.base,
         `/api/v1/assistants/${assistant.id}`,
         arranged.token,
       );
-      const [first] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
-      reportEvent(arranged.wire, first!.sessionId === session.id ? 3 : 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: first!.sessionId,
-        at,
-        _tag: "session.exited",
-        reason: "stopped",
-      });
       const stops = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 2);
-      const second = stops[1]!.sessionId;
-      reportEvent(arranged.wire, second === session.id ? 3 : 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: second,
-        at,
-        _tag: "session.exited",
-        reason: "stopped",
-      });
-      const response = await deleting;
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect(stops.map((one) => one.sessionId).sort()).toEqual([session.id, OLDER_SESSION].sort());
-      expect(await readSession(arranged, OLDER_SESSION)).toMatchObject({ status: "exited" });
-      expect(await readSession(arranged, session.id)).toMatchObject({ status: "exited" });
     });
   });
 
@@ -228,11 +198,11 @@ describe("assistant.delete", () => {
         reason: "idle_unload",
       });
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      // The state between an unload that kept input and the resume that
+      // The state between an exit that kept input and the resume that
       // follows it: the session has exited and an input still waits for it.
-      // A real unload cannot hold this state for the test, because the
-      // unload's own delivery resumes the session as soon as it commits; so
-      // the input is written directly.
+      // A real exit cannot hold this state for the test, because the exit's
+      // own delivery resumes the session as soon as it commits; so the input
+      // is written directly.
       await Effect.runPromise(
         Effect.orDie(
           arranged.harness.sql`INSERT INTO session_inputs

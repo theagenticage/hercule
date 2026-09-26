@@ -36,8 +36,9 @@ export const findAnsweredAssistantId = (session: Session): string | null =>
  * Checks whether the session view offers Steer and Cancel on the session's
  * queued inputs. Returns false for a session that answers an assistant's
  * conversation: its queued inputs are the owner's messages, which the
- * conversation already shows as sent, so the owner corrects one by sending
- * another message in the conversation instead.
+ * conversation already shows as sent. They go in on their own: steered into
+ * a running turn, sent as the next turn, or kept for the resume. The owner
+ * corrects one by sending another message in the conversation instead.
  */
 export const canSteerOrCancelQueuedInputs = (session: Session): boolean =>
   session.conversationId === null;

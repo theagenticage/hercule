@@ -8,14 +8,7 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import {
-  Forbidden,
-  Internal,
-  InvalidState,
-  NotFound,
-  Unauthenticated,
-  Validation,
-} from "../errors";
+import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -115,7 +108,7 @@ export const conversation = HttpApiGroup.make("conversation")
       params: { id: Id },
       payload: ConversationSendInput,
       success: ConversationMessage,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);
