@@ -2,7 +2,7 @@
  * Pure helpers for the values a session starts with:
  *
  * - validating the model options a caller picked,
- * - the two timeouts a session runs under,
+ * - the timeouts a session runs under,
  * - the spec for a session that continues another session's transcript.
  *
  * The caller reads the model catalog, the settings and the row and passes
@@ -73,12 +73,30 @@ export const buildTimeouts = (
     (controller["session.absoluteTimeoutMinutes"] ?? DEFAULT_ABSOLUTE_TIMEOUT_MINUTES) * MINUTE_MS,
 });
 
+const DEFAULT_IDLE_UNLOAD_MINUTES = 15;
+
+/**
+ * Returns the timeouts a session that answers an assistant's conversation
+ * starts with: the two every session has, plus the idle unload. A
+ * conversation session sits idle between the owner's messages for hours, and
+ * unloading its process saves the runner's memory; the next message resumes
+ * it. No other session is unloaded, because nothing would resume it.
+ */
+export const buildConversationTimeouts = (
+  controller: ScopeSettings<"controller">,
+): SessionSpec["timeouts"] => ({
+  ...buildTimeouts(controller),
+  idleMs: (controller["session.idleUnloadMinutes"] ?? DEFAULT_IDLE_UNLOAD_MINUTES) * MINUTE_MS,
+});
+
 /**
  * Builds the spec sent to a runner for a session that continues a
  * provider-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
  * the native session to continue from, and the timeouts from the current
- * settings.
+ * settings. `conversationId` is the conversation the continuing session
+ * answers, or `null` when it answers none; a session that answers a
+ * conversation gets the idle unload too.
  *
  * It copies the parent's whole spec rather than picking named fields, so
  * everything an Agent gave the parent also reaches the continuation: the
@@ -92,9 +110,11 @@ export const buildContinuingSpec = (
   modelSelection: ModelSelection,
   nativeSessionId: string,
   mode: NonNullable<SessionSpec["continue"]>["mode"],
+  conversationId: string | null,
 ): SessionSpec => ({
   ...parent,
   modelSelection,
   continue: { nativeSessionId, mode },
-  timeouts: buildTimeouts(controller),
+  timeouts:
+    conversationId === null ? buildTimeouts(controller) : buildConversationTimeouts(controller),
 });

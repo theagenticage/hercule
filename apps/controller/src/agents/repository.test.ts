@@ -18,6 +18,7 @@ const mintId = () => uuidToString(mintUuid());
 const insertAgent = (name: string, permissionProfileId: string, at: string) =>
   Effect.flatMap(agentRepository, (agents) =>
     agents.insert({
+      kind: "agent",
       providerId: "claude-provider",
       name,
       systemPrompt: "do the work",
@@ -45,6 +46,7 @@ describe("listing the agents under one profile", () => {
           cursor: undefined,
           direction: "asc",
           permissionProfileId: profileId,
+          kind: undefined,
         });
         return { listed: page.items, profileId };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -65,6 +67,7 @@ describe("listing the agents under one profile", () => {
           cursor: undefined,
           direction: "asc",
           permissionProfileId: undefined,
+          kind: undefined,
         });
         return page.items;
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),

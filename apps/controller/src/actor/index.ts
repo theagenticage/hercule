@@ -111,6 +111,13 @@ export const USER_ACTOR = "user";
 export const SYSTEM_ACTOR = "system";
 
 /**
+ * Returns the actor stamp of the session with this id, `session:<id>`. A write
+ * the session caused without a request of its own, such as the reply taken
+ * from its turn, is stamped with it.
+ */
+export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
+
+/**
  * Returns the actor stamp for an actor: `session:<id>` for a session,
  * `run:<id>` for a run, and the bare word `user` for the user. The id lets a
  * reader of the event log or of a task's provenance trace a change back to the
@@ -127,7 +134,7 @@ export const buildActorStamp = (actor: UserActor | SessionActor | RunActor): str
     case "user":
       return USER_ACTOR;
     case "session":
-      return `session:${actor.sessionId}`;
+      return buildSessionStamp(actor.sessionId);
     case "run":
       return `run:${actor.runId}`;
   }
@@ -146,6 +153,19 @@ export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, 
   actor._tag === "none"
     ? Effect.die("a write reached stamping with no authenticated actor behind it")
     : Effect.succeed(buildActorStamp(actor)),
+);
+
+/**
+ * Returns the actor stamp for the actor behind the current request, or
+ * `SYSTEM_ACTOR` when there is none.
+ *
+ * Use it only for a write that may legitimately run with no request behind
+ * it, such as work started by a runner's report or by boot. A write that only
+ * an operation can reach uses `currentStamp`, which treats a missing actor as
+ * a bug.
+ */
+export const currentStampOrSystem: Effect.Effect<string> = Effect.map(CurrentActor, (actor) =>
+  actor._tag === "none" ? SYSTEM_ACTOR : buildActorStamp(actor),
 );
 
 /**

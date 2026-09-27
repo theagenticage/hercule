@@ -384,22 +384,22 @@ describe("the thread workspace default", () => {
   });
 });
 
-describe("the GitHub connection threads use", () => {
+describe("the GitHub default for sessions without a workspace", () => {
   it("sets a GitHub connection and clears it again", async () => {
     await withSettings(async (base, token) => {
       const github = await connect(base, token, "github/github", { pat: PAT });
 
       const set = await patchSettings(base, token, {
-        user: { "thread.githubConnectionId": github },
+        user: { "github.defaultConnectionId": github },
       });
       expect(set.status, await set.clone().text()).toBe(200);
-      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBe(github);
+      expect((await readSettings(base, token)).user["github.defaultConnectionId"]).toBe(github);
 
       const cleared = await patchSettings(base, token, {
-        user: { "thread.githubConnectionId": null },
+        user: { "github.defaultConnectionId": null },
       });
       expect(cleared.status, await cleared.clone().text()).toBe(200);
-      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeNull();
+      expect((await readSettings(base, token)).user["github.defaultConnectionId"]).toBeNull();
     });
   });
 
@@ -407,10 +407,53 @@ describe("the GitHub connection threads use", () => {
     await withSettings(async (base, token) => {
       const mailbox = await connect(base, token, "mailer/mailbox", { token: "t" });
       const response = await patchSettings(base, token, {
-        user: { "thread.githubConnectionId": mailbox },
+        user: { "github.defaultConnectionId": mailbox },
       });
       expect(await readErrorCode(response)).toBe("validation");
-      expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeUndefined();
+      expect((await readSettings(base, token)).user["github.defaultConnectionId"]).toBeUndefined();
+    });
+  });
+
+  it("refuses the old thread key as an unknown key", async () => {
+    await withSettings(async (base, token) => {
+      const github = await connect(base, token, "github/github", { pat: PAT });
+      const response = await patchSettings(base, token, {
+        user: { "thread.githubConnectionId": github },
+      });
+      expect(response.status, await response.clone().text()).toBe(400);
+      expect(await readErrorCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).user).not.toHaveProperty(
+        "thread.githubConnectionId",
+      );
+    });
+  });
+});
+
+describe("the idle unload timeout", () => {
+  it("accepts a positive whole number of minutes and reads it back", async () => {
+    await withSettings(async (base, token) => {
+      const response = await patchSettings(base, token, {
+        controller: { "session.idleUnloadMinutes": 20 },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await readSettings(base, token)).controller["session.idleUnloadMinutes"]).toBe(20);
+    });
+  });
+
+  it("rejects zero and a fractional number of minutes, and keeps the stored value", async () => {
+    await withSettings(async (base, token) => {
+      const stored = await patchSettings(base, token, {
+        controller: { "session.idleUnloadMinutes": 20 },
+      });
+      expect(stored.status, await stored.clone().text()).toBe(200);
+
+      for (const value of [0, 1.5]) {
+        const response = await patchSettings(base, token, {
+          controller: { "session.idleUnloadMinutes": value },
+        });
+        expect(await readErrorCode(response), String(value)).toBe("validation");
+      }
+      expect((await readSettings(base, token)).controller["session.idleUnloadMinutes"]).toBe(20);
     });
   });
 });

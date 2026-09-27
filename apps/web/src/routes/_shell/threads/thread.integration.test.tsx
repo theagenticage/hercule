@@ -12,11 +12,12 @@
  * - Assistant text arrives only on `content.delta`, never on the
  *   `assistant_message` item events.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildApprovalCard, formatDuration, formatStamp } from "@hercule/client-core";
 import type {
+  Assistant,
   Input,
   ModelOption,
   Profile,
@@ -31,10 +32,12 @@ import type {
 import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
 import {
   buildErrorBody,
+  fakeMainScrollGeometry,
   pickRow,
   readPageText,
   renderApp,
   stubApi,
+  type FakeScrollGeometry,
   type Handler,
 } from "../../../app/testing";
 
@@ -46,8 +49,10 @@ const BASE_SESSION: Session = {
   title: "Fix the login bug",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
   agentId: null,
+  conversationId: null,
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-3000-7000-8000-000000000001",
   workspaceId: null,
@@ -209,7 +214,7 @@ const buildController = (
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: ZONE },
+      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE },
     },
   },
   [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
@@ -220,6 +225,9 @@ const buildController = (
   "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
   "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
   [`GET /api/v1/sessions/${fixture.id}/inputs`]: { body: { items: [] } },
+  // The sidebar's Assistants group reads the assistants; a test of an
+  // assistant's session overrides this with its own `extra`.
+  "GET /api/v1/assistants": { body: { items: [] } },
   ...extra,
 });
 
@@ -296,8 +304,12 @@ const buildTurnStart = (turnId: string, at: string): TurnEvent[] => [
 ];
 
 /** Builds the event that completes a turn. The screen needs it to show the turn's duration. */
-const buildTurnCompletion = (turnId: string, at: string): TurnEvent[] => [
-  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
+const buildTurnCompletion = (
+  turnId: string,
+  at: string,
+  state: "completed" | "failed" | "interrupted" = "completed",
+): TurnEvent[] => [
+  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state },
 ];
 
 /**
@@ -512,7 +524,7 @@ describe("Thread: transcript", () => {
     expect(screen.queryAllByRole("button", { name: /worked for/i })).toHaveLength(1);
   });
 
-  it("shows an earlier turn cut off by an interrupt as finished with no duration, never as 0s or as still running", async () => {
+  it("shows an earlier turn with no turn.completed as cut short, never as 0s or as still running", async () => {
     // Turn 1 starts a tool call and is cut off (no item.completed, no
     // turn.completed). Then turn 2 starts and finishes normally.
     const abandonedThenCompleted: TranscriptRow[] = [
@@ -572,11 +584,95 @@ describe("Thread: transcript", () => {
     ];
     await openApp(buildSession({ status: "idle" }), abandonedThenCompleted);
 
-    const divider = await screen.findByRole("button", { name: /worked for/i });
-    expect(readPageText(divider)).toBe("Worked for —›");
+    const divider = await screen.findByRole("button", { name: /^Cut short$/ });
+    expect(readPageText(divider)).toBe("Cut short›");
     // Finished, not still running: no shimmer and no live color.
     expect(divider.className).not.toContain("hercule-thread-shimmer");
     expect(divider.className).not.toContain("text-live");
+  });
+
+  it.each([
+    ["interrupted", "Stopped after"],
+    ["failed", "Failed after"],
+  ] as const)("shows a turn that ended %s as %s its duration", async (state, words) => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildCommandStart("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z", state),
+      ),
+    );
+
+    const divider = await screen.findByRole("button", { name: new RegExp(`^${words}`) });
+    expect(readPageText(divider)).toBe(`${words} ${formatDuration(5000)}›`);
+  });
+
+  // An ending that is not shown is a silent ending: a turn that was stopped
+  // or failed before it used a tool still says so, as plain text, because it
+  // has no items to open.
+  it.each([
+    ["interrupted", "Stopped after"],
+    ["failed", "Failed after"],
+  ] as const)(
+    "shows a turn with no tool items that ended %s as %s its duration",
+    async (state, words) => {
+      await openApp(
+        buildSession({ status: "idle" }),
+        buildTranscript(
+          buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+          buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+          buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z", state),
+        ),
+      );
+
+      const divider = await screen.findByText(`${words} ${formatDuration(5000)}`);
+      expect(divider.closest("button")).toBeNull();
+    },
+  );
+
+  it("shows no divider under a completed turn with no tool items", async () => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await screen.findAllByText("Fix the login bug");
+    expect(screen.queryByText(/^Worked for/)).toBeNull();
+  });
+
+  it("leaves out the target of a tool item that reported none, so no separator is doubled", async () => {
+    const user = userEvent.setup();
+    // An item that started with no detail has an empty target.
+    const startWithoutDetail: TurnEvent[] = [
+      {
+        _tag: "item.started",
+        eventId: "",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:01.000Z",
+        turnId: "t1",
+        itemId: "tool1",
+        kind: "command_execution",
+      },
+    ];
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        startWithoutDetail,
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^Worked for/ }));
+    expect(readPageText()).toContain("command · running");
+    expect(readPageText()).not.toContain("· ·");
   });
 });
 
@@ -680,7 +776,7 @@ describe("Thread: the live turn", () => {
     await openApp(exited, buildLiveTurnRows());
     await settle();
 
-    const divider = screen.getByRole("button", { name: /^Worked for —$/ });
+    const divider = screen.getByRole("button", { name: /^Cut short$/ });
     expect(divider.className).not.toContain("hercule-thread-shimmer");
 
     // Nothing counts up: a minute later the divider shows the same text.
@@ -688,7 +784,7 @@ describe("Thread: the live turn", () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
     await settle();
-    screen.getByRole("button", { name: /^Worked for —$/ });
+    screen.getByRole("button", { name: /^Cut short$/ });
     expect(screen.queryByRole("button", { name: /Working for/ })).toBeNull();
   });
 
@@ -1351,7 +1447,10 @@ describe("Thread: the user's bubble renders markdown", () => {
     const bubble = flexRow.firstElementChild as HTMLElement;
     expect(bubble.className).toContain("rounded-card");
     expect(bubble.className).toMatch(/\bborder\b/);
-    expect(bubble.className).toContain("border-line-soft");
+    // The full `--line` hairline, not the softer one: the bubble is a passive
+    // container on the page ground, and design-language.md gives depth by that
+    // hairline. The softer line left the bubble hard to see (D-84).
+    expect(bubble.className).toMatch(/(^|\s)border-line(\s|$)/);
     expect(bubble.className).toContain("bg-surface");
 
     expect(within(bubble).getByText("this").tagName).toBe("STRONG");
@@ -1580,35 +1679,20 @@ describe("Thread: live subscriptions", () => {
   });
 });
 
+/**
+ * jsdom computes no layout, so these tests set by hand the scroll geometry
+ * that `useStickToBottom` reads, on the shell's `main`: the thread has no
+ * scroll region of its own and scrolls with `main`.
+ */
 describe("Thread: auto-scroll follows new content", () => {
-  /**
-   * Returns the document's scrolling element. jsdom computes no layout, so
-   * the tests set the scroll geometry that `useStickToBottom` reads by hand on
-   * this element. The thread has no scroll region of its own; the whole page
-   * scrolls.
-   */
-  const getScrollElement = (): Element => document.scrollingElement ?? document.documentElement;
+  let geometry: FakeScrollGeometry;
 
-  const setGeometry = (values: {
-    scrollTop: number;
-    scrollHeight: number;
-    clientHeight: number;
-  }): void => {
-    const el = getScrollElement();
-    Object.defineProperty(el, "scrollTop", {
-      value: values.scrollTop,
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(el, "scrollHeight", { value: values.scrollHeight, configurable: true });
-    Object.defineProperty(el, "clientHeight", { value: values.clientHeight, configurable: true });
-  };
+  beforeEach(() => {
+    geometry = fakeMainScrollGeometry();
+  });
 
   afterEach(() => {
-    const el = getScrollElement();
-    delete (el as { scrollTop?: number }).scrollTop;
-    delete (el as { scrollHeight?: number }).scrollHeight;
-    delete (el as { clientHeight?: number }).clientHeight;
+    geometry.restore();
   });
 
   const buildNewRow = (): TranscriptRow =>
@@ -1620,19 +1704,33 @@ describe("Thread: auto-scroll follows new content", () => {
       turnId: "t3",
     });
 
+  // Added in review round 1 of #92 slice 3 (F-72). The hook stored the
+  // scrolling element in a `useEffect`, which runs after the screen's mount
+  // `useLayoutEffect`, so the first follow found no element and the thread
+  // opened at its top.
+  it("opens on the latest turn", async () => {
+    geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
+
+    await waitFor(() => {
+      expect(geometry.readScrollTop()).toBe(1000 - 100);
+    });
+  });
+
   it("scrolls to the bottom on a :stream delta when the reader was at the bottom", async () => {
     const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
-    setGeometry({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
     await settle();
 
     // In a real browser, scrollHeight already includes the new row when the
     // layout effect after this delta's commit runs.
-    setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
+    geometry.set({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
@@ -1642,7 +1740,7 @@ describe("Thread: auto-scroll follows new content", () => {
     });
 
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1200 - 100);
+      expect(geometry.readScrollTop()).toBe(1200 - 100);
     });
   });
 
@@ -1652,11 +1750,11 @@ describe("Thread: auto-scroll follows new content", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
-    setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
     await settle();
 
-    setGeometry({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
+    geometry.set({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
@@ -1666,7 +1764,7 @@ describe("Thread: auto-scroll follows new content", () => {
     });
     await settle();
 
-    expect(getScrollElement().scrollTop).toBe(0);
+    expect(geometry.readScrollTop()).toBe(0);
   });
 });
 
@@ -1714,7 +1812,10 @@ describe("Thread: the header is the screen's first row", () => {
       "GET /api/v1/settings": {
         body: {
           controller: {},
-          user: { "onboarding.completedSteps": ["timezone"], timezone: "Mars/Olympus" },
+          user: {
+            "onboarding.completedSteps": ["timezone", "assistant"],
+            timezone: "Mars/Olympus",
+          },
         },
       },
     });
@@ -1851,6 +1952,60 @@ describe("Thread: input queue", () => {
     await waitFor(() => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     });
+  });
+
+  // Added in review round 1 of #92 slice 3 (F-73). `isPending` reaches the
+  // composer a tick after `mutate`, so two Enters in one tick both sent.
+  it("sends once when Enter is pressed twice before the first input is answered", async () => {
+    const user = userEvent.setup();
+    let release = (): void => {};
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ body: { inputId: INPUT_ID, result: "opened" } });
+        }),
+    });
+
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    await user.type(box, "Also check the logs");
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await settle();
+
+    expect(
+      api.calls.filter(
+        (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+      ),
+    ).toHaveLength(1);
+    release();
+  });
+
+  // Added in review round 1 of #92 slice 3: the box was cleared on success
+  // even when the user had typed more while the input was in flight.
+  it("keeps text typed while an input is in flight", async () => {
+    const user = userEvent.setup();
+    let release = (): void => {};
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ body: { inputId: INPUT_ID, result: "opened" } });
+        }),
+    });
+
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    await user.type(box, "Also check the logs{Enter}");
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+        ),
+      ).toBe(true);
+    });
+    await user.type(box, " and the metrics");
+    release();
+    await settle();
+
+    expect(box.value).toBe("Also check the logs and the metrics");
   });
 
   it("shows a queued input in a list above the composer with Steer and Cancel, read from GET /sessions/:id/inputs", async () => {
@@ -2933,5 +3088,231 @@ describe("Draft: a draft joining a workspace", () => {
     // A draft has nothing to act on yet.
     expect(within(chrome).queryByRole("button", { name: "…" })).toBeNull();
     expect(within(chrome).queryByRole("link", { name: "+ New thread here" })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------
+ * The session view of an assistant's session: the session that answers
+ * an assistant's conversation, opened from the conversation's Show work
+ * link. The user talks to the assistant in its conversation, not here, so
+ * the view leads back to the conversation instead of offering a
+ * composer. The permission card stays, because a request is answered on
+ * the session.
+ * ------------------------------------------------------------------ */
+
+const ADA: Assistant = {
+  id: "01a06d02-a000-7000-8000-000000000001",
+  name: "Ada",
+  systemPrompt: "You are a helpful assistant.",
+  instanceId: BASE_SESSION.instanceId,
+  permissionProfileId: BASE_SESSION.permissionProfileId,
+  accessMode: "approval-required",
+  model: null,
+  disallowedTools: [],
+  unenforced: [],
+  heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
+  rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
+  reply: "turn-end",
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+/** Builds a session that answers Ada's web conversation. */
+const buildAssistantSession = (overrides: Partial<Session> = {}): Session =>
+  buildSession({
+    title: "Answer Ada's conversation",
+    agentId: ADA.id,
+    conversationId: "01a06d02-c000-7000-8000-000000000001",
+    ...overrides,
+  });
+
+/** The routes an assistant's session view may read Ada through: the list or her record. */
+const ASSISTANT_ROUTES: Readonly<Record<string, Handler>> = {
+  "GET /api/v1/assistants": { body: { items: [ADA] } },
+  [`GET /api/v1/assistants/${ADA.id}`]: { body: ADA },
+};
+
+/** Returns the header's crumb link, the one outside the sidebar that names Ada. */
+const findAssistantCrumb = async (): Promise<HTMLElement> =>
+  waitFor(() => {
+    const found = screen
+      .getAllByRole("link", { name: "Ada" })
+      .filter((link) => link.closest("nav") === null)[0];
+    if (found === undefined) throw new Error("no Ada crumb link outside the sidebar");
+    return found;
+  });
+
+describe("Thread: the session view of an assistant's session", () => {
+  const REQUEST: NonNullable<Session["openRequest"]> = {
+    requestId: "req-ada",
+    itemId: "tool-ada",
+    kind: "command_approval",
+    decisions: ["allow", "deny"],
+    detail: { command: "ls -la" },
+  };
+
+  it("shows Assistants / Ada / as the crumb, the name linking to the assistant's conversation", async () => {
+    await openApp(
+      buildAssistantSession({ status: "idle" }),
+      buildTwoCompletedTurns(),
+      ASSISTANT_ROUTES,
+    );
+
+    const crumb = await findAssistantCrumb();
+    expect(crumb.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
+    expect(readPageText(crumb.closest("div"))).toMatch(
+      /^Assistants \/ Ada \/ Answer Ada's conversation/,
+    );
+    expect(screen.queryByText("Threads /")).toBeNull();
+  });
+
+  it("renders no composer, and a line that links to the assistant's conversation in its place", async () => {
+    await openApp(
+      buildAssistantSession({ status: "idle" }),
+      buildTwoCompletedTurns(),
+      ASSISTANT_ROUTES,
+    );
+
+    expect(
+      await screen.findByText("This session replies in your conversation with Ada."),
+    ).toBeDefined();
+    const open = screen.getByRole("link", { name: "Open conversation" });
+    expect(open.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  // Added in the branch review of #92: the controller refuses input.update and
+  // input.cancel on a conversation's session, because the conversation
+  // already shows a queued input as the owner's message.
+  it("shows a queued input with no Steer and no Cancel", async () => {
+    const fixture = buildAssistantSession({ status: "busy" });
+    await openApp(fixture, buildTwoCompletedTurns(), {
+      ...ASSISTANT_ROUTES,
+      [`GET /api/v1/sessions/${fixture.id}/inputs`]: {
+        body: { items: [buildQueuedInput({ sessionId: fixture.id, text: "Book Friday" })] },
+      },
+    });
+
+    await screen.findByText("Book Friday");
+    expect(screen.queryByRole("button", { name: /steer/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+  });
+
+  it("still shows the permission card for an open request, and sends its answer to session.respond", async () => {
+    const user = userEvent.setup();
+    const fixture = buildAssistantSession({ status: "busy", openRequest: REQUEST });
+    const api = stubApi({
+      ...buildController(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
+      [`POST /api/v1/sessions/${fixture.id}/respond`]: { body: fixture },
+    });
+    await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
+
+    const allow = buildApprovalCard(REQUEST).rows.find((row) => row.decision === "allow")!;
+    await user.click(
+      await screen.findByRole("button", {
+        name: (name) => name.includes(allow.label) && name.includes(allow.describe),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(api.calls.find((call) => call.path.endsWith("/respond"))).toMatchObject({
+        method: "POST",
+        path: `/api/v1/sessions/${fixture.id}/respond`,
+        body: { requestId: REQUEST.requestId, decision: "allow" },
+      });
+    });
+  });
+
+  // Added in review round 1 of #92 slice 3 (D-82): a busy assistant's session
+  // can be stopped from its session view, as a thread can from its composer.
+  // Extended in review round 2 (D-92). The interrupt answers while the agent
+  // is still stopping, so the session is still busy; Stop goes only when the
+  // live connection reports the session idle.
+  it("offers Stop while the session is busy, calls session.interrupt, and removes Stop once the session is idle", async () => {
+    const user = userEvent.setup();
+    const fixture = buildAssistantSession({ status: "busy" });
+    let current = fixture;
+    const { api, live } = await openApp(fixture, buildTwoCompletedTurns(), {
+      ...ASSISTANT_ROUTES,
+      [`GET /api/v1/sessions/${fixture.id}`]: () => ({ body: current }),
+      [`POST /api/v1/sessions/${fixture.id}/interrupt`]: { body: fixture },
+    });
+
+    await screen.findByText("This session replies in your conversation with Ada.");
+    await user.click(screen.getByRole("button", { name: /^stop$/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.filter(
+          (call) =>
+            call.method === "POST" && call.path === `/api/v1/sessions/${fixture.id}/interrupt`,
+        ),
+      ).toHaveLength(1);
+    });
+    expect(screen.getByRole("button", { name: /^stop$/i })).toBeDefined();
+
+    current = { ...fixture, status: "idle" };
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [fixture.id], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+    });
+  });
+
+  it("has no Stop control while the session is idle", async () => {
+    await openApp(
+      buildAssistantSession({ status: "idle" }),
+      buildTwoCompletedTurns(),
+      ASSISTANT_ROUTES,
+    );
+
+    await screen.findByText("This session replies in your conversation with Ada.");
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+
+  // Added in review round 1 of #92 slice 3 (D-81): a session outlives its
+  // assistant, so the view must still open after the assistant is deleted.
+  it("still opens after the assistant was deleted, with a plain crumb and no link to a conversation", async () => {
+    const fixture = buildAssistantSession({ status: "idle" });
+    await openApp(fixture, buildTwoCompletedTurns(), {
+      "GET /api/v1/assistants": { body: { items: [] } },
+      [`GET /api/v1/assistants/${ADA.id}`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "No assistant has that id."),
+      },
+    });
+
+    expect(
+      await screen.findByText(
+        "This session replied in a conversation with an assistant that was deleted.",
+      ),
+    ).toBeDefined();
+    const crumb = screen.getByText("Assistants /");
+    expect(readPageText(crumb.parentElement)).toMatch(/^Assistants \/ Answer Ada's conversation/);
+    expect(crumb.querySelector("a")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open conversation" })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  // Added in review round 1 of #92 slice 3 (D-85): the sidebar marks the
+  // assistant whose session is open, as it marks the open thread.
+  it("marks the assistant's row in the sidebar as the open one", async () => {
+    const fixture = buildAssistantSession({ status: "idle" });
+    await openApp(fixture, buildTwoCompletedTurns(), {
+      ...ASSISTANT_ROUTES,
+      "GET /api/v1/sessions": { body: { items: [fixture] } },
+    });
+
+    const nav = await screen.findByRole("navigation", { name: "Threads" });
+    const row = await within(nav).findByRole("link", { name: /Ada/ });
+    await waitFor(() => {
+      expect(row.getAttribute("aria-current")).toBe("page");
+    });
   });
 });

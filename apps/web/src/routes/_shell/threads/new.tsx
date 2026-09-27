@@ -14,7 +14,8 @@ import {
   workspacesQuery,
 } from "../../../app/queries";
 import { Composer } from "../../../screens/composer/composer";
-import { ThreadChrome, ThreadColumn } from "../../../screens/thread/thread-chrome";
+import { ContentColumn } from "../../../screens/content-column";
+import { ThreadChrome } from "../../../screens/thread/thread-chrome";
 
 /** The search params of a draft: the project it belongs to, and the workspace it joins. */
 interface DraftSearch {
@@ -108,9 +109,9 @@ function NewThread(): JSX.Element {
         title="New thread"
         tabs={buildSiblingTabs({ workspace: joined, sessions, activeSessionId: null, draft: true })}
       />
-      <ThreadColumn className="justify-end">
+      <ContentColumn className="justify-end">
         <Composer thread={{ kind: "draft", config }} />
-      </ThreadColumn>
+      </ContentColumn>
     </div>
   );
 }

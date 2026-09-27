@@ -173,6 +173,17 @@ const COMMANDS: Record<string, string> = {
   "agent.update": "agent update",
   "agent.delete": "agent delete",
 
+  "assistant.query": "assistant list",
+  "assistant.read": "assistant read",
+  "assistant.create": "assistant create",
+  "assistant.update": "assistant update",
+  "assistant.delete": "assistant delete",
+
+  "conversation.query": "conversation list",
+  "conversation.read": "conversation read",
+  "conversation.queryMessages": "conversation message list",
+  "conversation.send": "conversation send",
+
   "session.query": "session list",
   "session.read": "session read",
   "session.spawn": "session spawn",
@@ -211,6 +222,9 @@ const STDIN_FIELDS = [
   "project.update description",
   "agent.create systemPrompt",
   "agent.update systemPrompt",
+  "assistant.create systemPrompt",
+  "assistant.update systemPrompt",
+  "conversation.send text",
   "session.spawn prompt",
   "session.continue prompt",
   "session.input text",
@@ -287,7 +301,21 @@ const RESOLVES: Record<string, string> = {
   "agent.update permissionProfileId": "profile.query",
   "agent.delete id": "agent.query",
 
+  "assistant.read id": "assistant.query",
+  "assistant.create instanceId": "provider.query",
+  "assistant.create permissionProfileId": "profile.query",
+  "assistant.update id": "assistant.query",
+  "assistant.update instanceId": "provider.query",
+  "assistant.update permissionProfileId": "profile.query",
+  "assistant.delete id": "assistant.query",
+
+  "conversation.query assistantId": "assistant.query",
+  "conversation.read id": "conversation.query",
+  "conversation.queryMessages id": "conversation.query",
+  "conversation.send id": "conversation.query",
+
   "session.query agentId": "agent.query",
+  "session.query conversationId": "conversation.query",
   "session.query permissionProfileId": "profile.query",
   "session.query runnerId": "runner.query",
   "session.spawn agentId": "agent.query",
@@ -444,5 +472,59 @@ describe("spawning a thread from a terminal", () => {
         `no example spawns into a ${kind} workspace`,
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * The slice-2 rows for assistants and their conversations: deleting an
+ * assistant, reading a conversation's messages, sending one, and listing a
+ * conversation's sessions.
+ */
+describe("the assistant and conversation rows", () => {
+  // The delete never waits for a session to stop, so it is never refused
+  // for one, and the row explains no refusal.
+  it("deletes an assistant by its id, and says the delete does not wait for its session", () => {
+    const row = table["assistant.delete"];
+    expect(row?.fields?.["id"]?.positional).toBe(true);
+    expect(row?.errors).toBeUndefined();
+    expect(row?.help).toContain("does not wait");
+    expect(row?.examples?.map((example) => example.args)).toContainEqual(["1f3a9c2e"]);
+  });
+
+  it("lists a conversation's messages by its id", () => {
+    const row = table["conversation.queryMessages"];
+    expect(row?.fields?.["id"]?.positional).toBe(true);
+    expect(row?.examples?.map((example) => example.args)).toContainEqual(["7b41d0a5"]);
+  });
+
+  it("sends the text from stdin, and explains that only a user credential may send", () => {
+    const row = table["conversation.send"];
+    expect(row?.fields?.["id"]?.positional).toBe(true);
+    expect(row?.fields?.["text"]?.stdin).toBe(true);
+    expect(
+      row?.errors?.["forbidden"]?.trim(),
+      "conversation.send has no forbidden help",
+    ).toBeTruthy();
+    expect(
+      row?.examples?.some(
+        (example) => example.args.join(" ") === "7b41d0a5" && example.stdin !== undefined,
+      ),
+      "no example sends a message to 7b41d0a5 from stdin",
+    ).toBe(true);
+  });
+
+  it("lets session list filter by conversation", () => {
+    const row = table["session.query"];
+    expect(row?.fields?.["conversationId"]).toEqual({
+      flag: "conversation",
+      help: "Only the sessions of this conversation, by its id or a tail of eight or more characters; find it with `hercule conversation list`.",
+      resolves: "conversation.query",
+    });
+    expect(row?.examples?.map((example) => example.args)).toContainEqual([
+      "--conversation",
+      "7b41d0a5",
+      "--limit",
+      "1",
+    ]);
   });
 });

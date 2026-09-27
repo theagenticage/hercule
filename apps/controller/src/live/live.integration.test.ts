@@ -44,6 +44,8 @@ import {
   NotFound,
   Unauthenticated,
   Validation,
+  type Assistant,
+  type Conversation,
   type Delta,
   type Event,
   type LiveMessage,
@@ -72,6 +74,7 @@ import {
   buildSocketUrl,
   fetchTicket,
   withServer,
+  waitForLiveToSettle,
   waitWithin,
   type Collected,
   type LiveClient,
@@ -82,6 +85,7 @@ import {
   reportEvent,
   spawnSessionOrFail,
   waitUntil,
+  withAgentFleet,
   withFleet,
   type Arranged,
 } from "../sessions/testing";
@@ -543,6 +547,163 @@ describe("what a task subscription receives", () => {
           }
 
           yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
+    });
+  });
+});
+
+/** Creates an assistant with only a name, and fails the test unless the create succeeds. */
+const createAssistant = async (base: string, token: string, name: string): Promise<Assistant> => {
+  const response = await post(base, "/api/v1/assistants", { name }, token);
+  expect(response.ok, await response.clone().text()).toBe(true);
+  return (await response.json()) as Assistant;
+};
+
+/** Returns the web conversation of an assistant. */
+const readWebConversation = async (
+  base: string,
+  token: string,
+  assistantId: string,
+): Promise<Conversation> => {
+  const response = await get(base, `/api/v1/conversations?assistantId=${assistantId}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const found = ((await response.json()) as { items: ReadonlyArray<Conversation> }).items.find(
+    (one) => one.channel === "web",
+  );
+  return expectPresent(found);
+};
+
+describe("what an assistant subscription receives", () => {
+  it("names the assistant once on a create, an update and a delete", async () => {
+    await withServer(async ({ base, live: reader }) => {
+      const token = await completeSetup(base);
+      // Setup creates the default assistant; its nudge must not count here.
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const assistants = yield* collectMessages(client, { topic: "assistant" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "assistant"));
+
+          const assistant = yield* Effect.promise(() => createAssistant(base, token, "Ada"));
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => assistants.received.length >= 1)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitForLiveToSettle());
+
+          const updated = yield* Effect.promise(() =>
+            send("PATCH", base, `/api/v1/assistants/${assistant.id}`, {
+              body: { name: "Bea" },
+              token,
+            }),
+          );
+          expect(updated.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => assistants.received.length >= 2)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitForLiveToSettle());
+
+          const deleted = yield* Effect.promise(() =>
+            del(base, `/api/v1/assistants/${assistant.id}`, token),
+          );
+          expect(deleted.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => assistants.received.length >= 3)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitWithin(200, () => assistants.received.length >= 4));
+
+          expect(assistants.received).toEqual([
+            { _tag: "invalidate", ids: [assistant.id], kind: "created" },
+            { _tag: "invalidate", ids: [assistant.id], kind: "updated" },
+            { _tag: "invalidate", ids: [assistant.id], kind: "deleted" },
+          ]);
+
+          yield* Fiber.interrupt(assistants.fiber);
+        }),
+      );
+    });
+  });
+});
+
+describe("what a conversation subscription receives", () => {
+  it("names the conversation once when its assistant is created and once when it is deleted", async () => {
+    await withServer(async ({ base, live: reader }) => {
+      const token = await completeSetup(base);
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const conversations = yield* collectMessages(client, { topic: "conversation" });
+          yield* Effect.promise(() => expectHeld(reader, 1, "conversation"));
+
+          const assistant = yield* Effect.promise(() => createAssistant(base, token, "Ada"));
+          const conversation = yield* Effect.promise(() =>
+            readWebConversation(base, token, assistant.id),
+          );
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => conversations.received.length >= 1)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitForLiveToSettle());
+
+          const deleted = yield* Effect.promise(() =>
+            del(base, `/api/v1/assistants/${assistant.id}`, token),
+          );
+          expect(deleted.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => conversations.received.length >= 2)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitWithin(200, () => conversations.received.length >= 3));
+
+          expect(conversations.received).toEqual([
+            { _tag: "invalidate", ids: [conversation.id], kind: "created" },
+            { _tag: "invalidate", ids: [conversation.id], kind: "deleted" },
+          ]);
+
+          yield* Fiber.interrupt(conversations.fiber);
+        }),
+      );
+    });
+  });
+
+  it("names the conversation once when a message is stored in it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const token = arranged.token;
+      const listed = await get(base, "/api/v1/assistants", token);
+      const [assistant] = ((await listed.json()) as { items: ReadonlyArray<Assistant> }).items;
+      const conversation = await readWebConversation(base, token, expectPresent(assistant).id);
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const conversations = yield* collectMessages(client, { topic: "conversation" });
+          yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "conversation"));
+
+          const sent = yield* Effect.promise(() =>
+            post(base, `/api/v1/conversations/${conversation.id}/messages`, { text: "hi" }, token),
+          );
+          expect(sent.status, yield* Effect.promise(() => sent.clone().text())).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => conversations.received.length >= 1)),
+          ).toBe(true);
+          yield* Effect.promise(() => waitWithin(200, () => conversations.received.length >= 2));
+
+          // The spec names the conversation's id for a stored message, not
+          // which kind of change it is.
+          expect(conversations.received).toHaveLength(1);
+          expect(conversations.received[0]).toMatchObject({
+            _tag: "invalidate",
+            ids: [conversation.id],
+          });
+
+          yield* Fiber.interrupt(conversations.fiber);
         }),
       );
     });

@@ -12,6 +12,7 @@ import { readSession, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
   waitUntilCaughtUp,
   emitManualEvent,
+  endPromptTurn,
   exitSession,
   waitForFrameCarrying,
   readMatchedInputRows,
@@ -98,7 +99,7 @@ describe("routing an event again after enrichment", () => {
       // The subscription waits for a ref the event does not have yet, so the
       // pass that read the event matched nothing.
       const subscriptionId = await subscribeAgent(arranged, agent, OTHER_REF);
-      expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
+      await endPromptTurn(arranged, agent);
 
       const response = await post(
         arranged.harness.base,

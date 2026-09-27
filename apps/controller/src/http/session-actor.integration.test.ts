@@ -14,7 +14,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import type { Session, Task } from "@hercule/contract";
+import type { Assistant, Conversation, Session, Task } from "@hercule/contract";
 import {
   spawnAgentUnder,
   at,
@@ -149,7 +149,7 @@ describe("the token the controller mints for a session", () => {
         _tag: "session.started",
         providerRefs: { nativeSessionId: "native-1" },
       });
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
 
       const fresh = await get(arranged.harness.base, "/api/v1/tasks", next);
       expect(fresh.status, await fresh.clone().text()).toBe(200);
@@ -468,6 +468,96 @@ describe("which actor a change records", () => {
       expect(createdRows.map((row) => row.actor)).toEqual(expect.arrayContaining([stamp, "user"]));
       const updatedRows = await listEventsOfKind(base, arranged.token, "task.updated");
       expect(updatedRows.map((row) => row.actor)).toEqual([stamp]);
+    });
+  });
+});
+
+describe("a session on the assistant profile", () => {
+  /**
+   * Returns the default assistant and its web conversation, read with the
+   * session's token. Each read fails the test unless it succeeds.
+   */
+  const readDefaultAssistant = async (
+    base: string,
+    token: string,
+  ): Promise<{ assistant: Assistant; conversation: Conversation }> => {
+    const listed = await get(base, "/api/v1/assistants", token);
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    const [assistant] = ((await listed.json()) as { items: ReadonlyArray<Assistant> }).items;
+    expect(assistant, "setup creates the default assistant").toBeDefined();
+
+    const conversations = await get(
+      base,
+      `/api/v1/conversations?assistantId=${assistant!.id}`,
+      token,
+    );
+    expect(conversations.status, await conversations.clone().text()).toBe(200);
+    const [conversation] = ((await conversations.json()) as { items: ReadonlyArray<Conversation> })
+      .items;
+    expect(conversation, "every assistant has a web conversation").toBeDefined();
+    return { assistant: assistant!, conversation: conversation! };
+  };
+
+  it("reads assistants and conversations", async () => {
+    await withFleet(async (arranged) => {
+      const { token } = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
+      const base = arranged.harness.base;
+      const { assistant, conversation } = await readDefaultAssistant(base, token);
+
+      const read = await get(base, `/api/v1/assistants/${assistant.id}`, token);
+      expect(read.status, await read.clone().text()).toBe(200);
+      expect(((await read.json()) as Assistant).id).toBe(assistant.id);
+
+      const readConversation = await get(base, `/api/v1/conversations/${conversation.id}`, token);
+      expect(readConversation.status, await readConversation.clone().text()).toBe(200);
+      expect(((await readConversation.json()) as Conversation).id).toBe(conversation.id);
+    });
+  });
+
+  it("reads a conversation's messages", async () => {
+    await withFleet(async (arranged) => {
+      const { token } = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
+      const base = arranged.harness.base;
+      const { conversation } = await readDefaultAssistant(base, token);
+
+      const messages = await get(base, `/api/v1/conversations/${conversation.id}/messages`, token);
+
+      expect(messages.status, await messages.clone().text()).toBe(200);
+      expect(await messages.json()).toEqual({ items: [] });
+    });
+  });
+
+  it("is forbidden to create or update an assistant, and the refusal names agent.write", async () => {
+    await withFleet(async (arranged) => {
+      const { token } = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
+      const base = arranged.harness.base;
+      const { assistant } = await readDefaultAssistant(base, token);
+
+      const created = await post(base, "/api/v1/assistants", { name: "Ada" }, token);
+      expect(created.status).toBe(403);
+      expect(await parseRefusal(created)).toMatchObject({
+        code: "forbidden",
+        grant: "agent.write",
+      });
+
+      const updated = await send("PATCH", base, `/api/v1/assistants/${assistant.id}`, {
+        body: { name: "Bea" },
+        token,
+      });
+      expect(updated.status).toBe(403);
+      expect(await parseRefusal(updated)).toMatchObject({
+        code: "forbidden",
+        grant: "agent.write",
+      });
     });
   });
 });

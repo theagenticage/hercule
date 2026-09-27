@@ -272,7 +272,7 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 
 - The `gh` CLI acts as one account per host per process (confirmed as of gh 2.40+). Each session gets `GH_TOKEN` injected from the **workspace's designated Connection**, so `gh` works out of the box.
 - A workspace designates exactly one GitHub Connection for this purpose ([./02-domain-model.md](./02-domain-model.md)). In a multi-repo workspace whose checkouts use different Connections, git operations stay per-checkout while `gh` uses the designated one.
-- Workspace-less sessions get the user-designated default GitHub Connection, or no `GH_TOKEN` if none is designated.
+- ~~Workspace-less sessions get the user-designated default GitHub Connection, or no `GH_TOKEN` if none is designated.~~ A session whose workspace designates no Connection, which includes every workspace-less session, gets the user's default GitHub Connection: the user setting `github.defaultConnectionId`, set in Settings > Profile. With no default set it gets no `GH_TOKEN`. The default applies only to Threads the user starts and to an assistant's conversation sessions. A session spawned from an Agent gets none, whether the user or an agent spawned it, because the Agent supplies every default a user setting would. A fork keeps its parent's Connection *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*.
 
 ### 9.4 Identity follows the repo
 

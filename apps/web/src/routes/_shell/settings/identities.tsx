@@ -10,6 +10,7 @@ export const Route = createFileRoute("/_shell/settings/identities")({
 function Identities(): JSX.Element {
   return (
     <EmptyState
+      className="mt-0"
       headline="No platform identity is paired."
       lead="An identity links a Discord or Slack account to you, so Hercule knows whose answers to take. Pairing mints a one-time code you send the bot."
     />

@@ -153,7 +153,7 @@ export const agent = HttpApiGroup.make("agent")
       params: { id: Id },
       payload: AgentUpdateInput,
       success: Agent,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/agents/:id", {
       params: { id: Id },

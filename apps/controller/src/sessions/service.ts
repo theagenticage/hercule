@@ -31,6 +31,7 @@ import {
   type ProviderEvent,
   type SessionBinding,
   type SessionInput,
+  type SessionInputResult,
   type SessionInterrupt,
   type SessionRespond,
   type SessionStart,
@@ -76,11 +77,14 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { buildGitIdentity, type GitCredential } from "../workspaces";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
+import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
+import { isResumeHeld } from "./resume-hold";
 import {
   readSessionOrFail,
   sessionRepository,
   type QueuePosition,
+  type SessionAccess,
   type StoredSession,
 } from "./repository";
 import { fold, computeOpenRequestAfter, startTracking, type Folded, type Tracked } from "./stream";
@@ -125,7 +129,7 @@ export interface InputPage {
  * the controller daemon chose the runner and opened the workspace before this
  * row is written.
  */
-export interface Opening {
+export interface CreateRequest {
   /**
    * Created by the caller, not by the insert. The workspace is opened in the
    * same transaction, and a thread's own worktree is created on a branch named
@@ -135,6 +139,8 @@ export interface Opening {
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `undefined` for a Thread. */
   readonly agentId: string | undefined;
+  /** The assistant's conversation the session answers; `undefined` for any other session. */
+  readonly conversationId: string | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -158,7 +164,7 @@ export interface Opening {
 }
 
 /** A session claimed for starting, and the complete frame that starts it. */
-export interface Starting {
+export interface StartRequest {
   readonly sessionId: string;
   readonly frame: SessionStart;
 }
@@ -183,16 +189,17 @@ export interface StartNeeds {
 }
 
 /** One user input to store, and the model selection the session runs under from then on. */
-export interface Taking {
+export interface TakeInputRequest<E> {
   readonly sessionId: string;
   /** The model selection the session runs under from this input on. */
   readonly modelSelection: ModelSelection;
   /**
-   * The encoded spec a resumed session goes back on the queue with, when the
-   * input resumes an exited session; `undefined` for a session that is still
-   * live.
+   * Builds the encoded spec a resumed session goes back on the queue with,
+   * from the session as it is read inside the transaction, for an input that
+   * resumes an exited session; `undefined` for a session that is still live.
+   * It runs only once `resume` has decided the session is resumed.
    */
-  readonly resumeSpec: string | undefined;
+  readonly buildResumeSpec: ((session: StoredSession) => Effect.Effect<string, E>) | undefined;
   readonly text: string;
   readonly at: string;
   /**
@@ -220,11 +227,17 @@ export interface FoldedReport {
  * committed. Each item affects something outside the session's own rows, such
  * as its workspace or its runner, so this domain does not do it itself.
  */
-export interface Applied {
+export interface AppliedReport {
   /** The session's workspace was used at this time. */
   readonly worked?: { readonly workspaceId: string; readonly at: string };
   /** The session's new status, or `undefined` when this report did not change it. */
   readonly moved: SessionStatus | undefined;
+  /**
+   * `true` when the session exited while input it keeps was still waiting
+   * for it. The caller resumes the session after the commit, so the input
+   * runs.
+   */
+  readonly exitedHoldingInput?: true;
 }
 
 /** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
@@ -253,12 +266,26 @@ const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already been sent to the runner";
 
+/**
+ * The refusal of `input.update` and `input.cancel` on a session that answers
+ * an assistant's conversation. The conversation already shows the input as
+ * the owner's message. A changed text would reach the assistant as words the
+ * owner never wrote there, and a cancelled one would leave the owner with no
+ * reply and no notice.
+ */
+const CONVERSATION_INPUT_FIXED =
+  "this input is the owner's message in an assistant's conversation, so it cannot be changed or cancelled; " +
+  "to correct or withdraw it, send a follow-up message with conversation.send";
+
 /** Why an input was cancelled on a session that `endOnLostRunners` ended. */
 const RUNNER_LOST =
   "that session's runner was not heard from for longer than the session's absolute timeout, " +
   "so the session was ended before this input was sent";
 
-/** Returns why a queued input was never sent. It is stored on the input when its session exits. */
+/**
+ * Returns why a queued input was never sent. It is stored on the input when
+ * its session exits, for a session that does not keep its input.
+ */
 const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
@@ -288,14 +315,26 @@ type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 
+/**
+ * Checks whether a session keeps its inputs that are still waiting when it
+ * exits, so they go to the next process when it is resumed. Only a session
+ * that answers an assistant's conversation keeps them, whatever the reason,
+ * because they are the owner's messages. A session whose conversation was
+ * deleted keeps nothing: it is history, and nobody reads its answers.
+ */
+const keepsInputsOnExit = (
+  session: Pick<StoredSession, "conversationId" | "conversationDeleted">,
+): boolean => session.conversationId !== null && !session.conversationDeleted;
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
-  const one = readSessionOrFail(sessions);
+  const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
+  const observer = yield* SessionObserver;
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -307,34 +346,62 @@ const make = Effect.gen(function* () {
 
   /**
    * Puts an exited session back on the queue, with the spec that resumes its
-   * own transcript. Joins the caller's transaction. Returns whether the
-   * session was moved: `false` means another caller already put it back, and
-   * there is nothing left to do.
+   * own transcript, when the session may be resumed now. Returns whether it
+   * did. It refuses, writing nothing, when:
+   *
+   * - the session is no longer exited, or its transcript cannot be resumed
+   *   (`resumable` on the row);
+   * - no input is waiting for it, so a resumed process would have nothing to
+   *   do;
+   * - an input is still on the wire: the send that claimed it has not heard
+   *   back yet, and it will put the input back to waiting or record it as
+   *   delivered. Resuming before that would let the input be sent twice;
+   * - the crash-loop guard holds the session back (`isResumeHeld`).
+   *
+   * `buildSpec` is given the session as read inside the transaction, and
+   * runs only once the session is resumed, because building an assistant's
+   * resume spec also writes the session's access. The check and
+   * the write run in one transaction, joining the caller's as a savepoint
+   * when there is one, so two callers racing to resume the same session
+   * resume it once.
    *
    * A caller that writes more than this one change passes
    * `announceTheMove: false` and announces once for everything it wrote. A
    * caller that writes only this change passes `true`.
    */
-  const resume = (
+  const resume = <E>(
     sessionId: string,
-    spec: string,
+    buildSpec: (session: StoredSession) => Effect.Effect<string, E>,
     at: string,
     announceTheMove: boolean,
-  ): Effect.Effect<boolean, SqlError> =>
-    Effect.gen(function* () {
-      const moved = yield* sessions.resume(sessionId, spec, at);
-      if (!moved) return false;
-      // The resumed process numbers its events from zero again, so the held
-      // ingest state no longer applies. It is dropped once the resume is
-      // committed, like any other cache invalidation.
-      yield* afterCommit(() => {
-        tracking.delete(sessionId);
-      });
-      if (announceTheMove) {
-        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
-      }
-      return true;
-    });
+  ): Effect.Effect<boolean, E | SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const found = yield* sessions.one(sessionId);
+        if (Option.isNone(found)) return false;
+        const session = found.value;
+        if (session.status !== "exited" || !session.resumable) return false;
+        if (!session.inputWaiting) return false;
+        if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
+        if (isResumeHeld(session)) return false;
+        yield* sessions.resume(sessionId, yield* buildSpec(session), at);
+        // Armed until the resumed process starts a turn or new input is
+        // stored. If it exits before either, it is not resumed again for the
+        // same input (`isResumeHeld`).
+        yield* sessions.setCrashGuardArmed(sessionId, true);
+        // The resumed process numbers its events from zero again, so the held
+        // ingest state no longer applies. It is dropped once the resume is
+        // committed, like any other cache invalidation.
+        yield* afterCommit(() => {
+          tracking.delete(sessionId);
+        });
+        if (announceTheMove) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+        return true;
+      }),
+    );
 
   /**
    * Returns an input that a caller can still edit or cancel. Fails when:
@@ -363,22 +430,30 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Does the cleanup after any session moves to `exited`: cancels its waiting
-   * inputs, forgets its token and ingest state, and announces each session
-   * once. When a reason is given, it is stored on the cancelled inputs.
+   * Checks that the queued inputs of a session may be changed or cancelled.
+   * Fails with `NotFound` when there is no such session, and with
+   * `InvalidState` when the session answers an assistant's conversation:
+   * input to an assistant goes only through `conversation.send`, and the
+   * conversation keeps what was sent.
    */
-  const endSessions = (
-    ids: ReadonlyArray<string>,
-    reason?: string,
-  ): Effect.Effect<void, SqlError> =>
+  const requireChangeableInputs = (
+    sessionId: string,
+  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+    Effect.flatMap(readSession(sessionId), (session) =>
+      session.conversationId === null
+        ? Effect.void
+        : Effect.fail(createInvalidStateError(CONVERSATION_INPUT_FIXED)),
+    );
+
+  /**
+   * Announces each session that moved to `exited` and forgets its token and
+   * ingest state, without touching its inputs. Part of `endSessions`.
+   */
+  const forgetSessions = (ids: ReadonlyArray<string>): Effect.Effect<void> =>
     Effect.gen(function* () {
       yield* Effect.forEach(
         ids,
-        (id) =>
-          Effect.gen(function* () {
-            yield* inputs.cancelQueued(id, reason);
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
-          }),
+        (id) => announce({ _tag: "record", topic: "session", id, kind: "updated" }),
         { discard: true },
       );
       // From now on the row's status is what makes the token invalid. This
@@ -389,6 +464,41 @@ const make = Effect.gen(function* () {
         tokens.forgetSessions(ids);
         for (const id of ids) tracking.delete(id);
       });
+    });
+
+  /**
+   * Does the cleanup after sessions move to `exited`, whatever ended them.
+   * Every path that ends a session calls this, in the transaction that ended
+   * it. For each session, it:
+   *
+   * - cancels its inputs not yet sent, storing `cancelReason` on them when
+   *   one is given, unless the session keeps them (`keepsInputsOnExit`);
+   * - tells `SessionObserver` that the session exited, and whether the
+   *   crash-loop guard now holds it back from a resume;
+   * - forgets its token and ingest state, and announces it once.
+   *
+   * `ended` holds the rows as they were just before the end.
+   */
+  const endSessions = (
+    ended: ReadonlyArray<StoredSession>,
+    reason: SessionEndReason,
+    cancelReason?: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      for (const session of ended) {
+        if (!keepsInputsOnExit(session)) {
+          yield* inputs.cancelQueued(session.id, cancelReason);
+        }
+        // Read again after the exit and the cancel: whether the guard holds
+        // the session depends on the input that is still waiting.
+        const after = yield* sessions.one(session.id);
+        yield* observer.sessionExited({
+          session,
+          reason,
+          resumeHeld: Option.isSome(after) && isResumeHeld(after.value),
+        });
+      }
+      yield* forgetSessions(ended.map((session) => session.id));
     });
 
   /**
@@ -406,8 +516,8 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const waiting = yield* sessions.liveInWorkspace(workspaceId);
-        for (const id of waiting) {
+        const ended = yield* sessions.endInWorkspace(workspaceId, at);
+        for (const { id } of ended) {
           yield* sessions.append(id, {
             seq: 0,
             at,
@@ -420,7 +530,6 @@ const make = Effect.gen(function* () {
               ...(message === null ? {} : { message }),
             },
           });
-          yield* sessions.moved(id, "exited", at);
           yield* audit.append({
             kind: "session.stopped",
             actor: SYSTEM_ACTOR,
@@ -431,7 +540,7 @@ const make = Effect.gen(function* () {
           // the session's transcript must be notified.
           yield* announce({ _tag: "transcript", sessionId: id });
         }
-        yield* endSessions(waiting, message ?? undefined);
+        yield* endSessions(ended, "workspace_failed", message ?? undefined);
       }),
     );
 
@@ -439,8 +548,17 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");
-        const { limit, cursor, sort, status, runnerId, agentId, permissionProfileId, thread } =
-          yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
+        const {
+          limit,
+          cursor,
+          sort,
+          status,
+          runnerId,
+          agentId,
+          permissionProfileId,
+          conversationId,
+          thread,
+        } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` filters for
         // the sessions of one Agent, and `thread` filters for the sessions
         // with no Agent, so no session can match both. A query with both would
@@ -468,6 +586,7 @@ const make = Effect.gen(function* () {
             runnerId,
             agentId,
             permissionProfileId,
+            conversationId,
             thread,
           }),
         );
@@ -498,7 +617,7 @@ const make = Effect.gen(function* () {
     read: (id: Id): Effect.Effect<Session, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
-        return (yield* recordComposer)(yield* one(id));
+        return (yield* recordComposer)(yield* readSession(id));
       }),
 
     /**
@@ -514,7 +633,7 @@ const make = Effect.gen(function* () {
           decodeTranscript(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* readSession(id);
         const listing = yield* refuseCursor(
           sessions.transcript({
             sessionId: id,
@@ -533,7 +652,7 @@ const make = Effect.gen(function* () {
      * stored as `queued`: whether the runner has room for it right now is
      * decided by dispatch, the same way for a new session as for any other.
      */
-    create: (open: Opening): Effect.Effect<void, SqlError> =>
+    create: (open: CreateRequest): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
         yield* sessions.insert({
@@ -541,6 +660,7 @@ const make = Effect.gen(function* () {
           title: buildTitle(open.prompt),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
+          conversationId: open.conversationId,
           instanceId: open.spec.instanceId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
@@ -591,10 +711,10 @@ const make = Effect.gen(function* () {
       runnerId: string,
       room: number,
       needs: StartNeeds,
-    ): Effect.Effect<ReadonlyArray<Starting>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError> =>
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const claimed: Array<Starting> = [];
+        const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
@@ -743,20 +863,24 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends a session that was never sent to a runner, so no runner needs to
-     * be told. Joins the caller's transaction, which also writes the audit
-     * entry.
+     * Stops a session that was never sent to a runner, so no runner needs to
+     * be told, and returns whether it did. Returns `false`, changing nothing,
+     * when the session is no longer `queued`: dispatch may have sent it to its
+     * runner since the caller read it, and then only the runner can end it.
+     * Joins the caller's transaction, which also writes the audit entry.
      */
-    endQueued: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+    endQueued: (sessionId: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        yield* sessions.moved(sessionId, "exited", at);
-        yield* endSessions([sessionId]);
+        const ended = yield* sessions.endQueued(sessionId, at);
+        if (Option.isNone(ended)) return false;
+        yield* endSessions([ended.value], "stopped");
+        return true;
       }),
 
     /**
      * Ends every session still open on a runner, with the same cleanup as any
-     * other move to `exited`: waiting inputs are cancelled, and each session
-     * is announced once. Joins the caller's transaction as a savepoint.
+     * other move to `exited` (`endSessions`), and each session is announced
+     * once. Joins the caller's transaction as a savepoint.
      * Returns the ids of the sessions that were `starting`, `idle` or `busy`,
      * so a caller retiring the runner can tell it to stop each one before
      * closing the connection.
@@ -766,11 +890,11 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          const { ended, toStop } = yield* sessions.endOnRunner(runnerId, at);
-          yield* endSessions(ended);
+          const ended = yield* sessions.endOnRunner(runnerId, at);
+          yield* endSessions(ended, "runner_retired");
           yield* Effect.forEach(
             ended,
-            (id) =>
+            ({ id }) =>
               audit.append({
                 kind: "session.stopped",
                 actor: SYSTEM_ACTOR,
@@ -779,7 +903,9 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return toStop;
+          // A queued session was never sent to the runner, so only the
+          // others have a process to stop.
+          return ended.filter((session) => session.status !== "queued").map(({ id }) => id);
         }),
       ),
 
@@ -798,18 +924,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endOnLostRunners(connected, at);
-        yield* endSessions(
-          ended.map((one) => one.sessionId),
-          RUNNER_LOST,
-        );
+        yield* endSessions(ended, "runner_lost", RUNNER_LOST);
         yield* Effect.forEach(
           ended,
-          ({ sessionId, runnerId }) =>
+          ({ id, runnerId }) =>
             audit.append({
               kind: "session.reconciled",
               actor: SYSTEM_ACTOR,
-              record: { topic: "session" as const, id: sessionId },
-              payload: { sessionId, runnerId, reason: "runner_lost" },
+              record: { topic: "session" as const, id },
+              payload: { sessionId: id, runnerId, reason: "runner_lost" },
               at,
             }),
           { discard: true },
@@ -832,18 +955,30 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Sets the access mode and permission profile an exited session resumes
+     * under, joining the caller's transaction. The caller also puts the same
+     * access mode in the resume spec, so the row shows what the resumed
+     * harness runs under. It is kept on the service, not read straight from
+     * the repository, because it is a write, and every write to a session
+     * goes through this service.
+     *
+     * It checks no grant. The caller is the controller daemon, resuming an
+     * assistant's session under the assistant's current settings.
+     */
+    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      sessions.setAccess(sessionId, access),
+
+    /**
      * Stores one user input and the model selection the session runs under
      * from then on. For an exited session, it also puts the session back on
-     * the queue with its resume spec. Joins the caller's transaction, so when
-     * the caller fails, for example on an invalid model option, neither the
-     * new selection nor the input is stored.
+     * the queue with its resume spec, when `resume` allows it; otherwise the
+     * input waits, and a later resume sends it. Joins the caller's
+     * transaction, so when the caller fails, for example on an invalid model
+     * option, neither the new selection nor the input is stored.
      */
-    takeInput: (taking: Taking): Effect.Effect<StoredInput, SqlError> =>
+    takeInput: <E = never>(taking: TakeInputRequest<E>): Effect.Effect<StoredInput, E | SqlError> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
-        if (taking.resumeSpec !== undefined) {
-          yield* resume(taking.sessionId, taking.resumeSpec, taking.at, false);
-        }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
           source: "user",
@@ -852,6 +987,14 @@ const make = Effect.gen(function* () {
           at: taking.at,
           ...(taking.claimed ? { sentAt: taking.at } : {}),
         });
+        // Someone is asking again, so the session may be resumed for every
+        // input that waits.
+        yield* sessions.setCrashGuardArmed(taking.sessionId, false);
+        // After the insert: a session is resumed only while it has input
+        // waiting, and this input is what it resumes for.
+        if (taking.buildResumeSpec !== undefined) {
+          yield* resume(taking.sessionId, taking.buildResumeSpec, taking.at, false);
+        }
         yield* announce({
           _tag: "record",
           topic: "session",
@@ -879,6 +1022,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const created = yield* inputs.insertMatched(matched);
         if (Option.isNone(created)) return created;
+        yield* sessions.setCrashGuardArmed(matched.sessionId, false);
         yield* announce({
           _tag: "record",
           topic: "session",
@@ -900,13 +1044,55 @@ const make = Effect.gen(function* () {
         }
       }),
 
-    /** Returns the ids of the sessions that have a queued input not yet sent. */
-    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      inputs.listSessionsAwaitingInput(),
+    /**
+     * Gives up on the input waiting for an exited session that cannot be
+     * resumed. `refusal` is the reason the resume was refused.
+     *
+     * - A session that answers no conversation, such as a Thread, keeps its
+     *   input queued, where its reader can see it was not delivered and
+     *   cancel it.
+     * - A session that answers a conversation has its waiting input
+     *   cancelled, and `SessionObserver` is told. Nobody reads that session's
+     *   inputs: the owner reads the conversation, so input left queued there
+     *   would never be answered and never be explained.
+     *
+     * Runs in its own transaction, and reads the session again inside it, so
+     * input that a resume by another caller has just made deliverable is
+     * never cancelled. An input still on the wire is left to the send that
+     * claimed it.
+     */
+    dropUnresumableInputs: (sessionId: string, refusal: string): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const found = yield* sessions.one(sessionId);
+          if (Option.isNone(found)) return;
+          const session = found.value;
+          if (session.status !== "exited" || session.conversationId === null) return;
+          const cancelled = yield* inputs.cancelQueued(
+            sessionId,
+            `the session could not be resumed: ${refusal}`,
+          );
+          if (cancelled === 0) return;
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* observer.inputsDropped({ session, refusal });
+        }),
+      ),
 
-    /** Checks whether this session has an input that was sent and not yet answered. */
-    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      inputs.holdsInputOnTheWire(sessionId),
+    /**
+     * Cancels every queued input of every session that answers the
+     * conversation, sent or not, with `reason`, so none of those sessions is
+     * resumed to run it. Joins the caller's transaction.
+     */
+    cancelConversationInputs: (
+      conversationId: string,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        for (const sessionId of yield* inputs.cancelForConversation(conversationId, reason)) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+      }),
 
     queuedInput,
 
@@ -936,26 +1122,67 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          yield* inputs.delivered(row.id, delivery, yield* nowIso);
+          yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
       ),
 
     /**
+     * Applies a runner's result for one input to the input's session, in
+     * order with the session's events. An input that opened a turn moves an
+     * `idle` session to `busy`. From that answer until the turn ends, a turn
+     * is running, even before the runner reports `turn.started`, so an exit
+     * in between is an exit during a turn and the owner is told.
+     *
+     * Any other result changes nothing here, because the send that waits for
+     * the result records it on the input. The session is also left alone
+     * when:
+     *
+     * - it is already `busy`: the runner reported `turn.started` before this
+     *   result;
+     * - it is in any other status but `idle`, such as `exited`;
+     * - another runner holds it now, so the result is stale.
+     */
+    applyInputResult: (
+      runnerId: string,
+      result: SessionInputResult,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (!result.ok || result.delivery !== "opened") return;
+          const sessionId = yield* inputs.findSessionId(result.requestId);
+          if (Option.isNone(sessionId)) return;
+          const found = yield* sessions.one(sessionId.value);
+          if (Option.isNone(found)) return;
+          const session = found.value;
+          if (session.runnerId !== runnerId || session.status !== "idle") return;
+          yield* sessions.moved(session.id, "busy", yield* nowIso);
+          // A turn opened, so the process did work: the crash-loop guard no
+          // longer applies to it, as when `turn.started` moves it to `busy`.
+          yield* sessions.setCrashGuardArmed(session.id, false);
+          yield* announce({ _tag: "record", topic: "session", id: session.id, kind: "updated" });
+        }),
+      ),
+
+    /**
      * Handles an input whose delivery failed. It goes back to waiting with the
-     * reason, or is cancelled if the session exited in the meantime. The
-     * session is read inside this transaction, so the check cannot race the
-     * write that exits the session.
+     * reason, except when the session exited in the meantime and does not
+     * keep its input (`keepsInputsOnExit`): then it is cancelled. The session
+     * is read inside this transaction, so the check cannot race the write
+     * that exits the session.
      */
     undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const now = yield* sessions.one(row.sessionId);
-          if (Option.isSome(now) && now.value.status === "exited") {
-            yield* inputs.cancelWithReason(row.id, reason);
+          const dropped =
+            Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
+          if (dropped) {
+            yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
           } else {
-            yield* inputs.requeue(row.id, reason);
+            yield* inputs.requeue(row.id, row.sentAt, reason);
           }
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
@@ -1001,10 +1228,10 @@ const make = Effect.gen(function* () {
           // `exited`, which makes their tokens invalid, and anything cached
           // from those tokens while the sessions ran is dropped after the
           // commit.
-          yield* endSessions(gone);
+          yield* endSessions(gone, "runner_restart");
           yield* Effect.forEach(
             gone,
-            (id) =>
+            ({ id }) =>
               audit.append({
                 kind: "session.reconciled",
                 actor: SYSTEM_ACTOR,
@@ -1084,7 +1311,7 @@ const make = Effect.gen(function* () {
       runnerId: string,
       event: ProviderEvent,
       report: FoldedReport,
-    ): Effect.Effect<Applied, SqlError> =>
+    ): Effect.Effect<AppliedReport, SqlError> =>
       Effect.gen(function* () {
         const { session, folded, park } = report;
         const id = session.id;
@@ -1094,6 +1321,8 @@ const make = Effect.gen(function* () {
         if (folded.rows.length > 0) {
           yield* announce({ _tag: "transcript", sessionId: id });
         }
+        // After the rows, so the observer can read what this report wrote.
+        yield* observer.sessionReported(session, event);
         // Written together with the status change from the same event, so a
         // session that reads `idle` already has its provider-native id.
         const native = findNativeId(event);
@@ -1107,11 +1336,18 @@ const make = Effect.gen(function* () {
           folded.status === undefined || folded.status === before || before === "exited"
             ? undefined
             : folded.status;
+        let exitedHoldingInput = false;
         if (moved !== undefined) {
           yield* sessions.moved(id, moved, at);
+          // A turn started, so the resumed process did work: the crash-loop
+          // guard no longer applies to it.
+          if (moved === "busy") yield* sessions.setCrashGuardArmed(id, false);
           if (event._tag === "session.exited") {
-            // Nothing waits on a harness that has exited, so its queue is cancelled too.
-            yield* endSessions([id], describeExited(event.reason));
+            yield* endSessions([session], event.reason, describeExited(event.reason));
+            // A session that keeps its input through an exit is resumed for
+            // it once this is committed. The caller does that, because it
+            // sends frames.
+            exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
           } else {
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
           }
@@ -1147,6 +1383,7 @@ const make = Effect.gen(function* () {
             ? { worked: { workspaceId: session.workspaceId, at } }
             : {}),
           moved,
+          ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
         };
       }),
 
@@ -1158,7 +1395,7 @@ const make = Effect.gen(function* () {
           decodeInputQuery(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* readSession(id);
         const listing = yield* refuseCursor(
           inputs.list({
             sessionId: id,
@@ -1170,6 +1407,12 @@ const make = Effect.gen(function* () {
         return toPageOutput(listing);
       }),
 
+    /**
+     * Replaces the text of an input still waiting on its session, and returns
+     * the changed input. Fails with `InvalidState` when the input was already
+     * sent, delivered or cancelled, or when the session answers an
+     * assistant's conversation.
+     */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.update");
@@ -1177,7 +1420,7 @@ const make = Effect.gen(function* () {
           decodeInputUpdate(input),
           createDecodeValidationError,
         );
-        yield* one(id);
+        yield* requireChangeableInputs(id);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -1189,13 +1432,19 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Cancels an input still waiting on its session, and returns the
+     * cancelled input. Fails with `InvalidState` when the input was already
+     * sent, delivered or cancelled, or when the session answers an
+     * assistant's conversation.
+     */
     cancelInput: (
       sessionId: Id,
       inputId: Id,
     ): Effect.Effect<Input, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
-        yield* one(sessionId);
+        yield* requireChangeableInputs(sessionId);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -1228,7 +1477,7 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost
+  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost | SessionObserver
 > = Layer.effect(SessionService)(make);
 
 /**

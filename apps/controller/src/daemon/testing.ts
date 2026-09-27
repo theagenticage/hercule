@@ -201,6 +201,17 @@ export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: 
     state: "completed",
   });
 
+/**
+ * Reports the end of the turn that the session's prompt opened, at sequence
+ * number 2, and waits until the session is idle. A spawned agent is `busy`
+ * until then, so an input sent to it waits for that turn to end. The test's
+ * next event is 3.
+ */
+export const endPromptTurn = async (arranged: Arranged, agent: Agent): Promise<void> => {
+  reportTurnCompleted(arranged, agent.session.id, 2);
+  await waitForSession(arranged, agent.session.id, (one) => one.status === "idle");
+};
+
 /** Starts a turn on the session, so a new input has to wait for the turn to end. */
 export const makeBusy = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
   reportTurnStarted(arranged, agent.session.id, seq);

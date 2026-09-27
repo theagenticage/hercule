@@ -145,8 +145,12 @@ export const buildThreadGroups = ({
   readonly mode: ThreadRows;
   readonly draft?: DraftPlace | null;
 }): readonly ProjectGroup[] => {
-  const rows = buildThreadRows(sessions, mode, instances);
-  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  // The sidebar lists Threads only. A session an Agent runs belongs to that
+  // Agent: an assistant's session shows under Assistants, and a workflow
+  // step's session under its run.
+  const threads = sessions.filter((session) => session.agentId === null);
+  const rows = buildThreadRows(threads, mode, instances);
+  const sessionsById = new Map(threads.map((session) => [session.id, session]));
 
   const byProject = new Map<string | null, ThreadRow[]>();
   for (const row of rows) {

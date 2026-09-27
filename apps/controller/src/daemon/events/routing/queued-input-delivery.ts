@@ -18,22 +18,23 @@
  * children of the pipeline's driver, which lives as long as the controller.
  */
 import * as Effect from "effect/Effect";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionService } from "../../../sessions";
+import { inputRepository } from "../../../sessions";
 import type { Delivery } from "../event-router";
 import { forkAndAbsorbFailures } from "../../absorbing";
 import { Live } from "../../sessions";
 
-export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService | Live> =
+export const queuedInputDelivery: Effect.Effect<Delivery, never, SqlClient.SqlClient | Live> =
   Effect.gen(function* () {
-    const sessions = yield* SessionService;
+    const inputs = yield* inputRepository;
     const live = yield* Live;
 
     return {
       name: "queued inputs",
       deliverWaiting: (): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
-          for (const sessionId of yield* sessions.listSessionsAwaitingInput()) {
+          for (const sessionId of yield* inputs.listSessionsAwaitingInput()) {
             yield* forkAndAbsorbFailures(
               "Delivering queued input to a session failed",
               live.deliverQueuedInput(sessionId),

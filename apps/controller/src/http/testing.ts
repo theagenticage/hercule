@@ -57,6 +57,7 @@ import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import { createPluginFixture } from "../plugins/testing";
 import {
   ensureProviderInstances,
   ProviderLoginDeadline,
@@ -66,6 +67,8 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
+import { AssistantSessionObserverLayer } from "../assistants";
+import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
@@ -108,7 +111,12 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        SessionServiceLayer,
+        // Observed by the assistants domain, as in the real boot, so a
+        // session's replies and notices reach its conversation.
+        SessionServiceLayer.pipe(
+          Layer.provide(AssistantSessionObserverLayer),
+          Layer.provide(ConversationMessagesLayer),
+        ),
         WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
@@ -144,6 +152,18 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
+
+/**
+ * Returns the plugins a test controller boots: the test's own, plus a
+ * provider plugin when none of the test's plugins offers providers. Setup
+ * creates the default assistant, which needs a provider instance, so a
+ * controller with no provider cannot finish setup. The provider plugin is
+ * built per call, so it holds nothing from a controller that has finished.
+ */
+const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
+  plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
+    ? plugins
+    : [...plugins, createPluginFixture({ id: "test" }).plugin];
 
 /** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
@@ -253,7 +273,10 @@ export interface ServerOptions {
    * nothing, so a test that checks notifications passes its own.
    */
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
-  /** The plugin registry. The real one is compiled in, so a test passes its own. */
+  /**
+   * The plugin registry. The real one is compiled in, so a test passes its
+   * own. A provider plugin is added when none of these offers providers.
+   */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
 
@@ -285,7 +308,9 @@ export const withServer = (
           yield* cancelStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
-          yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+          yield* Effect.flatMap(PluginHost, (host) =>
+            host.boot(buildPluginRegistry(options.plugins ?? [])),
+          );
           yield* ensureProviderInstances;
         });
         yield* bootSteps;
@@ -300,21 +325,7 @@ export const withServer = (
             Effect.andThen(bootSteps, resumeUnfinishedRuns),
           ),
         );
-        let listening = serve(bundle);
-        const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {
-          if (value !== undefined) listening = Effect.provideService(listening, key, value);
-        };
-        provideIfSet(RunnerPingSchedule, options.pings);
-        provideIfSet(RunnerFactsDeadline, options.factsDeadline);
-        provideIfSet(ProviderProbeDeadline, options.probeDeadline);
-        provideIfSet(ProviderProbeInterval, options.probeInterval);
-        provideIfSet(ProviderLoginDeadline, options.loginDeadline);
-        provideIfSet(SessionInputDeadline, options.inputDeadline);
-        provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
-        provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
-        provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
-        provideIfSet(ExpressionBudget, options.expressionBudget);
-        yield* listening;
+        yield* serve(bundle);
         const base = yield* baseUrl;
         // Reads the audit log through the service that wrote it, like any other
         // reader.
@@ -374,9 +385,35 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
+      provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));
 };
+
+/**
+ * Provides the timings a test overrides to everything the server runs,
+ * whether it runs in a request or on a fiber a service started when its layer
+ * was built. A timing left unset keeps its default.
+ */
+const provideTimings =
+  (options: ServerOptions) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
+    let provided = effect;
+    const provideIfSet = <V>(key: Context.Reference<V>, value: V | undefined): void => {
+      if (value !== undefined) provided = Effect.provideService(provided, key, value);
+    };
+    provideIfSet(RunnerPingSchedule, options.pings);
+    provideIfSet(RunnerFactsDeadline, options.factsDeadline);
+    provideIfSet(ProviderProbeDeadline, options.probeDeadline);
+    provideIfSet(ProviderProbeInterval, options.probeInterval);
+    provideIfSet(ProviderLoginDeadline, options.loginDeadline);
+    provideIfSet(SessionInputDeadline, options.inputDeadline);
+    provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
+    provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
+    provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
+    provideIfSet(ExpressionBudget, options.expressionBudget);
+    return provided;
+  };
 
 /**
  * Sends a request with a JSON body, and optionally a bearer token.

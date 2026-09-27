@@ -47,11 +47,18 @@ export const SETTINGS_NAV: readonly { readonly to: string; readonly label: strin
 
 /**
  * Returns the sidebar face for a path. Sessions (`/`), All sessions
- * (`/sessions`) and thread pages (`/threads/...`) show the threads face; every
- * other path shows the orchestration face. On those paths the user gets the
- * threads face back with the segmented switch.
+ * (`/sessions`), thread pages (`/threads/...`) and assistant conversations
+ * (`/assistants/...`) show the threads face; every other path shows the
+ * orchestration face. On those paths the user gets the threads face back with
+ * the segmented switch.
+ *
+ * A conversation is opened from the threads face's Assistants group, so the
+ * face stays put and the open assistant's row stays in view.
  */
 export const chooseFaceForPath = (pathname: string): Face =>
-  pathname === "/" || pathname === "/sessions" || pathname.startsWith("/threads/")
+  pathname === "/" ||
+  pathname === "/sessions" ||
+  pathname.startsWith("/threads/") ||
+  pathname.startsWith("/assistants/")
     ? "threads"
     : "orchestration";

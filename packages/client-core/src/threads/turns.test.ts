@@ -207,6 +207,7 @@ describe("buildTurns", () => {
       assistantText: "I'll look at the file.",
       startedAt: "2026-09-08T10:00:00.000Z",
       duration: 5000,
+      endState: "completed",
     });
     // user_message and assistant_message never appear in `items`.
     expect(turns[0]!.items.map((item) => item.itemId)).toEqual(["tool1"]);
@@ -413,8 +414,41 @@ describe("buildTurns", () => {
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.duration).toBeNull();
+    expect(turns[0]!.endState).toBeNull();
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "tool3", result: "running" }),
+    ]);
+  });
+
+  it("keeps how a turn ended, so a stopped or failed turn never reads as a normal one", () => {
+    const endTurn = (turnId: string, state: "completed" | "failed" | "interrupted") => [
+      buildRow({
+        _tag: "turn.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T12:00:00.000Z",
+        turnId,
+      }),
+      buildRow({
+        _tag: "turn.completed",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T12:00:22.000Z",
+        turnId,
+        state,
+      }),
+    ];
+
+    const turns = buildTurns([
+      ...endTurn("done", "completed"),
+      ...endTurn("broke", "failed"),
+      ...endTurn("stopped", "interrupted"),
+    ]);
+
+    expect(turns.map((turn) => [turn.turnId, turn.endState, turn.duration])).toEqual([
+      ["done", "completed", 22000],
+      ["broke", "failed", 22000],
+      ["stopped", "interrupted", 22000],
     ]);
   });
 

@@ -32,7 +32,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
   const { dispatch } = yield* Dispatch;
-  const { flush } = yield* Live;
+  const { flush, deliverQueuedInput } = yield* Live;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -106,6 +106,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      if (traffic.frame._tag === "sessionInputResult") {
+        return yield* sessions.applyInputResult(traffic.runnerId, traffic.frame);
+      }
       const { seq, event } = traffic.frame;
       // The fold reads and publishes but writes nothing, so it runs outside
       // the transaction. A browser watching the session gets the delta
@@ -137,6 +140,14 @@ const make = Effect.gen(function* () {
         yield* forkAndAbsorbFailures(
           "Dispatching to a freed slot failed",
           dispatch(traffic.runnerId),
+        );
+      }
+      // A session that exited while input waited for it is resumed in place,
+      // so the input runs, unless the session service holds it back.
+      if (applied.exitedHoldingInput === true) {
+        yield* forkAndAbsorbFailures(
+          "Resuming an exited session for its waiting input failed",
+          deliverQueuedInput(event.sessionId),
         );
       }
     });

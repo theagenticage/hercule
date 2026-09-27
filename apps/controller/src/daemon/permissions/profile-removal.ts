@@ -75,6 +75,7 @@ const make = Effect.gen(function* () {
                 runnerId: undefined,
                 agentId: undefined,
                 permissionProfileId: input.id,
+                conversationId: undefined,
                 thread: undefined,
               }),
             );
@@ -89,21 +90,31 @@ const make = Effect.gen(function* () {
             // An Agent names the profile for the sessions it will spawn. An
             // agent whose profile is gone could only spawn sessions whose
             // token resolves to no actor. The error names the oldest such
-            // agent, so the user knows which agent to change.
+            // agent, and the operation that changes it, so the user knows
+            // what to do: an assistant is changed with assistant.update,
+            // because agent.update refuses it.
             const naming = yield* refuseCursor(
               agents.list({
                 limit: 1,
                 cursor: undefined,
                 direction: "asc",
                 permissionProfileId: input.id,
+                // An assistant's agent row counts too: its sessions would
+                // spawn under this profile just the same.
+                kind: undefined,
               }),
             );
             const agent = naming.items[0];
             if (agent !== undefined) {
+              const [noun, operation] =
+                agent.kind === "assistant"
+                  ? ["assistant", "assistant.update"]
+                  : ["agent", "agent.update"];
               return yield* Effect.fail(
                 createInvalidStateError(
-                  `the agent ${agent.name} spawns its sessions under ${profile.name}; ` +
-                    "point that agent at another profile first, then delete this one",
+                  `the ${noun} ${agent.name} spawns its sessions under ${profile.name}; ` +
+                    `point that ${noun} at another profile with ${operation} first, ` +
+                    "then delete this one",
                 ),
               );
             }

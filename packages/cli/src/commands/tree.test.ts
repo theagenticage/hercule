@@ -197,6 +197,30 @@ describe("a command's fields against the schema", () => {
     }
   });
 
+  it("lets conversation list filter by assistant", () => {
+    const field = findCommandByWords(["conversation", "list"])?.query.find(
+      (one) => one.name === "assistantId",
+    );
+    expect(field).toBeDefined();
+    expect(field!.spelling).toBe("assistant");
+    expect(field!.resolves).toBe("assistant.query");
+  });
+
+  it("lets session list filter by conversation", () => {
+    const field = findCommandByWords(["session", "list"])?.query.find(
+      (one) => one.name === "conversationId",
+    );
+    expect(field).toBeDefined();
+    expect(field!.spelling).toBe("conversation");
+    expect(field!.resolves).toBe("conversation.query");
+  });
+
+  it("reads the text conversation send sends from stdin", () => {
+    const send = findCommandByWords(["conversation", "send"]);
+    expect(send).toBeDefined();
+    expect(send!.payload.find((field) => field.name === "text")?.stdin).toBe(true);
+  });
+
   it("takes at most one field from stdin, except the two passwords", () => {
     for (const command of COMMANDS) {
       const stdin = [...command.positionals, ...command.payload, ...command.query].filter(
@@ -254,6 +278,12 @@ describe("the placeholders a usage line shows", () => {
     "input cancel": "<session-id> <input-id>",
     "input steer": "<session-id> <input-id>",
     "transcript read": "<session-id>",
+    "assistant read": "<assistant-id>",
+    "assistant update": "<assistant-id>",
+    "assistant delete": "<assistant-id>",
+    "conversation read": "<conversation-id>",
+    "conversation message list": "<conversation-id>",
+    "conversation send": "<conversation-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {
@@ -281,6 +311,24 @@ describe("every example in the table", () => {
           parseArguments(command, example.args, () => Promise.resolve(example.stdin ?? "")),
           `${id} example ${index}: hercule ${row.command} ${example.args.join(" ")}`,
         ).resolves.toBeDefined();
+      }
+    }
+  });
+
+  // An optional stdin field is read only with its `--<flag>-stdin` marker. An
+  // example that pipes content without the marker teaches a command whose
+  // input is dropped without a word.
+  it("reads the stdin of every example that pipes one", async () => {
+    for (const [id, row] of visible) {
+      const command = findCommandByWords((row.command ?? "").split(" "))!;
+      for (const [index, example] of (row.examples ?? []).entries()) {
+        if (example.stdin === undefined) continue;
+        let read = false;
+        await parseArguments(command, example.args, () => {
+          read = true;
+          return Promise.resolve(example.stdin ?? "");
+        });
+        expect(read, `${id} example ${index} pipes stdin that is never read`).toBe(true);
       }
     }
   });

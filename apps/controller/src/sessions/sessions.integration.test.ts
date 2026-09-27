@@ -61,10 +61,16 @@ import {
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
+  withAgentFleet,
   withFleet as sharedWithFleet,
   type Arranged,
   type Wire,
 } from "./testing";
+import {
+  readDefaultConversation,
+  sendMessage,
+  waitForConversationSessions,
+} from "../conversations/testing";
 
 /** A provider that supports everything natively: the instance a plain spawn uses. */
 const FULL = buildProviderDefinition("full-provider", { token: "t" });
@@ -312,6 +318,19 @@ const buildTranscript = (sessionId: string): ReadonlyArray<readonly [number, Pro
   ];
 };
 
+/**
+ * Reports `buildTranscript` for a spawned session in the order a runner does:
+ * `session.started`, then the runner's answer that the prompt opened a turn,
+ * then the rest of that turn. Waits until the session is `idle` again.
+ */
+const reportTranscript = async (arranged: Arranged, sessionId: string): Promise<void> => {
+  const [started, ...turn] = buildTranscript(sessionId);
+  reportEvent(arranged.wire, ...started!);
+  await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+  for (const [seq, event] of turn) reportEvent(arranged.wire, seq, event);
+  await waitForSession(arranged, sessionId, (one) => one.status === "idle");
+};
+
 /** One stored input, as the API returns it. */
 interface StoredInput {
   readonly id: string;
@@ -364,13 +383,18 @@ const listInputs = async (arranged: Arranged, id: string): Promise<ReadonlyArray
 };
 
 /**
- * Spawns a session, starts it, and waits until it is idle and its prompt's
- * input frame is sent.
+ * Spawns a session, starts it, and waits until its prompt's input frame is
+ * sent and the session is `busy`. Returns the session as spawned.
  *
- * Both waits look for this session's own frame, not for a count of frames. A
- * test that starts a second session already has the first session's frames on
- * the wire, so a count of one would be met at once, before this session's
- * frames arrive.
+ * The fake runner answers the prompt with `opened`, and that answer alone
+ * makes the session `busy`: the prompt's turn is running, even though the
+ * runner has reported no `turn.started` yet. Use `startIdleSession` for a
+ * session whose first turn has ended.
+ *
+ * The wait for the start frame looks for this session's own frame, not for a
+ * count of frames. A test that starts a second session already has the first
+ * session's frames on the wire, so a count of one would be met at once,
+ * before this session's frames arrive.
  */
 const startSession = async (arranged: Arranged, prompt: string): Promise<Session> => {
   const session = await spawnSessionOrFail(arranged, { prompt });
@@ -381,13 +405,29 @@ const startSession = async (arranged: Arranged, prompt: string): Promise<Session
     at,
     _tag: "session.started",
   });
+  // Only the runner's answer to the prompt's input makes the session `busy`,
+  // so every count of input frames below includes the prompt's frame.
+  await waitForSession(arranged, session.id, (one) => one.status === "busy");
+  return session;
+};
+
+/**
+ * Starts a session, reports its prompt's turn as started and completed at
+ * sequence numbers 2 and 3, and waits until the session is `idle`. Returns
+ * the session as spawned. A test that reports more events on it starts at
+ * sequence number 4.
+ */
+const startIdleSession = async (arranged: Arranged, prompt: string): Promise<Session> => {
+  const session = await startSession(arranged, prompt);
+  const base = { sessionId: session.id, at, turnId: `turn-${session.id}` };
+  reportEvent(arranged.wire, 2, { ...base, eventId: crypto.randomUUID(), _tag: "turn.started" });
+  reportEvent(arranged.wire, 3, {
+    ...base,
+    eventId: crypto.randomUUID(),
+    _tag: "turn.completed",
+    state: "completed",
+  });
   await waitForSession(arranged, session.id, (one) => one.status === "idle");
-  // The prompt's input is sent after the transaction that set `idle`
-  // commits, so the status does not prove its frame was sent. Every count of
-  // input frames below includes this one.
-  await waitUntil("sent the prompt's input frame", () =>
-    listInputFrames(arranged.wire).find((frame) => frame.sessionId === session.id),
-  );
   return session;
 };
 
@@ -857,8 +897,10 @@ describe("what a runner reports", () => {
       const events = buildTranscript(session.id);
 
       reportEvent(arranged.wire, ...events[0]!);
+      // The session is `idle` only until the runner answers the prompt, which
+      // makes it `busy`, so the wait is for any status after `starting`.
       expect(
-        (await waitForSession(arranged, session.id, (one) => one.status === "idle")).startedAt,
+        (await waitForSession(arranged, session.id, (one) => one.status !== "starting")).startedAt,
       ).not.toBeNull();
 
       reportEvent(arranged.wire, ...events[1]!);
@@ -902,9 +944,9 @@ describe("what a runner reports", () => {
 
       reportEvent(arranged.wire, ...buildTranscript(session.id)[0]!);
 
-      const bound = await waitForSession(arranged, session.id, (one) => one.status === "idle");
-      // The id and the status are written together, so an idle session always
-      // has its native id already.
+      const bound = await waitForSession(arranged, session.id, (one) => one.status !== "starting");
+      // The id and the status are written together, so a started session
+      // always has its native id already.
       expect(bound.nativeSessionId).toBe("native-1");
     });
   });
@@ -980,7 +1022,7 @@ describe("what a runner reports", () => {
         at,
         _tag: "session.started",
       });
-      await waitForSession(arranged, mine.id, (one) => one.status === "idle");
+      await waitForSession(arranged, mine.id, (one) => one.status !== "starting");
 
       expect(await readStreamRows(arranged.harness, session.id)).toEqual([]);
       expect((await readSession(arranged, session.id)).status).toBe("starting");
@@ -991,7 +1033,7 @@ describe("what a runner reports", () => {
 describe("session.input", () => {
   it("leaves the input queued, with a reason, when an idle session's runner has disconnected", async () => {
     await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
+      const session = await startIdleSession(arranged, "hello");
       arranged.wire.close();
       await waitForRunnerGone(arranged);
 
@@ -1011,7 +1053,7 @@ describe("session.input", () => {
   it("leaves the input queued, with a reason, when an idle session's runner never answers", async () => {
     await withFleet(
       async (arranged) => {
-        const session = await startSession(arranged, "hello");
+        const session = await startIdleSession(arranged, "hello");
         arranged.wire.answering(() => undefined);
 
         const response = await sendInput(arranged, session.id, { text: "into the silence" });
@@ -1072,7 +1114,7 @@ describe("session.input, queued by default", () => {
 
   it("delivers to an idle session at once, and returns the result the runner reports, never one the controller chose", async () => {
     await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
+      const session = await startIdleSession(arranged, "hello");
       arranged.wire.answering(() => "steered");
 
       const response = await sendInput(arranged, session.id, { text: "again" });
@@ -1117,7 +1159,7 @@ describe("session.input: the model options a submission carries", () => {
 
   it("stores the options and sends them on the frame for that input", async () => {
     await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
+      const session = await startIdleSession(arranged, "hello");
 
       const response = await sendInput(arranged, session.id, {
         text: "again",
@@ -1289,7 +1331,7 @@ describe("input.steer", () => {
   // this steer must be rejected because the session is idle.
   it("rejects an input on an idle session, and sends no frame", async () => {
     await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
+      const session = await startIdleSession(arranged, "hello");
       const [prompt] = await listInputs(arranged, session.id);
       const before = listInputFrames(arranged.wire).length;
 
@@ -1363,8 +1405,8 @@ describe("input.steer", () => {
   // rejected, and the runner must never get a second frame for the same input.
   it("rejects an input already sent, and sends no second frame for it", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answering(() => undefined);
       const { session, inputId } = await makeBusyWithQueuedInput(arranged);
+      arranged.wire.answering(() => undefined);
       const before = listInputFrames(arranged.wire).length;
 
       const inFlight = steerInput(arranged, session.id, inputId);
@@ -1395,7 +1437,7 @@ describe("input.steer", () => {
     });
   });
 
-  it("rejects an input on a provider that does not support steering", async () => {
+  it("interrupts the running turn and sends the input as the next turn, on a provider that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
@@ -1403,7 +1445,6 @@ describe("input.steer", () => {
       });
       const events = buildTranscript(session.id);
       reportEvent(arranged.wire, ...events[0]!);
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
       await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
       reportEvent(arranged.wire, ...events[1]!);
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
@@ -1414,8 +1455,34 @@ describe("input.steer", () => {
 
       const response = await steerInput(arranged, session.id, inputId);
 
-      expect(response.status, await response.clone().text()).toBe(409);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({ inputId, result: "queued" });
+      const [interrupt] = await waitForFrames<SessionInterruptFrame>(
+        arranged.wire,
+        "sessionInterrupt",
+        1,
+      );
+      expect(interrupt!.sessionId).toBe(session.id);
+      // Nothing is sent into the turn being interrupted.
       expect(listInputFrames(arranged.wire)).toHaveLength(before);
+
+      // The interrupted turn ends, and the input goes in as the next turn.
+      reportEvent(arranged.wire, 3, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+      const delivered = await waitUntil("sent the input as the next turn", async () => {
+        const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+        return row?.status === "delivered" ? row : undefined;
+      });
+      expect(delivered.delivery).toBe("opened");
+      expect(
+        listInputFrames(arranged.wire).filter((one) => one.input.text === "steer me"),
+      ).toHaveLength(1);
     });
   });
 
@@ -1458,7 +1525,6 @@ describe("a session's inputs", () => {
     });
     const events = buildTranscript(session.id);
     reportEvent(arranged.wire, ...events[0]!);
-    await waitForSession(arranged, session.id, (one) => one.status === "idle");
     await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
     reportEvent(arranged.wire, ...events[1]!);
     await waitForSession(arranged, session.id, (one) => one.status === "busy");
@@ -1778,7 +1844,7 @@ describe("session.query and session.read", () => {
     // `busy` in one page, and never `exited`.
     await withFleet(async (arranged) => {
       const waiting = await spawnSessionOrFail(arranged, { prompt: "one" });
-      const idle = await startSession(arranged, "two");
+      const idle = await startIdleSession(arranged, "two");
       const gone = await spawnSessionOrFail(arranged, { prompt: "three" });
       reportExited(arranged.wire, gone.id, 1);
       await waitForSession(arranged, gone.id, (one) => one.status === "exited");
@@ -1808,6 +1874,66 @@ describe("session.query and session.read", () => {
 });
 
 /**
+ * The `conversationId` filter: the sessions that answered one conversation,
+ * made through `conversation.send`. The newest of them is the conversation's
+ * current session, which the web app reads with `limit=1`.
+ */
+describe("session.query by conversation", () => {
+  it("lists a conversation's sessions newest first, and no Thread", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const { conversation } = await readDefaultConversation(arranged);
+      await sendMessage(arranged, conversation.id, "hi");
+      const [older] = await waitForConversationSessions(arranged, conversation.id, 1);
+      await waitForStartFrames(arranged, older!.id, 1);
+      // An exit before the runner reported a native id leaves nothing to
+      // resume, so the next line places a new session.
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: older!.id,
+        at,
+        _tag: "session.exited",
+        reason: "crash",
+      });
+      await waitForSession(arranged, older!.id, (one) => one.status === "exited" && !one.resumable);
+      await sendMessage(arranged, conversation.id, "again");
+      const [newer] = await waitForConversationSessions(arranged, conversation.id, 2);
+      const thread = await spawnSessionOrFail(arranged, { prompt: "a thread" });
+
+      const listing = await get(
+        base,
+        `/api/v1/sessions?conversationId=${conversation.id}`,
+        arranged.token,
+      );
+      expect(listing.status, await listing.clone().text()).toBe(200);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items.map((one) => one.id)).toEqual([newer!.id, older!.id]);
+
+      const current = await get(
+        base,
+        `/api/v1/sessions?conversationId=${conversation.id}&sort=createdAt:desc&limit=1`,
+        arranged.token,
+      );
+      expect(current.status, await current.clone().text()).toBe(200);
+      expect(
+        ((await current.json()) as { items: ReadonlyArray<Session> }).items.map((one) => one.id),
+      ).toEqual([newer!.id]);
+
+      const nobody = await get(
+        base,
+        "/api/v1/sessions?conversationId=0199e0e7-9999-7000-8000-000000000000",
+        arranged.token,
+      );
+      expect(nobody.status, await nobody.clone().text()).toBe(200);
+      expect(((await nobody.json()) as { items: ReadonlyArray<Session> }).items).toEqual([]);
+
+      // A Thread answers no conversation.
+      expect((await readSession(arranged, thread.id)).conversationId).toBeNull();
+    });
+  });
+});
+
+/**
  * The transcript over HTTP: the rows ingest wrote, encoded through the
  * contract, in position order and one page at a time.
  */
@@ -1832,9 +1958,7 @@ describe("transcript.read", () => {
   it("reads the whole normalized stream back, oldest first", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      for (const [seq, event] of buildTranscript(session.id))
-        reportEvent(arranged.wire, seq, event);
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      await reportTranscript(arranged, session.id);
 
       const page = await waitUntil("wrote the turn", async () => {
         const found = await readTranscript(arranged, session.id);
@@ -1860,8 +1984,7 @@ describe("transcript.read", () => {
   it("pages with a cursor that continues exactly where the last page stopped", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      for (const [seq, event] of buildTranscript(session.id))
-        reportEvent(arranged.wire, seq, event);
+      await reportTranscript(arranged, session.id);
       await waitUntil("wrote the turn", async () => {
         const found = await readTranscript(arranged, session.id);
         return found.items.length === 6 ? found : undefined;
@@ -1936,6 +2059,9 @@ describe("session.interrupt", () => {
 
   it("sends the interrupt whatever status the controller has for the session", async () => {
     await withFleet(async (arranged) => {
+      // The prompt is never answered, so the session stays `idle` once it
+      // has started, instead of moving to `busy` for the prompt's turn.
+      arranged.wire.answering(() => undefined);
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
       await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
 
@@ -1996,6 +2122,47 @@ describe("session.stop", () => {
       const entries = await arranged.harness.audit("session.stopped");
       expect(entries).toHaveLength(1);
       expect(entries[0]?.actor).toBe("user");
+    });
+  });
+
+  it("ends a queued session once when several stops race, and returns the session as it is now", async () => {
+    await withFleet(async (arranged) => {
+      // The runner's only slot is taken, so the second session waits in the
+      // queue with no runner holding it.
+      const capped = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}`,
+        {
+          body: { maxConcurrentSessions: 1 },
+          token: arranged.token,
+        },
+      );
+      expect(capped.status, await capped.clone().text()).toBe(200);
+      await startSession(arranged, "take the slot");
+      const queued = await spawnSessionOrFail(arranged, { prompt: "wait" });
+      expect(queued.status).toBe("queued");
+
+      // Each stop can read the session as queued before another one ends it.
+      // The stops that lose the race change nothing and record nothing.
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, () => stopSession(arranged, queued.id)),
+      );
+
+      const answered = responses.filter((one) => one.status === 200);
+      expect(answered.length).toBeGreaterThan(0);
+      for (const response of answered) {
+        expect(await response.json()).toMatchObject({ id: queued.id, status: "exited" });
+      }
+      for (const response of responses.filter((one) => one.status !== 200)) {
+        expect(response.status, await response.clone().text()).toBe(409);
+      }
+      expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+      expect(
+        listFrames<SessionStopFrame>(arranged.wire, "sessionStop").filter(
+          (frame) => frame.sessionId === queued.id,
+        ),
+      ).toEqual([]);
     });
   });
 
@@ -2098,7 +2265,7 @@ describe("session.continue", () => {
         at,
         _tag: "session.started",
       });
-      await waitForSession(arranged, spawnedFromAgent.id, (one) => one.status === "idle");
+      await waitForSession(arranged, spawnedFromAgent.id, (one) => one.status === "busy");
       const parent = await endSession(arranged, spawnedFromAgent, 2);
       expect(parent.resumable).toBe(true);
 
@@ -2439,10 +2606,10 @@ describe("the queue when the session becomes idle, one input at a time", () => {
 
       reportEvent(arranged.wire, ...buildTranscript(session.id)[0]!);
 
-      const onWire = await waitUntil("sent the oldest input", async () => {
-        const found = await listInputs(arranged, session.id);
-        return typeof found[0]!.sentAt === "string" ? found : undefined;
-      });
+      // The claim commits `sent_at` before the frame is written, so wait for
+      // the frame: once it is on the wire, the claim is already stored.
+      await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      const onWire = await listInputs(arranged, session.id);
       expect(listInputFrames(arranged.wire)).toHaveLength(1);
       expect(onWire.map((row) => [row.text, row.status, typeof row.sentAt === "string"])).toEqual([
         ["one", "queued", true],
@@ -3088,7 +3255,7 @@ describe("sessions a runner's report leaves out", () => {
       // automatic placement picks a runner, and these three must be on the
       // runner whose report is tested.
       const running = await startBusySession(arranged, "mid-turn here");
-      const waiting = await startSession(arranged, "idle here");
+      const waiting = await startIdleSession(arranged, "idle here");
       const opening = await spawnSessionOrFail(arranged, { prompt: "still starting" });
       expect(opening.status).toBe("starting");
       expect(opening.runnerId).toBe(arranged.runnerId);
@@ -3132,7 +3299,7 @@ describe("sessions a runner's report leaves out", () => {
     // the runner was unreachable.
     await withFleet(async (arranged) => {
       const running = await startBusySession(arranged, "outlived its bound");
-      const kept = await startSession(arranged, "still running on both sides");
+      const kept = await startIdleSession(arranged, "still running on both sides");
       reportHeldSessions(arranged.wire, arranged, [kept.id]);
       await waitForSession(arranged, running.id, (one) => one.status === "exited");
       expect(listFrames<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
@@ -3182,7 +3349,7 @@ describe("sessions a runner's report leaves out", () => {
   it("changes nothing when the report still lists every session", async () => {
     await withFleet(async (arranged) => {
       const running = await startBusySession(arranged, "mid-turn here");
-      const waiting = await startSession(arranged, "idle here");
+      const waiting = await startIdleSession(arranged, "idle here");
       const opening = await spawnSessionOrFail(arranged, { prompt: "still starting" });
 
       reportHeldSessions(arranged.wire, arranged, [running.id, waiting.id, opening.id]);
@@ -3236,7 +3403,6 @@ describe("session.input into an exited session", () => {
         _tag: "session.started",
       });
 
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
       const delivered = await waitForFrames<SessionInput>(
         arranged.wire,
         "sessionInput",
@@ -3274,7 +3440,7 @@ describe("session.input into an exited session", () => {
         providerRefs: { nativeSessionId: "native-2" },
       });
 
-      const bound = await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      const bound = await waitForSession(arranged, session.id, (one) => one.status !== "starting");
       expect(bound.nativeSessionId).toBe("native-2");
     });
   });
@@ -3479,8 +3645,7 @@ describe("session.input into an exited session", () => {
   it("accepts the resumed process's sequence numbers from the start, however far the stored stream got", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      for (const [seq, event] of buildTranscript(session.id))
-        reportEvent(arranged.wire, seq, event);
+      await reportTranscript(arranged, session.id);
       await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
       await waitUntil("wrote the first turn", async () =>
         (await readStreamRows(arranged.harness, session.id)).some(
@@ -3502,7 +3667,6 @@ describe("session.input into an exited session", () => {
 
       const base = { eventId: crypto.randomUUID(), sessionId: session.id, at };
       reportEvent(again, 1, { ...base, _tag: "session.started" });
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
       reportEvent(again, 2, { ...base, _tag: "turn.started", turnId: "t2" });
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
       reportEvent(again, 3, {
@@ -4075,8 +4239,7 @@ describe("session.spawn into a workspace", () => {
         at,
         _tag: "session.started",
       });
-      await waitForSession(arranged, session.id, (one) => one.status === "idle");
-      await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
       await endSession(arranged, session, 2);
 
       const response = await sendInput(arranged, session.id, { text: "still there?" });
@@ -4205,8 +4368,7 @@ describe("session.spawn into a workspace", () => {
         at,
         _tag: "session.started",
       });
-      await waitForSession(arranged, parent.id, (one) => one.status === "idle");
-      await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      await waitForSession(arranged, parent.id, (one) => one.status === "busy");
       await endSession(arranged, parent, 2);
 
       // The repo no longer belongs to any project.
@@ -4331,8 +4493,8 @@ describe("session.spawn into a workspace", () => {
         at,
         _tag: "session.started",
       });
-      const idle = await waitForSession(arranged, session.id, (one) => one.status === "idle");
-      const ended = await endSession(arranged, idle, 2);
+      const running = await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      const ended = await endSession(arranged, running, 2);
       expect(ended.resumable).toBe(true);
 
       const disposed = await send(
@@ -4386,8 +4548,8 @@ describe("session.spawn into a workspace", () => {
         at,
         _tag: "session.started",
       });
-      const idle = await waitForSession(arranged, parent.id, (one) => one.status === "idle");
-      const ended = await endSession(arranged, idle, 2);
+      const running = await waitForSession(arranged, parent.id, (one) => one.status === "busy");
+      const ended = await endSession(arranged, running, 2);
 
       const response = await continueSession(arranged, ended.id, {
         mode: "fork",

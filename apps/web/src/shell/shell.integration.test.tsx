@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session, Workspace } from "@hercule/contract";
+import type { Assistant, ProviderInstance, Session, Workspace } from "@hercule/contract";
 import { formatAge } from "@hercule/client-core";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -18,11 +18,16 @@ const ZONE = "Europe/Amsterdam";
 const buildSettingsRoutes = (user: Record<string, unknown>) => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": {
-    body: { controller: {}, user: { "onboarding.completedSteps": ["timezone"], ...user } },
+    body: {
+      controller: {},
+      user: { "onboarding.completedSteps": ["timezone", "assistant"], ...user },
+    },
   },
-  // The Threads face reads the session list on every path it mounts on; a
-  // test that cares about actual sessions overrides this with its own list.
+  // The Threads face reads the session list and the assistant list on every
+  // path it mounts on; a test that cares about actual sessions or assistants
+  // overrides these with its own list.
   "GET /api/v1/sessions": { body: { items: [] } },
+  "GET /api/v1/assistants": { body: { items: [] } },
 });
 
 const buildShellRoutes = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> =>
@@ -33,8 +38,10 @@ const BASE_SESSION: Session = {
   title: "Fix the login bug",
   status: "idle",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
+  conversationId: null,
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-beff-7037-9f5b-042822015952",
   workspaceId: null,
@@ -357,7 +364,7 @@ describe("the Threads face's session rows", () => {
     expect(getThreadsNav().queryByRole("link", { name: /create new thread/i })).toBeNull();
   });
 
-  it.each(["/", "/threads/s1", "/sessions"])(
+  it.each(["/", "/threads/s1", "/sessions", "/assistants/a1"])(
     "shows the Threads face, not Hercule, on %s",
     async (path) => {
       await renderApp({ path, api: stubApi(buildShellRoutes()).fetch, token: "held" });
@@ -690,5 +697,339 @@ describe("Create new thread opens the project picker", () => {
     const picker = await screen.findByRole("dialog");
     expect((picker.textContent ?? "").replace(/\s+/g, " ")).toContain("New thread in");
     expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+/* ------------------------------------------------------------------
+ * The Threads face's Assistants group. It follows the thread groups
+ * and holds one row per assistant, oldest first, each linking to the
+ * assistant's conversation.
+ *
+ * The spec gives the dot's tones but not how to find them. These tests
+ * assume that the dot carries its presence in `data-presence`, that a
+ * loaded session's dot is painted with the live colour (a `bg-live`
+ * class), the way the fleet's connectivity dot is, and that the dot of
+ * an assistant with no loaded session is not.
+ * ------------------------------------------------------------------ */
+
+const BASE_ASSISTANT: Assistant = {
+  id: "01a06d02-a000-7000-8000-000000000001",
+  name: "Ada",
+  systemPrompt: "You are a helpful assistant.",
+  instanceId: BASE_SESSION.instanceId,
+  permissionProfileId: BASE_SESSION.permissionProfileId,
+  accessMode: "full-access",
+  model: null,
+  disallowedTools: [],
+  unenforced: [],
+  heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
+  rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
+  reply: "turn-end",
+  createdAt: "2026-09-04T08:00:00.000Z",
+  updatedAt: "2026-09-04T08:00:00.000Z",
+};
+
+const ADA = BASE_ASSISTANT;
+
+const BOB: Assistant = {
+  ...BASE_ASSISTANT,
+  id: "01a06d02-a000-7000-8000-000000000002",
+  name: "Bob",
+  createdAt: "2026-09-04T09:00:00.000Z",
+  updatedAt: "2026-09-04T09:00:00.000Z",
+};
+
+/** Ada's session, answering her web conversation. It is busy, so Ada is working. */
+const ADA_SESSION = buildSession({
+  id: "01a06d02-2000-7000-8000-00000000000a",
+  title: "Answer Ada's conversation",
+  status: "busy",
+  agentId: ADA.id,
+  conversationId: "01a06d02-c000-7000-8000-000000000001",
+  lastActivityAt: "2026-09-06T11:00:00.000Z",
+});
+
+/** Bob's only session, which has exited and can be resumed, so Bob is asleep. */
+const BOB_SESSION = buildSession({
+  id: "01a06d02-2000-7000-8000-00000000000b",
+  title: "Answer Bob's conversation",
+  status: "exited",
+  resumable: true,
+  nativeSessionId: "native-bob",
+  agentId: BOB.id,
+  conversationId: "01a06d02-c000-7000-8000-000000000002",
+  lastActivityAt: "2026-09-05T11:00:00.000Z",
+  exitedAt: "2026-09-05T11:10:00.000Z",
+});
+
+const THREAD = THREE_SESSIONS[0]!;
+
+/** The shell's routes with `assistants`, and `sessions` as the session list. */
+const withAssistants = (
+  assistants: readonly Assistant[],
+  sessions: readonly Session[] = [THREAD, ADA_SESSION, BOB_SESSION],
+): Readonly<Record<string, Handler>> => ({
+  ...withThreads(sessions),
+  // The server lists assistants oldest first.
+  "GET /api/v1/assistants": { body: { items: assistants } },
+});
+
+/** Returns the face's assistant rows, the links to a conversation, in DOM order. */
+const listAssistantRows = (): HTMLElement[] =>
+  getThreadsNav()
+    .getAllByRole("link")
+    .filter((link) => (link.getAttribute("href") ?? "").startsWith("/assistants/"));
+
+/** Returns the assistant row that links to `assistant`'s conversation, and fails when there is none. */
+const getAssistantRow = (assistant: Assistant): HTMLElement => {
+  const row = listAssistantRows().find(
+    (link) => link.getAttribute("href") === `/assistants/${assistant.id}`,
+  );
+  if (row === undefined) throw new Error(`no row links to ${assistant.name}'s conversation`);
+  return row;
+};
+
+/** Checks whether the row's dot is painted with the live colour. */
+const hasLiveDot = (row: HTMLElement): boolean => row.querySelector('[class*="bg-live"]') !== null;
+
+/**
+ * Returns the class names of the row's presence dot, the element that
+ * carries `data-presence`, and fails when the row has none.
+ */
+const readDotClasses = (row: HTMLElement): string => {
+  const dot = row.querySelector("[data-presence]");
+  if (dot === null) throw new Error("the row has no presence dot");
+  return dot.className;
+};
+
+/** Matches a class that animates an element, such as `animate-pulse`. */
+const MOTION = /\b(animate-\S+|hercule-\S*(pulse|live-dot)\S*)\b/;
+
+describe("the Threads face's Assistants group", () => {
+  it("follows the thread groups under the title Assistants", async () => {
+    await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
+
+    const title = await getThreadsNav().findByText("Assistants");
+    const thread = getThreadsNav().getByRole("link", { name: new RegExp(THREAD.title) });
+    expectInDocumentOrder([thread, title, listAssistantRows()[0]!]);
+  });
+
+  it("shows one row per assistant, oldest first, with its name and web", async () => {
+    await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
+
+    await getThreadsNav().findByText("Assistants");
+    const rows = listAssistantRows();
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+      `/assistants/${ADA.id}`,
+      `/assistants/${BOB.id}`,
+    ]);
+    expect(rows[0]!.textContent).toContain("Ada");
+    expect(rows[0]!.textContent).toContain("web");
+    expect(rows[1]!.textContent).toContain("Bob");
+    expect(rows[1]!.textContent).toContain("web");
+  });
+
+  // The shape says whether a session is loaded: filled while it is, a
+  // hollow ring while it is not. Only the working dot moves, because only
+  // then is work happening.
+  it.each<{ presence: string; session: Partial<Session>; dot: RegExp; moves: boolean }>([
+    { presence: "working", session: { status: "busy" }, dot: /\bbg-live\b/, moves: true },
+    { presence: "idle", session: { status: "idle" }, dot: /\bbg-live\b/, moves: false },
+    {
+      presence: "asleep",
+      session: { status: "exited", resumable: true },
+      dot: /\bborder-faint\b/,
+      moves: false,
+    },
+    {
+      presence: "unavailable",
+      session: { status: "exited", resumable: false },
+      dot: /\bborder-fail\b/,
+      moves: false,
+    },
+  ])(
+    "paints the dot of an assistant that is $presence",
+    async ({ presence, session, dot, moves }) => {
+      const sessions = [THREAD, { ...ADA_SESSION, ...session }];
+      await renderApp({
+        path: "/",
+        api: stubApi(withAssistants([ADA], sessions)).fetch,
+        token: "held",
+      });
+
+      await getThreadsNav().findByText("Assistants");
+      const row = getAssistantRow(ADA);
+      const classes = readDotClasses(row);
+      expect(row.querySelector("[data-presence]")?.getAttribute("data-presence")).toBe(presence);
+      expect(classes).toMatch(dot);
+      if (moves) expect(classes).toMatch(MOTION);
+      else expect(classes).not.toMatch(MOTION);
+    },
+  );
+
+  it("draws an asleep assistant's dot as a ring, with no fill", async () => {
+    await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
+
+    await getThreadsNav().findByText("Assistants");
+    expect(readDotClasses(getAssistantRow(BOB))).not.toMatch(/\bbg-/);
+  });
+
+  // "asleep" would promise a session to resume, and an assistant that has
+  // never run has none. The empty marker column keeps the name in line.
+  it("draws no dot for an assistant with no session yet, and keeps its name in line", async () => {
+    await renderApp({
+      path: "/",
+      api: stubApi(withAssistants([ADA, BOB], [THREAD, ADA_SESSION])).fetch,
+      token: "held",
+    });
+
+    await getThreadsNav().findByText("Assistants");
+    const row = getAssistantRow(BOB);
+    expect(row.querySelector("[data-presence]")).toBeNull();
+    expect(row.firstElementChild?.className).toMatch(/\bw-3\b/);
+  });
+
+  it("opens the assistant's conversation when its row is clicked", async () => {
+    const user = userEvent.setup();
+    const { router } = await renderApp({
+      path: "/",
+      api: stubApi(withAssistants([ADA, BOB])).fetch,
+      token: "held",
+    });
+
+    await getThreadsNav().findByText("Assistants");
+    await user.click(getAssistantRow(BOB));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/assistants/${BOB.id}`);
+    });
+  });
+
+  it("turns the dot asleep, without a reload, when a session nudge reports the assistant's session exited", async () => {
+    let sessions: readonly Session[] = [THREAD, ADA_SESSION, BOB_SESSION];
+    const api = stubApi({
+      ...withAssistants([ADA, BOB]),
+      "GET /api/v1/sessions": () => ({ body: { items: sessions } }),
+    });
+    const { live } = await renderApp({ path: "/", api: api.fetch, token: "held" });
+
+    await getThreadsNav().findByText("Assistants");
+    expect(hasLiveDot(getAssistantRow(ADA))).toBe(true);
+
+    sessions = [
+      THREAD,
+      {
+        ...ADA_SESSION,
+        status: "exited",
+        resumable: true,
+        nativeSessionId: "native-ada",
+        exitedAt: "2026-09-06T11:15:00.000Z",
+      },
+      BOB_SESSION,
+    ];
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [ADA_SESSION.id], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(hasLiveDot(getAssistantRow(ADA))).toBe(false);
+    });
+  });
+
+  it("keeps an assistant's session out of the thread groups", async () => {
+    await renderApp({ path: "/", api: stubApi(withAssistants([ADA, BOB])).fetch, token: "held" });
+
+    await getThreadsNav().findByRole("link", { name: new RegExp(THREAD.title) });
+    await getThreadsNav().findByText("Assistants");
+    const threadLinks = getThreadsNav()
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"));
+    expect(threadLinks).not.toContain(`/threads/${ADA_SESSION.id}`);
+    expect(threadLinks).not.toContain(`/threads/${BOB_SESSION.id}`);
+    expect(readFaceText()).not.toContain(ADA_SESSION.title);
+    expect(readFaceText()).not.toContain(BOB_SESSION.title);
+  });
+
+  it("renders no Assistants group when there is no assistant", async () => {
+    const api = stubApi(withAssistants([], [THREAD]));
+    await renderApp({ path: "/", api: api.fetch, token: "held" });
+
+    await getThreadsNav().findByRole("link", { name: new RegExp(THREAD.title) });
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.path === "/api/v1/assistants")).toBe(true);
+    });
+    expect(getThreadsNav().queryByText("Assistants")).toBeNull();
+    expect(listAssistantRows()).toEqual([]);
+  });
+});
+
+/** A Claude Code instance, logged in on moss when `loggedIn` is true and never probed otherwise. */
+const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
+  id: "01a06d02-1000-7000-8000-000000000001",
+  providerId: "claude-code",
+  name: "Claude Code",
+  config: {},
+  displayName: "Claude Code",
+  binaryName: "claude",
+  declared: {
+    steering: "native",
+    fork: "native",
+    modelSwitch: "in-session",
+    accessModes: {
+      "approval-required": "native",
+      "auto-accept-edits": "native",
+      auto: "native",
+      "full-access": "native",
+    },
+    mcpPassthrough: "native",
+    disallowedTools: "native",
+    structuredOutput: "supported",
+  },
+  secretFields: [],
+  snapshots: loggedIn
+    ? [
+        {
+          runnerId: MOSS.id,
+          probedAt: "2026-09-05T09:14:00.000Z",
+          harnessVersion: "2.1.263",
+          versionVerdict: "ok",
+          auth: { status: "ok", identity: "rogier@example.com" },
+          models: [],
+        },
+      ]
+    : [],
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
+});
+
+describe("the Threads face with no threads", () => {
+  const HINT = "A thread needs a runner with a provider login on it.";
+
+  it("says what a thread needs while no runner has a logged-in harness", async () => {
+    const routes = {
+      ...buildShellRoutes(),
+      "GET /api/v1/runners": { body: { items: [MOSS] } },
+      "GET /api/v1/providers": { body: [buildClaudeCode(false)] },
+    };
+    await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
+
+    expect(await getThreadsNav().findByText(HINT)).toBeDefined();
+  });
+
+  it("leaves the hint out once a runner has a logged-in harness", async () => {
+    const routes = {
+      ...buildShellRoutes(),
+      "GET /api/v1/runners": { body: { items: [MOSS] } },
+      "GET /api/v1/providers": { body: [buildClaudeCode(true)] },
+    };
+    await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
+
+    // The Sessions route's loader reads both lists before the screen renders,
+    // so the face has them by the time its empty text shows.
+    await getThreadsNav().findByText("No threads yet");
+    expect(getThreadsNav().queryByText(HINT)).toBeNull();
   });
 });

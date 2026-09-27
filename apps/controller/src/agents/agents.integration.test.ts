@@ -14,8 +14,8 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
-import type { Agent as AgentRecord, Session } from "@hercule/contract";
-import { del, get, post, send } from "../http/testing";
+import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   spawnAgentUnder,
@@ -161,7 +161,12 @@ const listSessions = async (arranged: Arranged, query: string): Promise<Readonly
 const spawnSessionFor = async (arranged: Arranged, agentId: string): Promise<Session> =>
   spawnSessionOrFail(arranged, { agentId, prompt: "assess this" });
 
-const driveSessionToStarted = async (arranged: Arranged, session: Session): Promise<void> => {
+/**
+ * Reports the session as started and waits until the runner has answered its
+ * prompt. The fake runner answers `opened`, so the session is then `busy` with
+ * the prompt's turn. The runner has reported one event, at sequence number 1.
+ */
+const driveSessionToBusy = async (arranged: Arranged, session: Session): Promise<void> => {
   await waitForStartFrames(arranged, session.id, 1);
   reportEvent(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
@@ -170,19 +175,21 @@ const driveSessionToStarted = async (arranged: Arranged, session: Session): Prom
     _tag: "session.started",
     providerRefs: { nativeSessionId: `native-${session.id}` },
   });
-  await waitForSession(arranged, session.id, (one) => one.status === "idle");
+  await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
 
-const driveSessionToBusy = async (arranged: Arranged, session: Session): Promise<void> => {
-  await driveSessionToStarted(arranged, session);
+/** Drives the session to `busy`, then reports its prompt's turn completed at sequence number 2. */
+const driveSessionToIdle = async (arranged: Arranged, session: Session): Promise<void> => {
+  await driveSessionToBusy(arranged, session);
   reportEvent(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
     sessionId: session.id,
     at,
-    _tag: "turn.started",
+    _tag: "turn.completed",
     turnId: "t1",
+    state: "completed",
   });
-  await waitForSession(arranged, session.id, (one) => one.status === "busy");
+  await waitForSession(arranged, session.id, (one) => one.status === "idle");
 };
 
 const driveSessionToExited = async (
@@ -432,7 +439,7 @@ describe("deleting an agent a session still points at", () => {
         );
         const session = await spawnSessionFor(arranged, agent.id);
         if (status === "starting") await waitForStartFrames(arranged, session.id, 1);
-        if (status === "idle") await driveSessionToStarted(arranged, session);
+        if (status === "idle") await driveSessionToIdle(arranged, session);
         if (status === "busy") await driveSessionToBusy(arranged, session);
         await waitForSession(arranged, session.id, (one) => one.status === status);
 
@@ -453,7 +460,7 @@ describe("deleting an agent a session still points at", () => {
         findInstanceId(arranged, "claude-provider"),
       );
       const session = await spawnSessionFor(arranged, agent.id);
-      await driveSessionToStarted(arranged, session);
+      await driveSessionToBusy(arranged, session);
       await driveSessionToExited(arranged, session, 2);
 
       const deleted = await del(
@@ -587,6 +594,100 @@ describe("the permission profile an agent spawns under", () => {
 
       expect(refused.code).toBe("invalid_state");
       expect(refused.text).toContain(profile.id);
+    });
+  });
+});
+
+describe("an assistant seen through the agent operations", () => {
+  const ASSISTANT_REFUSAL = "this agent is an assistant; use assistant.update or assistant.delete";
+  const SPAWN_REFUSAL =
+    "an assistant's sessions belong to its conversation; send it a message with conversation.send";
+
+  /** Creates an assistant from a name alone. */
+  const createAssistant = async (arranged: Arranged): Promise<Assistant> => {
+    const response = await post(
+      arranged.harness.base,
+      "/api/v1/assistants",
+      { name: "Ada" },
+      arranged.token,
+    );
+    expect(response.ok, await response.clone().text()).toBe(true);
+    return (await response.json()) as Assistant;
+  };
+
+  it("lists a plain agent and no assistant", async () => {
+    await withFleet(async (arranged) => {
+      await createAssistant(arranged);
+      const plain = await createAgentForInstance(
+        arranged,
+        findInstanceId(arranged, "claude-provider"),
+      );
+
+      expect((await listAgents(arranged)).map((agent) => agent.id)).toEqual([plain.id]);
+    });
+  });
+
+  it("reads an assistant's agent fields, and none of its assistant fields", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const read = await readAgent(arranged, assistant.id);
+      expect(read).toMatchObject({
+        id: assistant.id,
+        name: assistant.name,
+        systemPrompt: assistant.systemPrompt,
+        instanceId: assistant.instanceId,
+        permissionProfileId: assistant.permissionProfileId,
+        accessMode: assistant.accessMode,
+        disallowedTools: assistant.disallowedTools,
+      });
+      expect(read).not.toHaveProperty("heartbeat");
+      expect(read).not.toHaveProperty("rotation");
+      expect(read).not.toHaveProperty("reply");
+    });
+  });
+
+  it("refuses to update or delete an assistant, and points at the assistant operations", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const updated = await readErrorBody(
+        await updateAgent(arranged, assistant.id, { name: "Bea" }),
+      );
+      expect(updated.code, updated.text).toBe("invalid_state");
+      expect(updated.message).toBe(ASSISTANT_REFUSAL);
+
+      // The refusal comes before the fields are checked, so an edit that
+      // would also be invalid still points at the assistant operations.
+      const invalid = await readErrorBody(
+        await updateAgent(arranged, assistant.id, { instanceId: NOBODY }),
+      );
+      expect(invalid.code, invalid.text).toBe("invalid_state");
+      expect(invalid.message).toBe(ASSISTANT_REFUSAL);
+
+      const deleted = await readErrorBody(
+        await del(arranged.harness.base, `/api/v1/agents/${assistant.id}`, arranged.token),
+      );
+      expect(deleted.code, deleted.text).toBe("invalid_state");
+      expect(deleted.message).toBe(ASSISTANT_REFUSAL);
+    });
+  });
+
+  it("refuses to spawn a session from an assistant, and writes no session", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const refused = await readErrorBody(
+        await post(
+          arranged.harness.base,
+          "/api/v1/sessions",
+          { agentId: assistant.id, prompt: "assess this" },
+          arranged.token,
+        ),
+      );
+      expect(refused.code, refused.text).toBe("invalid_state");
+      expect(refused.message).toBe(SPAWN_REFUSAL);
+      expect(await listSessions(arranged, "")).toEqual([]);
     });
   });
 });

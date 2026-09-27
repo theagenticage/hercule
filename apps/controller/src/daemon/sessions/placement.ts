@@ -13,7 +13,13 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { lintOutputSchema, type AccessMode, type SessionSpec } from "@hercule/protocol";
+import {
+  lintOutputSchema,
+  type AccessMode,
+  type ModelSelection,
+  type SessionSpec,
+  type WorkspaceProvision,
+} from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
   createForbiddenError,
@@ -34,7 +40,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { agentRepository, type StoredAgent } from "../../agents";
-import { requireGrant, type Actor } from "../../actor";
+import { CurrentActor, requireGrant, type Actor } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
 import type { PluginHost } from "../../plugins";
@@ -55,6 +61,7 @@ import {
 } from "../../runners";
 import {
   buildContinuingSpec,
+  buildConversationTimeouts,
   readSessionOrFail,
   sessionRecordComposer,
   SessionService,
@@ -77,6 +84,22 @@ const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
 const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_AGENT = "no such agent";
+
+/**
+ * The refusal of `session.continue` on a session that answers an assistant's
+ * conversation. A fork would be a second session answering the same
+ * conversation, outside its messages.
+ */
+const CONVERSATION_FORK_REFUSED =
+  "forking a conversation's session is not supported; " +
+  "to branch off, spawn a Thread with `session.spawn` and give it the context it needs";
+
+/**
+ * The error message for a spawn from an assistant. An assistant's sessions
+ * are started by its conversation, never by a spawn.
+ */
+const ASSISTANT_SPAWN_REFUSED =
+  "an assistant's sessions belong to its conversation; send it a message with conversation.send";
 
 /** The error message when a session spawns from an Agent with more grants than the session has. */
 const NOT_ITS_GRANTS =
@@ -151,6 +174,8 @@ interface Placing {
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from, or undefined for a Thread. */
   readonly agentId: string | undefined;
+  /** The assistant's conversation the session answers, or undefined for any other session. */
+  readonly conversationId: string | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -236,9 +261,75 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Resolves the runner, the access mode and the model a new session on
+   * `instanceId` starts with, in this order:
+   *
+   * 1. the runner: the one named, or else the first placeable runner;
+   * 2. the access mode: the nearest one at or below the requested mode that
+   *    the provider supports;
+   * 3. the model: the one requested, or else the runner's default model for
+   *    the instance, with the requested options checked against it.
+   *
+   * Returns the runner id, the access mode and the model selection. Fails
+   * with `InvalidState` when no runner can take the session, the provider
+   * supports no such access mode, or the runner reported no models, and with
+   * `Validation` for an unknown instance, runner or option.
+   */
+  const resolveStartSettings = (request: {
+    readonly instanceId: string;
+    /** The runner the session must run on, or undefined to let placement choose. */
+    readonly runnerId: string | undefined;
+    readonly requestedAccessMode: AccessMode;
+    /** The model asked for, or undefined for the runner's default. */
+    readonly model: string | undefined;
+    readonly options: ModelSelection["options"];
+  }): Effect.Effect<
+    {
+      readonly runnerId: string;
+      readonly accessMode: AccessMode;
+      readonly modelSelection: ModelSelection;
+    },
+    InvalidState | Validation | SqlError | Schema.SchemaError
+  > =>
+    Effect.gen(function* () {
+      const { definition, snapshots } = yield* resolved(request.instanceId);
+      const hosting = yield* request.runnerId === undefined
+        ? choosePlacement(snapshots)
+        : chooseExplicitRunner(request.runnerId, snapshots);
+      const accessMode = findNearestSupportedAccessMode(
+        request.requestedAccessMode,
+        definition.declared.accessModes,
+      );
+      if (accessMode === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            `${definition.displayName} supports no access mode at or below ${request.requestedAccessMode}`,
+          ),
+        );
+      }
+      const model =
+        request.model ?? (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
+      if (model === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError("that runner reported no models for this provider instance"),
+        );
+      }
+      // Options are validated against the model, wherever they came from. An
+      // option the model does not offer is rejected by name, even when it
+      // came from the Agent, rather than silently dropped.
+      yield* validateOptions(hosting.models, model, request.options);
+      return {
+        runnerId: hosting.runnerId,
+        accessMode,
+        modelSelection: { model, options: request.options },
+      };
+    });
+
+  /**
    * Reads the Agent a spawn names, and the permission profile it gives its
    * sessions. Fails with not found when the Agent does not exist, and with an
-   * invalid state error when its profile no longer exists.
+   * invalid state error when it is an assistant or its profile no longer
+   * exists.
    *
    * The profile is read, not trusted from the agent row. The session's token
    * carries that profile, and a deleted profile would give a token that
@@ -254,6 +345,9 @@ const make = Effect.gen(function* () {
       const row = yield* agents.read(agentId);
       if (Option.isNone(row)) return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
       const agent = row.value;
+      if (agent.kind === "assistant") {
+        return yield* Effect.fail(createInvalidStateError(ASSISTANT_SPAWN_REFUSED));
+      }
       const profile = yield* profiles.getById(agent.permissionProfileId);
       if (Option.isNone(profile)) {
         return yield* Effect.fail(
@@ -387,12 +481,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Writes the workspace and the session in one transaction, then tells the
-   * runner about the workspace, then dispatches, which may start the session.
-   * Returns the new session. A transaction never waits on a runner, and a
-   * runner is never told about a row that could still roll back.
+   * Writes the workspace and the session in one transaction, joining the
+   * caller's when there is one. Returns the new session's id and the
+   * workspace frame the runner must be told about after the commit, if any.
    */
-  const place = (open: Placing): Effect.Effect<Session, Validation | NotFound | SqlError> =>
+  const writeSession = (
+    open: Placing,
+  ): Effect.Effect<
+    { readonly sessionId: string; readonly frame: WorkspaceProvision | undefined },
+    Validation | NotFound | SqlError
+  > =>
     Effect.gen(function* () {
       const sessionId = uuidToString(mintUuid());
       const frame = yield* withTransaction(
@@ -420,6 +518,7 @@ const make = Effect.gen(function* () {
             id: sessionId,
             permissionProfileId: open.permissionProfileId,
             agentId: open.agentId,
+            conversationId: open.conversationId,
             runnerId: open.runnerId,
             requestedAccessMode: open.requestedAccessMode,
             parentSessionId: open.parentSessionId,
@@ -429,18 +528,45 @@ const make = Effect.gen(function* () {
             payload: open.payload,
             projectId: open.projectId,
             checkoutBranch: opened.checkoutBranch,
-            // The workspace's own connection if it has one, otherwise the
-            // thread default. A session pushes as one account, chosen here.
+            // A session pushes as one GitHub account, chosen here: the
+            // workspace's own connection if it has one, otherwise the
+            // caller's fallback. The fallback is the user's default GitHub
+            // Connection for a Thread and a conversation session, the
+            // parent's connection for a fork, and none for a spawn from an
+            // Agent.
             githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             at,
           });
           return opened.frame;
         }),
       );
+      return { sessionId, frame };
+    });
+
+  /**
+   * Tells the runner about a new session's workspace, then dispatches, which
+   * may start the session. Runs after the commit that wrote the session, so a
+   * runner is never told about a row that could still roll back.
+   */
+  const tellRunnerAndDispatch = (
+    runnerId: string,
+    frame: WorkspaceProvision | undefined,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
       // In the order the runner needs them: it provisions the workspace, and
       // the session is dispatched once the runner reports the workspace ready.
-      if (frame !== undefined) yield* connections.tell(open.runnerId, frame);
-      yield* dispatch(open.runnerId);
+      if (frame !== undefined) yield* connections.tell(runnerId, frame);
+      yield* dispatch(runnerId);
+    });
+
+  /**
+   * Writes the workspace and the session in one transaction, then starts the
+   * session. Returns the new session. A transaction never waits on a runner.
+   */
+  const place = (open: Placing): Effect.Effect<Session, Validation | NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const { sessionId, frame } = yield* writeSession(open);
+      yield* tellRunnerAndDispatch(open.runnerId, frame);
       // Read back instead of using the inserted row, so the caller sees
       // `starting` when dispatch started the session at once, not `queued`.
       const after = yield* rows.one(sessionId);
@@ -451,6 +577,99 @@ const make = Effect.gen(function* () {
     });
 
   return {
+    /**
+     * Places a new session that answers an assistant's conversation, with
+     * `text` as its first input, inside the caller's transaction. Returns the
+     * start, which the caller runs after its commit: it tells the runner and
+     * dispatches, so a runner never hears of a session that could roll back.
+     *
+     * The session runs as the assistant's agent row describes it, with no
+     * workspace and no per-call override:
+     *
+     * - its system prompt starts with the assistant's name, so a rename takes
+     *   effect at the next session without editing the persona;
+     * - its timeouts include the idle unload, so an unused conversation
+     *   frees its runner slot;
+     * - it pushes to GitHub as the user's default Connection, if one is set.
+     *
+     * It checks no grant: the caller is `conversation.send`, which has
+     * checked its own. Fails with `InvalidState` when no runner can take the
+     * session or the assistant's profile no longer exists.
+     */
+    placeConversationSession: (request: {
+      readonly conversationId: string;
+      readonly assistantId: string;
+      readonly text: string;
+    }): Effect.Effect<
+      Effect.Effect<void, SqlError>,
+      | InvalidState
+      | NotFound
+      | Validation
+      | GrantsError
+      | SettingError
+      | SqlError
+      | Schema.SchemaError
+    > =>
+      Effect.gen(function* () {
+        const user = yield* CurrentActor;
+        if (user._tag !== "user") {
+          return yield* Effect.die("a conversation session is started only by the user's send");
+        }
+        const row = yield* agents.read(request.assistantId);
+        if (Option.isNone(row)) return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
+        const agent = row.value;
+        if (Option.isNone(yield* profiles.getById(agent.permissionProfileId))) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `the assistant's permission profile ${agent.permissionProfileId} no longer exists; ` +
+                "point the assistant at another profile, then send again",
+            ),
+          );
+        }
+        const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+          instanceId: agent.instanceId,
+          runnerId: undefined,
+          requestedAccessMode: agent.accessMode,
+          model: agent.model?.model,
+          options: agent.model?.options ?? {},
+        });
+        const defaults = yield* settings.allForUser(user.userId);
+
+        const spec = {
+          instanceId: agent.instanceId,
+          workspaceId: null,
+          modelSelection,
+          accessMode,
+          systemPrompt: `Your name is ${agent.name}.\n\n${agent.systemPrompt}`,
+          ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
+          timeouts: buildConversationTimeouts(yield* settings.all()),
+        } satisfies SessionSpec;
+
+        const { frame } = yield* writeSession({
+          permissionProfileId: agent.permissionProfileId,
+          agentId: agent.id,
+          conversationId: request.conversationId,
+          runnerId,
+          requestedAccessMode: agent.accessMode,
+          parentSessionId: undefined,
+          spec,
+          prompt: request.text,
+          kind: "session.spawned",
+          projectId: undefined,
+          workspace: undefined,
+          fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          payload: {
+            instanceId: agent.instanceId,
+            runnerId,
+            requestedAccessMode: agent.accessMode,
+            accessMode,
+            agentId: agent.id,
+            conversationId: request.conversationId,
+          },
+        });
+        return tellRunnerAndDispatch(runnerId, frame);
+      }),
+
     /**
      * Spawns one session: from an Agent, or a Thread when the call names no
      * Agent. Returns the new session.
@@ -520,49 +739,23 @@ const make = Effect.gen(function* () {
           agent?.instanceId ??
           defaults["thread.instanceId"] ??
           (yield* pickLoggedInInstance());
-        const { definition, snapshots } = yield* resolved(instanceId);
-        const placeOn = pinnedTo ?? decoded.runnerId;
-        const hosting = yield* placeOn === undefined
-          ? choosePlacement(snapshots)
-          : chooseExplicitRunner(placeOn, snapshots);
-
         const requestedAccessMode =
           decoded.accessMode ??
           agent?.accessMode ??
           defaults["thread.accessMode"] ??
           DEFAULT_ACCESS_MODE;
-        const accessMode = findNearestSupportedAccessMode(
-          requestedAccessMode,
-          definition.declared.accessModes,
-        );
-        if (accessMode === undefined) {
-          return yield* Effect.fail(
-            createInvalidStateError(
-              `${definition.displayName} supports no access mode at or below ${requestedAccessMode}`,
-            ),
-          );
-        }
-
         // A model and its options are one selection: options belong to the
         // model that offers them. So the Agent's options apply only when the
         // Agent's model is used. A call that names its own model uses the
         // options it sent with that model, or none at all.
         const agentSelection = decoded.model === undefined ? agent?.model : undefined;
-        const model =
-          decoded.model ??
-          agentSelection?.model ??
-          defaults["thread.model"] ??
-          (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
-        if (model === undefined) {
-          return yield* Effect.fail(
-            createInvalidStateError("that runner reported no models for this provider instance"),
-          );
-        }
-        // Options are validated against the model, wherever they came from. An
-        // option the model does not offer is rejected by name, even when it
-        // came from the Agent, rather than silently dropped.
-        const options = decoded.options ?? agentSelection?.options ?? {};
-        yield* validateOptions(hosting.models, model, options);
+        const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+          instanceId,
+          runnerId: pinnedTo ?? decoded.runnerId,
+          requestedAccessMode,
+          model: decoded.model ?? agentSelection?.model ?? defaults["thread.model"],
+          options: decoded.options ?? agentSelection?.options ?? {},
+        });
 
         if (decoded.permissionProfileId !== undefined) {
           yield* validateProfileExists(decoded.permissionProfileId);
@@ -576,7 +769,7 @@ const make = Effect.gen(function* () {
         const spec = {
           instanceId,
           workspaceId: null,
-          modelSelection: { model, options },
+          modelSelection,
           accessMode,
           ...(agent === undefined ? {} : { systemPrompt: agent.systemPrompt }),
           ...(agent === undefined || agent.disallowedTools.length === 0
@@ -589,7 +782,8 @@ const make = Effect.gen(function* () {
         return yield* place({
           permissionProfileId: profileId,
           agentId: agent?.id,
-          runnerId: hosting.runnerId,
+          conversationId: undefined,
+          runnerId,
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
@@ -597,10 +791,10 @@ const make = Effect.gen(function* () {
           kind: "session.spawned",
           projectId: decoded.projectId,
           workspace: decoded.workspace,
-          fallbackGithubConnectionId: defaults["thread.githubConnectionId"] ?? undefined,
+          fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
           payload: {
             instanceId,
-            runnerId: hosting.runnerId,
+            runnerId,
             requestedAccessMode,
             accessMode,
             ...(agent === undefined ? {} : { agentId: agent.id }),
@@ -631,6 +825,9 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const parent = yield* one(id);
+        if (parent.conversationId !== null) {
+          return yield* Effect.fail(createInvalidStateError(CONVERSATION_FORK_REFUSED));
+        }
         if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
           return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
         }
@@ -644,6 +841,7 @@ const make = Effect.gen(function* () {
           // The fork is the same piece of work under the same configuration,
           // so it carries the same lineage as its parent.
           agentId: parent.agentId ?? undefined,
+          conversationId: undefined,
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
           parentSessionId: parent.id,
@@ -655,6 +853,9 @@ const make = Effect.gen(function* () {
             parent.modelSelection,
             nativeSessionId,
             mode,
+            // A fork never answers a conversation: `session.continue`
+            // refuses a conversation's session above.
+            null,
           ),
           prompt,
           kind: "session.continued",

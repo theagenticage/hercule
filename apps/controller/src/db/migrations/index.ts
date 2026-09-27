@@ -38,6 +38,8 @@ import runsByParent from "./0027-runs-by-parent";
 import runsFailedByTheController from "./0028-runs-failed-by-the-controller";
 import routing from "./0029-routing";
 import strandedRunsCompleted from "./0030-stranded-runs-completed";
+import assistants from "./0031-assistants";
+import conversationMessages from "./0032-conversation-messages";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -70,6 +72,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [28, "runs-failed-by-the-controller", Effect.succeed(runsFailedByTheController)],
   [29, "routing", Effect.succeed(routing)],
   [30, "stranded-runs-completed", Effect.succeed(strandedRunsCompleted)],
+  [31, "assistants", Effect.succeed(assistants)],
+  [32, "conversation-messages", Effect.succeed(conversationMessages)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

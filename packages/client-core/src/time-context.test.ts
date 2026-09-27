@@ -1,5 +1,11 @@
 import { assert, describe, it } from "vitest";
-import { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
+import {
+  chooseStamps,
+  formatPreciseStamp,
+  formatSince,
+  formatStamp,
+  formatTimeContext,
+} from "./time-context";
 
 /** Monday 2026-09-07, 07:14 UTC. */
 const MONDAY_MORNING = new Date("2026-09-07T07:14:00Z");
@@ -56,6 +62,32 @@ describe("formatStamp", () => {
   it("returns undefined for an unusable zone or an invalid date", () => {
     assert.isUndefined(formatStamp(instant, "Europe/Nowhere"));
     assert.isUndefined(formatStamp(new Date(Number.NaN), "UTC"));
+  });
+});
+
+describe("chooseStamps", () => {
+  it("formats each instant in the given zone", () => {
+    const stamps = chooseStamps(["2026-09-04T15:21:00.000Z", "2026-09-04T16:00:00.000Z"], "UTC");
+
+    assert.deepStrictEqual(stamps, ["4 Sep 15:21", "4 Sep 16:00"]);
+  });
+
+  it("leaves out a stamp equal to the last one shown", () => {
+    const stamps = chooseStamps(
+      ["2026-09-04T15:21:05.000Z", "2026-09-04T15:21:50.000Z", "2026-09-04T15:22:00.000Z"],
+      "UTC",
+    );
+
+    assert.deepStrictEqual(stamps, ["4 Sep 15:21", undefined, "4 Sep 15:22"]);
+  });
+
+  it("gives no stamp to a row with no time, and compares across it with the last one shown", () => {
+    const stamps = chooseStamps(
+      ["2026-09-04T15:21:05.000Z", null, "2026-09-04T15:21:50.000Z"],
+      "UTC",
+    );
+
+    assert.deepStrictEqual(stamps, ["4 Sep 15:21", undefined, undefined]);
   });
 });
 

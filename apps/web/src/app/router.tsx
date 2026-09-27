@@ -16,6 +16,11 @@ export const createAppRouter = (context: RouterContext, history: RouterHistory) 
     context,
     history,
     defaultPreload: "intent",
+    // Inside the shell the page itself does not scroll; its `main` element
+    // does. The router resets the window's scroll on every navigation by
+    // itself, and this makes it reset `main` too, so a new screen opens at
+    // its top rather than at the previous screen's scroll offset.
+    scrollToTopSelectors: ["main"],
     // `_shell/$` sits at the top of the tree, so it catches every unknown
     // path the router can parse. These defaults handle the paths it cannot: a
     // path whose percent escapes do not decode never reaches a route, and so

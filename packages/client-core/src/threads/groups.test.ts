@@ -240,4 +240,43 @@ describe("buildThreadGroups", () => {
       "Fix flaky webhook tests",
     ]);
   });
+
+  it("leaves out a session that an agent runs, whether or not it answers a conversation", () => {
+    const groups = buildThreadGroups({
+      sessions: [
+        ...SESSIONS,
+        buildSession({
+          id: "s-assistant",
+          title: "Answer Ada's conversation",
+          agentId: "agent-ada",
+          conversationId: "conversation-ada",
+          lastActivityAt: buildTimestamp(9),
+        }),
+        buildSession({
+          id: "s-agent",
+          title: "Review the pull request",
+          agentId: "agent-reviewer",
+          projectId: WEBSHOP_PROJECT.id,
+          lastActivityAt: buildTimestamp(8),
+        }),
+      ],
+      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+      workspaces: [PRIMARY, RUN_3F1],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    });
+
+    const ids = groups.flatMap((group) =>
+      group.workspaces.flatMap((lane) => lane.rows.map((row) => row.id)),
+    );
+    expect(ids).not.toContain("s-assistant");
+    expect(ids).not.toContain("s-agent");
+    expect(groups.map((group) => [group.name, group.count])).toEqual([
+      ["webshop", 3],
+      ["ops", 1],
+      [null, 1],
+    ]);
+  });
 });

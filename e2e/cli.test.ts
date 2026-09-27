@@ -1,6 +1,6 @@
 /**
- * Tests tasks, projects, the event log and the shipped plugins through the
- * release binary.
+ * Tests tasks, projects, the event log, the shipped plugins and assistants
+ * through the release binary.
  *
  * Tasks, projects and the event log add no CLI code of their own: the commands
  * are derived from the contract's CLI table, so the only way to know they are
@@ -17,6 +17,7 @@ import {
   ROOT,
   USERNAME,
   readApiKey,
+  listInstances,
   runCli,
   completeSetup,
   parseJsonOutput,
@@ -203,5 +204,64 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     expect(help.stdout.trimEnd().split("\n").at(-1)).toBe(
       "operation task.create · POST /api/v1/tasks · grant task.create",
     );
+  }, 30_000);
+});
+
+interface AssistantRow {
+  readonly id: string;
+  readonly name: string;
+  readonly instanceId: string;
+  readonly reply: string;
+}
+
+describe("assistants through the binary", () => {
+  it("lists the default assistant, then a created one after it, each with its instance and reply mode", async () => {
+    const first = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+      items: ReadonlyArray<AssistantRow>;
+    };
+    expect(first.items.map((assistant) => assistant.name)).toEqual(["Hercule"]);
+
+    const created = expectJsonOutput(
+      await runLoggedInCli(["assistant", "create", "--name", "Ada", "--json"]),
+    ) as AssistantRow;
+    expect(created.name).toBe("Ada");
+
+    const second = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+      items: ReadonlyArray<AssistantRow>;
+    };
+    expect(second.items.map((assistant) => assistant.name)).toEqual(["Hercule", "Ada"]);
+    const instances = await listInstances({ url, apiKey: readApiKey(state.home) });
+    for (const assistant of second.items) {
+      expect(
+        instances.map((instance) => instance.id),
+        assistant.name,
+      ).toContain(assistant.instanceId);
+      expect(assistant.reply, assistant.name).toBe("turn-end");
+    }
+
+    // The table a person reads shows the same: one row per assistant, oldest
+    // first, with the tail of its instance and its reply mode.
+    const table = await runLoggedInCli(["assistant", "list"]);
+    expect(table.code, table.stderr).toBe(0);
+    const rows = table.stdout.split("\n").filter((line) => /Hercule|Ada/.test(line));
+    expect(rows).toHaveLength(2);
+    for (const [index, assistant] of second.items.entries()) {
+      expect(rows[index], assistant.name).toContain(assistant.name);
+      expect(rows[index], assistant.name).toContain(assistant.instanceId.slice(-8));
+      expect(rows[index], assistant.name).toContain("turn-end");
+    }
+  }, 60_000);
+
+  it("reads the default assistant with its reply mode", async () => {
+    const listed = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+      items: ReadonlyArray<AssistantRow>;
+    };
+    const hercule = listed.items.find((assistant) => assistant.name === "Hercule");
+    expect(hercule).toBeDefined();
+
+    const read = await runLoggedInCli(["assistant", "read", hercule!.id]);
+    expect(read.code, `${read.stdout}\n${read.stderr}`).toBe(0);
+    expect(read.stdout).toMatch(/^name\s+Hercule$/m);
+    expect(read.stdout).toMatch(/^reply\s+turn-end$/m);
   }, 30_000);
 });

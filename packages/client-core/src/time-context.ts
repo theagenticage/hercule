@@ -112,6 +112,29 @@ export const formatStamp = (instant: Date, timezone: string): string | undefined
 };
 
 /**
+ * Returns the time separator to show above each row of a conversation or a
+ * transcript, by position: the row's instant formatted by `formatStamp`, or
+ * undefined for no separator. A row passes null when it carries no time of
+ * its own.
+ *
+ * A separator equal to the last one shown is left out, so rows from the same
+ * minute share one, as in a messenger.
+ */
+export const chooseStamps = (
+  instants: readonly (string | null)[],
+  timezone: string,
+): readonly (string | undefined)[] => {
+  let shown: string | undefined;
+  return instants.map((instant) => {
+    if (instant === null) return undefined;
+    const stamp = formatStamp(new Date(instant), timezone);
+    if (stamp === shown) return undefined;
+    shown = stamp;
+    return stamp;
+  });
+};
+
+/**
  * Formats an instant to the second, for events that are seconds apart, such
  * as when a run started and ended: "4 Sep 17:21:08", or only "17:21:08" when
  * it falls on the same day as `sameDayAs` in `timezone`. Returns `undefined`

@@ -480,6 +480,16 @@ export const spawnAgentWithGrants = async (
   grants: ReadonlyArray<string>,
 ): Promise<Agent> => spawnAgentUnder(arranged, await createProfile(arranged, name, grants));
 
+/**
+ * Spawns and starts a session on `profile`, and waits until the runner has
+ * answered its prompt. Returns the session, which is then `busy`, with its
+ * token.
+ *
+ * The fake runner answers the prompt with `opened` and reports no turn
+ * events, so the session stays `busy` with its prompt's turn until the test
+ * reports that turn's end. The runner has reported one event, at sequence
+ * number 1, so the test's next event is 2.
+ */
 export const spawnAgentUnder = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
   const opened = await spawnSessionOrFail(arranged, {
     prompt: "hello",
@@ -493,6 +503,6 @@ export const spawnAgentUnder = async (arranged: Arranged, profile: Profile): Pro
     _tag: "session.started",
     providerRefs: { nativeSessionId: "native-1" },
   });
-  const session = await waitForSession(arranged, opened.id, (one) => one.status === "idle");
+  const session = await waitForSession(arranged, opened.id, (one) => one.status === "busy");
   return { session, token };
 };

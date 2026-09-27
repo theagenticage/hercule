@@ -213,11 +213,11 @@ export const CLI = {
     fields: {
       controller: {
         flag: "controller",
-        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, workspace expiry and how deep runs may nest (run.nestingLimit).",
+        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry and how deep runs may nest (run.nestingLimit).",
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults, topic order, mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), topic order, mutes.",
       },
     },
     errors: { unauthenticated: "user credential only: a session token is not allowed" },
@@ -1909,13 +1909,239 @@ export const CLI = {
     },
   },
 
+  "assistant.query": {
+    command: "assistant list",
+    help: "Lists the assistants, oldest first. An assistant is an Agent you talk to through a conversation, and it keeps one conversation per channel. Use it to find the id every other `hercule assistant` command takes.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "assistant.read": {
+    command: "assistant read",
+    help: "Reads one assistant in full: its prompt, where it runs, and how it wakes, rotates and replies.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: "The assistant's id, or a tail of eight or more characters.",
+        resolves: "assistant.query",
+      },
+    },
+  },
+  "assistant.create": {
+    command: "assistant create",
+    help: "Creates an assistant and its web conversation. Only --name is required; every other field left out takes the default the reply shows.",
+    examples: [
+      { args: ["--name", "Ada"] },
+      {
+        args: [
+          "--name",
+          "Ada",
+          "--instance",
+          "7b41d0a5",
+          "--reply",
+          "segments",
+          "--heartbeat",
+          '{"enabled":true,"schedule":"0 9 * * 1-5","prompt":"Check in.","target":"web"}',
+          "--system-prompt-stdin",
+        ],
+        stdin: "You are Ada, a patient helper.",
+      },
+    ],
+    fields: {
+      name: {
+        flag: "name",
+        help: "What to call the assistant; it is how a person finds it again.",
+      },
+      systemPrompt: {
+        stdin: true,
+        flag: "system-prompt",
+        help: "The assistant's system prompt, read from stdin only when --system-prompt-stdin asks for it; leave it off for the default system prompt.",
+      },
+      instanceId: {
+        flag: "instance",
+        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters; leave it off for the oldest instance of a provider this build carries.",
+        resolves: "provider.query",
+      },
+      permissionProfileId: {
+        flag: "profile",
+        help: "The Permission Profile its sessions' tokens carry, by its id or a tail of eight or more characters; leave it off for the shipped assistant profile.",
+        resolves: "profile.query",
+      },
+      accessMode: {
+        flag: "access-mode",
+        help: "What its sessions may do unasked; leave it off for full access.",
+      },
+      model: {
+        flag: "model",
+        help: "The model its sessions open on, by its slug; leave it off to run on whatever the instance offers by default.",
+      },
+      options: {
+        flag: "options",
+        help: "The choices that model opens with, as inline JSON; not allowed without --model, because a choice belongs to the model that offers it.",
+      },
+      disallowedTools: {
+        flag: "disallowed-tool",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. Leave it off to take away edit only.",
+      },
+      heartbeat: {
+        flag: "heartbeat",
+        help: "When it wakes by itself and what it is told then, as inline JSON with enabled, schedule, prompt and target; leave it off to wake every hour from 07:00 to 23:00 (0 7-23 * * *) in your timezone, in the web conversation.",
+      },
+      rotation: {
+        flag: "rotation",
+        help: "When its conversation moves to a fresh session, as inline JSON with contextFraction, maxContextTokens and dailyAt; leave it off to move at 70% of the context window, at 200000 tokens, or daily at 04:00, whichever comes first.",
+      },
+      reply: {
+        flag: "reply",
+        help: "Which of its words reach the conversation: turn-end for the last text of each turn, or segments for every text as it goes; leave it off for turn-end.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "there is no provider instance to run the assistant on, so add one with `hercule provider create`; or the shipped assistant profile was renamed, so name a profile with --profile",
+    },
+  },
+  "assistant.update": {
+    command: "assistant update",
+    help: "Edits an assistant; a field you leave out is not changed. A new reply mode applies at once. A new access mode or profile reaches its current session when that session next resumes, after an idle unload or a stop. The other fields reach only the next new session.",
+    examples: [
+      { args: ["1f3a9c2e", "--reply", "segments"] },
+      {
+        args: ["1f3a9c2e", "--system-prompt-stdin"],
+        stdin: "You are Ada, a patient helper who answers briefly.",
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: "The assistant's id, or a tail of eight or more characters.",
+        resolves: "assistant.query",
+      },
+      name: { flag: "name", help: "A new name for the assistant." },
+      systemPrompt: {
+        stdin: true,
+        flag: "system-prompt",
+        help: "A replacement system prompt, read from stdin only when --system-prompt-stdin asks for it.",
+      },
+      instanceId: {
+        flag: "instance",
+        help: "Run its sessions on this Provider Instance instead, by its id or a tail of eight or more characters.",
+        resolves: "provider.query",
+      },
+      permissionProfileId: {
+        flag: "profile",
+        help: "Bind its sessions to this Permission Profile instead, by its id or a tail of eight or more characters.",
+        resolves: "profile.query",
+      },
+      accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
+      model: {
+        flag: "model",
+        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the instance default.",
+      },
+      options: {
+        flag: "options",
+        help: "The choices to open that model with, replacing the ones set now, as inline JSON; not allowed without --model, because a choice belongs to the model that offers it.",
+      },
+      disallowedTools: {
+        flag: "disallowed-tool",
+        help: "The tool families to take away, replacing the ones set now; repeatable.",
+      },
+      heartbeat: {
+        flag: "heartbeat",
+        help: "A replacement heartbeat, as inline JSON with enabled, schedule, prompt and target.",
+      },
+      rotation: {
+        flag: "rotation",
+        help: "A replacement rotation, as inline JSON with contextFraction, maxContextTokens and dailyAt.",
+      },
+      reply: {
+        flag: "reply",
+        help: "Which of its words reach the conversation: turn-end or segments.",
+      },
+    },
+  },
+
+  "assistant.delete": {
+    command: "assistant delete",
+    help: "Deletes an assistant, its conversations and their messages. A session still running for it is told to stop once the delete is done; the delete does not wait for it, and whatever that session reports afterwards is not written anywhere. Its sessions and their transcripts stay, and keep the assistant's id as a record of where they came from.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: "The assistant's id, or a tail of eight or more characters.",
+        resolves: "assistant.query",
+      },
+    },
+  },
+
+  "conversation.query": {
+    command: "conversation list",
+    help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web channel is the only one so far.",
+    examples: [{ args: [] }, { args: ["--assistant", "1f3a9c2e"] }],
+    fields: {
+      assistantId: {
+        flag: "assistant",
+        help: "Only the conversations of this assistant, by its id or a tail of eight or more characters.",
+        resolves: "assistant.query",
+      },
+    },
+  },
+  "conversation.read": {
+    command: "conversation read",
+    help: "Reads one conversation: which assistant answers it, and in which channel.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+    },
+  },
+  "conversation.queryMessages": {
+    command: "conversation message list",
+    help: "Lists a conversation's messages, newest first. They are what the owner said, what the assistant answered, and any notice: that the assistant was interrupted, or can't be reached.",
+    examples: [{ args: ["7b41d0a5"] }, { args: ["7b41d0a5", "--sort", "position:asc"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+    },
+  },
+  "conversation.send": {
+    command: "conversation send",
+    help: "Sends a message to a conversation as its owner. The assistant answers in its newest session: a busy session has the message steered into its running turn, an idle one starts a turn with it, and one that exited is resumed in place when it can be; otherwise a new session is started. Prints the stored message; the answer arrives later, and `hercule conversation message list` shows it. The message is always kept: when no session can take it, for example because no runner is connected, the conversation gets a notice that says why.",
+    examples: [{ args: ["7b41d0a5"], stdin: "What is on my list for today?" }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+      text: { stdin: true, flag: "text", help: "The message to send." },
+    },
+    errors: {
+      forbidden:
+        "only a user credential may send: the message is recorded as the owner's, so an agent's session token is refused",
+    },
+  },
+
   "session.query": {
     command: "session list",
-    help: "Lists sessions, newest first: one row per conversation with a provider-backed agent. Use it to find the id every other `hercule session` command takes.",
+    help: "Lists sessions, newest first: each is a provider-backed agent at work, or one that has ended. Use it to find the id every other `hercule session` command takes.",
     examples: [
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
       { args: ["--thread", "true"] },
+      { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
     ],
     fields: {
       status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
@@ -1928,6 +2154,11 @@ export const CLI = {
         flag: "agent",
         help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hercule agent list`.",
         resolves: "agent.query",
+      },
+      conversationId: {
+        flag: "conversation",
+        help: "Only the sessions of this conversation, by its id or a tail of eight or more characters; find it with `hercule conversation list`.",
+        resolves: "conversation.query",
       },
       permissionProfileId: {
         flag: "profile",
@@ -2127,7 +2358,7 @@ export const CLI = {
   },
   "session.stop": {
     command: "session stop",
-    help: "Ends a session: the turn stops and the process goes away. It is not the end of the conversation - a session whose transcript is still on its runner is resumed in place by the next `hercule session input`.",
+    help: "Ends a session: the turn stops and the process goes away. Ending it is not final - a session whose transcript is still on its runner is resumed in place by the next `hercule session input`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2229,7 +2460,7 @@ export const CLI = {
   },
   "input.steer": {
     command: "input steer",
-    help: "Delivers a Queued Input into the session's running turn now. It is folded into that turn instead of waiting for the turn to end. Only a busy session can be steered, and only where the provider supports it.",
+    help: "Gets a Queued Input into the session's running turn now, instead of waiting for the turn to end. Only a busy session can be steered, and every provider can be: one that steers natively folds the input into the running turn, and for any other the running turn is interrupted and the input is sent as the next turn, which is reported as `queued`.",
     examples: [{ args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"] }],
     fields: {
       id: {
@@ -2245,7 +2476,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session is not busy, its provider does not steer into a running turn, or the input is no longer waiting",
+        "the session is not busy, its runner is not connected or refused the input, or the input is no longer waiting",
     },
   },
 
@@ -2368,8 +2599,16 @@ export const NOUNS = {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",
     flow: "hercule agent create records one, hercule agent list finds it again, then hercule session spawn --agent runs it.",
   },
+  assistant: {
+    summary:
+      "Assistants: Agents you talk to through conversations, each with a heartbeat, a rotation and a reply mode.",
+    flow: "hercule assistant list to find one, hercule assistant read for the whole of it, hercule assistant create for a new one, hercule assistant update to change it.",
+  },
+  conversation: {
+    summary: "Conversations: an assistant's exchange in one channel.",
+  },
   session: {
-    summary: "Sessions: conversations with provider-backed agents, resumable and forkable.",
+    summary: "Sessions: provider-backed agents at work, resumable and forkable.",
     flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
   },
   input: {

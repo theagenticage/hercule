@@ -10,7 +10,11 @@ const Support = Schema.Literals(["native", "unsupported"]);
  * falls back to, so nothing here records it.
  */
 export const DeclaredCapabilities = Schema.Struct({
-  /** `unsupported` means input to a busy session is queued by the controller. */
+  /**
+   * `unsupported` means the harness cannot take input into a running turn.
+   * Steering still works for every session: the controller interrupts the
+   * running turn and sends the input as the next turn.
+   */
   steering: Support,
   fork: Support,
   modelSwitch: Schema.Literals(["in-session", "new-session"]),

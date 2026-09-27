@@ -316,6 +316,37 @@ const TABLE = {
   "agent.update": { requires: "agent.write", method: "PATCH", path: "/api/v1/agents/:id" },
   "agent.delete": { requires: "agent.write", method: "DELETE", path: "/api/v1/agents/:id" },
 
+  "assistant.query": { requires: "agent.read", method: "GET", path: "/api/v1/assistants" },
+  "assistant.read": { requires: "agent.read", method: "GET", path: "/api/v1/assistants/:id" },
+  "assistant.create": { requires: "agent.write", method: "POST", path: "/api/v1/assistants" },
+  "assistant.update": {
+    requires: "agent.write",
+    method: "PATCH",
+    path: "/api/v1/assistants/:id",
+  },
+  "assistant.delete": {
+    requires: "agent.write",
+    method: "DELETE",
+    path: "/api/v1/assistants/:id",
+  },
+
+  "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
+  "conversation.read": {
+    requires: "agent.read",
+    method: "GET",
+    path: "/api/v1/conversations/:id",
+  },
+  "conversation.queryMessages": {
+    requires: "agent.read",
+    method: "GET",
+    path: "/api/v1/conversations/:id/messages",
+  },
+  "conversation.send": {
+    requires: "agent.write",
+    method: "POST",
+    path: "/api/v1/conversations/:id/messages",
+  },
+
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },

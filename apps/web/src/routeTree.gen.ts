@@ -18,7 +18,9 @@ import { Route as ShellCheckInRouteImport } from './routes/_shell/check-in'
 import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell/notifications'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
+import { Route as OnboardingAssistantRouteImport } from './routes/onboarding/assistant'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
+import { Route as ShellAssistantsAssistantIdRouteImport } from './routes/_shell/assistants/$assistantId'
 import { Route as ShellConnectionsIndexRouteImport } from './routes/_shell/connections/index'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
 import { Route as ShellFleetRunnerIdRouteImport } from './routes/_shell/fleet/$runnerId'
@@ -86,11 +88,22 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ShellRoute,
 } as any)
+const OnboardingAssistantRoute = OnboardingAssistantRouteImport.update({
+  id: '/onboarding/assistant',
+  path: '/onboarding/assistant',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OnboardingTimezoneRoute = OnboardingTimezoneRouteImport.update({
   id: '/onboarding/timezone',
   path: '/onboarding/timezone',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShellAssistantsAssistantIdRoute =
+  ShellAssistantsAssistantIdRouteImport.update({
+    id: '/assistants/$assistantId',
+    path: '/assistants/$assistantId',
+    getParentRoute: () => ShellRoute,
+  } as any)
 const ShellConnectionsIndexRoute = ShellConnectionsIndexRouteImport.update({
   id: '/connections/',
   path: '/connections/',
@@ -213,7 +226,9 @@ export interface FileRoutesByFullPath {
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
   '/settings': typeof ShellSettingsRouteWithChildren
+  '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
+  '/assistants/$assistantId': typeof ShellAssistantsAssistantIdRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/runs/$runId': typeof ShellRunsRunIdRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
@@ -244,8 +259,10 @@ export interface FileRoutesByTo {
   '/check-in': typeof ShellCheckInRoute
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
+  '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
+  '/assistants/$assistantId': typeof ShellAssistantsAssistantIdRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/runs/$runId': typeof ShellRunsRunIdRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
@@ -279,8 +296,10 @@ export interface FileRoutesById {
   '/_shell/intake': typeof ShellIntakeRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
+  '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
+  '/_shell/assistants/$assistantId': typeof ShellAssistantsAssistantIdRoute
   '/_shell/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/_shell/runs/$runId': typeof ShellRunsRunIdRoute
   '/_shell/settings/assistants': typeof ShellSettingsAssistantsRoute
@@ -315,7 +334,9 @@ export interface FileRouteTypes {
     | '/intake'
     | '/notifications'
     | '/settings'
+    | '/onboarding/assistant'
     | '/onboarding/timezone'
+    | '/assistants/$assistantId'
     | '/fleet/$runnerId'
     | '/runs/$runId'
     | '/settings/assistants'
@@ -346,8 +367,10 @@ export interface FileRouteTypes {
     | '/check-in'
     | '/intake'
     | '/notifications'
+    | '/onboarding/assistant'
     | '/onboarding/timezone'
     | '/'
+    | '/assistants/$assistantId'
     | '/fleet/$runnerId'
     | '/runs/$runId'
     | '/settings/assistants'
@@ -380,8 +403,10 @@ export interface FileRouteTypes {
     | '/_shell/intake'
     | '/_shell/notifications'
     | '/_shell/settings'
+    | '/onboarding/assistant'
     | '/onboarding/timezone'
     | '/_shell/'
+    | '/_shell/assistants/$assistantId'
     | '/_shell/fleet/$runnerId'
     | '/_shell/runs/$runId'
     | '/_shell/settings/assistants'
@@ -410,6 +435,7 @@ export interface RootRouteChildren {
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
   SetupRoute: typeof SetupRoute
+  OnboardingAssistantRoute: typeof OnboardingAssistantRoute
   OnboardingTimezoneRoute: typeof OnboardingTimezoneRoute
 }
 
@@ -478,12 +504,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/onboarding/assistant': {
+      id: '/onboarding/assistant'
+      path: '/onboarding/assistant'
+      fullPath: '/onboarding/assistant'
+      preLoaderRoute: typeof OnboardingAssistantRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/onboarding/timezone': {
       id: '/onboarding/timezone'
       path: '/onboarding/timezone'
       fullPath: '/onboarding/timezone'
       preLoaderRoute: typeof OnboardingTimezoneRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_shell/assistants/$assistantId': {
+      id: '/_shell/assistants/$assistantId'
+      path: '/assistants/$assistantId'
+      fullPath: '/assistants/$assistantId'
+      preLoaderRoute: typeof ShellAssistantsAssistantIdRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/_shell/connections/': {
       id: '/_shell/connections/'
@@ -679,6 +719,7 @@ interface ShellRouteChildren {
   ShellNotificationsRoute: typeof ShellNotificationsRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellAssistantsAssistantIdRoute: typeof ShellAssistantsAssistantIdRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellRunsRunIdRoute: typeof ShellRunsRunIdRoute
   ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
@@ -700,6 +741,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellNotificationsRoute: ShellNotificationsRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
+  ShellAssistantsAssistantIdRoute: ShellAssistantsAssistantIdRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellRunsRunIdRoute: ShellRunsRunIdRoute,
   ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
@@ -720,6 +762,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
   SetupRoute: SetupRoute,
+  OnboardingAssistantRoute: OnboardingAssistantRoute,
   OnboardingTimezoneRoute: OnboardingTimezoneRoute,
 }
 export const routeTree = rootRouteImport

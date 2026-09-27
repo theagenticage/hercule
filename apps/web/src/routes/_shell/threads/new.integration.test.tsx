@@ -186,8 +186,10 @@ const NEW_SESSION: Session = {
   title: "Fix the login bug",
   status: "starting",
   resumable: false,
+  resumeHeld: false,
   permissionProfileId: PROFILE_UNRESTRICTED.id,
   agentId: null,
+  conversationId: null,
   instanceId: INSTANCE_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,
@@ -214,7 +216,7 @@ const buildController = (
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: ZONE, ...user },
+      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE, ...user },
     },
   },
   "GET /api/v1/providers": { body: instances },

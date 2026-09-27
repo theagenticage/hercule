@@ -6,20 +6,26 @@ import { Label } from "../primitives/label";
  * What a screen shows when it has nothing to show yet: a headline, a lead
  * sentence about what will appear here, any actions (`children`), and fine
  * print with further detail.
+ *
+ * It sits a little below the screen's header by default. A settings screen
+ * passes `className="mt-0"`, so its empty state starts under the settings
+ * tabs where the cards of the other settings screens start.
  */
 export function EmptyState({
   headline,
   lead,
   fine,
+  className,
   children,
 }: {
   readonly headline: string;
   readonly lead?: string | undefined;
   readonly fine?: ReactNode;
+  readonly className?: string;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="mt-[4vh] flex max-w-[560px] flex-col gap-3.5">
+    <div className={cn("mt-[4vh] flex max-w-[560px] flex-col gap-3.5", className)}>
       <h2 className="text-[17px] font-emph tracking-[-0.01em] text-balance text-ink">{headline}</h2>
       {lead === undefined ? null : <p className="max-w-[52ch] text-row text-muted">{lead}</p>}
       {children}
@@ -49,10 +55,13 @@ export function LaneLabel({
   );
 }
 
-/** A passive container for rows. */
+/**
+ * Renders a passive container for rows. It is as wide as a `FormCard`, so a
+ * list and the cards under it share one right edge.
+ */
 export function Group({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
-    <div className="max-w-[560px] rounded-card border border-line-soft bg-surface px-1.5 py-1">
+    <div className="max-w-[568px] rounded-card border border-line-soft bg-surface px-1.5 py-1">
       {children}
     </div>
   );
@@ -105,7 +114,7 @@ export function FormCard({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <section className="flex max-w-[520px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
+    <section className="flex max-w-[568px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
       {typeof label === "string" ? (
         <div className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</div>
       ) : (
@@ -118,9 +127,17 @@ export function FormCard({
 }
 
 /** The small uppercase style of a card row's label. */
-const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] text-faint uppercase";
+const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] whitespace-nowrap text-faint uppercase";
 
-/** One labelled row of a card: the label in its own column, the control beside it. */
+/**
+ * Renders one labelled row of a card: the label in its own column, the
+ * control beside it.
+ *
+ * The label column is as wide as the longest label, "Default GitHub account",
+ * so no label breaks onto a second line, and every row on a page puts its
+ * control at the same x. A card is 568px wide so that the control column
+ * beside it still holds the four access modes of a compact segmented control.
+ */
 export function Row({
   label,
   htmlFor,
@@ -131,7 +148,7 @@ export function Row({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-3 text-row">
+    <div className="grid grid-cols-[160px_minmax(0,1fr)] items-baseline gap-3 text-row">
       <label htmlFor={htmlFor} className={ROW_LABEL}>
         {label}
       </label>

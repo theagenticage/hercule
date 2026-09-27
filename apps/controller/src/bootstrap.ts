@@ -26,6 +26,8 @@ import type { Plugin } from "@hercule/plugin-host";
 import type { HomePaths } from "@hercule/home";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
+import { AssistantSessionObserverLayer } from "./assistants";
+import { ConversationMessagesLayer } from "./conversations";
 import {
   createDatabaseError,
   migrate,
@@ -313,11 +315,23 @@ export const bootWith = <A, E>(
       Layer.provideMerge(catalog),
     );
 
+    /**
+     * The session service tells the assistants domain, through the sessions
+     * domain's `SessionObserver` port, about every report and every exit, and
+     * about inputs it drops, so an assistant's replies and notices reach its
+     * conversation. The sessions domain cannot import the assistants domain,
+     * so the two are joined here.
+     */
+    const sessionService = SessionServiceLayer.pipe(
+      Layer.provide(AssistantSessionObserverLayer),
+      Layer.provide(ConversationMessagesLayer),
+    );
+
     /** The services built on the catalog and the fleet. */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
-      SessionServiceLayer,
+      sessionService,
       WorkspaceServiceLayer,
       ConnectionServiceLayer,
     ).pipe(Layer.provideMerge(withFleet));

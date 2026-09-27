@@ -19,6 +19,7 @@ type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
 type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
+type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
   readonly itemId: string;
@@ -39,6 +40,11 @@ export interface ThreadTurn {
   readonly assistantText: string;
   readonly startedAt: string;
   readonly duration: number | null;
+  /**
+   * How the turn ended: `completed`, `failed`, or `interrupted` when it was
+   * stopped. `null` while no `turn.completed` has arrived, like `duration`.
+   */
+  readonly endState: TurnEndState | null;
 }
 
 /** The verb shown for each item kind. It is one word per kind, never more detailed. */
@@ -98,6 +104,7 @@ interface Building {
   turnId: string;
   startedAt: string;
   completedAt: string | null;
+  endState: TurnEndState | null;
   user: string;
   items: ThreadItem[];
   itemIndex: Map<string, number>;
@@ -124,6 +131,7 @@ export const buildTurns = (
       turnId,
       startedAt: fallbackAt,
       completedAt: null,
+      endState: null,
       user: "",
       items: [],
       itemIndex: new Map(),
@@ -142,7 +150,9 @@ export const buildTurns = (
         break;
       }
       case "turn.completed": {
-        findOrStartTurn(event.turnId, event.at).completedAt = event.at;
+        const turn = findOrStartTurn(event.turnId, event.at);
+        turn.completedAt = event.at;
+        turn.endState = event.state;
         break;
       }
       case "item.started": {
@@ -207,5 +217,6 @@ export const buildTurns = (
     startedAt: turn.startedAt,
     duration:
       turn.completedAt === null ? null : Date.parse(turn.completedAt) - Date.parse(turn.startedAt),
+    endState: turn.endState,
   }));
 };

@@ -4,10 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { resolveBrowserTimezone } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../app/testing";
 
+/**
+ * The assistant list the next step, `/onboarding/assistant`, reads. It is
+ * empty because these tests only check that the step is reached.
+ */
+const NO_ASSISTANTS: Readonly<Record<string, Handler>> = {
+  "GET /api/v1/assistants": { body: { items: [] } },
+};
+
 /** Returns stub routes for a controller whose user has completed no onboarding steps yet. */
 const buildFreshController = (): Readonly<Record<string, Handler>> => {
   let user: Record<string, unknown> = {};
   return {
+    ...NO_ASSISTANTS,
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": () => ({ body: { controller: {}, user } }),
     "PATCH /api/v1/settings": (call) => {
@@ -50,7 +59,7 @@ describe("the timezone step", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.location.pathname).toBe("/onboarding/assistant");
     });
     const written = api.calls.find((call) => call.method === "PATCH")!;
     expect((written.body as { user: Record<string, unknown> }).user).toMatchObject({
@@ -58,7 +67,7 @@ describe("the timezone step", () => {
     });
   });
 
-  it("records the step as completed and lets the app open", async () => {
+  it("records the step as completed and moves on to the assistant step", async () => {
     const api = stubApi(buildFreshController());
     const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
@@ -66,7 +75,7 @@ describe("the timezone step", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.location.pathname).toBe("/onboarding/assistant");
     });
     const written = api.calls.find((call) => call.method === "PATCH")!;
     expect(written.body).toEqual({
@@ -79,6 +88,7 @@ describe("the timezone step", () => {
 
   it("keeps the steps already recorded", async () => {
     const api = stubApi({
+      ...NO_ASSISTANTS,
       "GET /api/v1/setup": { body: { complete: true } },
       "GET /api/v1/settings": {
         body: { controller: {}, user: { "onboarding.completedSteps": ["from-a-later-client"] } },
@@ -93,7 +103,7 @@ describe("the timezone step", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.location.pathname).toBe("/onboarding/assistant");
     });
     const written = api.calls.find((call) => call.method === "PATCH")!;
     expect((written.body as { user: Record<string, unknown> }).user).toMatchObject({

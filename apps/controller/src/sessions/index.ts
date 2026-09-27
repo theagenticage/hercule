@@ -1,5 +1,5 @@
 /**
- * Sessions: one conversation with a provider, and the stream of events it
+ * Sessions: one run of a provider-backed agent, and the stream of events it
  * leaves behind.
  *
  * This domain owns the session rows, their lifecycle, the inputs waiting on
@@ -9,14 +9,28 @@
  * that a request calls directly. It also builds the frames and makes the
  * status changes that the controller daemon calls while it talks to a runner.
  */
-export { type LostWakeUp, type StoredInput } from "./inputs";
-export { buildContinuingSpec, buildTimeouts, validateOptions } from "./options";
+export { SessionObserver, type SessionEndReason, type SessionExit } from "./observer";
+export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
+export {
+  buildContinuingSpec,
+  buildConversationTimeouts,
+  buildTimeouts,
+  validateOptions,
+} from "./options";
 export { sessionRecordComposer } from "./records";
+export { isResumeHeld } from "./resume-hold";
 export {
   LIVE_SESSION_STATUSES,
   readSessionOrFail,
   sessionRepository,
+  type SessionAccess,
+  type SessionRows,
   type StoredSession,
 } from "./repository";
 export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";
-export { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "./transcript-log";
+export {
+  readAssistantTexts,
+  readTranscriptHead,
+  sessionExists,
+  readTranscriptRowsAfter,
+} from "./transcript-log";

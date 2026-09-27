@@ -67,8 +67,8 @@ const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecor
 const at = "2026-09-16T10:00:00.000Z";
 
 /**
- * Spawns a thread in a worktree of its own, and waits until it is started and
- * idle on the runner.
+ * Spawns a thread in a worktree of its own, and waits until it is started on
+ * the runner and busy with the turn its prompt opened.
  */
 const spawnThreadIn = async (
   arranged: Arranged,
@@ -94,7 +94,7 @@ const spawnThreadIn = async (
       arranged.token,
     );
     const one = (await response.json()) as Session;
-    return one.status === "idle" ? one : undefined;
+    return one.status === "busy" ? one : undefined;
   });
   return session;
 };
@@ -277,6 +277,39 @@ describe("the workspace expiry sweep", () => {
       expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
 
       await ageWorkspace(arranged, workspaceId, 31 * 24);
+      const gone = await waitForDisposed(arranged, workspaceId);
+      expect(gone.status).toBe("deleted");
+    });
+  });
+
+  it("disposes of the workspace past the orphan window when the thread's conversation was deleted", async () => {
+    await withSweep(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnThreadIn(arranged, web, 1);
+      await endResumable(arranged, session);
+      const workspaceId = String(session.workspaceId);
+      // The session answered a conversation that has since been deleted. It
+      // takes no input, so it can never be resumed, and its worktree holds no
+      // work anyone can come back to.
+      await Effect.runPromise(
+        Effect.orDie(
+          Effect.gen(function* () {
+            const sql = arranged.harness.sql;
+            const conversation = crypto.randomUUID().replaceAll("-", "");
+            yield* sql`
+              INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+              VALUES (unhex(${conversation}), randomblob(16), 'web', NULL, ${at})`;
+            yield* sql`
+              UPDATE sessions SET conversation_id = unhex(${conversation})
+              WHERE id = unhex(replace(${session.id}, '-', ''))`;
+            yield* sql`DELETE FROM conversations WHERE id = unhex(${conversation})`;
+          }),
+        ),
+      );
+
+      // Past one day, well short of thirty: only a session that has ended for
+      // good lets the workspace go this early.
+      await ageWorkspace(arranged, workspaceId, 25);
       const gone = await waitForDisposed(arranged, workspaceId);
       expect(gone.status).toBe("deleted");
     });

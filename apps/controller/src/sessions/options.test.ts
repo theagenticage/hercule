@@ -1,12 +1,12 @@
 /**
- * Unit tests for the model option rules alone, with no fleet. Which catalog
- * each operation reads, and that a rejected request writes nothing, are tested
- * end to end in `sessions.integration.test.ts`.
+ * Unit tests for the model option rules and the continuing spec alone, with
+ * no fleet. Which catalog each operation reads, and that a rejected request
+ * writes nothing, are tested end to end in `sessions.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
-import type { ModelDescriptor } from "@hercule/protocol";
-import { validateOptions, type ModelOptions } from "./options";
+import type { ModelDescriptor, SessionSpec } from "@hercule/protocol";
+import { buildContinuingSpec, validateOptions, type ModelOptions } from "./options";
 
 const MODELS: ReadonlyArray<ModelDescriptor> = [
   {
@@ -84,5 +84,51 @@ describe("validateOptions", () => {
     ["no options at all, even against an empty catalog", [], {}],
   ])("passes %s", (_what, models, given) => {
     expect(Exit.isSuccess(Effect.runSyncExit(validateOptions(models, "clever", given)))).toBe(true);
+  });
+});
+
+describe("buildContinuingSpec", () => {
+  const MINUTE_MS = 60_000;
+  const controller = {
+    "session.inactivityTimeoutMinutes": 10,
+    "session.absoluteTimeoutMinutes": 60,
+    "session.idleUnloadMinutes": 5,
+  };
+  const buildParent = (timeouts: SessionSpec["timeouts"]): SessionSpec => ({
+    instanceId: "0199e0e7-0000-7000-8000-0000000000f1",
+    workspaceId: null,
+    modelSelection: { model: "clever", options: {} },
+    accessMode: "full-access",
+    timeouts,
+  });
+
+  it("gives the idle unload to a session that answers a conversation, whatever the parent's spec held", () => {
+    const spec = buildContinuingSpec(
+      buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS }),
+      controller,
+      { model: "clever", options: {} },
+      "native-1",
+      "resume",
+      "0199e0e7-0000-7000-8000-0000000000c1",
+    );
+
+    expect(spec.timeouts).toEqual({
+      inactivityMs: 10 * MINUTE_MS,
+      absoluteMs: 60 * MINUTE_MS,
+      idleMs: 5 * MINUTE_MS,
+    });
+  });
+
+  it("gives no idle unload to a session that answers no conversation, even from a parent that had one", () => {
+    const spec = buildContinuingSpec(
+      buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS, idleMs: MINUTE_MS }),
+      controller,
+      { model: "clever", options: {} },
+      "native-1",
+      "fork",
+      null,
+    );
+
+    expect(spec.timeouts).toEqual({ inactivityMs: 10 * MINUTE_MS, absoluteMs: 60 * MINUTE_MS });
   });
 });

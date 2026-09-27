@@ -33,8 +33,8 @@ A fully-qualified canonical identifier for a thing outside Hercule (`github:issu
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One conversation with a provider-backed agent, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
-_Avoid_: execution, chat; "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
+One run of a provider-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
+_Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
 A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
@@ -65,11 +65,11 @@ A provider-held question a session is parked on until an answer arrives; surface
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
-Delivering user input into a session's running turn, folding it into that turn instead of opening a new one.
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked.
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered.
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -141,8 +141,20 @@ A rule mapping part of a channel connection (all its DMs, or a nested place: a s
 _Avoid_: registration, route (bare)
 
 **Conversation**:
-One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, a web chat. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. Its messages are conversation input, never events.
+One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events.
 _Avoid_: chat, thread (reserved for provider-native objects)
+
+**Conversation Message**:
+One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
+_Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
+
+**Notice**:
+A conversation message the system writes in one of two forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it, the session holding it cannot be resumed, or the crash-loop guard holds that session. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
+_Avoid_: notification (Hercule's central message to its user), error message, alert
+
+**Idle Unload**:
+Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
+_Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
 Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
@@ -261,7 +273,7 @@ The merged declared-plus-probed facts about a provider instance on a specific ru
 _Avoid_: provider status
 
 **Channel**:
-A chat surface Hercule speaks through (Discord, Slack).
+A chat surface Hercule speaks through (Discord, Slack). The web channel is the built-in one: the web app's own conversation with an assistant, with no Connection or plugin behind it.
 
 **Live Topic**:
 A named stream a connected client watches over its live connection: a session transcript, the event feed, notifications. A client viewing concern only; not a Subscription, which is a domain claim on events held by a run or session.
@@ -395,7 +407,7 @@ _Avoid_: rate limit (bare), throttle
 
 **Notification**:
 A persisted message from Hercule to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
-_Avoid_: alert, ping
+_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer)
 
 **Bound Action**:
 One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions.

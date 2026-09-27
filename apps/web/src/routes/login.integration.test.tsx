@@ -7,7 +7,7 @@ const buildController = (login: Answer): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "POST /api/v1/auth/login": login,
   "GET /api/v1/settings": {
-    body: { controller: {}, user: { "onboarding.completedSteps": ["timezone"] } },
+    body: { controller: {}, user: { "onboarding.completedSteps": ["timezone", "assistant"] } },
   },
 });
 

@@ -25,6 +25,7 @@ export const SETUP_PATH = "/setup";
 /** The path of each onboarding step's screen. */
 const ONBOARDING_PATH = {
   timezone: "/onboarding/timezone",
+  assistant: "/onboarding/assistant",
 } as const satisfies Record<OnboardingStep, string>;
 
 /** Every path the guard can send a request to. */

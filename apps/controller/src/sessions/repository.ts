@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { Fragment } from "effect/unstable/sql/Statement";
 import type {
   AccessMode,
   DisallowedTool,
@@ -26,9 +27,9 @@ import {
 } from "@hercule/contract";
 import {
   decodeCursor,
-  decodeIdCursor,
+  decodeIntegerKeyCursor,
   encodeCursor,
-  encodeIdCursor,
+  encodeIntegerKeyCursor,
   buildKeyset,
   buildPage,
   uuidFromString,
@@ -48,6 +49,8 @@ export interface StoredSession {
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
+  /** The assistant's conversation the session answers; `null` for any other session. */
+  readonly conversationId: string | null;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -66,6 +69,20 @@ export interface StoredSession {
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
   readonly lastActivityAt: string;
+  /**
+   * Whether the crash-loop guard is armed: the session was resumed, and since
+   * that resume its process has started no turn and no input has been stored
+   * for it. `isResumeHeld` reads it. The service sets it.
+   */
+  readonly crashGuardArmed: boolean;
+  /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
+  readonly inputWaiting: boolean;
+  /**
+   * Whether the session answered an assistant's conversation that has since
+   * been deleted, with its assistant. Such a session is kept as history and
+   * takes no input. Computed on read.
+   */
+  readonly conversationDeleted: boolean;
   /**
    * The provider behind the session's instance, and the tool families its
    * spec disallowed. Both are used to work out whether the provider enforces
@@ -88,6 +105,8 @@ export interface NewSession {
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `undefined` for a Thread. */
   readonly agentId: string | undefined;
+  /** The assistant's conversation the session answers; `undefined` for any other session. */
+  readonly conversationId: string | undefined;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -103,6 +122,17 @@ export interface NewSession {
   readonly modelSelection: ModelSelection;
   readonly parentSessionId: string | undefined;
   readonly at: string;
+}
+
+/**
+ * What a session may do: the access mode it asked for, the one it runs under
+ * after the provider's fallback, and the permission profile its token is
+ * bound to.
+ */
+export interface SessionAccess {
+  readonly requestedAccessMode: AccessMode;
+  readonly accessMode: AccessMode;
+  readonly permissionProfileId: string;
 }
 
 /**
@@ -123,6 +153,8 @@ export interface SessionPageRequest {
   readonly runnerId: string | undefined;
   readonly agentId: string | undefined;
   readonly permissionProfileId: string | undefined;
+  /** Only the sessions of this conversation. */
+  readonly conversationId: string | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
 }
@@ -132,6 +164,7 @@ interface SessionRow {
   readonly title: string;
   readonly permission_profile_id: Uint8Array;
   readonly agent_id: Uint8Array | null;
+  readonly conversation_id: Uint8Array | null;
   readonly provider_id: string | null;
   /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
@@ -152,6 +185,9 @@ interface SessionRow {
   readonly started_at: string | null;
   readonly exited_at: string | null;
   readonly last_activity_at: string;
+  readonly crash_guard_armed: number;
+  readonly input_waiting: number;
+  readonly conversation_deleted: number;
 }
 
 /**
@@ -162,7 +198,7 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, title, permission_profile_id, agent_id, instance_id, runner_id, workspace_id, project_id, " +
+  "id, title, permission_profile_id, agent_id, conversation_id, instance_id, runner_id, workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both are read to compute `unenforced`: the provider behind the instance,
   // and the tool families this session's spec disallowed.
@@ -170,13 +206,19 @@ const buildColumnList = (): string =>
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_request, created_at, started_at, exited_at, " +
-  `last_activity_at, (${buildResumableClause("sessions")}) AS resumable`;
+  "last_activity_at, crash_guard_armed, " +
+  "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
+  "AND session_inputs.status = 'queued') AS input_waiting, " +
+  "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
+  "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
+  `(${buildResumableClause("sessions")}) AS resumable`;
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
   title: row.title,
   permissionProfileId: uuidToString(row.permission_profile_id),
   agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
+  conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
@@ -195,6 +237,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   startedAt: row.started_at,
   exitedAt: row.exited_at,
   lastActivityAt: row.last_activity_at,
+  crashGuardArmed: row.crash_guard_armed === 1,
+  inputWaiting: row.input_waiting === 1,
+  conversationDeleted: row.conversation_deleted === 1,
   providerId: row.provider_id,
   disallowedTools:
     row.disallowed_tools === null
@@ -277,6 +322,37 @@ const make = Effect.gen(function* () {
   const buildStatusClause = (status: SessionStatus | ReadonlyArray<SessionStatus>) =>
     Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
 
+  /**
+   * Moves every session that matches `condition` and has not exited to
+   * `exited`, and returns those rows as they were just before, oldest first.
+   * The caller needs the old rows, because what an end means depends on the
+   * status the session ended from, and an UPDATE's RETURNING gives only the
+   * new values. So the rows are read first and then updated by id, and the
+   * caller runs both in one transaction, so no write can land between them.
+   */
+  const endMatching = (
+    condition: Fragment,
+    at: string,
+  ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+    Effect.gen(function* () {
+      const rows = yield* sql<SessionRow>`
+        SELECT ${sql.literal(COLUMNS)} FROM sessions
+        WHERE status <> 'exited' AND ${condition}
+        ORDER BY created_at, id
+      `;
+      if (rows.length === 0) return [];
+      yield* sql`
+        UPDATE sessions SET
+          status = 'exited',
+          last_activity_at = ${at},
+          open_request = NULL,
+          token_hash = NULL,
+          exited_at = ${at}
+        WHERE id IN ${sql.in(rows.map((row) => row.id))} AND status <> 'exited'
+      `;
+      return rows.map(toSession);
+    });
+
   return {
     /**
      * Writes the session and returns nothing. The caller minted the id, so it
@@ -296,14 +372,17 @@ const make = Effect.gen(function* () {
             ? null
             : uuidFromString(session.githubConnectionId);
         const agent = session.agentId === undefined ? null : uuidFromString(session.agentId);
+        const conversation =
+          session.conversationId === undefined ? null : uuidFromString(session.conversationId);
         yield* sql`
-          INSERT INTO sessions (id, title, permission_profile_id, agent_id, instance_id, runner_id,
+          INSERT INTO sessions (id, title, permission_profile_id, agent_id, conversation_id,
+                                instance_id, runner_id,
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
-                  ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
+                  ${conversation}, ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
@@ -315,6 +394,40 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<SessionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM sessions WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toSession),
+      ),
+
+    /**
+     * Returns every session of one conversation that has not exited, oldest
+     * first. The newest answers the conversation; an older one that has not
+     * exited yet is still running, for example while it is being stopped.
+     */
+    listLiveInConversation: (
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      Effect.map(
+        sql<SessionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM sessions
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND status <> 'exited'
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toSession),
+      ),
+
+    /**
+     * Returns the newest session of one conversation, whatever its status, or
+     * `none` when the conversation has no session yet. Sessions created in
+     * the same millisecond are ordered by id, as the index is.
+     */
+    newestInConversation: (
+      conversationId: string,
+    ): Effect.Effect<Option.Option<StoredSession>, SqlError> =>
+      Effect.map(
+        sql<SessionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM sessions
+          WHERE conversation_id = ${uuidFromString(conversationId)}
+          ORDER BY created_at DESC, id DESC LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toSession),
       ),
@@ -365,6 +478,9 @@ const make = Effect.gen(function* () {
         if (request.permissionProfileId !== undefined) {
           clauses.push(sql`permission_profile_id = ${uuidFromString(request.permissionProfileId)}`);
         }
+        if (request.conversationId !== undefined) {
+          clauses.push(sql`conversation_id = ${uuidFromString(request.conversationId)}`);
+        }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
         }
@@ -405,7 +521,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope = buildTranscriptScope(request.sessionId, request.direction);
         const after =
-          request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeIntegerKeyCursor(request.cursor, scope);
         const { keyset, order } = buildKeyset(
           sql,
           ["position"],
@@ -432,7 +550,7 @@ const make = Effect.gen(function* () {
                 event: JSON.parse(row.event) as ProviderEvent,
               })),
             ),
-          (last) => encodeIdCursor(scope, last.position),
+          (last) => encodeIntegerKeyCursor(scope, last.position),
         );
       }),
 
@@ -502,6 +620,21 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Moves a `queued` session to `exited`, and returns the row as it was
+     * before. A session that dispatch moved to `starting` in the meantime is
+     * left alone and returns `none`: its runner now holds it, so only the
+     * runner can end it. The caller runs it in a transaction.
+     */
+    endQueued: (
+      sessionId: string,
+      at: string,
+    ): Effect.Effect<Option.Option<StoredSession>, SqlError> =>
+      Effect.map(
+        endMatching(sql`id = ${uuidFromString(sessionId)} AND status = 'queued'`, at),
+        (ended) => Option.fromNullishOr(ended[0]),
+      ),
+
+    /**
      * Moves the session to `starting` for dispatch, and stores the hash of the
      * token created for that start. It is one statement rather than a status
      * change plus a write, because the row may hold a token only while it is
@@ -520,14 +653,10 @@ const make = Effect.gen(function* () {
     /**
      * Moves an exited session back to `queued`, with the spec its resumed
      * harness starts with, for dispatch to place. This is the only way out of
-     * `exited`, and the one exception to the rule in `moved`. Returns whether
-     * the session was moved.
+     * `exited`, and the one exception to the rule in `moved`.
      *
-     * The WHERE clause uses the same condition the caller used to read
-     * `resumable`, so two callers that arrive at once cannot both resume the
-     * session. The second finds it no longer exited and changes nothing. It
-     * does not put a session that has already started back on the queue, and
-     * so does not take the token away from the process holding it.
+     * It decides nothing: whether the session may be resumed is the service's
+     * check, made in the same transaction just before this write.
      *
      * An exited row holds no token hash (migration 0023), so a token that
      * leaked before the exit stays invalid once the session is back on the
@@ -539,22 +668,28 @@ const make = Effect.gen(function* () {
      * harmless, because `runner_seq` is only used to drop duplicates and the
      * transcript is read in `position` order.
      */
-    resume: (sessionId: string, spec: string, at: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          UPDATE sessions SET
-            status = 'queued',
-            spec = ${spec},
-            last_activity_at = ${at},
-            open_request = NULL,
-            stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                           WHERE session_id = sessions.id)
-          WHERE id = ${uuidFromString(sessionId)}
-            AND ${sql.literal(buildResumableClause("sessions"))}
-          RETURNING id
-        `,
-        (rows) => rows.length > 0,
-      ),
+    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          status = 'queued',
+          spec = ${spec},
+          last_activity_at = ${at},
+          open_request = NULL,
+          stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
+                         WHERE session_id = sessions.id)
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Stores whether the session's crash-loop guard is armed. It decides
+     * nothing: the service decides when the guard is armed and when it is
+     * not.
+     */
+    setCrashGuardArmed: (sessionId: string, armed: boolean): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET crash_guard_armed = ${armed ? 1 : 0}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
 
     /**
      * Sets the model and model options the session runs under from now on.
@@ -567,6 +702,21 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET model_selection = ${JSON.stringify(modelSelection)}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Sets the access mode the session asked for, the one it runs under, and
+     * the permission profile its token is bound to. Only a resume calls this,
+     * before the session starts again, because a running harness keeps the
+     * mode it was started with.
+     */
+    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          requested_access_mode = ${access.requestedAccessMode},
+          access_mode = ${access.accessMode},
+          permission_profile_id = ${uuidFromString(access.permissionProfileId)}
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
@@ -660,86 +810,52 @@ const make = Effect.gen(function* () {
           })),
       ),
 
-    /** Returns the ids of the sessions in a workspace that have not exited. */
-    liveInWorkspace: (workspaceId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM sessions
-          WHERE workspace_id = ${uuidFromString(workspaceId)} AND status <> 'exited'
-          ORDER BY created_at, id
-        `,
-        (rows) => rows.map((row) => uuidToString(row.id)),
-      ),
+    /**
+     * Ends every session in a workspace that has not exited, and returns those
+     * rows as they were before. The caller runs it in a transaction.
+     */
+    endInWorkspace: (
+      workspaceId: string,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      endMatching(sql`workspace_id = ${uuidFromString(workspaceId)}`, at),
 
     /**
-     * Ends every session still open on this runner. Returns two lists:
-     *
-     * - `toStop`: the sessions that were `starting`, `idle` or `busy`. A
-     *   caller retiring the runner still has to send each of them a stop. They
-     *   are read first, because the update then marks every session `exited`.
-     * - `ended`: every session this call moved, including queued ones, so the
-     *   caller can cancel their inputs and announce them.
+     * Ends every session still open on this runner, queued ones included, and
+     * returns those rows as they were before. A caller retiring the runner
+     * still has to send a stop to each one that was `starting`, `idle` or
+     * `busy`. The caller runs it in a transaction.
      */
     endOnRunner: (
       runnerId: string,
       at: string,
-    ): Effect.Effect<
-      { readonly ended: ReadonlyArray<string>; readonly toStop: ReadonlyArray<string> },
-      SqlError
-    > =>
-      Effect.gen(function* () {
-        const key = uuidFromString(runnerId);
-        const toStopRows = yield* sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM sessions WHERE runner_id = ${key} AND status IN ('starting', 'idle', 'busy')
-        `;
-        const endedRows = yield* sql<{ readonly id: Uint8Array }>`
-          UPDATE sessions SET
-            status = 'exited',
-            last_activity_at = ${at},
-            open_request = NULL,
-            token_hash = NULL,
-            exited_at = ${at}
-          WHERE runner_id = ${key} AND status <> 'exited'
-          RETURNING id
-        `;
-        return {
-          ended: endedRows.map((row) => uuidToString(row.id)),
-          toStop: toStopRows.map((row) => uuidToString(row.id)),
-        };
-      }),
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      endMatching(sql`runner_id = ${uuidFromString(runnerId)}`, at),
 
     /**
      * Ends every session on this runner that is `starting`, `idle` or `busy`
      * and is not in `held`, the list from the runner's sessions report.
-     * Returns the ids of the ended sessions. Only those three statuses are
+     * Returns those rows as they were before. Only those three statuses are
      * affected, so a session already `exited`, or `queued` and never sent to
-     * this runner, is left alone.
+     * this runner, is left alone. The caller runs it in a transaction.
      */
     reportedGone: (
       runnerId: string,
       held: ReadonlyArray<string>,
       at: string,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          UPDATE sessions SET
-            status = 'exited',
-            last_activity_at = ${at},
-            open_request = NULL,
-            token_hash = NULL,
-            exited_at = ${at}
-          WHERE runner_id = ${uuidFromString(runnerId)}
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      endMatching(
+        sql`runner_id = ${uuidFromString(runnerId)}
             AND status IN ('starting', 'idle', 'busy')
-            AND ${held.length === 0 ? sql`1 = 1` : sql`id NOT IN ${sql.in(held.map(uuidFromString))}`}
-          RETURNING id
-        `,
-        (rows) => rows.map((row) => uuidToString(row.id)),
+            AND ${held.length === 0 ? sql`1 = 1` : sql`id NOT IN ${sql.in(held.map(uuidFromString))}`}`,
+        at,
       ),
 
     /**
      * Ends every running session on a lost runner: the runner is not in
      * `connected`, and nothing was heard about the session for longer than the
-     * session's own absolute timeout.
+     * session's own absolute timeout. Returns those rows as they were before.
+     * The caller runs it in a transaction.
      *
      * The absolute timeout is the bound because a runner stops every session
      * process at most that long after the process started, and
@@ -757,29 +873,13 @@ const make = Effect.gen(function* () {
     endOnLostRunners: (
       connected: ReadonlyArray<string>,
       at: string,
-    ): Effect.Effect<
-      ReadonlyArray<{ readonly sessionId: string; readonly runnerId: string }>,
-      SqlError
-    > =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array; readonly runner_id: Uint8Array }>`
-          UPDATE sessions SET
-            status = 'exited',
-            last_activity_at = ${at},
-            open_request = NULL,
-            token_hash = NULL,
-            exited_at = ${at}
-          WHERE status IN ('starting', 'idle', 'busy')
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      endMatching(
+        sql`status IN ('starting', 'idle', 'busy')
             AND ${connected.length === 0 ? sql`1 = 1` : sql`runner_id NOT IN ${sql.in(connected.map(uuidFromString))}`}
             AND (julianday(${at}) - julianday(last_activity_at)) * 86400000
-                > COALESCE(json_extract(spec, '$.timeouts.absoluteMs'), ${DEFAULT_ABSOLUTE_TIMEOUT_MS})
-          RETURNING id, runner_id
-        `,
-        (rows) =>
-          rows.map((row) => ({
-            sessionId: uuidToString(row.id),
-            runnerId: uuidToString(row.runner_id),
-          })),
+                > COALESCE(json_extract(spec, '$.timeouts.absoluteMs'), ${DEFAULT_ABSOLUTE_TIMEOUT_MS})`,
+        at,
       ),
 
     /**

@@ -129,13 +129,19 @@ export const SessionSpec = Schema.Struct({
     Schema.Struct({ nativeSessionId: Fact, mode: Schema.Literals(["resume", "fork"]) }),
   ),
   /**
-   * The two time limits the runner supervisor enforces on this session (spec
-   * 03 section 6.2). Required: a spec without them is a controller bug, and
-   * the runner has no default of its own to fall back on.
+   * The time limits the runner supervisor enforces on this session (spec 03
+   * section 6.2). The two limits are required: a spec without them is a
+   * controller bug, and the runner has no default of its own to fall back on.
+   *
+   * `idleMs` is optional. With it, the supervisor stops a session that has
+   * sat between turns that long, with the exit reason `idle_unload`, which
+   * leaves the native session behind so a later start can resume it. Without
+   * it, a session is never unloaded for being idle.
    */
   timeouts: Schema.Struct({
     inactivityMs: PositiveMillis,
     absoluteMs: PositiveMillis,
+    idleMs: Schema.optionalKey(PositiveMillis),
   }),
 });
 

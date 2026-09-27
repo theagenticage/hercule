@@ -7,12 +7,16 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
+      user: {
+        "onboarding.completedSteps": ["timezone", "assistant"],
+        timezone: "Europe/Amsterdam",
+      },
     },
   },
-  // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins
-  // and Secrets load data of their own.
+  // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins,
+  // Secrets and Assistants load data of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
+  "GET /api/v1/assistants": { body: { items: [] } },
   "GET /api/v1/runs": { body: { items: [] } },
   "GET /api/v1/workflows": { body: { items: [] } },
   "GET /api/v1/plugins": { body: [] },
@@ -45,7 +49,7 @@ const screens: readonly [path: string, title: string, headline: string][] = [
   ["/notifications", "Notifications", "Decisions and outcomes will land here."],
   ["/settings/profile", "Profile", "Timezone"],
   ["/settings/threads", "Threads", "Sidebar rows"],
-  ["/settings/assistants", "Assistants", "No assistant has been created yet."],
+  ["/settings/assistants", "Assistants", "No assistants."],
   ["/settings/identities", "Identities", "No platform identity is paired."],
   [
     "/settings/permission-profiles",

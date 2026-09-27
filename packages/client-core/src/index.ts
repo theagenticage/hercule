@@ -6,6 +6,26 @@
  * error classes below.
  */
 export { describeActor, type ActorReading } from "./actor-display";
+export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
+export {
+  canSteerOrCancelQueuedInputs,
+  chooseMessageStamps,
+  findAnsweredAssistantId,
+  findWebConversation,
+  flattenMessagePages,
+} from "./assistants/conversation";
+export {
+  buildAssistantDraft,
+  buildAssistantUpdate,
+  dropSavedEdits,
+  mergeAssistantEdits,
+  type AssistantDraft,
+} from "./assistants/form";
+export {
+  decideAssistantPresence,
+  findNewestConversationSession,
+  type AssistantPresence,
+} from "./assistants/presence";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
@@ -35,6 +55,7 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export { buildIdOptions, type IdOption } from "./id-options";
 export { readJsonObject } from "./json-shape";
 export { listJsonLines, type JsonLine } from "./json-lines";
 export { joinCommand } from "./join-command";
@@ -89,9 +110,15 @@ export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
-export { decideSessionsEmptyState } from "./sessions-empty-state";
-export { findNextOnboardingStep, type OnboardingStep } from "./onboarding";
-export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
+export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
+export {
+  chooseStamps,
+  formatPreciseStamp,
+  formatSince,
+  formatStamp,
+  formatTimeContext,
+} from "./time-context";
 export {
   readPriorityGlyph,
   describeProvenanceTarget,
@@ -163,6 +190,7 @@ export {
 export { buildRunnerMenu } from "./threads/runner-menu";
 export { buildSubmission } from "./threads/submission";
 export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread-defaults";
+export { describeThreadItem, describeTurnDivider, showsTurnDivider } from "./threads/turn-divider";
 export { buildTurns, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   resolveBrowserTimezone,

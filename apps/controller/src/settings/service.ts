@@ -37,7 +37,7 @@ interface WrittenKey {
 }
 
 /** The only key whose value is the id of another record, so it must be checked. */
-const THREAD_GITHUB = "thread.githubConnectionId";
+const GITHUB_DEFAULT = "github.defaultConnectionId";
 
 const NOT_GITHUB = "that connection is not a GitHub connection";
 
@@ -48,22 +48,23 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   /**
-   * Checks that `thread.githubConnectionId`, when the patch sets it, is the id
-   * of a GitHub connection. Fails with a validation error otherwise.
+   * Checks that `github.defaultConnectionId`, when the patch sets it, is the
+   * id of a GitHub connection. Fails with a validation error otherwise.
    *
-   * A thread with no checkout of its own pushes as this account, so any other
-   * id would be a setting that only fails later, on a runner.
+   * A Thread with no workspace, and an assistant's conversation session, push
+   * as this account, so any other id would be a setting that only fails
+   * later, on a runner.
    */
   const validateGithubConnection = (
     patch: SettingsPatch,
   ): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
-      const connectionId = patch.user?.[THREAD_GITHUB];
+      const connectionId = patch.user?.[GITHUB_DEFAULT];
       if (connectionId === undefined || connectionId === null) return;
       const found = yield* connections.one(connectionId);
       if (Option.isNone(found) || !isGithubConnection(found.value)) {
         return yield* Effect.fail(
-          createValidationError([{ path: ["user", THREAD_GITHUB], message: NOT_GITHUB }]),
+          createValidationError([{ path: ["user", GITHUB_DEFAULT], message: NOT_GITHUB }]),
         );
       }
     });

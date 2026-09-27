@@ -1,7 +1,7 @@
 /**
  * Tests for Settings > Threads: the four `thread.*` defaults that prefill the
- * composer, the workspace and GitHub account defaults, and their position
- * above the Sidebar rows control.
+ * composer, the workspace default, and their position above the Sidebar rows
+ * control. The GitHub account select moved to Settings > Profile.
  */
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
@@ -128,7 +128,7 @@ const PROFILE_WORKER: Profile = {
 const PROFILES: readonly Profile[] = [PROFILE_UNRESTRICTED, PROFILE_WORKER];
 
 const STORED_BASE = {
-  "onboarding.completedSteps": ["timezone"],
+  "onboarding.completedSteps": ["timezone", "assistant"],
   timezone: "Europe/Amsterdam",
   "thread.instanceId": INSTANCE_LOCAL.id,
   "thread.model": "claude-sonnet-5",
@@ -317,71 +317,20 @@ describe("Settings > Threads defaults", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * The workspace a new thread opens in, and the GitHub account a thread
- * with no checkout acts through (#72).
+ * The workspace a new thread opens in (#72).
  *
- * The spec gives the copy for these controls but not their stored values
- * or labels, so these tests pin the choices made here:
- * - the Workspace control's two options store these `thread.workspace`
- *   values: Main workspace -> `primary`, New workspace -> `ephemeral`.
- *   There is no None option: a project without a source always runs
- *   without a workspace, so nobody picks it as a default;
- * - the select's label is the row's wording, "GitHub account for threads
- *   without a checkout".
+ * The spec gives the copy for this control but not its stored values, so
+ * these tests pin the choice made here: the Workspace control's two
+ * options store these `thread.workspace` values: Main workspace ->
+ * `primary`, New workspace -> `ephemeral`. There is no None option: a
+ * project without a source always runs without a workspace, so nobody
+ * picks it as a default.
  * ------------------------------------------------------------------ */
-
-const CONNECTION_AT = "2026-09-10T09:00:00.000Z";
-
-const GITHUB: Connection = {
-  id: "01a06d02-7500-7000-8000-000000000001",
-  type: "github/github",
-  label: "personal",
-  displayName: "rogierpennink",
-  status: "connected",
-  labels: [],
-  config: {},
-  credentials: [],
-  createdAt: CONNECTION_AT,
-  updatedAt: CONNECTION_AT,
-};
-
-const GITHUB_WORK: Connection = {
-  ...GITHUB,
-  id: "01a06d02-7500-7000-8000-000000000002",
-  label: "work",
-  displayName: "acme-bot",
-};
-
-/** A connection of another type, which the select must not offer. */
-const SLACK: Connection = {
-  ...GITHUB,
-  id: "01a06d02-7500-7000-8000-000000000003",
-  type: "slack",
-  label: "acme",
-  displayName: "acme.slack.com",
-};
-
-const openWithConnections = async (
-  user: Record<string, unknown> = {},
-  connections: readonly Connection[] = [GITHUB, GITHUB_WORK, SLACK],
-) => {
-  const api = stubApi({
-    ...buildController(user),
-    "GET /api/v1/connections": { body: { items: connections } },
-  });
-  const app = await renderApp({
-    path: "/settings/threads",
-    api: api.fetch,
-    token: "held",
-    detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
-  });
-  return { ...app, api };
-};
 
 describe("Settings > Threads: the workspace a thread opens in", () => {
   it("offers the two options and writes thread.workspace on pick", async () => {
     const user = userEvent.setup();
-    const { api } = await openWithConnections({ "thread.workspace": "primary" });
+    const { api } = await openApp({ "thread.workspace": "primary" });
 
     const group = await screen.findByRole("radiogroup", { name: "Workspace" });
     for (const face of ["Main workspace", "New workspace"]) {
@@ -401,52 +350,51 @@ describe("Settings > Threads: the workspace a thread opens in", () => {
   // There is no None option, so the fine print is the only place that says a
   // project without a source runs without a workspace.
   it("says in its fine print that a project with no source runs without a workspace", async () => {
-    await openWithConnections();
+    await openApp();
 
     const fine = await screen.findByText(/repos/);
     expect(fine.textContent).toContain("A project with no source always runs without a workspace.");
   });
 
   it("says in its fine print that a project with several repos opens in a New workspace", async () => {
-    await openWithConnections();
+    await openApp();
 
     const fine = await screen.findByText(/repos/);
     expect(fine.textContent).toContain("New workspace");
   });
 });
 
-describe("Settings > Threads: the GitHub account for threads without a checkout", () => {
-  it("offers only the github connections and writes thread.githubConnectionId on pick", async () => {
-    const user = userEvent.setup();
-    const { api } = await openWithConnections();
+const GITHUB: Connection = {
+  id: "01a06d02-7500-7000-8000-000000000001",
+  type: "github/github",
+  label: "personal",
+  displayName: "rogierpennink",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: "2026-09-10T09:00:00.000Z",
+  updatedAt: "2026-09-10T09:00:00.000Z",
+};
 
-    const field = await screen.findByLabelText<HTMLSelectElement>(
-      "GitHub account for threads without a checkout",
-    );
-    const offered = [...field.options].map((option) => option.textContent);
-    expect(offered).toContain(GITHUB.label);
-    expect(offered).toContain(GITHUB_WORK.label);
-    expect(offered).not.toContain(SLACK.label);
-
-    await user.selectOptions(field, GITHUB_WORK.id);
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)).toHaveLength(1);
-    expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.githubConnectionId": GITHUB_WORK.id },
+describe("Settings > Threads: the GitHub account", () => {
+  // The select moved to Settings > Profile, because it applies to an
+  // assistant's sessions as well as to threads. A GitHub connection exists
+  // here, so a select left behind would have an account to offer.
+  it("no longer offers a GitHub account", async () => {
+    const api = stubApi({
+      ...buildController({}),
+      "GET /api/v1/connections": { body: { items: [GITHUB] } },
     });
-  });
+    await renderApp({
+      path: "/settings/threads",
+      api: api.fetch,
+      token: "held",
+      detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
+    });
 
-  it("clears the setting rather than storing an empty id when no account is picked", async () => {
-    const user = userEvent.setup();
-    const { api } = await openWithConnections({ "thread.githubConnectionId": GITHUB.id });
-
-    const field = await screen.findByLabelText<HTMLSelectElement>(
-      "GitHub account for threads without a checkout",
-    );
-    await user.selectOptions(field, "");
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
+    await screen.findByLabelText("Provider instance");
+    expect(screen.queryByRole("combobox", { name: /github/i })).toBeNull();
+    expect(screen.queryByText(GITHUB.label)).toBeNull();
   });
 });

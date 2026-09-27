@@ -119,6 +119,9 @@ export const buildReadyClause = (alias: string): string =>
  * - its provider-native transcript is known
  * - its runner is not retired
  * - its workspace is ready (see `buildReadyClause`)
+ * - it answers no assistant's conversation, or that conversation still
+ *   exists. A session whose conversation was deleted takes no input, so
+ *   nothing can ever resume it.
  *
  * It lives here rather than in the sessions domain because the sweep below
  * uses it: a thread that can still be resumed keeps its worktree, so its
@@ -131,7 +134,9 @@ export const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
-  `AND ${buildReadyClause(alias)}`;
+  `AND ${buildReadyClause(alias)} ` +
+  `AND (${alias}.conversation_id IS NULL OR EXISTS (SELECT 1 FROM conversations ` +
+  `WHERE conversations.id = ${alias}.conversation_id))`;
 
 /** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";

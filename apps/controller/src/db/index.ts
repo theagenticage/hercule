@@ -14,11 +14,11 @@ export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
   decodeCursor,
-  decodeIdCursor,
+  decodeIntegerKeyCursor,
   decodeOffsetCursor,
   decodeOwnedCursor,
   encodeCursor,
-  encodeIdCursor,
+  encodeIntegerKeyCursor,
   encodeOffsetCursor,
   encodeOwnedCursor,
   buildKeyset,

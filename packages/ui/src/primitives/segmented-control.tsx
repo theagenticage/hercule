@@ -2,13 +2,31 @@ import type { ComponentProps, JSX } from "react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { cn } from "./cn";
 
-/** A control that switches between two or more views of one surface. One is always selected. */
+/**
+ * Renders a control that switches between two or more views of one surface.
+ * One is always selected.
+ *
+ * `compact` is the style for a control in the value column of a settings
+ * `Row`. The control fills the column like the selects above and below it,
+ * and the segments get smaller text and less padding, so that the longest
+ * labels, such as the four access modes, fit without breaking a word. Each
+ * segment keeps the line height of a select's 14px text, so the control is
+ * exactly as tall as a `Select` (35px) and a column of rows reads as one
+ * family.
+ *
+ * A compact segment is sized to its label, and the spare room is shared out
+ * equally. Equal-width segments would squeeze long labels against the
+ * control's edge and give the spare room to the short ones. With two labels
+ * of similar length, the two rules look the same.
+ */
 export function SegmentedControl({
+  compact = false,
   className,
   value,
   onValueChange,
   ...props
 }: Omit<ComponentProps<"div">, "defaultValue" | "dir" | "onChange"> & {
+  compact?: boolean;
   value: string;
   onValueChange: (value: string) => void;
 }): JSX.Element {
@@ -23,6 +41,8 @@ export function SegmentedControl({
       }}
       className={cn(
         "inline-flex w-full gap-0.5 rounded-control border border-line-soft bg-surface p-0.5",
+        compact &&
+          "[&>button]:flex-auto [&>button]:px-1.5 [&>button]:text-fine [&>button]:leading-[calc(var(--text-body)*1.5)]",
         className,
       )}
       {...props}

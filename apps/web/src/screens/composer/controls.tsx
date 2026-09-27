@@ -20,6 +20,7 @@ export function AttachButton(): JSX.Element {
   );
 }
 
+/** The dictation button. It stays disabled until dictation is built. */
 export function VoiceButton(): JSX.Element {
   return (
     <button
@@ -45,13 +46,18 @@ export function VoiceButton(): JSX.Element {
   );
 }
 
+/**
+ * The button that interrupts the running turn. Its line height is set so the
+ * button is 28px tall, the height of the send button beside it: a taller Stop
+ * would grow the row, and move the text above it, whenever a turn starts.
+ */
 export function StopButton({ onStop }: { readonly onStop: () => void }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onStop}
       title="Stops the running turn; queued messages wait"
-      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-meta font-emph text-ink hover:bg-line-soft"
+      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-meta leading-[18px] font-emph text-ink hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
     >
       <span aria-hidden="true" className="size-2 rounded-[1.5px] bg-current" />
       Stop

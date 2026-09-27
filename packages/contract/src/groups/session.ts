@@ -63,14 +63,34 @@ export const Session = Schema.Struct({
   title: Schema.String,
   status: SessionStatus,
   /**
-   * Computed when the session is read, never stored: true when the session is
-   * `exited`, has a `nativeSessionId`, and its runner is not retired. True
-   * means the next `session.input` resumes it in place.
+   * Computed when the session is read, never stored. True when all of these hold:
+   *
+   * - the session is `exited` and has a `nativeSessionId`;
+   * - its runner is not retired, and its workspace is still ready;
+   * - it answered no assistant's conversation, or that conversation still exists.
+   *
+   * True means the next input resumes it in place.
    */
   resumable: Schema.Boolean,
+  /**
+   * Computed when the session is read: true when the session exited before
+   * its last resume started any turn, inputs wait for it, no input has been
+   * stored since that resume, and it could otherwise be resumed (`resumable`).
+   * Such a session is not resumed automatically, because it would most likely
+   * die the same way again: its input waits, and the next input anyone sends
+   * resumes it with all of it (the crash-loop guard, spec 12 section 5.1). An
+   * assistant's owner is told with a "can't be reached" notice when the hold
+   * starts.
+   */
+  resumeHeld: Schema.Boolean,
   permissionProfileId: Id,
   /** The Agent this session was spawned from; `null` for a Thread. Kept only as a record of origin. */
   agentId: Schema.NullOr(Id),
+  /**
+   * The assistant's conversation this session answers; `null` for any other
+   * session. Kept after the conversation is deleted, as a record of origin.
+   */
+  conversationId: Schema.NullOr(Id),
   instanceId: Id,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
@@ -234,7 +254,8 @@ export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>
  * needs the `session.steer` grant. `opened` and `steered` are the runner's own
  * words for what it did with the input. `queued` is the controller's word for
  * an input the session cannot take yet, including the input that resumes an
- * exited session.
+ * exited session, and a steer on a provider that does not steer natively: the
+ * running turn is interrupted, and the input is sent as the next turn.
  */
 export const SessionInputOutcome = Schema.Struct({
   inputId: Id,
@@ -291,6 +312,8 @@ export const SessionFilter = Schema.Struct({
   agentId: Schema.optionalKey(Id),
   /** Only the sessions carrying this Permission Profile, whichever Agent spawned them. */
   permissionProfileId: Schema.optionalKey(Id),
+  /** Only the sessions of this conversation. */
+  conversationId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });

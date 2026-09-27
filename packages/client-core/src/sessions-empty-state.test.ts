@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance } from "@hercule/contract";
-import { decideSessionsEmptyState, type SessionsEmptyState } from "./sessions-empty-state";
+import {
+  decideSessionsEmptyState,
+  hasLoggedInRunner,
+  type SessionsEmptyState,
+} from "./sessions-empty-state";
 import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
 
 const waiting = buildInstance("claude-code", "Claude Code", [
@@ -193,5 +197,23 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
     expect(readLead(state)).toContain("kept by the controller");
     // Offering both kinds needs at least two harnesses, so this lead is plural.
     expect(readLead(state)).toContain("Sign in to use them in Hercule.");
+  });
+});
+
+describe("hasLoggedInRunner", () => {
+  it("is true when an online runner has a logged-in harness", () => {
+    expect(hasLoggedInRunner([BARE], [loggedIn])).toBe(true);
+  });
+
+  it("is false when no harness is logged in", () => {
+    expect(hasLoggedInRunner([BARE], [waiting])).toBe(false);
+  });
+
+  it("is false when the runner with the login is offline", () => {
+    expect(hasLoggedInRunner([{ ...BARE, connectivity: "offline" }], [loggedIn])).toBe(false);
+  });
+
+  it("is false with no runners", () => {
+    expect(hasLoggedInRunner([], [loggedIn])).toBe(false);
   });
 });

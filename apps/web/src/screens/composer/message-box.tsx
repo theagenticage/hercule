@@ -45,11 +45,13 @@ export function MessageBox({
       }}
       onKeyDown={(event) => {
         // Enter sends and Shift+Enter inserts a newline. The Enter that
-        // commits an IME composition does not send: it arrives with
-        // `isComposing` set, and treating it as a send would cut off a
-        // Japanese or Chinese sentence mid-word.
+        // commits an IME composition does not send, because treating it as
+        // a send would cut off a Japanese or Chinese sentence mid-word. Most
+        // browsers mark that Enter with `isComposing`. Safari does not: it
+        // fires the keydown after the composition ends, with the legacy
+        // `keyCode` 229 that means "the IME handled this key".
         if (event.key !== "Enter" || event.shiftKey) return;
-        if (event.nativeEvent.isComposing) return;
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         event.preventDefault();
         onSubmit();
       }}

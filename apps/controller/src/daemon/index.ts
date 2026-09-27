@@ -53,6 +53,7 @@ export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export { Inbound, InboundLayer, Retirement, RetirementLayer } from "./runners";
 export { RunExecutorLayer, RunFibers } from "./runs";
 export {
+  AssistantSessionsLayer,
   DispatchLayer,
   Live,
   LiveLayer,

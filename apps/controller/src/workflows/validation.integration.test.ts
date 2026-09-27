@@ -1277,6 +1277,38 @@ describe("the agent steps", () => {
     });
   });
 
+  it("rejects an agent step that names an assistant, on create, validate and update", async () => {
+    await withArrangedController(async (controller) => {
+      const { base, token } = controller;
+      // Setup created the assistant `Hercule`, whose id is also an agent id.
+      const listed = await get(base, "/api/v1/assistants", token);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      const [assistant] = ((await listed.json()) as { items: ReadonlyArray<{ id: string }> }).items;
+      const naming: InvalidFixture = {
+        description: "an agent step that names an assistant",
+        build: () => `name: A step that runs an assistant
+steps:
+  - id: review
+    kind: agent
+    agent: ${assistant!.id}
+    prompt: Review the pull request.
+`,
+        paths: [["steps", "0", "agent"]],
+      };
+
+      const [issue] = await expectErrorsAt(controller, naming);
+      expect(issue!.message).toContain("assistant");
+
+      const saved = await createWorkflow(base, token, { source: FILE_TASK_SOURCE });
+      expect([200, 201], await saved.clone().text()).toContain(saved.status);
+      const { workflow } = (await saved.json()) as WorkflowSaveResult;
+      const updated = await readIssues(
+        await updateWorkflow(base, token, workflow.id, { source: naming.build(controller) }),
+      );
+      expect(updated.map((found) => found.path)).toEqual(naming.paths);
+    });
+  });
+
   it("reports one error under outputSchema for each finding of the strict-subset lint", async () => {
     await withArrangedController(async ({ base, token, agentId }) => {
       const findings = lintOutputSchema(LINT_FAILING_OUTPUT_SCHEMA);

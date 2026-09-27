@@ -20,6 +20,7 @@ import type { SessionStart } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import {
   waitForFrames,
+  waitForStartFrames,
   spawnSessionOrFail,
   waitUntil,
   type Arranged,
@@ -33,6 +34,11 @@ import {
   withFleet,
   type Frame,
 } from "./testing";
+import {
+  readDefaultConversation,
+  sendMessage,
+  waitForConversationSessions,
+} from "../conversations/testing";
 
 const LOGIN = "octocat";
 const PAT = "ghp_a-token";
@@ -346,7 +352,7 @@ describe("the GitHub token a session starts with", () => {
     });
   });
 
-  it("falls back to the connection in the thread setting, and is null when there is neither", async () => {
+  it("falls back to the GitHub default setting, and is null when it is unset or cleared", async () => {
     await withCredentials(async (arranged) => {
       const bare = await spawnSessionOrFail(arranged, { prompt: "hello" });
       const first = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
@@ -356,7 +362,7 @@ describe("the GitHub token a session starts with", () => {
 
       const fallback = await createConnection(arranged, { pat: SECOND_PAT });
       const patched = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
-        body: { user: { "thread.githubConnectionId": fallback } },
+        body: { user: { "github.defaultConnectionId": fallback } },
         token: arranged.token,
       });
       expect(patched.status, await patched.clone().text()).toBe(200);
@@ -364,6 +370,59 @@ describe("the GitHub token a session starts with", () => {
       await spawnSessionOrFail(arranged, { prompt: "again" });
       const second = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2))[1]!;
       expect((second as unknown as Frame)["ghToken"]).toBe(SECOND_PAT);
+
+      const cleared = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
+        body: { user: { "github.defaultConnectionId": null } },
+        token: arranged.token,
+      });
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
+
+      await spawnSessionOrFail(arranged, { prompt: "once more" });
+      const third = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 3))[2]!;
+      expect((third as unknown as Frame)["ghToken"] ?? null).toBeNull();
+    });
+  });
+
+  it("follows the GitHub default setting for a conversation session placed by conversation.send, and is null when unset", async () => {
+    await withCredentials(async (arranged) => {
+      const unset = await readDefaultConversation(arranged);
+      await sendMessage(arranged, unset.conversation.id, "hi");
+      const [bare] = await waitForConversationSessions(arranged, unset.conversation.id, 1);
+      expect(bare!.workspaceId).toBeNull();
+      const [first] = await waitForStartFrames(arranged, bare!.id, 1);
+      expect((first as unknown as Frame)["ghToken"] ?? null).toBeNull();
+      expect((first as unknown as Frame)["gitIdentity"] ?? null).toBeNull();
+
+      const fallback = await createConnection(arranged, { pat: SECOND_PAT });
+      const patched = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
+        body: { user: { "github.defaultConnectionId": fallback } },
+        token: arranged.token,
+      });
+      expect(patched.status, await patched.clone().text()).toBe(200);
+      // A second assistant, so its first line places a new session that reads
+      // the setting as it is now.
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/assistants",
+        { name: "Ada" },
+        arranged.token,
+      );
+      expect(created.ok, await created.clone().text()).toBe(true);
+      const ada = (await created.json()) as { id: string };
+      const conversations = await get(
+        arranged.harness.base,
+        `/api/v1/conversations?assistantId=${ada.id}`,
+        arranged.token,
+      );
+      const [web] = ((await conversations.json()) as { items: ReadonlyArray<{ id: string }> })
+        .items;
+
+      await sendMessage(arranged, web!.id, "hi");
+
+      const [placed] = await waitForConversationSessions(arranged, web!.id, 1);
+      expect(placed!.workspaceId).toBeNull();
+      const [start] = await waitForStartFrames(arranged, placed!.id, 1);
+      expect((start as unknown as Frame)["ghToken"]).toBe(SECOND_PAT);
     });
   });
 });

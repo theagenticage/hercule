@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -103,12 +103,20 @@ export function useComposerModel(
     setRecent(next);
     writeRecent(next);
   };
+  // Set by `submit` before it calls `mutate`, and cleared when the send
+  // settles. `isPending` reaches the render a tick after `mutate`, so a second
+  // Enter in the same tick would still see it false; the ref is set at once.
+  const sendingRef = useRef(false);
+  const releaseSend = (): void => {
+    sendingRef.current = false;
+  };
   const spawn = useMutation({
     mutationFn: (payload: SessionSpawnInput) => client.session.spawn({ payload }),
     onSuccess: (created) => {
       rememberRecentModel();
       void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
     },
+    onSettled: releaseSend,
   });
   const input = useMutation({
     mutationFn: (sent: { readonly id: string; readonly payload: SessionInputPayload }) =>
@@ -118,11 +126,14 @@ export function useComposerModel(
       // Clear the picks only after the updated session is in the cache, so the
       // composer never falls back to the old configuration in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sent.id) });
-      setMessage("");
+      // Text typed while the message was in flight is a new message, so the
+      // box is cleared only while it still holds what was sent.
+      setMessage((current) => (current === sent.payload.text ? "" : current));
       setPicks({});
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sent.id) });
       onSend?.();
     },
+    onSettled: releaseSend,
   });
   const interrupt = useMutation({
     mutationFn: (id: string) => client.session.interrupt({ params: { id } }),
@@ -159,6 +170,9 @@ export function useComposerModel(
       setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
     },
     submit: () => {
+      // A second Enter or click before the first send settles is ignored, so
+      // one message is never sent twice.
+      if (sendingRef.current || spawn.isPending || input.isPending) return;
       // A draft is spawned with the workspace the composer resolved, even when
       // it is the default the user never touched. An existing workspace also
       // fixes the machine.
@@ -171,6 +185,7 @@ export function useComposerModel(
           : picks,
         { text: message },
       );
+      sendingRef.current = true;
       switch (sent.kind) {
         case "spawn":
           return spawn.mutate(sent.input);

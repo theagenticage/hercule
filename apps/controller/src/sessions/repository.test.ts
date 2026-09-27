@@ -8,6 +8,9 @@
  * - the last page ends the paging;
  * - a cursor works only for the sort direction it was created for;
  * - one session's transcript never shows another session's rows.
+ *
+ * The other tests check the status and token rules of single writes, and
+ * the profile filter of the session list.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -15,6 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
+import { inputRepository } from "./inputs";
 import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
@@ -37,6 +41,7 @@ const insertSession = (permissionProfileId: string) =>
       title: "a session",
       permissionProfileId,
       agentId: undefined,
+      conversationId: undefined,
       instanceId: mintId(),
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
@@ -332,6 +337,7 @@ describe("listing the sessions on one profile", () => {
           agentId: undefined,
           permissionProfileId: profileId,
           thread: undefined,
+          conversationId: undefined,
         });
         return { listed: page.items, profileId, live };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -339,5 +345,193 @@ describe("listing the sessions on one profile", () => {
 
     expect(listed.map((one) => one.id)).toEqual([live]);
     expect(listed[0]?.permissionProfileId).toBe(profileId);
+  });
+});
+
+describe("ending a queued session", () => {
+  it("ends a session that is still queued", async () => {
+    const { ended, status } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const ended = yield* sessions.endQueued(sessionId, at);
+        const row = yield* sessions.one(sessionId);
+        return { ended, status: Option.map(row, (one) => one.status) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // The returned row is the session as it was just before it ended.
+    expect(Option.map(ended, (one) => one.status)).toEqual(Option.some("queued"));
+    expect(status).toEqual(Option.some("exited"));
+  });
+
+  it("leaves a session that dispatch has started since it was read, and returns nothing", async () => {
+    // A stop reads the session as queued, then dispatch starts it before the
+    // stop's write. The runner now holds the session, so only the runner can
+    // end it, and the stop must go to the runner instead.
+    const { ended, status, tokenHash } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const { sessionId } = yield* insertStartedSession("hash-starting");
+        const ended = yield* sessions.endQueued(sessionId, at);
+        const row = yield* sessions.one(sessionId);
+        return {
+          ended,
+          status: Option.map(row, (one) => one.status),
+          tokenHash: yield* readTokenHash(sessionId),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(ended).toEqual(Option.none());
+    expect(status).toEqual(Option.some("starting"));
+    expect(tokenHash).toBe("hash-starting");
+  });
+});
+
+/**
+ * Inserts a runner and an exited session on it that can be resumed: its
+ * native transcript is known and it has no workspace. Returns the session's id.
+ */
+const insertResumableSession = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const sessions = yield* sessionRepository;
+  const runner = mintUuid();
+  yield* sql`
+    INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                         credential_hash, created_at, updated_at)
+    VALUES (${runner}, ${uuidToString(runner)}, 'online', 'active', 0, '[]', 'a hash', ${at}, ${at})
+  `;
+  const sessionId = mintId();
+  const instanceId = mintId();
+  yield* sessions.insert({
+    id: sessionId,
+    title: "a session",
+    permissionProfileId: mintId(),
+    agentId: undefined,
+    conversationId: undefined,
+    instanceId,
+    runnerId: uuidToString(runner),
+    requestedAccessMode: "approval-required",
+    accessMode: "approval-required",
+    workspaceId: null,
+    projectId: undefined,
+    checkoutBranch: undefined,
+    githubConnectionId: undefined,
+    spec: "{}",
+    modelSelection: { model: "clever", options: {} },
+    parentSessionId: undefined,
+    at,
+  });
+  yield* sessions.bind(sessionId, uuidToString(runner), instanceId, "native-1");
+  yield* sessions.moved(sessionId, "exited", at);
+  return sessionId;
+});
+
+describe("resuming an exited session", () => {
+  it("puts the session back on the queue, and stores the crash-loop guard as the service sets it", async () => {
+    // The repository decides nothing about the guard: a resume or an exit
+    // leaves the flag as it is, and only `setCrashGuardArmed` changes it.
+    const rows = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const exited = yield* sessions.one(sessionId);
+        yield* sessions.resume(sessionId, "{}", at);
+        const resumed = yield* sessions.one(sessionId);
+        yield* sessions.setCrashGuardArmed(sessionId, true);
+        yield* sessions.moved(sessionId, "exited", at);
+        const armed = yield* sessions.one(sessionId);
+        yield* sessions.setCrashGuardArmed(sessionId, false);
+        const disarmed = yield* sessions.one(sessionId);
+        return [exited, resumed, armed, disarmed].map((row) =>
+          Option.map(row, (stored) => [stored.status, stored.crashGuardArmed]),
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(rows).toEqual([
+      Option.some(["exited", false]),
+      Option.some(["queued", false]),
+      Option.some(["exited", true]),
+      Option.some(["exited", false]),
+    ]);
+  });
+});
+
+describe("whether a session's conversation was deleted", () => {
+  it("is true only for a session whose conversation no longer exists, and such a session has ended for good", async () => {
+    const deleted = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const answersNone = yield* sessions.one(sessionId);
+        const conversation = mintUuid();
+        yield* sql`
+          INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+          VALUES (${conversation}, ${mintUuid()}, 'web', NULL, ${at})
+        `;
+        yield* sql`UPDATE sessions SET conversation_id = ${conversation}
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        const answersOne = yield* sessions.one(sessionId);
+        const endedWhileAnswering = yield* sessions.listEndedForGood([sessionId]);
+        yield* sql`DELETE FROM conversations WHERE id = ${conversation}`;
+        const answeredDeleted = yield* sessions.one(sessionId);
+        const endedOnceDeleted = yield* sessions.listEndedForGood([sessionId]);
+        return {
+          rows: [answersNone, answersOne, answeredDeleted].map((row) =>
+            Option.map(row, (stored) => [stored.conversationDeleted, stored.resumable]),
+          ),
+          endedWhileAnswering,
+          endedOnceDeleted,
+          sessionId,
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // The transcript is still there, but a session whose conversation is gone
+    // takes no input, so it must not read as resumable.
+    expect(deleted.rows).toEqual([
+      Option.some([false, true]),
+      Option.some([false, true]),
+      Option.some([true, false]),
+    ]);
+    // So it has ended for good, and whatever it holds, such as subscriptions,
+    // is ended with it.
+    expect(deleted.endedWhileAnswering).toEqual([]);
+    expect(deleted.endedOnceDeleted).toEqual([deleted.sessionId]);
+  });
+});
+
+describe("whether an input waits on a session", () => {
+  it("is true while an input is queued, sent or not, and false once none is", async () => {
+    const waiting = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const sessionId = yield* insertResumableSession;
+        // An exited session's input is never claimed, so the session is put
+        // back on the queue first.
+        yield* sessions.resume(sessionId, "{}", at);
+        const empty = yield* sessions.one(sessionId);
+        const sent = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "user",
+          text: "a",
+          at,
+        });
+        yield* inputs.claim(sent.id, at);
+        const onTheWire = yield* sessions.one(sessionId);
+        yield* inputs.cancelWithReason(sent.id, at, "the session exited");
+        const cancelled = yield* sessions.one(sessionId);
+        return [empty, onTheWire, cancelled].map((row) =>
+          Option.map(row, (one) => one.inputWaiting),
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(waiting).toEqual([Option.some(false), Option.some(true), Option.some(false)]);
   });
 });

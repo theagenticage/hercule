@@ -23,13 +23,20 @@ import {
   type Internal,
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
+import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
+import {
+  ConversationMessagesLayer,
+  ConversationService,
+  ConversationServiceLayer,
+} from "../conversations";
 import { Controller, ControllerLayer } from "../controller";
 import {
+  AssistantSessionsLayer,
   DispatchLayer,
   InboundLayer,
   Live,
@@ -210,6 +217,35 @@ const agentRoutes = HttpApiBuilder.group(api, "agent", (handlers) =>
         withApiErrors(agents.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(agents.delete(params.id)));
+  }),
+);
+
+const assistantRoutes = HttpApiBuilder.group(api, "assistant", (handlers) =>
+  Effect.gen(function* () {
+    const assistants = yield* AssistantService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(assistants.query(query)))
+      .handle("read", ({ params }) => withApiErrors(assistants.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(assistants.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(assistants.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(assistants.delete(params.id)));
+  }),
+);
+
+const conversationRoutes = HttpApiBuilder.group(api, "conversation", (handlers) =>
+  Effect.gen(function* () {
+    const conversations = yield* ConversationService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(conversations.query(query)))
+      .handle("read", ({ params }) => withApiErrors(conversations.read(params.id)))
+      .handle("queryMessages", ({ params, query }) =>
+        withApiErrors(conversations.queryMessages({ conversationId: params.id, ...query })),
+      )
+      .handle("send", ({ params, payload }) =>
+        withApiErrors(conversations.send({ conversationId: params.id, ...payload })),
+      );
   }),
 );
 
@@ -511,7 +547,6 @@ const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCat
  * which a layer provided here would prevent.
  */
 export const operationLayers = Layer.mergeAll(
-  SetupLayer,
   AuthLayer,
   ApiKeysLayer,
   UserLayer,
@@ -529,12 +564,23 @@ export const operationLayers = Layer.mergeAll(
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
-  // and matched inputs are delivered through `Live` too. So those are
-  // provided to the group rather than merged next to it. `Live` also uses
-  // dispatch, which is why dispatch is provided last, under `Live`.
+  // and matched inputs are delivered through `Live` too. Setup creates the
+  // first assistant. So those are provided to the group rather than merged
+  // next to it, each above what it uses:
+  //
+  // - an assistant's create makes its conversation;
+  // - a conversation hands each sent message to the assistant's responder;
+  // - the assistant's responder and its delete reach sessions through the
+  //   controller daemon's `AssistantSessions`, which uses placement and `Live`;
+  // - the responder writes the notice for a message it could not deliver
+  //   through `ConversationMessages`, as a send appends. An assistant's
+  //   replies and its other notices are written by the session service
+  //   itself, through the sessions domain's `SessionObserver` port, which
+  //   boot provides with the session service;
+  // - placement and `Live` both use dispatch, which is provided last.
   Layer.mergeAll(
     InboundLayer,
-    PlacementLayer,
+    SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
     // domain cannot import it; the two are wired together here, where the
@@ -548,7 +594,16 @@ export const operationLayers = Layer.mergeAll(
         Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
       ),
     ).pipe(Layer.provideMerge(EventRouterLayer)),
-  ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
+  ).pipe(
+    Layer.provideMerge(AssistantServiceLayer),
+    Layer.provideMerge(ConversationServiceLayer),
+    Layer.provideMerge(AssistantResponderLayer),
+    Layer.provideMerge(AssistantSessionsLayer),
+    Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(LiveLayer),
+    Layer.provideMerge(ConversationMessagesLayer),
+    Layer.provideMerge(DispatchLayer),
+  ),
   ProvisioningLayer,
   SubscriptionServiceLayer,
   EventKindsOperationLayer,
@@ -588,6 +643,8 @@ export const handlerLayers = Layer.mergeAll(
   controllerRoutes,
   taskRoutes,
   agentRoutes,
+  assistantRoutes,
+  conversationRoutes,
   projectRoutes,
   resourceRoutes,
   workspaceRoutes,

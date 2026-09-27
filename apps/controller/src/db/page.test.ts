@@ -4,11 +4,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "./testing";
 import {
   decodeCursor,
-  decodeIdCursor,
+  decodeIntegerKeyCursor,
   decodeOffsetCursor,
   decodeOwnedCursor,
   encodeCursor,
-  encodeIdCursor,
+  encodeIntegerKeyCursor,
   encodeOffsetCursor,
   encodeOwnedCursor,
   buildKeyset,
@@ -134,39 +134,43 @@ const flipCursorDirection = (cursor: string): string =>
   ).toString("base64url");
 
 describe("integer keyset cursors", () => {
-  it("round-trips the id", async () => {
-    const cursor = encodeIdCursor(EVENTS, 4210);
-    expect(await Effect.runPromise(decodeIdCursor(cursor, EVENTS))).toBe(4210);
+  it("round-trips the key", async () => {
+    const cursor = encodeIntegerKeyCursor(EVENTS, 4210);
+    expect(await Effect.runPromise(decodeIntegerKeyCursor(cursor, EVENTS))).toBe(4210);
   });
 
   it("rejects another operation's cursor", async () => {
-    const cursor = encodeIdCursor({ ...EVENTS, op: "task.query" }, 7);
-    expect(await readFailureTag(decodeIdCursor(cursor, EVENTS))).toBe("CursorError");
+    const cursor = encodeIntegerKeyCursor({ ...EVENTS, op: "task.query" }, 7);
+    expect(await readFailureTag(decodeIntegerKeyCursor(cursor, EVENTS))).toBe("CursorError");
   });
 
   it("rejects its own cursor used with another field or direction", async () => {
-    const cursor = encodeIdCursor(EVENTS, 7);
-    expect(await readFailureTag(decodeIdCursor(cursor, { ...EVENTS, field: "createdAt" }))).toBe(
-      "CursorError",
-    );
-    expect(await readFailureTag(decodeIdCursor(cursor, { ...EVENTS, direction: "asc" }))).toBe(
-      "CursorError",
-    );
+    const cursor = encodeIntegerKeyCursor(EVENTS, 7);
+    expect(
+      await readFailureTag(decodeIntegerKeyCursor(cursor, { ...EVENTS, field: "createdAt" })),
+    ).toBe("CursorError");
+    expect(
+      await readFailureTag(decodeIntegerKeyCursor(cursor, { ...EVENTS, direction: "asc" })),
+    ).toBe("CursorError");
   });
 
   it("rejects an edited cursor", async () => {
     expect(
-      await readFailureTag(decodeIdCursor(flipCursorDirection(encodeIdCursor(EVENTS, 7)), EVENTS)),
+      await readFailureTag(
+        decodeIntegerKeyCursor(flipCursorDirection(encodeIntegerKeyCursor(EVENTS, 7)), EVENTS),
+      ),
     ).toBe("CursorError");
-    expect(await readFailureTag(decodeIdCursor("not a cursor at all", EVENTS))).toBe("CursorError");
+    expect(await readFailureTag(decodeIntegerKeyCursor("not a cursor at all", EVENTS))).toBe(
+      "CursorError",
+    );
   });
 
   it("rejects a UUID keyset cursor, and the UUID keyset decoder rejects its cursor", async () => {
     const uuid = encodeCursor(EVENTS, "2026-09-04T09:21:33.084Z", ID);
-    expect(await readFailureTag(decodeIdCursor(uuid, EVENTS))).toBe("CursorError");
-    expect(await readFailureTag(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(
-      "CursorError",
-    );
+    expect(await readFailureTag(decodeIntegerKeyCursor(uuid, EVENTS))).toBe("CursorError");
+    expect(
+      await readFailureTag(decodeCursor(encodeIntegerKeyCursor(EVENTS, 7), EVENTS, "string")),
+    ).toBe("CursorError");
   });
 });
 

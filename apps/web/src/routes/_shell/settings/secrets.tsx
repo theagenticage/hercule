@@ -33,28 +33,25 @@ function Secrets(): JSX.Element {
     <div className="flex flex-col gap-7">
       {secrets.length === 0 ? (
         <EmptyState
+          className="mt-0"
           headline="No secrets are stored."
           lead="Secrets are the tokens and keys connections and workflows use. Hercule keeps their values out of every read and shows only where each one is used."
         />
       ) : (
         <section>
           <LaneLabel>Stored</LaneLabel>
-          {/* The settings screens are a column of 520px cards, so the list
-              uses the same width. */}
-          <div className="max-w-[520px]">
-            <Group>
-              <ul className="flex flex-col">
-                {secrets.map((secret) => (
-                  <SecretRow
-                    key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
-                    client={client}
-                    secret={secret}
-                    timezone={timezone}
-                  />
-                ))}
-              </ul>
-            </Group>
-          </div>
+          <Group>
+            <ul className="flex flex-col">
+              {secrets.map((secret) => (
+                <SecretRow
+                  key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
+                  client={client}
+                  secret={secret}
+                  timezone={timezone}
+                />
+              ))}
+            </ul>
+          </Group>
         </section>
       )}
 

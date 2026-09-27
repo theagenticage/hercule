@@ -1,8 +1,9 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { resolveDisplayTimezone } from "@hercule/client-core";
+import { findAnsweredAssistantId, resolveDisplayTimezone } from "@hercule/client-core";
 import {
+  answeredAssistantQuery,
   localRunnerQuery,
   projectsQuery,
   providersQuery,
@@ -23,12 +24,15 @@ import { ThreadScreen } from "../../../screens/thread/thread-screen";
  * The loader fetches the transcript before the route renders, so the first
  * paint is never a spinner over an empty column. It also fetches the provider
  * instances and the runners, because the composer at the bottom needs them
- * for its model menu and its locked fields as soon as the thread shows.
+ * for its model menu and its locked fields as soon as the thread shows. For
+ * an assistant's session it fetches the assistant, whose name the card in the
+ * composer's place shows. An assistant deleted since the session ran reads as
+ * null rather than failing the load, so its sessions stay readable.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId")({
   staticData: { title: "Thread", ownsTopBar: true },
   loader: async ({ context, params }) => {
-    const [, , runners] = await Promise.all([
+    const [session, , runners] = await Promise.all([
       context.queryClient.ensureQueryData(sessionQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(transcriptQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
@@ -43,9 +47,15 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
       context.queryClient.prefetchQuery(workspacesQuery(context.client)),
       context.queryClient.prefetchQuery(sessionsQuery(context.client)),
     ]);
-    await context.queryClient.ensureQueryData(
-      localRunnerQuery(context.detectLocalRunner, runners.items),
-    );
+    const assistantId = findAnsweredAssistantId(session);
+    await Promise.all([
+      context.queryClient.ensureQueryData(
+        localRunnerQuery(context.detectLocalRunner, runners.items),
+      ),
+      assistantId === null
+        ? null
+        : context.queryClient.ensureQueryData(answeredAssistantQuery(context.client, assistantId)),
+    ]);
   },
   component: ThreadRoute,
 });

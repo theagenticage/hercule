@@ -257,6 +257,15 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
+    /** Returns the id of the session an input belongs to, or `none` when there is no such input. */
+    findSessionId: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          SELECT session_id FROM session_inputs WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.session_id)),
+      ),
+
     /** Returns one input of a session. An input id that belongs to another session returns `none`. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
@@ -310,12 +319,22 @@ const make = Effect.gen(function* () {
      * an edit in between could have changed. Returns `none` when the input was
      * already sent, already answered, or already cancelled. A second caller
      * racing to claim the same input always gets `none`.
+     *
+     * An input of an exited session is never claimed, and returns `none`. A
+     * caller that read the session as idle can race the runner's report that
+     * it exited. The input then stays waiting, and the resume that follows
+     * the exit sends it to the new process. Claimed, it would go to a process
+     * that is gone.
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
           UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
+            AND EXISTS (
+              SELECT 1 FROM sessions
+              WHERE sessions.id = session_inputs.session_id AND sessions.status <> 'exited'
+            )
           RETURNING ${sql.literal(COLUMNS)}
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
@@ -325,23 +344,38 @@ const make = Effect.gen(function* () {
      * Records the delivery the runner reported for this input. Only a row
      * still `queued` changes, because a caller may have cancelled it while the
      * frame was in flight.
+     *
+     * `sentAt` is when the send being answered claimed the row, and works as
+     * for `requeue`: the row changes only while it still holds that claim. A
+     * late answer to a send that was given up must not mark as delivered a
+     * row that was sent again since.
      */
-    delivered: (id: string, delivery: Delivery, at: string): Effect.Effect<void, SqlError> =>
+    delivered: (
+      id: string,
+      sentAt: string | null,
+      delivery: Delivery,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
                                   delivered_at = ${at}, sent_at = NULL
-        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 
     /**
      * Puts an input whose delivery failed back to waiting, and stores the
      * reason. The next time the session goes idle, or a user steers by hand,
      * the input is sent again. Until then, a caller sees the reason.
+     *
+     * `sentAt` is when the failed send claimed the row. The row changes only
+     * while it still holds that claim: a row that was put back to waiting in
+     * the meantime may have been sent again, and that newer send must not be
+     * undone.
      */
-    requeue: (id: string, reason: string): Effect.Effect<void, SqlError> =>
+    requeue: (id: string, sentAt: string | null, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 
     rewrite: (id: string, text: string): Effect.Effect<void, SqlError> =>
@@ -360,23 +394,59 @@ const make = Effect.gen(function* () {
      * Cancels an input whose session exited before the runner answered for it.
      * Nothing waits on a harness that has exited. The reason is stored so a
      * caller reading the input later can see why it was never delivered.
+     * `sentAt` works as for `requeue`: the row changes only while it still
+     * holds the failed send's claim.
      */
-    cancelWithReason: (id: string, reason: string): Effect.Effect<void, SqlError> =>
+    cancelWithReason: (
+      id: string,
+      sentAt: string | null,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 
     /**
      * Cancels every input of a session that is still waiting, because nothing
-     * waits on a harness that has exited. An input already sent is left alone:
-     * the runner has its text, so recording it as cancelled would be wrong.
+     * waits on a harness that has exited, and returns how many were
+     * cancelled. An input already sent is left alone: the runner has its
+     * text, so recording it as cancelled would be wrong.
      */
-    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
-        WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
-      `),
+    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+          RETURNING id
+        `,
+        (rows) => rows.length,
+      ),
+
+    /**
+     * Cancels every queued input of every session that answers the
+     * conversation, sent or not, with `reason`. Returns the ids of the
+     * sessions whose inputs were cancelled.
+     *
+     * An input sent and unanswered is cancelled too. Its session has exited
+     * by the time this runs, so no harness holds the text any more, and an
+     * input left queued would bring the session back to run it.
+     */
+    cancelForConversation: (
+      conversationId: string,
+      reason: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          WHERE status = 'queued'
+            AND session_id IN (
+              SELECT id FROM sessions WHERE conversation_id = ${uuidFromString(conversationId)}
+            )
+          RETURNING session_id
+        `,
+        (rows) => [...new Set(rows.map((row) => uuidToString(row.session_id)))],
+      ),
 
     /**
      * Cancels every input that was sent but unanswered when the controller

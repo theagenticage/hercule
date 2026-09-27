@@ -727,4 +727,22 @@ describe("buildQueryKeys", () => {
       queryKeys.inputs(),
     ]);
   });
+
+  it("maps an assistant push to the assistant list and the page of each assistant in it", () => {
+    assert.deepStrictEqual(buildQueryKeys("assistant", ["a1"]), [
+      queryKeys.assistants(),
+      queryKeys.assistant("a1"),
+    ]);
+  });
+
+  it("maps a conversation push to the conversation list prefix, and each conversation and its messages", () => {
+    assert.deepStrictEqual(buildQueryKeys("conversation", ["c1"]), [
+      queryKeys.conversations(),
+      queryKeys.conversation("c1"),
+      queryKeys.conversationMessages("c1"),
+    ]);
+    // The list key is the prefix of every filtered conversation list, such as
+    // one assistant's conversations, so one invalidation reaches them all.
+    assert.deepStrictEqual(queryKeys.conversations(), ["conversations"]);
+  });
 });

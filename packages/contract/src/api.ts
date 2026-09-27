@@ -10,9 +10,11 @@ import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import { API_PREFIX } from "./operations";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
+import { assistant } from "./groups/assistant";
 import { auth } from "./groups/auth";
 import { connection } from "./groups/connection";
 import { controller } from "./groups/controller";
+import { conversation } from "./groups/conversation";
 import { event } from "./groups/event";
 import { eventKind } from "./groups/event-kind";
 import { input } from "./groups/input";
@@ -61,6 +63,8 @@ export const api = HttpApi.make("hercule")
     provider,
     connection,
     agent,
+    assistant,
+    conversation,
     session,
     input,
     transcript,
