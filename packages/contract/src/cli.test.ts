@@ -87,6 +87,11 @@ const COMMANDS: Record<string, string> = {
   "task.update": "task update",
   "task.delete": "task delete",
 
+  "notification.query": "notification list",
+  "notification.read": "notification read",
+  "notification.create": "notification create",
+  "notification.withdraw": "notification withdraw",
+
   "project.query": "project list",
   "project.read": "project read",
   "project.create": "project create",
@@ -219,6 +224,7 @@ const STDIN_FIELDS = [
   "connection.setCredentials credentials",
   "task.create description",
   "task.update description",
+  "notification.create body",
   "project.create description",
   "project.update description",
   "agent.create systemPrompt",
@@ -249,6 +255,9 @@ const RESOLVES: Record<string, string> = {
   "task.read id": "task.query",
   "task.update id": "task.query",
   "task.delete id": "task.query",
+
+  "notification.read id": "notification.query",
+  "notification.withdraw id": "notification.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
