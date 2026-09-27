@@ -11,7 +11,11 @@ import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { WorkspaceStepKey, WorkspaceStepStart } from "@hercule/protocol";
+import {
+  MAX_WORKSPACE_STEPS,
+  type WorkspaceStepKey,
+  type WorkspaceStepStart,
+} from "@hercule/protocol";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceSteps, type WorkspaceStepToStart } from "../../runs";
 import { WorkspaceService } from "../../workspaces";
@@ -84,8 +88,18 @@ const make = Effect.gen(function* () {
         byRunner.set(runnerId, onRunner);
       }
       for (const [runnerId, onRunner] of byRunner) {
+        // One frame holds at most `MAX_WORKSPACE_STEPS` steps, so a longer
+        // list, such as the answer to a long report, is sent in parts.
+        const parts: Array<ReadonlyArray<WorkspaceStepKey>> = [];
+        for (let at = 0; at < onRunner.length; at += MAX_WORKSPACE_STEPS) {
+          parts.push(onRunner.slice(at, at + MAX_WORKSPACE_STEPS));
+        }
         runInBackground(
-          connections.tell(runnerId, { _tag: "workspaceStepSettle", steps: onRunner }),
+          Effect.forEach(
+            parts,
+            (part) => connections.tell(runnerId, { _tag: "workspaceStepSettle", steps: part }),
+            { discard: true },
+          ),
         );
       }
     },

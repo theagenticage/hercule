@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Run } from "@hercule/contract";
+import { MAX_WORKSPACE_STEPS } from "@hercule/protocol";
 import { get, send } from "../../http/testing";
 import {
   findStepRecords,
@@ -285,6 +286,53 @@ describe("workspace steps over the runner socket", () => {
       });
     },
     WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "settles the steps of a cancelled run in frames the protocol accepts, however many were running",
+    async () => {
+      await withFleet(async (arranged) => {
+        const repoId = await createRepo(arranged, "https://github.com/o/many.git");
+        // More parallel steps than one frame may list, all started at once.
+        const stepIds = Array.from({ length: MAX_WORKSPACE_STEPS + 1 }, (_, at) => `c${at}`);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Many commits at once",
+            workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+            steps: stepIds.map((id) => ({
+              id,
+              kind: "action",
+              action: "git.commit",
+              params: { message: `Save ${id}` },
+            })),
+          },
+        });
+        await waitUntil("sent every step", () =>
+          listFramesTagged(arranged.wire, "workspaceStepStart").length === stepIds.length
+            ? true
+            : undefined,
+        );
+
+        const response = await requestCancel(arranged.harness.base, arranged.token, runId);
+        expect(response.status, await response.clone().text()).toBe(200);
+
+        // Every received frame is decoded against the protocol, so a frame
+        // that listed too many steps would not have arrived.
+        const listSettled = () =>
+          listFramesTagged(arranged.wire, "workspaceStepSettle").flatMap(
+            (frame) => frame["steps"] as ReadonlyArray<{ readonly stepId: string }>,
+          );
+        await waitUntil("settled every step", () =>
+          listSettled().length === stepIds.length ? true : undefined,
+        );
+        expect(
+          listSettled()
+            .map((step) => step.stepId)
+            .sort(),
+        ).toEqual([...stepIds].sort());
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
   );
 
   it(
