@@ -15,7 +15,7 @@ import { Context, Effect, Fiber, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
-import { AfterCommit, mintUuid, uuidToString } from "../db";
+import { AfterCommit, mintUuid, uuidToString, withTransaction } from "../db";
 import { EventKindsLayer } from "../events";
 import { buildWorkspaceActionCapability } from "@hercule/protocol";
 import { SessionTokensLayer } from "../permissions";
@@ -451,7 +451,12 @@ describe("a workspace step", () => {
       Effect.gen(function* () {
         const { runnerId, runId } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
-        yield* runs.failRunsPinnedTo(runnerId, `The runner ${runnerId} was retired.`);
+        const sql = yield* SqlClient.SqlClient;
+        // The caller owns the transaction, as retiring a runner does.
+        yield* withTransaction(
+          sql,
+          runs.failRunsPinnedTo(runnerId, `The runner ${runnerId} was retired.`),
+        );
         const ended = yield* readRun(runId);
         expect(ended).toMatchObject({ status: "failed", failureReason: "workspace-failed" });
         expect(findRecord(ended, "commit")?.status).toBe("failed");

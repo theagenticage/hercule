@@ -921,6 +921,24 @@ export const makeRunEngine = Effect.gen(function* () {
     });
 
   /**
+   * Fails the given running runs because their workspace failed, as
+   * `failRunInWorkspace` fails each one. Once the transaction has committed,
+   * the Run Executor stops their executions.
+   *
+   * It opens no transaction of its own: the caller runs it inside the
+   * transaction that records why the workspace failed, so that failure and
+   * the runs' failures commit together.
+   */
+  const failRunsWhoseWorkspaceFailed = (
+    runIds: ReadonlyArray<string>,
+    message: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      for (const runId of runIds) yield* failRunInWorkspace(runId, message);
+      if (runIds.length > 0) yield* afterCommit(() => executor.stop(runIds));
+    });
+
+  /**
    * Decodes a workspace step's output against its action's output schema,
    * and returns it encoded again, as it is stored. Fails the result with
    * `unexpected` when the output does not match, and with `not_found` when
@@ -1141,41 +1159,23 @@ export const makeRunEngine = Effect.gen(function* () {
 
     /**
      * Fails every running run that works in a workspace, because the
-     * workspace failed: it could not be provisioned, or it broke. A run whose
-     * workspace step is running fails at that step, with
-     * `workspace_failed` and `message`; any other run fails with
-     * `workspace-failed` and no failed step. Once the transaction has
-     * committed, their executions stop.
-     *
-     * Run inside a caller's transaction, it joins that transaction, so the
-     * workspace's failure and its runs' failures commit together.
+     * workspace failed: it could not be provisioned, or it broke. Each run
+     * fails as `failRunsWhoseWorkspaceFailed` fails it.
      */
     failRunsInWorkspace: (workspaceId: string, message: string): Effect.Effect<void, SqlError> =>
-      Effect.provideService(
-        commitUninterruptibly(
-          sql,
-          Effect.gen(function* () {
-            const runIds = yield* runs.listWorkingIn(workspaceId);
-            for (const runId of runIds) yield* failRunInWorkspace(runId, message);
-            if (runIds.length > 0) yield* afterCommit(() => executor.stop(runIds));
-          }),
-        ),
-        AfterCommit,
-        afterCommitListener,
+      Effect.flatMap(runs.listWorkingIn(workspaceId), (runIds) =>
+        failRunsWhoseWorkspaceFailed(runIds, message),
       ),
 
     /**
-     * Fails every running run pinned to a runner, inside the caller's
-     * transaction, because the runner is gone and its workspaces with it.
-     * Each run fails as `failRunsInWorkspace` fails it. Once the caller's
-     * transaction has committed, their executions stop.
+     * Fails every running run pinned to a runner, because the runner is gone
+     * and its workspaces with it. Each run fails as
+     * `failRunsWhoseWorkspaceFailed` fails it.
      */
     failRunsPinnedTo: (runnerId: string, message: string): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const runIds = yield* runs.listPinnedTo(runnerId);
-        for (const runId of runIds) yield* failRunInWorkspace(runId, message);
-        if (runIds.length > 0) yield* afterCommit(() => executor.stop(runIds));
-      }),
+      Effect.flatMap(runs.listPinnedTo(runnerId), (runIds) =>
+        failRunsWhoseWorkspaceFailed(runIds, message),
+      ),
 
     /**
      * Returns every workspace step still running on a runner, for the
