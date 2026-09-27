@@ -15,13 +15,14 @@
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
-import { SessionService } from "../../sessions";
+import { SessionService, type StoredInput } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { Dispatch, Live } from "../sessions";
@@ -32,7 +33,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
   const { dispatch } = yield* Dispatch;
-  const { flush, deliverQueuedInput } = yield* Live;
+  const { sendClaimed, deliverQueuedInput } = yield* Live;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -115,7 +116,7 @@ const make = Effect.gen(function* () {
       // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
-      const applied = yield* withTransaction(
+      const { applied, claimed } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
@@ -125,15 +126,23 @@ const make = Effect.gen(function* () {
           if (applied.worked !== undefined) {
             yield* workspaces.touched(applied.worked.workspaceId, applied.worked.at);
           }
-          return applied;
+          // A session that went idle can take its oldest queued input. The
+          // input is claimed in the same transaction as the change to idle,
+          // so no delivery pass can read the session as idle and claim an
+          // input of its own first.
+          const claimed =
+            applied.moved === "idle"
+              ? yield* sessions.claimOldest(event.sessionId)
+              : Option.none<StoredInput>();
+          return { applied, claimed };
         }),
       );
-      // A session that went idle can take its queued input. A session that
-      // exited has freed a slot on its runner.
-      if (applied.moved === "idle") {
+      // The claimed input is sent after the commit, because the send waits on
+      // the runner. A session that exited has freed a slot on its runner.
+      if (Option.isSome(claimed)) {
         yield* forkAndAbsorbFailures(
           "Sending a session's queued input failed",
-          flush(event.sessionId),
+          sendClaimed(claimed.value),
         );
       }
       if (applied.moved === "exited") {

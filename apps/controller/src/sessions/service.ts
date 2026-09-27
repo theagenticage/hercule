@@ -544,6 +544,29 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Moves an `idle` session to `busy`, because an input the runner received
+   * opened a turn. Returns whether the session moved. Leaves the session
+   * alone when it is in any other status, or when another runner holds it
+   * now. Runs inside the caller's transaction.
+   *
+   * From that answer until the turn ends, a turn is running, even before the
+   * runner reports `turn.started`. So an exit in between is an exit during a
+   * turn, and the owner is told.
+   */
+  const openTurn = (runnerId: string, sessionId: string): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* sessions.one(sessionId);
+      if (Option.isNone(found)) return false;
+      const session = found.value;
+      if (session.runnerId !== runnerId || session.status !== "idle") return false;
+      yield* sessions.moved(session.id, "busy", yield* nowIso);
+      // A turn opened, so the process did work: the crash-loop guard no
+      // longer applies to it, as when `turn.started` moves it to `busy`.
+      yield* sessions.setCrashGuardArmed(session.id, false);
+      return true;
+    });
+
   return {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
@@ -1105,10 +1128,18 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
 
     /**
-     * Claims the oldest input still waiting on a session as soon as it is
-     * found, so a second caller arriving before the runner answers cannot
-     * claim it too. Returns `none` when no input is waiting or another caller
-     * claimed it first.
+     * Claims the oldest input still waiting on a session that just changed to
+     * idle. Returns `none` when no input is waiting. The caller runs this in
+     * the transaction that moves the session to idle.
+     *
+     * An input sent and still unanswered does not block this claim. It was
+     * sent before the turn that just ended, so that turn already took it,
+     * and the runner can take one new input now.
+     *
+     * Running in the same transaction matters: no other caller can read the
+     * session as idle before this row is claimed. Otherwise a delivery pass
+     * could claim the oldest row first, and this claim would take the next
+     * one, which puts two inputs on the wire at once.
      */
     claimOldest: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.gen(function* () {
@@ -1117,29 +1148,64 @@ const make = Effect.gen(function* () {
         return yield* inputs.claim(next.value.id, yield* nowIso);
       }),
 
-    /** Records the delivery the runner reported for an input it received. */
-    delivered: (row: StoredInput, delivery: Delivery): Effect.Effect<void, SqlError> =>
+    /**
+     * Claims the oldest input still waiting on an idle session, for a
+     * delivery pass that finds the session idle. Returns `none` when no input
+     * is waiting, when the session is not `idle`, or when another input of
+     * the session is sent and not yet answered: that input's turn may not
+     * have started yet, and the runner takes one input per turn.
+     */
+    claimOldestUnlessOneIsOnTheWire: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.flatMap(nowIso, (at) => inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at)),
+
+    /**
+     * Records the delivery the runner reported for an input it received, as
+     * the send that waited for the answer. The row changes only while it
+     * still holds this send's claim (`row.sentAt`).
+     *
+     * An input that opened a turn also moves the `idle` session held by
+     * `runnerId` to `busy`, in the same transaction. The same answer reaches
+     * `applyInputResult` on another fiber, and it can get there later. If
+     * only that method moved the session, the session would for a moment
+     * read `idle` with no input sent and unanswered, and the next delivery
+     * pass would send a second input into the turn that just opened.
+     */
+    delivered: (
+      row: StoredInput,
+      delivery: Delivery,
+      runnerId: string,
+    ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
+          const recorded = yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
+          // Only the first to record the answer moves the session. When
+          // `applyInputResult` recorded it already, the turn may have ended
+          // since, and moving the session now would leave it `busy` for good.
+          if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
       ),
 
     /**
-     * Applies a runner's result for one input to the input's session, in
-     * order with the session's events. An input that opened a turn moves an
-     * `idle` session to `busy`. From that answer until the turn ends, a turn
-     * is running, even before the runner reports `turn.started`, so an exit
-     * in between is an exit during a turn and the owner is told.
+     * Applies a runner's result for one input, in order with the session's
+     * events. A rejected input changes nothing here: the send that waits for
+     * the result puts it back to waiting.
      *
-     * Any other result changes nothing here, because the send that waits for
-     * the result records it on the input. The session is also left alone
-     * when:
+     * A delivered input is recorded on the row while a send still holds it.
+     * The waiting send (`delivered`) and this method both get the answer, and
+     * whichever runs first records it. Once it is recorded here, a waiting
+     * send that runs after the turn ended cannot move the session back to
+     * `busy`.
+     *
+     * An input that opened a turn moves an `idle` session to `busy`, even
+     * when the send gave up waiting before the answer came, because the
+     * runner did open a turn. The session is left alone when:
      *
      * - it is already `busy`: the runner reported `turn.started` before this
-     *   result;
+     *   result, or the waiting send recorded the answer first;
      * - it is in any other status but `idle`, such as `exited`;
      * - another runner holds it now, so the result is stale.
      */
@@ -1150,18 +1216,22 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          if (!result.ok || result.delivery !== "opened") return;
-          const sessionId = yield* inputs.findSessionId(result.requestId);
-          if (Option.isNone(sessionId)) return;
-          const found = yield* sessions.one(sessionId.value);
+          if (!result.ok || result.delivery === undefined) return;
+          const found = yield* inputs.read(result.requestId);
           if (Option.isNone(found)) return;
-          const session = found.value;
-          if (session.runnerId !== runnerId || session.status !== "idle") return;
-          yield* sessions.moved(session.id, "busy", yield* nowIso);
-          // A turn opened, so the process did work: the crash-loop guard no
-          // longer applies to it, as when `turn.started` moves it to `busy`.
-          yield* sessions.setCrashGuardArmed(session.id, false);
-          yield* announce({ _tag: "record", topic: "session", id: session.id, kind: "updated" });
+          const row = found.value;
+          const recorded =
+            row.sentAt !== null &&
+            (yield* inputs.delivered(row.id, row.sentAt, result.delivery, yield* nowIso));
+          const moved = result.delivery === "opened" && (yield* openTurn(runnerId, row.sessionId));
+          if (recorded || moved) {
+            yield* announce({
+              _tag: "record",
+              topic: "session",
+              id: row.sessionId,
+              kind: "updated",
+            });
+          }
         }),
       ),
 

@@ -3,7 +3,8 @@
  *
  * - `delivered`, `requeue` and `cancelWithReason` each change a row only
  *   while it still holds the claim of the send being answered;
- * - `claim` never claims an input of a session that has exited.
+ * - `claim` never claims an input of a session that has exited;
+ * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time.
  *
  * The case they guard against: an input is sent, the send is given up and
  * the row goes back to waiting, and the row is sent again. A late answer
@@ -12,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository, type StoredInput } from "./inputs";
@@ -189,5 +191,45 @@ describe("claiming an input", () => {
     );
 
     expect(Option.map(claimed, (one) => one.sentAt)).toEqual(Option.some(FIRST_SEND));
+  });
+});
+
+describe("claiming the oldest waiting input unless one is on the wire", () => {
+  /**
+   * Writes an idle session with two waiting inputs, runs `arrange` on it, then
+   * claims the oldest input twice, the way the change to idle and a delivery
+   * pass both can. Returns the texts of the rows each claim got.
+   */
+  const claimOldestTwice = (
+    arrange: (sessionId: string) => Effect.Effect<void, unknown, SqlClient.SqlClient>,
+  ): Promise<ReadonlyArray<string | undefined>> =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const { sessionId } = yield* insertSessionWithInput;
+        yield* inputs.insert({ sessionId, source: "user", actor: "user", text: "later", at });
+        yield* sessions.moved(sessionId, "idle", at);
+        yield* arrange(sessionId);
+        const first = yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, FIRST_SEND);
+        const second = yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, SECOND_SEND);
+        return [first, second].map((one) =>
+          Option.getOrUndefined(Option.map(one, (row) => row.text)),
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+  it("claims the oldest input of an idle session, and nothing more while it is unanswered", async () => {
+    // The runner takes one input per turn, so the newer input waits until the
+    // runner answers for the older one.
+    expect(await claimOldestTwice(() => Effect.void)).toEqual(["are you there?", undefined]);
+  });
+
+  it("claims nothing once the session is no longer idle", async () => {
+    const claimed = await claimOldestTwice((sessionId) =>
+      Effect.flatMap(sessionRepository, (sessions) => sessions.moved(sessionId, "busy", at)),
+    );
+
+    expect(claimed).toEqual([undefined, undefined]);
   });
 });

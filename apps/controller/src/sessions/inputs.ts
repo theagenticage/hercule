@@ -257,13 +257,13 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns the id of the session an input belongs to, or `none` when there is no such input. */
-    findSessionId: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    /** Returns an input by its id alone, or `none` when there is no such input. */
+    read: (id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
-        sql<{ readonly session_id: Uint8Array }>`
-          SELECT session_id FROM session_inputs WHERE id = ${uuidFromString(id)}
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs WHERE id = ${uuidFromString(id)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.session_id)),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
       ),
 
     /** Returns one input of a session. An input id that belongs to another session returns `none`. */
@@ -341,6 +341,46 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Claims the oldest input still waiting on an idle session, as `claim`
+     * does for one input. Returns the claimed row, or `none` when:
+     *
+     * - no input is waiting;
+     * - another input of the session is already sent and unanswered;
+     * - the session is not `idle`.
+     *
+     * The runner takes one input per turn. A second input sent before the
+     * first one's turn has started would have to be held by the runner. The
+     * checks and the claim are one statement, so two callers that both read
+     * the session as idle cannot each claim a different row.
+     */
+    claimOldestUnlessOneIsOnTheWire: (
+      sessionId: string,
+      at: string,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.map(
+        sql<InputRow>`
+          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
+          WHERE id = (
+              SELECT id FROM session_inputs
+              WHERE session_id = ${uuidFromString(sessionId)}
+                AND status = 'queued' AND sent_at IS NULL
+              ORDER BY created_at, id LIMIT 1
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM session_inputs
+              WHERE session_id = ${uuidFromString(sessionId)}
+                AND status = 'queued' AND sent_at IS NOT NULL
+            )
+            AND EXISTS (
+              SELECT 1 FROM sessions
+              WHERE sessions.id = ${uuidFromString(sessionId)} AND sessions.status = 'idle'
+            )
+          RETURNING ${sql.literal(COLUMNS)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+      ),
+
+    /**
      * Records the delivery the runner reported for this input. Only a row
      * still `queued` changes, because a caller may have cancelled it while the
      * frame was in flight.
@@ -349,18 +389,25 @@ const make = Effect.gen(function* () {
      * for `requeue`: the row changes only while it still holds that claim. A
      * late answer to a send that was given up must not mark as delivered a
      * row that was sent again since.
+     *
+     * Returns whether the row changed, so the caller knows whether it was the
+     * one that recorded the delivery.
      */
     delivered: (
       id: string,
       sentAt: string | null,
       delivery: Delivery,
       at: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
-                                  delivered_at = ${at}, sent_at = NULL
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
+                                    delivered_at = ${at}, sent_at = NULL
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Puts an input whose delivery failed back to waiting, and stores the
