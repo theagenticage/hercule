@@ -289,7 +289,7 @@ export const Run = Schema.Union(
        * is kept for inspection until then. Present only when the run has an
        * ephemeral workspace and either failed or was cancelled with
        * `keepWorkspace`; absent for every other run. It is the time the run
-       * finished plus the controller setting `workspace.failedRunTtlDays`,
+       * finished plus the controller setting `workspace.inspectionTtlDays`,
        * so a change to the setting moves it. It stays set after the workspace
        * is gone: read the workspace's own status to learn whether it still
        * exists.

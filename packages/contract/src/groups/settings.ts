@@ -107,15 +107,23 @@ export const SETTING_VALUES = {
      * its runner stops it, to be resumed at the next message.
      */
     "session.idleUnloadMinutes": PositiveMinutes,
-    /** How long an ephemeral workspace nothing references is kept, in hours. */
+    /**
+     * How long a session that cannot be resumed keeps its ephemeral workspace
+     * after it exits, in hours. Applies to sessions that exit after a change.
+     */
     "workspace.orphanTtlHours": PositiveHours,
-    /** How long an ephemeral workspace nothing has worked in is kept, in days. */
+    /**
+     * How long a session that can still be resumed keeps its ephemeral
+     * workspace after it exits, in days. Applies to sessions that exit after
+     * a change.
+     */
     "workspace.idleTtlDays": PositiveDays,
     /**
-     * How long the ephemeral workspace of a failed run, or of a run cancelled
-     * with its workspace kept, is kept for inspection, in days.
+     * How long a failed run, or a run cancelled with its workspace kept,
+     * keeps its ephemeral workspace for inspection after it ends, in days.
+     * Applies to runs that end after a change.
      */
-    "workspace.failedRunTtlDays": PositiveDays,
+    "workspace.inspectionTtlDays": PositiveDays,
     /**
      * How deep runs may nest. A run started by hand or by a program is 1
      * deep, and a run that a step of another run starts is one deeper than

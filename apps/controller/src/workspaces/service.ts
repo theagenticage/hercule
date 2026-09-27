@@ -237,7 +237,7 @@ interface Expired {
 const addFailedRunWindow = (finishedAt: string, controller: ScopeSettings<"controller">): string =>
   new Date(
     Date.parse(finishedAt) +
-      (controller["workspace.failedRunTtlDays"] ?? DEFAULT_FAILED_RUN_TTL_DAYS) * DAY_MS,
+      (controller["workspace.inspectionTtlDays"] ?? DEFAULT_FAILED_RUN_TTL_DAYS) * DAY_MS,
   ).toISOString();
 
 /**
@@ -329,6 +329,9 @@ const make = Effect.gen(function* () {
         designatedConnectionId: row.designatedConnectionId,
         message: row.message,
         sessionIds: sessionIds.get(row.id) ?? [],
+        // No workspace has a fixed kept-until time yet: that comes with the
+        // leases its sessions and runs release.
+        keptUntil: null,
         createdAt: row.createdAt,
         provisionedAt: row.provisionedAt,
         lastUsedAt: row.lastUsedAt,
@@ -701,7 +704,7 @@ const make = Effect.gen(function* () {
      * Returns when the sweep deletes the ephemeral workspace of a run that
      * finished at `finishedAt` and keeps its workspace for inspection: after
      * a failure, or a cancel that kept it. The window is the controller
-     * setting `workspace.failedRunTtlDays`, read now, so a change to the
+     * setting `workspace.inspectionTtlDays`, read now, so a change to the
      * setting moves the time.
      */
     computeKeptUntil: (finishedAt: string): Effect.Effect<string, SettingError | SqlError> =>

@@ -2917,6 +2917,7 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   designatedConnectionId: null,
   message: null,
   sessionIds,
+  keptUntil: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,
