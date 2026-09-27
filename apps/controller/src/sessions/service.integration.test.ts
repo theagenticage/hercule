@@ -859,3 +859,83 @@ describe("SessionService.endOnLostRunners", () => {
     expect(result).toEqual({ withinDefault: "busy", pastDefault: "exited" });
   });
 });
+
+/**
+ * Inserts an idle session on a runner with one input already claimed, the way
+ * a send claims it just before the frame goes out. Returns the claimed row.
+ */
+const insertIdleSessionWithSentInput = (runnerId: string) =>
+  Effect.gen(function* () {
+    const inputs = yield* inputRepository;
+    const { sessionId } = yield* insertRunningSession(runnerId, "idle", 0);
+    const input = yield* inputs.insert({
+      sessionId,
+      source: "user",
+      actor: "user",
+      text: "start a turn",
+      at,
+    });
+    return Option.getOrThrow(yield* inputs.claim(input.id, at));
+  });
+
+/**
+ * The runner's answer that an input opened a turn reaches the controller
+ * twice: the send waiting for it records it (`delivered`), and the session's
+ * ordered traffic applies it (`applyInputResult`). Either can run first.
+ */
+describe("an answer that an input opened a turn", () => {
+  it("moves the session to busy as soon as the waiting send records it", async () => {
+    // Otherwise the session reads idle with no input on the wire until
+    // `applyInputResult` runs, and a delivery pass in between sends a second
+    // input into the turn that just opened.
+    const result = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+
+        yield* sessions.delivered(row, "opened", runnerId);
+
+        return {
+          status: yield* readStatus(row.sessionId),
+          onTheWire: yield* inputs.holdsInputOnTheWire(row.sessionId),
+        };
+      }),
+    );
+
+    expect(result).toEqual({ status: "busy", onTheWire: false });
+  });
+
+  it("leaves the session idle when the waiting send records it after the turn already ended", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+
+        yield* sessions.applyInputResult(runnerId, {
+          _tag: "sessionInputResult",
+          requestId: row.id,
+          ok: true,
+          delivery: "opened",
+        });
+        const applied = {
+          status: yield* readStatus(row.sessionId),
+          input: Option.getOrThrow(yield* inputs.read(row.id)),
+        };
+        // The turn the input opened ends before the waiting send runs.
+        yield* rows.moved(row.sessionId, "idle", at);
+        yield* sessions.delivered(row, "opened", runnerId);
+
+        return { applied, status: yield* readStatus(row.sessionId) };
+      }),
+    );
+
+    expect(result.applied.status).toBe("busy");
+    expect(result.applied.input).toMatchObject({ status: "delivered", delivery: "opened" });
+    expect(result.status).toBe("idle");
+  });
+});

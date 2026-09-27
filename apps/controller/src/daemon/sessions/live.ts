@@ -49,7 +49,6 @@ import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
-  inputRepository,
   isResumeHeld,
   readSessionOrFail,
   sessionRecordComposer,
@@ -146,7 +145,6 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const readSession = readSessionOrFail(yield* sessionRepository);
-  const inputs = yield* inputRepository;
   const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
@@ -230,7 +228,7 @@ const make = Effect.gen(function* () {
       const answer = yield* deliverTo(session, row);
       const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
       if (delivery !== undefined) {
-        yield* sessions.delivered(row, delivery);
+        yield* sessions.delivered(row, delivery, session.runnerId);
         return { inputId: row.id, result: delivery };
       }
       const reason = Option.isSome(answer) ? (answer.value.message ?? REFUSED) : NOT_DELIVERED;
@@ -321,24 +319,21 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sends the session's oldest waiting input, after the session goes idle.
+   * Sends a queued input that the caller already claimed, and records the
+   * result, for a caller with nobody to tell about a failure. Fails only
+   * with a database error.
    *
-   * The row is claimed as soon as it is found, so a second change to idle
-   * that arrives before the runner replies cannot also send it. If the runner
-   * rejects the input or does not reply, `deliverClaimed` puts the row back to
-   * waiting, and the next change to idle sends it.
+   * If the runner rejects the input or does not reply, `deliverClaimed` puts
+   * the row back to waiting, and the next change to idle or delivery pass
+   * sends it.
    */
-  const flush = (sessionId: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const claimed = yield* sessions.claimOldest(sessionId);
-      if (Option.isNone(claimed)) return;
-      yield* Effect.catchIf(
-        deliverClaimed(claimed.value),
-        (error): error is InvalidState | NotFound =>
-          error instanceof InvalidState || error instanceof NotFound,
-        () => Effect.void,
-      );
-    });
+  const sendClaimed = (row: StoredInput): Effect.Effect<void, SqlError> =>
+    Effect.catchIf(
+      deliverClaimed(row),
+      (error): error is InvalidState | NotFound =>
+        error instanceof InvalidState || error instanceof NotFound,
+      () => Effect.void,
+    );
 
   /**
    * Delivers the queued inputs of a session, after some other caller stored
@@ -376,20 +371,17 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const session = yield* readSession(sessionId);
       if (session.status === "idle") {
-        // The runner takes one input per turn. An input is already sent and
-        // unanswered, so its turn has not started yet, and a second input
-        // sent now would have to be held by the runner. The next pass sends
-        // it, once the runner has reported what it did with the first.
-        if (yield* inputs.holdsInputOnTheWire(sessionId)) return;
         // A runner that is not connected cannot be sent anything. Claiming a
         // row only to put it straight back would rewrite the row, and notify
         // every client watching the session, on every pass while the runner
-        // is away. With a connection, the flush sends the session's oldest
-        // queued row, whoever wrote it. So a typed input whose delivery
-        // failed is retried first, and a matched input waits behind it, as
-        // in any queue.
+        // is away. With a connection, the session's oldest queued row is
+        // sent, whoever wrote it. So a typed input whose delivery failed is
+        // retried first, and a matched input waits behind it, as in any
+        // queue.
         if (!(yield* connections.holdsConnection(session.runnerId))) return;
-        return yield* flush(sessionId);
+        const claimed = yield* sessions.claimOldestUnlessOneIsOnTheWire(sessionId);
+        if (Option.isSome(claimed)) yield* sendClaimed(claimed.value);
+        return;
       }
       if (session.status !== "exited") return;
       const check = yield* resumableNativeSession(session).pipe(
@@ -600,7 +592,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    flush,
+    sendClaimed,
 
     deliverQueuedInput,
 
@@ -881,10 +873,10 @@ const make = Effect.gen(function* () {
  * - `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are
  *   operations. Each checks its own grant and decodes its own input, and a
  *   route handler calls it directly.
- * - `flush`, `deliverQueuedInput`, `queueConversationInput` and
+ * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput` and
  *   `stopSession` check no grant. The first two send a row that is already
- *   stored: `flush` when a session goes idle, `deliverQueuedInput` when
- *   something else has just stored a row. The grant was checked when the row
+ *   stored: `sendClaimed` the row claimed when a session goes idle,
+ *   `deliverQueuedInput` when something else has just stored a row. The grant was checked when the row
  *   was stored. The other two are the shared work of an operation that
  *   checks its own grant. Putting any of them on a route would let anyone who
  *   can reach the API call it.
