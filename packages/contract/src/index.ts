@@ -255,10 +255,12 @@ export {
   TASK_STATUSES,
   Task,
   TaskCreateInput,
+  TaskCreatedEventPayload,
   TaskFilter,
   TaskPriority,
   TaskStatus,
   TaskUpdateInput,
+  TaskUpdatedEventPayload,
   refuseEmptyTaskUpdate,
 } from "./groups/task";
 export {
@@ -348,8 +350,14 @@ export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
 export {
   FailedEdge,
   FailureReason,
+  RERUN_MODES,
+  RerunMode,
   Run,
   RunCancelInput,
+  RunCancelledEventPayload,
+  RunCompletedEventPayload,
+  RunFailedEventPayload,
+  RunRerunInput,
   RUN_SORT_FIELDS,
   RUN_STATUSES,
   RunFilter,

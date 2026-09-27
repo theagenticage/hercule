@@ -18,7 +18,10 @@
  * `run.start` starts a run, either of a stored workflow or of a workflow sent
  * with the request and never stored. It returns the run's id at once and never
  * waits for a step, so a caller reads the run with `run.read` to see how far
- * it got.
+ * it got. `run.rerun` starts a new run with the inputs of one that has ended.
+ *
+ * When a run ends, the controller emits `run.completed`, `run.failed` or
+ * `run.cancelled` into the event pipeline, with one of the payloads below.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -290,6 +293,8 @@ export const Run = Schema.Union(
        * `plan.edges`, in the same order, zeros included.
        */
       edgeTraversals: Schema.Array(Schema.Int),
+      /** The run this run is a re-run of, when `run.rerun` started it. */
+      rerunOf: Schema.optionalKey(Id),
       createdAt: Timestamp,
     },
     {
@@ -345,6 +350,8 @@ export const RunFilter = Schema.Struct({
    * for the runs a run's `run.start` steps started.
    */
   actor: Schema.optionalKey(Actor),
+  /** Only the re-runs of this run. */
+  rerunOf: Schema.optionalKey(Id),
 });
 
 export type RunFilter = Schema.Schema.Type<typeof RunFilter>;
@@ -396,6 +403,78 @@ export const RunCancelInput = closedStruct({
 
 export type RunCancelInput = Schema.Schema.Type<typeof RunCancelInput>;
 
+/**
+ * How `run.rerun` chooses the workflow definition of the new run:
+ *
+ * - `re-stamp`: the workflow as it is stored now, for a run whose workflow
+ *   was changed after it ran. A run of a workflow sent with `run.start`, or
+ *   of a workflow that was deleted since, has no stored workflow to re-stamp
+ *   from.
+ * - `replay`: the plan the run froze when it started, so the new run does
+ *   exactly what the old one was meant to do.
+ *
+ * Either way the new run starts with the inputs the old run started with.
+ */
+export const RERUN_MODES = ["re-stamp", "replay"] as const;
+
+export const RerunMode = Schema.Literals(RERUN_MODES);
+
+export type RerunMode = Schema.Schema.Type<typeof RerunMode>;
+
+/** The input of `run.rerun`. `mode` is `re-stamp` when it is left out. */
+export const RunRerunInput = closedStruct({
+  mode: Schema.optionalKey(RerunMode),
+});
+
+export type RunRerunInput = Schema.Schema.Type<typeof RunRerunInput>;
+
+/**
+ * The fields every run event's payload has. The payload never names who ended
+ * the run: the event's `actor` holds the user or session whose request ended
+ * it, and is null when the run ended on its own.
+ */
+const RUN_EVENT_FIELDS = {
+  runId: Id,
+  /** The stored workflow the run was started from, or null for a workflow sent with `run.start`. */
+  workflowId: Schema.NullOr(Id),
+  origin: RunOrigin,
+  /** The inputs the run started with, with defaults applied. */
+  inputs: Schema.Record(Schema.String, Schema.Json),
+  /** Absent for a run that ended before it started, such as one cancelled while pending. */
+  startedAt: Schema.optionalKey(Timestamp),
+  finishedAt: Timestamp,
+};
+
+/** The payload of `run.completed`, which the controller emits when a run completes. */
+export const RunCompletedEventPayload = Schema.Struct({
+  ...RUN_EVENT_FIELDS,
+  /** The output of the terminal step that ended the run, as on the run record. */
+  output: Schema.optionalKey(Schema.Json),
+});
+
+export type RunCompletedEventPayload = Schema.Schema.Type<typeof RunCompletedEventPayload>;
+
+/**
+ * The payload of `run.failed`, which the controller emits when a run fails.
+ * `failureReason`, `failedStepId` and `failedEdge` are the run record's.
+ */
+export const RunFailedEventPayload = Schema.Struct({
+  ...RUN_EVENT_FIELDS,
+  failureReason: FailureReason,
+  failedStepId: Schema.optionalKey(Schema.String),
+  failedEdge: Schema.optionalKey(FailedEdge),
+});
+
+export type RunFailedEventPayload = Schema.Schema.Type<typeof RunFailedEventPayload>;
+
+/**
+ * The payload of `run.cancelled`, which the controller emits when a run is
+ * cancelled. A cancellation is not a failure, so it has a kind of its own.
+ */
+export const RunCancelledEventPayload = Schema.Struct(RUN_EVENT_FIELDS);
+
+export type RunCancelledEventPayload = Schema.Schema.Type<typeof RunCancelledEventPayload>;
+
 export const run = HttpApiGroup.make("run")
   .add(
     /**
@@ -435,6 +514,28 @@ export const run = HttpApiGroup.make("run")
       payload: RunCancelInput,
       success: Run,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Starts a new run with the inputs of a run that has ended, and returns
+     * its id at once. The new run records the old one in `rerunOf`. Fails
+     * with `invalid_state` for a run that has not ended, and for a `re-stamp`
+     * of a run with no stored workflow to re-stamp from; with `validation`
+     * when the new run cannot start, as for `run.start`; and with
+     * `cap_exceeded` when it would be nested too deep.
+     */
+    HttpApiEndpoint.post("rerun", "/runs/:id/rerun", {
+      params: { id: Id },
+      payload: RunRerunInput,
+      success: RunStarted,
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Internal,
+      ],
     }),
   )
   .middleware(Authenticated);

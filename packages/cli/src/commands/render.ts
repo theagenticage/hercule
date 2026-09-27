@@ -268,15 +268,15 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 };
 
 /**
- * Returns the lines printed after `run start`: the new run's full id, and the
- * command that shows how far it got. The hint points at `run read` rather
- * than a subscription, because the controller does not accept a subscription
- * on a run yet.
+ * Returns the lines printed after `run start` and `run rerun`: the new run's
+ * full id, and the command that subscribes to it. A caller who started a run
+ * usually wants to know when it ends, and the subscription wakes it when the
+ * run completes, fails or is cancelled.
  */
 const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
   `run ${answer.runId} started`,
   "",
-  `see how far it got with \`hercule run read ${answer.runId}\``,
+  `subscribe for updates: hercule subscription create run:${answer.runId}`,
 ];
 
 /**
@@ -453,7 +453,9 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
-    if (command.id === "run.start") return renderRunStarted(value as RunStarted);
+    if (command.id === "run.start" || command.id === "run.rerun") {
+      return renderRunStarted(value as RunStarted);
+    }
     if (command.id === "run.read") return renderRun(value as Run, Date.now());
     if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     const lines = [...renderKeyValues(record)];
