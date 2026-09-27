@@ -57,6 +57,7 @@ import {
   type AuditKind,
   type PlatformEventKind,
 } from "../events";
+import { NotificationServiceLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
@@ -148,6 +149,7 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
         ),
       ),
     ),
+    Layer.provideMerge(NotificationServiceLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,

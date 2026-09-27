@@ -1,0 +1,223 @@
+/**
+ * Notification rows.
+ *
+ * This module reads and writes the contract's `Notification`. The producer,
+ * the subject, the actions and the resolution are stored as JSON, because a
+ * notification is read and written whole. Nothing here decides policy (who may
+ * create or withdraw, what a producer's mute key is); it only reads and writes.
+ */
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+import type {
+  BoundAction,
+  Notification,
+  NotificationProducer,
+  NotificationStatus,
+  NotificationSubject,
+  Resolution,
+  SortDirection,
+} from "@hercule/contract";
+import {
+  buildKeyset,
+  buildPage,
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type CursorScope,
+  type Page,
+} from "../db";
+
+/** The filter of a listing. A notification must match every field given. */
+export interface NotificationFilter {
+  readonly kind?: string;
+  readonly status?: NotificationStatus;
+  /** Keeps notifications created at or after this instant. */
+  readonly since?: string;
+}
+
+/** The page size, cursor and direction of a listing, which is always by `createdAt`. */
+export interface NotificationPageRequest {
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly direction: SortDirection;
+}
+
+/** A notification as it is written, before it has an id. */
+export type NewNotification = Omit<Notification, "id">;
+
+interface NotificationRow {
+  readonly id: Uint8Array;
+  readonly kind: string;
+  readonly title: string;
+  readonly body: string | null;
+  readonly producer: string;
+  readonly mute_key: string | null;
+  readonly subject: string;
+  readonly event_id: number | null;
+  readonly actions: string;
+  readonly status: string;
+  readonly resolution: string | null;
+  readonly created_at: string;
+}
+
+const COLUMNS =
+  "id, kind, title, body, producer, mute_key, subject, event_id, actions, status, resolution, created_at";
+
+/** Converts a stored row into the contract's notification. */
+const parseRow = (row: NotificationRow): Notification => ({
+  id: uuidToString(row.id),
+  kind: row.kind,
+  title: row.title,
+  ...(row.body === null ? {} : { body: row.body }),
+  producer: JSON.parse(row.producer) as NotificationProducer,
+  ...(row.mute_key === null ? {} : { muteKey: row.mute_key }),
+  subject: JSON.parse(row.subject) as ReadonlyArray<NotificationSubject>,
+  ...(row.event_id === null ? {} : { eventId: row.event_id }),
+  actions: JSON.parse(row.actions) as ReadonlyArray<BoundAction>,
+  status: row.status as NotificationStatus,
+  ...(row.resolution === null ? {} : { resolution: JSON.parse(row.resolution) as Resolution }),
+  createdAt: row.created_at,
+});
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  /**
+   * Builds the condition that one element of a notification's subject list,
+   * `subject.value`, is the given subject. A trigger is named by its workflow
+   * and its id in that workflow; everything else by its id.
+   */
+  const buildSubjectMatch = (subject: NotificationSubject) =>
+    subject.kind === "trigger"
+      ? sql`subject.value ->> 'kind' = 'trigger'
+            AND subject.value ->> 'workflowId' = ${subject.workflowId}
+            AND subject.value ->> 'triggerId' = ${subject.triggerId}`
+      : sql`subject.value ->> 'kind' = ${subject.kind} AND subject.value ->> 'id' = ${subject.id}`;
+
+  return {
+    /** Writes a new notification and returns it with its id. */
+    insert: (notification: NewNotification): Effect.Effect<Notification, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        yield* sql`
+          INSERT INTO notifications
+            (id, kind, title, body, producer, mute_key, subject, event_id, actions, status,
+             resolution, created_at)
+          VALUES
+            (${id}, ${notification.kind}, ${notification.title}, ${notification.body ?? null},
+             ${JSON.stringify(notification.producer)}, ${notification.muteKey ?? null},
+             ${JSON.stringify(notification.subject)}, ${notification.eventId ?? null},
+             ${JSON.stringify(notification.actions)}, ${notification.status},
+             ${notification.resolution === undefined ? null : JSON.stringify(notification.resolution)},
+             ${notification.createdAt})
+        `;
+        return { id: uuidToString(id), ...notification };
+      }),
+
+    /** Returns the notification with that id, or none if it does not exist. */
+    read: (id: string): Effect.Effect<Option.Option<Notification>, SqlError> =>
+      Effect.map(
+        sql<NotificationRow>`SELECT ${sql.literal(COLUMNS)} FROM notifications
+                             WHERE id = ${uuidFromString(id)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), parseRow),
+      ),
+
+    /**
+     * Resolves an open notification. Returns false, and writes nothing, when
+     * the notification is not open, so two resolutions racing each other
+     * cannot both win.
+     */
+    resolve: (id: string, resolution: Resolution): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE notifications SET status = 'resolved', resolution = ${JSON.stringify(resolution)}
+          WHERE id = ${uuidFromString(id)} AND status = 'open'
+          RETURNING id
+        `,
+        (rows) => rows.length === 1,
+      ),
+
+    /** Returns the ids of the open notifications whose subject lists any of these subjects. */
+    listOpenAbout: (
+      subjects: ReadonlyArray<NotificationSubject>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      subjects.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT notifications.id FROM notifications
+              WHERE notifications.status = 'open'
+                AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                            WHERE ${sql.or(subjects.map(buildSubjectMatch))})
+              ORDER BY notifications.created_at, notifications.id
+            `,
+            (rows) => rows.map((row) => uuidToString(row.id)),
+          ),
+
+    /** Returns the id of the workflow a run was started from, or none for a run of a sent workflow. */
+    readRunWorkflowId: (runId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly workflow_id: Uint8Array | null }>`
+          SELECT workflow_id FROM runs WHERE id = ${uuidFromString(runId)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]?.workflow_id), uuidToString),
+      ),
+
+    /**
+     * Returns the id of the assistant a session speaks for, or none for a
+     * session that is not part of an assistant's conversation.
+     */
+    readSessionAssistantId: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly assistant_id: Uint8Array | null }>`
+          SELECT conversations.assistant_id FROM sessions
+          JOIN conversations ON conversations.id = sessions.conversation_id
+          WHERE sessions.id = ${uuidFromString(sessionId)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]?.assistant_id), uuidToString),
+      ),
+
+    /** Returns one page of the notifications that match a filter, ordered by `createdAt`. */
+    list: (
+      filter: NotificationFilter,
+      request: NotificationPageRequest,
+    ): Effect.Effect<Page<Notification>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope: CursorScope = {
+          op: "notification.query",
+          field: "createdAt",
+          direction: request.direction,
+        };
+        const after =
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, "string");
+        const { keyset, order } = buildKeyset(
+          sql,
+          ["created_at", "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          request.direction,
+        );
+        const clauses = [keyset];
+        if (filter.kind !== undefined) clauses.push(sql`kind = ${filter.kind}`);
+        if (filter.status !== undefined) clauses.push(sql`status = ${filter.status}`);
+        if (filter.since !== undefined) clauses.push(sql`created_at >= ${filter.since}`);
+        const rows = yield* sql<NotificationRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM notifications
+          WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
+        `;
+        return yield* buildPage(
+          rows,
+          request.limit,
+          (page) => Effect.succeed(page.map(parseRow)),
+          (last) => encodeCursor(scope, last.createdAt, last.id),
+        );
+      }),
+  };
+});
+
+/** Everything the notification service reads and writes. */
+export const notificationRepository = make;

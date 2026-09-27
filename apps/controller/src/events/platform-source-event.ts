@@ -28,12 +28,12 @@ export interface PlatformSourceEventToAppend {
 /**
  * Appends one event with `source: "platform"` to the log, in the caller's
  * transaction, and announces the change to the log's Live Topic once the
- * transaction commits.
+ * transaction commits. Returns the new event's id, its position in the log.
  */
 export const appendPlatformSourceEvent = (
   sql: SqlClient.SqlClient,
   event: PlatformSourceEventToAppend,
-): Effect.Effect<void, SqlError> =>
+): Effect.Effect<number, SqlError> =>
   Effect.gen(function* () {
     // `dedup_key` is an emitter's idempotency key, and the controller needs
     // none: two logins a second apart are two facts, not one repeated, and a
@@ -43,13 +43,15 @@ export const appendPlatformSourceEvent = (
     // key would let a caller of `event.emit` post it first and suppress the
     // controller's event.
     const dedupKey = crypto.randomUUID();
-    yield* sql`
+    const written = yield* sql<{ readonly id: number }>`
       INSERT INTO events
         (source, connection_id, system, kind, occurred_at, received_at,
          dedup_key, refs, url, payload, raw, actor)
       VALUES
         ('platform', NULL, 'platform', ${event.kind}, ${event.at}, ${event.at},
          ${dedupKey}, '[]', NULL, ${JSON.stringify(event.payload)}, NULL, ${event.actor})
+      RETURNING id
     `;
     yield* announce({ _tag: "event" });
+    return written[0]!.id;
   });
