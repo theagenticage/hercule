@@ -112,6 +112,10 @@
                 <button class="sel">Steer</button>
                 <button class="sel">Cancel</button>
               </div>
+              <div class="dock-pill">
+                <i data-m="decision" class="s-attn"></i><b>Run git push?</b>
+                <button class="btn btn--ink">Allow once<kbd>⏎</kbd></button>
+              </div>
               <div class="dock">
                 <i data-m="decision" class="s-attn"></i>
                 <div>
@@ -119,7 +123,7 @@
                   <div class="dock-subject">git push -u origin fix/3ds-eu-cards</div>
                   <div class="ledger">
                     <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Deny</b><span class="d">The agent is told no and carries on</span><kbd>N</kbd></button>
-                    <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#shield" /></svg></span><b>Always allow git push</b><span class="d">Adds a Grant to this thread's profile</span><kbd>⇧⏎</kbd></button>
+                    <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#shield" /></svg></span><b>Always allow git push</b><span class="d">Allows git push for the rest of this thread</span><kbd>⇧⏎</kbd></button>
                     <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#check" /></svg></span><b>Allow once</b><span class="d">Runs this push, asks again next time</span><kbd>⏎</kbd></button>
                   </div>
                 </div>
@@ -129,6 +133,7 @@
                 <div class="c-row">
                   <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
                   <button class="sel"><svg class="mk"><use href="#shield" /></svg>Auto-accept edits<svg class="mk"><use href="#chev-down" /></svg></button>
+                  <span class="q-count"><i data-m="queued" class="s-attn sm"></i>1 queued</span>
                   <span class="c-spacer"></span>
                   <button class="sel opts">High<svg class="mk"><use href="#chev-down" /></svg></button>
                   <button class="pill"><svg class="mk"><use href="#b-claude" /></svg>Opus 5.5</button>

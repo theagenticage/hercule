@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390, height=844" />
+    <title>Now · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      /* Waiting sessions sit on the Now line: they wait until you answer. */
+      .wt-label { display: flex; align-items: center; gap: 8px; height: 22px; font-size: var(--fs-sm); font-weight: var(--w-emph); color: var(--now-ink); }
+      .wt-label .n { font-family: var(--font-mono); font-weight: 400; }
+      .wt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1px 10px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+      .wt:last-child { border-bottom: 0; }
+      .wt-title { font-size: 15px; font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .wt-meta { grid-column: 1; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .wt .wait { grid-row: 1 / 3; grid-column: 2; }
+
+      /* The lead: the one burning thing, answerable from the list. */
+      .m-lead { margin-top: 2px; padding: 14px 14px 12px; border-radius: 18px; background: var(--raised); box-shadow: var(--shadow-2), 0 0 0 1px var(--line-soft); }
+      .m-lead .lead-title { margin: 8px 0 4px; font-size: 17px; }
+      .m-lead-facts { font-size: var(--fs-sm); color: var(--muted); }
+      .m-lead-facts b { font-weight: var(--w-emph); color: var(--ink); }
+      .m-lead .big-ans.is-go { margin-top: 12px; }
+      .m-lead .big-pair { margin-top: 8px; }
+      .m-lead .big-pair .big-ans { min-height: 44px; font-size: 14px; }
+      .swipe-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--fs-xs); color: var(--muted); }
+      .swipe-hint .m { width: 14px; height: 14px; }
+      .swipe-hint .haptic { margin-left: auto; }
+
+      .sp-edge span:last-child { padding-left: 8px; }
+      .fyi-line { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--muted); padding-top: 3px; }
+      .fyi-line b { font-weight: var(--w-emph); color: var(--ink); }
+      .fyi-line .b { width: 12px; height: 12px; }
+      .last-seen { color: var(--ink); font-weight: var(--w-emph); }
+    </style>
+  </head>
+  <body class="phone">
+    <div data-status></div>
+    <header class="m-head">
+      <div class="m-head-text">
+        <h1 class="m-title">Now</h1>
+        <p class="m-sub">Tue 29 Sep · 212 events since 18:20</p>
+      </div>
+      <button class="m-icon" aria-label="Topics"><i data-m="filter"></i></button>
+      <button class="m-icon" aria-label="Search"><i data-m="search"></i></button>
+    </header>
+
+    <div class="m-scroll">
+      <div class="m-next"><i data-m="clock"></i><span>Ada <b>10:00</b> · triage <b>11:00</b></span><span class="pull">pull down for next</span></div>
+      <div class="m-now" aria-label="Now, 09:41"><span class="nowtab">09:41</span><span class="m-now-note">3 wait on you</span></div>
+
+      <div class="sp">
+        <div class="sp-item">
+          <span class="sp-t now">now</span>
+          <span class="sp-dot"><i data-m="decision" class="now"></i></span>
+          <div class="sp-body">
+            <a class="wt" href="session-active.html"><span class="wt-title">Fix <span class="nw">3-D Secure</span> checkout</span><span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span><span class="wt-meta">Run <code>git push</code>? · webshop</span></a>
+            <a class="wt"><span class="wt-title">Migrate ops dashboards</span><span class="wait"><span class="wbar"><i style="width: 57%"></i></span><span class="mono">17m</span></span><span class="wt-meta">Keep the old Grafana folder? · ops</span></a>
+            <a class="wt"><span class="wt-title">Ship release v2.15</span><span class="wait"><span class="wbar"><i style="width: 20%"></i></span><span class="mono">6m</span></span><span class="wt-meta">Publish to npm? · payments-api</span></a>
+          </div>
+        </div>
+
+        <div class="sp-item">
+          <span class="sp-t">08:52</span>
+          <span class="sp-dot"><i data-m="decision" class="now"></i></span>
+          <article class="sp-body">
+            <div class="m-lead">
+              <header class="lead-head">
+                <span class="prio" data-p="4" role="img" aria-label="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                <span class="lead-kind tx-now">Urgent</span><span class="dotsep">·</span><span>Checkout</span><span class="dotsep">·</span><span class="proj lane-webshop">webshop</span>
+              </header>
+              <a href="decision.html"><h2 class="lead-title">Checkout fails for EU cards with <span class="nw">3-D Secure</span></h2></a>
+              <p class="m-lead-facts"><b>412</b> errors · <b>188</b> users · <b>3</b> customer emails</p>
+              <button class="big-ans is-go"><i data-m="run"></i>Start Fix bug<small>new worktree</small></button>
+              <div class="big-pair"><button class="big-ans">Accept</button><button class="big-ans">Dismiss</button></div>
+              <p class="swipe-hint"><i data-m="swipe"></i>Swipe right to start<span class="haptic"><i data-m="haptic"></i>tick at the edge</span></p>
+            </div>
+          </article>
+        </div>
+
+        <div class="sp-item">
+          <span class="sp-t">08:31</span>
+          <span class="sp-dot"><i data-m="offer"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>Draft a reply to Marta at Brightline</span></div>
+            <div class="mr-meta"><i data-b="gmail"></i>Offer · invoice INV-2291 in the company name</div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">08:14</span>
+          <span class="sp-dot"><i data-m="unsure" class="now"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>"Label new issues" held 34 events</span></div>
+            <div class="mr-meta"><i data-b="github"></i>Needs a call · Spawn Bound 20/h tripped</div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">07:48</span>
+          <span class="sp-dot"><i data-m="decision"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>Stripe webhook retries rising</span><span class="prio" data-p="2" role="img" aria-label="Priority medium, 2 of 4" style="flex: none"><i></i><i></i><i></i><i></i></span></div>
+            <div class="mr-meta"><i data-b="stripe"></i>Proposal · payments-api · Investigate</div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">07:30</span>
+          <span class="sp-dot"><i data-m="unsure" class="now"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>App is slow on Android</span></div>
+            <div class="mr-meta"><i data-b="intercom"></i>Needs a call · which project?</div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">07:20</span>
+          <span class="sp-dot"><i data-m="offer"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>Merge 4 dependency bumps</span></div>
+            <div class="mr-meta"><i data-b="github"></i>Offer · all green, patch versions only</div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">07:00</span>
+          <span class="sp-dot"><i data-m="decision"></i></span>
+          <div class="sp-body">
+            <div class="mr-title"><span>SSL certificate expires in 12 days</span><span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4" style="flex: none"><i></i><i></i><i></i><i></i></span></div>
+            <div class="mr-meta"><i data-b="cron"></i>Proposal · status.acme.dev · ops</div>
+            <p class="fyi-line"><i data-b="posthog"></i><span>FYI · sign-ups <b>+9%</b> week over week</span></p>
+          </div>
+        </div>
+
+        <div class="sp-night">
+          <div class="sp-edge"><span class="sp-t"></span><span class="sp-dot"><i data-m="asleep" class="muted"></i></span><span>Night · 23:00 to 07:00</span></div>
+          <div class="sp-item">
+            <span class="sp-t">06:14</span>
+            <span class="sp-dot"><i data-m="fyi" class="muted"></i></span>
+            <div class="sp-body"><p class="fyi-line"><i data-b="stripe"></i><span>FYI · payout of <b>€18,240</b> arrives Thursday</span></p></div>
+          </div>
+          <div class="sp-item">
+            <span class="sp-t">05:56</span>
+            <span class="sp-dot"><i data-m="decision"></i></span>
+            <div class="sp-body">
+              <div class="mr-title"><span>Nightly backup job timing out on ops-db</span><span class="prio" data-p="3" role="img" aria-label="Priority high, 3 of 4" style="flex: none"><i></i><i></i><i></i><i></i></span></div>
+              <div class="mr-meta"><i data-b="grafana"></i>Proposal · 3 nights in a row · ops</div>
+            </div>
+          </div>
+          <div class="sp-item">
+            <span class="sp-t">23:10</span>
+            <span class="sp-dot"><i data-m="decision"></i></span>
+            <div class="sp-body">
+              <div class="mr-title"><span>Add iDEAL as a payment method</span><span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4" style="flex: none"><i></i><i></i><i></i><i></i></span></div>
+              <div class="mr-meta"><i data-b="intercom"></i>Proposal · 5 requests · webshop</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sp-item">
+          <span class="sp-t">19:12</span>
+          <span class="sp-dot"><i data-m="fyi" class="muted"></i></span>
+          <div class="sp-body"><p class="fyi-line"><i data-b="github"></i><span>FYI · payments-api <b>v2.14.0</b> published</span></p></div>
+        </div>
+        <div class="sp-edge"><span class="sp-t">18:20</span><span class="sp-dot"><i data-m="eye" class="muted"></i></span><span class="last-seen">You last looked · 198 more handled quietly</span></div>
+      </div>
+    </div>
+
+    <nav data-tabs="now"></nav>
+    <i class="home-ind" aria-hidden="true"></i>
+  </body>
+</html>

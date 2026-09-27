@@ -31,7 +31,7 @@
         <div class="bar-title">
           <span class="crumb">webshop /</span>
           <div class="ttabs" role="tablist" aria-label="Threads in this workspace">
-            <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix 3-D Secure checkout for EU cards</span></a>
+            <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix <span class="nw">3-D Secure</span> checkout for EU cards</span></a>
             <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
           </div>
         </div>
@@ -46,11 +46,11 @@
         <div class="tx" data-transcript data-scrolled-by="300">
           <div class="tx-col">
             <div class="tx-axis" aria-hidden="true"></div>
-            <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="intake.html">Checkout fails for EU cards with 3-D Secure</a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
+            <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="intake.html">Checkout fails for EU cards with <span class="nw">3-D Secure</span></a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
 
             <div class="tx-row is-you">
               <time>09:02</time>
-              <p class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
+              <p class="bubble">Checkout fails for EU cards that need <span class="nw">3-D Secure</span> since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
             </div>
 
             <div class="tx-row worked">
@@ -61,7 +61,7 @@
             <div class="tx-row">
               <time>09:04</time>
               <div class="prose">
-                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need <span class="nw">3-D Secure</span>. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the <span class="nw">3-D Secure</span> modal.</p>
                 <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
   <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
 }</pre>

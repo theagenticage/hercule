@@ -351,7 +351,10 @@ code { background: var(--sunk); padding: 1px 5px; border-radius: 5px; }
 .composer.is-compact .compact-pill { display: flex; margin: 0 auto 8px; width: fit-content; align-items: center; gap: 8px; height: 30px; padding: 0 6px 0 12px; border-radius: 15px; background: var(--glass-strong); backdrop-filter: blur(var(--glass-blur)); box-shadow: var(--shadow-note); font-size: var(--t-meta); color: var(--muted); }
 .composer.is-compact .compact-pill b { color: var(--ink); font-weight: 600; }
 .composer.is-compact .compact-pill .btn-sm { height: 22px; }
-.composer-wrap:has(.is-compact)::before { opacity: 0; }
+/* The compact composer swaps its opaque fade for a soft one. The transcript fades out and blurs
+   beneath the pill, so text beside the pill is dim and soft, never sharp. */
+.composer-wrap:has(.is-compact)::before { background: none; backdrop-filter: blur(5px); mask-image: linear-gradient(to bottom, transparent, #000 44px); }
+.scroll:has(+ .composer-wrap .is-compact) { mask-image: linear-gradient(to bottom, #000 calc(100% - 160px), rgb(0 0 0 / 0.1) calc(100% - 88px)); }
 .composer .cbox-main { display: block; }
 
 /* ============ conversation page parts ============ */
@@ -1260,7 +1263,9 @@ html:not([data-state="10x"]) .only-10x, html[data-state="10x"] .only-1x { displa
 .mic-big { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; color: var(--on-accent); background: radial-gradient(circle at 36% 30%, color-mix(in oklch, var(--accent), white 28%), var(--accent) 62%); box-shadow: 0 4px 12px -4px color-mix(in oklch, var(--accent) 80%, transparent); flex: none; }
 .mic-big .ic { width: 18px; height: 18px; }
 .m-composer.is-compact .dock, .m-composer.is-compact .queued, .m-composer.is-compact .cbox-row .sel { display: none; }
-.m-composer.is-compact::before { opacity: 0; }
+/* As on the desktop: with the composer compact, the transcript fades out and blurs beneath the pill. */
+.m-composer.is-compact::before { background: none; backdrop-filter: blur(5px); mask-image: linear-gradient(to bottom, transparent, #000 44px); }
+.m-body:has(+ .m-composer.is-compact) { mask-image: linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 190px), rgb(0 0 0 / 0.1) calc(100% - 112px)); }
 .m-composer.is-compact .compact-pill { display: flex; margin: 0 auto 8px; width: fit-content; align-items: center; gap: 8px; height: 36px; padding: 0 5px 0 14px; border-radius: 18px; background: color-mix(in oklch, var(--raised) 90%, transparent); backdrop-filter: blur(var(--glass-blur)); box-shadow: var(--shadow-note); font-size: 13px; color: var(--muted); }
 .m-composer.is-compact .compact-pill b { color: var(--ink); font-weight: 600; }
 .m-composer.is-compact .compact-pill .btn { height: 28px; border-radius: 14px; }
@@ -1357,6 +1362,8 @@ html:not([data-state="10x"]) .only-10x, html[data-state="10x"] .only-1x { displa
 .ms-r em { font-style: normal; font-size: 13px; color: var(--faint); display: inline-flex; align-items: center; gap: 5px; }
 .ms-r em.c-attn { color: var(--attn); }
 .ms-r > .ic:last-child { width: 12px; height: 12px; color: var(--faint); }
+.ms-r.is-on { background: var(--line-soft); }
+.ms-me .ic { width: 12px; height: 12px; color: var(--faint); }
 .m-scrim { position: absolute; z-index: 24; inset: 0; background: var(--scrim); }
 .m-sheet { position: absolute; z-index: 25; left: 0; right: 0; bottom: 0; padding: 0 18px 34px; border-radius: 26px 26px 0 0; background: var(--bg); box-shadow: var(--shadow-lift); }
 .m-sheet .grab { margin-top: 7px; }
@@ -1376,6 +1383,7 @@ html:not([data-state="10x"]) .only-10x, html[data-state="10x"] .only-1x { displa
 .m-sheet .frow { grid-template-columns: 1fr auto; column-gap: 12px; min-height: 52px; padding: 6px 0; font-size: 15px; }
 .m-sheet .frow-l small { font-size: 12px; }
 .m-sheet .sec-h { margin: 16px 0 6px; }
+.m-sheet-rows { margin-top: 10px; }
 .m-size { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .m-size .meter { width: 110px; height: 4px; }
 .m-size .meter i { background: var(--accent); }
@@ -1421,6 +1429,13 @@ html:not([data-state="10x"]) .only-10x, html[data-state="10x"] .only-1x { displa
 .lk-n .lk-acts { margin-top: 9px; }
 .lk-n .lk-acts button { height: 34px; background: oklch(0% 0 0 / 0.07); }
 .lk-n .lk-acts button.is-primary { background: var(--accent); color: var(--on-accent); }
+.lk-live-m code { font-size: 11.5px; background: oklch(100% 0 0 / 0.1); color: oklch(92% 0.01 70); }
+.lk-live-m .lk-hap { margin-left: auto; color: oklch(86% 0.08 300); background: oklch(100% 0 0 / 0.1); }
+.lk-n-h > span:not(.app):not(.end) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lk-n-h .app .orb { margin: 0; }
+.lk-acts-1 { grid-template-columns: 1fr; }
+.lk-acts button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.lk-acts button .ic { width: 15px; height: 15px; }
 .lk-more { display: flex; align-items: center; justify-content: center; gap: 6px; height: 34px; border-radius: 17px; margin: 0 40px; background: oklch(98% 0.004 80 / 0.5); backdrop-filter: blur(20px); color: oklch(25% 0.01 60); font-size: 12.5px; font-weight: 600; }
 .lk-foot { position: absolute; left: 44px; right: 44px; bottom: 34px; display: flex; justify-content: space-between; }
 .lk-foot span { display: inline-flex; align-items: center; justify-content: center; width: 50px; height: 50px; border-radius: 50%; background: oklch(10% 0 0 / 0.32); backdrop-filter: blur(20px); }
@@ -1694,7 +1709,7 @@ html:not([data-state="10x"]) .only-10x, html[data-state="10x"] .only-1x { displa
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .side, .cbox, .dock, .queued, .lip, .tabbar, .sheet, .ask, .wbar, .compact-pill { backdrop-filter: none !important; }
+  .side, .cbox, .dock, .queued, .lip, .tabbar, .sheet, .ask, .wbar, .compact-pill, .composer-wrap::before, .m-composer::before { backdrop-filter: none !important; }
   .cbox, .dock, .composer.is-compact .cbox { background: var(--raised) !important; }
   .side { background: var(--surface) !important; }
   .lip, .queued, .tabbar, .sheet, .wbar { background: var(--raised) !important; }

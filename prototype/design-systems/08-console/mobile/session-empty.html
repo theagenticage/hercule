@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>New thread · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  .se-body { flex: 1; min-height: 0; overflow: auto; padding: 22px 18px 16px; }
+  .se-body h1 { display: flex; gap: 10px; font-size: 22px; font-weight: var(--w-strong); line-height: 1.25; letter-spacing: -0.015em; color: var(--ink); }
+  .se-body h1 .prompt { flex: none; width: 16px; height: 16px; margin-top: 6px; color: var(--accent); }
+  .se-line { margin: 10px 0 0 26px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .se-line code { font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .se-projects { display: flex; gap: 8px; margin: 16px 0 0 26px; }
+  .se-projects .chip { height: 32px; padding: 0 12px; border-radius: 16px; background: transparent; }
+  .se-projects .chip.is-on { border-color: var(--accent); background: var(--accent-soft); }
+  .se-projects .chip .proj { font-size: 12.5px; }
+
+  .phone .sec { margin: 26px 0 4px; }
+  .se-start { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; column-gap: 10px; align-items: center; min-height: 58px; padding: 8px 2px; border-top: 1px solid var(--line-soft); color: var(--ink); }
+  .se-start:first-of-type { border-top: 0; }
+  .se-start kbd { width: 26px; height: 26px; font-size: 12px; border-radius: 6px; background: transparent; }
+  .se-start .se-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14.5px; font-weight: var(--w-emph); line-height: 1.3; }
+  .se-start .se-title span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .se-start .verb-tag { flex: none; font: 600 11.5px / 1 var(--font-mono); color: var(--accent); }
+  .se-start .from { display: flex; align-items: center; gap: 7px; margin-top: 5px; font: 450 11.5px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .se-start .from .brand { width: 12px; height: 12px; }
+  .se-start > .mk { width: 12px; height: 12px; color: var(--faint); }
+
+  /* The composer, docked at the thumb. Voice first: the mic is the biggest control. */
+  .se-dock { flex: none; position: relative; padding: 0 10px 4px; }
+  .se-dock .m-voice { position: relative; z-index: 2; }
+  .se-dock .m-voice-row { padding: 6px 6px 4px; }
+  .se-dock .ph { display: flex; align-items: center; gap: 2px; font-size: 16px; }
+  .se-dock .mic { width: 56px; height: 56px; }
+  .se-dock .mic .mk { width: 23px; height: 23px; }
+  .m-lip { display: flex; align-items: center; gap: 9px; margin: -12px 12px 0; padding: 20px 12px 8px; border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 14px 14px; background: var(--surface); font: 450 11.5px / 1 var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .m-lip .br { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
+  .m-lip .br .mk { width: 11px; height: 11px; color: var(--faint); }
+  .m-lip .rule { width: 1px; height: 11px; background: var(--line); }
+  .m-lip .right { margin-left: auto; color: var(--faint); }
+  .talk-hint { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 14px 0; font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .talk-hint b { color: var(--muted); font-weight: 560; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="TYPE" data-context="Draft · webshop"></div>
+
+  <header class="m-head">
+    <a class="m-back" href="#" title="Threads"><svg class="mk"><use href="#c-back"/></svg></a>
+    <div class="m-title">
+      <b>New thread</b>
+      <small>draft · nothing runs until you send</small>
+    </div>
+    <button class="m-btn" type="button">Discard</button>
+  </header>
+
+  <div class="se-body">
+    <h1><svg class="mk prompt"><use href="#c-caret"/></svg>What should the agent do in webshop?</h1>
+    <p class="se-line">It gets its own worktree of webshop, on a new branch from <code>main</code>.</p>
+    <div class="se-projects" aria-label="Project">
+      <button class="chip is-on" type="button"><span class="proj webshop">webshop</span></button>
+      <button class="chip" type="button"><span class="proj payments-api">payments-api</span></button>
+      <button class="chip" type="button"><span class="proj ops">ops</span></button>
+    </div>
+
+    <div class="sec">Start from what is waiting <span class="n">4 in webshop</span></div>
+    <a class="se-start" href="#"><kbd>1</kbd><div><div class="se-title"><span class="verb-tag">Fix</span><span>Checkout fails for EU cards</span></div><div class="from"><span class="tone-fail">urgent</span>Proposal · Intake</div></div><svg class="mk"><use href="#c-right"/></svg></a>
+    <a class="se-start" href="#"><kbd>2</kbd><div><div class="se-title"><span class="verb-tag">Fix</span><span>Cart total rounding on discounts</span></div><div class="from"><svg class="brand"><use href="#b-sentry"/></svg>Task · 2 new events</div></div><svg class="mk"><use href="#c-right"/></svg></a>
+    <a class="se-start" href="#"><kbd>3</kbd><div><div class="se-title"><span class="verb-tag">Investigate</span><span>App is slow on Android</span></div><div class="from"><svg class="brand"><use href="#b-intercom"/></svg>7 conversations</div></div><svg class="mk"><use href="#c-right"/></svg></a>
+    <a class="se-start" href="#"><kbd>4</kbd><div><div class="se-title"><span class="verb-tag">Build</span><span>Add iDEAL as a payment method</span></div><div class="from"><svg class="brand"><use href="#b-intercom"/></svg>5 requests</div></div><svg class="mk"><use href="#c-right"/></svg></a>
+  </div>
+
+  <div class="se-dock">
+    <div class="m-voice card-glass">
+      <div class="m-voice-row">
+        <button class="c-btn" type="button" title="Attach files or images"><svg class="mk"><use href="#c-plus"/></svg></button>
+        <span class="ph"><span class="cursor"></span>Say what you want done…</span>
+        <button class="mic" type="button" title="Hold to talk"><svg class="mk"><use href="#c-mic"/></svg></button>
+      </div>
+      <div class="m-voice-opts">
+        <button class="c-sel ink" type="button"><svg class="mk" style="color:var(--accent)"><use href="#g-lock"/></svg>auto-accept edits<svg class="mk"><use href="#c-down"/></svg></button>
+        <button class="c-sel" type="button"><span class="lbl">effort</span>high<svg class="mk"><use href="#c-down"/></svg></button>
+        <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Opus 5.5</span>
+      </div>
+      <span class="hap" style="top:-27px; right:12px">haptic · soft, when listening starts</span>
+    </div>
+    <div class="m-lip">
+      <span class="br"><svg class="mk"><use href="#g-branch"/></svg>New worktree</span>
+      <span class="rule"></span>
+      <span>from main</span>
+      <span class="rule"></span>
+      <span class="br"><svg class="mk"><use href="#g-runner"/></svg>studio-mac</span>
+    </div>
+    <div class="talk-hint"><b>hold</b> the mic to talk · <b>tap</b> to type</div>
+  </div>
+  <div class="home"></div>
+</div>
+</body>
+</html>

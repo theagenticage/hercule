@@ -24,7 +24,9 @@
     if (t) q.set("theme", t);
     if (fig.dataset.state) q.set("state", fig.dataset.state);
     var s = q.toString();
-    return fig.dataset.src + (s ? "?" + s : "");
+    // data-src may carry its own query (e.g. "mobile/intake.html?annotate").
+    var joiner = fig.dataset.src.indexOf("?") >= 0 ? "&" : "?";
+    return fig.dataset.src + (s ? joiner + s : "");
   }
 
   function build(fig) {
@@ -73,7 +75,9 @@
     fig.appendChild(cap);
 
     function fit() {
-      var avail = fig.clientWidth;
+      // clientWidth includes padding; the device must fit inside the content box.
+      var style = getComputedStyle(fig);
+      var avail = fig.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       var max = Number(fig.dataset.maxScale || (kind === "mobile" ? 0.8 : 1));
       var scale = Math.min(max, avail / (w + (kind === "mobile" ? 24 : 0)));
       iframe.style.transform = "scale(" + scale + ")";

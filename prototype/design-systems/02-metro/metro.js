@@ -313,10 +313,10 @@
   // The office's "At 10x" view (?state=swarm) shows the same product with ten times the work.
   var AT_10X = document.documentElement.dataset.state === "swarm";
   var NAV = [
-    ["intake", "Intake", '<span class="count attn">6</span>', "intake.html"],
+    ["intake", "Intake", '<span class="count attn">' + (AT_10X ? 41 : 6) + "</span>", "intake.html"],
     ["checkin", "Check-in", '<span class="count">09:00</span>'],
-    ["tasks", "Tasks", '<span class="count">12</span>'],
-    ["runs", "Runs", '<span class="count">4 live</span>'],
+    ["tasks", "Tasks", '<span class="count">' + (AT_10X ? 96 : 12) + "</span>"],
+    ["runs", "Runs", '<span class="count">' + (AT_10X ? 38 : 4) + " live</span>"],
     ["workflows", "Workflows", '<span class="count">6</span>'],
     ["fleet", "Fleet", '<span class="count">' + (AT_10X ? "140 of 150" : "16 of 22") + "</span>", "office.html"],
     ["connections", "Connections", '<span class="count">11</span>', "settings-connections.html"],
@@ -417,7 +417,7 @@
   }
 
   var TABS = [
-    ["intake", "Intake", "intake", "intake.html", 8],
+    ["intake", "Intake", "intake", "intake.html", 6],
     ["threads", "Threads", "thread", "session-active.html"],
     ["assistants", "Assistants", "bot", "assistant.html"],
     ["fleet", "Fleet", "fleet", "#"],

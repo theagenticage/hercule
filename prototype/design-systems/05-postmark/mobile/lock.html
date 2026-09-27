@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Lock screen · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      /* The wallpaper is the phone's, not Hercule's, so it keeps its colours in every theme.
+         It stays dark enough for white text at well over 4.5:1. */
+      .phone {
+        color: #fff;
+        background:
+          radial-gradient(70% 45% at 85% 12%, oklch(42% 0.14 300 / 0.9), transparent 70%),
+          radial-gradient(60% 40% at 5% 55%, oklch(38% 0.09 60 / 0.8), transparent 70%),
+          radial-gradient(80% 50% at 60% 100%, oklch(32% 0.08 170 / 0.9), transparent 70%), oklch(19% 0.03 290);
+      }
+      .phone .home-ind {
+        background: #fff;
+      }
+      /* A big cancelled postmark pressed into the wallpaper, the way a lock screen photo would sit. */
+      .watermark {
+        position: absolute;
+        left: 60px;
+        top: 650px;
+        width: 300px;
+        color: #fff;
+        opacity: 0.14;
+        --tilt: -14deg;
+      }
+      .clock {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 4px;
+      }
+      .clock .mk {
+        width: 16px;
+        height: 16px;
+      }
+      .clock .date {
+        margin-top: 8px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      .clock .time {
+        margin-top: -2px;
+        font: 700 92px / 1 var(--narrow);
+        letter-spacing: -0.02em;
+      }
+      .stack {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px 10px 0;
+      }
+      /* The platters are the theme's glass on the phone's wallpaper. */
+      .plat {
+        position: relative;
+        border-radius: 22px;
+        color: var(--ink);
+        background: color-mix(in oklch, var(--raised) 84%, transparent);
+        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: var(--glass-blur);
+        box-shadow: inset 0 0 0 1px var(--glass-edge);
+      }
+      /* The Live Activity: the thread's progress as a row of stamps, one of them waiting on you. */
+      .live {
+        padding: 12px 14px 12px;
+      }
+      .live-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .live-top svg {
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+      }
+      .live-top .rs {
+        margin-left: auto;
+        font-size: 9.5px;
+      }
+      .live h2 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-top: 8px;
+        font-size: 16px;
+        font-weight: 650;
+      }
+      .live h2 small {
+        margin-left: auto;
+        font-size: var(--t-sm);
+        font-weight: 400;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .track {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 12px;
+      }
+      .track::before {
+        content: "";
+        position: absolute;
+        left: 12.5%;
+        right: 12.5%;
+        top: 10px;
+        height: 5px;
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 0 50% / var(--perf-pitch) 5px repeat-x;
+      }
+      .step {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.2;
+      }
+      .step i[data-m] {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--raised);
+        box-shadow: 0 0 0 3px var(--raised);
+      }
+      .step.is-now {
+        color: var(--ink);
+        font-weight: 620;
+      }
+      .note {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 10px;
+        padding: 12px 14px 12px 12px;
+      }
+      .note > svg {
+        width: 38px;
+        height: 38px;
+        border-radius: 9px;
+      }
+      .note-top {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 14.5px;
+        font-weight: 640;
+      }
+      .note-top span {
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .note-top time {
+        margin-left: auto;
+        font-size: var(--t-sm);
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .note p {
+        margin-top: 2px;
+        font-size: 14.5px;
+        line-height: 1.35;
+      }
+      .note .cmd {
+        display: block;
+        margin-top: 3px;
+        font: 12.5px / 1.4 var(--mono);
+        white-space: nowrap;
+      }
+      /* The notification's bound actions, the same answers the thread offers. */
+      .acts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .acts .plat {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        height: 44px;
+        border-radius: 14px;
+        font-size: 15px;
+        font-weight: 560;
+      }
+      .acts .plat .mk {
+        width: 15px;
+        height: 15px;
+      }
+      .acts .go {
+        font-weight: 680;
+        color: var(--on-ink);
+        background: var(--violet);
+      }
+      .aside {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px;
+        font-size: 11.5px;
+        color: oklch(100% 0 0 / 0.8);
+      }
+      .aside span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .aside .mk {
+        width: 12px;
+        height: 12px;
+      }
+      .aside .haptic {
+        color: #fff;
+        background: oklch(100% 0 0 / 0.16);
+      }
+      /* The rest of Hercule's notifications, grouped under the newest. */
+      /* The group's own stacking context keeps the edges behind the newest notification. */
+      .group {
+        position: relative;
+        isolation: isolate;
+        margin-bottom: 12px;
+      }
+      .group .edge {
+        position: absolute;
+        z-index: -1;
+        left: 12px;
+        right: 12px;
+        bottom: -7px;
+        height: 20px;
+        border-radius: 0 0 18px 18px;
+        background: color-mix(in oklch, var(--raised) 62%, transparent);
+        box-shadow: inset 0 0 0 1px var(--glass-edge);
+      }
+      .group .edge + .edge {
+        left: 24px;
+        right: 24px;
+        bottom: -13px;
+        background: color-mix(in oklch, var(--raised) 42%, transparent);
+      }
+      .group .more {
+        margin-top: 3px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .corners {
+        position: absolute;
+        left: 46px;
+        right: 46px;
+        bottom: 42px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .corners span {
+        display: grid;
+        place-items: center;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: oklch(100% 0 0 / 0.16);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+      }
+      .corners .mk {
+        width: 22px;
+        height: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <span class="watermark" data-postmark data-waves data-top="SORTED" data-mid="09:41" data-bot="29 SEP"></span>
+      <div data-kit="status" data-tone="light"></div>
+
+      <div class="clock">
+        <svg class="mk"><use href="#lock" /></svg>
+        <div class="date">Tuesday 29 September</div>
+        <div class="time">9:41</div>
+      </div>
+
+      <div class="stack">
+        <section class="plat live" aria-label="Live Activity">
+          <div class="live-top">
+            <svg viewBox="0 0 100 100"><use href="#appicon" /></svg>
+            <span>Hercule · webshop</span>
+            <span class="rs rs--ochre tilt-d">Waiting on you</span>
+          </div>
+          <h2>Fix 3-D Secure checkout<small>3 files <span class="plus">+48</span> <span class="minus">-12</span></small></h2>
+          <div class="track">
+            <span class="step"><i data-m="done" class="s-ok"></i>Started<br />09:02</span>
+            <span class="step"><i data-m="done" class="s-ok"></i>24 tests<br />passed</span>
+            <span class="step is-now"><i data-m="decision" class="s-attn"></i>Push<br />your call</span>
+            <span class="step"><i data-m="queued" class="s-faint"></i>Pull<br />request</span>
+          </div>
+        </section>
+
+        <section class="plat note">
+          <svg viewBox="0 0 100 100"><use href="#appicon" /></svg>
+          <div>
+            <div class="note-top"><span>Request · Fix 3-D Secure checkout</span><time>now</time></div>
+            <p>Run a command? <code class="cmd">git push -u origin fix/3ds-eu-cards</code></p>
+          </div>
+        </section>
+        <div class="acts">
+          <button class="plat"><svg class="mk"><use href="#x" /></svg>Deny</button>
+          <button class="plat go"><svg class="mk"><use href="#check" /></svg>Allow once</button>
+        </div>
+        <div class="aside">
+          <span class="haptic"><svg class="mk"><use href="#haptic" /></svg>firm tap on arrival</span>
+          <span><svg class="mk"><use href="#lock" /></svg>Allow once asks for Face ID</span>
+        </div>
+
+        <div class="group">
+          <section class="plat note">
+            <svg viewBox="0 0 100 100"><use href="#appicon" /></svg>
+            <div>
+              <div class="note-top"><span>Proposal · webshop</span><time>09:00</time></div>
+              <p>Checkout fails for EU cards with 3-D Secure</p>
+              <div class="more">Hold for Start "Fix bug" · Dismiss</div>
+            </div>
+          </section>
+          <span class="edge"></span><span class="edge"></span>
+        </div>
+        <div class="aside" style="justify-content: center"><span>3 more from Hercule</span></div>
+      </div>
+
+      <div class="corners">
+        <span aria-label="Flashlight"
+          ><svg class="mk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M7 3h10v4l-3 4v10h-4V11L7 7z" /><path d="M7 7h10" /></svg
+        ></span>
+        <span aria-label="Camera"
+          ><svg class="mk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 8h4l2-3h6l2 3h4v11H3z" /><circle cx="12" cy="13" r="3.5" /></svg
+        ></span>
+      </div>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

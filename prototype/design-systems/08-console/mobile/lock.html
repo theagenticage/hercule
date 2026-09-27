@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Lock screen · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  /* The lock screen. The clock, the notifications and the two round buttons belong
+     to iOS and use its type and materials. The Live Activity is drawn by Hercule, so
+     it is the one surface here in the Console look: keycaps, the magenta answer and
+     the status line along its bottom. */
+  .phone { --sys: -apple-system, "SF Pro Text", var(--font-sans); background: var(--bg-sunk); }
+  .wall {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(70% 45% at 92% 100%, color-mix(in oklab, var(--c5) 30%, transparent), transparent 70%),
+      radial-gradient(60% 40% at 0% 78%, color-mix(in oklab, var(--c6) 22%, transparent), transparent 70%),
+      radial-gradient(90% 40% at 30% 0%, color-mix(in oklab, var(--c4) 22%, transparent), transparent 70%),
+      linear-gradient(175deg, var(--surface), var(--bg-sunk) 65%);
+  }
+  .phone > :not(.wall) { position: relative; }
+
+  .lock-glyph { display: block; width: 14px; height: 14px; margin: 2px auto 0; color: var(--ink); opacity: 0.85; }
+  .date { margin-top: 6px; text-align: center; font: 600 18px / 1 var(--sys); color: var(--ink); opacity: 0.9; }
+  .clock { margin-top: 2px; text-align: center; font: 700 84px / 1 var(--sys); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+  /* --------------------------------------------------- the Live Activity --- */
+  .la {
+    margin: 16px 12px 0; overflow: hidden;
+    border-radius: 22px;
+    background: color-mix(in oklab, var(--raised) 88%, transparent);
+    -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
+    box-shadow: 0 12px 30px -12px rgb(0 0 0 / 0.5), inset 0 0 0 1px var(--line-soft), inset 0 1px 0 var(--edge);
+  }
+  .la-main { padding: 12px 14px 12px; }
+  .la { position: relative; }
+  .la-head { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; align-items: center; }
+  .la-head img { width: 26px; height: 26px; border-radius: 7px; }
+  .la-head b { display: block; font-size: 15px; font-weight: var(--w-strong); line-height: 1.2; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .la-head small { display: block; margin-top: 2px; font: 450 11px / 1.2 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .la-ask { margin: 11px 0 11px; font-size: 14.5px; line-height: 1.35; color: var(--ink); }
+  .la-ask code { font-size: 12.5px; }
+  .la-answers { position: relative; display: grid; grid-template-columns: 1.5fr 1fr; gap: 8px; }
+  .la-answers button { display: flex; align-items: center; justify-content: center; gap: 9px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font-size: 15px; font-weight: var(--w-emph); color: var(--ink); }
+  .la-answers kbd { width: 22px; height: 22px; font-size: 12px; border-radius: 6px; background: transparent; }
+  .la-answers .is-primary { background: var(--accent); border-color: color-mix(in oklab, var(--accent) 65%, black); color: var(--on-accent); }
+  .la-answers .is-primary kbd { background: color-mix(in oklab, var(--on-accent) 16%, transparent); border-color: color-mix(in oklab, var(--on-accent) 32%, transparent); color: var(--on-accent); }
+  /* The status line, folded into the activity: mode, branch, the diff and the tests. */
+  .la-status { display: flex; align-items: center; gap: 10px; height: 24px; padding-right: 14px; border-top: 1px solid var(--line-soft); background: var(--bg-sunk); font: 450 11px / 1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+  .la-status .mode { align-self: stretch; display: grid; place-items: center; padding: 0 9px; background: var(--attn); color: color-mix(in oklab, var(--attn) 22%, black); font-weight: 750; font-size: 10.5px; letter-spacing: 0.06em; }
+  .la-status .wait { color: var(--attn); }
+  .la-status .end { margin-left: auto; display: inline-flex; gap: 8px; }
+
+  /* ------------------------------------------------- the notifications --- */
+  .notes { display: flex; flex-direction: column; gap: 7px; margin: 12px 12px 0; }
+  .note {
+    position: relative;
+    display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 11px;
+    padding: 10px 12px 10px 11px;
+    border-radius: 20px;
+    background: light-dark(rgb(246 246 246 / 0.74), rgb(38 38 40 / 0.72));
+    -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8);
+    box-shadow: inset 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.12));
+    font: 14px / 1.3 var(--sys); color: light-dark(#1d1d1f, #f2f2f4);
+  }
+  .note > img, .note > .who { width: 36px; height: 36px; margin-top: 2px; border-radius: 9px; }
+  .note .who { position: relative; display: grid; place-items: center; font: 650 16px / 1 var(--sys); }
+  .note .who img { position: absolute; right: -4px; bottom: -4px; width: 17px; height: 17px; border-radius: 5px; box-shadow: 0 0 0 1.5px light-dark(#f0f0f0, #262628); }
+  .note .row { display: flex; align-items: baseline; gap: 8px; }
+  .note .ttl { flex: 1; min-width: 0; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .ttl span { font-weight: 400; color: light-dark(#6e6e73, #a1a1a6); }
+  .note time { font-size: 12.5px; color: light-dark(#6e6e73, #a1a1a6); }
+  .note .body { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .note .acts button { height: 28px; padding: 0 12px; border-radius: 14px; background: light-dark(rgb(0 0 0 / 0.07), rgb(255 255 255 / 0.12)); font: 590 13px / 1 var(--sys); color: inherit; }
+  .note .acts .warn { color: light-dark(#d70015, #ff6961); }
+
+  .corner { display: flex; justify-content: space-between; margin: auto 46px 0; }
+  .corner span { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 50%; background: color-mix(in oklab, var(--bg-sunk) 55%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); color: var(--ink); }
+  .corner svg { width: 22px; height: 22px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="wall"></div>
+  <div class="sb" data-sb data-time=""></div>
+
+  <svg class="lock-glyph"><use href="#g-lock"/></svg>
+  <div class="date">Tuesday 29 September</div>
+  <div class="clock">9:41</div>
+
+  <span class="hap" style="margin:-19px 0 0 auto; right:12px; top:15px; align-self:flex-end">haptic · success, on Allow once</span>
+  <section class="la" aria-label="Live Activity: Fix 3-D Secure checkout">
+    <div class="la-main">
+      <div class="la-head">
+        <img src="../app-icon.svg" alt="">
+        <div><b>Fix 3-D Secure checkout</b><small>webshop · Claude Code · Opus 5.5 · 6m 12s</small></div>
+      </div>
+      <p class="la-ask">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+      <div class="la-answers">
+        <button class="is-primary" type="button"><kbd>y</kbd>Allow once</button>
+        <button type="button"><kbd>n</kbd>Deny</button>
+      </div>
+    </div>
+    <div class="la-status">
+      <span class="mode">WAIT</span>
+      <span class="wait">waiting on you</span>
+      <span class="end"><span>3 files <span class="tone-ok">+48</span> <span class="tone-fail">-12</span></span><span class="tone-ok">✓ 24</span></span>
+    </div>
+  </section>
+
+  <div class="notes">
+    <div class="note">
+      <img src="../app-icon.svg" alt="">
+      <div>
+        <div class="row"><span class="ttl">Proposal <span>· webshop · urgent</span></span><time>09:01</time></div>
+        <div class="body">Checkout fails for EU cards with 3-D Secure</div>
+        <div class="acts"><button type="button">Start "Fix bug"</button><button type="button">Dismiss</button></div>
+      </div>
+    </div>
+    <div class="note">
+      <img src="../app-icon.svg" alt="">
+      <div>
+        <div class="row"><span class="ttl">Request <span>· Ship release v2.15</span></span><time>09:31</time></div>
+        <div class="body">Publish payments-api 2.15.0 to npm?</div>
+        <div class="acts"><button type="button">Allow once</button><button class="warn" type="button">Deny</button></div>
+      </div>
+    </div>
+    <div class="note">
+      <img src="../app-icon.svg" alt="">
+      <div>
+        <div class="row"><span class="ttl">Question <span>· Migrate ops dashboards</span></span><time>08:53</time></div>
+        <div class="body">Keep the old Grafana folder?</div>
+        <div class="acts"><button type="button">Keep</button><button class="warn" type="button">Delete</button></div>
+      </div>
+      <span class="hap" style="bottom:15px; right:12px">haptic · warning</span>
+    </div>
+    <div class="note">
+      <span class="who avatar ada">A<img src="../app-icon.svg" alt=""></span>
+      <div>
+        <div class="row"><span class="ttl">Ada</span><time>09:00</time></div>
+        <div class="body">Morning Rogier. One urgent thing…</div>
+        <div class="acts"><button type="button">Reply</button></div>
+      </div>
+      <span class="hap" style="bottom:15px; right:12px">haptic · one soft tap</span>
+    </div>
+  </div>
+
+  <div class="corner" aria-hidden="true">
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M8 2.5h8v4l-2 3.5v11.5h-4V10L8 6.5z"/><path d="M12 13v2.5"/></svg></span>
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 8.5a2 2 0 0 1 2-2h2.5L9 4.5h6l1.5 2H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></svg></span>
+  </div>
+  <div class="home"></div>
+</div>
+</body>
+</html>

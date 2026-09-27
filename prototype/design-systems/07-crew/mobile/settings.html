@@ -264,6 +264,17 @@
       </div>
       <div class="home-ind"></div>
     </div>
+    <script>
+      // The selected theme follows the page's own theme, so a frame shown in Cocoa has Cocoa selected.
+      (function () {
+        var t = document.documentElement.dataset.theme;
+        t = t === "light" ? "studio" : t === "dark" ? "cocoa" : t;
+        document.querySelectorAll(".tp").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.querySelector(".tp-art").dataset.theme === t));
+        });
+        document.querySelector(".srow.is-on .val").textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      })();
+    </script>
     <script src="../brands.js"></script>
     <script src="../crew.js"></script>
   </body>

@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280, height=800" />
+    <title>(3) Intake · Hercule</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .topbar { gap: 10px; }
+      .topbar .bar-when { margin-right: 10px; }
+      .topics { display: flex; align-items: center; gap: 2px; }
+      .next-chip {
+        display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 9px;
+        border-radius: var(--r-pill); box-shadow: inset 0 0 0 1.5px var(--future); background: var(--future-wash);
+        color: var(--future-ink); font-size: var(--fs-sm); font-weight: var(--w-emph); white-space: nowrap;
+      }
+      .next-chip .m { width: 14px; height: 14px; }
+      .next-chip .mono { font-size: var(--fs-xs); }
+
+      .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 392px; }
+      .chart { --wake: color-mix(in oklch, var(--ink) 30%, var(--past)); min-height: 0; padding: 4px 16px 14px; display: flex; flex-direction: column; }
+
+      /* The timeline with lanes. Every row shares one time axis, 18:20 yesterday to 12:00 today:
+         x = (minutes since midnight + 340) / 1060. Now (09:41) sits at 86.887%. */
+      .gantt { --tcol: 276px; --gap: 16px; position: relative; }
+      .g-row { position: relative; z-index: 1; display: grid; grid-template-columns: var(--tcol) minmax(0, 1fr); column-gap: var(--gap); }
+      .g-under, .g-over { position: absolute; top: 0; bottom: 0; left: calc(var(--tcol) + var(--gap)); right: 0; pointer-events: none; }
+      .g-under { z-index: 0; }
+      .g-over { z-index: 3; }
+      .g-night { position: absolute; top: 30px; bottom: 0; left: 26.415%; width: 45.283%; border-radius: 8px 8px 0 0; background: var(--night); }
+      .g-night span { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .g-ahead { position: absolute; top: 30px; bottom: 0; left: 86.887%; right: 0; background: linear-gradient(90deg, var(--future-wash), transparent 90%); }
+      .g-triage { position: absolute; top: 30px; bottom: 0; left: 94.34%; border-left: 1.5px dashed color-mix(in oklch, var(--future) 60%, transparent); }
+      .g-nowline { position: absolute; top: 12px; bottom: 0; left: 86.887%; width: var(--now-w); transform: translateX(-50%); background: var(--now); }
+      .g-tab { top: 2px; left: 86.887%; transform: translateX(-50%); }
+
+      .g-head { padding-top: 30px; }
+      .g-sum { align-self: end; display: flex; align-items: flex-end; gap: 10px; padding-bottom: 20px; }
+      .g-sum .num { color: var(--ink); }
+      .g-sum-l { white-space: nowrap; display: flex; flex-direction: column; gap: 2px; padding-bottom: 2px; font-size: var(--fs-sm); }
+      .g-sum-l b { font-weight: var(--w-emph); }
+      .g-sum-l .t-mono { font-size: var(--fs-xs); color: var(--faint); }
+      .g-tidewrap { position: relative; }
+      .g-tide { height: 58px; }
+      .fut {
+        position: absolute; top: 21px; width: 20px; height: 20px; margin-left: -10px; display: grid; place-items: center;
+        border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--future); color: var(--future-ink);
+      }
+      .fut .m { width: 12px; height: 12px; }
+      .g-axis { position: relative; height: 20px; }
+      .g-axis span { position: absolute; top: 5px; transform: translateX(-50%); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .g-axis span:first-child { transform: none; }
+      .g-axis span:last-child { transform: translateX(-100%); }
+      .g-axis span.ahead { transform: translateX(-50%); padding: 0 4px; background: var(--bg); color: var(--future-ink); }
+
+      .g-lane { height: 30px; align-items: end; padding-bottom: 5px; border-top: 1px solid var(--line-soft); }
+      .g-lane-name { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+      .g-lane-name .proj { font-weight: var(--w-emph); font-size: var(--fs-sm); }
+      .g-lane-name .n { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+      .g-lane-name .none::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
+      .g-lane-note { align-self: end; font-size: var(--fs-xs); color: var(--faint); display: flex; align-items: center; gap: 6px; }
+      .g-lane-note .m { width: 12px; height: 12px; }
+
+      .g-item { width: calc(100% + 16px); height: 40px; margin: 0 -8px; padding: 0 8px; align-items: center; border-radius: 10px; text-align: left; color: var(--ink); }
+      .g-item:hover { background: var(--hover); }
+      .g-item.is-sel { background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); }
+      .gi-l { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; row-gap: 1px; align-items: center; min-width: 0; }
+      .gi-l > .prio, .gi-l > .m { justify-self: center; }
+      .gi-l > .m { width: 15px; height: 15px; }
+      .gi-title { font-size: var(--fs-md); font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .gi-meta { grid-column: 2; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; overflow: hidden; }
+      .gi-meta .b { width: 11px; height: 11px; color: var(--muted); }
+      .gi-meta .kind { color: var(--muted); }
+      .gi-r { position: relative; height: 100%; }
+
+      /* A wake: the bar from when triage first saw the item to Now. Its length is how long the item
+         has waited; its weight is its priority. Coral only for what burns or needs a call. */
+      .wake { position: absolute; top: 50%; height: 4px; margin-top: -2px; border-radius: 0 2px 2px 0; background: var(--wake); }
+      .wake::before { content: ""; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--ink); }
+      .w-now { height: 8px; margin-top: -4px; background: var(--now); }
+      .w-now::before { left: -5px; width: 10px; height: 10px; margin-top: -5px; background: var(--now); }
+      .w-call { height: 6px; margin-top: -3px; background: var(--now-wash); box-shadow: inset 0 0 0 1.5px var(--now); }
+      .w-call::before { background: var(--now); }
+      .w-p3 { height: 6px; margin-top: -3px; }
+      .w-p1 { height: 2px; margin-top: -1px; }
+      .gi-t { position: absolute; top: 50%; transform: translate(calc(-100% - 10px), -50%); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .is-sel .gi-t { color: var(--now-ink); font-weight: 500; }
+      .fyi-dot { position: absolute; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); background: var(--bg); }
+      .fyi-lab { position: absolute; top: 50%; transform: translate(10px, -50%); font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+      .fyi-lab.left { transform: translate(calc(-100% - 10px), -50%); }
+
+      .g-key { margin-top: auto; display: flex; align-items: center; gap: 18px; padding-top: 10px; font-size: var(--fs-xs); color: var(--muted); }
+      .g-key span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+      .k { display: inline-block; width: 18px; border-radius: 2px; background: var(--wake); height: 4px; }
+      .k-now { height: 8px; background: var(--now); }
+      .k-call { height: 6px; background: var(--now-wash); box-shadow: inset 0 0 0 1.5px var(--now); }
+      .k-thin { height: 2px; }
+      .k-fyi { width: 9px; height: 9px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
+      .k-ahead { width: 14px; height: 12px; background: transparent; border-left: 1.5px dashed var(--future); border-radius: 0; }
+      .g-key .end { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+
+      /* The selected item, in full. The same content is the decision page when opened as a link. */
+      .detail { min-height: 0; overflow: auto; background: var(--surface); border-left: 1px solid var(--line-soft); }
+      .dt-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 12px 0 20px; background: var(--surface); }
+      .dt-pos { font-size: var(--fs-sm); color: var(--muted); }
+      .dt-pos b { font-weight: var(--w-emph); color: var(--ink); }
+      .dt-keys { display: inline-flex; gap: 3px; }
+      .dt { padding: 4px 20px 20px; }
+      .dt .lead-head { flex-wrap: wrap; }
+      .dt .lead-title { margin: 10px 0 4px; }
+      .dt-seen { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+      .dt-seen .wait { color: var(--now-ink); }
+      .dt .lead-gist { font-size: var(--fs-md); }
+      .dt .made-1 { gap: 9px; }
+      .dt .ledger { margin: 16px -8px 0 -5px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+      /* The panel is narrow, so the answers drop their key hints and share one label width. */
+      .dt .ans { grid-template-columns: 150px minmax(0, 1fr); }
+      .dt .ans-label { min-width: 0; }
+      .dt .ans kbd { display: none; }
+
+      /* ?state=swarm: the same screen at ten times today's load. Lanes keep their few rows; what does
+         not fit folds into one row per lane that shows its own tide and a count. */
+      :root:not([data-state="swarm"]) .swarm,
+      :root[data-state="swarm"] .calm { display: none !important; }
+      .g-item.is-more { height: 34px; }
+      .gi-spark { position: absolute; left: 0; right: 13.113%; top: 5px; bottom: 5px; }
+      .more-n { display: inline-flex; align-items: center; gap: 6px; }
+      .more-n b { font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-xs); color: var(--ink); }
+      .grp-n { display: grid; place-items: center; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 5px; font-family: var(--font-mono); font-size: var(--fs-micro); font-weight: 500; background: var(--ink); color: var(--bg); }
+      .g-item.is-group .wake { height: 10px; margin-top: -5px; border-radius: 0 3px 3px 0; }
+      .dt-batch { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); font-size: var(--fs-sm); color: var(--muted); }
+      .dt-batch b { color: var(--ink); font-weight: var(--w-emph); }
+      .dt-batch .btn { margin-left: auto; }
+    </style>
+  </head>
+  <body class="web">
+    <aside data-rail="intake"></aside>
+    <main class="main">
+      <header class="topbar">
+        <h1 class="page-title">Intake</h1>
+        <span class="bar-when">since yesterday 18:20</span>
+        <div class="topics" role="tablist" aria-label="Topics">
+          <button class="tab-pill" role="tab" aria-selected="true">All</button>
+          <button class="tab-pill" role="tab">Checkout</button>
+          <button class="tab-pill" role="tab">Infrastructure</button>
+          <button class="tab-pill" role="tab">Customers</button>
+          <button class="tab-pill" role="tab">Releases</button>
+        </div>
+        <div class="top-end">
+          <span class="next-chip"><i data-m="triage"></i>next triage<span class="mono">11:00</span></span>
+          <button class="search-btn"><i data-m="search"></i>Search<kbd>⌘K</kbd></button>
+          <button class="btn btn-sm btn-ghost"><i data-m="copy" class="xs"></i>Copy link</button>
+        </div>
+      </header>
+
+      <div class="split">
+        <section class="chart scroll" aria-label="What came in, on a timeline">
+          <div class="gantt">
+            <div class="g-under" aria-hidden="true">
+              <div class="g-night"><span>night</span></div>
+              <div class="g-ahead"></div>
+              <div class="g-triage"></div>
+            </div>
+
+            <div class="g-row g-head">
+              <div class="g-sum calm">
+                <span class="num">212</span>
+                <span class="g-sum-l"><b>events since you last looked</b><span class="t-mono">14 surfaced · 198 quietly</span></span>
+              </div>
+              <div class="g-sum swarm">
+                <span class="num">2,684</span>
+                <span class="g-sum-l"><b>events since you last looked</b><span class="t-mono">129 surfaced · 2,555 quietly</span></span>
+              </div>
+              <div class="g-tidewrap">
+                <div class="g-tide" data-tide="since" data-from="-340" data-to="720" data-now="off" data-ticks="on" data-bucket="20" role="img" aria-label="Events per 20 minutes since 18:20 yesterday: steady in the evening, quiet at night, rising from 07:00 with a burst at 08:14"></div>
+                <span class="fut" style="left: 88.679%" title="Ada's heartbeat at 10:00"><i data-m="heartbeat"></i></span>
+                <span class="fut" style="left: 94.34%" title="Next triage pass at 11:00"><i data-m="triage"></i></span>
+                <div class="g-axis" aria-hidden="true">
+                  <span style="left: 0">18:20</span><span style="left: 15.094%">21:00</span><span style="left: 32.075%">00:00</span><span style="left: 49.057%">03:00</span><span style="left: 66.038%">06:00</span><span style="left: 77.358%">08:00</span><span class="ahead" style="left: 94.34%">11:00</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- today's load -->
+            <div class="calm">
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-webshop">webshop</span><span class="n">4</span></span><span class="g-lane-note"><i data-m="attach"></i>2 events attached to the Task Cart total rounding</span></div>
+              <button class="g-row g-item is-sel" type="button" aria-current="true">
+                <span class="gi-l">
+                  <span class="prio" data-p="4" role="img" aria-label="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">Checkout fails for EU cards with <span class="nw">3-D Secure</span></span>
+                  <span class="gi-meta"><i data-b="sentry"></i><i data-b="gmail"></i><i data-b="posthog"></i><i data-b="github"></i><span>412 errors · 188 users</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 82.264%">08:52</time><i class="wake w-now" style="left: 82.264%; width: 4.623%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="unsure" class="now"></i>
+                  <span class="gi-title">"Label new issues" held 34 events</span>
+                  <span class="gi-meta"><span class="kind">Breaker</span><i data-b="github"></i><span>Spawn Bound 20/h tripped</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 78.679%">08:14</time><i class="wake w-call" style="left: 78.679%; width: 8.208%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="offer" class="muted"></i>
+                  <span class="gi-title">Merge 4 dependency bumps</span>
+                  <span class="gi-meta"><span class="kind">Offer</span><i data-b="github"></i><span>all green, patch versions only</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 73.585%">07:20</time><i class="wake" style="left: 73.585%; width: 13.302%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">Add iDEAL as a payment method</span>
+                  <span class="gi-meta"><i data-b="intercom"></i><span>5 requests</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 27.358%">23:10</time><i class="wake w-p1" style="left: 27.358%; width: 59.529%"></i></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-payments">payments-api</span><span class="n">1</span></span></div>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <span class="prio" data-p="2" role="img" aria-label="Priority medium, 2 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">Stripe webhook retries rising</span>
+                  <span class="gi-meta"><i data-b="stripe"></i><i data-b="sentry"></i><span>Checkout</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 76.226%">07:48</time><i class="wake" style="left: 76.226%; width: 10.661%"></i></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-ops">ops</span><span class="n">2</span></span></div>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <span class="prio" data-p="3" role="img" aria-label="Priority high, 3 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">Nightly backup job timing out on ops-db</span>
+                  <span class="gi-meta"><i data-b="grafana"></i><i data-b="cron"></i><span>3 nights in a row, 2h limit</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 65.66%">05:56</time><i class="wake w-p3" style="left: 65.66%; width: 21.227%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">SSL certificate for status.acme.dev expires in 12 days</span>
+                  <span class="gi-meta"><i data-b="cron"></i><span>renew before 11 Oct</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 71.698%">07:00</time><i class="wake w-p1" style="left: 71.698%; width: 15.189%"></i></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj none">No project yet</span><span class="n">2</span></span></div>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="unsure" class="now"></i>
+                  <span class="gi-title">App is slow on Android</span>
+                  <span class="gi-meta"><span class="kind">Unsure</span><i data-b="intercom"></i><span>which project? 7 conversations</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 74.528%">07:30</time><i class="wake w-call" style="left: 74.528%; width: 12.359%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="offer" class="muted"></i>
+                  <span class="gi-title">Draft a reply to Marta at Brightline</span>
+                  <span class="gi-meta"><span class="kind">Offer</span><i data-b="gmail"></i><span>INV-2291 in the company name</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 80.283%">08:31</time><i class="wake" style="left: 80.283%; width: 6.604%"></i></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj none">FYI</span><span class="n">3</span></span></div>
+              <div class="g-row g-item" role="group" aria-label="3 FYI">
+                <span class="gi-l">
+                  <i data-m="fyi" class="muted"></i>
+                  <span class="gi-title" style="font-weight: 400; color: var(--muted)">Nothing to answer</span>
+                </span>
+                <span class="gi-r">
+                  <i class="fyi-dot" style="left: 4.906%"></i><span class="fyi-lab" style="left: 4.906%"><b>v2.14.0</b> published</span>
+                  <i class="fyi-dot" style="left: 67.358%"></i><span class="fyi-lab left" style="left: 67.358%">payout <b>€18,240</b></span>
+                  <i class="fyi-dot" style="left: 71.698%"></i><span class="fyi-lab" style="left: 71.698%">sign-ups <b>+9%</b></span>
+                </span>
+              </div>
+            </div>
+
+            <!-- ten times the load: the same lanes, never a longer list -->
+            <div class="swarm">
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-webshop">webshop</span><span class="n">31</span></span><span class="g-lane-note"><i data-m="attach"></i>6 events attached to 4 Tasks</span></div>
+              <button class="g-row g-item is-sel" type="button" aria-current="true">
+                <span class="gi-l">
+                  <span class="prio" data-p="4" role="img" aria-label="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                  <span class="gi-title">Checkout fails for EU cards with <span class="nw">3-D Secure</span></span>
+                  <span class="gi-meta"><i data-b="sentry"></i><i data-b="gmail"></i><i data-b="posthog"></i><i data-b="github"></i><span>412 errors · 188 users</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 82.264%">08:52</time><i class="wake w-now" style="left: 82.264%; width: 4.623%"></i></span>
+              </button>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="unsure" class="now"></i>
+                  <span class="gi-title">3 workflows held 112 events</span>
+                  <span class="gi-meta"><span class="kind">Breakers</span><i data-b="github"></i><span>Spawn Bounds tripped</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 78.679%">08:14</time><i class="wake w-call" style="left: 78.679%; width: 8.208%"></i></span>
+              </button>
+              <button class="g-row g-item is-more" type="button">
+                <span class="gi-l"><span></span><span class="gi-meta more-n"><b>+29</b><span>more · 1 now · 9 today · 19 when you can</span></span></span>
+                <span class="gi-r"><span class="gi-spark" data-tide="spark:61,29" data-from="-340" data-to="581" data-now="off" data-floor="1" data-bucket="30"></span></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-payments">payments-api</span><span class="n">22</span></span></div>
+              <button class="g-row g-item is-group" type="button">
+                <span class="gi-l">
+                  <span class="grp-n">9</span>
+                  <span class="gi-title">Webhook retries at 9 merchants</span>
+                  <span class="gi-meta"><i data-b="stripe"></i><i data-b="sentry"></i><span>9 Proposals, one cause</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 70.755%">06:51</time><i class="wake" style="left: 70.755%; width: 16.132%"></i></span>
+              </button>
+              <button class="g-row g-item is-more" type="button">
+                <span class="gi-l"><span></span><span class="gi-meta more-n"><b>+13</b><span>more · 4 today · 9 when you can</span></span></span>
+                <span class="gi-r"><span class="gi-spark" data-tide="spark:62,13" data-from="-340" data-to="581" data-now="off" data-floor="1" data-bucket="30" data-peak="0.7"></span></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj lane-ops">ops</span><span class="n">17</span></span></div>
+              <button class="g-row g-item is-group" type="button">
+                <span class="gi-l">
+                  <span class="grp-n">8</span>
+                  <span class="gi-title">Disk and certificate warnings</span>
+                  <span class="gi-meta"><i data-b="grafana"></i><i data-b="cron"></i><span>4 hosts, one answer</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 65.66%">05:56</time><i class="wake w-p3" style="left: 65.66%; width: 21.227%"></i></span>
+              </button>
+              <button class="g-row g-item is-more" type="button">
+                <span class="gi-l"><span></span><span class="gi-meta more-n"><b>+9</b><span>more · 2 today · 7 when you can</span></span></span>
+                <span class="gi-r"><span class="gi-spark" data-tide="spark:63,9" data-from="-340" data-to="581" data-now="off" data-floor="1" data-bucket="30" data-peak="0.55"></span></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj none">No project yet</span><span class="n">20</span></span></div>
+              <button class="g-row g-item" type="button">
+                <span class="gi-l">
+                  <i data-m="unsure" class="now"></i>
+                  <span class="gi-title">6 unsure which project</span>
+                  <span class="gi-meta"><span class="kind">Unsure</span><i data-b="intercom"></i><span>4 of them from Intercom</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 74.528%">07:30</time><i class="wake w-call" style="left: 74.528%; width: 12.359%"></i></span>
+              </button>
+              <button class="g-row g-item is-group" type="button">
+                <span class="gi-l">
+                  <span class="grp-n">6</span>
+                  <span class="gi-title">Draft replies to 6 customers</span>
+                  <span class="gi-meta"><span class="kind">Offers</span><i data-b="gmail"></i><i data-b="intercom"></i><span>invoices and API limits</span></span>
+                </span>
+                <span class="gi-r"><time class="gi-t" style="left: 69.811%">06:40</time><i class="wake" style="left: 69.811%; width: 17.076%"></i></span>
+              </button>
+
+              <div class="g-row g-lane"><span class="g-lane-name"><span class="proj none">6 more projects</span><span class="n">9</span></span><span class="g-lane-note">and FYI 31, in 3 groups</span></div>
+              <button class="g-row g-item is-more" type="button">
+                <span class="gi-l"><span></span><span class="gi-meta more-n"><b>9</b><span>open · 2 today · 7 when you can</span></span></span>
+                <span class="gi-r"><span class="gi-spark" data-tide="spark:64,9" data-from="-340" data-to="581" data-now="off" data-floor="1" data-bucket="30" data-peak="0.5"></span></span>
+              </button>
+            </div>
+
+            <div class="g-over" aria-hidden="true">
+              <span class="nowtab g-tab">09:41</span>
+              <div class="g-nowline"></div>
+            </div>
+          </div>
+
+          <div class="g-key" aria-label="How to read the timeline">
+            <span><i class="k k-now"></i>burning</span>
+            <span><i class="k k-call"></i>needs a call</span>
+            <span><i class="k"></i>open</span>
+            <span><i class="k k-thin"></i>when you can</span>
+            <span><i class="k k-fyi"></i>FYI</span>
+            <span><i class="k k-ahead"></i>next triage</span>
+            <span class="end">each bar runs from first seen to Now</span>
+          </div>
+        </section>
+
+        <aside class="detail" aria-label="Selected Proposal">
+          <div class="dt-head">
+            <span class="dt-pos calm"><b>1</b> of 9 open</span>
+            <span class="dt-pos swarm"><b>1</b> of 99 open</span>
+            <span class="dt-keys"><kbd>K</kbd><kbd>J</kbd></span>
+            <span class="c-spacer"></span>
+            <a class="btn btn-sm btn-ghost" href="decision.html"><i data-m="external" class="xs"></i>Open as page</a>
+            <button class="icon-btn sm" aria-label="Copy link to this Proposal"><i data-m="copy"></i></button>
+          </div>
+          <article class="dt">
+            <header class="lead-head">
+              <span class="prio" data-p="4" role="img" aria-label="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+              <span class="lead-kind tx-now">Urgent</span>
+              <span class="dotsep">·</span><span>Checkout</span>
+              <span class="dotsep">·</span><span class="proj lane-webshop">webshop</span>
+            </header>
+            <h2 class="lead-title">Checkout fails for EU cards with <span class="nw">3-D Secure</span></h2>
+            <p class="dt-seen"><span class="wait"><span class="wbar"><i style="width: 100%"></i></span>49m</span>first seen 08:52</p>
+            <p class="lead-gist">Since deploy #1289, card payments that need <span class="nw">3-D Secure</span> fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+            <div class="lead-part">
+              <div class="label">Made from <span class="n">4 sources</span></div>
+              <div class="made made-1">
+                <div class="made-row"><i data-b="sentry"></i><span><span class="mono fact-code">authentication_required</span> · 412 events, 188 users<span class="src">Sentry · webshop-prod</span></span></div>
+                <div class="made-row"><i data-b="gmail"></i><span>3 customer emails: "Card declined at checkout", …<span class="src">Gmail · rogier@personal</span></span></div>
+                <div class="made-row"><i data-b="posthog"></i><span>Conversion -18% since 14:10 yesterday, EU only<span class="src">PostHog · webshop</span></span></div>
+                <div class="made-row"><i data-b="github"></i><span>Deploy #1289, "Upgrade Stripe SDK to v14"<span class="src">GitHub · rogier/webshop · 14:02 yesterday</span></span></div>
+              </div>
+            </div>
+
+            <div class="ledger" role="group" aria-label="Answers">
+              <button class="ans is-go"><span class="ans-label"><i data-m="run" class="sm"></i>Start "Fix bug"</span><span class="ans-say"><b>Starts Fix bug on webshop in a new worktree</b><span class="sub">Claude Code · Opus 5.5 · studio-mac</span></span><kbd><i data-m="return" class="xs"></i></kbd></button>
+              <button class="ans"><span class="ans-label"><i data-m="task" class="sm"></i>Accept</span><span class="ans-say">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans"><span class="ans-label"><i data-m="close" class="sm"></i>Dismiss</span><span class="ans-say">Closes the Proposal</span><kbd>D</kbd></button>
+            </div>
+            <p class="proactive calm"><i data-m="queued" class="sm"></i>I can also draft a reply to the 3 customers once the fix ships.</p>
+            <div class="dt-batch swarm"><i data-m="unsure" class="now"></i><span><b>9 more</b> need a call</span><button class="btn btn-sm btn-ink">Answer 9 in a row<i data-m="return" class="xs"></i></button></div>
+          </article>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Intake · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  /* The headline, folded to five counts in a row. */
+  .m-hl { flex: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 12px 10px 8px; }
+  .m-hl > span { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .m-hl b { font: 650 20px / 1 var(--font-mono); color: var(--ink); letter-spacing: -0.02em; }
+  .m-hl .fail, .m-hl .fail b { color: var(--fail); }
+  .m-hl .attn, .m-hl .attn b { color: var(--attn); }
+  .m-hl .quiet, .m-hl .quiet b { color: var(--faint); }
+  .phone .strip { flex: none; margin: 0 16px 2px; }
+
+  .m-list { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--line-soft); }
+  .m-list .tier { padding: 13px 16px 5px 30px; }
+
+  /* A row on a phone: a gutter for the cursor, the title, one line of meta. */
+  .mi { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; padding: 9px 14px 10px 0; background: var(--bg); }
+  .mi > .gutter { padding: 4px 11px 0 0; }
+  .mi-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14.5px; font-weight: var(--w-emph); line-height: 1.3; color: var(--ink); }
+  .mi-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi-meta { display: flex; align-items: center; gap: 4px 10px; margin-top: 5px; padding-left: 20px; font: 450 11.5px / 1.2 var(--font-mono); color: var(--faint); white-space: nowrap; overflow: hidden; }
+  .mi-right { display: flex; align-items: center; padding: 3px 0 0 10px; }
+  .mi.is-lead { padding: 12px 14px 14px 0; }
+  .mi.is-lead .mi-title { align-items: flex-start; font-size: 16.5px; font-weight: var(--w-strong); line-height: 1.32; }
+  .mi.is-lead .mi-title > .mk { width: 14px; height: 14px; margin-top: 4px; }
+  .mi.is-lead .mi-title > span { white-space: normal; }
+  .mi-gist { margin-top: 8px; padding-left: 20px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+  .mi-gist code { font-size: 11.5px; padding: 0 4px; border-radius: 3px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .mi-made { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-left: 20px; white-space: nowrap; }
+  .mi-made .src { gap: 5px; }
+
+  /* A swipe in progress. The row slides right over its primary answer; past the
+     threshold the answer fills and the phone ticks. Left is the declining answer. */
+  .swipe-wrap { position: relative; }
+  .swipe { position: relative; overflow: hidden; }
+  .swipe-under { position: absolute; inset: 0; display: flex; align-items: center; padding-left: 16px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: var(--w-emph); }
+  .swipe-under kbd { margin-right: 8px; background: color-mix(in oklab, var(--on-accent) 16%, transparent); border-color: color-mix(in oklab, var(--on-accent) 32%, transparent); color: var(--on-accent); }
+  .swipe .mi { transform: translateX(178px); box-shadow: -10px 0 18px -10px rgb(0 0 0 / 0.45); border-radius: 12px 0 0 12px; }
+
+  .phone .verbs { border-top: 1px solid var(--line-soft); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="DECIDE" data-context="Now · Checkout fails for EU cards"></div>
+
+  <header class="m-head is-root">
+    <div class="m-title">
+      <b>Intake</b>
+      <small>since yesterday 18:20 · 212 events</small>
+    </div>
+    <button class="m-btn is-line" type="button">All topics<svg class="mk" style="width:10px;height:10px"><use href="#c-down"/></svg></button>
+    <button class="m-btn" type="button" title="Search"><svg class="mk"><use href="#c-search"/></svg></button>
+  </header>
+
+  <div class="m-hl">
+    <span class="fail"><b>1</b>burning</span>
+    <span><b>6</b>proposals</span>
+    <span class="attn"><b>2</b>need a call</span>
+    <span><b>3</b>FYI</span>
+    <span class="quiet"><b>198</b>quiet</span>
+  </div>
+  <div class="strip" aria-hidden="true">
+    <i class="fail" style="flex:1"></i><i class="ink" style="flex:5"></i><i class="muted" style="flex:1"></i><i class="ink" style="flex:2"></i><i class="live" style="flex:3"></i><i class="attn" style="flex:2"></i><i style="flex:198"></i>
+  </div>
+
+  <div class="m-list" data-list>
+    <div class="tier fail">Now <span class="n">1</span></div>
+    <article class="mi is-lead is-cursor" data-row>
+      <span class="gutter"><svg class="mk" style="width:10px;height:10px"><use href="#c-caret"/></svg></span>
+      <div>
+        <div class="mi-title"><svg class="mk tone-fail"><use href="#m-urgent"/></svg><span>Checkout fails for EU cards with 3-D Secure</span></div>
+        <div class="mi-meta"><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span class="proj webshop">webshop</span><span class="topic">Checkout</span><span>08:52</span></div>
+        <p class="mi-gist">Since deploy #1289, 3-D Secure payments fail for EU customers. The new Stripe SDK returns <code>requires_action</code>, and checkout treats it as a failure.</p>
+        <div class="mi-made">
+          <span class="src"><svg class="brand"><use href="#b-sentry"/></svg><b>412</b></span>
+          <span class="src"><svg class="brand"><use href="#b-gmail"/></svg><b>3</b> emails</span>
+          <span class="src"><svg class="brand"><use href="#b-posthog"/></svg><b>−18%</b></span>
+          <span class="src"><svg class="brand"><use href="#b-github"/></svg><b>#1289</b></span>
+        </div>
+      </div>
+      <span></span>
+    </article>
+
+    <div class="tier attn">Needs a call <span class="n">2</span></div>
+    <article class="mi" data-row>
+      <span class="gutter">1</span>
+      <div>
+        <div class="mi-title"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>App is slow on Android</span></div>
+        <div class="mi-meta"><span class="src"><svg class="brand"><use href="#b-intercom"/></svg>7 conversations</span><span>which project?</span></div>
+      </div>
+      <span class="mi-right"><span class="stamp attn">unsure</span></span>
+    </article>
+    <article class="mi" data-row>
+      <span class="gutter">2</span>
+      <div>
+        <div class="mi-title"><svg class="mk tone-attn"><use href="#m-paused"/></svg><span>"Label new issues" held 34 events</span></div>
+        <div class="mi-meta"><span class="src"><svg class="brand"><use href="#b-github"/></svg>rogier</span><span>bound 20/h tripped 08:14</span></div>
+      </div>
+      <span class="mi-right"><span class="stamp attn">held</span></span>
+    </article>
+
+    <div class="tier">Today <span class="n">4</span></div>
+    <div class="swipe-wrap">
+    <div class="swipe" data-row>
+      <div class="swipe-under"><kbd>s</kbd>Start "Investigate"</div>
+      <article class="mi">
+        <span class="gutter">3</span>
+        <div>
+          <div class="mi-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Nightly backup job timing out</span></div>
+          <div class="mi-meta"><span class="proj ops">ops</span><span class="src"><svg class="brand"><use href="#b-grafana"/></svg>ops</span></div>
+        </div>
+        <span></span>
+      </article>
+    </div>
+    <span class="hap" style="top:-11px; right:14px">haptic · light tick at the threshold</span>
+    </div>
+    <article class="mi" data-row>
+      <span class="gutter">4</span>
+      <div>
+        <div class="mi-title"><svg class="mk"><use href="#g-offer"/></svg><span>Draft a reply to Marta at Brightline</span></div>
+        <div class="mi-meta"><span class="src"><svg class="brand"><use href="#b-gmail"/></svg>rogier@personal</span><span class="topic">Customers</span></div>
+      </div>
+      <span class="mi-right"><span class="stamp">offer</span></span>
+    </article>
+    <article class="mi" data-row>
+      <span class="gutter">5</span>
+      <div>
+        <div class="mi-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Stripe webhook retries rising</span></div>
+        <div class="mi-meta"><span class="proj payments-api">payments-api</span><span class="src"><svg class="brand"><use href="#b-stripe"/></svg>live</span></div>
+      </div>
+      <span class="mi-right"><span class="prio" data-level="2"><i></i><i></i><i></i><i></i></span></span>
+    </article>
+    <article class="mi" data-row>
+      <span class="gutter">6</span>
+      <div>
+        <div class="mi-title"><svg class="mk"><use href="#g-offer"/></svg><span>Merge 4 dependency bumps</span></div>
+        <div class="mi-meta"><span class="src"><svg class="brand"><use href="#b-github"/></svg>rogier</span><span class="tone-ok">all green</span></div>
+      </div>
+      <span class="mi-right"><span class="stamp">offer</span></span>
+    </article>
+
+    <div class="tier">When you can <span class="n">2</span></div>
+    <article class="mi" data-row>
+      <span class="gutter">7</span>
+      <div>
+        <div class="mi-title"><svg class="mk"><use href="#g-proposal"/></svg><span>SSL certificate for status.acme.dev expires in 12 days</span></div>
+        <div class="mi-meta"><span class="proj ops">ops</span><span>Cron · schedules</span></div>
+      </div>
+      <span class="mi-right"><span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span></span>
+    </article>
+    <article class="mi" data-row>
+      <span class="gutter">8</span>
+      <div>
+        <div class="mi-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Add iDEAL as a payment method</span></div>
+        <div class="mi-meta"><span class="proj webshop">webshop</span><span class="src"><svg class="brand"><use href="#b-intercom"/></svg>5 requests</span></div>
+      </div>
+      <span class="mi-right"><span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span></span>
+    </article>
+  </div>
+
+  <div class="verbs">
+    <button class="verb is-primary" type="button"><span>Start "Fix bug"</span><kbd>s</kbd></button>
+    <button class="verb" type="button"><span>Accept</span><kbd>a</kbd></button>
+    <button class="verb" type="button"><span>Dismiss</span><kbd>d</kbd></button>
+  </div>
+  <nav class="m-tabs" data-mtabs data-active="intake"></nav>
+  <div class="home"></div>
+</div>
+</body>
+</html>

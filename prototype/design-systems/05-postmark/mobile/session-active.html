@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Fix 3-D Secure checkout · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .m-nav {
+        position: relative;
+        z-index: 3;
+      }
+      /* Text fades as it scrolls up under the title bar, instead of being cut at a hard edge. */
+      .transcript {
+        --fade-top: 20px;
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px);
+        mask-image: linear-gradient(to bottom, transparent, #000 20px);
+      }
+      /* The phone's column: edge to edge, and tall enough at the end to clear the composer. */
+      .col {
+        width: auto;
+        padding: 0 16px 330px;
+      }
+      .from-slip {
+        max-width: 100%;
+      }
+      .from-slip > span:nth-of-type(1) {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .msg-user > div {
+        max-width: 86%;
+      }
+      .bubble,
+      .prose {
+        font-size: 15px;
+      }
+      .code {
+        font-size: 11.5px;
+      }
+      .files {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .files-head {
+        justify-content: space-between;
+      }
+      .files-head .rs {
+        font-size: 10px;
+      }
+      .file {
+        font-size: 11.5px;
+      }
+      .composer-dock {
+        z-index: 4;
+        padding: 0 10px 30px;
+      }
+      .queued {
+        margin-inline: 12px;
+      }
+      .queued .mono {
+        margin-left: auto;
+      }
+      /* The phone is too narrow for the mark's own column: the mark joins the title, and the
+         answers get the full width. */
+      .dock {
+        grid-template-columns: minmax(0, 1fr);
+        margin-inline: 12px;
+        padding: 12px 12px 18px;
+      }
+      .dock-title i[data-m] {
+        width: 18px;
+        height: 18px;
+      }
+      .dock-subject {
+        margin-bottom: 10px;
+        font-size: 12px;
+      }
+      /* On the thread the Request keeps to one row of three thumb-sized answers. Tapping the
+         dock opens the full sheet with each answer's describe line (mobile/decision.html). */
+      .answers {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.1fr);
+        gap: 6px;
+      }
+      .answers button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 44px;
+        padding: 0 10px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: var(--ink);
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+      }
+      .answers .mk {
+        width: 15px;
+        height: 15px;
+        flex: none;
+      }
+      .answers .a-no .mk {
+        color: var(--muted);
+      }
+      .answers .a-ok .mk {
+        color: var(--green);
+      }
+      .answers .a-go {
+        color: var(--on-ink);
+        background: var(--violet);
+        box-shadow: var(--lift-shadow);
+      }
+      .c-input {
+        font-size: 15px;
+      }
+      .lip .mono {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Scrolled, the Request pill takes thumb-sized type, and the composer folds to one glass row:
+         the input, the queued count, Stop and the mic. */
+      .dock-pill {
+        gap: 10px;
+        padding: 5px 5px 5px 14px;
+      }
+      .dock-pill b {
+        font-size: 15px;
+      }
+      .dock-pill .btn {
+        height: 38px;
+        padding: 0 16px 0 13px;
+        font-size: 15px;
+      }
+      .composer.is-compact .c-card {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 6px 6px 16px;
+        border-radius: 26px;
+      }
+      .composer.is-compact .c-row {
+        display: contents;
+      }
+      .composer.is-compact .c-plus,
+      .composer.is-compact .c-row > .sel,
+      .composer.is-compact .c-spacer {
+        display: none;
+      }
+      .composer.is-compact .c-input {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        height: 22px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .composer.is-compact .c-input::placeholder {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <nav class="m-nav">
+        <a class="m-back" aria-label="Back to Threads"><svg class="mk"><use href="#chev-left" /></svg></a>
+        <div class="m-title">
+          <b>Fix 3-D Secure checkout for EU cards</b>
+          <small><i class="tag" data-p="webshop"></i>webshop · Opus 5.5 · <span class="plus">+48</span><span class="minus">-12</span></small>
+        </div>
+        <button class="icon-btn" aria-label="More"><svg class="mk"><use href="#more" /></svg></button>
+      </nav>
+
+      <div class="pane">
+        <div class="transcript" data-transcript>
+          <div class="col">
+            <div class="ts-line">
+              <span data-postmark data-top="STARTED" data-mid="09:02" data-bot="29 SEP"></span>
+              <span>Tue 29 Sep · 09:02 · studio-mac</span>
+            </div>
+            <a class="from-slip">
+              <svg class="mk"><use href="#proposal" /></svg>
+              <span>From <b>Checkout fails for EU cards with 3-D Secure</b></span>
+              <span class="stamp-cluster"><span class="post" data-src="sentry"></span><span class="post" data-src="gmail"></span><span class="post" data-src="posthog"></span></span>
+            </a>
+
+            <div class="msg-user">
+              <div>
+                <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+                <span class="bubble-meta">Rogier · 09:02</span>
+              </div>
+            </div>
+
+            <div class="worked"><span>Worked for <b>2m 14s</b></span><svg class="mk"><use href="#chev-down" /></svg></div>
+            <div class="tools">
+              <div><b>read</b> src/checkout/payment.ts</div>
+              <div><b>read</b> src/checkout/3ds-modal.tsx · +4 files</div>
+              <div><b>ran</b> git log --oneline -5 -- package.json <span class="ok">✓</span></div>
+            </div>
+
+            <div class="prose">
+              <p>
+                Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need
+                3-D Secure. <code>handlePaymentResult</code> only handles <code>succeeded</code> and treats everything else as a failure, so we
+                show "Card declined" instead of opening the 3-D Secure modal.
+              </p>
+            </div>
+            <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+            <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+
+            <div class="worked"><span>Worked for <b>4m 51s</b></span><svg class="mk"><use href="#chev-right" /></svg></div>
+
+            <div class="files">
+              <div class="files-main">
+                <div class="files-head">
+                  <span>3 changed files <span class="plus">+48</span> <span class="minus">-12</span></span>
+                  <span class="rs rs--green tilt-a"><svg class="mk"><use href="#done" /></svg>24 passed</span>
+                </div>
+                <div class="file"><span>src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+                <div class="file"><span>src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+                <div class="file"><span>src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+                <div class="file-acts"><a class="link">Show files</a><a class="link">Open diff</a></div>
+              </div>
+            </div>
+
+            <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+          </div>
+        </div>
+
+        <div class="composer-dock">
+          <div class="composer" data-composer>
+            <div class="queued">
+              <i data-m="queued" class="s-attn sm"></i>
+              <span class="q-text">Also check the Apple Pay path</span>
+              <span class="mono">runs next</span>
+            </div>
+            <div class="dock-pill">
+              <i data-m="decision" class="s-attn"></i><b>Run git push?</b>
+              <button class="btn btn--ink"><svg class="mk"><use href="#check" /></svg>Allow once</button>
+            </div>
+            <div class="dock">
+              <div>
+                <div class="dock-title"><i data-m="decision" class="s-attn"></i>Run a command?<span class="rs rs--ochre tilt-d">Waiting on you</span></div>
+                <div class="dock-subject">git push -u origin fix/3ds-eu-cards</div>
+                <div class="answers">
+                  <button class="a-no"><svg class="mk"><use href="#x" /></svg>Deny</button>
+                  <button class="a-ok"><svg class="mk"><use href="#shield" /></svg>Always allow</button>
+                  <button class="a-go"><svg class="mk"><use href="#check" /></svg>Allow once</button>
+                </div>
+              </div>
+            </div>
+            <div class="c-card">
+              <textarea class="c-input" rows="1" placeholder="Queued until the turn finishes…"></textarea>
+              <div class="c-row">
+                <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
+                <button class="sel"><svg class="mk"><use href="#shield" /></svg>Auto-accept edits<svg class="mk"><use href="#chev-down" /></svg></button>
+                <span class="q-count"><i data-m="queued" class="s-attn sm"></i>1 queued</span>
+                <span class="c-spacer"></span>
+                <button class="stop"><svg class="mk"><use href="#stop" /></svg>Stop</button>
+                <button class="m-mic" aria-label="Hold to talk"><svg class="mk"><use href="#mic" /></svg></button>
+              </div>
+            </div>
+            <div class="lip">
+              <span class="sel"><svg class="mk"><use href="#worktree" /></svg><span class="mono">fix-3ds-eu-cards</span></span>
+              <button class="sel right"><svg class="mk"><use href="#machine" /></svg>studio-mac</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

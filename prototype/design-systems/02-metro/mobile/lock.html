@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-theme="night-service">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Lock screen · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone lk">
+      <!-- The wallpaper: a quiet stretch of network map, so the notifications sit on the lines. -->
+      <svg class="lk-wall" width="390" height="844" viewBox="0 0 390 844" aria-hidden="true">
+        <path d="M-20 262H96l70-70H410" style="stroke: var(--ln-sentry)" />
+        <path d="M-20 280H104l70-70H410" style="stroke: var(--ln-gmail)" />
+        <path d="M312-20V160l60 60v660" style="stroke: var(--ln-github)" />
+        <path d="M-20 700H70l80-80H410" style="stroke: var(--ln-posthog)" />
+        <path d="M40 880V560l-60-60" style="stroke: var(--ln-intercom)" />
+        <circle cx="136" cy="222" r="7" />
+        <circle cx="342" cy="190" r="7" />
+        <circle cx="110" cy="660" r="7" />
+      </svg>
+
+      <div class="statusbar" data-statusbar="KPN"></div>
+
+      <!-- The Dynamic Island, compact: the thread's line on the left, what it waits for on the right. -->
+      <div class="lk-island" role="img" aria-label="Fix 3-D Secure checkout is waiting on you">
+        <i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i>
+        <span class="lk-island-t">waiting</span>
+      </div>
+
+      <div class="lk-top">
+        <i data-i="lock" class="lk-lock"></i>
+        <div class="lk-date">Tuesday 29 September</div>
+        <div class="lk-clock">9:41</div>
+      </div>
+
+      <div class="lk-list">
+        <!-- The Live Activity for the working thread. Its answers are bound: Allow once pushes
+             the branch without opening the app. -->
+        <section class="lk-la" aria-label="Live Activity: Fix 3-D Secure checkout">
+          <div class="lk-la-top">
+            <i data-appicon="22"></i>
+            <b>Fix 3-D Secure checkout</b>
+            <span class="lk-muted">webshop</span>
+            <span class="grow"></span>
+            <span class="lk-attn">waiting on you</span>
+          </div>
+          <svg class="lineage-svg lk-la-line" data-lineage width="334" height="54" data-cy="21" data-spread="10.5" data-rightpad="22" data-lines="sentry gmail posthog github"
+            data-stations="Proposal||done;Thread|09:40|here-wait;PR|next|future"></svg>
+          <div class="lk-la-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+          <div class="lk-la-acts">
+            <button class="lk-btn lk-btn--ink">Allow once</button>
+            <button class="lk-btn">Deny</button>
+            <span class="lk-la-stat"><b class="plus">+48</b> <b class="minus">-12</b><small>3 files</small></span>
+          </div>
+        </section>
+
+        <article class="lk-nt">
+          <div class="lk-nt-top"><i data-appicon="20"></i><span><b>Request</b> · Ship release v2.15</span><span class="lk-time">2m ago</span></div>
+          <p>Publish payments-api 2.15.0 to npm?</p>
+          <div class="lk-nt-acts"><button class="lk-btn lk-btn--ink">Allow once</button><button class="lk-btn">Deny</button></div>
+        </article>
+
+        <article class="lk-nt">
+          <div class="lk-nt-top"><i data-appicon="20"></i><span><b>Question</b> · Migrate ops dashboards</span><span class="lk-time">9:31</span></div>
+          <p>Keep the old Grafana folder?</p>
+          <div class="lk-nt-acts"><button class="lk-btn">Keep</button><button class="lk-btn">Delete</button></div>
+        </article>
+
+        <article class="lk-nt lk-nt--stack">
+          <div class="lk-nt-top"><i data-appicon="20"></i><span><b>Ada</b> · Web chat</span><span class="lk-time">9:00</span></div>
+          <p>Morning Rogier. One urgent thing…</p>
+        </article>
+        <div class="lk-hap"><span class="haptic">haptic: pattern on arrival · success on Allow</span></div>
+      </div>
+
+      <button class="lk-corner lk-corner--l" aria-label="Flashlight">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M8 3h8v4l-2 3v11h-4V10L8 7z" /><path d="M12 13v2" stroke-linecap="round" /></svg>
+      </button>
+      <button class="lk-corner lk-corner--r" aria-label="Camera">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 8h4l2-3h6l2 3h4v11H3z" /><circle cx="12" cy="13" r="3.5" /></svg>
+      </button>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

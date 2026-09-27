@@ -1364,9 +1364,10 @@ code {
   color: var(--faint);
 }
 
-/* Scrolled: the stack narrows to a see-through pill; answers and options fold away. */
+/* Scrolled: the stack narrows to a see-through pill; answers and options fold away.
+   The transcript fades out just behind the pill, so text never runs under the Reply field. */
 html[data-state="scrolled"] .composer-wrap {
-  background: none;
+  background: linear-gradient(0deg, var(--canvas) 22px, color-mix(in oklab, var(--canvas) 86%, transparent) 48px, transparent 84px);
 }
 html[data-state="scrolled"] .composer-stack {
   width: 540px;
@@ -3349,8 +3350,12 @@ html[data-state="scrolled"] .dock-h .fold {
 .bigans.pair button.go {
   grid-column: 1 / -1;
 }
-/* A haptic annotation: where a tap is felt. Dashed and mono, so it never reads as UI. */
+/* A haptic annotation: where a tap is felt. It is not part of the product, so it is hidden unless
+   the page is opened with ?annotate, which sets <html data-annotate>. */
 .hap {
+  display: none;
+}
+html[data-annotate] .hap {
   position: absolute;
   z-index: 60;
   display: inline-flex;

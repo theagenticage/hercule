@@ -13,7 +13,7 @@
          the notifications and the Dock, so those use the system font. */
       .glance { position: relative; width: 1440px; height: 900px; }
       .os { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
-      .sp { flex: 1; }
+      .grow { flex: 1; }
       .glass-os {
         background: var(--glass);
         backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
@@ -158,7 +158,7 @@
       .pop-foot { display: flex; margin: 0 -8px; }
       .pop-foot button { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; font-size: var(--fs-sm); color: var(--ink); }
       .pop-foot button:hover { background: var(--hover); }
-      .pop-foot .sp + button { color: var(--muted); }
+      .pop-foot .grow + button { color: var(--muted); }
 
       /* ---------------------------------------------------------------- notifications */
       .notes { position: absolute; top: 34px; right: 12px; width: 348px; z-index: 9; display: flex; flex-direction: column; gap: 8px; }
@@ -240,7 +240,7 @@
     <header class="menubar os">
       <span class="mb-menu is-app">Editor</span>
       <span class="mb-menu">File</span><span class="mb-menu">Edit</span><span class="mb-menu">Selection</span><span class="mb-menu">View</span><span class="mb-menu">Go</span><span class="mb-menu">Window</span><span class="mb-menu">Help</span>
-      <span class="sp"></span>
+      <span class="grow"></span>
       <button class="mb-item mb-hercule" aria-label="Hercule: 3 waiting on you, next triage 11:00" aria-expanded="true">
         <svg class="mini" viewBox="0 0 34 14" aria-hidden="true"><path class="f" d="M0 13C4 12.5 6 9.5 9 10.5S13 6.5 16 8.5 20 3.5 23 5.5V14H0Z" /><path d="M0 13C4 12.5 6 9.5 9 10.5S13 6.5 16 8.5 20 3.5 23 5.5" /><circle class="u" cx="30.5" cy="9" r="2.6" /><path class="n" d="M24 0.5V13.5" /></svg>
         <span class="mb-count">3</span>
@@ -277,8 +277,8 @@
         <span>package.json</span>
         <span>tsconfig.json</span>
       </nav>
-      <pre class="ed-code"><b data-n="1"><span class="k">import</span> { stripe } <span class="k">from</span> <span class="s">"../lib/stripe"</span>;</b><b data-n="2"><span class="k">import type</span> { Cart } <span class="k">from</span> <span class="s">"../cart/types"</span>;</b><b data-n="3"><span class="k">import</span> { open3dsModal } <span class="k">from</span> <span class="s">"./3ds-modal"</span>;</b><b data-n="4"> </b><b data-n="5"><span class="c">/** Confirms a card payment, and runs 3-D Secure when the bank asks for it. */</span></b><b data-n="6"><span class="k">export async function</span> <span class="f">confirmPayment</span>(cart: Cart, card: CardInput) {</b><b data-n="7">  <span class="k">const</span> intent = <span class="k">await</span> stripe.paymentIntents.<span class="f">create</span>({</b><b data-n="8">    amount: cart.totalCents,</b><b data-n="9">    currency: <span class="s">"eur"</span>,</b><b data-n="10">    payment_method_types: [<span class="s">"card"</span>],</b><b data-n="11">  });</b><b data-n="12"> </b><b data-n="13">  <span class="k">const</span> result = <span class="k">await</span> stripe.<span class="f">confirmCardPayment</span>(intent.client_secret, {</b><b data-n="14">    payment_method: { card },</b><b data-n="15">  });</b><b data-n="16"> </b><b data-n="17" class="add">  <span class="c">// EU cards come back as requires_action. This used to count as a failure.</span></b><b data-n="18" class="add">  <span class="k">if</span> (result.paymentIntent?.status === <span class="s">"requires_action"</span>) {</b><b data-n="19" class="add">    <span class="k">return</span> <span class="f">handleNextAction</span>(result.paymentIntent);</b><b data-n="20" class="add">  }</b><b data-n="21">  <span class="k">return</span> result;</b><b data-n="22">}</b><b data-n="23"> </b><b data-n="24" class="add"><span class="k">async function</span> <span class="f">handleNextAction</span>(intent: PaymentIntent) {</b><b data-n="25" class="add">  <span class="k">const</span> outcome = <span class="k">await</span> <span class="f">open3dsModal</span>(intent.next_action);</b><b data-n="26" class="add">  <span class="k">if</span> (outcome === <span class="s">"cancelled"</span>) {</b><b data-n="27" class="add">    <span class="k">return</span> { status: <span class="s">"cancelled"</span> <span class="k">as const</span> };</b><b data-n="28" class="add">  }</b><b data-n="29" class="add">  <span class="k">return</span> stripe.<span class="f">retrievePaymentIntent</span>(intent.client_secret);</b><b data-n="30" class="add">}</b><b data-n="31"> </b><b data-n="32"><span class="k">export function</span> <span class="f">isEuCard</span>(card: CardInput) {</b><b data-n="33">  <span class="k">return</span> EU_COUNTRIES.<span class="f">has</span>(card.country);</b><b data-n="34">}</b></pre>
-      <div class="ed-foot"><span>fix/3ds-eu-cards</span><span>3 changed</span><span class="sp"></span><span>Ln 18, Col 5</span><span>TypeScript</span></div>
+      <pre class="ed-code"><b data-n="1"><span class="k">import</span> { stripe } <span class="k">from</span> <span class="s">"../lib/stripe"</span>;</b><b data-n="2"><span class="k">import type</span> { Cart } <span class="k">from</span> <span class="s">"../cart/types"</span>;</b><b data-n="3"><span class="k">import</span> { open3dsModal } <span class="k">from</span> <span class="s">"./3ds-modal"</span>;</b><b data-n="4"> </b><b data-n="5"><span class="c">/** Confirms a card payment, and runs <span class="nw">3-D Secure</span> when the bank asks for it. */</span></b><b data-n="6"><span class="k">export async function</span> <span class="f">confirmPayment</span>(cart: Cart, card: CardInput) {</b><b data-n="7">  <span class="k">const</span> intent = <span class="k">await</span> stripe.paymentIntents.<span class="f">create</span>({</b><b data-n="8">    amount: cart.totalCents,</b><b data-n="9">    currency: <span class="s">"eur"</span>,</b><b data-n="10">    payment_method_types: [<span class="s">"card"</span>],</b><b data-n="11">  });</b><b data-n="12"> </b><b data-n="13">  <span class="k">const</span> result = <span class="k">await</span> stripe.<span class="f">confirmCardPayment</span>(intent.client_secret, {</b><b data-n="14">    payment_method: { card },</b><b data-n="15">  });</b><b data-n="16"> </b><b data-n="17" class="add">  <span class="c">// EU cards come back as requires_action. This used to count as a failure.</span></b><b data-n="18" class="add">  <span class="k">if</span> (result.paymentIntent?.status === <span class="s">"requires_action"</span>) {</b><b data-n="19" class="add">    <span class="k">return</span> <span class="f">handleNextAction</span>(result.paymentIntent);</b><b data-n="20" class="add">  }</b><b data-n="21">  <span class="k">return</span> result;</b><b data-n="22">}</b><b data-n="23"> </b><b data-n="24" class="add"><span class="k">async function</span> <span class="f">handleNextAction</span>(intent: PaymentIntent) {</b><b data-n="25" class="add">  <span class="k">const</span> outcome = <span class="k">await</span> <span class="f">open3dsModal</span>(intent.next_action);</b><b data-n="26" class="add">  <span class="k">if</span> (outcome === <span class="s">"cancelled"</span>) {</b><b data-n="27" class="add">    <span class="k">return</span> { status: <span class="s">"cancelled"</span> <span class="k">as const</span> };</b><b data-n="28" class="add">  }</b><b data-n="29" class="add">  <span class="k">return</span> stripe.<span class="f">retrievePaymentIntent</span>(intent.client_secret);</b><b data-n="30" class="add">}</b><b data-n="31"> </b><b data-n="32"><span class="k">export function</span> <span class="f">isEuCard</span>(card: CardInput) {</b><b data-n="33">  <span class="k">return</span> EU_COUNTRIES.<span class="f">has</span>(card.country);</b><b data-n="34">}</b></pre>
+      <div class="ed-foot"><span>fix/3ds-eu-cards</span><span>3 changed</span><span class="grow"></span><span>Ln 18, Col 5</span><span>TypeScript</span></div>
     </div>
 
     <!-- The quick panel: ⌥Space from any app answers what waits, without switching apps. -->
@@ -291,7 +291,7 @@
       <div class="qp-list">
         <div class="qp-row is-on">
           <i data-m="decision" class="now"></i>
-          <div class="qp-t"><b>Fix 3-D Secure checkout for EU cards</b><span class="proj lane-webshop">webshop</span></div>
+          <div class="qp-t"><b>Fix <span class="nw">3-D Secure</span> checkout for EU cards</b><span class="proj lane-webshop">webshop</span></div>
           <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
           <div class="qp-more">
             <p class="qp-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
@@ -316,13 +316,13 @@
       </div>
       <footer class="qp-foot">
         <span><kbd>↑</kbd><kbd>↓</kbd>move</span><span><kbd>↵</kbd>answer</span><span><kbd>⌘O</kbd>open thread</span><span><kbd>esc</kbd>close</span>
-        <span class="sp"></span><span class="mono">1 of 3</span>
+        <span class="grow"></span><span class="mono">1 of 3</span>
       </footer>
     </section>
 
     <!-- The menu bar popover: the day on one axis. What came in, Now, and what is scheduled next. -->
     <section class="pop glass-os" aria-label="Hercule today">
-      <header class="pop-h"><b>Today</b><span class="muted sm">Tue 29 Sep</span><span class="sp"></span><span class="t-mono">23 live</span><button class="icon-btn sm" aria-label="Settings"><i data-m="settings" class="sm"></i></button></header>
+      <header class="pop-h"><b>Today</b><span class="muted sm">Tue 29 Sep</span><span class="grow"></span><span class="t-mono">23 live</span><button class="icon-btn sm" aria-label="Settings"><i data-m="settings" class="sm"></i></button></header>
       <div class="pop-tide" role="img" aria-label="Events since 06:00, Now at 09:41, Ada's heartbeat at 10:00, triage at 11:00">
         <div class="pt-chart" data-tide="day" data-from="360" data-to="720" data-bucket="12" style="width: 308px; height: 40px"></div>
         <span class="pt-now" style="left: 189px">09:41</span>
@@ -330,11 +330,11 @@
         <span class="pt-soon" style="left: 256.7px">triage<i></i></span>
         <div class="pt-axis"><span style="left: 0">06:00</span><span style="left: 102.7px">08:00</span><span style="left: 205.3px">10:00</span><span style="left: 308px">12:00</span></div>
       </div>
-      <p class="pop-next"><i data-m="triage"></i>Next: <b>triage at 11:00</b><span class="sp"></span><span class="mono">in 1h 19m</span></p>
+      <p class="pop-next"><i data-m="triage"></i>Next: <b>triage at 11:00</b><span class="grow"></span><span class="mono">in 1h 19m</span></p>
       <hr />
       <div class="label">Waiting on you<span class="n">3</span></div>
       <a class="pop-row" href="session-active.html">
-        <i data-m="decision" class="now"></i><b>Fix 3-D Secure checkout for EU cards</b>
+        <i data-m="decision" class="now"></i><b>Fix <span class="nw">3-D Secure</span> checkout for EU cards</b>
         <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
         <small><span class="proj lane-webshop">webshop</span>· Request · git push</small>
       </a>
@@ -349,9 +349,9 @@
         <small><span class="proj lane-payments">payments-api</span>· Request · npm publish</small>
       </a>
       <hr />
-      <p class="pop-live"><span><i data-m="working" class="live"></i><b>8</b> working</span><span><i data-m="idle" class="faint"></i><b>12</b> idle</span><span class="sp"></span><span class="faint xs">build-box-1 at cap</span></p>
+      <p class="pop-live"><span><i data-m="working" class="live"></i><b>8</b> working</span><span><i data-m="idle" class="faint"></i><b>12</b> idle</span><span class="grow"></span><span class="faint xs nw">build-box-1 at cap</span></p>
       <hr />
-      <div class="pop-foot"><button>Open Hercule<kbd>⌘0</kbd></button><span class="sp"></span><button>Quick panel<kbd>⌥ Space</kbd></button></div>
+      <div class="pop-foot"><button>Open Hercule<kbd>⌘0</kbd></button><span class="grow"></span><button>Quick panel<kbd>⌥ Space</kbd></button></div>
     </section>
 
     <!-- Native notifications. Each carries the answers as action buttons. -->
@@ -379,7 +379,7 @@
         <div>
           <div class="note-h"><b>Ada</b><time>09:00</time></div>
           <div class="note-kind"><i data-m="heartbeat" class="future"></i>Heartbeat · Web chat</div>
-          <p class="note-body">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+          <p class="note-body">Morning Rogier. One urgent thing: EU card payments that need <span class="nw">3-D Secure</span> have failed since yesterday's deploy.</p>
         </div>
         <div class="note-acts"><button>Reply</button><button>Open</button></div>
       </article>

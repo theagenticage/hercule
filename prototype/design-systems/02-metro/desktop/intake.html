@@ -32,14 +32,33 @@
 
         <div class="intake">
           <div class="intake-main">
-            <div class="headline">
+            <div class="headline when-today">
               <span class="burning"><b>1</b>burning</span><span><b>6</b>proposals</span><span><b>2</b>need a call</span><span><b>3</b>FYI</span
               ><span class="quiet"><b>198</b>handled quietly</span>
             </div>
+            <div class="headline when-swarm">
+              <span class="burning"><b>3</b>burning</span><span><b>41</b>proposals</span><span><b>9</b>need a call</span><span><b>35</b>FYI</span
+              ><span class="quiet"><b>30,881</b>handled quietly</span>
+            </div>
 
-            <!-- What came in since the last visit, as a network: each Connection is a line into Triage. -->
+            <!-- What came in since the last visit, as a network: each Connection is a line into Triage.
+                 At 10x the same eight lines carry 150 times the events; only their weight changes. -->
             <figure class="mapband" aria-label="What came in since yesterday 18:20">
-              <svg class="netmap" data-netmap width="720" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27"></svg>
+              <svg class="netmap when-today" data-netmap width="720" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27"></svg>
+              <svg
+                class="netmap when-swarm"
+                data-netmap
+                width="720"
+                height="200"
+                data-labelw="124"
+                data-outw="124"
+                data-row="21"
+                data-top="28"
+                data-outrow="27"
+                data-when="09:00 · 2m 51s · next 11:00"
+                data-in="sentry:12400 github:6100 gmail:4300 stripe:3100 intercom:2600 posthog:1200 grafana:900 cron:400"
+                data-out="41 proposals:41:wait;12 offers:12:wait;9 unsure:9:wait;22 attached:22:done;35 FYI:35:info;30,881 no action:30881:end"
+              ></svg>
             </figure>
 
             <!-- The lead Proposal: four lines meet at one interchange. -->
@@ -98,7 +117,7 @@
               </div>
             </article>
 
-            <h2 class="sec-head">Needs a call<span class="n">2</span></h2>
+            <h2 class="sec-head">Needs a call<span class="n when-today">2</span><span class="n when-swarm">9</span></h2>
             <div class="irow">
               <i data-strip="intercom" data-end="wait"></i>
               <div>
@@ -119,8 +138,9 @@
                 <button class="btn btn--sm">Keep held</button><button class="btn btn--ghost btn--sm">Release all 34</button><button class="btn btn--ghost btn--sm">Raise to 50/h</button>
               </div>
             </div>
+            <a class="side-all more when-swarm" href="#">7 more, by events<i data-i="chev-r"></i></a>
 
-            <h2 class="sec-head">Today<span class="n">4</span></h2>
+            <h2 class="sec-head">Today<span class="n when-today">4</span><span class="n when-swarm">20</span></h2>
             <div class="irow">
               <i data-strip="grafana cron" data-end="wait"></i>
               <div>
@@ -157,8 +177,9 @@
               </div>
               <div class="irow-acts"><button class="btn btn--sm">Merge all 4</button><button class="btn btn--ghost btn--sm">Review first</button></div>
             </div>
+            <a class="side-all more when-swarm" href="#">16 more for today<i data-i="chev-r"></i></a>
 
-            <h2 class="sec-head">When you can<span class="n">2</span></h2>
+            <h2 class="sec-head">When you can<span class="n when-today">2</span><span class="n when-swarm">32</span></h2>
             <div class="irow">
               <i data-strip="cron" data-end="wait"></i>
               <div>
@@ -175,6 +196,7 @@
               </div>
               <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--ghost btn--sm">Dismiss</button></div>
             </div>
+            <a class="side-all more when-swarm" href="#">30 more when you can<i data-i="chev-r"></i></a>
 
             <h2 class="sec-head">Nothing to decide</h2>
             <div class="quietline">
@@ -185,14 +207,14 @@
               <b class="ok">+9%</b> week over week<span class="sep"></span>Stripe payout <b>€18,240</b> on Thursday
             </div>
             <div class="quietline">
-              <span class="lbl"><i data-strip="sentry github gmail" data-end="idle" data-size="s"></i></span><b>198</b>no action: known, noise or duplicates
+              <span class="lbl"><i data-strip="sentry github gmail" data-end="idle" data-size="s"></i></span><b class="when-today">198</b><b class="when-swarm">30,881</b>no action: known, noise or duplicates
               <button class="btn btn--ghost btn--sm" style="margin-left: auto">Show</button>
             </div>
           </div>
 
           <aside class="rail">
             <section class="rail-sec">
-              <h3>Running now<span class="aside">8 working · 3 waiting</span></h3>
+              <h3>Running now<span class="aside when-today">8 working · 3 waiting</span><span class="aside when-swarm">52 working · 11 waiting</span></h3>
               <div class="board">
                 <a class="board-row" href="session-active.html">
                   <i data-mk="wait" class="attn"></i>
@@ -230,9 +252,19 @@
                   <div class="st attn">paused<small>bound tripped</small></div>
                 </div>
               </div>
-              <a class="side-all" href="office.html" style="margin-top: 6px; padding: 0">5 more working · 6 idle · 1 asleep<i data-i="chev-r"></i></a>
+              <a class="side-all when-today" href="office.html" style="margin-top: 6px; padding: 0">5 more working · 6 idle · 1 asleep<i data-i="chev-r"></i></a>
+              <a class="side-all when-swarm" href="office.html?state=swarm" style="margin-top: 6px; padding: 0">8 more waiting · 49 working · 77 idle<i data-i="chev-r"></i></a>
             </section>
-            <section class="rail-sec">
+            <section class="rail-sec when-swarm">
+              <h3>Fleet<span class="aside">140 of 150 slots</span></h3>
+              <div class="fleet-bars">
+                <span class="nm">studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-4</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+              </div>
+              <a class="side-all" href="office.html?state=swarm" style="margin-top: 6px; padding: 0">6 more runners · 98 of 108 slots<i data-i="chev-r"></i></a>
+            </section>
+            <section class="rail-sec when-today">
               <h3>Fleet<span class="aside">16 of 22 slots</span></h3>
               <div class="fleet-bars">
                 <span class="nm">studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="v">5 of 6</span>

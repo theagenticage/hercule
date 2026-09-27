@@ -48,7 +48,8 @@
   .mx > .h small.tone-attn { color: var(--attn); }
   .mx > .h:first-child { padding-left: 0; }
   .mx > .rh { padding-left: 0; font-weight: var(--w-emph); color: var(--ink); }
-  .mx > .rh .brand, .mx > .rh .mk { width: 13px; height: 13px; color: var(--ink); }
+  .mx > .rh .brand, .mx > .rh .mk, .mx > .rh .pi { width: 13px; height: 13px; color: var(--ink); }
+  .inst > .pi { font-size: 17px; }
   .mx .ok { color: var(--ok); font: 450 11.5px / 1 var(--font-mono); }
   .mx .ok .mk { width: 11px; height: 11px; }
   .mx .ok span { color: var(--muted); }
@@ -113,7 +114,7 @@
           </div>
 
           <div class="inst" data-row>
-            <svg class="mk glyph"><use href="#g-chip"/></svg>
+            <span class="pi glyph" aria-hidden="true">π</span>
             <div class="id"><b>pi</b><span class="acct">local · llama.cpp</span><span class="auth"><svg class="mk"><use href="#m-done"/></svg>model loaded</span></div>
             <div class="use none">local · no usage limit</div>
             <div class="defaults">
@@ -140,7 +141,7 @@
             <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 2 models</span></span>
             <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 2 models</span></span>
 
-            <span class="rh"><svg class="mk"><use href="#g-chip"/></svg>pi</span>
+            <span class="rh"><span class="pi" aria-hidden="true">π</span>pi</span>
             <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· qwen3-coder</span></span>
             <span class="no">no local model</span>
             <span class="no">no local model</span>

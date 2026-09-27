@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390, height=844" />
+    <title>New thread in webshop · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .m-scroll { padding: 14px 20px 290px; }
+      .startline { width: auto; margin-bottom: 16px; }
+      .draft-title { width: auto; font-size: var(--fs-title); line-height: 1.25; }
+      .draft-sub { width: auto; margin: 6px 0 0; font-size: 14px; line-height: 1.45; }
+      .m-starts { margin-top: 26px; }
+      .m-starts .label { margin-bottom: 8px; }
+      .m-starts .start { width: 100%; min-height: 60px; margin-bottom: 8px; padding: 11px 14px 11px 12px; font-size: 14px; }
+      .m-starts .start small { margin-top: 1px; }
+
+      /* The thumb zone: typing is one tap away, but holding to talk is the big target, and what
+         the thread will run on sits at the very bottom, where the thumb already is. */
+      .m-dock { gap: 10px; }
+      .ty { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 6px 0 16px; border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line); font-size: 15px; color: var(--faint); }
+      .ty span { flex: 1; }
+      .ty .c-send { width: 34px; height: 34px; }
+      .hold { display: flex; align-items: center; justify-content: center; gap: 10px; height: 58px; border-radius: var(--r-pill); background: var(--ink); color: var(--bg); font-size: 16px; font-weight: var(--w-emph); }
+      .hold .m { width: 22px; height: 22px; }
+      .hold-wave { width: 20px; height: 20px; color: color-mix(in oklch, var(--bg) 60%, transparent); }
+      .m-dock-hint { justify-content: flex-start; margin-top: -2px; }
+
+      .ws { border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft); }
+      .ws-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 0 12px; width: 100%; min-height: 54px; padding: 8px 12px 8px 14px; text-align: left; font-size: 14px; }
+      .ws-row + .ws-row { border-top: 1px solid var(--line-soft); }
+      .ws-row .m,
+      .ws-row .b { width: 16px; height: 16px; color: var(--muted); }
+      .ws-row b { font-weight: var(--w-emph); }
+      .ws-row .mono { font-size: 12px; }
+      .ws-what { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .ws-side { display: block; margin-top: 1px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+      .ws-row .chev { width: 13px; height: 13px; color: var(--faint); }
+    </style>
+  </head>
+  <body class="phone">
+    <div data-status></div>
+    <nav class="m-nav" aria-label="New thread">
+      <a class="m-back" href="session-active.html"><i data-m="chev-left"></i>Threads</a>
+      <span class="m-nav-mid">New thread</span>
+      <span class="m-nav-end"></span>
+    </nav>
+
+    <div class="m-scroll">
+      <p class="startline">09:41 <span>starts when you send</span></p>
+      <h1 class="draft-title">What should the agent do in webshop?</h1>
+      <p class="draft-sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+      <section class="m-starts" aria-label="Start from what came in">
+        <div class="label">Or start from what came in</div>
+        <button class="start"><i data-m="decision" class="now"></i><span><b>Fix:</b> Checkout fails for EU cards with <span class="nw">3-D Secure</span></span><small>Intake · urgent · 08:52</small></button>
+        <button class="start"><i data-b="stripe"></i><span><b>Investigate:</b> Stripe webhook retries rising</span><small>Intake · 07:48</small></button>
+        <button class="start"><i data-b="intercom"></i><span><b>Research:</b> Add iDEAL as a payment method</span><small>Intake · 5 requests</small></button>
+      </section>
+    </div>
+
+    <div class="m-dock" role="group" aria-label="Your first message">
+      <div class="ty" role="textbox" tabindex="0" aria-label="Type what you want done"><span>Say what you want done…</span><button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button></div>
+      <button class="hold" aria-label="Hold to talk"><i data-m="mic"></i>Hold to talk<i data-m="voice" class="hold-wave"></i></button>
+      <p class="m-dock-hint">Let go to send<span class="haptic"><i data-m="haptic"></i>soft tick as it starts listening</span></p>
+      <div class="ws">
+        <button class="ws-row"><i data-b="anthropic"></i><span><span class="ws-what"><b>Claude Code</b> · Opus 5.5</span><span class="ws-side">auto-accept edits · effort high</span></span><i data-m="chev-right" class="chev"></i></button>
+        <button class="ws-row"><i data-m="worktree"></i><span><span class="ws-what"><b>New worktree</b> · from <span class="mono">main</span></span><span class="ws-side">on studio-mac · 5 of 6 sessions in use</span></span><i data-m="chev-right" class="chev"></i></button>
+      </div>
+    </div>
+    <i class="home-ind" aria-hidden="true"></i>
+  </body>
+</html>

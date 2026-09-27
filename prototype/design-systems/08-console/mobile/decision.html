@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Checkout fails for EU cards with 3-D Secure · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  .d-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 20px; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
+  .d-kick { display: flex; align-items: center; gap: 10px; font: 450 11.5px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .d-kick .urgent { display: inline-flex; align-items: center; gap: 6px; color: var(--fail); font-weight: 600; }
+  .d-title { margin: 12px 0 10px; font-size: 22px; font-weight: var(--w-strong); line-height: 1.25; letter-spacing: -0.015em; color: var(--ink); }
+  .d-gist { font-size: 14.5px; line-height: 1.55; color: var(--ink); }
+  .d-gist code { font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+
+  /* Errors per hour, with the deploy that started them. */
+  .d-chart { margin: 18px 0 4px; }
+  .d-chart header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .d-chart header b { margin-left: auto; color: var(--fail); font-weight: 600; }
+  .d-bars { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 56px; padding-bottom: 1px; border-bottom: 1px solid var(--line-soft); }
+  .d-bars i { flex: 1; min-height: 2px; border-radius: 1.5px 1.5px 0 0; background: var(--line); }
+  .d-bars i.f { background: var(--fail); }
+  .d-deploy { position: absolute; top: -4px; bottom: 0; width: 0; border-left: 1px dashed var(--muted); }
+  .d-deploy span { position: absolute; top: 0; left: 5px; font: 500 10.5px / 1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+  .d-axis { display: flex; justify-content: space-between; margin-top: 5px; font: 450 10px / 1 var(--font-mono); color: var(--faint); }
+
+  .phone .sec { margin: 22px 0 4px; }
+  .d-src { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+  .d-src:first-of-type { border-top: 0; }
+  .d-src .brand { width: 15px; height: 15px; margin-top: 1px; color: var(--ink); }
+  .d-src .who { display: block; font: 450 11.5px / 1.3 var(--font-mono); color: var(--muted); }
+  .d-src .what { display: block; margin-top: 3px; font-size: 13.5px; line-height: 1.4; color: var(--ink); }
+  .d-src .what code { font-size: 11.5px; white-space: normal; word-break: break-all; }
+  .d-src .val { font: 600 12.5px / 1.3 var(--font-mono); white-space: nowrap; text-align: right; }
+  .d-src .val small { display: block; font-weight: 450; font-size: 11px; color: var(--faint); }
+
+  /* The answer dock: what triage suggests, then the answers, all in thumb reach. */
+  .d-dock { flex: none; position: relative; padding: 10px 12px 6px; border-top: 1px solid var(--line); background: var(--bg-sunk); }
+  .d-note { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; margin: 0 2px 10px; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+  .d-note .mk { color: var(--accent); }
+  .d-note b { color: var(--ink); font-weight: var(--w-emph); }
+  .d-runs { display: flex; align-items: center; gap: 8px; margin: 0 2px 9px; font: 450 11px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; overflow: hidden; }
+  .d-runs .brand { width: 11px; height: 11px; color: var(--muted); }
+  .d-runs b { color: var(--ink); font-weight: 560; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="DECIDE" data-context="Proposal · Checkout fails for EU cards"></div>
+
+  <header class="m-head">
+    <a class="m-back" href="intake.html" title="Intake"><svg class="mk"><use href="#c-back"/></svg></a>
+    <div class="m-title">
+      <b>Proposal</b>
+      <small>1 of 8 in Intake · from a push at 09:01</small>
+    </div>
+    <button class="m-btn is-line" type="button">Next<kbd>j</kbd></button>
+  </header>
+
+  <div class="d-body">
+    <div class="d-kick">
+      <span class="urgent"><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+      <span class="proj webshop">webshop</span>
+      <span class="topic">Checkout</span>
+      <span>first seen 08:52</span>
+    </div>
+    <h1 class="d-title">Checkout fails for EU cards with 3-D Secure</h1>
+    <p class="d-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+    <div class="d-chart">
+      <header><svg class="brand" style="width:11px;height:11px"><use href="#b-sentry"/></svg>PaymentError per hour<b>412 events</b></header>
+      <div class="d-bars" aria-label="Errors per hour since yesterday 12:00">
+        <i style="height:4%"></i><i style="height:3%"></i><i style="height:5%"></i>
+        <i class="f" style="height:30%"></i><i class="f" style="height:52%"></i><i class="f" style="height:64%"></i><i class="f" style="height:58%"></i><i class="f" style="height:70%"></i><i class="f" style="height:61%"></i><i class="f" style="height:44%"></i><i class="f" style="height:22%"></i><i class="f" style="height:10%"></i><i class="f" style="height:6%"></i><i class="f" style="height:5%"></i><i class="f" style="height:6%"></i><i class="f" style="height:8%"></i><i class="f" style="height:14%"></i><i class="f" style="height:24%"></i><i class="f" style="height:40%"></i><i class="f" style="height:66%"></i><i class="f" style="height:88%"></i><i class="f" style="height:100%"></i>
+        <span class="d-deploy" style="left:calc(3 * (100% + 3px) / 22 - 2px)"><span>deploy #1289</span></span>
+      </div>
+      <div class="d-axis"><span>yesterday 12:00</span><span>18:00</span><span>00:00</span><span>06:00</span><span>now</span></div>
+    </div>
+
+    <div class="sec">Made from <span class="n">4 sources</span></div>
+    <div class="d-src">
+      <svg class="brand"><use href="#b-sentry"/></svg>
+      <div><span class="who">Sentry · webshop-prod</span><span class="what"><code>PaymentError: authentication_required</code></span></div>
+      <span class="val tone-fail">412<small>188 users</small></span>
+    </div>
+    <div class="d-src">
+      <svg class="brand"><use href="#b-gmail"/></svg>
+      <div><span class="who">Gmail · rogier@personal</span><span class="what">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span></div>
+      <span class="val">3<small>emails</small></span>
+    </div>
+    <div class="d-src">
+      <svg class="brand"><use href="#b-posthog"/></svg>
+      <div><span class="who">PostHog · webshop</span><span class="what">Checkout conversion down since 14:10 yesterday, EU only</span></div>
+      <span class="val tone-fail">−18%</span>
+    </div>
+    <div class="d-src">
+      <svg class="brand"><use href="#b-github"/></svg>
+      <div><span class="who">GitHub · rogier/webshop</span><span class="what">Deploy #1289 at 14:02 yesterday: "Upgrade Stripe SDK to v14"</span></div>
+      <span class="val">#1289</span>
+    </div>
+  </div>
+
+  <div class="d-dock">
+    <div class="d-note"><svg class="mk"><use href="#g-offer"/></svg><span>I can also <b>draft a reply to the 3 customers</b> once the fix ships.</span><span class="toggle is-on" role="switch" aria-checked="true"></span></div>
+    <div class="d-runs"><span>runs as</span><svg class="brand"><use href="#b-claude"/></svg><b>Claude Code · Opus 5.5</b><span>on studio-mac</span></div>
+    <div class="m-ledger">
+      <button class="m-ans is-primary" type="button"><kbd>s</kbd><span><b>Start "Fix bug"</b><small>Starts Fix bug on webshop in a new worktree</small></span></button>
+      <button class="m-ans" type="button"><kbd>a</kbd><span><b>Accept</b><small>Adds it to the backlog as a Task</small></span></button>
+      <button class="m-ans" type="button"><kbd>d</kbd><span><b>Dismiss</b><small>Closes the Proposal</small></span></button>
+    </div>
+    <span class="hap" style="top:89px; right:24px">haptic · success, on tap</span>
+  </div>
+  <div class="home" style="background:var(--bg-sunk)"></div>
+</div>
+</body>
+</html>

@@ -71,6 +71,8 @@ kbd.lg { min-width: 22px; height: 22px; font-size: 12px; border-radius: 5px; }
 .mk.lg { width: 14px; height: 14px; }
 .brand { width: 13px; height: 13px; flex: none; display: inline-block; vertical-align: -2px; color: var(--muted); }
 .logo { width: 18px; height: 18px; flex: none; color: var(--ink); }
+/* pi has no brand mark: its mark is the letter itself, in mono. Sized like .brand. */
+.pi { display: inline-grid; place-items: center; width: 13px; height: 13px; flex: none; font: 700 13px / 1 var(--font-mono); color: var(--muted); }
 
 .tone-attn { color: var(--attn); }
 .tone-fail { color: var(--fail); }
@@ -1011,53 +1013,34 @@ html[data-state="scrolled"] .composer-dock .dock-mini { display: flex; width: 10
 .m-badge { position: absolute; top: 5px; left: calc(50% + 5px); display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; font: 650 10.5px / 1 var(--font-mono); color: var(--muted); background: var(--raised); box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 1px var(--line); }
 .m-badge.attn { color: color-mix(in oklab, var(--attn) 22%, black); background: var(--attn); box-shadow: 0 0 0 2px var(--bg); }
 
-/* The command line: the phone's ⌘K, just above the tabs. */
-.m-cmd {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 12px 10px;
-  height: 46px;
-  padding: 0 5px 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 23px;
-  font: 450 13.5px / 1 var(--font-mono);
-  color: var(--faint);
-  box-shadow: var(--shadow-float), inset 0 1px 0 var(--edge);
-}
-.m-cmd .prompt { color: var(--accent); width: 12px; height: 12px; }
-.m-cmd span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m-cmd .c-btn { width: 36px; height: 36px; border-radius: 50%; }
-.m-cmd .c-btn .mk { width: 16px; height: 16px; }
-
 /* Verb row: the keys of this screen as thumb-sized keycaps. They act on the row
    under the cursor, the same as the keys do on a desktop. */
 .verbs { flex: none; display: flex; gap: 8px; padding: 10px 12px; }
 .verb {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   height: 50px;
-  padding: 0 12px 0 14px;
+  padding: 0 11px 0 13px;
   border: 1px solid var(--line);
   border-bottom-width: 3px;
   border-radius: 13px;
   background: var(--surface);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: var(--w-emph);
   color: var(--ink);
   white-space: nowrap;
 }
 .verb kbd { background: transparent; }
-.verb.is-primary { flex: 1.35; background: var(--accent); color: var(--on-accent); border-color: color-mix(in oklab, var(--accent) 65%, black); }
+.verb.is-primary { flex-grow: 1.6; background: var(--accent); color: var(--on-accent); border-color: color-mix(in oklab, var(--accent) 65%, black); }
 .verb.is-primary kbd { background: color-mix(in oklab, var(--on-accent) 16%, transparent); border-color: color-mix(in oklab, var(--on-accent) 32%, transparent); color: var(--on-accent); }
 
 /* Big answer rows: one thumb, one tap. The key, the answer, and what it will do. */
 .m-ledger { display: flex; flex-direction: column; gap: 6px; }
+.m-ledger > .m-ans { position: relative; }
 .m-ans {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
@@ -1099,7 +1082,7 @@ html[data-state="scrolled"] .composer-dock .dock-mini { display: flex; width: 10
 .m-req-head { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; padding: 0 4px 10px; }
 .m-req-head > .mk { width: 14px; height: 14px; margin-top: 3px; color: var(--attn); }
 .m-req-title { font-size: 15px; font-weight: var(--w-strong); line-height: 1.4; color: var(--ink); }
-.m-req-title code { font-size: 13px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+.m-req-title code { font-size: 12px; font-weight: 500; white-space: nowrap; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
 .m-req-note { margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
 .m-req-mini { display: none; align-items: center; gap: 8px; font: 450 12px / 1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 .m-req-mini .mk { color: var(--attn); }

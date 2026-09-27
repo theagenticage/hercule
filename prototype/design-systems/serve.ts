@@ -9,6 +9,7 @@ Bun.serve({
   port,
   async fetch(request) {
     let path = decodeURIComponent(new URL(request.url).pathname);
+    if (path === "/favicon.ico") return new Response(null, { status: 204 });
     if (path.endsWith("/")) path += "index.html";
     const file = Bun.file(join(root, normalize(path)));
     if (await file.exists()) return new Response(file);

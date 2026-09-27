@@ -151,6 +151,9 @@
       .thread-note i {
         flex: none;
       }
+      .thread-note code {
+        white-space: nowrap;
+      }
       .thread-note .link {
         margin-left: auto;
         flex: none;
@@ -203,45 +206,6 @@
         right: 0;
         bottom: 84px;
         padding: 0 14px 10px;
-      }
-      .thumb .ledger {
-        gap: 6px;
-      }
-      .thumb .ans {
-        grid-template-columns: 30px minmax(0, 1fr) auto;
-        min-height: 52px;
-        margin: 0;
-        padding: 0 14px 0 12px;
-        border-radius: 14px;
-        background: var(--raised);
-        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
-      }
-      .thumb .ans.is-primary {
-        background: var(--violet);
-        box-shadow: var(--lift-shadow);
-      }
-      .thumb .ans.is-primary b,
-      .thumb .ans.is-primary .d {
-        color: var(--on-ink);
-      }
-      .thumb .ans.is-primary .ans-key {
-        background: var(--on-ink);
-        color: var(--violet);
-      }
-      .thumb .ans-key {
-        width: 30px;
-        height: 30px;
-      }
-      .thumb .ans-key .mk {
-        width: 16px;
-        height: 16px;
-      }
-      .thumb .ans b {
-        font-size: 15px;
-      }
-      .thumb .ans .d {
-        font-size: var(--t-sm);
-        text-align: right;
       }
       .thumb .haptic {
         position: absolute;
@@ -306,17 +270,17 @@
       </div>
 
       <div class="next">
-        <span class="rs rs--ochre tilt-b"><i data-m="decision" class="sm"></i>Your call</span>
+        <span class="rs rs--ochre tilt-b">Unsure</span>
         <b>App is slow on Android</b>
         <span class="n">+4</span>
       </div>
 
       <div class="thumb">
         <span class="haptic"><svg class="mk"><use href="#haptic" /></svg>thud as the stamp lands</span>
-        <div class="ledger">
-          <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Dismiss</b><span class="d">closes it</span></button>
-          <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#task" /></svg></span><b>Accept</b><span class="d">to the backlog</span></button>
-          <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span><b>Start "Fix bug"</b><span class="d">Opus 5.5 · studio-mac</span></button>
+        <div class="ledger ledger--thumb">
+          <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Dismiss</b><span class="d">Closes the Proposal</span></button>
+          <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#task" /></svg></span><b>Accept</b><span class="d">Adds it as a Task</span></button>
+          <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span><b>Start "Fix bug"</b><span class="d">New worktree · studio-mac</span></button>
         </div>
       </div>
 

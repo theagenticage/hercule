@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390, height=844" />
+    <title>Ada · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .m-head { padding-left: 16px; }
+      .m-sub { display: flex; align-items: center; gap: 5px; }
+      .m-sub .m { width: 13px; height: 13px; }
+      .m-sub .mono { font-size: 11px; color: var(--ink); }
+
+      .cv-wrap { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 54px minmax(0, 1fr); border-top: 1px solid var(--line-soft); }
+
+      /* Ada's day runs down the left edge, 00:00 at the top and 24:00 at the bottom, in the same
+         direction the Conversation reads. Each hour is 1/24 of the track, so a position is
+         minutes / 1440. The past is solid, the heartbeats still to come are hollow sea-glass. */
+      .hb { position: relative; }
+      .hb-track { position: absolute; left: 0; right: 0; top: 12px; bottom: 188px; }
+      .hb-night { position: absolute; left: 30px; right: 0; border-radius: 6px 0 0 6px; background: var(--night); }
+      .hb-axis { position: absolute; left: 42px; width: 0; }
+      .hb-axis.past { top: 0; border-left: 1.5px solid var(--past); margin-left: -0.25px; }
+      .hb-axis.future { bottom: 0; border-left: 1px dashed var(--future); }
+      .hb-beat { position: absolute; left: 42.5px; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--future); }
+      .hb-beat.quiet { box-shadow: inset 0 0 0 1.5px var(--faint); }
+      .hb-beat.spoke { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; background: var(--live); box-shadow: 0 0 0 2.5px var(--bg); }
+      .hb-mark { position: absolute; left: 42.5px; display: grid; place-items: center; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--raised); box-shadow: 0 0 0 1px var(--line); color: var(--muted); }
+      .hb-mark .m { width: 11px; height: 11px; }
+      .hb-h { position: absolute; left: 0; width: 26px; margin-top: -7px; text-align: right; font-family: var(--font-mono); font-size: 10px; line-height: 14px; color: var(--faint); }
+      .hb-now { position: absolute; left: 4px; right: 0; height: var(--now-w); margin-top: -1px; background: var(--now); }
+      .hb-tab { left: 2px; margin-top: -10px; padding: 0 3px; font-size: 10px; }
+
+      /* The Conversation beside it. */
+      .cv { padding: 4px 16px 200px 6px; }
+      .cv-day { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; font-size: var(--fs-xs); font-weight: var(--w-emph); color: var(--muted); }
+      .cv-day::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+      .cv-msg { margin-bottom: 16px; }
+      .cv-t { display: block; margin-bottom: 4px; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .cv-you { display: flex; flex-direction: column; align-items: flex-end; }
+      .cv .bubble { max-width: 88%; font-size: 15px; line-height: 1.45; }
+      .cv .prose { font-size: 15px; line-height: 1.5; }
+      .cv .prose code { font-size: 12px; }
+      .cv .notice { font-size: 13px; }
+      .cv .quiet-line { margin-bottom: 16px; }
+      .cv .reminder-chip { grid-template-columns: 16px minmax(0, 1fr) 14px; width: 100%; padding: 9px 12px 9px 12px; text-align: left; font-size: 14px; }
+      .cv .reminder-chip .chev { width: 13px; height: 13px; color: var(--future-ink); }
+
+      /* The composer sits on the tab bar, so its glass stops there. */
+      .m-dock { bottom: 84px; padding-bottom: 10px; border-bottom: 0; }
+      .m-lip { display: flex; align-items: center; gap: 6px; padding: 0 4px; font-size: var(--fs-xs); color: var(--muted); }
+      .m-lip .m { width: 13px; height: 13px; color: var(--faint); }
+      .m-lip .push { margin-left: auto; }
+      .m-lip b { font-family: var(--font-mono); font-weight: 400; color: var(--ink); }
+    </style>
+  </head>
+  <body class="phone">
+    <div data-status></div>
+    <header class="m-head">
+      <span class="av av-lg working" aria-hidden="true">A</span>
+      <div class="m-head-text">
+        <h1 class="m-title">Ada</h1>
+        <p class="m-sub"><i data-m="working" class="live"></i>working · next heartbeat <span class="mono">10:00</span></p>
+      </div>
+      <button class="m-icon" aria-label="Ada's Reminders, 3"><i data-m="reminder"></i></button>
+      <button class="m-icon" aria-label="Ada's settings"><i data-m="settings"></i></button>
+    </header>
+
+    <div class="cv-wrap">
+      <div class="hb" role="img" aria-label="Ada's day: a fresh context at 04:00, quiet heartbeats at 07:00 and 08:00, she spoke at 09:00, Now is 09:41, and heartbeats every hour from 10:00 to 23:00">
+        <div class="hb-track">
+          <i class="hb-night" style="top: 0; height: 29.167%"></i>
+          <i class="hb-night" style="top: 95.833%; height: 4.167%"></i>
+          <i class="hb-axis past" style="height: 40.347%"></i>
+          <i class="hb-axis future" style="top: 40.347%"></i>
+          <span class="hb-h" style="top: 0">00</span>
+          <span class="hb-h" style="top: 29.167%">07</span>
+          <span class="hb-h" style="top: 50%">12</span>
+          <span class="hb-h" style="top: 75%">18</span>
+          <span class="hb-h" style="top: 95.833%">23</span>
+          <span class="hb-mark" style="top: 16.667%" title="04:00 fresh context"><i data-m="rotate"></i></span>
+          <i class="hb-beat quiet" style="top: 29.167%"></i>
+          <i class="hb-beat quiet" style="top: 33.333%"></i>
+          <i class="hb-beat spoke" style="top: 37.5%"></i>
+          <i class="hb-beat" style="top: 45.833%"></i><i class="hb-beat" style="top: 50%"></i><i class="hb-beat" style="top: 54.167%"></i>
+          <i class="hb-beat" style="top: 58.333%"></i><i class="hb-beat" style="top: 62.5%"></i><i class="hb-beat" style="top: 66.667%"></i>
+          <i class="hb-beat" style="top: 70.833%"></i><i class="hb-beat" style="top: 75%"></i><i class="hb-beat" style="top: 79.167%"></i>
+          <i class="hb-beat" style="top: 83.333%"></i><i class="hb-beat" style="top: 87.5%"></i><i class="hb-beat" style="top: 91.667%"></i>
+          <i class="hb-beat" style="top: 95.833%"></i>
+          <i class="hb-beat" style="top: 41.667%"></i>
+          <i class="hb-now" style="top: 40.347%"></i>
+          <span class="nowtab hb-tab" style="top: 40.347%">09:41</span>
+        </div>
+      </div>
+
+      <div class="m-scroll cv" data-transcript data-scrolled-by="220">
+        <div class="cv-day">Yesterday</div>
+        <div class="cv-msg">
+          <span class="cv-t">22:14</span>
+          <div class="notice" role="note">
+            <i data-m="notice"></i>
+            <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span>
+            <small>Notice · from Hercule, not from Ada</small>
+          </div>
+        </div>
+
+        <div class="cv-day">Today</div>
+        <button class="quiet-line"><i data-m="heartbeat"></i>2 quiet check-ins<span class="t-mono">07:00 · 08:00</span><i data-m="chev-right"></i></button>
+
+        <div class="cv-msg prose">
+          <div class="beat-tag"><i data-m="heartbeat" class="xs"></i>heartbeat · 09:00</div>
+          <p>Morning Rogier. Triage found one urgent thing: EU card payments that need <span class="nw">3-D Secure</span> have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push.</p>
+          <p>Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p>
+        </div>
+
+        <div class="cv-msg cv-you">
+          <span class="cv-t">09:20</span>
+          <p class="bubble">Remind me Friday to renew the SSL cert for ops.</p>
+        </div>
+
+        <div class="cv-msg prose">
+          <span class="cv-t">09:20</span>
+          <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+          <button class="reminder-chip" aria-label="Change the Reminder: Renew the SSL cert for ops"><i data-m="reminder"></i><span>Renew the SSL cert for ops<span class="when">Fri 2 Oct · 09:00 · Web chat</span></span><i data-m="chev-right" class="chev"></i></button>
+        </div>
+
+        <div class="cv-msg cv-you">
+          <span class="cv-t">09:38</span>
+          <p class="bubble">What's the status of the backup job?</p>
+        </div>
+
+        <div class="cv-msg prose" aria-live="polite">
+          <span class="cv-t">09:38 · replying</span>
+          <p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret-live" aria-hidden="true"></span></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-dock" data-composer role="group" aria-label="Message Ada">
+      <div class="vc">
+        <button class="vc-key" aria-label="Add a file or photo"><i data-m="plus"></i></button>
+        <button class="vc-hold" aria-label="Hold to talk to Ada"><i data-m="mic"></i>Hold to talk<small>waits for her turn</small></button>
+        <button class="vc-key" aria-label="Stop Ada's turn"><i data-m="stop"></i></button>
+      </div>
+      <p class="m-lip"><i data-m="webchat"></i>Web chat<span class="push"></span><i data-m="rotate"></i>context <b>41%</b> · rotates at 70%</p>
+    </div>
+
+    <nav data-tabs="ada"></nav>
+    <i class="home-ind" aria-hidden="true"></i>
+  </body>
+</html>

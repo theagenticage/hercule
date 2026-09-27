@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="../system.css" />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=390" />
-    <title>Fix 3-D Secure checkout · Hercule</title>
+    <title>Fix 3&#8209;D Secure checkout · Hercule</title>
     <style>
       .stage {
         position: relative;
@@ -83,7 +83,7 @@
         <a class="m-back" href="intake.html"><i data-i="chev-l" data-size="22"></i><b class="tb-badge">9</b></a>
         <div class="m-head">
           <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i>
-          <span class="m-head-text"><b>Fix 3-D Secure checkout</b><small>webshop · <span class="you-ink">waiting on you</span></small></span>
+          <span class="m-head-text"><b>Fix 3&#8209;D Secure checkout</b><small>webshop · <span class="you-ink">waiting on you</span></small></span>
         </div>
         <button class="ch" title="3 changed files"><span class="plus">+48</span><span class="minus">-12</span></button>
       </header>
@@ -98,7 +98,7 @@
 
             <div class="msg--me">
               <div>
-                <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+                <div class="bubble">Checkout fails for EU cards that need 3&#8209;D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
                 <div class="bubble-meta">09:02</div>
               </div>
             </div>
@@ -106,9 +106,9 @@
             <div class="worked"><b>Worked 2m 14s ›</b><span class="tools"><span>read 6 files</span></span></div>
 
             <div class="m-msg" style="--hue: var(--hue-peach)">
-              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3-D Secure</b><span>Opus 5.5 · 09:04</span></div>
+              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3&#8209;D Secure</b><span>Opus 5.5 · 09:04</span></div>
               <div class="msg-body">
-                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> treats that as a failure, so we show "Card declined" instead of the 3-D Secure modal.</p>
+                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3&#8209;D Secure. <code>handlePaymentResult</code> treats that as a failure, so we show "Card declined" instead of the 3&#8209;D Secure modal.</p>
                 <div class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
   <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
 }</div>
@@ -119,7 +119,7 @@
             <div class="worked"><b>Worked 4m 51s ›</b><span class="tools"><span>edited 3 files</span></span></div>
 
             <div class="m-msg" style="--hue: var(--hue-peach)">
-              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3-D Secure</b><span>09:09</span></div>
+              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3&#8209;D Secure</b><span>09:09</span></div>
               <div class="msg-body">
                 <div class="card files">
                   <div class="files-head"><i data-i="diff"></i><span>3 changed files</span><span class="spacer"></span><span class="plus mono">+48</span><span class="minus mono">-12</span></div>

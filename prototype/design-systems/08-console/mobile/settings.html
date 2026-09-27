@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Settings · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  /* The settings index: the thirteen domains in four groups. */
+  .ix { flex: 1; min-height: 0; overflow: auto; padding: 10px 14px 20px; }
+  .ix-filter { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 8px 0 12px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg-sunk); font: 450 13px / 1 var(--font-mono); color: var(--faint); }
+  .ix-filter span { flex: 1; }
+  .ix-filter .mk { width: 13px; height: 13px; }
+  .ix-group { margin-top: 12px; border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; }
+  .ix-row { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto 12px; align-items: center; column-gap: 12px; height: 44px; padding: 0 12px 0 14px; font-size: 15px; color: var(--ink); white-space: nowrap; }
+  .ix-row + .ix-row { box-shadow: 0 -1px 0 var(--line-soft); }
+  .ix-row > .mk:first-child { width: 17px; height: 17px; color: var(--muted); }
+  .ix-row .note { display: inline-flex; align-items: center; gap: 6px; font: 450 12px / 1 var(--font-mono); color: var(--faint); }
+  .ix-row .note .mk { width: 11px; height: 11px; }
+  .ix-row > .mk:last-child { width: 11px; height: 11px; color: var(--faint); }
+  .ix-row.is-active { background: var(--sel); }
+  .ix-row.is-active::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  .ix-row.is-active > .mk:first-child { color: var(--accent); }
+
+  /* The Appearance sheet, at its medium height. Drag it up for the rest. */
+  .sheet { height: 540px; }
+  .sheet-body { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+  .sheet-head .m-btn { color: var(--accent); font-size: 15px; }
+  .phone .sec { margin: 18px 0 10px; }
+  .phone .sec:first-child { margin-top: 2px; }
+  .match { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 13px; line-height: 1.35; color: var(--muted); }
+  .match b { color: var(--ink); font-weight: var(--w-emph); }
+  .tiles { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; }
+  .tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; text-align: left; }
+  .tile-frame { border-radius: 11px; box-shadow: 0 0 0 1px var(--line); }
+  .tile.is-on .tile-frame { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px var(--accent-soft); }
+  .tile-name { display: flex; align-items: baseline; gap: 6px; padding: 0 2px; font-size: 13px; font-weight: var(--w-emph); color: var(--ink); white-space: nowrap; }
+  .tile-name small { font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+  .tile.is-on .tile-name small { color: var(--accent); }
+  /* A theme in miniature: the cursor row, two rows, eight slots and the status line. */
+  .tpm { display: flex; flex-direction: column; gap: 5px; height: 76px; padding-top: 9px; border-radius: 11px; background: var(--bg); overflow: hidden; }
+  .tpm-row { display: flex; align-items: center; gap: 6px; height: 12px; padding: 0 9px; }
+  .tpm-row.is-cur { height: 15px; background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+  .tpm-row i { width: 6px; height: 6px; flex: none; border-radius: 1.5px; }
+  .tpm-row b { height: 4px; border-radius: 2px; background: var(--ink); opacity: 0.55; }
+  .tpm-row b + b { background: var(--c4); opacity: 0.9; width: 16px; margin-left: auto; }
+  .tpm-sw { display: flex; gap: 2px; margin-top: auto; padding: 0 9px; }
+  .tpm-sw i { flex: 1; height: 6px; border-radius: 1px; }
+  .tpm-st { display: flex; align-items: center; gap: 5px; height: 12px; margin-top: 4px; border-top: 1px solid var(--line); background: var(--bg-sunk); }
+  .tpm-st em { align-self: stretch; padding: 0 5px; background: var(--accent); color: var(--on-accent); font: 750 7px / 11px var(--font-mono); font-style: normal; letter-spacing: 0.06em; }
+  .tpm-st i { width: 14px; height: 3px; border-radius: 1.5px; background: var(--live); }
+  .tpm-st i + i { background: var(--attn); }
+
+  .opt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; min-height: 50px; border-top: 1px solid var(--line-soft); font-size: 14.5px; color: var(--ink); }
+  .opt small { display: block; margin-top: 3px; font-size: 12px; color: var(--faint); }
+  .sec + .opt { border-top: 0; }
+  .phone .seg-ctl button { height: 28px; padding: 0 11px; font-size: 13px; }
+  .phone .toggle { width: 42px; height: 26px; }
+  .phone .toggle::after { top: 3px; left: 3px; width: 20px; height: 20px; }
+  .phone .toggle.is-on::after { transform: translateX(16px); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="NAV" data-context="Settings · Appearance"></div>
+
+  <header class="m-head is-root">
+    <div class="m-title">
+      <b>Settings</b>
+      <small>Rogier · controller on studio-mac</small>
+    </div>
+  </header>
+
+  <div class="ix">
+    <label class="ix-filter"><svg class="mk"><use href="#c-search"/></svg><span>Filter settings</span><kbd>/</kbd></label>
+    <div class="ix-group">
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-user"/></svg><span>Profile</span><span class="note">Rogier</span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row is-active" href="#"><svg class="mk"><use href="#g-palette"/></svg><span>Appearance</span><span class="note" data-theme-label>Phosphor</span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-session"/></svg><span>Threads</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+    </div>
+    <div class="ix-group">
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-assistant"/></svg><span>Assistants</span><span class="note">3</span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-connection"/></svg><span>Connections</span><span class="note"><svg class="mk tone-attn"><use href="#m-urgent"/></svg>11</span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-chip"/></svg><span>Providers</span><span class="note">3</span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-runner"/></svg><span>Machines</span><span class="note"><svg class="mk tone-attn"><use href="#m-urgent"/></svg>3</span><svg class="mk"><use href="#c-right"/></svg></a>
+    </div>
+    <div class="ix-group">
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-id"/></svg><span>Identities</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-shield"/></svg><span>Permission profiles</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-key"/></svg><span>Secrets</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-gauge"/></svg><span>Bounds</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+    </div>
+    <div class="ix-group">
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-plug"/></svg><span>Plugins</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+      <a class="ix-row" href="#"><svg class="mk"><use href="#g-gear"/></svg><span>System</span><span class="note"></span><svg class="mk"><use href="#c-right"/></svg></a>
+    </div>
+  </div>
+
+  <nav class="m-tabs" data-mtabs data-active="settings"></nav>
+
+  <div class="sheet-scrim"></div>
+  <div class="sheet" role="dialog" aria-label="Appearance">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><b>Appearance</b><button class="m-btn" type="button">Done</button></div>
+    <div class="sheet-body">
+      <div class="sec">Theme <span class="n">6 · each brings its own 16 colors</span></div>
+      <div class="match"><span class="toggle is-on" role="switch" aria-checked="true"></span><span>Follow iOS: <b>Paper Tape</b> by day, <b>Phosphor</b> by night</span></div>
+      <div class="tiles">
+        <button class="tile" type="button" data-theme-choice="phosphor"><div class="tile-frame"><div class="tpm" data-theme="phosphor"></div></div><span class="tile-name">Phosphor<small>dark</small></span></button>
+        <button class="tile" type="button" data-theme-choice="graphite"><div class="tile-frame"><div class="tpm" data-theme="graphite"></div></div><span class="tile-name">Graphite<small>dark</small></span></button>
+        <button class="tile" type="button" data-theme-choice="ember"><div class="tile-frame"><div class="tpm" data-theme="ember"></div></div><span class="tile-name">Ember<small>dark</small></span></button>
+        <button class="tile" type="button" data-theme-choice="void"><div class="tile-frame"><div class="tpm" data-theme="void"></div></div><span class="tile-name">Void<small>dark</small></span></button>
+        <button class="tile" type="button" data-theme-choice="paper-tape"><div class="tile-frame"><div class="tpm" data-theme="paper-tape"></div></div><span class="tile-name">Paper Tape<small>light</small></span></button>
+        <span class="hap" style="bottom:-25px; right:0">haptic · tick per theme</span>
+        <button class="tile" type="button" data-theme-choice="porcelain"><div class="tile-frame"><div class="tpm" data-theme="porcelain"></div></div><span class="tile-name">Porcelain<small>light</small></span></button>
+      </div>
+
+      <div class="sec">Type, motion and marks</div>
+      <div class="opt"><span>Text size<small>code is set 1.5 px smaller</small></span><span class="seg-ctl"><button type="button">S</button><button class="is-on" type="button">M</button><button type="button">L</button><button type="button">XL</button></span></div>
+      <div class="opt"><span>Density</span><span class="seg-ctl"><button class="is-on" type="button">Comfortable</button><button type="button">Compact</button></span></div>
+      <div class="opt"><span>Reduce motion<small>follows iOS · off</small></span><span class="toggle" role="switch" aria-checked="false"></span></div>
+      <div class="opt"><span>Reduce glass<small>the composer and sheets turn solid</small></span><span class="toggle" role="switch" aria-checked="false"></span></div>
+      <div class="opt"><span>Source marks<small>brand marks beside each source</small></span><span class="toggle is-on" role="switch" aria-checked="true"></span></div>
+      <div class="opt"><span>Haptics<small>a tick on swipes, a tap on answers</small></span><span class="toggle is-on" role="switch" aria-checked="true"></span></div>
+    </div>
+  </div>
+  <div class="home"></div>
+</div>
+<script>
+  // Draws each theme tile from one template, marks the theme the page is drawn in,
+  // and lets a tap switch it.
+  (function () {
+    const root = document.documentElement;
+    const ALIASES = { dark: "phosphor", light: "paper-tape" };
+    const SLOTS = [1, 2, 3, 4, 5, 6, 9, 13];
+    const miniature = `
+      <div class="tpm-row is-cur"><i style="background:var(--attn)"></i><b style="width:44%"></b><b></b></div>
+      <div class="tpm-row"><i style="background:var(--live)"></i><b style="width:36%"></b></div>
+      <div class="tpm-row"><i style="background:var(--ok)"></i><b style="width:28%"></b></div>
+      <div class="tpm-sw">${SLOTS.map((n) => `<i style="background:var(--c${n})"></i>`).join("")}</div>
+      <div class="tpm-st"><em>NAV</em><i></i><i></i></div>`;
+    const tiles = [...document.querySelectorAll("[data-theme-choice]")];
+    tiles.forEach((tile) => (tile.querySelector(".tpm").innerHTML = miniature));
+    function markCurrentTheme() {
+      const current = ALIASES[root.dataset.theme] || root.dataset.theme;
+      tiles.forEach((tile) => tile.classList.toggle("is-on", tile.dataset.themeChoice === current));
+      const on = tiles.find((tile) => tile.dataset.themeChoice === current);
+      if (on) document.querySelector("[data-theme-label]").textContent = on.querySelector(".tile-name").firstChild.textContent;
+    }
+    tiles.forEach((tile) => tile.addEventListener("click", () => { root.dataset.theme = tile.dataset.themeChoice; markCurrentTheme(); }));
+    markCurrentTheme();
+  })();
+</script>
+</body>
+</html>

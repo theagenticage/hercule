@@ -114,7 +114,7 @@
   --raised: oklch(99.3% 0.004 310);
   --ink: oklch(23.5% 0.02 300);
   --muted: oklch(46% 0.02 300);
-  --faint: oklch(54% 0.017 300);
+  --faint: oklch(52.5% 0.017 300);
   --line: oklch(30% 0.03 300 / 0.11);
   --line-soft: oklch(30% 0.03 300 / 0.065);
 
@@ -181,7 +181,7 @@
   --raised: oklch(98.8% 0.005 155);
   --ink: oklch(24% 0.018 165);
   --muted: oklch(44.5% 0.018 165);
-  --faint: oklch(53% 0.016 165);
+  --faint: oklch(51% 0.016 165);
   --line: oklch(30% 0.03 165 / 0.12);
   --line-soft: oklch(30% 0.03 165 / 0.07);
 
@@ -243,7 +243,7 @@
   --raised: oklch(25% 0.028 320);
   --ink: oklch(95% 0.012 320);
   --muted: oklch(77.5% 0.022 318);
-  --faint: oklch(63% 0.026 318);
+  --faint: oklch(64.5% 0.026 318);
   --line: oklch(92% 0.03 320 / 0.11);
   --line-soft: oklch(92% 0.03 320 / 0.065);
 
@@ -303,7 +303,7 @@
   --raised: oklch(24% 0.021 172);
   --ink: oklch(95% 0.014 165);
   --muted: oklch(77.5% 0.022 168);
-  --faint: oklch(62.5% 0.026 168);
+  --faint: oklch(64% 0.026 168);
   --line: oklch(92% 0.03 168 / 0.11);
   --line-soft: oklch(92% 0.03 168 / 0.065);
 
@@ -363,7 +363,7 @@
   --raised: oklch(25.5% 0.022 48);
   --ink: oklch(95% 0.013 70);
   --muted: oklch(78% 0.022 62);
-  --faint: oklch(63.5% 0.026 58);
+  --faint: oklch(65% 0.026 58);
   --line: oklch(92% 0.03 60 / 0.11);
   --line-soft: oklch(92% 0.03 60 / 0.065);
 

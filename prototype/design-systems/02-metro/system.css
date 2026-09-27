@@ -2140,7 +2140,7 @@ kbd,
   gap: 10px;
 }
 .m-head h1 {
-  font-size: 26px;
+  font-size: 20px;
   letter-spacing: -0.02em;
 }
 .m-body {
@@ -5696,4 +5696,1791 @@ a.btn {
   font-size: var(--t-xs);
   font-weight: var(--w-regular);
   color: var(--faint);
+}
+
+/* ================================================================== mobile screens */
+/* Every phone page is one frame: status bar, a short head, one scrolling body and, on the four
+   top-level screens, a glass tab bar the body scrolls under. Answers are thumb-sized (44px and
+   up) and sit in the lower half of the screen, where one hand reaches. */
+.phone > .statusbar {
+  z-index: 30;
+}
+.phone > .tabbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+.phone:has(> .tabbar) .m-body {
+  padding-bottom: 100px;
+}
+.m-head .sub {
+  font-size: var(--t-s);
+  color: var(--faint);
+  font-family: var(--mono);
+  margin-top: 3px;
+}
+.m-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--hover);
+  flex: none;
+}
+.m-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.m-topics {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 0 20px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.m-topics button {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+  white-space: nowrap;
+  flex: none;
+}
+.m-topics button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+  font-weight: var(--w-bold);
+}
+/* A haptic annotation: where the phone would tap back, and how hard. */
+.m-haps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 9px;
+}
+
+/* ------------------------------------------------------------------ mobile Intake */
+/* The Triage line: Connections run in from the right to the Triage interchange, and Hercule's
+   ink line leaves it downwards. Every item in the list is a station on that line. */
+.m-track {
+  position: relative;
+}
+.m-track::before {
+  content: "";
+  position: absolute;
+  left: 34.25px;
+  width: 3.5px;
+  top: 40px;
+  bottom: 24px;
+  border-radius: 2px;
+  background: var(--trunk);
+}
+.m-band {
+  position: relative;
+  padding: 12px 20px 0 36px;
+}
+.m-band-rows {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.m-band-row {
+  display: grid;
+  grid-template-columns: 1fr 12px 58px 30px;
+  column-gap: 7px;
+  align-items: center;
+  height: 13px;
+  font-size: 11.5px;
+  line-height: 13px;
+}
+.m-band-row .brand {
+  width: 12px;
+  height: 12px;
+  color: var(--ink);
+}
+.m-band-row .nm {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.m-band-row b {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: right;
+}
+.m-band-ln {
+  position: relative;
+  height: var(--w);
+  border-radius: 0 3px 3px 0;
+  background: var(--c);
+  overflow: hidden;
+}
+.m-band-row--none .m-band-ln {
+  background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 7px);
+  opacity: 0.6;
+}
+.m-band-row--none b {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+/* Trains: one dot per busy line, running towards Triage. */
+.m-band-ln i {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 3px;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 50%;
+  background: var(--casing);
+  animation: m-train var(--d, 3s) linear infinite;
+}
+@keyframes m-train {
+  to {
+    left: -3px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-band-ln i {
+    animation: none;
+    left: 62%;
+  }
+}
+.m-band-cap {
+  position: absolute;
+  left: -11px;
+  top: -6px;
+  bottom: -6px;
+  width: 22px;
+  border-radius: 11px;
+  background: var(--casing);
+  box-shadow: inset 0 0 0 3px var(--trunk);
+  z-index: 2;
+}
+.m-band-foot {
+  display: flex;
+  gap: 6px;
+  padding: 12px 0 0 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.m-band-foot b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.m-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 13px;
+  padding: 10px 20px 0 56px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.m-headline b {
+  font-size: 18px;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  margin-right: 3px;
+  letter-spacing: -0.01em;
+}
+.m-headline .burning b {
+  color: var(--fail);
+}
+
+/* The lead Proposal: the one card, its interchange on the line, its sources feeding it. */
+.m-lead {
+  position: relative;
+  margin: 14px 14px 0 52px;
+  padding: 13px 14px 12px;
+  border-radius: 16px;
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-2);
+}
+.m-lead-stn {
+  position: absolute;
+  left: -25px;
+  top: 12px;
+  width: 18px;
+  height: 44px;
+  border-radius: 9px;
+  background: var(--casing);
+  box-shadow:
+    inset 0 0 0 3px var(--attn),
+    0 0 0 5px var(--attn-soft);
+  z-index: 2;
+}
+.m-lead-feed {
+  position: absolute;
+  left: -46px;
+  top: 21px;
+  width: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.m-lead-feed i {
+  height: 2.6px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.m-lead-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.m-lead-top > span + span:not(.stamp)::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--faint);
+}
+.m-lead-top .stamp {
+  margin-left: auto;
+}
+.m-lead h2 {
+  text-wrap: balance;
+  font-size: 17px;
+  line-height: 1.25;
+  margin: 8px 0 10px;
+}
+.m-srcs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 12px;
+  margin-bottom: 13px;
+}
+.m-src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 0;
+}
+.m-src::before {
+  content: "";
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--c);
+  flex: none;
+}
+.m-src .brand {
+  width: 13px;
+  height: 13px;
+  color: var(--ink);
+}
+.m-src b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* The big answer: the whole row is the button, and it ends in the route it would take. */
+.m-go {
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 52px;
+  padding: 0 14px 0 16px;
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 16px;
+  font-weight: var(--w-bold);
+  box-shadow: var(--shadow-1);
+}
+.m-go .route {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: var(--w-medium);
+  color: inherit;
+  opacity: 0.78;
+  display: flex;
+  align-items: center;
+}
+.m-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.m-pair button {
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: var(--w-medium);
+  background: var(--hover);
+}
+.m-pair .route {
+  font-size: 11px;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+}
+
+/* Rows: each is a station on the line; its strip's station sits on the trunk. */
+.m-sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 20px 4px 56px;
+  font-size: 13.5px;
+  font-weight: var(--w-bold);
+}
+.m-sec .n {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: var(--w-regular);
+  color: var(--faint);
+}
+.m-sec .aside {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: var(--w-regular);
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.m-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  padding: 11px 20px 11px 0;
+}
+.m-row + .m-row::after {
+  content: "";
+  position: absolute;
+  left: 56px;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--line-soft);
+}
+.m-row > .strip {
+  margin: -2px 0 0 19px;
+  position: relative;
+  z-index: 1;
+}
+.m-row-t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: var(--w-bold);
+  line-height: 20px;
+  min-width: 0;
+}
+.m-row-t > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-row-m {
+  display: flex;
+  align-items: center;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.m-row-m > * + *::before {
+  content: "·";
+  margin: 0 0.45em;
+  color: var(--faint);
+}
+.m-row-m .src .brand {
+  width: 13px;
+  height: 13px;
+}
+.m-row-a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.m-btn {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: var(--w-medium);
+  color: var(--ink);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  white-space: nowrap;
+}
+.m-btn--ink {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+  font-weight: var(--w-bold);
+}
+.m-btn--ghost {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.m-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.m-seg {
+  display: flex;
+  width: 100%;
+  padding: 2px;
+  border-radius: 11px;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.m-seg button {
+  flex: 1 1 auto;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: var(--w-medium);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.m-seg button + button {
+  box-shadow: -1px 0 0 var(--line-soft);
+}
+/* A row mid-swipe: the text slides right and uncovers the row's first answer. */
+.m-row--swiped {
+  overflow: hidden;
+}
+.m-row--swiped .m-row-body {
+  transform: translateX(124px);
+}
+.m-row--swiped .m-row-t > span:first-child,
+.m-row--swiped .m-row-m {
+  overflow: visible;
+}
+.m-swipe {
+  position: absolute;
+  left: 52px;
+  top: 7px;
+  bottom: 7px;
+  width: 116px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: var(--w-bold);
+}
+.m-swipe svg {
+  width: 18px;
+  height: 18px;
+}
+.m-note {
+  padding: 0 20px 4px 56px;
+  margin-top: -4px;
+}
+/* The end of the line: a buffer stop, and what triage handled without asking. */
+.m-end {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  margin-top: 8px;
+  padding: 0 20px 0 56px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.m-end::before {
+  content: "";
+  position: absolute;
+  left: 25px;
+  top: 22.25px;
+  width: 22px;
+  height: 3.5px;
+  border-radius: 2px;
+  background: var(--trunk);
+}
+.m-end b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.m-more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 20px 0 56px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.m-more svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ------------------------------------------------------------------ bottom sheets */
+.m-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 15;
+}
+.m-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(30px) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+.m-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 0 20px 36px;
+}
+.m-sheet .grabber {
+  flex: none;
+  margin-bottom: 8px;
+}
+.m-sheet--decision {
+  top: 92px;
+}
+
+/* ------------------------------------------------------------------ mobile decision */
+.ds-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+}
+.ds-head .attn {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+}
+.ds-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ds-meta > span + span::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--faint);
+}
+.ds-title {
+  text-wrap: balance;
+  font-size: 20px;
+  line-height: 1.22;
+  margin: 8px 0 8px;
+  letter-spacing: -0.015em;
+}
+.ds-gist {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.ds-gist code {
+  color: var(--ink);
+  background: var(--sunken);
+  padding: 1px 4px 0;
+  border-radius: 4px;
+  font-size: 12px;
+}
+/* The junction: four sources run into the Proposal; the tracks out are the answers below. */
+.ds-jn {
+  position: relative;
+  margin: 16px -20px 0;
+  padding: 0 20px 0 36px;
+}
+.ds-jn::after {
+  content: "";
+  position: absolute;
+  left: 34.25px;
+  top: 50%;
+  bottom: -30px;
+  width: 3.5px;
+  background: var(--trunk);
+}
+.ds-src {
+  display: grid;
+  grid-template-columns: 30px 14px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: center;
+  height: 28px;
+  font-size: 12.5px;
+}
+.ds-src .ln {
+  height: 3px;
+  background: var(--c);
+  border-radius: 0 2px 2px 0;
+}
+.ds-src .brand {
+  width: 14px;
+  height: 14px;
+  color: var(--ink);
+}
+.ds-src .ev {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-src .ev b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  margin-right: 5px;
+}
+.ds-src .n {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ds-src .n.fail {
+  color: var(--fail);
+}
+.ds-cap {
+  position: absolute;
+  left: 25px;
+  top: 4px;
+  bottom: 4px;
+  width: 22px;
+  border-radius: 11px;
+  background: var(--casing);
+  box-shadow:
+    inset 0 0 0 3px var(--attn),
+    0 0 0 5px var(--attn-soft);
+  z-index: 2;
+}
+.ds-ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 10px 36px;
+  font-size: 13.5px;
+  font-weight: var(--w-bold);
+}
+.ds-ask .attn {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ds-answers {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 36px;
+}
+/* The track past the junction: ink to the suggested answer, faint to the others. */
+.ds-answers::before {
+  content: "";
+  position: absolute;
+  left: -21.75px;
+  top: -40px;
+  height: 70px;
+  width: 3.5px;
+  background: var(--trunk);
+}
+.ds-answers::after {
+  content: "";
+  position: absolute;
+  left: -20.75px;
+  top: 30px;
+  bottom: 30px;
+  width: 0;
+  border-left: 1.5px dashed var(--faint);
+}
+.ds-ans {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  align-content: center;
+  color: inherit;
+  text-decoration: none;
+  min-height: 60px;
+  padding: 8px 14px 8px 16px;
+  border-radius: 14px;
+  text-align: left;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ds-ans::before {
+  content: "";
+  position: absolute;
+  left: -26px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--casing);
+  box-shadow: inset 0 0 0 2.5px var(--faint);
+  z-index: 1;
+}
+.ds-ans b {
+  display: block;
+  font-size: 16px;
+  line-height: 1.25;
+}
+.ds-ans small {
+  grid-column: 1 / -1;
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ds-ans .route {
+  font-size: 11px;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+}
+.ds-ans--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-2);
+}
+.ds-ans--primary::before {
+  background: var(--trunk);
+  box-shadow:
+    0 0 0 2px var(--casing),
+    0 0 0 3.5px var(--trunk);
+}
+.ds-ans--primary small,
+.ds-ans--primary .route {
+  color: inherit;
+  opacity: 0.75;
+}
+.ds-haps {
+  margin: 10px 0 0 36px;
+}
+.ds-then {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 0 36px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 14px;
+  line-height: 1.35;
+}
+.ds-then .icon {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ mobile thread */
+.m-nav {
+  flex: none;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  padding: 0 8px 4px;
+}
+.m-nav .t {
+  text-align: center;
+  min-width: 0;
+}
+.m-nav .t b {
+  display: block;
+  font-size: 15.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-nav .t small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.m-nav .m-icon {
+  justify-self: center;
+}
+.m-nav a.back {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 15px;
+  justify-self: start;
+}
+.m-nav a.back svg {
+  width: 22px;
+  height: 22px;
+}
+.m-lineage {
+  flex: none;
+  padding: 0 20px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.phone .col {
+  width: auto;
+  max-width: none;
+  margin: 0 16px;
+}
+.phone .turns {
+  padding: 16px 0 320px;
+  gap: 14px;
+}
+.phone .msg-user {
+  max-width: 86%;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.phone .msg-agent {
+  font-size: 15px;
+  line-height: 1.55;
+}
+.phone .codeblock {
+  font-size: 11.5px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.phone button.worked {
+  gap: 10px;
+}
+.phone .files-head {
+  padding: 10px 10px 10px 14px;
+}
+.phone .files-row {
+  grid-template-columns: minmax(0, 1fr) auto 36px;
+  column-gap: 10px;
+  padding: 7px 14px;
+}
+.phone .files-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+.phone .files-foot {
+  padding: 8px 14px;
+  font-size: var(--t-s);
+}
+/* The phone composer: glass over the foot of the transcript, voice first. */
+.phone .composer-wrap {
+  padding-bottom: 26px;
+  z-index: 12;
+}
+.phone .composer-wrap::before {
+  height: 200px;
+}
+.phone .composer {
+  width: calc(100% - 16px);
+  max-width: none;
+}
+.phone.is-shrunk .composer,
+:root[data-state="scrolled"] .phone .composer {
+  width: calc(100% - 48px);
+}
+.phone .dock {
+  margin: 0 10px -14px;
+  padding: 10px 10px 24px;
+  border-radius: 16px 16px 0 0;
+}
+.phone .dock-head {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  padding: 0 2px 8px;
+}
+.phone .dock-subject {
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-dock-acts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.m-dock-acts .m-btn {
+  height: 44px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+.m-dock-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px 0;
+}
+.m-dock-foot .link {
+  font-size: 13px;
+  font-weight: var(--w-medium);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.m-dock-foot .link .route {
+  font-size: 11px;
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+}
+.m-dock-foot .haptic {
+  margin-left: auto;
+}
+.m-btn--sm {
+  height: 30px;
+  padding: 0 9px;
+  font-size: 13px;
+}
+.phone .queued {
+  padding: 8px 0 0 4px;
+  margin-top: 8px;
+}
+.phone .queued .what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.phone .queued .tag {
+  white-space: nowrap;
+}
+.phone .card {
+  border-radius: 22px;
+}
+.m-voice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 8px;
+}
+.m-voice .ph {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: var(--faint);
+  padding-left: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-voice .icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink);
+}
+.m-voice .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.m-mic {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  flex: none;
+}
+.m-mic svg {
+  width: 21px;
+  height: 21px;
+}
+.phone .card-mini {
+  padding: 5px 5px 5px 16px;
+  font-size: 14.5px;
+}
+.phone .card-mini .m-mic {
+  width: 32px;
+  height: 32px;
+}
+.phone .card-mini .m-mic svg {
+  width: 16px;
+  height: 16px;
+}
+.phone .lip {
+  margin: -14px 12px 0;
+  padding: 19px 12px 6px;
+}
+.phone .dock-mini {
+  padding: 5px 5px 5px 9px;
+}
+.phone .dock-mini code {
+  font-size: 11px;
+  min-width: 0;
+}
+.phone .dock-mini .m-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+/* Shrunk on the phone, the transcript fades out just above the composer, so the glass only ever
+   blurs what lies behind it and no sharp text shows beside or below the stack. The Request joins
+   the reply line as one pill stack of the same width, with no gap at its corners. */
+.phone.is-shrunk .transcript,
+:root[data-state="scrolled"] .phone .transcript {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 200px), transparent calc(100% - 112px));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 200px), transparent calc(100% - 112px));
+}
+.phone.is-shrunk .composer .dock,
+:root[data-state="scrolled"] .phone .composer .dock {
+  margin: 0 0 -22px;
+  padding: 0 0 22px;
+  border-radius: 22px 22px 0 0;
+}
+.nw {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ mobile new thread */
+.m-nav--modal {
+  grid-template-columns: 76px minmax(0, 1fr) 76px;
+}
+.m-nav .txt {
+  justify-self: start;
+  padding-left: 10px;
+  font-size: 15px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.m-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.m-proj svg {
+  width: 10px;
+  height: 10px;
+}
+.m-draft {
+  display: flex;
+  flex-direction: column;
+  padding-top: 10px;
+}
+.m-draft .draft-map {
+  flex: none;
+  margin: 18px 20px 16px;
+}
+.m-draft-h {
+  padding: 0 20px;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.m-draft-sub {
+  margin-top: 6px;
+  padding: 0 20px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* The starting points sit low, just above the composer, where the thumb already is. */
+.m-starts {
+  margin-top: auto;
+  padding-top: 20px;
+}
+.m-starts-head {
+  display: flex;
+  gap: 6px;
+  padding: 0 20px 4px;
+  font-size: 12px;
+  font-weight: var(--w-bold);
+  color: var(--muted);
+}
+.m-starts-head span {
+  font-weight: var(--w-regular);
+  color: var(--faint);
+}
+.m-start {
+  position: relative;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  padding: 0 20px 0 0;
+  text-align: left;
+}
+.m-start > .strip {
+  margin-left: 12px;
+}
+.m-start + .m-start::after {
+  content: "";
+  position: absolute;
+  left: 50px;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--line-soft);
+}
+.m-start .t {
+  display: block;
+  font-size: 15px;
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-start .t em {
+  font-style: normal;
+  font-weight: var(--w-bold);
+}
+.m-start small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.m-draft-composer {
+  margin-top: 14px;
+  padding: 0 8px 28px;
+}
+.m-draft-hap {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 8px;
+}
+.m-draft-composer .card {
+  background: var(--raised);
+  border-radius: 22px;
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow-2);
+}
+.m-draft-composer .ta {
+  display: flex;
+  align-items: flex-start;
+  min-height: 58px;
+  padding: 16px 18px 0;
+  font-size: 16px;
+}
+.m-draft-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 8px 10px;
+}
+.m-draft-row .icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink);
+}
+.m-draft-row .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.m-mic--l {
+  width: 52px;
+  height: 52px;
+}
+.m-mic--l svg {
+  width: 24px;
+  height: 24px;
+}
+.m-draft-composer .lip {
+  margin: -14px 14px 0;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+/* ------------------------------------------------------------------ mobile Assistants */
+.m-asst {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 2px 20px 0;
+}
+.m-asst button {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 10px 0 4px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  white-space: nowrap;
+  min-width: 0;
+}
+.m-asst button[aria-pressed="true"] {
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1.5px var(--ink),
+    var(--shadow-1);
+}
+.m-asst b {
+  font-size: 14.5px;
+}
+.m-asst small {
+  font-size: 11.5px;
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.m-asst small.live {
+  color: var(--live);
+}
+/* Juno's Discord Connection is reconnecting: a small amber dot on the chip, like a badge. */
+.m-asst-warn {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--attn);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.m-asst-sub {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 20px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+}
+.m-asst-sub svg {
+  width: 13px;
+  height: 13px;
+}
+.m-convo .turns {
+  padding-bottom: 120px;
+}
+.phone:has(> .tabbar) .composer-wrap {
+  bottom: 84px;
+  padding-bottom: 10px;
+}
+.phone .msg-agent--asst {
+  padding-left: 32px;
+}
+.phone .notice-line {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+  column-gap: 0;
+}
+.phone .reminder {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  row-gap: 1px;
+  line-height: 1.3;
+}
+.phone .reminder .rm-ic {
+  grid-row: 1 / 3;
+}
+.phone .reminder .rm-what {
+  grid-column: 2;
+  grid-row: 2;
+}
+.phone .reminder .btn {
+  grid-column: 3;
+  grid-row: 1 / 3;
+}
+
+/* ------------------------------------------------------------------ mobile settings */
+.ms-index {
+  padding: 4px 16px 0;
+}
+.m-head .ms-me {
+  flex: none;
+  text-decoration: none;
+}
+.m-head .ms-me .avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+.ms-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.ms-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 64px;
+  padding: 8px 9px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  text-decoration: none;
+}
+.ms-tile.is-open {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.ms-tile b {
+  font-size: 12.5px;
+  line-height: 14px;
+  font-weight: var(--w-bold);
+}
+.ms-ic {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.ms-ic svg {
+  width: 13px;
+  height: 13px;
+}
+.ms-v {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ms-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--attn);
+}
+.m-sheet--settings {
+  top: 388px;
+}
+.mc-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 20px 10px;
+}
+.mc-head > div {
+  flex: 1;
+}
+.mc-head h2 {
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.mc-head p {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.mc-head p b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.mc-sec {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 10px 0 4px;
+  font-size: 12px;
+  font-weight: var(--w-bold);
+  color: var(--muted);
+}
+.mc-sec span {
+  font-weight: var(--w-regular);
+  color: var(--faint);
+}
+.mc-group {
+  margin-top: 6px;
+}
+.mc-topic {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  height: 22px;
+  padding-left: 26px;
+  font-size: 13.5px;
+}
+.mc-topic span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.mc-topic--none b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+/* A group's lines run left into its Topic's interchange, like the Triage band on Intake. */
+.mc-rows {
+  position: relative;
+  padding-left: 8px;
+}
+.mc-cap {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 16px;
+  border-radius: 8px;
+  background: var(--casing);
+  box-shadow: inset 0 0 0 3px var(--trunk);
+  z-index: 1;
+}
+.mc-cap--end {
+  box-shadow: inset 0 0 0 2px var(--faint);
+}
+.mc-row,
+.mc-ch {
+  display: grid;
+  grid-template-columns: 34px 16px minmax(0, 1fr) auto;
+  column-gap: 9px;
+  align-items: center;
+  height: 34px;
+}
+.mc-ln {
+  height: var(--w, 3px);
+  background: var(--c);
+  border-radius: 0 3px 3px 0;
+}
+.mc-row .brand,
+.mc-ch .brand {
+  width: 15px;
+  height: 15px;
+  color: var(--ink);
+}
+.mc-row .nm,
+.mc-ch .nm {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mc-row .nm b,
+.mc-ch .nm b {
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.mc-row .n {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mc-ch {
+  height: 44px;
+  padding-left: 8px;
+}
+.mc-ch .mc-ln {
+  --w: 4px;
+}
+.mc-ch--down .mc-ln {
+  background: repeating-linear-gradient(90deg, var(--c) 0 5px, transparent 5px 9px);
+}
+.mc-ch--down .nm .attn {
+  font-size: 12.5px;
+}
+.mc-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: var(--w-medium);
+}
+.mc-who .mk + * {
+  margin-right: 4px;
+}
+.mc-who i + i {
+  margin-left: 6px;
+}
+.mc-retry {
+  height: 30px;
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ mobile lock screen */
+/* The lock screen follows the theme, like the rest of the app: the wallpaper is a quiet piece of
+   network map drawn in the theme's own line colors. */
+.lk {
+  background: linear-gradient(to bottom, var(--sunken), var(--surface) 60%, var(--bg));
+}
+.lk-wall {
+  position: absolute;
+  inset: 0;
+  opacity: 0.34;
+}
+.lk-wall path {
+  fill: none;
+  stroke-width: 11;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lk-wall circle {
+  fill: var(--surface);
+  stroke: var(--ink);
+  stroke-width: 3.5;
+}
+.lk .statusbar {
+  font-size: 15px;
+}
+.lk .statusbar .island {
+  display: none;
+}
+.lk-island {
+  position: absolute;
+  z-index: 31;
+  left: 50%;
+  top: 11px;
+  width: 172px;
+  height: 36px;
+  margin-left: -86px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 13px 0 8px;
+  border-radius: 20px;
+  background: #000;
+  --casing: #000;
+  --trunk: #f2eee6;
+}
+.lk-island-t {
+  font-size: 12.5px;
+  font-weight: var(--w-bold);
+  color: oklch(81% 0.13 78);
+}
+.lk-top {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  color: var(--ink);
+}
+.lk-lock {
+  width: 18px;
+  height: 18px;
+}
+.lk-date {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.01em;
+}
+.lk-clock {
+  font-size: 88px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.lk-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 10px 0;
+}
+.lk-la,
+.lk-nt {
+  border-radius: 20px;
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(24px) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    var(--shadow-1);
+}
+.lk-la {
+  padding: 11px 14px 12px;
+}
+.lk-la-top,
+.lk-nt-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.lk-la-top .appicon,
+.lk-nt-top .appicon {
+  flex: none;
+}
+.lk-muted {
+  color: var(--muted);
+}
+.lk-attn {
+  color: var(--attn);
+  font-weight: var(--w-bold);
+  font-size: 12.5px;
+}
+.lk-la-line {
+  margin: 6px 0 0 -2px;
+}
+.lk-la-q {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+.lk-la-q code {
+  font-size: 11.5px;
+}
+.lk-la-acts,
+.lk-nt-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.lk-btn {
+  flex: none;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: var(--w-bold);
+  color: var(--ink);
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.lk-btn--ink {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+.lk-la-stat {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.lk-la-stat small {
+  font-family: var(--font);
+  color: var(--muted);
+  font-size: 12px;
+}
+.lk-nt {
+  padding: 10px 14px 12px;
+}
+.lk-nt-top b {
+  font-weight: var(--w-bold);
+}
+.lk-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lk-nt p {
+  margin: 3px 0 0 27px;
+  font-size: 14.5px;
+  line-height: 1.35;
+}
+.lk-nt-acts {
+  margin-left: 27px;
+}
+/* Older notifications fold into a stack: two thin edges peek out below the top card. */
+.lk-nt--stack {
+  position: relative;
+  margin-bottom: 12px;
+}
+.lk-nt--stack::before,
+.lk-nt--stack::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  border-radius: 0 0 14px 14px;
+  background: var(--glass);
+  box-shadow: inset 0 -1px 0 var(--glass-edge);
+  opacity: 0.8;
+}
+.lk-nt--stack::after {
+  top: calc(100% + 6px);
+  left: 26px;
+  right: 26px;
+  height: 5px;
+  opacity: 0.55;
+}
+.lk-hap {
+  display: flex;
+  justify-content: center;
+}
+.lk-corner {
+  position: absolute;
+  bottom: 44px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  z-index: 5;
+}
+.lk-corner--l {
+  left: 44px;
+}
+.lk-corner--r {
+  right: 44px;
 }

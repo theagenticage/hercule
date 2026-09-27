@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Ada · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  .m-head .avatar { width: 30px; height: 30px; margin: 0 8px 0 2px; border-radius: 8px; font-size: 14px; }
+  .m-title small .live { display: inline-flex; align-items: center; gap: 5px; color: var(--live); }
+  .m-title small .live .mk { width: 9px; height: 9px; }
+
+  .m-thread { padding-top: 14px; }
+  .m-thread .msg-agent { margin-bottom: 14px; font-size: 14px; line-height: 1.5; }
+  .m-thread .msg-user { margin-bottom: 14px; }
+  .m-thread .bubble { padding: 8px 12px; font-size: 14px; line-height: 1.45; }
+  .m-thread .msg-meta { margin-bottom: 6px; }
+  .notice { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; align-items: start; margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: var(--attn-soft); font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+  .notice .mk { color: var(--attn); margin-top: 3px; }
+  .notice small { display: block; margin-top: 4px; font: 450 11px / 1.4 var(--font-mono); color: var(--muted); }
+  .notice .act { margin-top: 8px; height: 28px; }
+  .quiet-fold { display: flex; align-items: center; gap: 9px; margin: 0 0 16px; font: 450 11.5px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .quiet-fold .mk { width: 10px; height: 10px; }
+  .quiet-fold b { color: var(--muted); font-weight: 560; }
+  .quiet-fold::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  .ada-meta .avatar { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
+  .ada-meta .hb { display: inline-flex; align-items: center; gap: 5px; color: var(--live); }
+  .reminder { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-top: 8px; padding: 7px 6px 7px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-sunk); font-size: 13.5px; line-height: 1.35; }
+  .reminder .mk { color: var(--accent); }
+  .reminder small { display: block; margin-top: 3px; font: 450 11px / 1.3 var(--font-mono); color: var(--faint); }
+  .streaming .cursor { background: var(--live); width: 0.5em; }
+  .streaming-tag { display: inline-flex; align-items: center; gap: 6px; color: var(--live); }
+
+  /* Listening. Final words are ink; the words still being recognised are faint. */
+  .m-voice.is-listening { border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); }
+  .m-voice.is-listening .m-voice-row { align-items: flex-end; padding: 8px 6px 6px 8px; }
+  .said .interim { color: var(--faint); }
+  .said .cursor { width: 2px; margin-left: 1px; background: var(--accent); }
+  .listen-bar { display: flex; align-items: center; gap: 10px; padding: 0 12px 9px; font: 450 11px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .listen-bar .rec { color: var(--accent); font-weight: 600; }
+  .listen-bar .end { margin-left: auto; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="VOICE" data-context="Ada · listening"></div>
+
+  <header class="m-head">
+    <a class="m-back" href="#" title="Assistants"><svg class="mk"><use href="#c-back"/></svg></a>
+    <span class="avatar ada">A</span>
+    <div class="m-title">
+      <b>Ada</b>
+      <small><span class="live"><svg class="mk"><use href="#m-working"/></svg>writing</span><span>Web chat · Slack DM</span></small>
+    </div>
+    <button class="m-btn" type="button" title="Memory"><svg class="mk"><use href="#g-memory"/></svg></button>
+    <button class="m-btn" type="button" title="Reminders"><svg class="mk"><use href="#g-reminder"/></svg></button>
+  </header>
+
+  <div class="m-stage">
+    <div class="m-scroll" data-composer="#dock">
+      <div class="m-thread">
+        <div class="notice">
+          <svg class="mk"><use href="#g-notice"/></svg>
+          <div>Ada was interrupted: her turn failed after a provider timeout of 120s. Your last message was kept.<small>Notice · yesterday 22:14 · from Hercule, not from Ada</small><button class="act" type="button"><kbd>r</kbd>Retry</button></div>
+        </div>
+
+        <div class="quiet-fold"><svg class="mk"><use href="#c-right"/></svg><span><b>Today</b> · 2 quiet check-ins, 07:00 and 08:00</span></div>
+
+        <div class="msg-agent">
+          <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada<span class="hb"><svg class="mk" style="width:10px;height:10px"><use href="#g-heartbeat"/></svg>heartbeat</span>09:00</div>
+          <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name. I can draft that.</p>
+        </div>
+
+        <div class="msg-user">
+          <div class="msg-meta">Rogier · 09:20</div>
+          <div class="bubble">Remind me Friday to renew the SSL cert for ops.</div>
+        </div>
+
+        <div class="msg-agent">
+          <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada · 09:20</div>
+          <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+          <div class="reminder">
+            <svg class="mk"><use href="#g-reminder"/></svg>
+            <div>Renew the SSL cert for ops<small>Reminder · Fri 2 Oct · 09:00</small></div>
+            <button class="m-btn" type="button">Edit</button>
+          </div>
+        </div>
+
+        <div class="msg-user">
+          <div class="msg-meta">Rogier · 09:38</div>
+          <div class="bubble">What's the status of the backup job?</div>
+        </div>
+
+        <div class="msg-agent streaming">
+          <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada · 09:38<span class="streaming-tag"><svg class="mk" style="width:10px;height:10px"><use href="#m-working"/></svg>writing</span></div>
+          <p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="cursor"></span></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-dock" id="dock">
+      <div class="m-voice card-glass is-listening">
+        <span class="hap" style="top:-26px; right:12px">haptic · soft, as listening starts</span>
+        <div class="m-voice-row">
+          <div class="said">And ask Milo to post last night's timings <span class="interim">in the thread</span><span class="cursor"></span></div>
+          <button class="mic is-listening" type="button" title="Release to send"><svg class="mk"><use href="#c-stop"/></svg></button>
+        </div>
+        <div class="listen-bar">
+          <span class="rec">0:04</span>
+          <span class="wave" aria-hidden="true"><i style="height:6px"></i><i style="height:12px"></i><i style="height:20px"></i><i style="height:14px"></i><i style="height:24px"></i><i style="height:18px"></i><i style="height:9px"></i><i style="height:15px"></i><i style="height:22px"></i><i style="height:11px"></i><i style="height:6px"></i><i style="height:4px"></i><i style="height:8px"></i><i style="height:13px"></i><i style="height:5px"></i><i style="height:3px"></i></span>
+          <span class="end">release to send · slide to cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="home"></div>
+</div>
+</body>
+</html>

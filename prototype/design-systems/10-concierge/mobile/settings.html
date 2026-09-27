@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<!-- The settings index, with one domain (Appearance) open as a sheet at half height. The index
+     stays visible above it, so Rogier can see where he is. Themes switch live. -->
+<div class="phone" data-tab="settings">
+  <header class="m-head"><h1>Settings</h1></header>
+  <div class="m-body">
+    <div class="ms">
+      <a class="ms-me" href="#"><span class="avatar">R</span><span class="grow"><b>Rogier</b><small>rogier@personal · Profile</small></span><i data-i="right"></i></a>
+
+      <div class="ms-g">
+        <a class="ms-r is-on" href="#"><i data-i="brush"></i><span>Appearance</span><em>Linen · Espresso at night</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-m="session"></i><span>Threads</span><em>Opus 5.5 · auto-accept</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i class="orb" data-v="ada" data-p="working" style="--size:16px"></i><span>Assistants</span><em><i class="orb" data-v="milo" data-p="idle" style="--size:9px"></i><i class="orb" data-v="juno" data-p="asleep" style="--size:9px"></i>3</em><i data-i="right"></i></a>
+      </div>
+
+      <div class="ms-g">
+        <a class="ms-r" href="#"><i data-i="plug"></i><span>Connections</span><em class="c-attn">1 reconnecting</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="bolt"></i><span>Providers</span><em>3</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="machine"></i><span>Machines</span><em>16 of 22 slots</em><i data-i="right"></i></a>
+      </div>
+
+      <div class="ms-g">
+        <a class="ms-r" href="#"><i data-i="user"></i><span>Identities</span><em>4</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="shield"></i><span>Permission profiles</span><em>3</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="key"></i><span>Secrets</span><em>11</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="sliders"></i><span>Bounds</span><em class="c-attn">1 tripped</em><i data-i="right"></i></a>
+      </div>
+
+      <div class="ms-g">
+        <a class="ms-r" href="#"><i data-i="grid"></i><span>Plugins</span><em>9</em><i data-i="right"></i></a>
+        <a class="ms-r" href="#"><i data-i="database"></i><span>System</span><em>backed up 04:00</em><i data-i="right"></i></a>
+      </div>
+    </div>
+  </div>
+
+  <div class="m-scrim"></div>
+  <section class="m-sheet" aria-label="Appearance">
+    <span class="grab"></span>
+    <div class="m-sheet-h"><span></span><b>Appearance</b><button class="m-text">Done</button></div>
+    <div class="m-themes">
+      <button class="m-theme is-on" data-set-theme="linen"><span class="m-theme-sw" data-theme="linen"><i class="orb" data-v="ada" data-p="idle" style="--size:11px"></i><i class="bar"></i></span>Linen</button>
+      <button class="m-theme" data-set-theme="porcelain"><span class="m-theme-sw" data-theme="porcelain"><i class="orb" data-v="ada" data-p="idle" style="--size:11px"></i><i class="bar"></i></span>Porcelain</button>
+      <button class="m-theme" data-set-theme="espresso"><span class="m-theme-sw" data-theme="espresso"><i class="orb" data-v="ada" data-p="idle" style="--size:11px"></i><i class="bar"></i></span>Espresso</button>
+      <button class="m-theme" data-set-theme="velvet"><span class="m-theme-sw" data-theme="velvet"><i class="orb" data-v="ada" data-p="idle" style="--size:11px"></i><i class="bar"></i></span>Velvet</button>
+      <button class="m-theme" data-set-theme="charcoal"><span class="m-theme-sw" data-theme="charcoal"><i class="orb" data-v="ada" data-p="idle" style="--size:11px"></i><i class="bar"></i></span>Charcoal</button>
+    </div>
+    <div class="m-sheet-rows">
+      <div class="frow"><span class="frow-l">Match the phone<small>Linen by day, Espresso by night</small></span><span class="toggle is-on"></span></div>
+      <div class="frow"><span class="frow-l">Text size</span><span class="m-size"><small>A</small><span class="meter"><i style="--v:50%"></i></span><span>A</span></span></div>
+      <div class="frow"><span class="frow-l">Haptics<small>a tap where an answer lands <span class="haptic"><i data-i="haptic"></i>selection tick</span></small></span><span class="toggle is-on"></span></div>
+      <div class="frow"><span class="frow-l">Source marks on rows<small>show where a Proposal came from</small></span><span class="toggle is-on"></span></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

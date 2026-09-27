@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390, height=844" />
+    <title>Appearance · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      /* The index: one row per domain, with what is true about it right now on the right. */
+      .m-scroll { padding: 0 16px 480px; }
+      .grp-label { padding: 14px 4px 6px; font-size: var(--fs-xs); font-weight: var(--w-emph); color: var(--muted); }
+      .grp { border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft); overflow: hidden; }
+      .set-li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 12px; align-items: center; gap: 12px; height: 46px; padding: 0 12px 0 14px; font-size: 15px; }
+      .set-li + .set-li { border-top: 1px solid var(--line-soft); }
+      .set-li > .m { width: 18px; height: 18px; color: var(--muted); }
+      .set-li .chev { width: 12px; height: 12px; color: var(--faint); }
+      .set-li .set-v { display: flex; align-items: center; gap: 5px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+      .set-li .set-v .m { width: 13px; height: 13px; }
+      .set-li .set-v .mono { font-size: 11px; }
+      .set-li[aria-current="page"] { background: var(--hover); }
+      .set-li[aria-current="page"] > .m:first-child { color: var(--ink); }
+
+      /* Appearance opens as a sheet at half height. The index above it stays readable and
+         tappable, so there is no dimming. */
+      .sheet { top: 388px; display: flex; flex-direction: column; }
+      .sh-head { display: flex; align-items: center; gap: 10px; padding: 2px 16px 10px 20px; }
+      .sh-head h2 { font-size: 17px; line-height: 1.25; }
+      .sh-head p { font-size: var(--fs-xs); color: var(--muted); }
+      .sh-done { margin-left: auto; height: 36px; padding: 0 4px; font-size: 15px; font-weight: var(--w-emph); color: var(--live-ink); }
+      .sh-body { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 40px; scrollbar-width: none; }
+
+      /* Five phones in the five themes. The picked one gets a ring and a check. */
+      .ph-picks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 2px 4px 12px; }
+      .ph-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      .ph { position: relative; display: block; width: 100%; height: 88px; border-radius: 13px; overflow: hidden; background: var(--bg); box-shadow: 0 0 0 1px var(--line); }
+      .ph-pick[aria-pressed="true"] .ph { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink); }
+      .ph-now { position: absolute; left: 6px; right: 0; top: 16px; height: 1.5px; background: var(--now); }
+      .ph-now::before { content: ""; position: absolute; left: 0; top: -3px; width: 12px; height: 7px; border-radius: 3px; background: var(--now); }
+      .ph-row { position: absolute; left: 8px; height: 5px; border-radius: 3px; background: var(--line); }
+      .ph-row::before { content: ""; position: absolute; left: 0; top: -1px; width: 7px; height: 7px; border-radius: 50%; }
+      .ph-row { padding-left: 11px; background-clip: content-box; }
+      .ph-row.a::before { background: var(--now); }
+      .ph-row.b::before { background: var(--live); }
+      .ph-row.c::before { box-shadow: inset 0 0 0 1.5px var(--future); }
+      .ph-tabs { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; background: var(--surface); border-top: 1px solid var(--line-soft); }
+      .ph-check { position: absolute; right: 5px; bottom: 19px; display: none; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); color: var(--bg); }
+      .ph-check .m { width: 10px; height: 10px; stroke-width: 2; }
+      .ph-pick[aria-pressed="true"] .ph-check { display: grid; }
+      .ph-name { font-size: var(--fs-sm); font-weight: var(--w-emph); line-height: 1.1; white-space: nowrap; }
+      .ph-name small { display: block; margin-top: 2px; font-size: 10.5px; font-weight: var(--w-regular); color: var(--faint); text-align: center; }
+
+      .sh-grp { border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft); }
+      .sh-grp + .sh-grp { margin-top: 12px; }
+      .sh-row { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 8px 14px; font-size: 15px; }
+      .sh-row + .sh-row { border-top: 1px solid var(--line-soft); }
+      .sh-row .txt { flex: 1; min-width: 0; }
+      .sh-row small { display: block; margin-top: 1px; font-size: var(--fs-xs); color: var(--muted); }
+      .sh-row .seg > button { height: 30px; font-size: 13px; }
+      .sh-row.col { flex-direction: column; align-items: stretch; gap: 8px; }
+      .sh-row.col .top { display: flex; align-items: center; gap: 12px; }
+      .sunstrip { width: auto; margin: 2px 2px 0; }
+      /* The phone strip is narrower than the desktop one, so 07:12 ends at its boundary
+         instead of centring on it, which keeps it clear of the Now label. */
+      .sunstrip .ax.to-left { transform: translateX(calc(-100% - 3px)); }
+
+      /* Phone-sized switches. */
+      .sheet .switch { width: 46px; height: 28px; }
+      .sheet .switch::after { width: 24px; height: 24px; }
+      .sheet .switch[aria-checked="true"]::after { transform: translateX(18px); }
+    </style>
+  </head>
+  <body class="phone">
+    <div data-status></div>
+    <header class="m-head">
+      <div class="m-head-text">
+        <h1 class="m-title">Settings</h1>
+        <p class="m-sub">Rogier · controller on studio-mac</p>
+      </div>
+      <button class="m-icon" aria-label="Search settings"><i data-m="search"></i></button>
+    </header>
+
+    <div class="m-scroll">
+      <div class="grp">
+        <a class="set-li"><i data-m="profile"></i><span>Profile</span><span class="set-v">Rogier</span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li" aria-current="page"><i data-m="appearance"></i><span>Appearance</span><span class="set-v theme-name">Sand</span><i data-m="chev-right" class="chev"></i></a>
+      </div>
+      <div class="grp-label">Work</div>
+      <div class="grp">
+        <a class="set-li"><i data-m="session"></i><span>Threads</span><span class="set-v"><i data-m="decision" class="now"></i>3 wait on you</span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="heartbeat"></i><span>Assistants</span><span class="set-v">Ada, Milo, Juno</span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="connections"></i><span>Connections</span><span class="set-v"><i data-m="working" class="live"></i>Discord reconnecting</span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="providers"></i><span>Providers</span><span class="set-v">61% · resets <span class="mono">11:00</span></span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="fleet"></i><span>Machines</span><span class="set-v">build-box-1 at cap</span><i data-m="chev-right" class="chev"></i></a>
+      </div>
+      <div class="grp-label">Safety</div>
+      <div class="grp">
+        <a class="set-li"><i data-m="identities"></i><span>Identities</span><span class="set-v"></span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="shield"></i><span>Permission profiles</span><span class="set-v"></span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="key"></i><span>Secrets</span><span class="set-v"></span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="gauge"></i><span>Bounds</span><span class="set-v"><i data-m="unsure" class="now"></i>tripped <span class="mono">08:14</span></span><i data-m="chev-right" class="chev"></i></a>
+      </div>
+      <div class="grp-label">System</div>
+      <div class="grp">
+        <a class="set-li"><i data-m="plugins"></i><span>Plugins</span><span class="set-v"></span><i data-m="chev-right" class="chev"></i></a>
+        <a class="set-li"><i data-m="system"></i><span>System</span><span class="set-v"></span><i data-m="chev-right" class="chev"></i></a>
+      </div>
+    </div>
+
+    <nav data-tabs="settings"></nav>
+
+    <section class="sheet" role="dialog" aria-label="Appearance">
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <header class="sh-head">
+        <div><h2>Appearance</h2><p>this iPhone · saved at once</p></div>
+        <button class="sh-done">Done</button>
+      </header>
+      <div class="sh-body">
+        <div class="ph-picks" role="group" aria-label="Theme">
+          <button class="ph-pick" data-set-theme="sand" aria-pressed="false"><span class="ph" data-preview="sand" aria-hidden="true"><i class="ph-now"></i><i class="ph-row a" style="top: 30px; width: 70%"></i><i class="ph-row b" style="top: 44px; width: 56%"></i><i class="ph-row c" style="top: 58px; width: 64%"></i><i class="ph-check"><i data-m="done"></i></i><i class="ph-tabs"></i></span><span class="ph-name">Sand<small>light</small></span></button>
+          <button class="ph-pick" data-set-theme="shell" aria-pressed="false"><span class="ph" data-preview="shell" aria-hidden="true"><i class="ph-now"></i><i class="ph-row a" style="top: 30px; width: 70%"></i><i class="ph-row b" style="top: 44px; width: 56%"></i><i class="ph-row c" style="top: 58px; width: 64%"></i><i class="ph-check"><i data-m="done"></i></i><i class="ph-tabs"></i></span><span class="ph-name">Shell<small>light</small></span></button>
+          <button class="ph-pick" data-set-theme="kelp" aria-pressed="false"><span class="ph" data-preview="kelp" aria-hidden="true"><i class="ph-now"></i><i class="ph-row a" style="top: 30px; width: 70%"></i><i class="ph-row b" style="top: 44px; width: 56%"></i><i class="ph-row c" style="top: 58px; width: 64%"></i><i class="ph-check"><i data-m="done"></i></i><i class="ph-tabs"></i></span><span class="ph-name">Kelp<small>dark</small></span></button>
+          <button class="ph-pick" data-set-theme="driftwood" aria-pressed="false"><span class="ph" data-preview="driftwood" aria-hidden="true"><i class="ph-now"></i><i class="ph-row a" style="top: 30px; width: 70%"></i><i class="ph-row b" style="top: 44px; width: 56%"></i><i class="ph-row c" style="top: 58px; width: 64%"></i><i class="ph-check"><i data-m="done"></i></i><i class="ph-tabs"></i></span><span class="ph-name">Driftwood<small>dark</small></span></button>
+          <button class="ph-pick" data-set-theme="low-tide" aria-pressed="false"><span class="ph" data-preview="low-tide" aria-hidden="true"><i class="ph-now"></i><i class="ph-row a" style="top: 30px; width: 70%"></i><i class="ph-row b" style="top: 44px; width: 56%"></i><i class="ph-row c" style="top: 58px; width: 64%"></i><i class="ph-check"><i data-m="done"></i></i><i class="ph-tabs"></i></span><span class="ph-name">Low Tide<small>dark</small></span></button>
+        </div>
+
+        <div class="sh-grp">
+          <div class="sh-row col">
+            <div class="top"><span class="txt">Follow iOS<small>Sand while iOS is light, Kelp while it is dark</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Follow iOS"></button></div>
+            <div class="sunstrip" role="img" aria-label="Today: Kelp until 07:12, Sand until 19:24, then Kelp">
+              <span class="band" data-preview="kelp" style="left: 0; width: 29.4%">Kelp</span>
+              <span class="band" data-preview="sand" style="left: 30%; width: 50.2%; padding: 0; text-align: center">Sand</span>
+              <span class="band" data-preview="kelp" style="left: 80.8%; width: 19.2%">Kelp</span>
+              <span class="now" style="left: 40.3%"></span>
+              <span class="ax to-left" style="left: 30%">07:12</span>
+              <span class="ax is-now" style="left: 40.3%">09:41</span>
+              <span class="ax" style="left: 80.8%">19:24</span>
+            </div>
+          </div>
+          <div class="sh-row"><span class="txt">Density</span><div class="seg" role="tablist" aria-label="Density"><button role="tab" aria-selected="true">Comfortable</button><button role="tab" aria-selected="false">Compact</button></div></div>
+          <div class="sh-row"><span class="txt">Text size</span><div class="seg" role="tablist" aria-label="Text size"><button role="tab" aria-selected="false" style="font-size: 12px">Aa</button><button role="tab" aria-selected="true" style="font-size: 14px">Aa</button><button role="tab" aria-selected="false" style="font-size: 16px">Aa</button></div></div>
+        </div>
+
+        <div class="sh-grp">
+          <div class="sh-row"><span class="txt">Source marks on rows<small>where each item came from, beside its title</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Source marks on rows"></button></div>
+          <div class="sh-row"><span class="txt">Reduce motion<small>on when iOS asks for it</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce motion"></button></div>
+          <div class="sh-row"><span class="txt">Reduce transparency<small>glass turns solid: the tab bar, docks, sheets</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce transparency"></button></div>
+        </div>
+      </div>
+    </section>
+    <i class="home-ind" aria-hidden="true"></i>
+  </body>
+</html>

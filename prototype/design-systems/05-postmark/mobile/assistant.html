@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Ada · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .m-nav {
+        position: relative;
+        z-index: 3;
+      }
+      .m-who {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .transcript {
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px);
+        mask-image: linear-gradient(to bottom, transparent, #000 20px);
+      }
+      .col {
+        width: auto;
+        padding: 0 16px 150px;
+      }
+      .bubble,
+      .prose {
+        font-size: 15px;
+      }
+      .msg-user > div {
+        max-width: 84%;
+      }
+      /* Ada's turns: on the phone her seal moves into the name line so her prose gets the full width. */
+      .ada {
+        margin: 14px 0 18px;
+      }
+      .who {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .who b {
+        color: var(--ink);
+        font-weight: 620;
+        font-size: 14px;
+      }
+      .who .rs {
+        font-size: 9.5px;
+      }
+      .ada .prose {
+        margin: 6px 0 0;
+      }
+      .day {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 10px 0 8px;
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .day::before,
+      .day::after {
+        content: "";
+        flex: 1;
+        height: 5px;
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 0 0 / var(--perf-pitch) 5px repeat-x;
+      }
+      /* A Notice is the system speaking, not Ada: set on the ground with a stamp, no seal. */
+      .notice {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 4px 10px;
+        align-items: start;
+        margin: 10px 0 8px;
+        font-size: var(--t-sm);
+        line-height: 1.45;
+        color: var(--muted);
+      }
+      .notice time {
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      /* Two heartbeats that found nothing: two cancelled postmarks and one line. */
+      .quiet-beats {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 6px 0 10px;
+        color: var(--faint);
+        font-size: var(--t-sm);
+      }
+      .quiet-beats .pms {
+        display: flex;
+      }
+      .quiet-beats .postmark {
+        width: 34px;
+        color: var(--faint);
+        --tilt: -8deg;
+      }
+      .quiet-beats .postmark + .postmark {
+        margin-left: -10px;
+        --tilt: 6deg;
+      }
+      .quiet-beats .mk {
+        width: 13px;
+        height: 13px;
+        margin-left: auto;
+      }
+      /* Slips under Ada's heartbeat: what she is pointing at, answerable in place. */
+      .slips {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .slip {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 6px 10px;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+      }
+      .slip .t {
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .slip .acts {
+        grid-column: 2;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .slip .acts .rs {
+        margin-right: auto;
+        font-size: 9.5px;
+      }
+      .slip .btn {
+        height: 34px;
+        padding-inline: 12px;
+      }
+      .caret {
+        display: inline-block;
+        width: 7px;
+        height: 15px;
+        margin-left: 2px;
+        vertical-align: -2px;
+        border-radius: 1px;
+        background: var(--violet);
+        animation: blink 1s steps(2) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .composer-dock {
+        z-index: 4;
+        padding: 0 10px 30px;
+      }
+      .c-input {
+        font-size: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <nav class="m-nav">
+        <a class="m-back" aria-label="Back to Threads"><svg class="mk"><use href="#chev-left" /></svg></a>
+        <div class="m-who">
+          <span class="seal seal--lg is-working">A</span>
+          <div class="m-title">
+            <b>Ada</b>
+            <small>personal assistant · working</small>
+          </div>
+        </div>
+        <button class="icon-btn" aria-label="Assistant settings"><svg class="mk"><use href="#gear" /></svg></button>
+      </nav>
+
+      <div class="pane">
+        <div class="transcript" data-transcript>
+          <div class="col">
+            <div class="day">Mon 28 Sep</div>
+            <div class="notice">
+              <span class="rs rs--red tilt-a"><i data-m="failed" class="sm"></i>Interrupted</span>
+              <span>Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept. <time>22:14</time></span>
+            </div>
+
+            <div class="day">Today · Tue 29 Sep</div>
+            <div class="quiet-beats">
+              <span class="pms"><span data-postmark data-top="HEARTBEAT" data-mid="07:00" data-bot="QUIET"></span><span data-postmark data-top="HEARTBEAT" data-mid="08:00" data-bot="QUIET"></span></span>
+              <span>2 quiet check-ins</span>
+              <svg class="mk"><use href="#chev-right" /></svg>
+            </div>
+
+            <div class="ada">
+              <div class="who"><span class="seal">A</span><b>Ada</b><span class="rs rs--violet tilt-b"><svg class="mk"><use href="#heart" /></svg>Heartbeat</span><span class="mono">09:00</span></div>
+              <div class="prose">
+                <p>
+                  Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You
+                  started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can
+                  draft that.
+                </p>
+              </div>
+              <div class="slips">
+                <div class="slip">
+                  <i data-m="decision" class="s-attn"></i>
+                  <span class="t">Fix 3-D Secure checkout for EU cards</span>
+                  <div class="acts"><span class="rs rs--ochre tilt-c">Waiting on you</span><a class="link">Open<svg class="mk"><use href="#arrow-right" /></svg></a></div>
+                </div>
+                <div class="slip">
+                  <span class="post" data-src="gmail"></span>
+                  <span class="t">Draft a reply to Marta at Brightline</span>
+                  <div class="acts"><span class="rs rs--violet tilt-d"><svg class="mk"><use href="#offer" /></svg>Offer</span><button class="btn btn--ghost btn--sm">Not now</button><button class="btn btn--ink btn--sm">Draft reply</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg-user">
+              <div>
+                <div class="bubble">Remind me Friday to renew the SSL cert for ops.</div>
+                <span class="bubble-meta">Rogier · 09:20 · by voice</span>
+              </div>
+            </div>
+
+            <div class="ada">
+              <div class="who"><span class="seal">A</span><b>Ada</b><span class="mono">09:20</span></div>
+              <div class="prose"><p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p></div>
+              <div class="reminder">
+                <span class="leaf">Fri<b>2</b>Oct</span>
+                <div class="what">
+                  <b>Renew the SSL cert for ops</b>
+                  <span><svg class="mk"><use href="#clock" /></svg>09:00 · to Web chat · <a class="link">Edit</a></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg-user">
+              <div>
+                <div class="bubble">What's the status of the backup job?</div>
+                <span class="bubble-meta">Rogier · 09:38</span>
+              </div>
+            </div>
+
+            <div class="ada">
+              <div class="who"><span class="seal is-working">A</span><b>Ada</b><span class="rs rs--violet tilt-c"><i data-m="working" class="sm"></i>Working</span></div>
+              <div class="prose">
+                <p>
+                  Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night
+                  since the table <code>events</code> passed 40 GB…<span class="caret"></span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer-dock">
+          <div class="composer" data-composer>
+            <div class="c-card">
+              <textarea class="c-input" rows="1" placeholder="Message Ada…"></textarea>
+              <div class="c-row">
+                <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
+                <span class="c-spacer"></span>
+                <span class="haptic"><svg class="mk"><use href="#haptic" /></svg>soft tick on press</span>
+                <button class="m-mic" aria-label="Hold to talk to Ada"><svg class="mk"><use href="#mic" /></svg></button>
+              </div>
+            </div>
+            <div class="lip">
+              <span class="sel"><svg class="mk"><use href="#webchat" /></svg>Web chat</span>
+              <span class="rule"></span>
+              <span class="sel">Replies at turn end</span>
+              <span class="sel right"><svg class="mk"><use href="#b-claude" /></svg>Sonnet 5</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

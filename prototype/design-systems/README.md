@@ -23,4 +23,7 @@ eslint and prettier.
 - `shared/page.js`, `book.js`, `frames.css` - theme/state handling and the device frames.
 - `shared/shoot.mjs` - `node shared/shoot.mjs <page> <out.png> [--w --h --scale --full]`.
 - `shared/check.mjs` - `node shared/check.mjs <NN-slug>`: mechanical checks plus a shot of every
-  page in light and dark.
+  page in light and dark, and the book in 1600px slices. Both tools use Chromium's new headless
+  mode, the one that draws `backdrop-filter` blur.
+- `NN-slug/cover-light.png`, `cover-dark.png` - the gallery thumbnails, 1440x900 shots of each
+  design's best page in its `light` and `dark` theme. A missing cover falls back to a live frame.

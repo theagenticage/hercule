@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Settings · Appearance · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .m-head {
+        padding: 2px 20px 2px;
+      }
+      .m-head h1 {
+        font-size: 20px;
+      }
+      /* The settings index: the thirteen domains in four groups, one 44px row each. */
+      .index {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        padding: 0 16px;
+      }
+      .index .label {
+        padding: 9px 6px 6px;
+      }
+      .group {
+        border-radius: 14px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr) auto 12px;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+        padding: 0 12px 0 14px;
+        font-size: 15px;
+        color: var(--ink);
+      }
+      .row + .row {
+        border-top: 1px solid var(--line-soft);
+      }
+      .row > .mk {
+        width: 19px;
+        height: 19px;
+        color: var(--muted);
+      }
+      .row .v {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .row .v.attn {
+        color: var(--ochre-text);
+      }
+      .row .chev {
+        width: 12px;
+        height: 12px;
+        color: var(--faint);
+      }
+      .row.is-on {
+        background: var(--violet-soft);
+      }
+      .row.is-on > .mk {
+        color: var(--violet);
+      }
+      .group .row:first-child {
+        border-radius: 14px 14px 0 0;
+      }
+      .group .row:last-child {
+        border-radius: 0 0 14px 14px;
+      }
+      .scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 16;
+        background: oklch(20% 0.02 60 / 0.12);
+      }
+      /* One domain, Appearance, open as a sheet over the index at its medium height. */
+      .sheet-m {
+        z-index: 20;
+        padding: 0 16px 26px;
+      }
+      .s-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 6px 2px 10px;
+      }
+      .s-head h2 {
+        font-size: 18px;
+        font-weight: 650;
+      }
+      .s-head .link {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .themes {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+      }
+      .tcard {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+      }
+      /* A theme preview: a tiny Intake card drawn in that theme's own tokens. */
+      .tp {
+        width: 100%;
+        height: 66px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 7px;
+        border-radius: 10px;
+        color: var(--ink);
+        background:
+          radial-gradient(120% 70% at 0% 0%, var(--wall-a), transparent 70%),
+          radial-gradient(90% 70% at 100% 100%, var(--wall-b), transparent 70%), var(--bg);
+        box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+      }
+      .tcard.is-on .tp {
+        box-shadow:
+          0 0 0 2px var(--bg),
+          0 0 0 4px var(--violet);
+      }
+      .tp-env {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px;
+        border-radius: 5px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .tp-env b {
+        display: block;
+        height: 4px;
+        width: 60%;
+        border-radius: 2px;
+        background: var(--ink);
+        opacity: 0.8;
+      }
+      .tp-env b + b {
+        width: 40%;
+        opacity: 0.3;
+      }
+      .tp-env .post {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        --pw: 10px;
+        --ph: 13px;
+        --pm: 1.5px;
+        --pr: 1px;
+        --pp: 3px;
+      }
+      .tp-env .post-face .mk {
+        width: 6px;
+        height: 6px;
+      }
+      .tp-inks {
+        display: flex;
+        gap: 3px;
+      }
+      .tp-inks i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .tcard b {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .tcard small {
+        margin-top: -5px;
+        font-size: 10.5px;
+        color: var(--faint);
+      }
+      .tcard.is-on b {
+        color: var(--violet);
+      }
+      .s-list {
+        margin-top: 12px;
+        border-radius: 14px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .s-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 4px 12px 4px 14px;
+        font-size: 15px;
+      }
+      .s-row + .s-row {
+        border-top: 1px solid var(--line-soft);
+      }
+      .s-row > span:first-child {
+        flex: 1;
+        min-width: 0;
+      }
+      .s-row small {
+        display: block;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .s-row .seg button {
+        padding-inline: 9px;
+      }
+      .s-row .toggle {
+        flex: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <header class="m-head">
+        <h1>Settings</h1>
+      </header>
+
+      <div class="index">
+        <div class="label">You</div>
+        <div class="group">
+          <a class="row"><svg class="mk"><use href="#user" /></svg><span>Profile</span><span class="v">Rogier</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row is-on"><svg class="mk"><use href="#palette" /></svg><span>Appearance</span><span class="v" data-theme-name>Manila</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+        </div>
+        <div class="label">Work</div>
+        <div class="group">
+          <a class="row"><svg class="mk"><use href="#threads" /></svg><span>Threads</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#heart" /></svg><span>Assistants</span><span class="v">3</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#connection" /></svg><span>Connections</span><span class="v attn"><i data-m="paused" class="s-attn sm"></i>Discord reconnecting</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#plug" /></svg><span>Providers</span><span class="v">3</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#fleet" /></svg><span>Machines</span><span class="v">3 online</span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+        </div>
+        <div class="label">Access</div>
+        <div class="group">
+          <a class="row"><svg class="mk"><use href="#key" /></svg><span>Identities</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#shield" /></svg><span>Permission profiles</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#lock" /></svg><span>Secrets</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#pulse" /></svg><span>Bounds</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+        </div>
+        <div class="label">System</div>
+        <div class="group">
+          <a class="row"><svg class="mk"><use href="#bolt" /></svg><span>Plugins</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+          <a class="row"><svg class="mk"><use href="#gear" /></svg><span>System</span><span class="v"></span><svg class="mk chev"><use href="#chev-right" /></svg></a>
+        </div>
+      </div>
+
+      <div class="scrim"></div>
+
+      <section class="sheet-m" aria-label="Appearance">
+        <div class="grabber"></div>
+        <div class="s-head">
+          <h2>Appearance</h2>
+          <a class="link">Done</a>
+        </div>
+        <div class="themes">
+          <button class="tcard" data-pick="manila">
+            <span class="tp theme-manila"><span class="tp-env"><span class="post" data-src="sentry"></span><b></b><b></b></span><span class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i></span></span>
+            <b>Manila</b><small>light</small>
+          </button>
+          <button class="tcard" data-pick="newsprint">
+            <span class="tp theme-newsprint"><span class="tp-env"><span class="post" data-src="gmail"></span><b></b><b></b></span><span class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i></span></span>
+            <b>Newsprint</b><small>light</small>
+          </button>
+          <button class="tcard" data-pick="carbon">
+            <span class="tp theme-carbon"><span class="tp-env"><span class="post" data-src="github"></span><b></b><b></b></span><span class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i></span></span>
+            <b>Carbon</b><small>dark</small>
+          </button>
+          <button class="tcard" data-pick="oxide">
+            <span class="tp theme-oxide"><span class="tp-env"><span class="post" data-src="stripe"></span><b></b><b></b></span><span class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i></span></span>
+            <b>Oxide</b><small>dark</small>
+          </button>
+          <button class="tcard" data-pick="bottle">
+            <span class="tp theme-bottle"><span class="tp-env"><span class="post" data-src="grafana"></span><b></b><b></b></span><span class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i></span></span>
+            <b>Bottle</b><small>dark</small>
+          </button>
+        </div>
+        <div class="s-list">
+          <div class="s-row"><span>Follow iPhone<small>Manila by day, Carbon by night</small></span><span class="toggle is-on"></span></div>
+          <div class="s-row"><span>Density</span><div class="seg"><button class="is-on">Comfortable</button><button>Compact</button></div></div>
+          <div class="s-row"><span>Text size</span><div class="seg"><button>Small</button><button class="is-on">Default</button><button>Large</button></div></div>
+          <div class="s-row"><span>Reduce motion<small>Stamps land without the thunk</small></span><span class="toggle"></span></div>
+          <div class="s-row"><span>Reduce transparency<small>Glass turns to solid paper</small></span><span class="toggle"></span></div>
+          <div class="s-row"><span>Source stamps on rows</span><span class="toggle is-on"></span></div>
+        </div>
+      </section>
+      <div data-kit="home"></div>
+    </div>
+    <script>
+      // Picking a theme applies it to the whole page at once, the way the real setting would.
+      document.addEventListener("DOMContentLoaded", () => {
+        const aliases = { light: "manila", dark: "carbon" };
+        const cards = document.querySelectorAll("[data-pick]");
+        const mark = () => {
+          const t = document.documentElement.dataset.theme || "light";
+          cards.forEach((c) => c.classList.toggle("is-on", c.dataset.pick === (aliases[t] || t)));
+        };
+        cards.forEach((c) => c.addEventListener("click", () => ((document.documentElement.dataset.theme = c.dataset.pick), mark())));
+        mark();
+      });
+    </script>
+  </body>
+</html>

@@ -420,6 +420,9 @@
     } else {
       scroller.scrollTop = scroller.scrollHeight;
     }
+    // The transcript fades out under the composer stack (see system.css), so it needs the stack's height.
+    const stack = composer.closest(".composer-dock") || composer;
+    new ResizeObserver(() => scroller.style.setProperty("--stack-h", stack.offsetHeight + "px")).observe(stack);
     scroller.addEventListener("scroll", update, { passive: true });
     composer.addEventListener("focusin", () => ((focused = true), update()));
     composer.addEventListener("focusout", () => ((focused = false), update()));

@@ -1,0 +1,1939 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aurora · a design system for Hercule</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="marks.js"></script>
+    <script src="../shared/book.js" defer></script>
+    <style>
+      /* The book scrolls; every screen page does not. */
+      html,
+      body {
+        height: auto;
+        overflow: visible;
+      }
+      body {
+        font-size: var(--t-body);
+        line-height: 1.55;
+      }
+      .book-sky {
+        position: fixed;
+      }
+      .book {
+        position: relative;
+        z-index: 1;
+        width: min(1200px, calc(100% - 64px));
+        margin: 0 auto;
+        padding-bottom: 120px;
+        /* A figure pinned to one theme takes that theme's tokens, but its caption sits on
+           the book. These copies keep the caption in the book's own ink. */
+        --book-ink: var(--ink);
+        --book-muted: var(--muted);
+        --book-faint: var(--faint);
+      }
+
+      /* ---- Top bar: the logo, the sections, the theme in use ---- */
+      .book-top {
+        position: sticky;
+        top: 12px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        height: 52px;
+        margin-top: 12px;
+        padding: 0 10px 0 18px;
+        border-radius: 18px;
+        font-size: var(--t-ui);
+      }
+      .book-top .logo {
+        font-size: 14px;
+      }
+      .book-top .logo .faint {
+        font-weight: var(--w-med);
+      }
+      .book-links {
+        display: flex;
+        gap: 2px;
+        margin-right: auto;
+      }
+      .book-links a {
+        padding: 6px 9px;
+        border-radius: 9px;
+        color: var(--muted);
+        font-weight: var(--w-med);
+      }
+      .book-links a:hover {
+        color: var(--ink);
+        background: var(--hover);
+      }
+      .book-pills {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: 12px;
+        background: var(--hover);
+      }
+      .book-pills button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 11px 0 8px;
+        border-radius: 9px;
+        font-weight: var(--w-med);
+        color: var(--muted);
+      }
+      .book-pills button:hover {
+        color: var(--ink);
+      }
+      .book-pills button[aria-pressed="true"] {
+        color: var(--ink);
+        background: var(--glass-strong);
+        box-shadow:
+          inset 0 0 0 1px var(--rim),
+          0 0 0 1px var(--edge),
+          var(--shadow-1);
+      }
+      /* Each swatch carries its own data-theme, so it is painted with that theme's tokens. */
+      .book-pills button i {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, var(--field-calm), transparent 70%), var(--bg);
+        box-shadow:
+          inset 0 0 0 1px var(--line),
+          0 0 0 2px color-mix(in oklab, var(--accent-light) 45%, transparent);
+      }
+
+      /* ---- Sections ---- */
+      .book-sec {
+        padding-top: 120px;
+        scroll-margin-top: 40px;
+      }
+      .book-kick {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        font: var(--w-med) 12px/1 var(--font-mono);
+        color: var(--faint);
+        letter-spacing: 0.02em;
+      }
+      .book-kick .orb {
+        width: 6px;
+        height: 6px;
+      }
+      .book-sec > h2,
+      .book-h2 {
+        font-size: 20px;
+        line-height: 1.3;
+      }
+      .book-lede {
+        max-width: 640px;
+        margin-top: 10px;
+        color: var(--muted);
+      }
+      .book-lede b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+      .book-sub {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 64px 0 20px;
+      }
+      .book-sub h3 {
+        font-size: 16px;
+      }
+      .book-sub span {
+        color: var(--faint);
+        font-size: var(--t-ui);
+      }
+
+      /* Frames sit on the field, so their shadow is softer and their captions are ink. */
+      .f {
+        --f-shadow:
+          0 0 0 1px var(--edge),
+          0 1px 2px oklch(20% 0.04 300 / 0.1),
+          0 24px 60px -20px oklch(20% 0.06 300 / 0.35);
+        color: var(--book-ink);
+      }
+      .f-caption {
+        font-weight: var(--w-semi);
+      }
+      .f-caption small {
+        opacity: 1;
+        color: var(--book-muted);
+        font-weight: var(--w-reg);
+      }
+      .f-caption a {
+        opacity: 1;
+        color: var(--book-faint);
+        font-weight: var(--w-med);
+      }
+      .f-caption a:hover {
+        color: var(--accent);
+      }
+
+      /* ---- Hero ---- */
+      .book-hero {
+        display: grid;
+        grid-template-columns: 360px minmax(0, 1fr);
+        gap: 56px;
+        align-items: center;
+        padding-top: 88px;
+      }
+      .book-icon {
+        display: block;
+        width: 96px;
+        height: 96px;
+        margin-bottom: 28px;
+        filter: drop-shadow(0 18px 36px oklch(30% 0.12 300 / 0.35));
+      }
+      .book-hero h1 {
+        font-size: 20px;
+        line-height: 1.2;
+      }
+      .book-thesis {
+        margin-top: 4px;
+        font-size: 18px;
+        font-weight: var(--w-med);
+        color: var(--accent);
+        letter-spacing: var(--track-title);
+      }
+      .book-brief {
+        margin-top: 20px;
+        color: var(--muted);
+      }
+      .book-facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 24px;
+      }
+
+      /* ---- Why ---- */
+      .book-why {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 56px;
+        margin-top: 24px;
+      }
+      .book-why p + p {
+        margin-top: 14px;
+      }
+      .book-why ul {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+        padding: 22px 24px;
+        border-radius: var(--r-xl);
+      }
+      .book-why li {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 6px;
+        color: var(--muted);
+      }
+      .book-why li b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+      .book-why li .i {
+        margin-top: 4px;
+        color: var(--attn);
+      }
+      .book-why .book-not {
+        margin-top: 6px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .book-why .book-not .i {
+        color: var(--accent);
+      }
+
+      /* ---- 1000x ---- */
+      .book-pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+        align-items: start;
+        margin-top: 28px;
+      }
+      .book-pair + .book-claims {
+        margin-top: 22px;
+      }
+      .book-pair-h {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-top: 72px;
+      }
+      .book-pair-h h3 {
+        font-size: 16px;
+      }
+      .book-pair-h .n {
+        font: var(--w-med) 12px/1 var(--font-mono);
+        color: var(--faint);
+      }
+      .book-today {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .book-today .shot {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow:
+          0 0 0 1px var(--edge),
+          0 24px 60px -20px oklch(20% 0.06 300 / 0.3);
+      }
+      .book-today img {
+        display: block;
+        width: 100%;
+        height: auto;
+        filter: saturate(0.9);
+      }
+      .book-today figcaption {
+        font-size: 13px;
+        line-height: 1.4;
+        font-weight: var(--w-semi);
+      }
+      .book-today figcaption small {
+        display: block;
+        margin-top: 2px;
+        font-size: 12px;
+        font-weight: var(--w-reg);
+        color: var(--muted);
+      }
+      .book-claims {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+      }
+      .book-claim {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        color: var(--muted);
+      }
+      .book-claim b {
+        display: block;
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+      .book-trio {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 206px;
+        gap: 28px;
+        align-items: start;
+        margin-top: 28px;
+      }
+
+      /* ---- The system ---- */
+      .book-doctrine {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 28px;
+      }
+      .book-rule {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 20px 20px 22px;
+        border-radius: var(--r-xl);
+      }
+      .book-rule .n {
+        font: var(--w-med) 12px/1 var(--font-mono);
+        color: var(--faint);
+      }
+      .book-rule h3 {
+        font-size: 15px;
+      }
+      .book-rule p {
+        font-size: var(--t-ui);
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .book-rule .demo {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        min-height: 112px;
+        justify-content: center;
+      }
+      .book-rule .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-ui);
+        font-weight: var(--w-med);
+      }
+      .book-ramp {
+        height: 10px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--live-light), var(--attn-light) 55%, var(--fail-light));
+        box-shadow: 0 0 18px -2px color-mix(in oklab, var(--attn-light) 70%, transparent);
+      }
+      .book-tints {
+        display: flex;
+        gap: 10px;
+      }
+      .book-tints > span {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+      }
+      .book-tints > span > i {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, var(--tint), transparent);
+      }
+      .book-own {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .book-own .logo svg {
+        width: 30px;
+        height: 30px;
+      }
+      .book-focus {
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 10px;
+        font-size: var(--t-ui);
+        font-weight: var(--w-med);
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        background: var(--glass-strong);
+      }
+      .book-brands {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px 10px;
+        color: var(--ink);
+      }
+      .book-brands .brand {
+        width: 20px;
+        height: 20px;
+        opacity: 0.82;
+      }
+
+      .book-themes {
+        margin-top: 24px;
+      }
+      .book-themes .theme-card .preview {
+        height: 132px;
+      }
+      .book-themes .tc-name {
+        font-size: 14px;
+      }
+      .book-themes .tc-d {
+        font-size: 12px;
+      }
+      .book-note {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 22px;
+        margin-top: 14px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-note span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .book-note .i {
+        color: var(--faint);
+      }
+
+      .book-grid2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .book-pane {
+        padding: 24px 26px;
+        border-radius: var(--r-xl);
+      }
+      .book-pane > h3 {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 15px;
+      }
+      .book-pane > h3 span {
+        font-size: 12px;
+        font-weight: var(--w-reg);
+        color: var(--faint);
+        letter-spacing: 0;
+      }
+      .book-pane > p {
+        margin-top: 6px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+
+      /* Type */
+      .book-type {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+        gap: 36px;
+        margin-top: 20px;
+      }
+      .book-type > div:first-child {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .book-nums {
+        display: flex;
+        align-items: baseline;
+        gap: 22px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: var(--track-num);
+      }
+      .book-nums b {
+        font-size: var(--t-big);
+        line-height: 1;
+        font-weight: var(--w-semi);
+      }
+      .book-nums b.burn {
+        color: var(--fail);
+      }
+      .book-nums b.wait {
+        color: var(--attn);
+      }
+      .book-nums span {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0;
+      }
+      .book-spec {
+        display: grid;
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .book-spec .t18 {
+        font-size: 18px;
+        font-weight: var(--w-semi);
+        letter-spacing: var(--track-title);
+      }
+      .book-spec .t15 {
+        font-size: 15px;
+        line-height: var(--lh-body);
+      }
+      .book-spec .t13 {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .book-spec .mono {
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .book-scale {
+        display: grid;
+        gap: 0;
+        font-size: var(--t-ui);
+      }
+      .book-scale > div {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr) auto;
+        align-items: baseline;
+        gap: 10px;
+        padding: 7px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .book-scale > div:first-child {
+        border-top: 0;
+      }
+      .book-scale .mono {
+        color: var(--faint);
+        font-size: 11.5px;
+      }
+      .book-scale .faint {
+        font-size: 12px;
+      }
+      .book-weights {
+        display: flex;
+        gap: 18px;
+        margin-top: 16px;
+        font-size: 22px;
+      }
+      .book-weights span {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .book-weights small {
+        font: 11px var(--font-mono);
+        color: var(--faint);
+      }
+
+      /* Glass: panes over a busy stage, so the blur and the tint show. */
+      .book-stage {
+        position: relative;
+        overflow: hidden;
+        margin-top: 18px;
+        padding: 26px;
+        border-radius: var(--r-xl);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .book-stage .field {
+        z-index: 0;
+      }
+      .book-stage .field i {
+        animation: none;
+      }
+      .book-stage-text {
+        position: absolute;
+        inset: 18px 24px;
+        z-index: 0;
+        font: 12px/1.7 var(--font-mono);
+        color: var(--muted);
+        overflow: hidden;
+        user-select: none;
+      }
+      .book-glasses {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .book-glasses > div {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 3px;
+        height: 118px;
+        padding: 14px 16px;
+        border-radius: var(--r-lg);
+        font-size: var(--t-ui);
+        font-weight: var(--w-semi);
+      }
+      .book-glasses small {
+        font-size: 12px;
+        font-weight: var(--w-reg);
+        color: var(--muted);
+      }
+      .book-solid {
+        background: var(--glass-solid);
+        box-shadow:
+          inset 0 0 0 1px var(--line-soft),
+          var(--shadow-1);
+      }
+      .book-lits {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 24px;
+        margin-top: 30px;
+        padding: 0 8px 10px;
+      }
+      .book-lits > div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 54px;
+        padding: 0 14px;
+        border-radius: var(--r-lg);
+        font-size: var(--t-ui);
+        font-weight: var(--w-med);
+      }
+      .book-radii {
+        display: flex;
+        align-items: flex-end;
+        gap: 14px;
+        margin-top: 22px;
+      }
+      .book-radii span {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        font: 11px var(--font-mono);
+        color: var(--faint);
+      }
+      .book-radii i {
+        display: block;
+        width: 52px;
+        height: 52px;
+        border: 1.5px solid var(--ink);
+        border-right: 0;
+        border-bottom: 0;
+        opacity: 0.55;
+      }
+      .book-depth {
+        display: flex;
+        gap: 14px;
+        margin-top: 22px;
+      }
+      .book-depth span {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        height: 58px;
+        border-radius: var(--r-md);
+        background: var(--raised);
+        font: 11px var(--font-mono);
+        color: var(--muted);
+      }
+
+      /* Motion */
+      .book-motion {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .book-motion > div {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-motion b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+      .book-motion .fig {
+        position: relative;
+        overflow: hidden;
+        height: 120px;
+        margin-bottom: 8px;
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .book-curve {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .book-comp {
+        position: absolute;
+        left: 50%;
+        bottom: 14px;
+        height: 44px;
+        border-radius: 16px;
+        transform: translateX(-50%);
+      }
+      .book-comp.full {
+        width: 78%;
+        left: 30%;
+      }
+      .book-comp.small {
+        width: 34%;
+        left: 78%;
+        height: 34px;
+        background: var(--glass-thin);
+      }
+      .book-lines {
+        position: absolute;
+        inset: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .book-lines i {
+        height: 5px;
+        border-radius: 3px;
+        background: var(--ink);
+        opacity: 0.16;
+      }
+      .book-lines i:nth-child(3n) {
+        width: 70%;
+      }
+      .book-lines i:nth-child(4n) {
+        width: 84%;
+      }
+
+      /* Marks */
+      .book-marks {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .book-marks h4 {
+        margin-bottom: 12px;
+        font-size: 12px;
+        font-weight: var(--w-semi);
+        color: var(--faint);
+        letter-spacing: 0;
+      }
+      .book-marks ul {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 11px 12px;
+      }
+      .book-marks li {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .book-marks li .i,
+      .book-marks li .brand {
+        width: 18px;
+        height: 18px;
+        color: var(--ink);
+      }
+      .book-marks li .brand {
+        width: 16px;
+        height: 16px;
+        margin: 1px;
+        opacity: 0.82;
+      }
+      .book-marks .work .i {
+        color: var(--live);
+      }
+      .book-marks .wait .i {
+        color: var(--attn);
+      }
+      .book-marks .burn .i {
+        color: var(--fail);
+      }
+      .book-marks .ok .i {
+        color: var(--ok);
+      }
+      .book-marks .dim .i {
+        color: var(--faint);
+      }
+
+      /* Layout */
+      .book-layout {
+        display: grid;
+        grid-template-columns: 360px 320px 104px minmax(0, 1fr);
+        gap: 32px;
+        align-items: end;
+        margin-top: 22px;
+      }
+      .book-schem {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .book-schem b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+        font-size: var(--t-ui);
+      }
+      .book-win {
+        position: relative;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .book-win .field i {
+        animation: none;
+      }
+      .book-win > span {
+        position: absolute;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        font: 10px var(--font-mono);
+        color: var(--muted);
+        background: var(--glass);
+        box-shadow:
+          inset 0 0 0 1px var(--rim),
+          0 0 0 1px var(--edge);
+      }
+      .book-win > span.lit-burn {
+        box-shadow:
+          inset 0 0 0 1px var(--rim),
+          0 0 0 1px var(--edge),
+          0 0 18px color-mix(in oklab, var(--fail-light) 70%, transparent);
+      }
+      .book-win > span.lit-wait {
+        box-shadow:
+          inset 0 0 0 1px var(--rim),
+          0 0 0 1px var(--edge),
+          0 0 16px color-mix(in oklab, var(--attn-light) 80%, transparent);
+      }
+      .book-dens {
+        display: grid;
+        gap: 9px;
+        align-self: stretch;
+        align-content: end;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-dens b {
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+
+      /* Signature */
+      .book-sig {
+        position: relative;
+        overflow: hidden;
+        height: 364px;
+        margin-top: 24px;
+        border-radius: var(--r-2xl);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .book-sig .nav {
+        position: absolute;
+        z-index: 1;
+        left: 28px;
+        top: 28px;
+        width: 240px;
+        padding: 10px;
+        border-radius: 18px;
+        gap: 2px;
+      }
+      .book-sig .lead {
+        position: absolute;
+        z-index: 1;
+        left: 312px;
+        top: 44px;
+        width: 520px;
+      }
+      .book-sig .lead .ledger {
+        margin-top: 16px;
+      }
+      .book-sig-dock {
+        position: absolute;
+        z-index: 1;
+        right: 28px;
+        top: 96px;
+        width: 290px;
+        padding: 16px 18px;
+        border-radius: 18px;
+        font-size: var(--t-ui);
+      }
+      .book-sig-dock p {
+        margin: 6px 0 12px;
+        color: var(--muted);
+      }
+      .book-sig-dock code {
+        color: var(--ink);
+      }
+      .book-sig-dock .ledger .ans {
+        --ans-label: 96px;
+      }
+      .book-caps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 32px;
+        margin-top: 22px;
+      }
+      .book-cap {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 10px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-cap b {
+        display: block;
+        color: var(--ink);
+        font-weight: var(--w-semi);
+      }
+      .book-cap .disc {
+        width: 24px;
+        height: 24px;
+      }
+
+      /* Identity */
+      .book-ident {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+        margin-top: 24px;
+      }
+      .book-ident .book-pane {
+        display: flex;
+        flex-direction: column;
+      }
+      .book-logos {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 36px;
+        margin-top: 22px;
+      }
+      .book-lockup {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 30px;
+        font-weight: var(--w-semi);
+        letter-spacing: -0.02em;
+      }
+      .book-lockup svg {
+        width: 44px;
+        height: 44px;
+        filter: drop-shadow(0 0 10px color-mix(in oklab, var(--live-light) 50%, transparent));
+      }
+      .book-lockup.dark {
+        padding: 18px 24px;
+        border-radius: var(--r-lg);
+        color: oklch(94% 0.012 310);
+        background: oklch(17% 0.028 310);
+        font-size: 20px;
+      }
+      .book-lockup.dark svg {
+        width: 28px;
+        height: 28px;
+      }
+      .book-icons {
+        display: flex;
+        align-items: flex-end;
+        gap: 22px;
+        margin-top: 22px;
+      }
+      .book-icons span {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font: 11px var(--font-mono);
+        color: var(--faint);
+      }
+      .book-icons svg {
+        display: block;
+        filter: drop-shadow(0 10px 22px oklch(25% 0.1 300 / 0.35));
+      }
+      .book-ambient {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .book-tabs {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 64px;
+        padding: 0 14px;
+        border-radius: 12px 12px 0 0;
+        background: light-dark(oklch(90% 0.006 300), oklch(19% 0.012 300));
+        box-shadow: inset 0 -1px 0 light-dark(oklch(30% 0.02 300 / 0.1), oklch(100% 0 0 / 0.08));
+        font: 12.5px/1 -apple-system, system-ui, sans-serif;
+      }
+      .book-tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 220px;
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 10px 10px 0 0;
+        color: light-dark(oklch(42% 0.01 300), oklch(74% 0.01 300));
+      }
+      .book-tab.on {
+        background: light-dark(oklch(99% 0.003 300), oklch(28% 0.016 300));
+        color: light-dark(oklch(22% 0.01 300), oklch(95% 0.005 300));
+      }
+      .book-fav {
+        position: relative;
+        width: 16px;
+        height: 16px;
+        flex: none;
+      }
+      .book-fav svg {
+        width: 16px;
+        height: 16px;
+        color: light-dark(oklch(24% 0.02 300), oklch(95% 0.005 300));
+      }
+      .book-fav i {
+        position: absolute;
+        right: -3px;
+        top: -3px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: oklch(78% 0.15 75);
+        box-shadow: 0 0 0 1.5px light-dark(oklch(99% 0.003 300), oklch(28% 0.016 300));
+      }
+      .book-isl {
+        position: relative;
+        height: 128px;
+        border-radius: 12px 12px 0 0;
+        overflow: hidden;
+        background:
+          radial-gradient(60% 90% at 50% 0%, oklch(40% 0.1 300 / 0.9), transparent),
+          radial-gradient(50% 80% at 90% 110%, oklch(55% 0.13 166 / 0.6), transparent),
+          oklch(16% 0.03 305);
+      }
+      .book-isl .island {
+        top: 18px;
+      }
+      .book-isl-cap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 16px;
+        text-align: center;
+        font-size: 12px;
+        color: oklch(88% 0.02 300);
+      }
+
+      /* ---- Screens ---- */
+      .book-screens {
+        display: grid;
+        gap: 44px 32px;
+      }
+      .book-screens--desk,
+      .book-screens--web {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .book-screens--mob {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 44px 28px;
+      }
+
+      /* ---- Office and 10x ---- */
+      .book-points {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 28px;
+        margin-top: 26px;
+      }
+      .book-point {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-point b {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink);
+        font-weight: var(--w-semi);
+        font-size: 14px;
+      }
+      .book-point b .num {
+        font-size: var(--t-num);
+        letter-spacing: var(--track-num);
+        line-height: 1;
+      }
+
+      /* ---- Adopting ---- */
+      .book-table {
+        width: 100%;
+        margin-top: 24px;
+        border-collapse: collapse;
+        font-size: var(--t-ui);
+      }
+      .book-table th {
+        text-align: left;
+        padding: 0 14px 10px 0;
+        font-size: 12px;
+        font-weight: var(--w-semi);
+        color: var(--faint);
+      }
+      .book-table td {
+        padding: 9px 14px 9px 0;
+        border-top: 1px solid var(--line-soft);
+        vertical-align: middle;
+        color: var(--muted);
+      }
+      .book-table td:first-child,
+      .book-table td:nth-child(2) {
+        white-space: nowrap;
+      }
+      .book-table td:first-child code {
+        color: var(--muted);
+      }
+      .book-table td:nth-child(2) code {
+        color: var(--ink);
+      }
+      .book-table .sw {
+        display: inline-flex;
+        gap: 4px;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      .book-table .sw i {
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .book-steps {
+        display: grid;
+        gap: 0;
+        margin-top: 18px;
+        counter-reset: step;
+      }
+      .book-steps li {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 280px) minmax(0, 1fr);
+        gap: 16px;
+        padding: 14px 0;
+        border-top: 1px solid var(--line-soft);
+        counter-increment: step;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-steps li::before {
+        content: counter(step);
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        font-size: 12px;
+        font-weight: var(--w-bold);
+        color: var(--accent);
+        background: var(--accent-wash);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-light) 50%, transparent);
+      }
+      .book-steps b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+        font-size: 14px;
+      }
+
+      /* ---- Spec ---- */
+      .book-asks {
+        display: grid;
+        gap: 0;
+        margin-top: 22px;
+      }
+      .book-asks li {
+        display: grid;
+        grid-template-columns: 26px 250px minmax(0, 1fr) 190px;
+        gap: 16px;
+        align-items: baseline;
+        padding: 13px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .book-asks li .i {
+        align-self: start;
+        margin-top: 1px;
+        color: var(--attn);
+      }
+      .book-asks b {
+        color: var(--ink);
+        font-weight: var(--w-semi);
+        font-size: 14px;
+      }
+      .book-asks .where {
+        font: 11.5px/1.4 var(--font-mono);
+        color: var(--faint);
+      }
+      .book-end {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 96px;
+        color: var(--faint);
+        font-size: var(--t-ui);
+      }
+      .book-end svg {
+        width: 22px;
+        height: 22px;
+        color: var(--ink);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="field book-sky" aria-hidden="true">
+      <i class="own" style="--x: 72%; --y: 6%; --w: 1100px; --h: 700px; --o: 0.8"></i>
+      <i class="calm" style="--x: 6%; --y: 30%; --w: 900px; --h: 760px; --o: 0.75"></i>
+      <i class="wait" style="--x: 98%; --y: 78%; --w: 760px; --h: 620px; --o: 0.55"></i>
+      <i class="burn" style="--x: 30%; --y: 104%; --w: 700px; --h: 460px; --o: 0.35"></i>
+    </div>
+
+    <div class="book">
+      <header class="book-top glass-strong">
+        <span class="logo"><svg><use href="#logo" /></svg>Hercule <span class="faint">· Aurora</span></span>
+        <nav class="book-links" aria-label="Sections">
+          <a href="#why">Why</a>
+          <a href="#better">1000x</a>
+          <a href="#system">System</a>
+          <a href="#screens">Screens</a>
+          <a href="#office">Office</a>
+          <a href="#swarm">At 10x</a>
+          <a href="#adopt">Adopting</a>
+          <a href="#spec">Spec</a>
+        </nav>
+        <div class="book-pills" role="group" aria-label="Theme">
+          <button data-theme-option="dawn"><i data-theme="dawn"></i>Dawn</button>
+          <button data-theme-option="mist"><i data-theme="mist"></i>Mist</button>
+          <button data-theme-option="dusk"><i data-theme="dusk"></i>Dusk</button>
+          <button data-theme-option="boreal"><i data-theme="boreal"></i>Boreal</button>
+          <button data-theme-option="ember"><i data-theme="ember"></i>Ember</button>
+        </div>
+      </header>
+
+      <!-- 1. Hero -->
+      <section class="book-hero">
+        <div>
+          <svg class="book-icon" viewBox="0 0 100 100" aria-hidden="true"><use href="#app-icon" /></svg>
+          <h1>Aurora</h1>
+          <p class="book-thesis">Calm glass, living light.</p>
+          <p class="book-brief">
+            Hercule as frosted glass over a soft field of light. The field is the system's mood: a slow green drift while agents work, warming to amber as decisions wait, a coral bloom where
+            something burns. Light comes from the side of the screen where the thing lives, so you feel the state before you read a word. Violet is Hercule's own light. Everything else is
+            quiet glass and ink, in five themes - two light, three dark, none of them navy.
+          </p>
+          <div class="book-facts">
+            <span class="tag"><i class="orb"></i>Working</span>
+            <span class="tag"><i class="orb wait"></i>Waits on you</span>
+            <span class="tag"><i class="orb burn"></i>Burning</span>
+            <span class="tag"><i class="orb own"></i>Hercule</span>
+          </div>
+        </div>
+        <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake at 09:14" data-note="The burning Proposal is the brightest pane; the field blooms coral on its side."></figure>
+      </section>
+
+      <!-- 2. Why this one -->
+      <section class="book-sec" id="why">
+        <div class="book-kick"><i class="orb own"></i>02 · Why this one</div>
+        <h2>Light is read before words are</h2>
+        <div class="book-why">
+          <div class="book-lede" style="max-width: none">
+            <p>
+              Attention is the scarce thing, and reading is the most expensive way to spend it. Aurora moves the first read from words to light: before you parse a row, the field has told you
+              <b>whether to look, and where</b>. Light works in peripheral vision - on a second screen, across the room, on a lock screen.
+            </p>
+            <p>It is also the most native of the ten. Vibrancy, depth and slow motion are how macOS and iOS already speak, so the desktop app and the phone feel at home, not ported.</p>
+          </div>
+          <ul class="glass-thin">
+            <li><svg class="i s14"><use href="#m-hand" /></svg><span><b>Trades density.</b> Big radii and generous space fit fewer rows than a console.</span></li>
+            <li><svg class="i s14"><use href="#m-eye" /></svg><span><b>Trades contrast headroom.</b> Panes stay opaque enough for 4.5:1; a solid mode replaces glass.</span></li>
+            <li><svg class="i s14"><use href="#m-bolt" /></svg><span><b>Trades decoration.</b> Light only works while it means something, so nothing glows for style.</span></li>
+            <li class="book-not"><svg class="i s14"><use href="#m-close" /></svg><span>Not Halo, not Tide: no ring glyph, no time axis. Light is the one idea.</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 3. 1000x better than today -->
+      <section class="book-sec" id="better">
+        <div class="book-kick"><i class="orb burn"></i>03 · 1000x better than today</div>
+        <h2>Three moments, before and after</h2>
+        <p class="book-lede">Today's design has good bones: the ledger, the questions, the calm. Aurora keeps every one of those meanings and changes how fast you find them.</p>
+
+        <div class="book-pair-h"><span class="n">A</span><h3>Where do I look first?</h3></div>
+        <div class="book-pair">
+          <figure class="book-today">
+            <div class="shot"><img src="../shared/baseline/intake-view-light.png" width="1440" height="900" alt="Today's Intake: rows of equal grey text" /></div>
+            <figcaption>Today · Intake<small>"1 burning" is a word in the summary line and a pale dot on its card. Its answers - Start Bugfix, Later, Dismiss - are three plain words of equal weight.</small></figcaption>
+          </figure>
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Aurora · Intake" data-note="The burning Proposal is lit coral from behind, and its answers sit under the question."></figure>
+        </div>
+        <div class="book-claims">
+          <div class="book-claim"><span class="disc burn"><svg class="i s14"><use href="#m-eye" /></svg></span><span><b>Attention: found, not searched</b>The glow is seen in peripheral vision before a single headline is read.</span></div>
+          <div class="book-claim"><span class="disc own"><svg class="i s14"><use href="#m-bolt" /></svg></span><span><b>Decision: one row, one key</b>Start "Fix bug" is the lit row with its plan on it. Enter answers; A and D take the other two.</span></div>
+        </div>
+
+        <div class="book-pair-h"><span class="n">B</span><h3>Hours in the dark</h3></div>
+        <div class="book-pair">
+          <figure class="book-today">
+            <div class="shot"><img src="../shared/baseline/app-shell-dark.png" width="1440" height="900" alt="Today's dark theme: navy neutrals" /></div>
+            <figcaption>Today · dark<small>Navy neutrals at hue 265. The one decision that waits is a row among rows: a small "?" and amber "decision wanted" text.</small></figcaption>
+          </figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-theme="dusk" data-caption="Aurora · Dusk" data-note="Plum-violet night. The Request dock is the brightest object on screen."></figure>
+        </div>
+        <div class="book-claims">
+          <div class="book-claim"><span class="disc wait"><svg class="i s14"><use href="#m-eye" /></svg></span><span><b>Attention: only state is colored</b>The ground is a quiet plum; amber on it can only mean one thing - a Request waits.</span></div>
+          <div class="book-claim"><span class="disc own"><svg class="i s14"><use href="#m-bolt" /></svg></span><span><b>Decision: where your hands are</b>Allow once sits on the composer you were typing in, one keypress away.</span></div>
+        </div>
+
+        <div class="book-pair-h"><span class="n">C</span><h3>Away from the tab</h3></div>
+        <div class="book-trio">
+          <figure class="book-today">
+            <div class="shot"><img src="../shared/baseline/app-shell-light.png" width="1440" height="900" alt="Today's app shell in a browser" /></div>
+            <figcaption>Today · one browser tab<small>A decision waits as one row in one browser tab. Away from that tab, nothing reaches you.</small></figcaption>
+          </figure>
+          <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="Aurora · Glance" data-note="Menu bar, Option-Space panel, notifications with answers."></figure>
+          <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Aurora · Lock screen" data-note="Allow the push from here."></figure>
+        </div>
+        <div class="book-claims">
+          <div class="book-claim"><span class="disc wait"><svg class="i s14"><use href="#m-eye" /></svg></span><span><b>Attention: it comes to you</b>The menu bar glows amber; the Dynamic Island glows with the session's light.</span></div>
+          <div class="book-claim"><span class="disc own"><svg class="i s14"><use href="#m-bolt" /></svg></span><span><b>Decision: answered where you are</b>Every notification carries its answers. Nothing to open, nothing to find.</span></div>
+        </div>
+      </section>
+
+      <!-- 4. The system -->
+      <section class="book-sec" id="system">
+        <div class="book-kick"><i class="orb"></i>04 · The system</div>
+        <h2>Color is light, and light means something</h2>
+        <div class="book-doctrine">
+          <div class="book-rule glass">
+            <span class="n">1</span>
+            <h3>Urgency is light</h3>
+            <div class="demo">
+              <div class="book-ramp"></div>
+              <div class="row st work"><svg class="i"><use href="#m-working" /></svg>Working · calm</div>
+              <div class="row st wait"><svg class="i"><use href="#m-decision" /></svg>Waits on you</div>
+              <div class="row st burn"><svg class="i"><use href="#m-burning" /></svg>Burning or failed</div>
+            </div>
+            <p>The more something needs you, the brighter it glows, on its side of the screen.</p>
+          </div>
+          <div class="book-rule glass">
+            <span class="n">2</span>
+            <h3>Place is tint</h3>
+            <div class="demo">
+              <div class="book-tints">
+                <span><i style="--tint: var(--field-webshop)"></i><span class="proj webshop">webshop</span></span>
+                <span><i style="--tint: var(--field-payments)"></i><span class="proj payments">payments-api</span></span>
+                <span><i style="--tint: var(--field-ops)"></i><span class="proj ops">ops</span></span>
+              </div>
+            </div>
+            <p>Inside a project, its tint joins the field and marks its dot. Sky, orchid, lichen.</p>
+          </div>
+          <div class="book-rule glass">
+            <span class="n">3</span>
+            <h3>Violet is Hercule's own</h3>
+            <div class="demo">
+              <div class="book-own">
+                <span class="logo"><svg><use href="#logo" /></svg></span>
+                <span class="send"><svg class="i"><use href="#m-arrow-up" /></svg></span>
+                <span class="book-focus">Focus</span>
+              </div>
+            </div>
+            <p>Selection, focus, send, the mark. Never green, amber or coral: those are taken.</p>
+          </div>
+          <div class="book-rule glass">
+            <span class="n">4</span>
+            <h3>The rest is glass and ink</h3>
+            <div class="demo">
+              <div class="book-brands">
+                <svg class="brand" aria-label="GitHub"><use href="#b-github" /></svg>
+                <svg class="brand" aria-label="Sentry"><use href="#b-sentry" /></svg>
+                <svg class="brand" aria-label="Gmail"><use href="#b-gmail" /></svg>
+                <svg class="brand" aria-label="Stripe"><use href="#b-stripe" /></svg>
+                <svg class="brand" aria-label="Slack"><use href="#b-slack" /></svg>
+                <svg class="brand" aria-label="PostHog"><use href="#b-posthog" /></svg>
+                <svg class="brand" aria-label="Intercom"><use href="#b-intercom" /></svg>
+                <svg class="brand" aria-label="Grafana"><use href="#b-grafana" /></svg>
+              </div>
+            </div>
+            <p>Sources are monochrome marks. A color that means nothing is not allowed on screen.</p>
+          </div>
+        </div>
+        <div class="book-note">
+          <span><svg class="i s14"><use href="#m-eye" /></svg>State is never color alone: every light has a mark and a word.</span>
+          <span><svg class="i s14"><use href="#m-shield" /></svg>Ink holds 4.5:1 on every pane, in every theme.</span>
+        </div>
+
+        <div class="book-sub"><h3>Five themes</h3><span>Click one: the book and every frame below switch with it.</span></div>
+        <div class="themes book-themes" role="group" aria-label="Theme">
+          <button class="theme-card glass-thin" data-for="dawn" data-theme-option="dawn">
+            <span class="preview" data-theme="dawn" aria-hidden="true">
+              <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 200px; --h: 150px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 180px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 120px"></i></span>
+              <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+              <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+              <span class="p-comp"></span>
+            </span>
+            <span class="tc-name">Dawn<svg class="i s12"><use href="#m-sun" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+            <span class="tc-d">Pearl, lilac sheen · light</span>
+          </button>
+          <button class="theme-card glass-thin" data-for="mist" data-theme-option="mist">
+            <span class="preview" data-theme="mist" aria-hidden="true">
+              <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 200px; --h: 150px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 180px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 120px"></i></span>
+              <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+              <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+              <span class="p-comp"></span>
+            </span>
+            <span class="tc-name">Mist<svg class="i s12"><use href="#m-sun" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+            <span class="tc-d">Sage-grey morning</span>
+          </button>
+          <button class="theme-card glass-thin" data-for="dusk" data-theme-option="dusk">
+            <span class="preview" data-theme="dusk" aria-hidden="true">
+              <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 200px; --h: 150px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 180px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 120px"></i></span>
+              <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+              <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+              <span class="p-comp"></span>
+            </span>
+            <span class="tc-name">Dusk<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+            <span class="tc-d">Plum-violet night · dark</span>
+          </button>
+          <button class="theme-card glass-thin" data-for="boreal" data-theme-option="boreal">
+            <span class="preview" data-theme="boreal" aria-hidden="true">
+              <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 200px; --h: 150px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 180px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 120px"></i></span>
+              <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+              <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+              <span class="p-comp"></span>
+            </span>
+            <span class="tc-name">Boreal<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+            <span class="tc-d">Green-black sky</span>
+          </button>
+          <button class="theme-card glass-thin" data-for="ember" data-theme-option="ember">
+            <span class="preview" data-theme="ember" aria-hidden="true">
+              <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 200px; --h: 150px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 180px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 120px"></i></span>
+              <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+              <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+              <span class="p-comp"></span>
+            </span>
+            <span class="tc-name">Ember<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+            <span class="tc-d">Warm cocoa</span>
+          </button>
+        </div>
+        <div class="book-note">
+          <span><svg class="i s14"><use href="#m-sun" /></svg><code>light</code> is Dawn, <code>dark</code> is Dusk</span>
+          <span><svg class="i s14"><use href="#m-moon" /></svg>No dark ground sits in the navy band: plum, green-black and cocoa.</span>
+          <span><svg class="i s14"><use href="#m-eye" /></svg>Reduced transparency swaps every pane for a solid of the same tone.</span>
+        </div>
+
+        <div class="book-sub"><h3>Type</h3><span>Figtree and JetBrains Mono, self-hosted. Titles stop at 18px.</span></div>
+        <div class="book-pane glass book-type">
+          <div>
+            <div class="book-nums">
+              <b class="burn">3</b><span>burning</span>
+              <b class="wait">9</b><span>in Intake</span>
+              <b>23</b><span>live</span>
+            </div>
+            <div class="book-spec">
+              <div class="t18">Checkout fails for EU cards with 3-D Secure</div>
+              <div class="t15">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers.</div>
+              <div class="t13">Sentry · 412 events · 188 users · first seen 08:52</div>
+              <div class="mono">PaymentError: authentication_required</div>
+            </div>
+          </div>
+          <div>
+            <div class="book-scale">
+              <div><span class="mono">36</span><span>The one numeral a screen is about</span><span class="faint">630</span></div>
+              <div><span class="mono">26</span><span>Numerals that carry a count</span><span class="faint">630</span></div>
+              <div><span class="mono">18</span><span>Page title</span><span class="faint">630</span></div>
+              <div><span class="mono">15</span><span>Body, transcripts</span><span class="faint">430</span></div>
+              <div><span class="mono">13</span><span>Interface</span><span class="faint">540</span></div>
+              <div><span class="mono">11</span><span>Meta, hints</span><span class="faint">540</span></div>
+            </div>
+            <div class="book-weights">
+              <span style="font-weight: 430">Aa<small>430</small></span>
+              <span style="font-weight: 540">Aa<small>540</small></span>
+              <span style="font-weight: 630">Aa<small>630</small></span>
+              <span style="font-weight: 720">Aa<small>720</small></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="book-sub"><h3>Shape, depth and glass</h3><span>Three strengths of glass over the field, one solid for reduced transparency.</span></div>
+        <div class="book-stage">
+          <div class="field" aria-hidden="true">
+            <i class="calm" style="--x: 8%; --y: 40%; --w: 420px"></i>
+            <i class="own" style="--x: 45%; --y: 110%; --w: 460px; --h: 300px"></i>
+            <i class="wait" style="--x: 74%; --y: 10%; --w: 360px"></i>
+            <i class="burn" style="--x: 102%; --y: 80%; --w: 320px"></i>
+          </div>
+          <div class="book-stage-text" aria-hidden="true">
+            Checked the Stripe SDK changelog for v14. handlePaymentResult treats requires_action as a failure. Read src/checkout/payment.ts. Ran pnpm test checkout. 3 failing. Wrote
+            the 3-D Secure branch. Ran pnpm test checkout. 18 passed. Opened a draft PR. Checked the Stripe SDK changelog for v14. handlePaymentResult treats requires_action as a failure.
+            Read src/checkout/payment.ts. Ran pnpm test checkout. 3 failing. Wrote the 3-D Secure branch. Ran pnpm test checkout. 18 passed. Opened a draft PR. Checked the Stripe SDK
+            changelog for v14. handlePaymentResult treats requires_action as a failure.
+          </div>
+          <div class="book-glasses">
+            <div class="glass-thin">Thin<small>Tags and chips on the field</small></div>
+            <div class="glass">Glass<small>Sidebar, panes, cards</small></div>
+            <div class="glass-strong">Strong<small>Composer, sheets, popovers</small></div>
+            <div class="book-solid">Solid<small>Reduced transparency</small></div>
+          </div>
+          <div class="book-lits">
+            <div class="glass-strong lit calm"><span class="st work"><svg class="i"><use href="#m-working" /></svg></span>Lit calm</div>
+            <div class="glass-strong lit wait"><span class="st wait"><svg class="i"><use href="#m-decision" /></svg></span>Lit wait</div>
+            <div class="glass-strong lit burn"><span class="st burn"><svg class="i"><use href="#m-burning" /></svg></span>Lit burn</div>
+            <div class="glass-strong lit own"><svg class="i" style="color: var(--accent)"><use href="#m-assistant" /></svg>Lit own</div>
+          </div>
+        </div>
+        <div class="book-grid2" style="margin-top: 16px">
+          <div class="book-pane glass-thin">
+            <h3>Radii <span>A pane's radius grows with its size</span></h3>
+            <div class="book-radii">
+              <span><i style="border-radius: 6px 0 0 0"></i>6</span>
+              <span><i style="border-radius: 9px 0 0 0"></i>9</span>
+              <span><i style="border-radius: 12px 0 0 0"></i>12</span>
+              <span><i style="border-radius: 16px 0 0 0"></i>16</span>
+              <span><i style="border-radius: 22px 0 0 0"></i>22</span>
+              <span><i style="border-radius: 28px 0 0 0"></i>28</span>
+            </div>
+          </div>
+          <div class="book-pane glass-thin">
+            <h3>Depth <span>Three shadows; a pane never holds a pane</span></h3>
+            <div class="book-depth">
+              <span style="box-shadow: var(--shadow-1)">shadow-1 · rows</span>
+              <span style="box-shadow: var(--shadow-2)">shadow-2 · panes</span>
+              <span style="box-shadow: var(--shadow-3)">shadow-3 · sheets</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="book-sub"><h3>Motion</h3><span>The field breathes; panes rise and settle. Reduced motion stills both.</span></div>
+        <div class="book-motion">
+          <div>
+            <div class="fig glass-thin">
+              <div class="field" aria-hidden="true" style="border-radius: inherit">
+                <i class="calm" style="--x: 30%; --y: 60%; --w: 260px"></i>
+                <i class="own" style="--x: 80%; --y: 20%; --w: 220px"></i>
+              </div>
+            </div>
+            <b>Drift · 46s</b>
+            <span>The field moves slower than 0.2 Hz: felt, never watched. It stops for reduced motion.</span>
+          </div>
+          <div>
+            <div class="fig glass-thin">
+              <svg class="book-curve" viewBox="0 0 320 120" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M24 100 H296 M24 100 V16" stroke="var(--line)" fill="none" />
+                <path d="M24 100 C78.4 36 78.4 20 296 20" stroke="var(--accent)" stroke-width="2.5" fill="none" stroke-linecap="round" />
+              </svg>
+            </div>
+            <b>Settle · 520ms</b>
+            <span>Panes rise fast and land soft: <code>cubic-bezier(0.2, 0.8, 0.2, 1)</code>. Quick 140ms for hovers.</span>
+          </div>
+          <div>
+            <div class="fig glass-thin">
+              <div class="book-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <span class="book-comp small glass-strong" aria-hidden="true"></span>
+            </div>
+            <b>Clear on scroll</b>
+            <span>Reading back, the composer shrinks to a pill and turns see-through. At the bottom, it returns.</span>
+          </div>
+        </div>
+
+        <div class="book-sub"><h3>Marks and icons</h3><span>One family on a 16px grid, 1.5px stroke. A state is a mark, a word and a light.</span></div>
+        <div class="book-pane glass book-marks">
+          <div>
+            <h4>State</h4>
+            <ul>
+              <li class="work"><svg class="i"><use href="#m-working" /></svg>working</li>
+              <li class="wait"><svg class="i"><use href="#m-decision" /></svg>decision</li>
+              <li class="burn"><svg class="i"><use href="#m-burning" /></svg>burning</li>
+              <li class="burn"><svg class="i"><use href="#m-failed" /></svg>failed</li>
+              <li class="ok"><svg class="i"><use href="#m-done" /></svg>done</li>
+              <li class="wait"><svg class="i"><use href="#m-paused" /></svg>paused</li>
+              <li><svg class="i"><use href="#m-queued" /></svg>queued</li>
+              <li class="dim"><svg class="i"><use href="#m-cancelled" /></svg>cancelled</li>
+              <li class="dim"><svg class="i"><use href="#m-skipped" /></svg>skipped</li>
+              <li><svg class="i"><use href="#m-proposed" /></svg>proposed</li>
+              <li class="dim"><svg class="i"><use href="#m-asleep" /></svg>asleep</li>
+              <li class="dim"><svg class="i"><use href="#m-unreachable" /></svg>unreachable</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Entities</h4>
+            <ul>
+              <li><svg class="i"><use href="#m-task" /></svg>Task</li>
+              <li><svg class="i"><use href="#m-run" /></svg>Run</li>
+              <li><svg class="i"><use href="#m-session" /></svg>Session</li>
+              <li><svg class="i"><use href="#m-workflow" /></svg>Workflow</li>
+              <li><svg class="i"><use href="#m-assistant" /></svg>Assistant</li>
+              <li><svg class="i"><use href="#m-event" /></svg>Event</li>
+              <li><svg class="i"><use href="#m-memory" /></svg>Memory</li>
+              <li><svg class="i"><use href="#m-heartbeat" /></svg>Heartbeat</li>
+              <li><svg class="i"><use href="#m-reminder" /></svg>Reminder</li>
+              <li><svg class="i"><use href="#m-notice" /></svg>Notice</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Triage and places</h4>
+            <ul>
+              <li><svg class="i"><use href="#m-offer" /></svg>offer</li>
+              <li><svg class="i"><use href="#m-fyi" /></svg>FYI</li>
+              <li><svg class="i"><use href="#m-held" /></svg>held</li>
+              <li><svg class="i"><use href="#m-topic" /></svg>Topic</li>
+              <li><svg class="i"><use href="#m-intake" /></svg>Intake</li>
+              <li><svg class="i"><use href="#m-checkin" /></svg>Check-in</li>
+              <li><svg class="i"><use href="#m-fleet" /></svg>Fleet</li>
+              <li><svg class="i"><use href="#m-connections" /></svg>Connections</li>
+              <li><svg class="i"><use href="#m-office" /></svg>Office</li>
+              <li><svg class="i"><use href="#m-haptic" /></svg>haptic</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Sources and providers</h4>
+            <ul>
+              <li><svg class="brand"><use href="#b-github" /></svg>GitHub</li>
+              <li><svg class="brand"><use href="#b-sentry" /></svg>Sentry</li>
+              <li><svg class="brand"><use href="#b-gmail" /></svg>Gmail</li>
+              <li><svg class="brand"><use href="#b-stripe" /></svg>Stripe</li>
+              <li><svg class="brand"><use href="#b-posthog" /></svg>PostHog</li>
+              <li><svg class="brand"><use href="#b-slack" /></svg>Slack</li>
+              <li><svg class="brand"><use href="#b-claude" /></svg>Claude Code</li>
+              <li><svg class="brand"><use href="#b-openai" /></svg>Codex</li>
+              <li><span class="pi" style="width: 18px; font-size: 15px">π</span>pi</li>
+              <li><svg class="brand"><use href="#b-discord" /></svg>Discord</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="book-sub"><h3>Layout and density</h3><span>Calm middle density: panes float on the field, hairlines inside them.</span></div>
+        <div class="book-layout">
+          <div class="book-schem">
+            <div class="book-win" style="width: 360px; height: 225px">
+              <div class="field"><i class="burn" style="--x: 30%; --y: 20%; --w: 200px"></i><i class="calm" style="--x: 95%; --y: 100%; --w: 180px"></i></div>
+              <span class="lit-burn" style="left: 2px; top: 2px; bottom: 2px; width: 67px; border-radius: 6px">268</span>
+              <span style="left: 136px; right: 38px; top: 26px; height: 120px; border-radius: 7px">780</span>
+              <span style="left: 150px; right: 52px; bottom: 10px; height: 40px; border-radius: 8px">composer</span>
+            </div>
+            <span><b>Desktop · 1440</b> Floating glass sidebar 268, a 780 column, the composer and its dock at the bottom.</span>
+          </div>
+          <div class="book-schem">
+            <div class="book-win" style="width: 320px; height: 200px">
+              <div class="field"><i class="burn" style="--x: 10%; --y: 20%; --w: 180px"></i><i class="wait" style="--x: 90%; --y: 10%; --w: 160px"></i></div>
+              <span class="lit-burn" style="left: 2px; top: 2px; bottom: 2px; width: 21px; border-radius: 5px"></span>
+              <span style="left: 30px; right: 4px; top: 4px; height: 13px; border-radius: 4px">tabs</span>
+              <span style="left: 44px; width: 150px; top: 26px; bottom: 8px; border-radius: 6px">lead</span>
+              <span style="left: 202px; right: 10px; top: 26px; bottom: 8px; border-radius: 6px">lanes</span>
+            </div>
+            <span><b>Web · 1280</b> The sidebar folds into an 84 rail of marks with counts; neighbours become tabs.</span>
+          </div>
+          <div class="book-schem">
+            <div class="book-win" style="width: 104px; height: 225px; border-radius: 16px">
+              <div class="field"><i class="wait" style="--x: 50%; --y: 80%; --w: 120px"></i></div>
+              <span style="left: 6px; right: 6px; top: 92px; bottom: 26px; border-radius: 10px 10px 4px 4px">sheet</span>
+              <span class="lit-wait" style="left: 3px; right: 3px; bottom: 3px; height: 17px; border-radius: 6px 6px 13px 13px">5 tabs</span>
+            </div>
+            <span><b>Mobile · 390</b> Thumb zone.</span>
+          </div>
+          <div class="book-dens">
+            <span><b>4</b> px base grid, <b>8</b> px pane inset</span>
+            <span><b>32</b> px nav rows, <b>52</b> px bars</span>
+            <span><b>52</b> px answer rows on mobile, one thumb each</span>
+            <span><b>1</b> level of containment: pane on field, never pane in pane</span>
+          </div>
+        </div>
+
+        <div class="book-sub"><h3>The signature: the glow toward attention</h3><span>Light comes from where the thing lives. Nothing else is allowed to glow.</span></div>
+        <div class="book-sig">
+          <div class="field" aria-hidden="true">
+            <i class="burn" style="--x: 22%; --y: 34%; --w: 760px; --h: 640px; --o: 0.85"></i>
+            <i class="wait" style="--x: 92%; --y: 40%; --w: 560px; --h: 480px; --o: 0.8"></i>
+            <i class="calm" style="--x: 60%; --y: 120%; --w: 620px; --h: 360px; --o: 0.6"></i>
+            <i class="own" style="--x: 55%; --y: -18%; --w: 700px; --h: 320px; --o: 0.4"></i>
+          </div>
+          <nav class="nav glass" aria-label="Sample navigation">
+            <a class="nav-item glow burn" aria-current="page"><svg class="i"><use href="#m-intake" /></svg>Intake<span class="count burn">9</span></a>
+            <a class="nav-item glow wait"><svg class="i"><use href="#m-checkin" /></svg>Check-in<span class="count wait">3</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-tasks" /></svg>Tasks<span class="count">14</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-run" /></svg>Runs<span class="count">4</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-workflow" /></svg>Workflows<span class="count">6</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-fleet" /></svg>Fleet<span class="count">3</span></a>
+          </nav>
+          <article class="lead glass-strong lit burn">
+            <header class="lead-top">
+              <span class="st burn"><svg class="i"><use href="#m-burning" /></svg>Burning</span>
+              <span class="faint">Proposal</span>
+              <span class="spacer grow"></span>
+              <span class="faint">first seen 08:52</span>
+            </header>
+            <h2 class="lead-title">Checkout fails for EU cards with 3-D Secure</h2>
+            <div class="lead-meta">
+              <span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span>Urgent</span>
+              <span class="dot-sep"></span><span class="src"><svg class="i s14"><use href="#m-topic" /></svg>Checkout</span>
+              <span class="dot-sep"></span><span class="proj webshop">webshop</span>
+            </div>
+            <div class="ledger">
+              <button class="ans go"><b>Start "Fix bug"</b><span>Starts Fix bug on webshop in a new worktree</span><span class="kbd">⏎</span></button>
+              <button class="ans"><b>Accept</b><span>Adds it to the backlog as a Task</span><span class="kbd">A</span></button>
+              <button class="ans"><b>Dismiss</b><span>Closes the Proposal</span><span class="kbd">D</span></button>
+            </div>
+          </article>
+          <div class="book-sig-dock glass-strong lit wait">
+            <span class="st wait"><svg class="i"><use href="#m-decision" /></svg>Run this command?</span>
+            <p><code>git push -u origin fix/3ds-eu-cards</code></p>
+            <div class="ledger">
+              <button class="ans go"><b>Allow once</b><span>Pushes the branch</span></button>
+              <button class="ans"><b>Deny</b><span>The branch stays local</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="book-caps">
+          <div class="book-cap"><span class="disc burn"><svg class="i s14"><use href="#m-burning" /></svg></span><span><b>From the left: Intake burns</b>The nav entry is lit from its edge and the field blooms behind it.</span></div>
+          <div class="book-cap"><span class="disc burn"><svg class="i s14"><use href="#m-intake" /></svg></span><span><b>Behind the pane: the question</b>The Proposal that burns is lit from behind; its answers are rows, the first one filled.</span></div>
+          <div class="book-cap"><span class="disc wait"><svg class="i s14"><use href="#m-decision" /></svg></span><span><b>From the right: a Request</b>A session waits on a push; amber light rises on its side.</span></div>
+        </div>
+
+        <div class="book-sub"><h3>The mark, the app icon, and Hercule in a tab</h3><span>Two pillars with the aurora as the crossbar: a gate the light passes through.</span></div>
+        <div class="book-ident">
+          <div class="book-pane glass">
+            <h3>Logo <span>Ink pillars, the wave in the aurora gradient</span></h3>
+            <div class="book-logos">
+              <span class="book-lockup"><svg><use href="#logo" /></svg>Hercule</span>
+              <span class="book-lockup dark"><svg><use href="#logo" /></svg>Hercule</span>
+            </div>
+          </div>
+          <div class="book-pane glass">
+            <h3>App icon <span>A Dusk sky, frosted pillars, the wave glowing between</span></h3>
+            <div class="book-icons">
+              <span><svg viewBox="0 0 100 100" width="128" height="128"><use href="#app-icon" /></svg>128</span>
+              <span><svg viewBox="0 0 100 100" width="64" height="64"><use href="#app-icon" /></svg>64</span>
+              <span><svg viewBox="0 0 100 100" width="32" height="32"><use href="#app-icon" /></svg>32</span>
+              <span><svg viewBox="0 0 100 100" width="16" height="16"><use href="#app-icon" /></svg>16</span>
+            </div>
+          </div>
+        </div>
+        <div class="book-ambient">
+          <div class="book-pane glass-thin">
+            <h3>The tab <span>Title and favicon carry what waits</span></h3>
+            <div class="book-tabs" style="margin-top: 16px">
+              <span class="book-tab on"><span class="book-fav"><svg><use href="#logo" /></svg><i></i></span>(3) Intake · Hercule</span>
+              <span class="book-tab"><svg class="brand" style="width: 14px; height: 14px"><use href="#b-sentry" /></svg>PaymentError · Sentry</span>
+            </div>
+            <p style="margin-top: 14px">(3) is what waits on you in Check-in, whatever page is open. The favicon dot takes the most urgent light: amber waits, coral burns.</p>
+          </div>
+          <div class="book-pane glass-thin">
+            <h3>The Dynamic Island <span>Lit by what waits</span></h3>
+            <div class="book-isl" style="margin-top: 16px">
+              <div class="island live">
+                <svg viewBox="0 0 100 100"><use href="#app-icon" /></svg>
+                <span class="disc wait"><svg class="i"><use href="#m-decision" /></svg></span>
+              </div>
+              <div class="book-isl-cap">Fix 3-D Secure checkout · waits on you</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Screens -->
+      <section class="book-sec" id="screens">
+        <div class="book-kick"><i class="orb"></i>05 · Screens</div>
+        <h2>Twenty-two screens, one field</h2>
+        <p class="book-lede">Every frame is the live page. Switch the theme at the top and all of them change.</p>
+
+        <div class="book-sub"><h3>Desktop app</h3><span>1440 × 900 · macOS window, translucent sidebar, keyboard first</span></div>
+        <div class="book-screens book-screens--desk">
+          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-caption="Session · empty" data-note="A draft thread in webshop. Three starts from Intake; nothing runs until you send."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Session · active" data-note="Fix 3-D Secure checkout. The Request dock is the brightest thing on screen."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="Session · reading back" data-note="Scrolled: the composer shrinks and clears, the dock folds to one line."></figure>
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="Nine to decide since yesterday 18:20. The lead card on the left, lanes by what they need."></figure>
+          <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Assistant · Ada" data-note="A Conversation with Ada, her memory and heartbeat in the rail."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes, each drawn with its own tokens. Transparency and motion."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants" data-note="Ada's record: channels, heartbeat, reminders, memory and bounds."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Each Connection with its last 24 hours. Sentry climbs after deploy #1289."></figure>
+          <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="All sessions as a glass pavilion. Rooms are lit by their state."></figure>
+          <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="Glance" data-note="Menu bar extra, the Option-Space panel, notifications with answers, the Dock badge."></figure>
+        </div>
+
+        <div class="book-sub"><h3>Web</h3><span>1280 × 800 · the layout folds instead of shrinking; every page has a link to copy</span></div>
+        <div class="book-screens book-screens--web">
+          <figure data-frame="web" data-src="web/session-empty.html" data-url="hercule.home.arpa" data-caption="Session · empty" data-note="Sessions is home. The draft starts in webshop."></figure>
+          <figure data-frame="web" data-src="web/session-active.html" data-url="hercule.home.arpa/threads/3f1c9a2e" data-caption="Session · active" data-note="Neighbouring threads become tabs; the rail keeps the counts."></figure>
+          <figure data-frame="web" data-src="web/intake.html" data-url="hercule.home.arpa/intake" data-caption="Intake" data-note="Lead card and lanes side by side at 1280."></figure>
+          <figure data-frame="web" data-src="web/decision.html" data-url="hercule.home.arpa/intake/7c41e0" data-caption="Decision" data-note="Where a link from Slack or email lands: one Proposal as a page."></figure>
+          <figure data-frame="web" data-src="web/assistant.html" data-url="hercule.home.arpa/threads/a2d9e41b" data-caption="Assistant · Ada" data-note="The same Conversation as on the phone and the desktop."></figure>
+          <figure data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Settings · Providers" data-note="Three provider instances and the defaults a new thread starts with."></figure>
+        </div>
+
+        <div class="book-sub"><h3>Mobile</h3><span>390 × 844 · thumb reach, sheets, big answer rows, voice first; haptics annotated</span></div>
+        <div class="book-screens book-screens--mob">
+          <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="Swipe a row to answer; the lead is a card."></figure>
+          <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="Decision" data-note="One Proposal in a sheet, answers in reach."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="Session · empty" data-note="Say it: the mic is the send button."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="Session · active" data-note="The Request dock over the composer."></figure>
+          <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Assistant · Ada" data-note="The Conversation, with a reminder set."></figure>
+          <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings" data-note="Thirteen domains as tiles; Machines as a sheet."></figure>
+          <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="A Live Activity and answerable notifications."></figure>
+        </div>
+      </section>
+
+      <!-- 6. The office -->
+      <section class="book-sec" id="office">
+        <div class="book-kick"><i class="orb"></i>06 · The office</div>
+        <h2>A glass pavilion at night, lit by the same field</h2>
+        <p class="book-lede">The office is not a new language. It is the list view's light, given rooms. Toggle List | Office on All sessions; the same state marks, projects and answers are there.</p>
+        <div style="margin-top: 28px">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office · All sessions" data-note="23 live on three runners and the assistants' gazebo. Three rooms wait on Rogier."></figure>
+        </div>
+        <div class="book-points">
+          <div class="book-point"><b><span class="disc sm"><svg class="i s12"><use href="#m-working" /></svg></span>Rooms are sessions</b>Aurora green while working, amber while waiting on you, dark when idle. The mark rides on the glass.</div>
+          <div class="book-point"><b><span class="disc sm quiet"><svg class="i s12"><use href="#m-machine" /></svg></span>Wings are runners</b>Each runner is a wing on one frosted slab; empty desks show free capacity.</div>
+          <div class="book-point"><b><span class="disc sm wait"><svg class="i s12"><use href="#m-decision" /></svg></span>Pins are questions</b>A waiting room raises a glass tag with its question and Allow once, answerable in place.</div>
+          <div class="book-point"><b><span class="disc sm own"><svg class="i s12"><use href="#m-assistant" /></svg></span>The gazebo is violet</b>Assistants sit together in Hercule's own light. Project tints run along each sill.</div>
+        </div>
+      </section>
+
+      <!-- 7. At 10x -->
+      <section class="book-sec" id="swarm">
+        <div class="book-kick"><i class="orb wait"></i>07 · At 10x</div>
+        <h2>140 live, 31,000 events a day: more light, not longer lists</h2>
+        <p class="book-lede">Volume never raises the brightness; only urgency does. So a pile of low items stays calm, and the three that burn still own the room.</p>
+        <div class="book-pair">
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-state="swarm" data-caption="Intake · 74 waiting" data-note="Topics as a constellation: a light's size is its count, its glow is its urgency."></figure>
+          <figure data-frame="desktop" data-src="desktop/office.html" data-state="swarm" data-caption="Office · 140 live" data-note="Nine runners. Rooms become a heat of light; pins only where you are needed."></figure>
+        </div>
+        <div class="book-points">
+          <div class="book-point"><b><span class="num">19,380</span></b>events since last night become one line: 60 Proposals · 48 attached · 19,227 handled quietly.</div>
+          <div class="book-point"><b><span class="num" style="color: var(--fail)">3</span></b>burning, not 60: the lead card says "1 of 3 burning" and steps through them.</div>
+          <div class="book-point"><b><span class="num">11</span></b>calls grouped by question: "Which project is this?" answered once for 7.</div>
+          <div class="book-point"><b><span class="num">25</span></b>low items accepted as one answer, with its describe line: nothing starts.</div>
+        </div>
+      </section>
+
+      <!-- 8. Adopting it -->
+      <section class="book-sec" id="adopt">
+        <div class="book-kick"><i class="orb own"></i>08 · Adopting it</div>
+        <h2>Same names, new light</h2>
+        <p class="book-lede">Today's twelve tokens keep their names and their meaning, so the first swap is one file. What is new is added, never renamed.</p>
+        <table class="book-table">
+          <thead>
+            <tr><th>Today</th><th>Aurora</th><th>What changes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--bg</code></td><td><span class="sw"><i style="background: var(--bg)"></i></span><code>--bg</code></td><td>The ground under the field. Plum, green-black or cocoa in the dark themes, never hue 265.</td></tr>
+            <tr><td><code>--surface</code></td><td><span class="sw"><i style="background: var(--surface)"></i></span><code>--surface</code></td><td>Solid panels. Floating panes use <code>--glass</code> instead.</td></tr>
+            <tr><td><code>--raised</code></td><td><span class="sw"><i style="background: var(--raised)"></i></span><code>--raised</code></td><td>Menus and popovers, under <code>--glass-strong</code>.</td></tr>
+            <tr><td><code>--ink</code> <code>--muted</code> <code>--faint</code></td><td><span class="sw"><i style="background: var(--ink)"></i><i style="background: var(--muted)"></i><i style="background: var(--faint)"></i></span><code>--ink</code> <code>--muted</code> <code>--faint</code></td><td>Same roles. <code>--faint</code> now holds 4.5:1, so it can carry text.</td></tr>
+            <tr><td><code>--line</code> <code>--line-soft</code></td><td><span class="sw"><i style="background: var(--line)"></i><i style="background: var(--line-soft)"></i></span><code>--line</code> <code>--line-soft</code></td><td>Hairlines inside panes. Panes add <code>--rim</code> and <code>--edge</code>.</td></tr>
+            <tr><td><code>--live</code> <code>--ok</code></td><td><span class="sw"><i style="background: var(--live)"></i><i style="background: var(--live-light)"></i></span><code>--live</code> <code>--ok</code> + <code>--live-light</code></td><td>Text-grade as before, plus a light for glows and a wash for fills.</td></tr>
+            <tr><td><code>--attn</code> <code>--attn-soft</code></td><td><span class="sw"><i style="background: var(--attn)"></i><i style="background: var(--attn-light)"></i></span><code>--attn</code> + <code>--attn-light</code> <code>--attn-wash</code></td><td><code>--attn-soft</code> becomes <code>--attn-wash</code>.</td></tr>
+            <tr><td><code>--fail</code></td><td><span class="sw"><i style="background: var(--fail)"></i><i style="background: var(--fail-light)"></i></span><code>--fail</code> + <code>--fail-light</code> <code>--fail-wash</code></td><td>Coral. Burning and failed share it; the mark tells them apart.</td></tr>
+            <tr><td><code>--project-hercule</code> <code>--project-ops</code></td><td><span class="sw"><i style="background: var(--p-webshop)"></i><i style="background: var(--p-payments)"></i><i style="background: var(--p-ops)"></i></span><code>--p-*</code> + <code>--field-*</code></td><td>Each project gets a dot hue and a field tint from one palette.</td></tr>
+            <tr><td><code>--card-shadow</code> <code>--lift-shadow</code></td><td><code>--shadow-1</code> <code>--shadow-2</code> <code>--shadow-3</code></td><td>Rows, panes, sheets.</td></tr>
+            <tr><td><code>--sans</code> <code>--mono</code></td><td><code>--font-ui</code> <code>--font-mono</code></td><td>Figtree and JetBrains Mono, both OFL, self-hosted for the CSP.</td></tr>
+            <tr><td class="faint">new</td><td><span class="sw"><i style="background: var(--accent)"></i></span><code>--accent</code> <code>--glass*</code> <code>--field-*</code> <code>--r-*</code> <code>--dur-*</code></td><td>Hercule's violet, the glass strengths, the field lights, radii and motion.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="book-sub"><h3>The first five changes</h3><span>In order; each ships on its own and leaves the app working.</span></div>
+        <ol class="book-steps">
+          <li><b>Swap the tokens</b><span>Replace the theme blocks in <code>packages/ui/src/styles.css</code> with <code>tokens.css</code>: five themes on <code>html[data-theme]</code>, light and dark as aliases, fonts self-hosted. Settings gains Appearance to pick one.</span></li>
+          <li><b>Add the field</b><span>A <code>Field</code> component in <code>packages/ui</code> draws lights it is given. Which lights to draw is a <code>client-core</code> function over the attention summary, so every screen agrees.</span></li>
+          <li><b>One glass pane</b><span>A <code>Pane</code> primitive with thin, regular and strong, and the solid swap for reduced transparency. The sidebar, composer, popovers and drawers adopt it; nested cards go.</span></li>
+          <li><b>Marks with light</b><span>Redraw <code>packages/ui/src/marks/marks.tsx</code> on the 16px grid. Add <code>Orb</code>, <code>Disc</code> and lit priority bars, so every state is a mark, a word and a light.</span></li>
+          <li><b>Decisive answers</b><span>The ledger's primary row is lit and keyed; the composer shrinks and clears on scroll; the Request dock is lit amber. Then the tab title and favicon carry the Check-in count.</span></li>
+        </ol>
+      </section>
+
+      <!-- 9. What this design asks the spec to change -->
+      <section class="book-sec" id="spec">
+        <div class="book-kick"><i class="orb wait"></i>09 · What this design asks the spec to change</div>
+        <h2>Semantics stay; these are the declared changes</h2>
+        <ul class="book-asks">
+          <li><svg class="i"><use href="#m-decision" /></svg><b>Color at pane scale</b><span>The pinned language keeps color to words and dots and forbids washes and filled buttons. Aurora lights panes, washes counts, lights priority bars in urgency color and fills the primary answer in violet.</span><span class="where">spec 14 · Design language</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>Settings gains two screens</b><span>Appearance (five themes, follow system, transparency, motion) and Providers (instances and their defaults). Connections and Machines are also listed there, opening <code>/connections</code> and <code>/fleet</code>.</span><span class="where">spec 14 · V1 screen inventory</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>A Proposal has a page</b><span><code>/intake/&lt;proposal id&gt;</code>, so a link from Slack or email lands on one decision.</span><span class="where">spec 14 · URL space</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>The web shell folds at 1280</b><span>The two-faced sidebar becomes a rail of marks with counts; the Threads face moves into the title bar as tabs.</span><span class="where">spec 14 · App shell</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>All sessions gets List | Office</b><span>The office is a second view of the same page, with the same lanes and answers.</span><span class="where">spec 14 · App shell</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>The pulse is open</b><span>The sidebar foot shows the pulse as a bar and words, not a closed line. The Marks legend toggle is not drawn in these mockups; it would sit beside the settings button.</span><span class="where">spec 14 · Sidebar foot</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>Batch answers at 10x</b><span>"Accept 25 low" and grouped calls answer many Proposals at once. That needs a batch operation, or a client that fans out and reports each result.</span><span class="where">spec 10 §4 · spec 11</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>The phone opens on Intake</b><span>On mobile the tab bar leads with Intake and Check-in; Threads is third. On the desktop and web, Sessions stays home.</span><span class="where">spec 14 · Home is Sessions</span></li>
+          <li><svg class="i"><use href="#m-decision" /></svg><b>Native surfaces need native push</b><span>Glance assumes the desktop app. Answering from the lock screen and the Live Activity need a native iOS app with push, beyond Web Push.</span><span class="where">spec 14 · Post-v1</span></li>
+        </ul>
+        <div class="book-end"><svg><use href="#logo" /></svg>Aurora · calm glass, living light · design 03 of 10</div>
+      </section>
+    </div>
+  </body>
+</html>

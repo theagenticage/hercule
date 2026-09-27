@@ -575,12 +575,12 @@
     el.classList.add("tabbar");
     function t(key, label, ic, badge) {
       return (
-        '<a class="tb' + (active === key ? " is-on" : "") + '" href="' + ({ crew: "#", intake: "intake.html", threads: "session-active.html", settings: "settings.html" }[key] || "#") + '">' +
+        '<a class="tb' + (active === key ? " is-on" : "") + '" href="' + ({ office: "office.html", intake: "intake.html", threads: "session-active.html", settings: "settings.html" }[key] || "#") + '">' +
         '<span class="tb-ic">' + icon(ic, 22) + (badge ? '<b class="tb-badge">' + badge + "</b>" : "") + "</span><span>" + label + "</span></a>"
       );
     }
     el.innerHTML =
-      t("crew", "Crew", "crew", "3") +
+      t("office", "Office", "office", "3") +
       t("intake", "Intake", "intake", "9") +
       '<a class="tb-new" href="session-empty.html" aria-label="New thread">' + icon("plus", 24) + "</a>" +
       t("threads", "Threads", "threads") +
@@ -704,6 +704,9 @@
     hydrate(document);
     glassComposer();
     segments();
+    // A page framed in the design book must not take focus: focusing inside an iframe scrolls the book.
+    var first = document.querySelector("[data-autofocus]");
+    if (first && window.top === window) first.focus();
     document.documentElement.classList.add("is-ready");
   }
 

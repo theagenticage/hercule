@@ -1221,6 +1221,22 @@ h3 {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
+/* Folded into glass, the composer no longer has the soft fade behind it, so the transcript fades
+ * out under the whole bottom stack instead: a line beside or between the pills is dim and soft,
+ * never sharp enough to read as a collision. */
+.transcript:has(~ .composer.is-compact) {
+  --fade-bottom: linear-gradient(
+    to bottom,
+    transparent,
+    #000 32px,
+    #000 calc(100% - 190px),
+    rgb(0 0 0 / 0.5) calc(100% - 135px),
+    rgb(0 0 0 / 0.14) calc(100% - 95px),
+    transparent calc(100% - 50px)
+  );
+  -webkit-mask-image: var(--fade-bottom);
+  mask-image: var(--fade-bottom);
+}
 .column {
   width: 800px;
   max-width: calc(100% - 48px);
@@ -3788,11 +3804,12 @@ pre.code .s {
  * Hercule outside its window, over someone else's desktop: the menu bar extra, the quick panel,
  * notifications and the dock. The wallpaper and the other app mix their colors from the theme
  * and stay colorless, so the only hues on screen are states. */
-.g-desk {
+.g-desk,
+.lk-screen {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  /* Someone else's wallpaper: dusk dunes in mauve, a hue no state uses, so nothing on it reads as a signal. */
+  /* Someone else's wallpaper (the lock screen shares it): dusk dunes in mauve, a hue no state uses, so nothing on it reads as a signal. */
   --wall-sky: light-dark(oklch(87% 0.035 295), oklch(17% 0.035 290));
   --wall-horizon: light-dark(oklch(93% 0.035 55), oklch(25% 0.05 335));
   --wall-sun: light-dark(oklch(98% 0.025 75), oklch(38% 0.07 20));
@@ -5846,6 +5863,20 @@ pre.code .s {
   -webkit-mask-image: linear-gradient(to bottom, transparent 8px, #000 44px);
   mask-image: linear-gradient(to bottom, transparent 8px, #000 44px);
 }
+/* Folded, the same fade as on desktop: the transcript dims out under the ask pill and the composer. */
+.m-tr:has(~ .mc.is-compact) {
+  --fade-bottom: linear-gradient(
+    to bottom,
+    transparent 8px,
+    #000 44px,
+    #000 calc(100% - 215px),
+    rgb(0 0 0 / 0.5) calc(100% - 160px),
+    rgb(0 0 0 / 0.14) calc(100% - 115px),
+    transparent calc(100% - 70px)
+  );
+  -webkit-mask-image: var(--fade-bottom);
+  mask-image: var(--fade-bottom);
+}
 .mt-col {
   padding: 0 16px 392px;
 }
@@ -6357,4 +6388,226 @@ pre.code .s {
 .mset-rows .seg > button {
   height: 30px;
   padding: 0 14px;
+}
+
+/* ---------------------------------------------------------------- lock screen (mobile/lock.html)
+ * Hercule on a locked phone: the Dynamic Island, an inline widget beside the date, a Live Activity
+ * for the session that waits on you, and notifications whose buttons answer without unlocking. */
+.lk-wall {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.lk-screen .status .num {
+  visibility: hidden;
+}
+.lk-screen .status .island {
+  display: none;
+}
+/* The compact Live Activity: the session's ring on the leading side, how long it has waited on the trailing side. */
+.lk-island {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  transform: translateX(-50%);
+  z-index: 31;
+  width: 166px;
+  height: 36px;
+  padding: 0 14px 0 8px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #000;
+  color: var(--wait);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.lk-top {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  padding-top: 2px;
+  color: var(--ink);
+}
+.lk-top > .ic {
+  width: 15px;
+  height: 15px;
+  opacity: 0.8;
+}
+.lk-date {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 17px;
+  font-weight: 560;
+  opacity: 0.86;
+}
+.lk-date .sep {
+  opacity: 0.5;
+}
+/* The inline widget beside the date. The system draws lock screen widgets in one color, so the
+ * ring is told apart by thickness alone: waiting segments are raised, idle ones are hairlines. */
+.lk-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lk-inline .h-idle,
+.lk-inline .h-pause {
+  opacity: 0.45;
+}
+.lk-clock {
+  margin-top: -4px;
+  font-size: 96px;
+  font-weight: 560;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+.lk-list {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  margin: 14px 12px 0;
+}
+/* The Live Activity keeps the app icon's dark finish in every theme, so it reads as Hercule at a glance. */
+.lk-live {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 13px 14px 12px;
+  border-radius: 24px;
+  color: var(--ink);
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    var(--shadow-2);
+}
+.lk-live .tx {
+  min-width: 0;
+  line-height: 1.3;
+}
+.lk-live .tx b {
+  display: flex;
+  align-items: baseline;
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.lk-live .tx b .w {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--wait-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lk-live .tx .s {
+  display: block;
+  margin-top: 1px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.lk-live .tx .s strong {
+  color: var(--wait-ink);
+  font-weight: 600;
+}
+.lk-live .plus {
+  color: var(--work-ink);
+}
+.lk-live .minus {
+  color: var(--fail-ink);
+}
+.lk-live .cmd {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lk-live .cmd .pr {
+  color: var(--faint);
+}
+.lk-live .acts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.lk-live .acts .btn {
+  height: 38px;
+  font-size: 14px;
+}
+.lk-list .g-note {
+  grid-template-columns: 38px minmax(0, 1fr) 90px;
+  min-height: 74px;
+}
+.lk-list .g-note .acts button {
+  font-size: 13px;
+}
+.lk-list .g-note .face {
+  --sz: 32px;
+}
+.lk-list .nw {
+  white-space: nowrap;
+}
+/* A button that starts a workflow names the workflow on a second line. */
+.lk-list .g-note .acts small {
+  display: block;
+  font-size: 11px;
+  font-weight: 450;
+  color: var(--muted);
+}
+.lk-foot {
+  position: absolute;
+  left: 46px;
+  right: 46px;
+  bottom: 48px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.lk-foot .round {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+}
+.lk-foot .round .ic {
+  width: 20px;
+  height: 20px;
+}
+.lk-foot .haptic {
+  white-space: nowrap;
+  padding: 4px 10px 4px 8px;
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lk-live,
+  .lk-foot .round,
+  .lk-foot .haptic {
+    backdrop-filter: none;
+    background: var(--raised);
+  }
 }

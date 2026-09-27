@@ -267,11 +267,12 @@
     });
     var max = Math.max.apply(null, smooth.map(Math.sqrt)) || 1;
     var pts = smooth.map(function (c, i) {
-      var x = ((i + 0.5) * bucket / (to - from)) * width;
+      // The last bucket can run past the window's end; clamp it so the line never overshoots Now.
+      var x = Math.min(width, ((i + 0.5) * bucket / (to - from)) * width);
       return [x, height - (floor || 0) - (Math.sqrt(c) / max) * (height - (floor || 0) - 2) * (peak || 1)];
     });
     pts.unshift([0, pts[0][1]]);
-    pts.push([width, pts[pts.length - 1][1]]);
+    if (pts[pts.length - 1][0] < width) pts.push([width, pts[pts.length - 1][1]]);
     return pts;
   }
 
@@ -640,6 +641,12 @@
     var scroller = document.querySelector("[data-transcript]");
     var composer = document.querySelector("[data-composer]");
     if (!scroller || !composer) return;
+    // The transcript fades out above the glass (see .tx in system.css), so it needs to know how
+    // much of its bottom the composer covers. That changes whenever the composer shrinks or grows.
+    new ResizeObserver(function () {
+      var reach = scroller.getBoundingClientRect().bottom - composer.getBoundingClientRect().top;
+      scroller.style.setProperty("--glass-reach", Math.max(0, Math.round(reach)) + "px");
+    }).observe(composer);
     var forced = root.dataset.state === "scrolled";
     // Setting scrollTop from code also fires a scroll event; that one must not shrink the composer.
     var fromCode = false;
@@ -690,9 +697,18 @@
         document.querySelectorAll("[data-set-theme]").forEach(function (o) {
           o.setAttribute("aria-pressed", String(o === t));
         });
+        showThemeName();
       }
       var sw = e.target.closest(".switch");
       if (sw) sw.setAttribute("aria-checked", String(sw.getAttribute("aria-checked") !== "true"));
+    });
+  }
+
+  // Writes the name of the page's current theme into every .theme-name, on load and after a pick.
+  function showThemeName() {
+    var themeName = { light: "Sand", sand: "Sand", shell: "Shell", dark: "Kelp", kelp: "Kelp", driftwood: "Driftwood", "low-tide": "Low Tide" };
+    document.querySelectorAll(".theme-name").forEach(function (n) {
+      n.textContent = themeName[root.dataset.theme] || "Sand";
     });
   }
 
@@ -707,10 +723,7 @@
     document.querySelectorAll("[data-ticks-of]").forEach(renderTicks);
     document.querySelectorAll("[data-receipt]").forEach(renderReceipt);
     document.querySelectorAll("[data-beats]").forEach(renderBeats);
-    var themeName = { light: "Sand", sand: "Sand", shell: "Shell", dark: "Kelp", kelp: "Kelp", driftwood: "Driftwood", "low-tide": "Low Tide" };
-    document.querySelectorAll(".theme-name").forEach(function (n) {
-      n.textContent = themeName[root.dataset.theme] || "Sand";
-    });
+    showThemeName();
     // A theme picker shows the page's own theme as chosen, so ?theme=dark marks Kelp.
     var canonical = { light: "sand", dark: "kelp" }[root.dataset.theme] || root.dataset.theme || "sand";
     document.querySelectorAll("[data-set-theme]").forEach(function (o) {

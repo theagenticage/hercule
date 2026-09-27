@@ -12,7 +12,7 @@
    c1  red      failed, burning   c4  blue    webshop           c5  magenta  the cursor:
    c3  yellow   waits on you: ?,  c13 violet  payments-api          focus, keys, the
                 paused, held,     c9  orange  ops                   selected row, the
-                unsure            c12 c14 c10 c11 next projects,     primary answer, the
+                unsure            c12 c14 c10 next projects,         primary answer, the
    c2  green    done, healthy,                in that order          mode chip. It is the
                 additions                                            brand and it is the
    c6  cyan     working, live,                                       same hue in every
@@ -27,6 +27,9 @@
      says how: ? waits on your answer, ! is degraded (at cap, reconnecting, held)
      and may need you, || is paused until you act.
    - Magenta is where the cursor is. Only one magenta thing is "hot" per pane.
+   - Shape tells the families apart: a state is a mark, a project is a square.
+   - c11 (bright yellow) has no job: it sits too close to the yellow that means you.
+     c0, c7 and c15 have none either; they complete the terminal set.
    - Source systems (Sentry, Gmail...) are shape, not color: monochrome marks in ink.
    - Code in transcripts and diffs uses the same slots: keywords c5, strings c2,
      functions c4, numbers c9, types c6, comments c8.
@@ -417,7 +420,7 @@
 
   /* Glass: only for things that float over a scrolling pane. */
   --glass: color-mix(in oklab, var(--raised) 74%, transparent);
-  --glass-thin: color-mix(in oklab, var(--raised) 34%, transparent);
+  --glass-thin: color-mix(in oklab, var(--raised) 62%, transparent);
 
   /* Keycaps. */
   --key-bg: var(--surface);

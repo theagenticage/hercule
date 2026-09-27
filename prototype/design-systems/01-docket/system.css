@@ -1224,9 +1224,15 @@ h4 {
 .verb.is-primary:hover {
   background: color-mix(in oklab, var(--go) 90%, var(--ink));
 }
-.card > .verbs {
-  border-radius: 0 0 var(--r-md) var(--r-md);
-  overflow: hidden;
+/* The row is not clipped: clipping would cut the verdict rule in half where it covers the row's
+   top hairline. The outer answers round their own corners to follow the card instead. */
+.card > .verbs > .verb:first-child,
+.minicard > .verbs > .verb:first-child {
+  border-bottom-left-radius: calc(var(--r-md) - 1px);
+}
+.card > .verbs > .verb:last-child,
+.minicard > .verbs > .verb:last-child {
+  border-bottom-right-radius: calc(var(--r-md) - 1px);
 }
 
 /* Made from: evidence as a row of numerals, separated by hairlines. */
@@ -2025,6 +2031,52 @@ html[data-state="scrolled"] .dock-q {
 }
 html[data-state="scrolled"] .dock-q .t {
   font-size: var(--fs-ui);
+}
+/* The compact dock keeps its kind tab inside its own edge: the tab leads the row in place of
+   the ask mark, so no part of the dock stands out over the transcript. The phone has no room
+   for the tab on that row and drops it instead. */
+html[data-state="scrolled"] .composer-inner .dock {
+  display: flex;
+  align-items: center;
+  margin-top: 0;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+html[data-state="scrolled"] .composer-inner .dock .ktab {
+  position: static;
+  flex: none;
+  margin-left: 11px;
+  border-radius: var(--r-sm);
+}
+html[data-state="scrolled"] .composer-inner .dock-q {
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: 1fr auto;
+  padding-left: 10px;
+}
+html[data-state="scrolled"] .composer-inner .dock-q .ask {
+  display: none;
+}
+html[data-state="scrolled"] .composer-inner .dock-keys {
+  grid-column: 2;
+}
+/* The transcript fades out above the compact stack, so no sharp text shows beside the stack
+   or in the gaps between its pieces. --stack is the stack's height; the phone sets its own. */
+html[data-state="scrolled"] .thread {
+  --stack: 100px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 22px,
+    #000 calc(100% - var(--stack) - 64px),
+    transparent calc(100% - var(--stack))
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 22px,
+    #000 calc(100% - var(--stack) - 64px),
+    transparent calc(100% - var(--stack))
+  );
 }
 
 /* ---------- Glass popovers, palette ---------- */

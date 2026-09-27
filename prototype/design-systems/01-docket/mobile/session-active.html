@@ -51,7 +51,9 @@
   .dock-mini button.go { background: var(--go); color: var(--on-verdict); }
   .vbar { margin-top: 10px; }
 
-  html[data-state="scrolled"] .dock { background: var(--glass-thin); }
+  html[data-state="scrolled"] .thread { --stack: 166px; }
+  html[data-state="scrolled"] .dock { background: var(--glass-thin); margin-top: 0; border-radius: var(--r-lg); }
+  html[data-state="scrolled"] .dock .ktab { display: none; }
   html[data-state="scrolled"] .dock .mverbs,
   html[data-state="scrolled"] .dock .haptic,
   html[data-state="scrolled"] .dock-q .s,

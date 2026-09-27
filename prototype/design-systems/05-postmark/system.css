@@ -1760,6 +1760,53 @@ kbd,
   margin-left: auto;
 }
 
+/* The scrolled state's two folds: the Request becomes one pill with its primary answer, and the
+   queued Input becomes a count on the composer. Both are hidden until the composer is compact. */
+.dock-pill,
+.q-count {
+  display: none;
+}
+.dock-pill {
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  margin: 0 auto 8px;
+  padding: 4px 4px 4px 10px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 1px var(--line), var(--lift-shadow);
+}
+.dock-pill i[data-m] {
+  width: 18px;
+  height: 18px;
+}
+.dock-pill b {
+  font-size: var(--t-ui);
+  font-weight: 620;
+  white-space: nowrap;
+}
+.dock-pill .btn {
+  padding: 0 5px 0 12px;
+}
+.dock-pill .btn kbd {
+  color: var(--on-ink);
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--on-ink) 45%, transparent);
+}
+.q-count {
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px 0 6px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
 /* Glass: while the transcript scrolls, the composer shrinks and lets the page through.
    ?state=scrolled forces the same look for screenshots. */
 .composer.is-compact {
@@ -1773,18 +1820,24 @@ kbd,
 .composer.is-compact .c-row {
   margin-top: 4px;
 }
-/* The dock and the queued strip hold text you must read, so they stay nearly opaque: only the
-   composer card itself goes thin. */
-.composer.is-compact .lip {
-  background: color-mix(in oklch, var(--surface) 72%, transparent);
-}
 .composer.is-compact .dock,
-.composer.is-compact .queued {
-  background: color-mix(in oklch, var(--surface) 84%, transparent);
+.composer.is-compact .queued,
+.composer.is-compact .lip {
+  display: none;
 }
-.composer.is-compact .dock .ans .d,
-.composer.is-compact .dock-subject {
-  opacity: 0.85;
+.composer.is-compact .dock-pill {
+  display: flex;
+}
+.composer.is-compact .q-count {
+  display: inline-flex;
+}
+/* Under the compact composer the transcript fades out, so no line shows sharp beside or between
+   the glass pieces. kit.js keeps --stack-h at the height of the composer stack; a page with a
+   fade at the top of its transcript sets --fade-top to keep it. */
+.pane:has(.composer.is-compact) .transcript {
+  --fade: linear-gradient(to bottom, transparent, #000 var(--fade-top, 0px), #000 calc(100% - var(--stack-h, 140px) - 88px), transparent calc(100% - var(--stack-h, 140px) + 4px));
+  -webkit-mask-image: var(--fade);
+  mask-image: var(--fade);
 }
 
 /* ---------- Transcript ---------- */
@@ -2532,6 +2585,127 @@ kbd,
   margin: 8px auto 0;
   background: var(--line);
 }
+/* Answer rows sized for a thumb: at least 52px tall, the describe line on the right, one
+   filled primary. The phone's version of the ledger. */
+.ledger--thumb {
+  gap: 6px;
+}
+.ledger--thumb .ans {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  min-height: 52px;
+  margin: 0;
+  padding: 0 14px 0 12px;
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+}
+.ledger--thumb .ans.is-primary {
+  background: var(--violet);
+  box-shadow: var(--lift-shadow);
+}
+.ledger--thumb .ans.is-primary b,
+.ledger--thumb .ans.is-primary .d {
+  color: var(--on-ink);
+}
+.ledger--thumb .ans.is-primary .ans-key {
+  background: var(--on-ink);
+  color: var(--violet);
+}
+.ledger--thumb .ans-key {
+  width: 30px;
+  height: 30px;
+}
+.ledger--thumb .ans-key .mk {
+  width: 16px;
+  height: 16px;
+}
+.ledger--thumb .ans b {
+  font-size: 15px;
+}
+.ledger--thumb .ans .d {
+  font-size: var(--t-sm);
+  text-align: right;
+}
+/* Stacked: the describe line sits under the label, for describe lines too long to share a row. */
+.ledger--thumb.is-stacked .ans {
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  row-gap: 1px;
+  min-height: 56px;
+  padding: 8px 14px 8px 12px;
+}
+.ledger--thumb.is-stacked .ans-key {
+  grid-row: span 2;
+}
+.ledger--thumb.is-stacked .ans .d {
+  grid-column: 2;
+  text-align: left;
+}
+/* A pushed page's bar: back, the title with one line of context, and one action. */
+.m-nav {
+  flex: none;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 8px 6px;
+}
+.m-back {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 40px;
+  color: var(--violet);
+}
+.m-back .mk {
+  width: 22px;
+  height: 22px;
+}
+.m-title {
+  min-width: 0;
+}
+.m-title b {
+  display: block;
+  font-size: 16px;
+  font-weight: 640;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-title small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.m-nav .icon-btn {
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+.m-nav .icon-btn .mk {
+  width: 20px;
+  height: 20px;
+}
+/* The voice button: the first way in on the phone. Hold to talk, release to send. */
+.m-mic {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--violet);
+  color: var(--on-ink);
+  box-shadow: var(--lift-shadow);
+}
+.m-mic .mk {
+  width: 20px;
+  height: 20px;
+}
 
 /* ---------- Motion ---------- */
 @keyframes thunk {
@@ -2587,6 +2761,7 @@ kbd,
   .c-card,
   .lip,
   .dock,
+  .dock-pill,
   .queued,
   .pop,
   .sheet-m,

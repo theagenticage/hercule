@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fix 3-D Secure checkout for EU cards · webshop</title>
+<script>if (new URLSearchParams(location.search).has("annotate")) document.documentElement.dataset.annotate = "";</script>
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="../system.css">
 <style>
@@ -58,7 +59,7 @@
 .m-lip .i, .m-lip .brand { width: 12px; height: 12px; }
 .m-lip .sep { color: var(--faint); }
 /* Scrolled: the Request folds to its question, the composer narrows to see-through glass. */
-html[data-state="scrolled"] .m-stack { background: none; padding-top: 12px; }
+html[data-state="scrolled"] .m-stack { background: linear-gradient(0deg, var(--canvas) 40px, color-mix(in oklab, var(--canvas) 86%, transparent) 72px, transparent 116px); padding-top: 12px; }
 html[data-state="scrolled"] .m-req { margin: 0 12px; background: var(--glass-thin); -webkit-backdrop-filter: blur(10px) saturate(1.4); backdrop-filter: blur(10px) saturate(1.4); }
 html[data-state="scrolled"] .m-req .bigans, html[data-state="scrolled"] .m-req-h .by, html[data-state="scrolled"] .m-lip { display: none; }
 html[data-state="scrolled"] .m-req-h { background: color-mix(in oklab, var(--attn) 86%, transparent); font-size: 13px; }
@@ -132,7 +133,7 @@ html[data-state="scrolled"] .hap { display: none; }
     </div>
   </div>
   <span class="ph-home" aria-hidden="true"></span>
-  <span class="hap" style="right: 18px; top: 481px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>warning · a Request arrives</span>
+  <span class="hap" style="right: 18px; top: 460px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>warning · a Request arrives</span>
   <span class="hap" style="right: 24px; top: 566px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>success · on Allow once</span>
 </div>
 <script>

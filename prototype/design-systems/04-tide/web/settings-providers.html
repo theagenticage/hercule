@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280, height=800" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .page { flex: 1; min-height: 0; display: grid; grid-template-columns: 196px minmax(0, 1fr); }
+      .set-nav { padding: 14px 12px; border-right: 1px solid var(--line-soft); overflow: auto; }
+      .set-nav .side-label { padding-top: 4px; }
+      .set-nav .nav-item { height: 29px; font-size: var(--fs-sm); }
+      .set-nav .nav-item .m { width: 15px; height: 15px; }
+      .set-scroll { padding: 0 32px 24px; }
+
+      /* One provider instance: who it signs in as, then its defaults, then where it runs and how much is left. */
+      .pv { padding: 14px 0 16px; border-bottom: 1px solid var(--line-soft); }
+      .pv:last-child { border-bottom: 0; }
+      .pv-head { display: flex; align-items: center; gap: 12px; }
+      .pv-logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--hover); flex: none; }
+      .pv-logo .b { width: 17px; height: 17px; }
+      .pv-logo .b-pi { font-size: 18px; }
+      .pv-name { font-size: var(--fs-xl); font-weight: var(--w-strong); letter-spacing: var(--tracking-title); }
+      .pv-acct { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
+      .pv-acct .mono { font-size: 11.5px; color: var(--ink); }
+      .pv-end { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+      .pv-state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--muted); }
+      .pv-state .m { color: var(--live-ink); }
+
+      .pv-grid { display: grid; grid-template-columns: minmax(0, 1fr) 180px 412px; gap: 12px 28px; margin-top: 12px; }
+      .pv-field { min-width: 0; }
+      .pv-field > .label { margin-bottom: 7px; font-size: var(--fs-xs); }
+      .pv-wide { grid-column: 1 / 3; }
+      .quiet { font-size: var(--fs-sm); color: var(--faint); line-height: 26px; }
+
+      .mdls { display: flex; flex-wrap: wrap; gap: 6px; }
+      .mdl { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--fs-sm); background: var(--hover); color: var(--ink); }
+      .mdl.is-default { background: var(--raised); box-shadow: inset 0 0 0 1.5px var(--ink); font-weight: var(--w-emph); }
+      .mdl small { font-family: var(--font-mono); font-size: 10px; font-weight: 400; color: var(--muted); }
+
+      /* A mode the provider cannot run is struck through, not only greyed, so the difference never rests on colour. */
+      .seg.am > button { padding: 0 10px; }
+      .seg.am > .no { color: var(--faint); text-decoration: line-through; text-decoration-thickness: 1px; cursor: not-allowed; }
+      .fallback { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: var(--fs-xs); color: var(--muted); }
+      .fallback .m { width: 12px; height: 12px; color: var(--future-ink); }
+
+      .mcs { display: flex; flex-wrap: wrap; gap: 6px; }
+      .mc { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px 0 7px; border-radius: 8px; font-size: var(--fs-sm); background: var(--hover); }
+      .mc .m { width: 14px; height: 14px; color: var(--live-ink); }
+      .mc-v { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+      .mc-cap { font-family: var(--font-mono); font-size: 10.5px; color: var(--now-ink); }
+      .mc.is-off { padding-left: 9px; background: none; border: 1px dashed var(--line); color: var(--muted); }
+      .mc.is-off button { margin-left: 2px; font-size: var(--fs-xs); font-weight: var(--w-emph); color: var(--future-ink); }
+
+      /* The usage window as time: the used share climbs from 06:00 to now, then a dotted line
+         shows where the same pace lands when the window resets at 11:00. */
+      .uw { position: relative; height: 62px; margin: 2px 0 0; border-top: 1px dashed var(--line); }
+      .uw svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+      .uw-fill { fill: color-mix(in oklch, var(--past) 55%, transparent); }
+      .uw-line { fill: none; stroke: color-mix(in oklch, var(--ink) 55%, var(--past)); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+      .uw-base { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+      .uw-proj { fill: none; stroke: var(--future); stroke-width: 1.5; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+      .uw-reset { stroke: var(--future); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+      .uw-next { fill: color-mix(in oklch, var(--future) 16%, transparent); }
+      .uw-now { position: absolute; top: -4px; bottom: 0; width: var(--now-w); transform: translateX(-50%); background: var(--now); }
+      .uw-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--now); box-shadow: 0 0 0 2.5px var(--bg); }
+      .uw-end { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--future); }
+      .uw-lab { position: absolute; font-family: var(--font-mono); font-size: var(--fs-micro); white-space: nowrap; }
+      .uw-lab.used { color: var(--ink); font-weight: 500; }
+      .uw-lab.ahead { color: var(--future-ink); }
+      .uw-lab.limit { color: var(--faint); }
+      .uw-axis { position: relative; height: 22px; margin-top: 4px; }
+      .uw-axis span { position: absolute; top: 3px; transform: translateX(-50%); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); white-space: nowrap; }
+      .uw-axis span:first-child { transform: none; }
+      .uw-axis span:last-child { transform: translateX(-100%); }
+      .uw-axis .ahead { color: var(--future-ink); }
+      .uw-axis .nowtab { top: 0; transform: translateX(-50%); color: var(--on-now); }
+    </style>
+  </head>
+  <body class="web">
+    <aside data-rail="settings"></aside>
+    <main class="main">
+      <header class="topbar">
+        <span class="crumb">Settings /</span>
+        <h1 class="page-title">Providers</h1>
+        <span class="bar-when">3 instances · machines checked 09:40</span>
+        <div class="top-end">
+          <button class="btn btn-sm"><i data-m="plus" class="xs"></i>Add provider instance</button>
+        </div>
+      </header>
+
+      <div class="page">
+        <nav class="set-nav" aria-label="Settings">
+          <div class="side-label">Settings</div>
+          <div class="nav">
+            <a class="nav-item"><i data-m="profile"></i><span>Profile</span></a>
+            <a class="nav-item"><i data-m="appearance"></i><span>Appearance</span></a>
+            <a class="nav-item"><i data-m="session"></i><span>Threads</span></a>
+            <a class="nav-item"><i data-m="heartbeat"></i><span>Assistants</span></a>
+            <a class="nav-item"><i data-m="connections"></i><span>Connections</span></a>
+            <a class="nav-item is-active" aria-current="page"><i data-m="providers"></i><span>Providers</span></a>
+            <a class="nav-item"><i data-m="fleet"></i><span>Machines</span></a>
+            <a class="nav-item"><i data-m="identities"></i><span>Identities</span></a>
+            <a class="nav-item"><i data-m="shield"></i><span>Permission profiles</span></a>
+            <a class="nav-item"><i data-m="key"></i><span>Secrets</span></a>
+            <a class="nav-item"><i data-m="gauge"></i><span>Bounds</span></a>
+            <a class="nav-item"><i data-m="plugins"></i><span>Plugins</span></a>
+            <a class="nav-item"><i data-m="system"></i><span>System</span></a>
+          </div>
+        </nav>
+
+        <div class="set-scroll">
+          <section class="pv" aria-label="Claude Code">
+            <header class="pv-head">
+              <span class="pv-logo"><i data-b="anthropic"></i></span>
+              <div>
+                <h2 class="pv-name">Claude Code</h2>
+                <span class="pv-acct">Anthropic account <span class="mono">rogier@personal</span></span>
+              </div>
+              <div class="pv-end">
+                <span class="pv-state"><i data-m="done" class="xs"></i>signed in on 3 machines</span>
+                <button class="switch" role="switch" aria-checked="true" aria-label="Claude Code enabled"></button>
+                <button class="icon-btn sm" aria-label="More for Claude Code"><i data-m="more"></i></button>
+              </div>
+            </header>
+            <div class="pv-grid">
+              <div class="pv-field">
+                <div class="label">Models</div>
+                <div class="mdls"><span class="mdl is-default">Opus 5.5<small>default</small></span><span class="mdl">Sonnet 5</span><span class="mdl">Haiku 4.5</span></div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default effort</div>
+                <div class="seg" role="radiogroup" aria-label="Default effort"><button role="radio" aria-checked="false">Low</button><button role="radio" aria-checked="false">Medium</button><button role="radio" aria-checked="true" aria-pressed="true">High</button></div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default access mode</div>
+                <div class="seg am" role="radiogroup" aria-label="Default access mode"><button role="radio" aria-checked="false">Approval required</button><button role="radio" aria-checked="true" aria-pressed="true">Auto-accept edits</button><button role="radio" aria-checked="false">Auto</button><button role="radio" aria-checked="false">Full access</button></div>
+              </div>
+              <div class="pv-field pv-wide">
+                <div class="label">Installed on</div>
+                <div class="mcs">
+                  <span class="mc"><i data-m="done"></i>studio-mac<span class="mc-v">2.4.0</span></span>
+                  <span class="mc"><i data-m="done"></i>build-box-1<span class="mc-v">2.4.0</span><span class="mc-cap">at cap</span></span>
+                  <span class="mc"><i data-m="done"></i>build-box-2<span class="mc-v">2.4.0</span></span>
+                </div>
+              </div>
+              <div class="pv-field">
+                <div class="label">5-hour window <span class="n">61% used · resets 11:00</span></div>
+                <div class="uw" role="img" aria-label="61% of the 5-hour usage window used since 06:00. At this pace about 83% is used when the window resets at 11:00.">
+                  <svg viewBox="0 0 360 100" preserveAspectRatio="none" aria-hidden="true">
+                    <rect class="uw-next" x="300" y="0" width="60" height="100" />
+                    <line class="uw-base" x1="0" y1="100" x2="360" y2="100" />
+                    <path class="uw-fill" d="M0 100 L40 99 L60 97 L90 88 L120 78 L150 70 L170 62 L190 53 L205 45 L221 39 L221 100 Z" />
+                    <path class="uw-line" d="M0 100 L40 99 L60 97 L90 88 L120 78 L150 70 L170 62 L190 53 L205 45 L221 39" />
+                    <path class="uw-proj" d="M221 39 L300 17" />
+                    <line class="uw-reset" x1="300" y1="0" x2="300" y2="100" />
+                  </svg>
+                  <span class="uw-lab limit" style="left: 0; top: 3px">limit</span>
+                  <span class="uw-now" style="left: 61.389%"></span>
+                  <span class="uw-dot" style="left: 61.389%; top: 39%"></span>
+                  <span class="uw-lab used" style="right: calc(38.611% + 9px); top: calc(39% - 16px)">61%</span>
+                  <span class="uw-end" style="left: 83.333%; top: 17%"></span>
+                  <span class="uw-lab ahead" style="left: calc(83.333% + 9px); top: calc(17% - 6px)">~83%</span>
+                </div>
+                <div class="uw-axis" aria-hidden="true">
+                  <span style="left: 0">06:00</span><span style="left: 33.333%">08:00</span><span class="nowtab" style="left: 61.389%">09:41</span><span class="ahead" style="left: 83.333%">11:00</span><span class="ahead" style="left: 100%">12:00</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="pv" aria-label="Codex">
+            <header class="pv-head">
+              <span class="pv-logo"><i data-b="openai"></i></span>
+              <div>
+                <h2 class="pv-name">Codex</h2>
+                <span class="pv-acct">OpenAI account <span class="mono">work</span></span>
+              </div>
+              <div class="pv-end">
+                <span class="pv-state"><i data-m="done" class="xs"></i>signed in on 2 machines</span>
+                <button class="switch" role="switch" aria-checked="true" aria-label="Codex enabled"></button>
+                <button class="icon-btn sm" aria-label="More for Codex"><i data-m="more"></i></button>
+              </div>
+            </header>
+            <div class="pv-grid">
+              <div class="pv-field">
+                <div class="label">Models</div>
+                <div class="mdls"><span class="mdl is-default">gpt-5.4<small>default</small></span><span class="mdl">gpt-5.4-mini</span></div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default effort</div>
+                <div class="seg" role="radiogroup" aria-label="Default effort"><button role="radio" aria-checked="false">Low</button><button role="radio" aria-checked="true" aria-pressed="true">Medium</button><button role="radio" aria-checked="false">High</button></div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default access mode</div>
+                <div class="seg am" role="radiogroup" aria-label="Default access mode"><button role="radio" aria-checked="true" aria-pressed="true">Approval required</button><button role="radio" aria-checked="false">Auto-accept edits</button><button role="radio" aria-checked="false">Auto</button><button role="radio" aria-checked="false">Full access</button></div>
+              </div>
+              <div class="pv-field pv-wide">
+                <div class="label">Installed on</div>
+                <div class="mcs">
+                  <span class="mc is-off">studio-mac<button>Install</button></span>
+                  <span class="mc"><i data-m="done"></i>build-box-1<span class="mc-v">0.157.1</span><span class="mc-cap">at cap</span></span>
+                  <span class="mc"><i data-m="done"></i>build-box-2<span class="mc-v">0.157.1</span></span>
+                </div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Usage</div>
+                <p class="quiet">No usage window on this account</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="pv" aria-label="pi">
+            <header class="pv-head">
+              <span class="pv-logo"><i data-b="pi"></i></span>
+              <div>
+                <h2 class="pv-name">pi</h2>
+                <span class="pv-acct">Local model via llama.cpp <span class="mono">studio-mac</span></span>
+              </div>
+              <div class="pv-end">
+                <span class="pv-state"><i data-m="done" class="xs"></i>running on 1 machine</span>
+                <button class="switch" role="switch" aria-checked="true" aria-label="pi enabled"></button>
+                <button class="icon-btn sm" aria-label="More for pi"><i data-m="more"></i></button>
+              </div>
+            </header>
+            <div class="pv-grid">
+              <div class="pv-field">
+                <div class="label">Models</div>
+                <div class="mdls"><span class="mdl is-default">qwen3-coder 30b<small>default</small></span></div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default effort</div>
+                <p class="quiet">pi has no effort setting</p>
+              </div>
+              <div class="pv-field">
+                <div class="label">Default access mode</div>
+                <div class="seg am" role="radiogroup" aria-label="Default access mode"><button role="radio" aria-checked="true" aria-pressed="true">Approval required</button><button class="no" role="radio" aria-checked="false" aria-disabled="true" title="pi cannot run in this mode">Auto-accept edits</button><button class="no" role="radio" aria-checked="false" aria-disabled="true" title="pi cannot run in this mode">Auto</button><button role="radio" aria-checked="false">Full access</button></div>
+                <p class="fallback"><i data-m="return"></i>A struck mode falls back to Approval required, and the thread tells you.</p>
+              </div>
+              <div class="pv-field pv-wide">
+                <div class="label">Installed on</div>
+                <div class="mcs">
+                  <span class="mc"><i data-m="done"></i>studio-mac<span class="mc-v">0.9.2</span></span>
+                  <span class="mc is-off">build-box-1<button>Install</button></span>
+                  <span class="mc is-off">build-box-2<button>Install</button></span>
+                </div>
+              </div>
+              <div class="pv-field">
+                <div class="label">Usage</div>
+                <p class="quiet">Runs locally, no usage window</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

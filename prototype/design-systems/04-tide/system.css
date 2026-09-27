@@ -68,6 +68,10 @@ code {
   border-radius: var(--r-xs);
   background: var(--hover);
 }
+/* Keeps a phrase on one line, so "3-D Secure" never breaks at its hyphen. */
+.nw {
+  white-space: nowrap;
+}
 hr {
   border: 0;
   border-top: 1px solid var(--line-soft);
@@ -952,6 +956,17 @@ kbd {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--faint);
+  white-space: nowrap;
+}
+/* One source per line, each cut with an ellipsis, for a narrow column. */
+.made-1 {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.made-1 .made-row > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ------------------------------------------------------------------ composer */
@@ -1743,6 +1758,12 @@ body.web {
   border-bottom: 1px solid var(--line-soft);
   z-index: 5;
 }
+.top-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* ------------------------------------------------------------------ mobile shell */
 body.phone {
@@ -1903,9 +1924,431 @@ body.phone {
   margin: 8px auto 4px;
 }
 
+/* ------------------------------------------------------------------ mobile pieces */
+/* On the phone, time runs down the screen: Now at the top, the past below it, and what is next
+   above it, pulled down into view. So the Now line lies flat here. The tab bar floats over the
+   list so its glass has something to blur. */
+body.phone .tabbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+.m-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 16px 10px 20px;
+}
+.m-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.m-title {
+  font-size: var(--fs-title);
+  line-height: 1.2;
+}
+.m-sub {
+  margin-top: 1px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.m-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink);
+}
+.m-icon .m {
+  width: 19px;
+  height: 19px;
+}
+.m-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 100px;
+  scrollbar-width: none;
+}
+
+/* What is next sits above Now: a hollow sea-glass peek until it is pulled down. */
+.m-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  margin: 0 16px 4px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--future);
+  color: var(--future-ink);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.m-next .m {
+  width: 14px;
+  height: 14px;
+}
+.m-next b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+}
+.m-next .pull {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--faint);
+}
+
+/* The flat Now line, with the time on its tab at the left edge. */
+.m-now {
+  position: relative;
+  height: 22px;
+  margin: 6px 0 2px;
+}
+.m-now::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 0;
+  top: 10px;
+  height: var(--now-w);
+  background: var(--now);
+}
+.m-now .nowtab {
+  left: 14px;
+  top: 1px;
+}
+.m-now-note {
+  position: absolute;
+  right: 0;
+  top: 1px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 8px;
+  background: var(--bg);
+  font-size: var(--fs-xs);
+  color: var(--now-ink);
+  font-weight: var(--w-emph);
+}
+
+/* The spine: a column of times, a thin rule, and each item hanging off its time. */
+.sp {
+  position: relative;
+  padding-right: 16px;
+}
+.sp::before {
+  content: "";
+  position: absolute;
+  left: 55.5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.sp-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px 24px minmax(0, 1fr);
+  align-items: start;
+  padding: 9px 0;
+}
+.sp-t {
+  padding: 4px 6px 0 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--faint);
+  white-space: nowrap;
+}
+.sp-t.now {
+  color: var(--now-ink);
+  font-weight: 500;
+}
+.sp-dot {
+  position: relative;
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg);
+}
+.sp-body {
+  min-width: 0;
+  padding-left: 8px;
+}
+/* The night: a shaded stretch of the spine, so the quiet hours read as one block. */
+.sp-night {
+  position: relative;
+  margin-right: -16px;
+  padding-right: 16px;
+  background: var(--night);
+}
+.sp-night .sp-dot {
+  background: none;
+}
+.sp-edge {
+  display: grid;
+  grid-template-columns: 44px 24px minmax(0, 1fr);
+  align-items: center;
+  height: 30px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.sp-edge .sp-t {
+  padding-top: 0;
+}
+.sp-edge .sp-dot {
+  width: 22px;
+  height: 22px;
+}
+
+/* Above Now the spine turns into the future: a dashed sea-glass rule and hollow dots. */
+.sp.is-future::before {
+  background: none;
+  border-left: 1px dashed var(--future);
+}
+.sp.is-future .sp-t {
+  color: var(--future-ink);
+}
+.sp.is-future .sp-dot .m {
+  color: var(--future-ink);
+}
+
+/* A pushed page's top bar: back on the left, where you are in the middle, one action right. */
+.m-nav {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 44px;
+  padding: 0 12px 0 8px;
+}
+.m-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding-right: 8px;
+  font-size: 15px;
+  color: var(--live-ink);
+  font-weight: var(--w-emph);
+}
+.m-back .m {
+  width: 22px;
+  height: 22px;
+}
+.m-nav-mid {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.m-nav-end {
+  justify-self: end;
+  display: flex;
+  gap: 6px;
+}
+.m-nav .m-icon {
+  width: 36px;
+  height: 36px;
+}
+
+/* The answer dock: the answers sit at the bottom, in reach of the thumb, over frosted glass. */
+.m-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 34px;
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-top: 1px solid var(--line-soft);
+}
+.m-dock-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.m-dock-hint .m {
+  width: 14px;
+  height: 14px;
+}
+.m-dock-hint .haptic {
+  margin-left: auto;
+}
+
+/* A row on the spine: one line of title, one line of source and reason. */
+.mr-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: var(--w-emph);
+  line-height: 1.3;
+}
+.mr-title span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mr-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mr-meta .b,
+.mr-meta .m {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+
+/* Big answer rows: a whole row is the button, sized for a thumb. */
+.big-ans {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  font-size: 15px;
+  font-weight: var(--w-emph);
+  text-align: left;
+}
+.big-ans .m {
+  width: 18px;
+  height: 18px;
+}
+.big-ans small {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  color: var(--muted);
+}
+.big-ans.is-go {
+  background: var(--ink);
+  border-color: transparent;
+  color: var(--bg);
+}
+.big-ans.is-go small {
+  color: color-mix(in oklch, var(--bg) 72%, transparent);
+}
+.big-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.big-pair .big-ans {
+  justify-content: center;
+}
+
+/* The voice-first reply: holding the wide bar records, and typing is one tap away. */
+.vc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vc-key {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--muted);
+  transition: width var(--dur-slow) var(--ease-tide), height var(--dur-slow) var(--ease-tide);
+}
+.vc-key .m {
+  width: 18px;
+  height: 18px;
+}
+.vc-hold {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 16px 0 14px;
+  border-radius: var(--r-pill);
+  background: var(--live-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--live) 40%, transparent);
+  color: var(--live-ink);
+  font-size: 14px;
+  font-weight: var(--w-emph);
+  white-space: nowrap;
+  transition: height var(--dur-slow) var(--ease-tide);
+}
+.vc-hold .m {
+  width: 18px;
+  height: 18px;
+}
+.vc-hold small {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* The dock is the composer glass on a phone: while you scroll back it thins out and folds away
+   everything but the reply and the one big answer. */
+.m-dock {
+  transition: background var(--dur-slow), padding var(--dur-slow) var(--ease-tide);
+}
+.m-dock.is-shrunk {
+  gap: 6px;
+  padding-top: 8px;
+  background: var(--glass-thin);
+}
+.m-dock.is-shrunk .queued,
+.m-dock.is-shrunk .m-dock-hint,
+.m-dock.is-shrunk .m-lip {
+  display: none;
+}
+.m-dock.is-shrunk .vc-key,
+.m-dock.is-shrunk .vc-hold {
+  height: 38px;
+}
+.m-dock.is-shrunk .vc-key {
+  width: 38px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .m-working .wv {
     animation: none;
+  }
+  .m-dock,
+  .vc-key,
+  .vc-hold {
+    transition: none;
   }
 }
 @media (prefers-reduced-transparency: reduce) {
@@ -1915,9 +2358,13 @@ body.phone {
   .composer.is-shrunk .dock,
   .tabbar,
   .sheet,
+  .m-dock,
   .side {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+  .m-dock.is-shrunk {
+    background: var(--bg);
   }
 }
 :root[data-motion="reduce"] .m-working .wv {
@@ -2277,18 +2724,6 @@ body.phone {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--faint);
-}
-.made-1 {
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-.made-1 .made-row > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.made-row .src {
-  white-space: nowrap;
 }
 .fact-code {
   font-size: 11.5px;
@@ -2660,6 +3095,13 @@ pre.code .c {
 }
 .composer-wrap .composer {
   pointer-events: auto;
+}
+/* While the composer is glass, the transcript fades out just above it. Without the fade, lines
+   run sharp up to the edge of the narrower glass and look cut off mid-word. tide.js keeps
+   --glass-reach at the height the composer covers at the bottom of the transcript. */
+.tx:has(~ .composer-wrap .composer.is-shrunk) {
+  -webkit-mask-image: linear-gradient(to top, transparent var(--glass-reach, 0px), #000 calc(var(--glass-reach, 0px) + 72px));
+  mask-image: linear-gradient(to top, transparent var(--glass-reach, 0px), #000 calc(var(--glass-reach, 0px) + 72px));
 }
 .stop-btn {
   display: inline-flex;

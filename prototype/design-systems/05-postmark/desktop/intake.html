@@ -181,6 +181,134 @@
       .quiet .link {
         margin-left: auto;
       }
+
+      /* ---------- At 10x (?state=10x): 31,000 events a day, 60 proposals a morning ----------
+         Blocks marked data-scale="today" or "10x" swap with the state; numbers marked data-10x
+         are swapped by the script at the end of the page. The lead keeps its envelope, the rest
+         stacks: one card per group that shares an answer, with a count and that one answer. */
+      html[data-state="10x"] [data-scale="today"],
+      html:not([data-state="10x"]) [data-scale="10x"] {
+        display: none !important;
+      }
+      html[data-state="10x"] .lead :is(.gist, .made-from, .perf, .offer-note, .ans kbd, .ans .d em) {
+        display: none;
+      }
+      html[data-state="10x"] .lead .env-body {
+        padding-bottom: 14px;
+      }
+      html[data-state="10x"] .lead .env-title {
+        margin-bottom: 12px;
+      }
+      /* The two envelopes under the lead show as paper edges below it. */
+      html[data-state="10x"] .lead {
+        box-shadow:
+          0 7px 0 -3px var(--raised),
+          0 7px 0 -2px var(--line),
+          0 14px 0 -7px var(--raised),
+          0 14px 0 -6px var(--line),
+          var(--lift-shadow);
+      }
+      /* The ledger lies in one row, each answer keeping its describe line under its label. */
+      html[data-state="10x"] .lead .ledger {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        gap: 6px;
+        margin-top: 10px;
+      }
+      html[data-state="10x"] .lead .ans {
+        grid-template-columns: 22px minmax(0, auto);
+        grid-template-rows: auto auto;
+        row-gap: 1px;
+        margin: 0;
+        padding: 7px 16px 7px 8px;
+      }
+      html[data-state="10x"] .lead .ans-key {
+        grid-row: span 2;
+      }
+      html[data-state="10x"] .lead .ans .d {
+        grid-column: 2;
+      }
+      .stack-note {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 20px 4px 0;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .stack-note b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .stack-note .link {
+        margin-left: auto;
+      }
+      /* The rack: one column per tier, one stack card per shared answer. */
+      .rack {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0 18px;
+        align-items: start;
+      }
+      .rack-col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .rack .tier {
+        margin: 0;
+      }
+      .stack {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr);
+        column-gap: 12px;
+        padding: 12px 14px 12px 12px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        box-shadow:
+          0 5px 0 -2px var(--raised),
+          0 5px 0 -1px var(--line),
+          0 10px 0 -5px var(--raised),
+          0 10px 0 -4px var(--line),
+          var(--card-shadow),
+          inset 0 0 0 1px var(--line-soft);
+      }
+      /* The stack's denomination: how many it holds, over the stamps of the sources that made it. */
+      .stack .stack-n {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 7px;
+      }
+      .stack .stack-n b {
+        font: 620 26px / 1 var(--narrow);
+        letter-spacing: -0.01em;
+      }
+      .stack .stack-n .src {
+        display: flex;
+        gap: 3px;
+      }
+      .stack .stack-n .post:nth-child(2) {
+        transform: rotate(4deg);
+      }
+      .stack .t {
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stack .sub {
+        margin: 2px 0 10px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stack .suggest {
+        max-width: 100%;
+      }
     </style>
   </head>
   <body>
@@ -197,11 +325,11 @@
             </div>
           </div>
           <nav class="topics">
-            <a class="topic is-on">All <b>6</b></a>
-            <a class="topic"><span class="live-dot attn"></span>Checkout <b>3</b></a>
-            <a class="topic">Infrastructure <b>1</b></a>
-            <a class="topic">Customers <b>1</b></a>
-            <a class="topic">Releases <b>1</b></a>
+            <a class="topic is-on">All <b data-10x="60">6</b></a>
+            <a class="topic"><span class="live-dot attn"></span>Checkout <b data-10x="19">3</b></a>
+            <a class="topic">Infrastructure <b data-10x="14">1</b></a>
+            <a class="topic">Customers <b data-10x="17">1</b></a>
+            <a class="topic">Releases <b data-10x="10">1</b></a>
             <span class="topics-manage"><svg class="mk"><use href="#gear" /></svg>Manage topics</span>
           </nav>
         </div>
@@ -212,20 +340,23 @@
               <div class="receipt">
                 <span data-postmark data-waves data-top="TRIAGE" data-mid="09:00" data-bot="29 SEP 2026"></span>
                 <div class="tally">
-                  <div class="tally-item is-fail"><b>1</b><span><i data-m="burning" class="s-fail"></i>burning</span></div>
-                  <div class="tally-item"><b>6</b><span><i data-m="proposal"></i>proposals</span></div>
-                  <div class="tally-item is-attn"><b>2</b><span><i data-m="decision" class="s-attn"></i>need a call</span></div>
-                  <div class="tally-item"><b>3</b><span>FYI</span></div>
-                  <div class="tally-item is-quiet"><b>198</b><span>handled quietly</span></div>
+                  <div class="tally-item is-fail"><b data-10x="3">1</b><span><i data-m="burning" class="s-fail"></i>burning</span></div>
+                  <div class="tally-item"><b data-10x="60">6</b><span><i data-m="proposal"></i>proposals</span></div>
+                  <div class="tally-item is-attn"><b data-10x="11">2</b><span><i data-m="decision" class="s-attn"></i>need a call</span></div>
+                  <div class="tally-item"><b data-10x="41">3</b><span>FYI</span></div>
+                  <div class="tally-item is-quiet"><b data-10x="30,516">198</b><span>handled quietly</span></div>
                 </div>
               </div>
-              <p class="receipt-line">
+              <p class="receipt-line" data-scale="today">
                 <b>212 events</b> since yesterday 18:20 → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action
+              </p>
+              <p class="receipt-line" data-scale="10x">
+                <b>31,000 events</b> in 24h → 60 proposals · 14 attached · 21 offers · 41 FYI · 8 unsure · 340 held · 30,516 no action
               </p>
             </div>
 
             <section>
-              <div class="tier"><h2>Now</h2><span class="perf"></span></div>
+              <div class="tier"><h2>Now</h2><span class="n" data-scale="10x">3</span><span class="perf"></span></div>
               <article class="env env--urgent lead">
                 <div class="corner">
                   <div class="stamps">
@@ -277,9 +408,82 @@
                   </div>
                 </div>
               </article>
+              <p class="stack-note" data-scale="10x">
+                <b>2 more burning</b> under this one
+                <a class="link">Fan out<svg class="mk"><use href="#chev-down" /></svg></a>
+              </p>
             </section>
 
-            <section>
+            <!-- At 10x: every group that shares an answer is one stack, answered once. -->
+            <section class="rack" data-scale="10x">
+              <div class="rack-col">
+                <div class="tier"><h2>Needs a call</h2><span class="n">11</span><span class="perf"></span></div>
+                <article class="stack">
+                  <div class="stack-n"><b>8</b><span class="src"><span class="post" data-src="intercom"></span><span class="post" data-src="gmail"></span></span></div>
+                  <div>
+                    <div class="t">Unsure which project</div>
+                    <div class="sub">From support and email</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--attn)"><svg class="mk"><use href="#tag" /></svg></span>Sort all 8</button>
+                  </div>
+                </article>
+                <article class="stack">
+                  <div class="stack-n"><b>3</b><span class="src"><span class="post" data-src="github"></span></span></div>
+                  <div>
+                    <div class="t">Spawn Bounds tripped</div>
+                    <div class="sub">3 workflows held 340 events</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--attn)"><svg class="mk"><use href="#paused" /></svg></span>Review the holds</button>
+                  </div>
+                </article>
+              </div>
+              <div class="rack-col">
+                <div class="tier"><h2>Today</h2><span class="n">45</span><span class="perf"></span></div>
+                <article class="stack">
+                  <div class="stack-n"><b>24</b><span class="src"><span class="post" data-src="grafana"></span><span class="post" data-src="stripe"></span></span></div>
+                  <div>
+                    <div class="t">Timeouts and retries rising</div>
+                    <div class="sub">ops-db backups, webhooks</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#run" /></svg></span>Start "Investigate" on all</button>
+                  </div>
+                </article>
+                <article class="stack">
+                  <div class="stack-n"><b>12</b><span class="src"><span class="post" data-src="github"></span></span></div>
+                  <div>
+                    <div class="t">Dependency bumps</div>
+                    <div class="sub">All green, patch versions only</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--green)"><svg class="mk"><use href="#check" /></svg></span>Merge all 12</button>
+                  </div>
+                </article>
+                <article class="stack">
+                  <div class="stack-n"><b>9</b><span class="src"><span class="post" data-src="gmail"></span></span></div>
+                  <div>
+                    <div class="t">Customer replies to draft</div>
+                    <div class="sub">Invoices and billing, from Gmail</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#reply" /></svg></span>Draft all 9</button>
+                  </div>
+                </article>
+              </div>
+              <div class="rack-col">
+                <div class="tier"><h2>When you can</h2><span class="n">33</span><span class="perf"></span></div>
+                <article class="stack">
+                  <div class="stack-n"><b>21</b><span class="src"><span class="post" data-src="intercom"></span></span></div>
+                  <div>
+                    <div class="t">Feature requests</div>
+                    <div class="sub">iDEAL and 20 more</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--green)"><svg class="mk"><use href="#task" /></svg></span>Accept all 21</button>
+                  </div>
+                </article>
+                <article class="stack">
+                  <div class="stack-n"><b>12</b><span class="src"><span class="post" data-src="cron"></span></span></div>
+                  <div>
+                    <div class="t">Certificates expiring</div>
+                    <div class="sub">Within 30 days · ops</div>
+                    <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#run" /></svg></span>Start "Fix bug" on all</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section data-scale="today">
               <div class="tier"><h2>Needs a call</h2><span class="n">2</span><span class="perf"></span></div>
               <div class="sheet">
                 <div class="call">
@@ -313,7 +517,7 @@
               </div>
             </section>
 
-            <section>
+            <section data-scale="today">
               <div class="tier"><h2>Today</h2><span class="n">4</span><span class="perf"></span></div>
               <div class="sheet">
                 <div class="prow">
@@ -354,7 +558,7 @@
               </div>
             </section>
 
-            <section>
+            <section data-scale="today">
               <div class="tier"><h2>When you can</h2><span class="n">2</span><span class="perf"></span></div>
               <div class="sheet">
                 <div class="prow">
@@ -384,41 +588,41 @@
 
           <aside class="rail">
             <section>
-              <h3 class="label">What came in <span class="when">since yesterday 18:20</span></h3>
+              <h3 class="label">What came in <span class="when" data-10x="in the last 24h">since yesterday 18:20</span></h3>
               <div class="album">
                 <div class="album-row">
-                  <span class="post post--md" data-src="sentry" data-n="131"></span>
-                  <div><div class="name">Sentry <small>webshop-prod</small></div><div class="became"><span class="rs rs--green tilt-c">→ Proposal</span><span class="rs rs--green tilt-b">Attached</span></div></div>
+                  <span class="post post--md" data-src="sentry" data-n="131" data-n-10x="19.4k"></span>
+                  <div><div class="name">Sentry <small>webshop-prod</small></div><div class="became"><span class="rs rs--green tilt-c" data-10x="→ 11 Proposals">→ Proposal</span><span class="rs rs--green tilt-b" data-10x="9 attached">Attached</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="github" data-n="38"></span>
-                  <div><div class="name">GitHub <small>rogier</small></div><div class="became"><span class="rs rs--violet tilt-b">Offer</span><span class="rs rs--ochre tilt-a">34 held</span></div></div>
+                  <span class="post post--md" data-src="github" data-n="38" data-n-10x="5.2k"></span>
+                  <div><div class="name">GitHub <small>rogier</small></div><div class="became"><span class="rs rs--violet tilt-b" data-10x="12 offers">Offer</span><span class="rs rs--ochre tilt-a" data-10x="340 held">34 held</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="gmail" data-n="17"></span>
-                  <div><div class="name">Gmail <small>rogier@personal</small></div><div class="became"><span class="rs rs--green tilt-a">→ Proposal</span><span class="rs rs--violet tilt-d">Offer</span></div></div>
+                  <span class="post post--md" data-src="gmail" data-n="17" data-n-10x="2.1k"></span>
+                  <div><div class="name">Gmail <small>rogier@personal</small></div><div class="became"><span class="rs rs--green tilt-a" data-10x="3 unsure">→ Proposal</span><span class="rs rs--violet tilt-d" data-10x="9 offers">Offer</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="stripe" data-n="12"></span>
-                  <div><div class="name">Stripe <small>live</small></div><div class="became"><span class="rs rs--green tilt-b">→ Proposal</span><span class="rs tilt-c">FYI</span></div></div>
+                  <span class="post post--md" data-src="stripe" data-n="12" data-n-10x="1.9k"></span>
+                  <div><div class="name">Stripe <small>live</small></div><div class="became"><span class="rs rs--green tilt-b" data-10x="→ 8 Proposals">→ Proposal</span><span class="rs tilt-c" data-10x="18 FYI">FYI</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="intercom" data-n="9"></span>
-                  <div><div class="name">Intercom <small>support</small></div><div class="became"><span class="rs rs--ochre tilt-d">Unsure</span><span class="rs rs--green tilt-a">→ Proposal</span></div></div>
+                  <span class="post post--md" data-src="intercom" data-n="9" data-n-10x="1.3k"></span>
+                  <div><div class="name">Intercom <small>support</small></div><div class="became"><span class="rs rs--ochre tilt-d" data-10x="5 unsure">Unsure</span><span class="rs rs--green tilt-a" data-10x="→ 21 Proposals">→ Proposal</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="posthog" data-n="3"></span>
-                  <div><div class="name">PostHog <small>webshop</small></div><div class="became"><span class="rs rs--red tilt-a">Lead</span><span class="rs tilt-b">FYI</span></div></div>
+                  <span class="post post--md" data-src="posthog" data-n="3" data-n-10x="700"></span>
+                  <div><div class="name">PostHog <small>webshop</small></div><div class="became"><span class="rs rs--red tilt-a" data-10x="Lead">Lead</span><span class="rs tilt-b" data-10x="12 FYI">FYI</span></div></div>
                 </div>
                 <div class="album-row">
-                  <span class="post post--md" data-src="grafana" data-n="2"></span>
-                  <div><div class="name">Grafana <small>ops</small></div><div class="became"><span class="rs rs--green tilt-c">→ Proposal</span></div></div>
+                  <span class="post post--md" data-src="grafana" data-n="2" data-n-10x="400"></span>
+                  <div><div class="name">Grafana <small>ops</small></div><div class="became"><span class="rs rs--green tilt-c" data-10x="→ 8 Proposals">→ Proposal</span><span class="rs rs--green tilt-a" data-scale="10x">5 attached</span></div></div>
                 </div>
               </div>
             </section>
 
             <section>
-              <h3 class="label">FYI <span class="when">3</span></h3>
+              <h3 class="label">FYI <span class="when" data-10x="41 · newest 3">3</span></h3>
               <div class="fyi"><span class="post" data-src="github"></span><span>Release <b class="emph">v2.14.0</b> of payments-api was published</span></div>
               <div class="fyi"><span class="post" data-src="posthog"></span><span>Sign-ups up <b class="emph">+9%</b> week over week</span></div>
               <div class="fyi"><span class="post" data-src="stripe"></span><span>Payout of <b class="emph">€18,240</b> arrives Thursday</span></div>
@@ -426,14 +630,25 @@
 
             <section>
               <div class="quiet">
-                <b>198</b><span>handled quietly</span>
-                <span class="rs tilt-a">No action</span>
-                <a class="link">All 212<svg class="mk"><use href="#chev-right" /></svg></a>
+                <b data-10x="30,516">198</b><span>handled quietly</span>
+                <span class="rs tilt-a" data-scale="today">No action</span>
+                <a class="link"><span data-10x="All 31,000">All 212</span><svg class="mk"><use href="#chev-right" /></svg></a>
               </div>
             </section>
           </aside>
         </div>
       </main>
     </div>
+    <script>
+      // At 10x, swap in the 10x numbers before kit.js draws the stamps, then the sidebar's once it has.
+      if (document.documentElement.dataset.state === "10x") {
+        document.querySelectorAll("[data-10x]").forEach((el) => (el.textContent = el.dataset["10x"]));
+        document.querySelectorAll("[data-n-10x]").forEach((el) => (el.dataset.n = el.dataset["n-10x"]));
+        document.addEventListener("DOMContentLoaded", () => {
+          document.querySelector(".side-row.is-on .count").textContent = "60";
+          document.querySelector(".side-foot .pulse span:nth-child(2)").textContent = "9 runners · 140 live · 11 waiting";
+        });
+      }
+    </script>
   </body>
 </html>

@@ -7,6 +7,17 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { chromium } = require("/Users/rogier/.npm-global/lib/node_modules/playwright");
 
+// Frames in a book load lazily and a screenshot never scrolls, so load them all before shooting.
+async function loadAllFrames(page) {
+  const count = await page.evaluate(() => {
+    const frames = [...document.querySelectorAll("iframe")];
+    frames.forEach((f) => (f.loading = "eager"));
+    return frames.length;
+  });
+  if (count) await page.waitForLoadState("load");
+  if (count) await page.waitForTimeout(800);
+}
+
 const [target, out, ...rest] = process.argv.slice(2);
 const opt = { w: 1440, h: 900, scheme: "light", scale: 1, wait: 400 };
 for (let i = 0; i < rest.length; i++) {
@@ -15,17 +26,22 @@ for (let i = 0; i < rest.length; i++) {
   else opt[k] = rest[++i];
 }
 const url = /^[a-z]+:\/\//.test(target) ? target : pathToFileURL(resolve(target.split("?")[0])).href + (target.includes("?") ? "?" + target.split("?")[1] : "");
-const browser = await chromium.launch();
+// The "chromium" channel is the new headless mode, which draws backdrop-filter blur; the default
+// headless shell does not, and glass would look like plain see-through panels.
+const browser = await chromium.launch({ channel: "chromium" });
 const page = await browser.newPage({
   viewport: { width: Number(opt.w), height: Number(opt.h) },
   deviceScaleFactor: Number(opt.scale),
   colorScheme: opt.scheme,
 });
+// New headless mode asks for /favicon.ico, which no design has; its 404 is not a page error.
+await page.route("**/favicon.ico", (r) => r.fulfill({ status: 204 }));
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(url, { waitUntil: "load" });
 await page.evaluate(() => document.fonts.ready);
+await loadAllFrames(page);
 if (opt.scrollTo) await page.evaluate((s) => document.querySelector(s)?.scrollIntoView(), opt.scrollTo);
 if (opt.scrollBy) await page.mouse.wheel(0, Number(opt.scrollBy));
 await page.waitForTimeout(Number(opt.wait));

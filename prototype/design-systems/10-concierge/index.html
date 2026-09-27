@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en" data-theme="linen" class="book">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concierge · Hercule design system 10</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="system.css">
+<link rel="stylesheet" href="../shared/frames.css">
+<script src="kit.js" defer></script>
+<script src="../shared/book.js" defer></script>
+<style>
+/* The book scrolls; every app page does not. */
+html.book, html.book body { height: auto; overflow: visible; }
+html.book body { overflow-x: clip; background: var(--bg); --book-ink: var(--ink); --book-muted: var(--muted); --book-faint: var(--faint); }
+html.book { scroll-behavior: smooth; scroll-padding-top: 64px; }
+
+/* ---------- top bar ---------- */
+.bk-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 20px; height: 54px; padding: 0 28px;
+  background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: 0 0.5px 0 var(--line); }
+.bk-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+.bk-brand .logo { width: 20px; height: 20px; }
+.bk-brand small { font-size: 12px; font-weight: 500; color: var(--faint); }
+.bk-nav { display: flex; gap: 2px; margin: 0 auto; }
+.bk-nav a { padding: 6px 9px; border-radius: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.bk-nav a:hover { background: var(--line-soft); color: var(--ink); }
+.bk-switch { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--line-soft); }
+.bk-switch button { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 8px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.bk-switch button:hover { color: var(--ink); }
+.bk-switch button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--shadow-note); }
+.bk-td { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--bg) 0 50%, var(--accent) 50% 100%); box-shadow: inset 0 0 0 0.5px var(--line), 0 0 0 0.5px var(--line); }
+
+/* ---------- page and sections ---------- */
+.bk { width: min(1200px, 100% - 80px); margin: 0 auto; padding-bottom: 140px; }
+.bk-s { padding-top: 112px; }
+.bk-h { display: grid; grid-template-columns: 52px 1fr; margin-bottom: 32px; }
+.bk-n { font: 500 12px/28px var(--font-mono); color: var(--faint); }
+.bk-h h2 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.015em; }
+.bk-lede { grid-column: 2; margin-top: 6px; max-width: 760px; font: 420 19px/1.5 var(--font-voice); color: var(--muted); text-wrap: pretty; }
+.bk-sub { margin-top: 72px; }
+.bk-sub:first-of-type { margin-top: 0; }
+.bk-sub > h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+.bk-cap { font-size: 13px; line-height: 1.55; color: var(--muted); max-width: 720px; margin-bottom: 24px; text-wrap: pretty; }
+.bk-cap b { color: var(--ink); font-weight: 600; }
+.bk-fine { font-size: 12px; line-height: 1.5; color: var(--faint); }
+.bk-fine b { color: var(--muted); font-weight: 600; }
+.f { color: var(--book-muted); --f-chrome: color-mix(in oklch, var(--surface), var(--ink) 7%); --f-chrome-ink: var(--muted); --f-shadow: var(--shadow-lift); }
+.f-caption { color: var(--book-muted); }
+.f-caption > span { color: var(--book-ink); font-weight: 600; font-size: 13px; }
+.f-caption small { color: var(--book-muted); font-weight: 400; opacity: 1; }
+.f-caption a { color: var(--book-faint); }
+
+/* ---------- 1 hero ---------- */
+.bk-hero { display: grid; grid-template-columns: 1fr 400px; gap: 56px; align-items: center; padding: 88px 0 52px; }
+.bk-kicker { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--faint); font-weight: 500; margin-bottom: 22px; }
+.bk-kicker .dot-sep::before { margin: 0; }
+.bk-hero h1 { display: flex; align-items: center; gap: 18px; font-size: 46px; line-height: 1; font-weight: 650; letter-spacing: -0.035em; }
+.bk-thesis { margin-top: 18px; font: 440 36px/1.2 var(--font-voice); letter-spacing: -0.014em; color: var(--ink); font-variation-settings: "opsz" 48; }
+.bk-thesis span { color: var(--accent-ink); }
+.bk-brief { margin-top: 22px; max-width: 590px; font-size: 16px; line-height: 1.62; color: var(--muted); text-wrap: pretty; }
+.bk-brief b { color: var(--ink); font-weight: 600; }
+.bk-stage { position: relative; display: grid; justify-items: center; padding: 34px 0 0; }
+.bk-stage::before { content: ""; position: absolute; inset: -30px -20px 40px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklch, var(--accent) 16%, transparent), transparent); }
+.bk-stage .orb { --size: 150px; }
+.bk-desk { position: relative; width: 280px; height: 7px; margin-top: 24px; border-radius: 4px; background: var(--logo-desk, var(--ink)); }
+.bk-stage-say { position: relative; margin-top: 26px; width: 360px; display: grid; gap: 4px; text-align: center; }
+.bk-stage-say .presence { justify-content: center; }
+.bk-stage-say .voice { font-size: 18px; }
+
+/* ---------- 2 why ---------- */
+.bk-why { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+.bk-why p { font-size: 15px; line-height: 1.65; color: var(--muted); text-wrap: pretty; }
+.bk-why p + p { margin-top: 14px; }
+.bk-why b { color: var(--ink); font-weight: 600; }
+.bk-trade { display: grid; gap: 0; align-content: start; }
+.bk-trade > div { display: grid; grid-template-columns: 112px 1fr; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line-soft); font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+.bk-trade > div:first-child { border-top: 0; padding-top: 2px; }
+.bk-trade dt, .bk-trade .k { font-weight: 600; color: var(--ink); font-size: 13px; }
+.bk-trade .k.is-gain { color: var(--ok); }
+.bk-trade .k.is-cost { color: var(--fail); }
+.bk-trade .k.is-rule { color: var(--accent-ink); }
+
+/* ---------- 3 before / after ---------- */
+.bk-pair { margin-top: 64px; }
+.bk-pair:first-of-type { margin-top: 0; }
+.bk-pair-h { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.bk-pair-h .bk-pn { font: 500 12px/1 var(--font-mono); color: var(--faint); }
+.bk-pair-h h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.bk-pair-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+.bk-side { display: grid; gap: 12px; min-width: 0; }
+.bk-tag { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--faint); }
+.bk-tag.is-new { color: var(--accent-ink); }
+.bk-tag .logo { width: 14px; height: 14px; }
+.bk-before { display: block; width: 100%; height: auto; aspect-ratio: 1440 / 900; border-radius: 12px; box-shadow: var(--shadow-lift); }
+.bk-side p { font-size: 13.5px; line-height: 1.58; color: var(--muted); text-wrap: pretty; }
+.bk-side p b { color: var(--ink); font-weight: 600; }
+.bk-phones { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.bk-gain { display: flex; align-items: baseline; gap: 26px; margin-top: 20px; padding: 14px 18px; border-radius: var(--r-lg); background: var(--sunk); font-size: 13px; color: var(--muted); }
+.bk-gain > b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.bk-gain .g { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.bk-gain .g s { text-decoration: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.bk-gain .g i { font-style: normal; color: var(--faint); }
+.bk-gain .g strong { color: var(--ink); font: 600 17px/1 var(--font-ui); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+/* ---------- 4 the system ---------- */
+.bk-rules { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-bottom: 36px; }
+.bk-rule { display: grid; gap: 6px; align-content: start; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.bk-rule b { font-size: 14px; color: var(--ink); font-weight: 600; }
+.bk-rule .bk-rn { font: 600 26px/1 var(--font-ui); letter-spacing: -0.03em; color: var(--accent-ink); margin-bottom: 6px; }
+
+.bk-roles { display: grid; grid-template-columns: 120px 1fr; row-gap: 0; }
+.bk-roles > dt { padding: 18px 0; border-top: 1px solid var(--line-soft); font-size: 13px; font-weight: 600; color: var(--ink); }
+.bk-roles > dd { margin: 0; padding: 14px 0; border-top: 1px solid var(--line-soft); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 30px; }
+.bk-roles > dt:first-of-type, .bk-roles > dt:first-of-type + dd { border-top: 0; }
+.bk-chip { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink); font-weight: 500; }
+.bk-chip small { display: block; font-size: 11.5px; color: var(--faint); font-weight: 400; margin-top: 1px; }
+.bk-chip .mk { width: 14px; height: 14px; }
+.bk-chip .br { width: 16px; height: 16px; color: var(--ink); }
+.bk-tile { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+
+/* the hue ruler: the wheel, unrolled from 0 to 360 */
+.bk-ruler { position: relative; height: 128px; margin: 36px 0 8px; }
+.bk-ruler-band { position: absolute; left: 0; right: 0; top: 56px; height: 14px; border-radius: 7px;
+  background: linear-gradient(to right, oklch(70% 0.12 0), oklch(70% 0.12 45), oklch(70% 0.12 90), oklch(70% 0.12 135), oklch(70% 0.12 180), oklch(70% 0.12 225), oklch(70% 0.12 270), oklch(70% 0.12 315), oklch(70% 0.12 360)); opacity: 0.22; }
+.bk-hue { position: absolute; top: 49px; left: calc(var(--h) / 360 * 100%); translate: -50% 0; display: grid; justify-items: center; }
+.bk-hue > i { width: 28px; height: 28px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px var(--bg), 0 2px 8px -2px var(--scrim); }
+.bk-hue.is-option > i { background: none; box-shadow: inset 0 0 0 2px var(--c), 0 0 0 3px var(--bg); }
+.bk-hue > span { position: absolute; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--ink); text-align: center; line-height: 1.3; }
+.bk-hue > span small { display: block; font-weight: 400; font-size: 11px; color: var(--faint); font-family: var(--font-mono); }
+.bk-hue.up > span { bottom: 38px; }
+.bk-hue.down > span { top: 38px; }
+
+/* themes */
+.bk-themes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; }
+.bk-themes .theme { gap: 12px; }
+.bk-themes .tp { height: 132px; }
+.bk-themes .theme[aria-pressed="true"] .tp { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent), 0 8px 22px -10px var(--scrim); }
+.bk-themes .theme[aria-pressed="true"] .theme-l b { color: var(--accent-ink); }
+.bk-sw { display: flex; gap: 4px; padding: 0 2px; }
+.bk-sw i { flex: 1; height: 16px; border-radius: 4px; background: var(--c); box-shadow: inset 0 0 0 0.5px var(--line); }
+.bk-ratio { padding: 0 2px; font: 400 11px/1.5 var(--font-mono); color: var(--faint); }
+.bk-accents { display: flex; align-items: center; gap: 28px; margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line-soft); font-size: 13px; color: var(--muted); }
+.bk-accents > span:first-child { color: var(--ink); font-weight: 600; }
+.bk-accents .bk-chip { font-weight: 500; }
+
+/* type */
+.bk-type { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 56px; }
+.bk-spec { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line-soft); align-content: start; }
+.bk-spec-l { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--faint); }
+.bk-spec-l b { color: var(--muted); font-weight: 600; }
+.bk-spec .voice { font-size: 26px; line-height: 1.32; font-variation-settings: "opsz" 36; }
+.bk-spec .bk-ui-t { font-size: 17px; font-weight: 600; letter-spacing: -0.012em; }
+.bk-spec .bk-ui-d { font-size: 13px; color: var(--muted); }
+.bk-spec .bk-ui-d b { color: var(--ink); font-weight: 500; }
+.bk-spec code { font-size: 15px; padding: 3px 8px; justify-self: start; }
+.bk-nums { display: flex; align-items: baseline; gap: 34px; }
+.bk-nums span { font: 600 38px/1 var(--font-ui); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.bk-nums small { display: block; margin-top: 6px; font: 400 11.5px/1.3 var(--font-ui); letter-spacing: 0; color: var(--faint); }
+.bk-scale { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 30px; flex-wrap: wrap; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+.bk-scale > span { display: grid; gap: 6px; }
+.bk-scale em { font-style: normal; font-weight: 500; color: var(--ink); line-height: 1; }
+.bk-scale em.v { font-family: var(--font-voice); font-weight: 440; }
+.bk-scale small { font: 400 11px/1 var(--font-mono); color: var(--faint); }
+
+/* shape, depth, glass */
+.bk-shape { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+.bk-radii { display: flex; align-items: flex-end; gap: 18px; }
+.bk-radii > span { display: grid; gap: 8px; justify-items: center; font: 400 11px/1 var(--font-mono); color: var(--faint); }
+.bk-radii i { width: 64px; height: 48px; background: var(--raised); box-shadow: var(--shadow-note); }
+.bk-layers { position: relative; height: 250px; margin-top: 28px; border-radius: var(--r-lg); background: var(--bg); box-shadow: inset 0 0 0 0.5px var(--line); overflow: hidden; }
+.bk-layers > div { position: absolute; display: flex; align-items: flex-start; padding: 10px 12px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.bk-layers > div b { color: var(--ink); font-weight: 600; margin-right: 6px; }
+.bk-l-ground { inset: 0; }
+.bk-l-surface { left: 40px; top: 40px; right: 40px; bottom: 0; background: var(--surface); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: 0 0 0 0.5px var(--line); }
+.bk-l-note { left: 80px; top: 82px; width: 260px; height: 110px; background: var(--raised); border-radius: var(--r-lg); box-shadow: var(--shadow-note); }
+.bk-l-lift { left: 220px; top: 124px; width: 220px; height: 90px; background: var(--raised); border-radius: var(--r-xl); box-shadow: var(--shadow-lift); }
+.bk-l-glass { left: 380px; right: 60px; top: 170px; height: 46px; align-items: center; border-radius: var(--r-pill); background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); box-shadow: var(--shadow-lift), inset 0 0.5px 0 var(--glass-edge); }
+.bk-glass { position: relative; height: 322px; margin-top: 4px; border-radius: var(--r-lg); background: var(--surface); box-shadow: inset 0 0 0 0.5px var(--line); overflow: hidden; }
+.bk-glass-t { padding: 20px 26px; display: grid; gap: 12px; font-size: 13.5px; line-height: 1.55; color: var(--ink); }
+.bk-glass-t pre { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--sunk); font: 400 12px/1.6 var(--font-mono); color: var(--ink); }
+.bk-glass-t .k { color: var(--voice-milo); }
+.bk-glass-t .s { color: var(--ok); }
+.bk-glass-t .fn { color: var(--accent-ink); }
+.bk-glass-pill { position: absolute; left: 50%; bottom: 20px; translate: -50% 0; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 14px; border-radius: var(--r-pill); font-size: 13px; color: var(--muted); white-space: nowrap;
+  background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); box-shadow: var(--shadow-lift), inset 0 0.5px 0 var(--glass-edge); }
+.bk-glass-pill b { color: var(--ink); font-weight: 600; }
+.bk-glass-pill .mk { width: 13px; height: 13px; }
+
+/* motion */
+.bk-motion { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+.bk-orbs { display: flex; justify-content: space-between; gap: 12px; padding: 26px 8px 20px; }
+.bk-orbs > span { display: grid; justify-items: center; gap: 12px; font-size: 12.5px; font-weight: 600; color: var(--ink); text-align: center; }
+.bk-orbs small { display: block; font-weight: 400; font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.bk-orbs .orb { --size: 46px; }
+.bk-durs { display: grid; grid-template-columns: auto auto 1fr; gap: 0 18px; font-size: 13px; color: var(--muted); }
+.bk-durs > * { padding: 9px 0; line-height: 20px; border-top: 1px solid var(--line-soft); }
+.bk-durs > :nth-child(-n+3) { border-top: 0; }
+.bk-durs code { display: block; background: none; padding: 9px 0; border-radius: 0; color: var(--ink); font-size: 12px; }
+.bk-durs b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bk-phrase { margin-top: 18px; padding: 18px 20px; border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow-note); }
+.bk-phrase .say { grid-template-columns: 26px 1fr; }
+.bk-phrase .say::after { left: 12px; top: 34px; }
+.bk-phrase .voice span { animation: bk-phrase 7s var(--ease-settle) infinite both; }
+.bk-phrase .voice span:nth-child(1) { animation-delay: -6.2s; }
+.bk-phrase .voice span:nth-child(2) { animation-delay: -5.6s; }
+.bk-phrase .voice span:nth-child(3) { animation-delay: -5s; }
+.bk-phrase .dcard { margin-top: 12px; animation: bk-settle 7s var(--ease-settle) infinite both; animation-delay: -4.4s; }
+@keyframes bk-phrase { 0% { opacity: 0; filter: blur(2px); } 8%, 94% { opacity: 1; filter: none; } 100% { opacity: 0; } }
+@keyframes bk-settle { 0% { opacity: 0; transform: translateY(8px) scale(0.985); } 9%, 94% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+
+/* marks and icons */
+.bk-marks { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+.bk-marks > span { display: grid; justify-items: center; gap: 10px; padding: 16px 4px 12px; border-radius: 10px; font-size: 11.5px; color: var(--muted); text-align: center; }
+.bk-marks > span:hover { background: var(--line-soft); }
+.bk-marks .mk { width: 22px; height: 22px; }
+.bk-marks .mk .eq { width: 22px; height: 22px; }
+.bk-icons { display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; margin-top: 22px; }
+.bk-icons > span { display: grid; justify-items: center; gap: 7px; padding: 12px 2px 9px; border-radius: 9px; font: 400 10.5px/1 var(--font-mono); color: var(--faint); }
+.bk-icons > span:hover { background: var(--line-soft); color: var(--ink); }
+.bk-icons .ic { width: 18px; height: 18px; color: var(--ink); }
+.bk-brands { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+.bk-brands > span { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.bk-brands .br { width: 16px; height: 16px; color: var(--ink); }
+
+/* layout schematics */
+.bk-layouts { display: grid; grid-template-columns: 1.5fr 1.2fr 0.55fr; gap: 28px; align-items: end; }
+.bk-lay { display: grid; gap: 12px; }
+.bk-lay-f { position: relative; border-radius: 12px; background: var(--bg); box-shadow: var(--shadow-note); overflow: hidden; font-size: 10.5px; color: var(--faint); }
+.bk-lay-f > div { position: absolute; display: grid; place-items: center; text-align: center; line-height: 1.3; }
+.bk-lay-f b { color: var(--ink); font-weight: 600; font-size: 11px; display: block; }
+.bk-lay-d { aspect-ratio: 1440 / 900; }
+.bk-lay-d .a { left: 0; top: 0; bottom: 0; width: 18.3%; background: var(--side-glass); box-shadow: 0.5px 0 0 var(--line); }
+.bk-lay-d .b { left: 30%; width: 47.2%; top: 8%; bottom: 17%; background: var(--surface); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
+.bk-lay-d .c { left: 34%; width: 39%; bottom: 4%; height: 9%; border-radius: 8px; background: var(--glass-strong); box-shadow: var(--shadow-note); }
+.bk-lay-d .r { right: 2%; width: 17%; top: 8%; bottom: 17%; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line); border: 1px dashed var(--line); }
+.bk-lay-w { aspect-ratio: 1280 / 800; }
+.bk-lay-w .a { left: 0; right: 0; top: 0; height: 9%; background: var(--surface); box-shadow: 0 0.5px 0 var(--line); grid-auto-flow: column; gap: 10px; }
+.bk-lay-w .b { left: 18%; width: 52%; top: 15%; bottom: 17%; background: var(--surface); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
+.bk-lay-w .c { left: 22%; width: 44%; bottom: 4%; height: 9%; border-radius: 8px; background: var(--glass-strong); box-shadow: var(--shadow-note); }
+.bk-lay-w .r { right: 3%; width: 22%; top: 15%; bottom: 17%; border-radius: 8px; border: 1px dashed var(--line); }
+.bk-lay-m { aspect-ratio: 390 / 844; border-radius: 22px; }
+.bk-lay-m .b { left: 8%; right: 8%; top: 9%; bottom: 25%; background: var(--surface); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
+.bk-lay-m .t { left: 0; right: 0; bottom: 0; height: 13%; background: var(--glass-strong); box-shadow: 0 -0.5px 0 var(--line); grid-template-columns: repeat(5, 1fr); padding: 0 4px 8px; font-size: 9px; }
+.bk-lay-m .t .orb { --size: 12px; }
+.bk-lay-m .t i.mic { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); display: grid; place-items: center; color: var(--on-accent); }
+.bk-lay-m .t i.mic .ic { width: 12px; height: 12px; }
+.bk-lay-m .s { left: 0; right: 0; bottom: 0; height: 0; }
+.bk-lay .bk-fine { max-width: 380px; }
+.bk-density { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+.bk-density > div { display: grid; gap: 4px; }
+.bk-density strong { font: 600 26px/1 var(--font-ui); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.bk-density strong small { font-size: 13px; color: var(--faint); font-weight: 500; letter-spacing: 0; margin-left: 3px; }
+.bk-density span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+/* the signature */
+.bk-sig { display: grid; grid-template-columns: 1fr 300px; gap: 48px; align-items: start; }
+.bk-sig-stage { padding: 4px 0 0; }
+.bk-sig-stage .say-body { gap: 12px; }
+.bk-sig-notes { display: grid; gap: 0; }
+.bk-sig-notes > div { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 14px 0; border-top: 1px solid var(--line-soft); font-size: 13px; line-height: 1.55; color: var(--muted); }
+.bk-sig-notes > div:first-child { border-top: 0; padding-top: 4px; }
+.bk-sig-notes b { color: var(--ink); font-weight: 600; }
+.bk-sig-notes .k { font: 600 13px/1.55 var(--font-ui); color: var(--accent-ink); }
+
+/* logo and app icon */
+.bk-logo { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.bk-logo-card { display: grid; align-content: space-between; gap: 28px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
+.bk-logo-card.is-dark { background: oklch(18.6% 0.012 55); color: oklch(93.5% 0.014 80); }
+.bk-icons-row { display: flex; align-items: flex-end; gap: 28px; }
+.bk-icons-row > span { display: grid; justify-items: center; gap: 10px; font: 400 11px/1 var(--font-mono); color: var(--faint); }
+.bk-word { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 650; letter-spacing: -0.03em; }
+.bk-word .logo { width: 34px; height: 34px; }
+.bk-menubar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; height: 30px; padding: 0 14px; border-radius: 8px; background: color-mix(in oklch, var(--bg), var(--ink) 5%); font-size: 12.5px; font-weight: 500; color: var(--ink); }
+.bk-menubar .ic { width: 15px; height: 15px; color: var(--muted); }
+.bk-mb-orb { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px 0 5px; border-radius: 6px; background: var(--line-soft); }
+.bk-mb-orb .orb { --size: 13px; animation: none; }
+.bk-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 8px 8px 0; border-radius: 10px 10px 0 0; background: color-mix(in oklch, var(--bg), var(--ink) 7%); }
+.bk-tab { display: flex; align-items: center; gap: 8px; width: 33%; height: 34px; padding: 0 12px; border-radius: 9px 9px 0 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.bk-tab.is-on { background: var(--raised); color: var(--ink); }
+.bk-tab img { width: 16px; height: 16px; flex: none; }
+.bk-tab span { overflow: hidden; text-overflow: ellipsis; }
+.bk-tabs-cap { display: flex; gap: 2px; padding: 8px 8px 0; font-size: 11.5px; color: var(--faint); }
+.bk-tabs-cap span { width: 33%; padding: 0 12px; }
+
+/* office and 10x */
+.bk-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px 40px; margin-top: 32px; }
+.bk-list > div { display: grid; grid-template-columns: 24px 1fr; gap: 10px; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.bk-list b { color: var(--ink); font-weight: 600; }
+.bk-list .orb { --size: 16px; margin-top: 2px; }
+.bk-list .mk { width: 15px; height: 15px; margin-top: 2px; }
+.bk-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 44px 32px; align-items: start; }
+.bk-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 44px 32px; align-items: start; }
+.bk-scalegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 44px 32px; align-items: start; }
+.bk-scalegrid + .bk-scalegrid { grid-template-columns: 1fr 312px; margin-top: 44px; }
+.bk-tenx { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-bottom: 44px; }
+.bk-tenx > div { display: grid; gap: 6px; align-content: start; }
+.bk-tenx strong { font: 600 38px/1 var(--font-ui); letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+.bk-tenx strong small { font-size: 15px; font-weight: 500; letter-spacing: 0; color: var(--faint); margin-left: 3px; }
+.bk-tenx span { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.bk-tenx b { color: var(--ink); font-weight: 600; }
+
+/* adopting it */
+.bk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bk-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--faint); padding: 0 12px 10px 0; }
+.bk-table td { padding: 9px 12px 9px 0; border-top: 1px solid var(--line-soft); color: var(--muted); vertical-align: middle; }
+.bk-table td:first-child code, .bk-table td:nth-child(4) code { background: none; padding: 0; color: var(--ink); font-size: 12.5px; white-space: nowrap; }
+.bk-table td:first-child, .bk-table td:nth-child(4) { white-space: nowrap; }
+.bk-table th { white-space: nowrap; }
+.bk-table td.v { font: 400 11.5px/1.3 var(--font-mono); color: var(--faint); white-space: nowrap; }
+.bk-pv { display: inline-flex; gap: 4px; }
+.bk-pv i { width: 34px; height: 22px; border-radius: 5px; background: linear-gradient(var(--c), var(--c)), var(--u); box-shadow: inset 0 0 0 0.5px oklch(30% 0.02 60 / 0.16); }
+.bk-pv i.fg { background: var(--u); display: grid; place-items: center; box-shadow: inset 0 0 0 0.5px oklch(30% 0.02 60 / 0.16); }
+.bk-pv i.fg::after { content: "Aa"; font: 600 11px/1 var(--font-ui); font-style: normal; color: var(--c); }
+.bk-steps { display: grid; gap: 0; margin: 56px 0 0; padding: 0; }
+.bk-steps > li { list-style: none; display: grid; grid-template-columns: 52px 1fr 1.05fr; gap: 24px; padding: 20px 0; border-top: 1px solid var(--line-soft); }
+.bk-steps .n { font: 600 26px/1 var(--font-ui); letter-spacing: -0.03em; color: var(--accent-ink); }
+.bk-steps h4 { font-size: 14.5px; font-weight: 600; margin-bottom: 4px; }
+.bk-steps p { font-size: 13px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+.bk-steps p b { color: var(--ink); font-weight: 600; }
+.bk-files { display: grid; gap: 5px; align-content: start; }
+.bk-files code { justify-self: start; font-size: 11.5px; }
+
+/* spec */
+.bk-spec-list { display: grid; gap: 0; }
+.bk-spec-list > div { display: grid; grid-template-columns: 36px 1fr 300px; gap: 20px; padding: 18px 0; border-top: 1px solid var(--line-soft); }
+.bk-spec-list > div:first-child { border-top: 0; }
+.bk-spec-list .n { font: 500 12px/22px var(--font-mono); color: var(--faint); }
+.bk-spec-list h4 { font-size: 14.5px; font-weight: 600; line-height: 22px; }
+.bk-spec-list p { font-size: 13px; line-height: 1.55; color: var(--muted); margin-top: 3px; text-wrap: pretty; }
+.bk-spec-list p b { color: var(--ink); font-weight: 600; }
+.bk-spec-list .ref { font-size: 12px; line-height: 1.55; color: var(--faint); padding-top: 2px; }
+.bk-spec-list .ref b { color: var(--muted); font-weight: 600; }
+
+.bk-foot { margin-top: 120px; padding-top: 28px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--faint); }
+.bk-foot .voice { font-size: 16px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="bk-top">
+  <a class="bk-brand" href="#top"><i data-logo></i>Hercule <small>Concierge</small></a>
+  <nav class="bk-nav" aria-label="Sections">
+    <a href="#why">Why</a><a href="#better">1000x</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#scale">At 10x</a><a href="#adopt">Adopting it</a><a href="#spec">Spec</a>
+  </nav>
+  <div class="bk-switch" role="group" aria-label="Theme">
+    <button data-theme-option="linen"><i class="bk-td" data-theme="linen"></i>Linen</button>
+    <button data-theme-option="porcelain"><i class="bk-td" data-theme="porcelain"></i>Porcelain</button>
+    <button data-theme-option="espresso"><i class="bk-td" data-theme="espresso"></i>Espresso</button>
+    <button data-theme-option="velvet"><i class="bk-td" data-theme="velvet"></i>Velvet</button>
+    <button data-theme-option="charcoal"><i class="bk-td" data-theme="charcoal"></i>Charcoal</button>
+  </div>
+</header>
+
+<main class="bk">
+
+<!-- ================= 1 hero ================= -->
+<section class="bk-hero" id="top">
+  <div>
+    <div class="bk-kicker"><span>Hercule</span><span class="dot-sep"></span><span>design system 10</span><span class="dot-sep"></span><span>five themes · 22 screens</span></div>
+    <h1><span class="appicon" style="--size:60px"><i data-logo></i></span>Concierge</h1>
+    <p class="bk-thesis">Talk to one, <span>command many.</span></p>
+    <p class="bk-brief">A swarm does not scale in lists. It scales behind a voice you trust. In Concierge, <b>Ada, your primary Assistant, is the front door</b>: home is her briefing, a few calm sentences with each decision set inside as a card. Every card carries its real bound actions and their describe lines, so <b>answering is one key and never a guess</b>. Intake, the Office and every Thread stay one step away. Most days you will not need them.</p>
+  </div>
+  <div class="bk-stage" aria-hidden="true">
+    <i class="orb" data-v="ada" data-p="working"></i>
+    <span class="bk-desk"></span>
+    <div class="bk-stage-say">
+      <span class="presence"><b class="c-accent">Ada</b> · working · heartbeat 09:00</span>
+      <p class="voice">Three things wait on you. The push unblocks the checkout fix.</p>
+    </div>
+  </div>
+</section>
+<figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="The cover: Ada's Conversation is home" data-note="Her 09:00 brief. The urgent Proposal is the first card, with its evidence counted and its answers ready; the blocked Thread is linked inside it."></figure>
+
+<!-- ================= 2 why ================= -->
+<section class="bk-s" id="why">
+  <header class="bk-h"><span class="bk-n">02</span><h2>Why this one</h2>
+    <p class="bk-lede">The other nine make the swarm easier to look at. Concierge makes looking optional.</p></header>
+  <div class="bk-why">
+    <div>
+      <p>A good chief of staff does not hand you forty folders. She tells you the three things that need you and has the answers ready. <b>Ada does that</b> at every heartbeat and whenever you ask: on the desktop, in a browser tab, on your lock screen. Everything else is in her receipt, one click away.</p>
+      <p>It is the only direction where attention is spent on <b>deciding, not scanning</b>. The screens you already know still exist, and they got better too, but they are no longer where the day starts.</p>
+    </div>
+    <div class="bk-trade">
+      <div><span class="k is-gain">You gain</span><span>One place to start. Decisions answered in one key, from any surface. Scale that shows as numerals and bundles, never a longer list.</span></div>
+      <div><span class="k is-cost">You trade</span><span>The see-everything feeling. Working on many rows at once is one step further away, in Intake and the Office. And it leans on triage: a weak brief is worse than a list.</span></div>
+      <div><span class="k is-rule">It never</span><span>Decides for you. Every card is a real Proposal or Request with its bound actions, one tap from its full page. Ada only chooses what you see first.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3 1000x ================= -->
+<section class="bk-s" id="better">
+  <header class="bk-h"><span class="bk-n">03</span><h2>Why it is 1000x better than today</h2>
+    <p class="bk-lede">Today's design has good bones: the domain, the thread surface, the calm. What it spends is your attention. Each pair below is measured in the one thing that matters: how fast you get from opening Hercule to a decision made.</p></header>
+
+  <div class="bk-pair">
+    <div class="bk-pair-h"><span class="bk-pn">3.1</span><h3>Home answers you, instead of listing things</h3></div>
+    <div class="bk-pair-grid">
+      <div class="bk-side">
+        <span class="bk-tag">Today · Sessions is home</span>
+        <img class="bk-before" src="../shared/baseline/app-shell-light.png" alt="Today's home: the Sessions list, grouped by state" width="1440" height="900">
+        <p>The one thing that needs you, <b>“Runner drain command · decision wanted”</b>, is one row among twelve, set in the same weight as the rest. To answer it you find it, open the thread, read, then find the card.</p>
+      </div>
+      <div class="bk-side">
+        <span class="bk-tag is-new"><i data-logo></i>Concierge · Ada is home</span>
+        <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Ada's brief"></figure>
+        <p>One sentence names the urgent thing. Its card counts the evidence (<b>412</b> errors, <b>188</b> users, <b>−18%</b> EU conversion) and carries the answers. <b>↵</b> starts the fix.</p>
+      </div>
+    </div>
+    <div class="bk-gain"><b>Open to decided</b><span class="g"><i>today</i><s>find · open · read · answer</s></span><span class="g"><i>Concierge</i><strong>read one sentence, press ↵</strong></span></div>
+  </div>
+
+  <div class="bk-pair">
+    <div class="bk-pair-h"><span class="bk-pn">3.2</span><h3>Intake you read by color and number, not by sentence</h3></div>
+    <div class="bk-pair-grid">
+      <div class="bk-side">
+        <span class="bk-tag">Today · Intake</span>
+        <img class="bk-before" src="../shared/baseline/intake-view-light.png" alt="Today's Intake: lanes of text rows with ghost answers" width="1440" height="900">
+        <p>Color lives at dot scale, so every row has to be read. Lane labels are 10.5px capitals. The answers are ghost words (<b>Start Bugfix · Later · Dismiss</b>) that do not say what they will do.</p>
+      </div>
+      <div class="bk-side">
+        <span class="bk-tag is-new"><i data-logo></i>Concierge · Intake</span>
+        <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake, the full picture"></figure>
+        <p>One numeral per lane. Every row carries its project room's color, so webshop, payments-api and ops separate before you read a word. Each answer is a full-width row that says what it will do, with its key.</p>
+      </div>
+    </div>
+    <div class="bk-gain"><b>Telling items apart</b><span class="g"><i>today</i><s>6px dots · read every row</s></span><span class="g"><i>Concierge</i><strong>room color + one numeral per lane</strong></span></div>
+  </div>
+
+  <div class="bk-pair">
+    <div class="bk-pair-h"><span class="bk-pn">3.3</span><h3>A dark theme that is not navy, and a composer that gets out of the way</h3></div>
+    <div class="bk-pair-grid">
+      <div class="bk-side">
+        <span class="bk-tag">Today · Midnight dark</span>
+        <img class="bk-before" src="../shared/baseline/app-shell-dark.png" alt="Today's dark theme: navy neutrals" width="1440" height="900">
+        <p>Neutrals at hue 265 with chroma 0.029 read as navy. Faint text sits at <b>3.0:1</b>, below the line where metadata stays readable late at night. One dark theme, no choice.</p>
+      </div>
+      <div class="bk-side">
+        <span class="bk-tag is-new"><i data-logo></i>Concierge · Espresso, scrolled back</span>
+        <figure data-frame="desktop" data-src="desktop/session-active.html" data-theme="espresso" data-state="scrolled" data-caption="A Thread in Espresso, scrolled back"></figure>
+        <p>Warm, near-neutral grounds at hue 55 and chroma 0.012. Ink at <b>15.4:1</b>, faint at <b>4.5:1</b>. Three dark themes, each crisp. While you read back, the composer turns to glass and shrinks, and the waiting Request stays docked on it.</p>
+      </div>
+    </div>
+    <div class="bk-gain"><b>Dark ground</b><span class="g"><i>neutral</i><s>265 · 0.029</s><strong>55 · 0.012</strong></span><span class="g"><i>faint text</i><s>3.0:1</s><strong>4.5:1</strong></span><span class="g"><i>ink</i><s>13.4:1</s><strong>15.4:1</strong></span><span class="g"><i>dark themes</i><s>1</s><strong>3</strong></span></div>
+  </div>
+
+  <div class="bk-pair">
+    <div class="bk-pair-h"><span class="bk-pn">3.4</span><h3>Decisions wherever you are, in one tap</h3></div>
+    <div class="bk-pair-grid">
+      <div class="bk-side">
+        <span class="bk-tag">Today · a web tab</span>
+        <img class="bk-before" src="../shared/baseline/intake-view-dark.png" alt="Today's Intake in dark: decisions as quiet text buttons" width="1440" height="900">
+        <p>A decision waits until you are at a desk with the tab open. When you get there, “It's spam · It's real” and “Resume · Review held” are quiet text, easy to miss and slow to trust.</p>
+      </div>
+      <div class="bk-side">
+        <span class="bk-tag is-new"><i data-logo></i>Concierge · the lock screen and one tap</span>
+        <div class="bk-phones">
+          <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="Push with bound actions; a Live Activity"></figure>
+          <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="The decision" data-note="Thumb-sized answer rows"></figure>
+        </div>
+        <p>The same bound actions ride on the push and in the Live Activity. Tap the notification and the decision opens with answer rows sized for a thumb; a firm haptic confirms the answer started.</p>
+      </div>
+    </div>
+    <div class="bk-gain"><b>Where you can answer</b><span class="g"><i>today</i><s>a web tab</s></span><span class="g"><i>Concierge</i><strong>desktop · menu bar · web · phone · lock screen</strong></span></div>
+  </div>
+</section>
+
+<!-- ================= 4 the system ================= -->
+<section class="bk-s" id="system">
+  <header class="bk-h"><span class="bk-n">04</span><h2>The system</h2>
+    <p class="bk-lede">One voice speaks in a serif; everything she brings you is set in the sans, as a note with its answers. Color says who; shape says what state.</p></header>
+
+  <!-- color -->
+  <div class="bk-sub" id="color">
+    <h3>Color is voice</h3>
+    <p class="bk-cap">Real color, used boldly, and always for one reason: to say <b>who</b>. Nothing is colored for decoration.</p>
+    <div class="bk-rules">
+      <div class="bk-rule"><span class="bk-rn">1</span><b>Large color says who.</b>Ada speaks in persimmon. Each other Assistant has its own hue. A Session wears the color of the project room it works in.</div>
+      <div class="bk-rule"><span class="bk-rn">2</span><b>State is shape, at mark scale.</b>12px marks with a word beside them. “Needs you” is Ada's color, because she is the one who brings every decision to you.</div>
+      <div class="bk-rule"><span class="bk-rn">3</span><b>Sources are provenance.</b>GitHub, Sentry, Gmail and the rest are where things came from, not voices. Their marks stay in ink.</div>
+      <div class="bk-rule"><span class="bk-rn">4</span><b>Hercule speaks in ink.</b>Receipts, counts and the core's describe lines never take a hue. The system itself never shouts.</div>
+    </div>
+    <dl class="bk-roles">
+      <dt>Voices</dt>
+      <dd>
+        <span class="bk-chip"><i class="orb" data-v="ada" data-p="idle" style="--size:30px"></i><span>Ada<small>persimmon · 48</small></span></span>
+        <span class="bk-chip"><i class="orb" data-v="milo" data-p="idle" style="--size:30px"></i><span>Milo<small>iris · 292</small></span></span>
+        <span class="bk-chip"><i class="orb" data-v="juno" data-p="idle" style="--size:30px"></i><span>Juno<small>orchid · 345</small></span></span>
+        <span class="bk-chip"><i class="orb" data-v="four" data-p="idle" style="--size:30px"></i><span>A fourth Assistant<small>teal · 198</small></span></span>
+      </dd>
+      <dt>Rooms</dt>
+      <dd>
+        <span class="bk-chip"><i class="bk-tile" style="background:var(--project-webshop)"></i><span>webshop<small>marigold · 82</small></span></span>
+        <span class="bk-chip"><i class="bk-tile" style="background:var(--project-payments-api)"></i><span>payments-api<small>lagoon · 218</small></span></span>
+        <span class="bk-chip"><i class="bk-tile" style="background:var(--project-ops)"></i><span>ops<small>moss · 128</small></span></span>
+      </dd>
+      <dt>States</dt>
+      <dd>
+        <span class="bk-chip"><i data-m="q"></i>waiting on you</span>
+        <span class="bk-chip"><i data-m="working"></i>working</span>
+        <span class="bk-chip"><i data-m="failed"></i>failed</span>
+        <span class="bk-chip"><i data-m="done"></i>done</span>
+        <span class="bk-chip"><i data-m="queued"></i>queued</span>
+        <span class="bk-chip"><i data-m="paused"></i>paused</span>
+        <span class="bk-chip"><i data-m="cancelled"></i>cancelled</span>
+      </dd>
+      <dt>Sources</dt>
+      <dd>
+        <span class="bk-chip"><i data-b="github"></i>GitHub</span>
+        <span class="bk-chip"><i data-b="sentry"></i>Sentry</span>
+        <span class="bk-chip"><i data-b="gmail"></i>Gmail</span>
+        <span class="bk-chip"><i data-b="posthog"></i>PostHog</span>
+        <span class="bk-chip"><i data-b="intercom"></i>Intercom</span>
+        <span class="bk-chip"><i data-b="stripe"></i>Stripe</span>
+        <span class="bk-chip"><i data-b="grafana"></i>Grafana</span>
+        <span class="bk-chip"><i data-b="slack"></i>Slack</span>
+      </dd>
+    </dl>
+    <div class="bk-ruler" aria-label="Every hue in use, on one line from 0 to 360">
+      <span class="bk-ruler-band"></span>
+      <span class="bk-hue up" style="--h:22;--c:var(--fail)"><i></i><span>failed<small>22</small></span></span>
+      <span class="bk-hue down" style="--h:48;--c:var(--accent)"><i></i><span>Ada · needs you<small>48</small></span></span>
+      <span class="bk-hue up" style="--h:82;--c:var(--project-webshop)"><i></i><span>webshop<small>82</small></span></span>
+      <span class="bk-hue down" style="--h:128;--c:var(--project-ops)"><i></i><span>ops<small>128</small></span></span>
+      <span class="bk-hue up" style="--h:155;--c:var(--ok)"><i></i><span>done<small>155</small></span></span>
+      <span class="bk-hue down" style="--h:172;--c:var(--live)"><i></i><span>working<small>172</small></span></span>
+      <span class="bk-hue up" style="--h:198;--c:var(--voice-4)"><i></i><span>fourth voice<small>198</small></span></span>
+      <span class="bk-hue down" style="--h:218;--c:var(--project-payments-api)"><i></i><span>payments-api<small>218</small></span></span>
+      <span class="bk-hue up is-option" style="--h:262;--c:oklch(55% 0.16 262)"><i></i><span>cobalt, Ada's option<small>262</small></span></span>
+      <span class="bk-hue down" style="--h:292;--c:var(--voice-milo)"><i></i><span>Milo<small>292</small></span></span>
+      <span class="bk-hue up" style="--h:345;--c:var(--voice-juno)"><i></i><span>Juno<small>345</small></span></span>
+    </div>
+    <p class="bk-fine">Every hue in use, unrolled from 0 to 360. No two meanings share a hue, and Ada's alternative color may only take a gap no one else uses.</p>
+  </div>
+
+  <!-- themes -->
+  <div class="bk-sub" id="themes">
+    <h3>Five themes, one voice</h3>
+    <p class="bk-cap">Two light, three dark. The grounds change; the meanings never do. Click a theme to switch this whole book and every screen in it. <b>Linen</b> and <b>Espresso</b> are the flagships and the defaults for light and dark.</p>
+    <div class="bk-themes">
+      <button class="theme" data-theme-option="linen"><span class="tp" data-theme="linen" aria-hidden="true"><span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span><span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span></span><span class="theme-l"><b>Linen</b><small>light · by day</small></span>
+        <span class="bk-sw" data-theme="linen"><i style="--c:var(--bg)"></i><i style="--c:var(--raised)"></i><i style="--c:var(--ink)"></i><i style="--c:var(--accent)"></i><i style="--c:var(--live)"></i><i style="--c:var(--fail)"></i><i style="--c:var(--ok)"></i></span>
+        <span class="bk-ratio">ink 14.6 · faint 3.7 : 1</span></button>
+      <button class="theme" data-theme-option="porcelain"><span class="tp" data-theme="porcelain" aria-hidden="true"><span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span><span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span></span><span class="theme-l"><b>Porcelain</b><small>light · cooler, quieter</small></span>
+        <span class="bk-sw" data-theme="porcelain"><i style="--c:var(--bg)"></i><i style="--c:var(--raised)"></i><i style="--c:var(--ink)"></i><i style="--c:var(--accent)"></i><i style="--c:var(--live)"></i><i style="--c:var(--fail)"></i><i style="--c:var(--ok)"></i></span>
+        <span class="bk-ratio">ink 15.6 · faint 3.9 : 1</span></button>
+      <button class="theme" data-theme-option="espresso"><span class="tp" data-theme="espresso" aria-hidden="true"><span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span><span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span></span><span class="theme-l"><b>Espresso</b><small>dark · by night</small></span>
+        <span class="bk-sw" data-theme="espresso"><i style="--c:var(--bg)"></i><i style="--c:var(--raised)"></i><i style="--c:var(--ink)"></i><i style="--c:var(--accent)"></i><i style="--c:var(--live)"></i><i style="--c:var(--fail)"></i><i style="--c:var(--ok)"></i></span>
+        <span class="bk-ratio">ink 15.4 · faint 4.5 : 1</span></button>
+      <button class="theme" data-theme-option="velvet"><span class="tp" data-theme="velvet" aria-hidden="true"><span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span><span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span></span><span class="theme-l"><b>Velvet</b><small>dark · plum</small></span>
+        <span class="bk-sw" data-theme="velvet"><i style="--c:var(--bg)"></i><i style="--c:var(--raised)"></i><i style="--c:var(--ink)"></i><i style="--c:var(--accent)"></i><i style="--c:var(--live)"></i><i style="--c:var(--fail)"></i><i style="--c:var(--ok)"></i></span>
+        <span class="bk-ratio">ink 15.4 · faint 4.8 : 1</span></button>
+      <button class="theme" data-theme-option="charcoal"><span class="tp" data-theme="charcoal" aria-hidden="true"><span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span><span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span></span><span class="theme-l"><b>Charcoal</b><small>dark · neutral</small></span>
+        <span class="bk-sw" data-theme="charcoal"><i style="--c:var(--bg)"></i><i style="--c:var(--raised)"></i><i style="--c:var(--ink)"></i><i style="--c:var(--accent)"></i><i style="--c:var(--live)"></i><i style="--c:var(--fail)"></i><i style="--c:var(--ok)"></i></span>
+        <span class="bk-ratio">ink 15.3 · faint 4.5 : 1</span></button>
+    </div>
+    <div class="bk-accents">
+      <span>Ada's color</span>
+      <span class="bk-chip"><i class="orb" data-p="idle" style="--size:22px"></i>Persimmon<small>&nbsp;· default</small></span>
+      <span class="bk-chip" data-accent="cobalt"><i class="orb" data-p="idle" style="--size:22px;--v:var(--accent)"></i>Cobalt</span>
+      <span class="bk-chip" data-accent="graphite"><i class="orb" data-p="idle" style="--size:22px;--v:var(--accent)"></i>Graphite</span>
+      <span class="bk-fine">Her color is also “needs you”, so it moves as one: orb, answers, marks.</span>
+    </div>
+  </div>
+
+  <!-- type -->
+  <div class="bk-sub" id="type">
+    <h3>Type: a voice and a ledger</h3>
+    <p class="bk-cap">Assistants speak in <b>Newsreader</b>, upright, never italic. Everything else, including the agents' own prose, is <b>Inter</b>. Commands, paths and diffs are <b>JetBrains Mono</b>. Hierarchy comes from numerals and weight; page titles stop at 18px on the desktop and 20px on the phone.</p>
+    <div class="bk-type">
+      <div class="bk-spec">
+        <div class="bk-spec-l"><b>Voice · Newsreader 420, upright</b><span>17 / 1.5 in the app</span></div>
+        <p class="voice">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+      </div>
+      <div class="bk-spec">
+        <div class="bk-spec-l"><b>Ledger · Inter 600 / 400</b><span>15 titles · 13 answers · 12 describe lines</span></div>
+        <p class="bk-ui-t">Checkout fails for EU cards with 3-D Secure</p>
+        <p class="bk-ui-d">Starts <b>Fix bug</b> on <b>webshop</b> in a new worktree</p>
+        <p class="bk-ui-d" style="color:var(--faint);font-size:11px">Claude Code · Opus 5.5 · studio-mac</p>
+      </div>
+      <div class="bk-spec">
+        <div class="bk-spec-l"><b>Mono · JetBrains Mono</b><span>commands, paths, diffs, ids</span></div>
+        <code>git push -u origin fix/3ds-eu-cards</code>
+        <p class="bk-ui-d"><code style="font-size:12px">src/checkout/payment.ts</code> <span class="c-ok">+21</span> <span class="c-fail">−9</span></p>
+      </div>
+      <div class="bk-spec">
+        <div class="bk-spec-l"><b>Numerals · Inter 600, tabular</b><span>26 and 38</span></div>
+        <div class="bk-nums"><span class="c-fail">−18%<small>EU checkout conversion</small></span><span>412<small>errors in Sentry</small></span><span>2,512<small>handled quietly</small></span></div>
+      </div>
+      <div class="bk-scale">
+        <span><em style="font-size:11px">Fine print</em><small>11 fine</small></span>
+        <span><em style="font-size:12px">Describe line</em><small>12 meta</small></span>
+        <span><em style="font-size:13px">Rows and answers</em><small>13 ui</small></span>
+        <span><em style="font-size:14px">Agent prose</em><small>14 body</small></span>
+        <span><em style="font-size:15px;font-weight:600">Card title</em><small>15 title</small></span>
+        <span><em class="v" style="font-size:17px">Ada speaking</em><small>17 voice</small></span>
+        <span><em style="font-size:18px;font-weight:600">Page title</em><small>18 page</small></span>
+        <span><em style="font-size:26px;font-weight:600;letter-spacing:-0.03em">412</em><small>26 num</small></span>
+        <span><em style="font-size:38px;font-weight:600;letter-spacing:-0.035em">−18%</em><small>38 num-lg</small></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- shape, depth, glass -->
+  <div class="bk-sub" id="shape">
+    <h3>Shape, depth and glass</h3>
+    <p class="bk-cap">Soft corners, like well-set notes. <b>One level of containment</b>: a note. Inside a note there are hairlines and spacing, never another box. Glass is kept for what floats over moving content: the composer, the sidebar, the phone's tab bar and sheets.</p>
+    <div class="bk-shape">
+      <div>
+        <div class="bk-radii">
+          <span><i style="border-radius:4px"></i>4 xs</span>
+          <span><i style="border-radius:7px"></i>7 sm</span>
+          <span><i style="border-radius:10px"></i>10 md</span>
+          <span><i style="border-radius:14px"></i>14 lg · notes</span>
+          <span><i style="border-radius:20px"></i>20 xl · sheets</span>
+          <span><i style="border-radius:999px;width:84px"></i>pill</span>
+        </div>
+        <div class="bk-layers">
+          <div class="bk-l-ground"><b>ground</b>--bg</div>
+          <div class="bk-l-surface"><b>surface</b>the column</div>
+          <div class="bk-l-note"><b>note</b>a card, the one box</div>
+          <div class="bk-l-lift"><b>lift</b>menus, sheets, windows</div>
+          <div class="bk-l-glass"><b>glass</b>floats over moving content</div>
+        </div>
+      </div>
+      <div>
+        <div class="bk-glass" aria-hidden="true">
+          <div class="bk-glass-t">
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> only handles <code>succeeded</code> and treats everything else as a failure.</p>
+            <pre><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="fn">openThreeDSModal</span>(result.clientSecret);
+}</pre>
+            <p>I wrote a failing test first, then the fix. Tests pass. Ready to push the branch and open a pull request.</p>
+          </div>
+          <span class="bk-glass-pill"><i data-m="q"></i><b>git push</b> is waiting on you<button class="btn btn-sm btn-accent">Allow once</button></span>
+        </div>
+        <p class="bk-fine" style="margin-top:10px">The glass composer: while you read back, it shrinks to this pill and lets the transcript show through. The waiting Request stays on it.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- motion -->
+  <div class="bk-sub" id="motion">
+    <h3>Motion: calm, and always explaining something</h3>
+    <p class="bk-cap">Ada's words arrive in phrases, not characters. A decision card settles into her message. The orb breathes when she is idle and swirls when she works. Nothing moves that is not telling you about a change.</p>
+    <div class="bk-motion">
+      <div>
+        <div class="bk-orbs">
+          <span><i class="orb" data-v="ada" data-p="working"></i>working<small>swirls, 3.8s</small></span>
+          <span><i class="orb" data-v="ada" data-p="idle"></i>idle<small>breathes, 7s</small></span>
+          <span><i class="orb is-listening" data-v="ada" data-p="idle"></i>listening<small>breathes, 2.2s</small></span>
+          <span><i class="orb" data-v="juno" data-p="asleep"></i>asleep<small>a still crescent</small></span>
+          <span><i class="orb" data-v="milo" data-p="unreachable"></i>can't be reached<small>a hollow ring</small></span>
+        </div>
+        <div class="bk-durs">
+          <code>--dur-quick</code><b>140ms</b><span>hover, press</span>
+          <code>--dur-glass</code><b>280ms</b><span>the composer shrinks or returns</span>
+          <code>--dur-settle</code><b>460ms</b><span>a card settles into a message</span>
+          <code>--dur-phrase</code><b>520ms</b><span>one phrase of Ada's voice arrives</span>
+          <code>--dur-breathe</code><b>5.2s</b><span>the orb, idle or listening</span>
+          <code>--ease-settle</code><b>0.2 0.8 0.2 1</b><span>everything that lands</span>
+        </div>
+        <p class="bk-fine" style="margin-top:14px"><b>Reduced motion</b> stops the orb and lets phrases arrive whole; state still reads from shape. <b>Reduced transparency</b> turns every glass surface solid.</p>
+      </div>
+      <div>
+        <div class="bk-phrase">
+          <div class="say">
+            <i class="orb" data-v="ada" data-p="working" style="--size:22px"></i>
+            <div class="say-body" style="gap:0">
+              <div class="say-meta"><b>Ada</b><span>11:40 · check-in</span></div>
+              <p class="voice"><span>The fix is ready. </span><span>It only needs your OK </span><span>to push.</span></p>
+              <article class="dcard"><div class="dcard-body"><div class="dc-head"><i data-m="q"></i><span class="kind">Request</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Fix 3-D Secure checkout</span></div><h3 class="dc-title">Run <code>git push -u origin fix/3ds-eu-cards</code>?</h3></div>
+                <div class="ledger ledger-tight"><button class="ans is-primary"><span class="ans-label">Allow once</span><span class="ans-desc">Runs this push; asks again next time</span><kbd class="kbd">&#8629;</kbd></button><button class="ans"><span class="ans-label">Deny</span><span class="ans-desc">Refuses the push; the agent is told why</span><kbd class="kbd">2</kbd></button></div></article>
+            </div>
+          </div>
+        </div>
+        <p class="bk-fine" style="margin-top:10px">Looped here: three phrases arrive, then the card settles in.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- marks and icons -->
+  <div class="bk-sub" id="marks">
+    <h3>Marks and icons</h3>
+    <p class="bk-cap">One bespoke family on a 12px grid for state and kind, a 16px set for controls, and source marks in ink. <b>One mark per slot</b>: a row's first cell holds its state mark, in its project's color when it is a Session.</p>
+    <div class="bk-marks">
+      <span><i data-m="q"></i>waiting on you</span>
+      <span><i data-m="working"></i>working</span>
+      <span><i data-m="queued"></i>queued</span>
+      <span><i data-m="paused"></i>paused</span>
+      <span><i data-m="done"></i>done</span>
+      <span><i data-m="failed"></i>failed</span>
+      <span><i data-m="cancelled"></i>cancelled</span>
+      <span><i data-m="skipped"></i>skipped</span>
+      <span><i data-m="held"></i>held</span>
+      <span><i data-m="session" style="color:var(--project-webshop)"></i>Thread</span>
+      <span><i data-m="run" style="color:var(--project-payments-api)"></i>Run</span>
+      <span><i data-m="task"></i>Task</span>
+      <span><i data-m="workflow"></i>Workflow</span>
+      <span><i data-m="offer"></i>Offer</span>
+      <span><i data-m="fyi"></i>FYI</span>
+      <span><i data-m="attached"></i>attached</span>
+      <span><i data-m="reminder" style="color:var(--accent-ink)"></i>Reminder</span>
+      <span><i data-m="notice" style="color:var(--fail)"></i>Notice</span>
+    </div>
+    <div class="bk-icons">
+      <span><i data-i="search"></i>search</span><span><i data-i="plus"></i>plus</span><span><i data-i="mic"></i>mic</span><span><i data-i="send"></i>send</span><span><i data-i="stop"></i>stop</span><span><i data-i="gear"></i>gear</span><span><i data-i="sliders"></i>sliders</span><span><i data-i="shield"></i>shield</span><span><i data-i="branch"></i>branch</span><span><i data-i="folder"></i>folder</span><span><i data-i="machine"></i>machine</span><span><i data-i="clock"></i>clock</span><span><i data-i="bell"></i>bell</span><span><i data-i="out"></i>out</span>
+      <span><i data-i="close"></i>close</span><span><i data-i="more"></i>more</span><span><i data-i="sidebar"></i>sidebar</span><span><i data-i="compose"></i>compose</span><span><i data-i="list"></i>list</span><span><i data-i="cube"></i>cube</span><span><i data-i="clip"></i>clip</span><span><i data-i="wave"></i>wave</span><span><i data-i="arrow"></i>arrow</span><span><i data-i="file"></i>file</span><span><i data-i="diff"></i>diff</span><span><i data-i="home"></i>home</span><span><i data-i="tray"></i>tray</span><span><i data-i="grid"></i>grid</span>
+      <span><i data-i="user"></i>user</span><span><i data-i="key"></i>key</span><span><i data-i="plug"></i>plug</span><span><i data-i="link"></i>link</span><span><i data-i="brush"></i>brush</span><span><i data-i="moon"></i>moon</span><span><i data-i="sun"></i>sun</span><span><i data-i="lock"></i>lock</span><span><i data-i="phone"></i>phone</span><span><i data-i="globe"></i>globe</span><span><i data-i="bolt"></i>bolt</span><span><i data-i="database"></i>database</span><span><i data-i="cron"></i>cron</span><span><i data-i="haptic"></i>haptic</span>
+    </div>
+    <div class="bk-brands">
+      <span><i data-b="github"></i>GitHub</span><span><i data-b="gmail"></i>Gmail</span><span><i data-b="sentry"></i>Sentry</span><span><i data-b="posthog"></i>PostHog</span><span><i data-b="intercom"></i>Intercom</span><span><i data-b="grafana"></i>Grafana</span><span><i data-b="stripe"></i>Stripe</span><span><i data-b="slack"></i>Slack</span><span><i data-b="discord"></i>Discord</span><span><i data-b="linear"></i>Linear</span><span><i data-b="datadog"></i>Datadog</span><span><i data-b="claude"></i>Claude Code</span><span><i data-b="openai"></i>Codex</span><span><i data-b="pi"></i>pi</span><span><i data-b="cron"></i>cron</span>
+    </div>
+  </div>
+
+  <!-- layout -->
+  <div class="bk-sub" id="layout">
+    <h3>Layout and density</h3>
+    <p class="bk-cap">One conversation column everywhere, with a glass composer at its foot. What changes per platform is the frame around it: a translucent sidebar on the desktop, a top bar on the web, a thumb-reach tab bar on the phone.</p>
+    <div class="bk-layouts">
+      <div class="bk-lay">
+        <div class="bk-lay-f bk-lay-d"><div class="a"><span><b>sidebar 264</b>Ada · Intake · Office<br>waiting · working · idle</span></div><div class="b"><span><b>column 680</b>the Conversation<br>or a Thread</span></div><div class="c"><span><b>glass composer</b></span></div><div class="r"><span><b>facts</b>on a Thread</span></div></div>
+        <p class="bk-fine"><b>Desktop app.</b> Keyboard first: ⌘J asks Ada, ⌥Space answers from any app, every answer has its key.</p>
+      </div>
+      <div class="bk-lay">
+        <div class="bk-lay-f bk-lay-w"><div class="a"><span><b>Ada · Intake · Office · Settings · Ask Ada</b></span></div><div class="b"><span><b>column</b>the Conversation<br>or a Thread</span></div><div class="c"><span><b>glass composer</b></span></div><div class="r"><span><b>facts rail</b>or the open item</span></div></div>
+        <p class="bk-fine"><b>Web.</b> No sidebar: a top bar and deep links. At 1280 the second column appears instead of the page shrinking.</p>
+      </div>
+      <div class="bk-lay">
+        <div class="bk-lay-f bk-lay-m"><div class="b"><span><b>one column</b>big answer rows</span></div><div class="t"><span><i class="orb" data-v="ada" data-p="idle"></i></span><span>Intake</span><span><i class="mic"><i data-i="mic"></i></i></span><span>Office</span><span>Settings</span></div></div>
+        <p class="bk-fine"><b>Phone.</b> Hold the middle to talk.</p>
+      </div>
+    </div>
+    <div class="bk-density">
+      <div><strong>4<small>px</small></strong><span>base unit; every gap is a multiple</span></div>
+      <div><strong>34<small>/ 28</small></strong><span>row height, comfortable and compact</span></div>
+      <div><strong>780<small>px</small></strong><span>the widest a conversation column gets</span></div>
+      <div><strong>1<small>box</small></strong><span>levels of containment: the note</span></div>
+    </div>
+  </div>
+
+  <!-- signature -->
+  <div class="bk-sub" id="signature">
+    <h3>The signature: her voice, with the decision set inside it</h3>
+    <p class="bk-cap">This is the element you would recognize from across the room: a warm orb, a sentence in a serif, and a card that is the real Proposal with its bound actions.</p>
+    <div class="bk-sig">
+      <div class="bk-sig-stage">
+        <div class="say"><i class="orb" data-v="ada" data-p="idle" style="--size:26px"></i><div class="say-body"><div class="say-meta"><b>Ada</b><span>09:00 · heartbeat · triage found 212 events</span></div><p class="voice">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+          <article class="dcard is-lead"><div class="dcard-body dc-grid"><div class="dc-main"><div class="dc-head"><i data-m="q"></i><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Checkout</span></div><h3 class="dc-title">Checkout fails for EU cards with 3-D Secure</h3><div class="from"><span><i data-b="sentry"></i><b>412</b> errors · <b>188</b> users</span><span><i data-b="gmail"></i><b>3</b> customer emails</span><span><i data-b="github"></i>deploy <b>#1289</b></span></div><p class="dc-gist">The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p></div><div class="fig"><span class="fig-n c-fail">&minus;18%</span><span class="fig-l">EU checkout conversion since 14:10 yesterday</span></div></div>
+            <div class="ledger"><button class="ans is-primary"><span class="ans-label">Start “Fix bug”</span><span class="ans-desc">Starts <b>Fix bug</b> on <b>webshop</b> in a new worktree<span class="ans-fine">Claude Code · Opus 5.5 · studio-mac</span></span><kbd class="kbd">&#8629;</kbd></button><button class="ans"><span class="ans-label">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd class="kbd">2</kbd></button><button class="ans"><span class="ans-label">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd class="kbd">3</kbd></button></div></article>
+          <p class="voice">Everything else can wait.</p>
+          <a class="receipt" href="desktop/intake.html"><span class="rc"><b>4</b> more proposals</span><span class="rc"><b>3</b> FYI</span><span class="rc"><b>1</b> attached</span><span class="rc muted"><b>198</b> handled quietly</span><span class="receipt-go">The full picture<i data-i="arrow"></i></span></a>
+        </div></div>
+      </div>
+      <div class="bk-sig-notes">
+        <div><span class="k">1</span><span><b>The orb says who and how.</b> Ada's persimmon, breathing while idle, swirling while she works.</span></div>
+        <div><span class="k">2</span><span><b>The serif is a person speaking.</b> Short: two sentences, then the card.</span></div>
+        <div><span class="k">3</span><span><b>The card is the record.</b> A Proposal with its evidence counted and one numeral, not a summary of one.</span></div>
+        <div><span class="k">4</span><span><b>The answers are bound actions.</b> Label, the core's describe line, the producer's fine print, and a key.</span></div>
+        <div><span class="k">5</span><span><b>The receipt is honest.</b> Everything she did not bring you, counted, one click from the full picture.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- logo -->
+  <div class="bk-sub" id="logo">
+    <h3>Logo and app icon</h3>
+    <p class="bk-cap">The orb resting on the front desk. It is Ada at her post, and the one thing on the desk is the thing that needs you. The same orb is the menu bar extra and the favicon, where it carries the count of what waits.</p>
+    <div class="bk-logo">
+      <div class="bk-logo-card">
+        <div class="bk-icons-row">
+          <span><i class="appicon is-light" style="--size:128px"><i data-logo></i></i>128</span>
+          <span><i class="appicon is-light" style="--size:64px"><i data-logo></i></i>64</span>
+          <span><i class="appicon is-light" style="--size:32px"><i data-logo></i></i>32</span>
+          <span><i class="appicon is-dark" style="--size:128px"><i data-logo></i></i>dark</span>
+        </div>
+        <div class="bk-word"><i data-logo></i>Hercule</div>
+      </div>
+      <div class="bk-logo-card">
+        <div>
+          <div class="bk-menubar"><span class="bk-mb-orb"><i class="orb" data-v="ada" data-p="idle"></i>3</span><i data-i="clock"></i><i data-i="lock"></i><i data-i="bolt"></i><i data-i="search"></i><span>Tue 29 Sep 09:41</span></div>
+          <p class="bk-fine" style="margin-top:8px">The menu bar extra: Ada's orb with the count of what waits on you.</p>
+        </div>
+        <div>
+          <div class="bk-tabs">
+            <span class="bk-tab"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E"><span>Ada · Hercule</span></span>
+            <span class="bk-tab is-on"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='24.5' cy='8' r='7.5' fill='%23c24e1c' stroke='%23fff' stroke-width='1.6'/%3E%3Ctext x='24.5' y='11.6' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='10.5' text-anchor='middle' fill='%23fff'%3E3%3C/text%3E%3C/svg%3E"><span>(3) Intake · 8 new · Hercule</span></span>
+            <span class="bk-tab"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='24.5' cy='8' r='7.5' fill='%23c24e1c' stroke='%23fff' stroke-width='1.6'/%3E%3Ctext x='24.5' y='11.6' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='10.5' text-anchor='middle' fill='%23fff'%3E11%3C/text%3E%3C/svg%3E"><span>(11) Ada · Hercule</span></span>
+          </div>
+          <div class="bk-tabs-cap"><span>calm</span><span>3 wait on you</span><span>11 wait, at 10x</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 5 screens ================= -->
+<section class="bk-s" id="screens">
+  <header class="bk-h"><span class="bk-n">05</span><h2>Screens</h2>
+    <p class="bk-lede">All 22, live. Every one follows the theme you pick at the top; open any of them on its own with the link under it.</p></header>
+
+  <div class="bk-sub">
+    <h3>Desktop app</h3>
+    <p class="bk-cap">macOS first: a translucent sidebar, keys on every answer, the menu bar and ⌥Space for answering without switching apps.</p>
+    <div class="bk-grid2">
+      <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Ada" data-note="Home. Her brief, with the urgent Proposal and its answers inside it."></figure>
+      <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="The full picture: one numeral per lane, room colors, answers that say what they do."></figure>
+      <figure data-frame="desktop" data-src="desktop/session-empty.html" data-caption="New thread" data-note="The composer is the form. Say what you want done; the room is one pick."></figure>
+      <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="A Thread" data-note="The thread surface kept whole; the git push Request docks on the composer."></figure>
+      <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="A Thread, scrolled back" data-note="The composer shrinks to a glass pill; the Request stays one tap away."></figure>
+      <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="Every live session at a desk in its project's room. Ada at the front desk."></figure>
+      <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="At a glance" data-note="Menu bar extra, ⌥Space quick panel, notifications with bound actions, a popped-out Thread, the Dock badge."></figure>
+      <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes previewed live, Ada's color, text size, density, marks."></figure>
+      <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants" data-note="Ada's record: Memory, heartbeat, reminders, rotation, channel bindings, reply mode."></figure>
+      <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Event sources and channels with health, volume and default Topic."></figure>
+    </div>
+  </div>
+
+  <div class="bk-sub">
+    <h3>Web</h3>
+    <p class="bk-cap">Zero install and deep links. No sidebar: a top bar, and at 1280 a second column instead of a smaller first one. The tab title and favicon count what waits.</p>
+    <div class="bk-grid2">
+      <figure data-frame="web" data-url="hercule.acme.dev" data-src="web/assistant.html" data-caption="Ada" data-note="Her desk is one strip above the Conversation."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/intake" data-src="web/intake.html" data-caption="Intake" data-note="The lanes and the open item side by side."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/proposals/318" data-src="web/decision.html" data-caption="A Proposal as a page" data-note="Where a link from Slack or email lands. Answer it without the rest of the app."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/threads/new?project=webshop" data-src="web/session-empty.html" data-caption="New thread" data-note="A draft thread in webshop, started from the top bar."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/threads/1042" data-src="web/session-active.html" data-caption="A Thread" data-note="The transcript, and a facts rail with the branch, the machine and the Proposal it came from."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/threads/1042" data-src="web/session-active.html" data-state="scrolled" data-caption="A Thread, scrolled back" data-note="The same glass composer in the browser."></figure>
+      <figure data-frame="web" data-url="hercule.acme.dev/settings/providers" data-src="web/settings-providers.html" data-caption="Settings · Providers" data-note="Which instance runs on which machine; models, access modes, usage."></figure>
+    </div>
+  </div>
+
+  <div class="bk-sub">
+    <h3>Mobile</h3>
+    <p class="bk-cap">Where many decisions will be made. Thumb-reach tabs, big answer rows and swipes, sheets instead of popovers, voice first, and haptics noted where they fire.</p>
+    <div class="bk-grid4">
+      <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Ada" data-note="Voice first: hold to talk."></figure>
+      <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="Swipe right takes the suggested answer."></figure>
+      <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="A decision" data-note="Opened from a notification."></figure>
+      <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="Pushes with bound actions; a Live Activity."></figure>
+      <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="A Thread" data-note="The Request as big rows over the composer."></figure>
+      <figure data-frame="mobile" data-src="mobile/session-active.html" data-state="scrolled" data-caption="A Thread, scrolled back" data-note="The composer as a glass pill."></figure>
+      <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="New thread" data-note="Say it; pick a start."></figure>
+      <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings" data-note="The index, Appearance in a sheet."></figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 6 office ================= -->
+<section class="bk-s" id="office">
+  <header class="bk-h"><span class="bk-n">06</span><h2>The office</h2>
+    <p class="bk-lede">If Ada is the front desk, the Office is the floor behind her: every live session at a desk, in its project's room. You visit it to check on her, not to work from it.</p></header>
+  <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="23 live · 8 working · 3 waiting on you · 1 paused · 11 idle, on three machines. Ada: “Three desks wait on you. I marked the way.”"></figure>
+  <div class="bk-list">
+    <div><i class="orb" data-v="ada" data-p="idle"></i><span><b>Ada at the front desk.</b> Her orb, Milo's and Juno's sit at reception. The paths she draws to the desks that wait on you are dotted, in her color.</span></div>
+    <div><i class="bk-tile" style="width:16px;height:16px;border-radius:4px;background:var(--project-webshop);margin-top:2px"></i><span><b>Rooms are projects.</b> The room keys from every list become the carpets: marigold webshop, lagoon payments-api, moss ops.</span></div>
+    <div><i data-m="q"></i><span><b>The same marks, at desk scale.</b> Working, waiting, paused and idle read by the same shapes as a sidebar row.</span></div>
+    <div><i data-m="session" style="color:var(--project-webshop)"></i><span><b>The same cards.</b> A desk that waits on you raises the Request card from the thread, with the same bound actions and keys.</span></div>
+    <div><i data-i="machine" class="ic" style="width:16px;height:16px;margin-top:1px"></i><span><b>Machines are wings.</b> Desks per runner, with the cap shown as empty chairs. Idle sessions without a desk are counted, not drawn.</span></div>
+    <div><i data-i="list" class="ic" style="width:16px;height:16px;margin-top:1px"></i><span><b>List | Office.</b> One toggle away from the same sessions as rows. The Office replaces the All sessions page, not the lists.</span></div>
+  </div>
+</section>
+
+<!-- ================= 7 10x ================= -->
+<section class="bk-s" id="scale">
+  <header class="bk-h"><span class="bk-n">07</span><h2>At 10x</h2>
+    <p class="bk-lede">140 live sessions, 31,000 events a day, 60 proposals a morning. Ada's brief stays three sentences. The growth goes into numerals, bundles and the receipt, never into a longer list.</p></header>
+  <div class="bk-tenx">
+    <div><strong>3<small>sentences</small></strong><span>Ada's brief at 1x and at 10x. <b>“Three things are burning. Nine need your call; I bundled them so one answer covers many.”</b></span></div>
+    <div><strong>1<small>answer</small></strong><span>for a bundle. <b>Merge all 14</b> fires one bound action per item, each still recorded on its own.</span></div>
+    <div><strong>2,512<small>of 2,640</small></strong><span>events handled quietly this morning, counted in the receipt, never listed.</span></div>
+    <div><strong>80<small>of 86</small></strong><span>desks in use on nine machines. The Office groups the eleven waiting desks into <b>“seven of the eleven are one npm question”</b>.</span></div>
+  </div>
+  <div class="bk-scalegrid">
+    <figure data-frame="desktop" data-src="desktop/intake.html" data-state="10x" data-caption="Intake at 10x" data-note="Burning items as live rows, bundles with one answer, a heat map for what came in."></figure>
+    <figure data-frame="desktop" data-src="desktop/office.html" data-state="10x" data-caption="Office at 10x" data-note="140 live on nine machines; one bundle card answers seven releases."></figure>
+      </div>
+  <div class="bk-scalegrid">
+    <figure data-frame="web" data-url="hercule.acme.dev/intake" data-src="web/intake.html" data-state="10x" data-caption="Intake at 10x, web" data-note="The same bundles, the open item beside them."></figure>
+    <figure data-frame="mobile" data-src="mobile/intake.html" data-state="10x" data-caption="Intake at 10x, phone" data-note="Bundles swipe as one."></figure>
+  </div>
+</section>
+
+<!-- ================= 8 adopting it ================= -->
+<section class="bk-s" id="adopt">
+  <header class="bk-h"><span class="bk-n">08</span><h2>Adopting it</h2>
+    <p class="bk-lede">Every token today has a home here, mostly under the same name. The swatches show today's light and dark beside Linen and Espresso.</p></header>
+  <table class="bk-table">
+    <thead><tr><th>Today</th><th>Today, light · dark</th><th></th><th>Concierge</th><th>Linen · Espresso</th><th>What changes</th></tr></thead>
+    <tbody>
+      <tr><td><code>--bg</code></td><td><span class="bk-pv"><i style="--c:oklch(94.5% 0.0156 265);--u:#fff"></i><i style="--c:oklch(20% 0.0288 265);--u:#000"></i></span></td><td class="v">265 · 0.029</td><td><code>--bg</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--bg);--u:#fff"></i><i data-theme="espresso" style="--c:var(--bg);--u:#000"></i></span></td><td>Warm paper and roasted brown instead of blue-violet. Chroma drops from 0.029 to 0.012 in dark.</td></tr>
+      <tr><td><code>--surface</code></td><td><span class="bk-pv"><i style="--c:oklch(96.7% 0.0125 265);--u:#fff"></i><i style="--c:oklch(22.2% 0.0288 265);--u:#000"></i></span></td><td class="v"></td><td><code>--surface</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--surface);--u:#fff"></i><i data-theme="espresso" style="--c:var(--surface);--u:#000"></i></span></td><td>Same role: the column and the sidebar under glass.</td></tr>
+      <tr><td><code>--raised</code></td><td><span class="bk-pv"><i style="--c:oklch(100% 0.0078 265);--u:#fff"></i><i style="--c:oklch(25.5% 0.0259 265);--u:#000"></i></span></td><td class="v"></td><td><code>--raised</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--raised);--u:#fff"></i><i data-theme="espresso" style="--c:var(--raised);--u:#000"></i></span></td><td>Same role: notes and cards. New <code>--sunk</code> below the ground for code and receipts.</td></tr>
+      <tr><td><code>--ink</code></td><td><span class="bk-pv"><i class="fg" style="--c:oklch(23% 0.01 265);--u:oklch(94.5% 0.0156 265)"></i><i class="fg" style="--c:oklch(90% 0.008 265);--u:oklch(20% 0.0288 265)"></i></span></td><td class="v">13.4 : 1 dark</td><td><code>--ink</code></td><td><span class="bk-pv"><i class="fg" data-theme="linen" style="--c:var(--ink);--u:var(--bg)"></i><i class="fg" data-theme="espresso" style="--c:var(--ink);--u:var(--bg)"></i></span></td><td>15.4 : 1 in Espresso.</td></tr>
+      <tr><td><code>--muted</code></td><td><span class="bk-pv"><i class="fg" style="--c:oklch(48% 0.0156 265);--u:oklch(94.5% 0.0156 265)"></i><i class="fg" style="--c:oklch(68% 0.0288 265);--u:oklch(20% 0.0288 265)"></i></span></td><td class="v">5.6 · 6.3 : 1</td><td><code>--muted</code></td><td><span class="bk-pv"><i class="fg" data-theme="linen" style="--c:var(--muted);--u:var(--bg)"></i><i class="fg" data-theme="espresso" style="--c:var(--muted);--u:var(--bg)"></i></span></td><td>6.4 · 8.1 : 1.</td></tr>
+      <tr><td><code>--faint</code></td><td><span class="bk-pv"><i class="fg" style="--c:oklch(66% 0.0156 265);--u:oklch(94.5% 0.0156 265)"></i><i class="fg" style="--c:oklch(50% 0.0288 265);--u:oklch(20% 0.0288 265)"></i></span></td><td class="v">2.7 · 3.0 : 1</td><td><code>--faint</code></td><td><span class="bk-pv"><i class="fg" data-theme="linen" style="--c:var(--faint);--u:var(--bg)"></i><i class="fg" data-theme="espresso" style="--c:var(--faint);--u:var(--bg)"></i></span></td><td>3.7 · 4.5 : 1. Metadata stays readable.</td></tr>
+      <tr><td><code>--line</code></td><td><span class="bk-pv"><i style="--c:oklch(23% 0.01 265 / 0.1);--u:oklch(94.5% 0.0156 265)"></i><i style="--c:oklch(90% 0.0288 265 / 0.1);--u:oklch(20% 0.0288 265)"></i></span></td><td class="v"></td><td><code>--line</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--line);--u:var(--bg)"></i><i data-theme="espresso" style="--c:var(--line);--u:var(--bg)"></i></span></td><td>Warm ink at 13%, not blue.</td></tr>
+      <tr><td><code>--line-soft</code></td><td><span class="bk-pv"><i style="--c:oklch(23% 0.01 265 / 0.055);--u:oklch(94.5% 0.0156 265)"></i><i style="--c:oklch(90% 0.0288 265 / 0.06);--u:oklch(20% 0.0288 265)"></i></span></td><td class="v"></td><td><code>--line-soft</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--line-soft);--u:var(--bg)"></i><i data-theme="espresso" style="--c:var(--line-soft);--u:var(--bg)"></i></span></td><td>The hairline inside a note.</td></tr>
+      <tr><td><code>--attn</code></td><td><span class="bk-pv"><i style="--c:#8a6116;--u:#fff"></i><i style="--c:#d0a147;--u:#000"></i></span></td><td class="v">amber</td><td><code>--attn</code> = <code>--accent-ink</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--attn);--u:#fff"></i><i data-theme="espresso" style="--c:var(--attn);--u:#000"></i></span></td><td>“Needs you” becomes Ada's persimmon. New <code>--accent</code> fills her orb and the primary answer.</td></tr>
+      <tr><td><code>--fail</code></td><td><span class="bk-pv"><i style="--c:#a34e46;--u:#fff"></i><i style="--c:#cf7b71;--u:#000"></i></span></td><td class="v">clay</td><td><code>--fail</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--fail);--u:#fff"></i><i data-theme="espresso" style="--c:var(--fail);--u:#000"></i></span></td><td>Crimson, clearly apart from persimmon. Plus <code>--fail-soft</code> for a failed notice.</td></tr>
+      <tr><td><code>--live</code></td><td><span class="bk-pv"><i style="--c:#48717f;--u:#fff"></i><i style="--c:#7fa8b8;--u:#000"></i></span></td><td class="v">petrol</td><td><code>--live</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--live);--u:#fff"></i><i data-theme="espresso" style="--c:var(--live);--u:#000"></i></span></td><td>Jade: the working equalizer, never a pulsing dot.</td></tr>
+      <tr><td><code>--ok</code></td><td><span class="bk-pv"><i style="--c:#48745a;--u:#fff"></i><i style="--c:#7fae8e;--u:#000"></i></span></td><td class="v">sage</td><td><code>--ok</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--ok);--u:#fff"></i><i data-theme="espresso" style="--c:var(--ok);--u:#000"></i></span></td><td>Emerald: done, diff additions, passing tests.</td></tr>
+      <tr><td><code>--project-hercule</code><br><code>--project-ops</code></td><td><span class="bk-pv"><i style="--c:#7d7ab0;--u:#fff"></i><i style="--c:#a67f92;--u:#fff"></i></span></td><td class="v">dots only</td><td><code>--project-&lt;slug&gt;</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--project-webshop);--u:#fff"></i><i data-theme="linen" style="--c:var(--project-payments-api);--u:#fff"></i><i data-theme="linen" style="--c:var(--project-ops);--u:#fff"></i></span></td><td>A fixed palette of room colors, assigned per project in order, used at tile and mark scale.</td></tr>
+      <tr><td><code>--sans</code> · <code>--mono</code></td><td class="v" colspan="2">Onest · IBM Plex Mono</td><td><code>--font-ui</code> · <code>--font-mono</code></td><td class="v">Inter · JetBrains Mono</td><td>Plus <code>--font-voice</code>, Newsreader upright, for Assistants only.</td></tr>
+      <tr><td class="v">none</td><td class="v" colspan="2"></td><td><code>--voice-*</code> · <code>--glass*</code></td><td><span class="bk-pv"><i data-theme="linen" style="--c:var(--voice-milo);--u:#fff"></i><i data-theme="linen" style="--c:var(--voice-juno);--u:#fff"></i><i data-theme="linen" style="--c:var(--glass);--u:var(--bg)"></i></span></td><td>One hue per Assistant; glass and blur for the composer, sidebar, tab bar and sheets.</td></tr>
+    </tbody>
+  </table>
+
+  <ol class="bk-steps">
+    <li><span class="n">1</span><div><h4>Tokens and five themes</h4><p>Replace the Midnight block with the five themes and their <b>light</b> / <b>dark</b> aliases, so the existing Light, Dark, System choice keeps working on day one. The selector grows to five tiles plus Ada's color.</p></div><div class="bk-files"><code>packages/ui/src/styles.css</code><code>packages/ui/src/theme/theme-selector.tsx</code><code>packages/ui/src/styles.test.ts</code></div></li>
+    <li><span class="n">2</span><div><h4>Fonts</h4><p>Swap Onest and IBM Plex Mono for Inter and JetBrains Mono, and add Newsreader for the voice. All OFL, self-hosted, so the strict CSP stays as it is.</p></div><div class="bk-files"><code>packages/ui/src/fonts/</code><code>packages/ui/src/styles.css</code></div></li>
+    <li><span class="n">3</span><div><h4>Marks, logo and the orb</h4><p>Recolor the marks by the doctrine (<b>needs you</b> takes the accent, <b>paused</b> goes to ink), draw the orb-on-desk logo, and add an <b>Orb</b> presence component for every Assistant, with its five states.</p></div><div class="bk-files"><code>packages/ui/src/marks/marks.tsx</code><code>packages/ui/src/marks/logo.tsx</code><code>packages/ui/src/patterns/patterns.tsx</code></div></li>
+    <li><span class="n">4</span><div><h4>One decision card</h4><p>A single <b>DecisionCard</b> with the ledger of answers (label, describe line, fine print, key), used by the permission card, Intake and an Assistant's message. The data it reads already exists: bound actions and their describe lines.</p></div><div class="bk-files"><code>packages/ui/src/patterns/patterns.tsx</code><code>apps/web/src/screens/thread/permission-card.tsx</code><code>apps/web/src/routes/_shell/intake.tsx</code></div></li>
+    <li><span class="n">5</span><div><h4>Ada is home; the glass composer</h4><p>The home route shows the web-chat Assistant's Conversation. The sidebar gets Ada, Intake and Office on top, with Waiting / Working / Paused / Idle below. The composer turns to glass and compacts while the transcript is scrolled back.</p></div><div class="bk-files"><code>apps/web/src/routes/_shell/index.tsx</code><code>apps/web/src/shell/sidebar.tsx</code><code>apps/web/src/screens/composer/composer.tsx</code><code>apps/web/src/screens/thread/use-stick-to-bottom.ts</code></div></li>
+  </ol>
+</section>
+
+<!-- ================= 9 spec ================= -->
+<section class="bk-s" id="spec">
+  <header class="bk-h"><span class="bk-n">09</span><h2>What this design asks the spec to change</h2>
+    <p class="bk-lede">Nothing in the domain changes. Proposals, Requests, bound actions and their describe lines are used exactly as specified. What changes is where things live and how they look.</p></header>
+  <div class="bk-spec-list">
+    <div><span class="n">1</span><div><h4>Home is Ada's Conversation</h4><p>The default route <code>/</code> becomes the web-chat Assistant's Conversation instead of Sessions. On a fresh install, before any triage, Ada's first message offers to start a Thread on this machine, so the first minute still ends in a Thread on this machine, as the spec intends.</p></div><p class="ref"><b>14 §V1 screen inventory</b>, “Home is Sessions” and the URL space; <b>14 §Onboarding and first run</b></p></div>
+    <div><span class="n">2</span><div><h4>Bound actions render inside an Assistant's message</h4><p>When Ada mentions a Proposal or Request, the web chat shows it as the decision card with its bound actions, the same record as in Intake. Answered in one place, it shows as answered everywhere.</p></div><p class="ref"><b>10 §7.3 Router and sinks</b>, web chat as a sink; <b>10 §7.4 Bound actions</b>; <b>10 §7.7 Answered elsewhere</b>; <b>12 §9 Web chat</b></p></div>
+    <div><span class="n">3</span><div><h4>The morning brief is Ada's heartbeat, and it is the front page</h4><p>The spec already allows narrative brief prose as an Assistant posting to a channel. This design makes that post the home screen, while Intake keeps its lanes.</p></div><p class="ref"><b>14 §Post-v1</b>, “Narrative morning-brief prose”; <b>14 §The Intake view</b>, principle 1; <b>12 §8.2 Heartbeat</b></p></div>
+    <div><span class="n">4</span><div><h4>Bundled answers at scale</h4><p>Intake may group like items (“14 dependency bumps”) under one answer that fires each item's own bound action, so every item is still recorded and undone on its own.</p></div><p class="ref"><b>10 §7.4 Bound actions</b>; <b>10 §8 Intake and check-in</b></p></div>
+    <div><span class="n">5</span><div><h4>Five themes, an accent, and filled primary answers</h4><p>Replaces “one light, one dark” with five themes and a limited choice of Ada's color. “Needs you” becomes the accent instead of amber. The primary answer is a filled row, not a text-only ghost button.</p></div><p class="ref"><b>14 §Design language</b>, register and semantic hues; <b>14 §Iconography</b>, paused in attention hue; <b>14 §App shell</b>, the theme row</p></div>
+    <div><span class="n">6</span><div><h4>A new shell: Ada, Intake, Office</h4><p>The two-face sidebar (Threads | Hercule) becomes one list: Ada, Intake, Office, then sessions by state. The All sessions page becomes the Office with its List | Office toggle. Check-in folds into Ada's check-ins and the Office.</p></div><p class="ref"><b>14 §App shell</b>; <b>14 §The check-in view</b>; <b>14 §Post-v1</b>, merging Intake and check-in</p></div>
+    <div><span class="n">7</span><div><h4>Desktop surfaces</h4><p>A menu bar extra, a global-hotkey quick panel, native notifications with bound-action buttons, and any Thread in its own window.</p></div><p class="ref"><b>14 §Packages and desktop-shell readiness</b>; <b>14 §Post-v1</b>, desktop app; <b>10 §7.3</b>, a desktop sink</p></div>
+    <div><span class="n">8</span><div><h4>New paths, and a web layout without a sidebar</h4><p><code>/proposals/&lt;id&gt;</code> as the landing page for a link from Slack or email, <code>/office</code>, and <code>/settings/providers</code>. The web app uses a top bar instead of the sidebar.</p></div><p class="ref"><b>14 §V1 screen inventory</b>, the pinned URL space</p></div>
+    <div><span class="n">9</span><div><h4>A phone, with push</h4><p>A mobile push sink whose notifications carry bound actions, a Live Activity for a Thread that waits on you, an Office tab and hold-to-talk to Ada.</p></div><p class="ref"><b>10 §7.3 Router and sinks</b>; <b>14 §Post-v1</b>, Web Push</p></div>
+  </div>
+
+  <footer class="bk-foot"><i class="orb" data-v="ada" data-p="idle" style="--size:18px"></i><span class="voice">That's everything. I'll keep the rest quiet.</span><span class="grow"></span><span>Concierge · Hercule design system 10</span></footer>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Lock screen · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone lk-screen">
+      <svg class="lk-wall" viewBox="0 0 390 844" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="lk-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" style="stop-color: var(--wall-sky)" />
+            <stop offset="0.5" style="stop-color: var(--wall-horizon)" />
+          </linearGradient>
+          <radialGradient id="lk-sun" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" style="stop-color: var(--wall-sun); stop-opacity: 0.9" />
+            <stop offset="1" style="stop-color: var(--wall-sun); stop-opacity: 0" />
+          </radialGradient>
+        </defs>
+        <rect width="390" height="844" fill="url(#lk-sky)" />
+        <circle cx="290" cy="380" r="230" fill="url(#lk-sun)" />
+        <path style="fill: var(--wall-d1)" d="M0 452C60 424 130 430 190 446S300 474 390 438V844H0Z" />
+        <path style="fill: var(--wall-d2)" d="M0 548C80 520 160 520 230 540S340 566 390 548V844H0Z" />
+        <path style="fill: var(--wall-d3)" d="M0 648C90 622 170 630 250 652S360 668 390 660V844H0Z" />
+        <path style="fill: var(--wall-d4)" d="M0 748C100 728 200 726 290 744S370 756 390 750V844H0Z" />
+      </svg>
+
+      <div class="status" data-status></div>
+
+      <!-- The compact Live Activity. iOS shows it here once the phone is unlocked; it is drawn on the
+           lock screen too, so one frame shows both presentations of the same session. -->
+      <div class="lk-island" aria-label="Fix 3-D Secure checkout: waiting on you for 2 minutes">
+        <span data-halo="wait1" data-size="22" data-still aria-hidden="true"></span>2m
+      </div>
+
+      <header class="lk-top">
+        <i data-icon="lock"></i>
+        <div class="lk-date">
+          Tuesday 29 September<span class="sep">·</span>
+          <span class="lk-inline" aria-label="3 waiting on you, 8 working, 1 paused, 11 idle"><span class="on-ink" data-halo="wait3 work8 pause1 idle11" data-size="17" data-still aria-hidden="true"></span>3</span>
+        </div>
+        <div class="lk-clock">9:41</div>
+      </header>
+
+      <div class="lk-list">
+        <article class="lk-live" data-theme="eclipse" aria-label="Live Activity">
+          <span data-halo="wait1" data-size="46" data-center="?" data-still aria-hidden="true"></span>
+          <span class="tx">
+            <b>Fix 3-D Secure checkout<span class="w">2m</span></b>
+            <span class="s"><strong>waiting on you</strong> · 3 files <span class="plus mono">+48</span> <span class="minus mono">-12</span></span>
+          </span>
+          <div class="cmd"><span class="pr">$ </span>git push -u origin fix/3ds-eu-cards</div>
+          <div class="acts"><button class="btn wait">Allow once</button><button class="btn">Deny</button></div>
+        </article>
+
+        <div class="g-note">
+          <span class="app-icon" data-theme="eclipse" style="--sz: 38px"><span data-halo="wait1.4 work7.3 idle4.1" data-split data-size="25" data-still></span></span>
+          <span class="tx"><b>Proposal<span class="w">4m ago</span></b>Checkout fails for EU cards with <span class="nw">3-D Secure</span></span>
+          <span class="acts"><button>Start<small>“Fix bug”</small></button><button>Dismiss</button></span>
+        </div>
+        <div class="g-note">
+          <span class="app-icon" data-theme="eclipse" style="--sz: 38px"><span data-halo="wait1.4 work7.3 idle4.1" data-split data-size="25" data-still></span></span>
+          <span class="tx"><b>Ship release v2.15<span class="w">9m ago</span></b>Publish payments-api 2.15.0 to npm?</span>
+          <span class="acts"><button>Allow once</button><button>Deny</button></span>
+        </div>
+        <div class="g-note">
+          <span class="app-icon" data-theme="eclipse" style="--sz: 38px"><span data-halo="wait1.4 work7.3 idle4.1" data-split data-size="25" data-still></span></span>
+          <span class="tx"><b>Migrate ops dashboards<span class="w">14m ago</span></b>Keep the old Grafana folder?</span>
+          <span class="acts"><button>Keep</button><button>Delete</button></span>
+        </div>
+        <div class="g-note">
+          <span class="face working">A</span>
+          <span class="tx"><b>Ada<span class="w">09:00</span></b>Morning Rogier. One urgent thing: EU card payments…</span>
+          <span class="acts"><button>Reply</button></span>
+        </div>
+      </div>
+
+      <div class="lk-foot">
+        <span class="round" title="Flashlight"
+          ><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M5 1.8h6v2.4L9.6 6.6v6.8a.8.8 0 0 1-.8.8H7.2a.8.8 0 0 1-.8-.8V6.6L5 4.2z" /><path d="M5 4.2h6M8 8.4v1.6" stroke-linecap="round" /></svg
+        ></span>
+        <span class="haptic">haptic · tap on answer</span>
+        <span class="round" title="Camera"
+          ><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="4.3" width="12.4" height="9" rx="2" /><path d="M5.6 4.3l1-1.8h2.8l1 1.8" /><circle cx="8" cy="8.8" r="2.3" /></svg
+        ></span>
+      </div>
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

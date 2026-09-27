@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390, height=844" />
+    <title>Fix 3-D Secure checkout · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .th { flex: none; padding: 0 20px 10px; border-bottom: 1px solid var(--line-soft); }
+      .th-title { font-size: 17px; line-height: 1.3; }
+      .th-sub { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+      .th .tideline { margin-top: 8px; }
+
+      /* The transcript reads top to bottom like any conversation, so here the past is above and
+         Now sits at the bottom, right where the answer dock is. */
+      .m-scroll { padding: 12px 0 360px; }
+      .m-scroll > .sp::before { top: 22px; }
+      .sp-body .bubble { max-width: none; font-size: 15px; line-height: 1.45; border-radius: 16px 16px 16px 5px; }
+      .sp-body .prose { font-size: 15px; line-height: 1.5; }
+      .sp-body .prose code { font-size: 12px; }
+      /* Code runs off the right edge of the screen and scrolls sideways, the way a phone shows
+         anything wider than itself. */
+      .sp-body pre.code { margin-right: -16px; padding: 10px 6px 10px 12px; border-radius: 12px 0 0 12px; font-size: 10.5px; line-height: 1.6; overflow-x: auto; scrollbar-width: none; }
+      .sp-start { font-size: var(--fs-sm); color: var(--muted); padding-top: 3px; }
+      .sp-start b { color: var(--ink); font-weight: var(--w-emph); }
+      .sp-start .mono { font-size: 11px; }
+
+      /* A turn of work: a sea bar lies on the spine for as long as the agent worked. */
+      .sp-item.worked { padding: 5px 0; }
+      .sp-item.worked::before { content: ""; position: absolute; left: 54px; top: 5px; bottom: 5px; width: 4px; border-radius: 2px; background: var(--live); }
+      .sp-item.worked .worked-line { padding-left: 8px; }
+      .sp-item.worked .sp-body { padding-left: 0; }
+
+      .sp-body .files { max-width: none; }
+      .sp-body .files-head { padding: 9px 8px 9px 12px; font-size: var(--fs-md); }
+      .sp-body .file { grid-template-columns: 1fr auto auto 44px; padding: 6px 12px; }
+
+      /* Waiting on you: the spine turns coral from the Request down to the Now line. */
+      .sp-item.waiting::after { content: ""; position: absolute; left: 55.25px; top: 26px; bottom: -18px; width: 1.5px; background: var(--now); }
+      .sp-item.waiting .sp-t { color: var(--now-ink); }
+      .sp-body .wait-line { font-size: 14px; }
+      .m-now { margin: 6px 0 0; }
+
+      /* The answer dock: the Request's one big row first, the queued input, then a voice-first
+         reply. It is the composer glass too: it thins out while you scroll back. */
+      .m-dock { padding-top: 10px; }
+      .rq-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: var(--w-emph); }
+      .rq-head .m { width: 16px; height: 16px; }
+      .rq-head .t-mono { margin-left: auto; font-size: var(--fs-micro); font-weight: 400; color: var(--now-ink); }
+      .rq-cmd { display: block; margin-top: 6px; padding: 7px 10px; border-radius: 9px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line-soft); font-size: 12px; color: var(--ink); white-space: nowrap; }
+      .big-pair.wide { grid-template-columns: minmax(0, 1fr) 108px; }
+      .big-pair.wide .big-ans { font-size: 14px; min-height: 46px; }
+
+      .m-dock .queued { margin: 2px 0 0; padding: 6px 4px 6px 12px; }
+      .queued-stack { flex: 1; min-width: 0; }
+      .queued-stack .queued-text { display: block; }
+      .queued-stack .queued-when { display: block; margin-top: 1px; }
+      .q-btn { height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: var(--w-emph); color: var(--ink); }
+      .q-x { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--muted); }
+      .q-x .m { width: 14px; height: 14px; color: var(--muted); }
+
+      /* Scrolled back, only the one big answer stays; the command and the other answers fold away. */
+      .m-dock.is-shrunk .rq-cmd,
+      .m-dock.is-shrunk .big-pair { display: none; }
+      .m-dock.is-shrunk .big-ans.is-go { min-height: 44px; }
+    </style>
+  </head>
+  <body class="phone">
+    <div data-status></div>
+    <nav class="m-nav" aria-label="Thread">
+      <a class="m-back" href="intake.html"><i data-m="chev-left"></i>Now</a>
+      <span class="m-nav-mid">fix/3ds-eu-cards</span>
+      <span class="m-nav-end"><button class="m-icon" aria-label="More thread actions"><i data-m="more"></i></button></span>
+    </nav>
+    <header class="th">
+      <h1 class="th-title">Fix <span class="nw">3-D Secure</span> checkout for EU cards</h1>
+      <p class="th-sub"><span class="proj lane-webshop">webshop</span><span class="dotsep">·</span><span>studio-mac</span><span class="dotsep">·</span><span>Opus 5.5</span><span class="dotsep">·</span><span>auto-accept edits</span></p>
+      <div data-tideline="session" data-w="150" role="img" aria-label="Started 09:02, worked until 09:13, waiting on you for 28 minutes, one message queued"></div>
+    </header>
+
+    <div class="m-scroll" data-transcript data-scrolled-by="320">
+      <div class="sp" aria-label="Transcript">
+        <div class="sp-item">
+          <span class="sp-t">09:02</span><span class="sp-dot"><i data-m="session" class="sm"></i></span>
+          <p class="sp-body sp-start">Started from the Proposal <b>Checkout fails for EU cards</b> · <span class="mono">new worktree from main</span></p>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t"></span><span class="sp-dot"><span class="av" aria-hidden="true">R</span></span>
+          <div class="sp-body"><p class="bubble">Checkout fails for EU cards that need <span class="nw">3-D Secure</span> since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p></div>
+        </div>
+        <div class="sp-item worked">
+          <span class="sp-t"></span><span></span>
+          <div class="sp-body"><button class="worked-line"><span>Worked for <b>2m 14s</b></span><i data-m="chev-right"></i></button></div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">09:04</span><span class="sp-dot"><i data-b="anthropic"></i></span>
+          <div class="sp-body prose">
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need <span class="nw">3-D Secure</span>. <code>handlePaymentResult</code> treats that as a failure, so we show "Card declined" instead of the <span class="nw">3-D Secure</span> modal.</p>
+            <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</pre>
+            <p>I wrote a failing test first, then the fix.</p>
+          </div>
+        </div>
+        <div class="sp-item worked">
+          <span class="sp-t"></span><span></span>
+          <div class="sp-body"><button class="worked-line"><span>Worked for <b>4m 51s</b></span><i data-m="chev-right"></i><span class="faint">edited 3 files</span></button></div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">09:10</span><span class="sp-dot"><i data-m="diff" class="sm"></i></span>
+          <div class="sp-body">
+            <div class="files">
+              <div class="files-head">3 changed files<span class="add">+48</span><span class="del">-12</span><span class="acts"><button class="btn btn-sm btn-ghost">Open diff</button></span></div>
+              <div class="file"><span>payment.ts</span><span class="add">+21</span><span class="del">-9</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span></div>
+              <div class="file"><span>payment.test.ts</span><span class="add">+19</span><span class="del">-0</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span></div>
+              <div class="file"><span>3ds-modal.tsx</span><span class="add">+8</span><span class="del">-3</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">09:12</span><span class="sp-dot"><i data-m="done" class="sm live"></i></span>
+          <div class="sp-body"><span class="test-line"><b>24 passed</b><span class="mono">pnpm test checkout</span></span></div>
+        </div>
+        <div class="sp-item">
+          <span class="sp-t">09:13</span><span class="sp-dot"><i data-b="anthropic"></i></span>
+          <div class="sp-body prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+        <div class="sp-item waiting">
+          <span class="sp-t"></span><span class="sp-dot"><i data-m="decision" class="now"></i></span>
+          <div class="sp-body"><p class="wait-line">Waiting on you to allow <code>git push</code></p></div>
+        </div>
+      </div>
+      <div class="m-now" aria-label="Now, 09:41, waiting 28 minutes"><span class="nowtab">09:41</span><span class="m-now-note">your turn</span></div>
+    </div>
+
+    <div class="m-dock" data-composer role="group" aria-label="Request and reply">
+      <div class="rq" role="group" aria-label="Request: run a command">
+        <div class="rq-head"><i data-m="decision" class="now"></i>Run a command?<span class="t-mono">asked 09:13</span></div>
+        <code class="rq-cmd">git push -u origin fix/3ds-eu-cards</code>
+      </div>
+      <button class="big-ans is-go"><i data-m="done"></i>Allow once<small>asks again next time</small></button>
+      <div class="big-pair wide"><button class="big-ans">Always allow git push</button><button class="big-ans">Deny</button></div>
+      <p class="m-dock-hint"><i data-m="swipe"></i>Or swipe the Request right<span class="haptic"><i data-m="haptic"></i>firm tap on allow</span></p>
+      <div class="queued">
+        <i data-m="queued"></i>
+        <span class="queued-stack"><span class="queued-text">Also check the Apple Pay path</span><span class="queued-when">queued · runs next</span></span>
+        <button class="q-btn">Steer</button>
+        <button class="q-x" aria-label="Cancel the queued message"><i data-m="close"></i></button>
+      </div>
+      <div class="vc">
+        <button class="vc-key" aria-label="Add a file or photo"><i data-m="plus"></i></button>
+        <button class="vc-hold" aria-label="Hold to talk to the agent"><i data-m="mic"></i>Hold to talk<small>tap to type</small></button>
+      </div>
+    </div>
+    <i class="home-ind" aria-hidden="true"></i>
+  </body>
+</html>

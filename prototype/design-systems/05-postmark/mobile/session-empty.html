@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>New thread · webshop · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .draft {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 14px 20px 0;
+      }
+      /* The project's sorting tag, drawn large: a luggage label with its punched hole. */
+      .label-tag {
+        position: relative;
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        padding: 0 14px 0 28px;
+        color: var(--on-ink);
+        font: 680 13px / 1 var(--narrow);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--proj-webshop);
+        clip-path: polygon(13px 0, 100% 0, 100% 100%, 13px 100%, 0 50%);
+        border-radius: 4px;
+        transform: rotate(-3deg);
+        filter: drop-shadow(0 2px 3px oklch(30% 0.05 60 / 0.2));
+      }
+      .label-tag::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        width: 7px;
+        height: 7px;
+        margin-top: -3.5px;
+        border-radius: 50%;
+        background: var(--bg);
+      }
+      .draft h1 {
+        margin-top: 16px;
+        font-size: 20px;
+        font-weight: 650;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+      }
+      .draft .line {
+        margin-top: 6px;
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+      .starts {
+        margin-top: 22px;
+      }
+      .starts .label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .starts .label .perf {
+        flex: 1;
+      }
+      .start {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 2px 12px;
+        width: 100%;
+        min-height: 64px;
+        margin-bottom: 8px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+        text-align: left;
+      }
+      .start .verb {
+        font: 640 10.5px / 1 var(--narrow);
+        letter-spacing: var(--track-stamp);
+        text-transform: uppercase;
+        color: var(--violet);
+      }
+      .start .t {
+        grid-column: 1;
+        font-size: 15px;
+        font-weight: 580;
+        line-height: 1.3;
+      }
+      .start small {
+        grid-column: 1;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .start .post {
+        grid-column: 2;
+        grid-row: 1 / span 3;
+        transform: rotate(3deg);
+      }
+      /* Voice first: the big button is the main way in; typing is the fallback below it. */
+      .talk {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+      .talk-btn {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 84px;
+        height: 84px;
+        border-radius: 50%;
+        background: var(--violet);
+        color: var(--on-ink);
+        box-shadow:
+          0 0 0 10px var(--violet-soft),
+          var(--lift-shadow);
+      }
+      .talk-btn .mk {
+        width: 32px;
+        height: 32px;
+      }
+      .talk b {
+        margin-top: 8px;
+        font-size: 15px;
+        font-weight: 620;
+      }
+      .talk small {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .bottom {
+        flex: none;
+        padding: 0 10px 34px;
+      }
+      .bottom .c-input {
+        font-size: 15px;
+      }
+      .bottom .lip {
+        margin-inline: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <nav class="m-nav">
+        <a class="m-back" aria-label="Back to Threads"><svg class="mk"><use href="#chev-left" /></svg></a>
+        <div class="m-title">
+          <b>New thread</b>
+          <small>Draft · starts when you send</small>
+        </div>
+        <button class="icon-btn" aria-label="Discard draft"><svg class="mk"><use href="#x" /></svg></button>
+      </nav>
+
+      <div class="draft">
+        <span class="label-tag">webshop</span>
+        <h1>What should the agent do in webshop?</h1>
+        <p class="line">It gets its own worktree of webshop, on a new branch from main.</p>
+
+        <div class="starts">
+          <div class="label">From Intake <span class="perf"></span></div>
+          <button class="start">
+            <span class="verb">Fix</span>
+            <span class="t">Checkout fails for EU cards</span>
+            <small>Proposal · Urgent · 412 events</small>
+            <span class="post post--md" data-src="sentry"></span>
+          </button>
+          <button class="start">
+            <span class="verb">Investigate</span>
+            <span class="t">Stripe webhook retries</span>
+            <small>Proposal · Stripe and Sentry</small>
+            <span class="post post--md" data-src="stripe"></span>
+          </button>
+        </div>
+
+        <div class="talk">
+          <button class="talk-btn" aria-label="Hold to talk"><svg class="mk"><use href="#mic" /></svg></button>
+          <b>Hold to talk</b>
+          <small><span class="haptic"><svg class="mk"><use href="#haptic" /></svg>soft tick on press</span>Let go to review before it starts</small>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <div class="composer">
+          <div class="c-card">
+            <textarea class="c-input" rows="1" placeholder="Say what you want done…"></textarea>
+            <div class="c-row">
+              <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
+              <button class="sel"><svg class="mk"><use href="#shield" /></svg>Auto-accept edits<svg class="mk"><use href="#chev-down" /></svg></button>
+              <span class="c-spacer"></span>
+              <button class="pill"><svg class="mk"><use href="#b-claude" /></svg>Opus 5.5</button>
+              <button class="send" aria-label="Start thread" disabled><svg class="mk"><use href="#arrow-up" /></svg></button>
+            </div>
+          </div>
+          <div class="lip">
+            <button class="sel"><svg class="mk"><use href="#worktree" /></svg>New worktree</button>
+            <span class="rule"></span>
+            <button class="sel"><svg class="mk"><use href="#branch" /></svg><span class="mono">from main</span></button>
+            <button class="sel right"><svg class="mk"><use href="#machine" /></svg>studio-mac</button>
+          </div>
+        </div>
+      </div>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

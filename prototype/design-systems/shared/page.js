@@ -13,4 +13,15 @@
   if (theme) root.dataset.theme = theme;
   var state = params.get("state");
   if (state) root.dataset.state = state;
+
+  // Inside a book or compare frame a page must not take focus: focusing an element in a
+  // same-origin iframe scrolls the outer page to that frame and steals the reader's keys.
+  if (window.top !== window) {
+    HTMLElement.prototype.focus = function () {};
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll("[autofocus]").forEach(function (el) {
+        el.removeAttribute("autofocus");
+      });
+    });
+  }
 })();

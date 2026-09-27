@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280, height=800" />
+    <title>(3) New thread in webshop · Hercule</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .topbar { gap: 6px; }
+      .crumb { margin-right: 4px; }
+      .ttabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+      .ttab .draft-dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px dashed var(--future-ink); }
+      .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 296px; }
+      .body { position: relative; min-height: 0; }
+
+      /* The body is narrower than on the desktop, so the draft column is too. */
+      .draft .startline, .draft-title, .draft-sub, .starts { width: 680px; }
+      .draft .composer { width: 680px; }
+      .draft .c-input { min-height: 76px; }
+
+      /* The docked Now column */
+      .nowcol { display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--surface); border-left: 1px solid var(--line-soft); }
+      .nc-head { display: flex; align-items: center; gap: 10px; height: 48px; flex: none; padding: 0 12px 0 18px; }
+      .nc-tab { position: static; box-shadow: none; }
+      .nc-day { font-size: var(--fs-sm); font-weight: var(--w-emph); color: var(--muted); }
+      .nc-head .icon-btn { margin-left: auto; }
+      .nc-sec { padding: 10px 18px 16px; border-top: 1px solid var(--line-soft); }
+      .nc-sec > .label { height: 26px; }
+      .nc-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; margin: 0 -8px; padding: 8px; border-radius: 10px; color: var(--ink); }
+      .nc-row:hover { background: var(--hover); }
+      .nc-row.is-here { background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); }
+      .nc-row b { font-weight: var(--w-emph); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .nc-row small { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; }
+      .nc-row small .proj { font-size: var(--fs-xs); color: var(--muted); }
+      .nc-here { margin-left: auto; font-size: var(--fs-micro); color: var(--faint); }
+      .nc-next { width: 100%; margin-top: 10px; justify-content: space-between; }
+
+      .hour { position: relative; margin-top: 4px; padding-bottom: 20px; }
+      .hour-now { position: absolute; top: 18px; bottom: 16px; width: var(--now-w); transform: translateX(-50%); background: var(--now); z-index: 1; }
+      .hl { display: flex; flex-direction: column; gap: 5px; padding-bottom: 12px; }
+      .hl-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--ink); }
+      .hl-name .m { width: 14px; height: 14px; }
+      .hl-name em { font-style: normal; color: var(--faint); margin-left: 2px; }
+      .hl-track { position: relative; height: 8px; }
+      .hl-track::before { content: ""; position: absolute; left: 0; right: 0; top: 3.5px; height: 1px; background: var(--line); }
+      .hl-track i { position: absolute; top: 0; height: 8px; border-radius: 3px; }
+      .hs-turn { background: var(--past); }
+      .hs-turn.is-live { background: var(--live); border-radius: 3px 0 0 3px; }
+      .hs-wait { background: var(--now); top: 2px !important; height: 4px !important; }
+      .hs-queued { width: 8px; margin-left: -4px; border-radius: 50% !important; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--future); }
+      .hs-paused { top: 3px !important; height: 0 !important; border-top: 1.5px dashed var(--muted); border-radius: 0 !important; }
+      .hour-axis { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .hour-axis span { position: absolute; transform: translateX(-50%); }
+      .hour-axis span:first-child { transform: none; }
+      .hour-axis span:last-child { transform: translateX(-100%); }
+
+      .nc-next-row { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; height: 30px; font-size: var(--fs-sm); }
+      .nc-next-row time { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--future-ink); }
+      .nc-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--muted); }
+      .nc-foot b { color: var(--ink); font-weight: var(--w-emph); }
+      .nc-cap { margin-left: auto; color: var(--faint); }
+      .hs-new { width: 9px; height: 9px !important; margin: -0.5px 0 0 -4.5px; border-radius: 50% !important; background: var(--now); box-shadow: 0 0 0 3px var(--now-wash); }
+      .hs-new::after { content: ""; position: absolute; left: 9px; top: 3.5px; width: 60px; border-top: 1.5px dashed var(--future); }
+    </style>
+  </head>
+  <body class="web">
+    <aside data-rail="threads"></aside>
+    <main class="main">
+      <header class="topbar">
+        <span class="crumb">webshop /</span>
+        <div class="ttabs" role="tablist" aria-label="Threads in this workspace">
+          <a class="ttab" role="tab" aria-selected="true"><span class="draft-dot" aria-hidden="true"></span><span>New thread</span></a>
+          <a class="ttab" role="tab" aria-selected="false" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix <span class="nw">3-D Secure</span> checkout for EU cards</span></a>
+          <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
+        </div>
+        <div class="top-end">
+          <button class="icon-btn" aria-label="More thread actions"><i data-m="more"></i></button>
+        </div>
+      </header>
+
+      <div class="split">
+        <div class="body">
+          <section class="draft">
+            <p class="startline">09:41 <span>starts when you send</span></p>
+            <h1 class="draft-title">What should the agent do in webshop?</h1>
+            <p class="draft-sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+            <div class="composer" data-composer>
+              <div class="card-c">
+                <div class="c-input" role="textbox" tabindex="0" aria-label="Message">Say what you want done…</div>
+                <div class="c-row">
+                  <button class="icon-btn" aria-label="Attach"><i data-m="plus"></i></button>
+                  <button class="c-sel"><i data-m="shield"></i>auto-accept edits<i data-m="chev-down" class="caret"></i></button>
+                  <button class="c-sel" style="min-width: 84px"><i data-m="gauge"></i>High<i data-m="chev-down" class="caret"></i></button>
+                  <button class="c-pill"><i data-b="anthropic"></i>Claude Code<span class="acct">·</span>Opus 5.5</button>
+                  <span class="c-spacer"></span>
+                  <button class="icon-btn" aria-label="Voice"><i data-m="mic"></i></button>
+                  <button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button>
+                </div>
+              </div>
+              <div class="lip">
+                <i data-m="worktree"></i><span>New worktree</span>
+                <span class="c-rule"></span>
+                <i data-m="branch"></i><span>from <span class="mono">main</span></span>
+                <span class="c-spacer"></span>
+                <i data-m="machine"></i><span>studio-mac</span><span class="faint">5 of 6</span>
+              </div>
+            </div>
+
+            <div class="starts">
+              <div class="label">Start from what came in</div>
+              <div class="start-grid">
+                <button class="start"><i data-m="decision" class="now"></i><span><b>Fix:</b> Checkout fails for EU cards with <span class="nw">3-D Secure</span></span><small>Intake · urgent · 08:52</small></button>
+                <button class="start"><i data-b="stripe"></i><span><b>Investigate:</b> Stripe webhook retries rising</span><small>Intake · 07:48</small></button>
+                <button class="start"><i data-b="intercom"></i><span><b>Research:</b> Add iDEAL as a payment method</span><small>Intake · 5 requests</small></button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="nowcol" aria-label="Now">
+          <div class="nc-head"><span class="nowtab nc-tab">09:41</span><span class="nc-day">Tue 29 Sep</span><button class="icon-btn sm" aria-label="Fold the Now column"><i data-m="sidebar"></i></button></div>
+
+          <section class="nc-sec">
+            <div class="label">Waiting on you<span class="n">3</span></div>
+            <a class="nc-row" href="session-active.html">
+              <i data-m="decision" class="now"></i>
+              <b>Fix <span class="nw">3-D Secure</span> checkout</b>
+              <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
+              <small><span class="proj lane-webshop">webshop</span><span class="dotsep">·</span>git push</small>
+            </a>
+            <a class="nc-row">
+              <i data-m="decision" class="now"></i>
+              <b>Migrate ops dashboards</b>
+              <span class="wait"><span class="wbar"><i style="width: 57%"></i></span><span class="mono">17m</span></span>
+              <small><span class="proj lane-ops">ops</span><span class="dotsep">·</span>Keep the old Grafana folder?</small>
+            </a>
+            <a class="nc-row">
+              <i data-m="decision" class="now"></i>
+              <b>Ship release v2.15</b>
+              <span class="wait"><span class="wbar"><i style="width: 20%"></i></span><span class="mono">6m</span></span>
+              <small><span class="proj lane-payments">payments-api</span><span class="dotsep">·</span>npm publish</small>
+            </a>
+            <button class="btn btn-sm nc-next">Next waiting<kbd>J</kbd></button>
+          </section>
+
+          <!-- The workspace's sessions over this hour, one lane each, on the same axis as the
+               tideline: sea while a turn runs, coral while it waits on Rogier, hollow ahead. -->
+          <section class="nc-sec">
+            <div class="label">In webshop<span class="n">09:00 to 10:00</span></div>
+            <div class="hour" role="img" aria-label="This hour in webshop: Fix 3-D Secure worked until 09:13 and has waited since; the new thread starts when you send; Refactor cart totals has worked since 09:19; Label new issues is paused">
+              <span class="hour-now" style="left: 68.33%"></span>
+              <div class="hl">
+                <span class="hl-name"><i data-m="decision" class="now"></i>Fix 3-D Secure</span>
+                <span class="hl-track">
+                  <i class="hs-turn" style="left: 3.33%; width: 3.84%"></i>
+                  <i class="hs-turn" style="left: 8.33%; width: 8.17%"></i>
+                  <i class="hs-turn" style="left: 17%; width: 4.67%"></i>
+                  <i class="hs-wait" style="left: 21.67%; width: 46.66%"></i>
+                  <i class="hs-queued" style="left: 72%"></i>
+                </span>
+              </div>
+              <div class="hl">
+                <span class="hl-name"><i data-m="working" class="live"></i>Refactor cart totals</span>
+                <span class="hl-track"><i class="hs-turn is-live" style="left: 31.67%; width: 36.66%"></i></span>
+              </div>
+              <div class="hl">
+                <span class="hl-name"><i data-m="queued" class="future"></i>New thread<em>starts at send</em></span>
+                <span class="hl-track"><i class="hs-new" style="left: 68.33%"></i></span>
+              </div>
+              <div class="hl">
+                <span class="hl-name"><i data-m="paused" class="muted"></i>Label new issues<em>paused</em></span>
+                <span class="hl-track"><i class="hs-paused" style="left: 0; width: 68.33%"></i></span>
+              </div>
+              <div class="hour-axis"><span style="left: 0">09:00</span><span style="left: 50%">09:30</span><span style="left: 100%">10:00</span></div>
+            </div>
+          </section>
+
+          <section class="nc-sec">
+            <div class="label">Next</div>
+            <div class="nc-next-row"><i data-m="heartbeat" class="future"></i><span>Ada's heartbeat</span><time>10:00</time></div>
+            <div class="nc-next-row"><i data-m="triage" class="future"></i><span>Triage pass</span><time>11:00</time></div>
+          </section>
+
+          <div class="nc-foot"><i data-m="working" class="live"></i><span><b>8</b> working · <b>12</b> idle</span><span class="nc-cap">build-box-1 at cap</span></div>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

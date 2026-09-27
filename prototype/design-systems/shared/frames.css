@@ -5,6 +5,8 @@
   --f-chrome: #e9e9eb;
   --f-chrome-ink: #6b6b70;
   --f-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 18px 50px -12px rgb(0 0 0 / 0.35);
+  /* Derived from the chrome ink, so a book that sets a dark chrome gets a dark URL field too. */
+  --f-url: color-mix(in srgb, var(--f-chrome-ink) 12%, transparent);
   margin: 0;
   display: flex;
   flex-direction: column;
@@ -38,7 +40,7 @@
   padding: 0 calc(14px * var(--f-scale, 1));
   font: calc(12.5px * var(--f-scale, 1)) / 1 -apple-system, system-ui, sans-serif;
   color: var(--f-chrome-ink);
-  border-bottom: 1px solid rgb(0 0 0 / 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--f-chrome-ink) 16%, transparent);
 }
 .f-dots {
   display: flex;
@@ -48,7 +50,7 @@
   width: calc(11px * var(--f-scale, 1));
   height: calc(11px * var(--f-scale, 1));
   border-radius: 50%;
-  background: rgb(0 0 0 / 0.14);
+  background: color-mix(in srgb, var(--f-chrome-ink) 30%, transparent);
 }
 .f-nav {
   letter-spacing: 0.2em;
@@ -65,7 +67,7 @@
   gap: calc(6px * var(--f-scale, 1));
   height: calc(26px * var(--f-scale, 1));
   border-radius: calc(7px * var(--f-scale, 1));
-  background: rgb(255 255 255 / 0.7);
+  background: var(--f-url);
   transform: translateX(calc(-40px * var(--f-scale, 1)));
 }
 .f-url svg {

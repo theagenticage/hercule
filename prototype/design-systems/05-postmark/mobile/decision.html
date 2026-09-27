@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Your call · Fix 3-D Secure checkout · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      /* The end of the thread, under the sheet. Faded at the top: earlier turns are above. */
+      .tail {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        /* The sheet covers the bottom 422px; the thread ends just above it. */
+        padding: 0 16px 436px;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent, #000 56px);
+        mask-image: linear-gradient(to bottom, transparent, #000 56px);
+      }
+      .tail > * {
+        flex: none;
+      }
+      .tail .prose {
+        margin: 10px 0;
+        font-size: 14.5px;
+      }
+      .tail .files {
+        grid-template-columns: minmax(0, 1fr);
+        margin: 12px 0;
+      }
+      .tail .files-head {
+        justify-content: space-between;
+      }
+      .tail .files-head .rs {
+        font-size: 10px;
+      }
+      .tail .file {
+        font-size: 11.5px;
+      }
+      .tail .code {
+        margin: 10px 0;
+        font-size: 12px;
+      }
+      .tail .worked {
+        margin: 12px 0 6px;
+      }
+      /* The Request, as a sheet in thumb reach. */
+      .decide {
+        padding: 0 14px 40px;
+      }
+      .d-head {
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        margin: 14px 4px 10px;
+      }
+      .d-head i[data-m] {
+        width: 24px;
+        height: 24px;
+      }
+      .d-head h2 {
+        font-size: 18px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+      .d-head small {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .d-cmd {
+        margin: 0 2px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font: 13px / 1.45 var(--mono);
+        color: var(--ink);
+        background: color-mix(in oklch, var(--ink) 6%, transparent);
+      }
+      .d-meta {
+        display: flex;
+        gap: 14px;
+        margin: 9px 6px 14px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .d-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .d-meta .mk {
+        width: 13px;
+        height: 13px;
+      }
+      .d-meta .mono {
+        font-size: 11.5px;
+      }
+      .d-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 12px 4px 0;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .d-foot .voice {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .d-foot .voice .mk {
+        width: 15px;
+        height: 15px;
+        color: var(--violet);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <nav class="m-nav">
+        <a class="m-back" aria-label="Back to Intake"><svg class="mk"><use href="#chev-left" /></svg></a>
+        <div class="m-title">
+          <b>Fix 3-D Secure checkout for EU cards</b>
+          <small><i class="tag" data-p="webshop"></i>webshop · Opus 5.5 · studio-mac</small>
+        </div>
+        <button class="icon-btn" aria-label="More"><svg class="mk"><use href="#more" /></svg></button>
+      </nav>
+
+      <div class="tail">
+        <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+        <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+        <div class="worked"><span>Worked for <b>4m 51s</b></span><svg class="mk"><use href="#chev-right" /></svg></div>
+        <div class="files">
+          <div class="files-main">
+            <div class="files-head">
+              <span>3 changed files <span class="plus">+48</span> <span class="minus">-12</span></span>
+              <span class="rs rs--green tilt-a"><svg class="mk"><use href="#done" /></svg>24 passed</span>
+            </div>
+            <div class="file"><span>src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+            <div class="file"><span>src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+            <div class="file"><span>src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+          </div>
+        </div>
+        <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+      </div>
+
+      <section class="sheet-m decide" aria-label="Request">
+        <div class="grabber"></div>
+        <div class="d-head">
+          <i data-m="decision" class="s-attn"></i>
+          <div>
+            <h2>Run a command?</h2>
+            <small>Opened from a notification · 09:14</small>
+          </div>
+          <span class="rs rs--ochre tilt-d">Waiting on you</span>
+        </div>
+        <div class="d-cmd">git push -u origin fix/3ds-eu-cards</div>
+        <div class="d-meta">
+          <span><svg class="mk"><use href="#branch" /></svg><span class="mono">fix/3ds-eu-cards</span> → main</span>
+          <span><svg class="mk"><use href="#machine" /></svg>studio-mac</span>
+        </div>
+        <div class="ledger ledger--thumb is-stacked">
+          <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Deny</b><span class="d">The agent is told no and carries on</span></button>
+          <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#shield" /></svg></span><b>Always allow git push</b><span class="d">Allows git push for the rest of this thread</span></button>
+          <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#check" /></svg></span><b>Allow once</b><span class="d">Runs this push, asks again next time</span></button>
+        </div>
+        <div class="d-foot">
+          <span class="haptic"><svg class="mk"><use href="#haptic" /></svg>firm tap as the stamp lands</span>
+          <span class="voice"><svg class="mk"><use href="#mic" /></svg>Hold to answer by voice</span>
+        </div>
+      </section>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

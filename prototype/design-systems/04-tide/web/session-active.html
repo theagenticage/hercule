@@ -14,7 +14,6 @@
       .topbar { gap: 6px; }
       .crumb { margin-right: 4px; }
       .ttabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
-      .top-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
       .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 296px; }
       .body { position: relative; min-height: 0; }
       .body::before {
@@ -23,6 +22,48 @@
       }
       .tx { --tx-pad: 352px; }
       .composer-wrap { padding: 0 20px 16px; }
+
+      /* The docked Now column */
+      .nowcol { display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--surface); border-left: 1px solid var(--line-soft); }
+      .nc-head { display: flex; align-items: center; gap: 10px; height: 48px; flex: none; padding: 0 12px 0 18px; }
+      .nc-tab { position: static; box-shadow: none; }
+      .nc-day { font-size: var(--fs-sm); font-weight: var(--w-emph); color: var(--muted); }
+      .nc-head .icon-btn { margin-left: auto; }
+      .nc-sec { padding: 10px 18px 16px; border-top: 1px solid var(--line-soft); }
+      .nc-sec > .label { height: 26px; }
+      .nc-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; margin: 0 -8px; padding: 8px; border-radius: 10px; color: var(--ink); }
+      .nc-row:hover { background: var(--hover); }
+      .nc-row.is-here { background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); }
+      .nc-row b { font-weight: var(--w-emph); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .nc-row small { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; }
+      .nc-row small .proj { font-size: var(--fs-xs); color: var(--muted); }
+      .nc-here { margin-left: auto; font-size: var(--fs-micro); color: var(--faint); }
+      .nc-next { width: 100%; margin-top: 10px; justify-content: space-between; }
+
+      .hour { position: relative; margin-top: 4px; padding-bottom: 20px; }
+      .hour-now { position: absolute; top: 18px; bottom: 16px; width: var(--now-w); transform: translateX(-50%); background: var(--now); z-index: 1; }
+      .hl { display: flex; flex-direction: column; gap: 5px; padding-bottom: 12px; }
+      .hl-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--ink); }
+      .hl-name .m { width: 14px; height: 14px; }
+      .hl-name em { font-style: normal; color: var(--faint); margin-left: 2px; }
+      .hl-track { position: relative; height: 8px; }
+      .hl-track::before { content: ""; position: absolute; left: 0; right: 0; top: 3.5px; height: 1px; background: var(--line); }
+      .hl-track i { position: absolute; top: 0; height: 8px; border-radius: 3px; }
+      .hs-turn { background: var(--past); }
+      .hs-turn.is-live { background: var(--live); border-radius: 3px 0 0 3px; }
+      .hs-wait { background: var(--now); top: 2px !important; height: 4px !important; }
+      .hs-queued { width: 8px; margin-left: -4px; border-radius: 50% !important; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--future); }
+      .hs-paused { top: 3px !important; height: 0 !important; border-top: 1.5px dashed var(--muted); border-radius: 0 !important; }
+      .hour-axis { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .hour-axis span { position: absolute; transform: translateX(-50%); }
+      .hour-axis span:first-child { transform: none; }
+      .hour-axis span:last-child { transform: translateX(-100%); }
+
+      .nc-next-row { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; height: 30px; font-size: var(--fs-sm); }
+      .nc-next-row time { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--future-ink); }
+      .nc-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--muted); }
+      .nc-foot b { color: var(--ink); font-weight: var(--w-emph); }
+      .nc-cap { margin-left: auto; color: var(--faint); }
     </style>
   </head>
   <body class="web">
@@ -31,7 +72,7 @@
       <header class="topbar">
         <span class="crumb">webshop /</span>
         <div class="ttabs" role="tablist" aria-label="Threads in this workspace">
-          <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix 3-D Secure checkout for EU cards</span></a>
+          <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix <span class="nw">3-D Secure</span> checkout for EU cards</span></a>
           <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
         </div>
         <div class="top-end">
@@ -46,11 +87,11 @@
           <div class="tx" data-transcript data-scrolled-by="300">
             <div class="tx-col">
               <div class="tx-axis" aria-hidden="true"></div>
-              <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="decision.html">Checkout fails for EU cards with 3-D Secure</a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
+              <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="decision.html">Checkout fails for EU cards with <span class="nw">3-D Secure</span></a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
 
               <div class="tx-row is-you">
                 <time>09:02</time>
-                <p class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
+                <p class="bubble">Checkout fails for EU cards that need <span class="nw">3-D Secure</span> since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
               </div>
 
               <div class="tx-row worked">
@@ -61,7 +102,7 @@
               <div class="tx-row">
                 <time>09:04</time>
                 <div class="prose">
-                  <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+                  <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need <span class="nw">3-D Secure</span>. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the <span class="nw">3-D Secure</span> modal.</p>
                   <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
   <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
 }</pre>
@@ -172,7 +213,7 @@
             <div class="label">Waiting on you<span class="n">3</span></div>
             <a class="nc-row is-here" href="session-active.html" aria-current="page">
               <i data-m="decision" class="now"></i>
-              <b>Fix 3-D Secure checkout</b>
+              <b>Fix <span class="nw">3-D Secure</span> checkout</b>
               <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
               <small><span class="proj lane-webshop">webshop</span><span class="dotsep">·</span>git push<span class="nc-here">this thread</span></small>
             </a>
@@ -212,7 +253,7 @@
                 <span class="hl-track"><i class="hs-turn is-live" style="left: 31.67%; width: 36.66%"></i></span>
               </div>
               <div class="hl">
-                <span class="hl-name"><i data-m="paused" class="muted"></i>Label new issues<em>paused, bound tripped</em></span>
+                <span class="hl-name"><i data-m="paused" class="muted"></i>Label new issues<em>paused</em></span>
                 <span class="hl-track"><i class="hs-paused" style="left: 0; width: 68.33%"></i></span>
               </div>
               <div class="hour-axis"><span style="left: 0">09:00</span><span style="left: 50%">09:30</span><span style="left: 100%">10:00</span></div>
