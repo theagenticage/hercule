@@ -78,9 +78,10 @@ The warning has the path `["steps"]`. A save answers it beside the stored workfl
 *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* Two checks read where an action runs (`runsIn`, section 8). They run at `workflow.create`, `workflow.update` and `workflow.validate`, and on a definition sent with `run.start`:
 
 - A step that calls a workspace action, in a workflow with no `workspace` policy, is refused at that step: the action would have no workspace to run in.
+- A git action in a workflow whose policy has no checkout (`ephemeral` with `checkouts: []`) is refused at that step: it would have nothing to work in.
 - A git action without `resourceId`, in a workflow whose policy has more than one checkout, is refused at that step: the checkout it works in would be ambiguous.
 
-A `resourceId` that is not in the run's workspace, and a git action in a workspace with no checkout (`ephemeral` with `checkouts: []`), are not checked at save. The step fails when it runs, with the code `validation` (section 7.2).
+These are decided by the definition alone, because a policy's checkouts are written out and never rendered from a template. A `resourceId` that is not in the run's workspace is not checked at save, because the param can be a template. The step fails when it runs, with the code `validation` (section 7.2).
 
 ### Invalid after the fact
 
@@ -599,7 +600,7 @@ interface StepRecord {
   - **A controller restart does not cut off a workspace step.** A workspace step record found `running` when the controller starts stays `running`: the run resumes asleep, and its runner's reconnect sends the step again. A plugin action found `running` still fails with `interrupted`, because only a workspace step can be delivered again safely.
   - **Cancel.** The cancel transaction ends the records as before. After it commits, the controller settles every workspace step it cancelled with the runner, which stops the step. A settle that cannot be delivered is caught by the runner's report when it returns.
   - **`workspace-failed`.** The run fails with `workspace-failed` when its workspace cannot be set up (a failed setup command), or when the user retires the runner it is pinned to (the message is "runner X was retired"). `failedStepId` is set when a workspace step was running, and that step's record is `failed`. A failed setup always has one: the first workspace step, whose start began the provisioning. A runner retired between two workspace steps has none, and `failedStepId` is absent.
-  - **Error codes of a workspace step.** Beside the codes above, a runner reports `action_failed` (the action ran and failed; for a git action, the message holds the tail of git's error output), `timeout` (the action ran past its 10-minute deadline and was stopped), `unsupported_action` (the runner's build does not implement the action) and `interrupted` (the step was stopped before it finished). `validation` is the code for a step whose `resourceId` is not a checkout of the run's workspace, and for a git action in a workspace with no checkout ("the run's workspace has no checkout"). A workspace step that fails with one of these codes fails the run with `step-failed`, as any action does.
+  - **Error codes of a workspace step.** Beside the codes above, a runner reports `action_failed` (the action ran and failed; for a git action, the message holds the tail of git's error output), `timeout` (the action ran past its 10-minute deadline and was stopped), `unsupported_action` (the runner's build does not implement the action) and `interrupted` (the step was stopped before it finished). `validation` is the code for a step whose `resourceId` is not a checkout of the run's workspace. A workspace step that fails with one of these codes fails the run with `step-failed`, as any action does.
 - Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
 
 ### 7.3 Platform events
@@ -659,7 +660,7 @@ Five built-in actions ship in the core (~~three~~ four of them now *(amended 202
 - **`git.commit`** commits the changes in one checkout of the run's workspace. It takes `{ message, paths?, resourceId? }` and outputs `{ sha, branch, committed }`:
   - `message` is the commit message, and may not be empty.
   - `paths` limits the commit to those paths. Without `paths`, every change in the checkout is staged (`git add -A`) and committed. The paths are given to git after `--`, so a path that starts with `-` is never read as an option.
-  - `resourceId` picks the checkout when the workspace has more than one, and may be left out when it has one (section 1 refuses it left out with more than one). A `resourceId` that is not a checkout of the workspace, and a workspace with no checkout at all, fail the step with the code `validation`.
+  - `resourceId` picks the checkout when the workspace has more than one, and may be left out when it has one (section 1 refuses it left out with more than one). A `resourceId` that is not a checkout of the workspace fails the step with the code `validation`; a workspace with no checkout at all is refused at save (section 1).
   - `sha` is the commit made, `branch` the checkout's branch.
   - **Nothing to commit is not a failure.** The step succeeds with `committed: false`, and `sha` is the checkout's current HEAD. A workflow that wants a failure there routes on it: an edge with the condition `!steps.commit.output.committed` to a step that reports it.
   - The commit's author is the workspace's designated Connection, as for a session ([./13-security.md](./13-security.md) section 9.2). With no Connection behind the workspace, git's own identity on the machine is left as it is.

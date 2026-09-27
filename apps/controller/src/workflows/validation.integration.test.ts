@@ -1256,6 +1256,12 @@ const WORKSPACE_ACTION_WITHOUT_WORKSPACE: InvalidFixture = {
   paths: [["steps", "0", "action"]],
 };
 
+const GIT_ACTION_WITHOUT_CHECKOUT: InvalidFixture = {
+  description: "a git.commit step in a workspace with no checkout",
+  build: () => buildCommitSource(["workspace:", "  kind: ephemeral", "  checkouts: []"]),
+  paths: [["steps", "0", "action"]],
+};
+
 const GIT_ACTION_WITHOUT_RESOURCE: InvalidFixture = {
   description: "a git.commit step with no resourceId in a workspace of two checkouts",
   build: () => buildCommitSource(TWO_CHECKOUTS),
@@ -1263,10 +1269,12 @@ const GIT_ACTION_WITHOUT_RESOURCE: InvalidFixture = {
 };
 
 describe("the workspace actions", () => {
-  it("rejects a workspace action in a workflow with no workspace, and a git action that does not say which of several checkouts it works in", async () => {
+  it("rejects a workspace action in a workflow with no workspace, a git action in a workspace with no checkout, and a git action that does not say which of several checkouts it works in", async () => {
     await withArrangedController(async (controller) => {
       const [noWorkspace] = await expectErrorsAt(controller, WORKSPACE_ACTION_WITHOUT_WORKSPACE);
       expect(noWorkspace!.message).toContain("kind: ephemeral");
+      const [noCheckout] = await expectErrorsAt(controller, GIT_ACTION_WITHOUT_CHECKOUT);
+      expect(noCheckout!.message).toContain("workspace.checkouts");
       const [noResource] = await expectErrorsAt(controller, GIT_ACTION_WITHOUT_RESOURCE);
       expect(noResource!.message).toContain("resourceId");
       await expectNothingStored(controller.base, controller.token);

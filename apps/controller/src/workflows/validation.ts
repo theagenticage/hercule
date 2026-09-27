@@ -654,11 +654,15 @@ const listAgentReferenceIssues = (
  * run in. Returns an issue when:
  *
  * - the workflow has no `workspace`, so a run of it has no workspace at all;
+ * - a git action runs in a workspace with no checkout (`ephemeral` with
+ *   `checkouts: []`), so it has nothing to work in;
  * - a git action names no `resourceId` while the workspace has more than one
  *   checkout, so a run could not tell which checkout to work in.
  *
- * A git action in a workspace with no checkout is not refused here: it fails
- * when the step runs, with an error that says the workspace has no checkout.
+ * All three are decided by the definition alone: the checkouts of a policy
+ * are written out, never rendered from a template. A `resourceId` that names
+ * a repo the workspace has no checkout of is checked when the step runs,
+ * because the param can be a template.
  */
 const listWorkspaceIssues = (
   step: ActionStep,
@@ -677,6 +681,14 @@ const listWorkspaceIssues = (
     ];
   }
   const checkouts = countPolicyCheckouts(workspace);
+  if (isGitActionId(action.id) && checkouts === 0) {
+    return [
+      {
+        path: [...path, "action"],
+        message: `The action ${action.id} works in a checkout, and the workflow's workspace has none. Add the repo it works in under workspace.checkouts.`,
+      },
+    ];
+  }
   if (
     isGitActionId(action.id) &&
     checkouts > 1 &&

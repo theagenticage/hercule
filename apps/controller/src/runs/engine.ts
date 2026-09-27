@@ -248,11 +248,10 @@ const listPolicyResourceIds = (policy: WorkspacePolicy): ReadonlyArray<string> =
 /**
  * Checks that a workspace step can run in the run's workspace, before a
  * runner is chosen or a workspace opened. Returns the error the step fails
- * with, or `undefined` when it can run. A git action needs a checkout to work
- * in: the workspace must have one, and a `resourceId` in its input must name
- * one of them. Saving the workflow refused the other mistakes it could see,
- * but a `resourceId` can come from a template, and an empty workspace is a
- * choice the author may make for other steps.
+ * with, or `undefined` when it can run: a `resourceId` in a git action's
+ * input must name one of the workspace's checkouts. Validation at save and at
+ * `run.start` refused every other mistake, but a `resourceId` can come from a
+ * template, so only the rendered input shows this one.
  */
 const findWorkspaceStepError = (
   policy: WorkspacePolicy,
@@ -261,12 +260,6 @@ const findWorkspaceStepError = (
 ): EngineStepError | undefined => {
   if (!isGitActionId(action)) return undefined;
   const resourceIds = listPolicyResourceIds(policy);
-  if (resourceIds.length === 0) {
-    return {
-      code: "validation",
-      message: `The run's workspace has no checkout, so the action ${action} has nothing to work in. Add a checkout to the workflow's workspace.`,
-    };
-  }
   const resourceId = readResourceId(input);
   if (resourceId !== undefined && !resourceIds.includes(resourceId)) {
     return {

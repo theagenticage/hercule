@@ -492,28 +492,23 @@ describe("a workspace step", () => {
     );
   });
 
-  it("fails with validation when the run's workspace has no checkout, or none of the repo its resourceId names", async () => {
+  it("fails with validation when the run's workspace has no checkout of the repo its resourceId names", async () => {
     await runTest(() =>
       Effect.gen(function* () {
         yield* insertRunner();
         const repoId = yield* insertRepo;
         const otherRepoId = yield* insertRepo;
         const runs = yield* RunService;
-        const noCheckout = {
-          ...buildCommitDefinition(repoId),
-          workspace: { kind: "ephemeral" as const, checkouts: [] },
-        };
-        const otherRepo = buildCommitDefinition(repoId, { resourceId: otherRepoId });
-        for (const definition of [noCheckout, otherRepo]) {
-          const { runId } = yield* runs.start({ definition });
-          const ended = yield* waitForRunToEnd(runId);
-          expect(ended).toMatchObject({ status: "failed", failedStepId: "commit" });
-          expect(ended.runnerId).toBeUndefined();
-          expect(findRecord(ended, "commit")).toMatchObject({
-            status: "failed",
-            error: { code: "validation" },
-          });
-        }
+        const { runId } = yield* runs.start({
+          definition: buildCommitDefinition(repoId, { resourceId: otherRepoId }),
+        });
+        const ended = yield* waitForRunToEnd(runId);
+        expect(ended).toMatchObject({ status: "failed", failedStepId: "commit" });
+        expect(ended.runnerId).toBeUndefined();
+        expect(findRecord(ended, "commit")).toMatchObject({
+          status: "failed",
+          error: { code: "validation" },
+        });
       }),
     );
   });
