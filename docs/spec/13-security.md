@@ -262,11 +262,20 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* Answered. **Transport:** a Unix socket at `<runner storage>/daemon.sock`, mode 0600 in a directory mode 0700, so no other OS user reaches it; no port is bound. **Authentication:** the helper proves nothing itself and the daemon resolves nothing. `hercule git-credential get` sends git's `protocol`/`host`/`path` down the socket together with the `HERCULE_TOKEN` its environment carries - the session token of section 5, minted per session and revoked when it exits - and the daemon relays that as `CredentialRequest { requestId, remote, sessionToken }` to the controller. The controller verifies the token, canonicalises the remote, and answers only when that resource is a checkout of that session's own workspace; anything else is `CredentialAnswer { error }` and the helper prints nothing, which is git's signal to fall through to the machine's own helpers (section 9.5). The machine asks as itself only while it is provisioning a workspace, sending `{ requestId, remote, workspaceId }` in place of the token, and the controller answers only while that workspace is `provisioning` on that runner. Nothing is minted on the runner and no identity is inferred from the OS: a process-tree check was rejected (PID reuse races, double-fork reparenting, and it stops nothing a same-user process could not already do by reading `runner.json`). What stays outside the model is what section 12 already accepts: a same-OS-user process is at parity with the runner, and an agent can always read the token of its own repository.
 
+*(Amended 2026-09-25, [#259](https://github.com/theagenticage/hercule/issues/259).)* The machine also asks as itself while it runs a **workspace step** (section 9.6), because no session runs the step, so no session token exists. It sends the same `{ requestId, remote, workspaceId }` form, naming the run's workspace. No new secret and no new frame are added. The controller answers that form in two cases, and refuses every other with `unauthorized`:
+
+- the workspace is `provisioning` on that runner (as above);
+- a workspace step's record is `running` in that workspace, in a run that is `running` and pinned to that runner.
+
+The remote must still canonicalise to a checkout of that workspace, so the credential only ever works for the workspace's own remotes. A step that has ended, a controller step of the same run (such as `wait`), and another runner naming the workspace all get `unauthorized`. The runner puts the workspace id in the environment of its own git only while it provisions a workspace or runs a workspace step; a session's git carries its session token instead.
+
 ### 9.2 Per-checkout identity
 
 - `credential.useHttpPath=true` makes git include the repository path in the credential lookup, so the helper resolves identity per checkout.
 - The helper answers with a **username hint** from the Connection so git's credential matching distinguishes accounts on the same host. One workspace can therefore mix GitHub accounts at the git level (multi-repo workspaces with one checkout per Resource). This matches Git Credential Manager's own multi-account guidance.
 - Commit author = per-checkout `user.name` / `user.email` from the Connection, injected the same way.
+
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* Per-checkout commit authors are not built yet. The author of every commit - one a session's agent makes, and one the `git.commit` workspace action makes - comes from the workspace's **designated** Connection (section 9.3). In a multi-repo workspace whose checkouts use different Connections, every checkout's commits carry that one author until per-checkout identity is built. Credentials are already per checkout (above); only the author is not.
 
 ### 9.3 `gh` and `GH_TOKEN`
 
@@ -281,6 +290,17 @@ Identity follows the repo, never the agent, in v1. Per-agent git identity (an ag
 ### 9.5 Non-GitHub remotes
 
 Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user configures on the machine) remains the documented fallback for remotes that are not GitHub Connections. Hercule does not manage those credentials.
+
+### 9.6 Workspace actions
+
+*(Added 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* A workspace action is a workflow action that runs in a run's workspace on the run's runner ([./07-workflows.md](./07-workflows.md) section 8, [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md)). A workflow can be fired by an external event, such as a GitHub issue or an email, so its templates carry text an outsider wrote. The rules below keep that text from ever becoming a command on the runner's machine.
+
+- **Argument lists, never shell strings.** Every process a workspace action starts is started from an argument list, with no shell. A template fills an argument and nothing else. An issue titled `fix; rm -rf ~` becomes a commit message as one argument to `git commit`; no shell reads it, so the `rm` never runs. Paths come after `--`, so a path that starts with `-` is never read as an option.
+- **Process group.** Each process leads its own process group. Stopping a step sends SIGTERM to the whole group, waits 5 seconds, then sends SIGKILL. The grace period lets git remove its `index.lock`, so a stopped step does not leave the checkout locked.
+- **One step per workspace.** A workspace runs one workspace step at a time, so two parallel steps never collide on `index.lock`.
+- **Deadline.** Each action has a 10-minute deadline. Past it the step is stopped as above and fails with `timeout`.
+- **Little output is kept.** A failed step's message holds the tail of git's stderr. Nothing else of stdout or stderr is kept.
+- **Credentials.** `git.commit` needs none. ~~The credentials for a push arrive with `git.push` ([#259](https://github.com/theagenticage/hercule/issues/259)), through the helper of section 9.1.~~ *(amended 2026-09-25, [#259](https://github.com/theagenticage/hercule/issues/259))* `git.push` gets its credential through the helper of section 9.1, in the workspace-step case added there: only for the checkout's own remote, and only while the step runs.
 
 ## 10. Taint and provenance in assistant memory
 
@@ -355,5 +375,6 @@ ADRs:
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace actions, section 9.6)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`), `research/connection-setup-ux.md` (branch `research/connection-setup-ux`), `research/assistant-systems.md` (branch `research/assistant-systems`).

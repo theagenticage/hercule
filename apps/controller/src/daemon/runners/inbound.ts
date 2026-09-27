@@ -2,7 +2,7 @@
  * The only consumer of what the fleet reports:
  *
  * - the sessions a runner holds, and what happens in them;
- * - the result of provisioning a workspace;
+ * - the result of provisioning a workspace, and of each workspace step;
  * - the git credentials a runner asks for;
  * - every change that may have given a runner room for more work.
  *
@@ -22,6 +22,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
+import { RunService, WorkspaceSteps } from "../../runs";
 import { SessionService, type StoredInput } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
@@ -32,6 +33,8 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
+  const runs = yield* RunService;
+  const workspaceSteps = yield* WorkspaceSteps;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
 
@@ -39,21 +42,25 @@ const make = Effect.gen(function* () {
     switch (traffic._tag) {
       case "workspaceReported":
         return Effect.gen(function* () {
-          // This is the only place the two domains meet. The workspaces domain
-          // records the runner's report, and the sessions domain decides what
-          // it means for the sessions waiting on the workspace. Both writes
-          // are one transaction, so a failed workspace and the sessions it
-          // strands are updated together or not at all.
+          // This is the only place the domains meet. The workspaces domain
+          // records the runner's report, and the sessions and runs domains
+          // decide what it means for the sessions and runs working in the
+          // workspace. All the writes are one transaction, so a failed
+          // workspace and the work it strands are updated together or not at
+          // all.
           const settled = yield* withTransaction(
             sql,
             Effect.gen(function* () {
               const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
               // A workspace that failed to provision ends the sessions waiting
-              // on it, with the runner's error message as the reason.
+              // on it, with the runner's error message as the reason, and
+              // fails the runs working in it.
               if (settled?.moved === "failed") {
-                yield* sessions.endForWorkspace(
+                const { message } = traffic.report;
+                yield* sessions.endForWorkspace(settled.workspaceId, message ?? null);
+                yield* runs.failRunsInWorkspace(
                   settled.workspaceId,
-                  traffic.report.message ?? null,
+                  message ?? "The runner could not provision the workspace, and gave no reason.",
                 );
               }
               return settled;
@@ -76,13 +83,35 @@ const make = Effect.gen(function* () {
           workspaces.credentialAnswer(traffic.runnerId, traffic.request),
           (answer) => Effect.asVoid(connections.tell(traffic.runnerId, answer)),
         );
+      case "workspaceStepReported":
+        return Effect.gen(function* () {
+          const { runnerId, result } = traffic;
+          yield* runs.recordStepResult(runnerId, result);
+          // The step's end is recorded now, or was already, or the result
+          // was ignored because the runner has no business with the step.
+          // Either way the controller never asks for this result again, so
+          // the step is settled, and the runner deletes its result file. For a
+          // step in a repo's main workspace, which is never deleted, nothing
+          // else deletes it.
+          const { runId, stepId, iteration } = result;
+          workspaceSteps.settle([{ runnerId, runId, stepId, iteration }]);
+        });
+      case "workspaceStepsReported":
+        // The runner holds steps whose records ended while it was away, for
+        // example because their run was cancelled. Each one is settled.
+        return Effect.map(
+          runs.listEndedWorkspaceSteps(traffic.runnerId, traffic.report.steps),
+          workspaceSteps.settle,
+        );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's
         // free room takes a transaction and a credential read per session, and
-        // the rest of the fleet must not wait behind one runner.
-        return forkAndAbsorbFailures(
-          "Dispatching to a freed slot failed",
-          dispatch(traffic.runnerId),
+        // the rest of the fleet must not wait behind one runner. The runner
+        // may also have become placeable without reconnecting, for example by
+        // being undrained, so the runs waiting for a runner are woken too.
+        return Effect.andThen(
+          forkAndAbsorbFailures("Dispatching to a freed slot failed", dispatch(traffic.runnerId)),
+          runs.wakeRunsWaitingForRunner(),
         );
     }
   };
@@ -179,5 +208,12 @@ export class Inbound extends Context.Service<Inbound, Effect.Success<typeof make
 export const InboundLayer: Layer.Layer<
   Inbound,
   never,
-  SqlClient.SqlClient | RunnerConnections | SessionService | WorkspaceService | Dispatch | Live
+  | SqlClient.SqlClient
+  | RunnerConnections
+  | SessionService
+  | WorkspaceService
+  | RunService
+  | WorkspaceSteps
+  | Dispatch
+  | Live
 > = Layer.effect(Inbound)(make);

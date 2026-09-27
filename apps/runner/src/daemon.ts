@@ -29,6 +29,7 @@ import {
 } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
 import { readMachineHeadroom } from "./watermark";
+import { makeWorkspaceSteps } from "./workspace-actions";
 import { makeWorkspaces } from "./workspaces";
 
 /** Lists this machine's network addresses, sorted so two readings can be compared. */
@@ -159,6 +160,12 @@ export const runDaemon = (
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
       });
+      const workspaceSteps = makeWorkspaceSteps({
+        storageDir,
+        workspaces,
+        socketPath,
+        baseEnv: process.env,
+      });
       const credentials = makeCredentialRelay();
       yield* Effect.acquireRelease(
         // A second daemon on the same Hercule Home could give this machine's
@@ -195,6 +202,7 @@ export const runDaemon = (
             providersDir,
             scratchDir,
             workspaces,
+            workspaceSteps,
             socketPath,
             credentials,
             binDir,

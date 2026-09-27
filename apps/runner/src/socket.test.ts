@@ -17,6 +17,7 @@ import {
   RunnerToController,
   encodeChallengeBytes,
   type ControllerHello,
+  MAX_WORKSPACE_STEPS,
   type RunnerFacts,
   type ProbeReport,
   type ProbeRequest,
@@ -33,6 +34,7 @@ import {
   type ControllerPin,
 } from "./socket";
 import { makeCredentialRelay } from "./credentials";
+import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-actions";
 import { makeWorkspaces } from "./workspaces";
 
 /** This machine's facts. These tests are not about the probe. */
@@ -269,11 +271,22 @@ const HERCULE_TOOL = {
   claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
 };
 
+const workspaces = makeWorkspaces({ storageDir: STORAGE_DIR });
+
+/** The workspace steps of a runner that holds none. */
+const IDLE_STEPS = makeWorkspaceSteps({
+  storageDir: STORAGE_DIR,
+  workspaces,
+  socketPath: `${STORAGE_DIR}/daemon.sock`,
+  baseEnv: {},
+});
+
 /** Runs one connection until it ends, and returns how it ended. */
 const runConnection = (
   pin: ControllerPin,
   probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
   proofDeadline: Duration.Duration = PATIENT,
+  workspaceSteps: WorkspaceSteps = IDLE_STEPS,
 ) =>
   Effect.runPromise(
     Effect.result(
@@ -284,7 +297,8 @@ const runConnection = (
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
-        workspaces: makeWorkspaces({ storageDir: STORAGE_DIR }),
+        workspaces,
+        workspaceSteps,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
         binDir: BIN_DIR,
@@ -487,7 +501,12 @@ describe("which controller a runner accepts", () => {
     // a proven connection.
     await delay(Duration.toMillis(DEADLINE) * 4);
     expect(settled, "the runner ended a connection it should have kept").toBeUndefined();
-    expect(stub.received[0]?._tag).toBe("runnerHello");
+    // The hello lists the workspace actions this build implements, so the
+    // controller pins a run that commits only to a runner that can.
+    expect(stub.received[0]).toMatchObject({
+      _tag: "runnerHello",
+      capabilities: expect.arrayContaining(["action:git.commit"]) as unknown,
+    });
 
     stub.hangUp();
     await pending;
@@ -495,6 +514,35 @@ describe("which controller a runner accepts", () => {
     // However the connection ended, it was not because the controller was
     // the wrong one.
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("a runner with workspace steps in flight", () => {
+  it("reports them once the controller has proved its identity, in frames the protocol accepts", async () => {
+    const stub = await stubController();
+    // More steps than one frame may hold, so the report is split.
+    const inFlight = Array.from({ length: MAX_WORKSPACE_STEPS + 1 }, (_, at) => ({
+      runId: `run-${String(at)}`,
+      stepId: "commit",
+      iteration: 1,
+    }));
+    // Running a real step is the job of the workspace steps' own tests. This
+    // test checks that the connection reports whatever steps are in flight.
+    const steps: WorkspaceSteps = { ...IDLE_STEPS, listInFlight: () => inFlight };
+
+    const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), PATIENT, steps);
+
+    await stub.connected();
+    await waitUntilProven(stub);
+    // Every received frame was decoded against the protocol, so a frame
+    // over the limit would not have arrived.
+    const listReported = () =>
+      stub.received.flatMap((frame) => (frame._tag === "workspaceStepsReport" ? frame.steps : []));
+    await waitUntil(() => listReported().length === inFlight.length);
+    expect(listReported()).toEqual(inFlight);
+
+    stub.hangUp();
+    await pending;
   });
 });
 

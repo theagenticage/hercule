@@ -112,6 +112,11 @@ export const SETTING_VALUES = {
     /** How long an ephemeral workspace nothing has worked in is kept, in days. */
     "workspace.idleTtlDays": PositiveDays,
     /**
+     * How long the ephemeral workspace of a failed run, or of a run cancelled
+     * with its workspace kept, is kept for inspection, in days.
+     */
+    "workspace.failedRunTtlDays": PositiveDays,
+    /**
      * How deep runs may nest. A run started by hand or by a program is 1
      * deep, and a run that a step of another run starts is one deeper than
      * that run. A workflow that starts itself, directly or through another

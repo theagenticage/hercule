@@ -552,6 +552,8 @@ describe("the workflow action catalog", () => {
     );
 
     expect(rows.sort()).toEqual([
+      "core git.commit",
+      "core git.push",
       "core run.start",
       "core task.create",
       "core task.query",
@@ -583,6 +585,8 @@ describe("the workflow action catalog", () => {
     expect(readErroredMessage(statuses.slashed)).toContain("The id cannot contain a / character");
     expect(readErroredMessage(statuses.listed)).toContain("struct");
     expect(statuses.actions.map((action) => action.id)).toEqual([
+      "git.commit",
+      "git.push",
       "run.start",
       "task.create",
       "task.query",

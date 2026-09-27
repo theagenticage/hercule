@@ -169,7 +169,7 @@ export const buildBranchField = (
         ? null
         : [
             { text: "The new branch is " },
-            { text: "hercule/run-…", mono: true },
+            { text: "hercule/thread-…", mono: true },
             { text: ", named after the thread, and starts from " },
             { text: `origin/${base}`, mono: true },
             { text: " when the remote has it." },

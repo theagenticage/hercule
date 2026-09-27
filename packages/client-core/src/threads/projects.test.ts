@@ -9,7 +9,7 @@ import {
   INFRA,
   OPS_PROJECT,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
   RUNBOOKS,
   WEBSHOP,
   WEBSHOP_PROJECT,
@@ -22,7 +22,7 @@ const SANDBOX = buildProject("p-sandbox", "sandbox");
 const rows = buildProjectPickerRows({
   projects: [WEBSHOP_PROJECT, OPS_PROJECT, SANDBOX],
   resources: [WEBSHOP, INFRA, RUNBOOKS],
-  workspaces: [PRIMARY, RUN_3F1],
+  workspaces: [PRIMARY, THREAD_3F1],
   sessions: [
     buildSession({ id: "s1", projectId: WEBSHOP_PROJECT.id }),
     buildSession({ id: "s2", projectId: WEBSHOP_PROJECT.id }),

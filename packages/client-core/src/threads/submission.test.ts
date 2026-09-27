@@ -222,12 +222,12 @@ describe("buildSubmission: the project and the workspace", () => {
       buildSubmission(
         {
           kind: "draft",
-          config: { ...IN_PROJECT, workspace: { kind: "existing", workspaceId: "ws-run-3f1" } },
+          config: { ...IN_PROJECT, workspace: { kind: "existing", workspaceId: "ws-thread-3f1" } },
         },
         {},
         MESSAGE,
       ),
-    ).toMatchObject({ input: { workspace: { kind: "existing", workspaceId: "ws-run-3f1" } } });
+    ).toMatchObject({ input: { workspace: { kind: "existing", workspaceId: "ws-thread-3f1" } } });
   });
 
   it("sends no workspace at all for a thread that works without a checkout", () => {

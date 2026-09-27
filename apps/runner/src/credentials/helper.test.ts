@@ -6,7 +6,12 @@
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
-import { answerCredentialQuestion, runCredentialAction, serveCredentialSocket } from "./index";
+import {
+  answerCredentialQuestion,
+  RUNNER_WORKSPACE_VARIABLE,
+  runCredentialAction,
+  serveCredentialSocket,
+} from "./index";
 import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
@@ -92,17 +97,18 @@ describe("what the helper prints", () => {
     await served.close();
   });
 
-  it("asks with the workspace id while the runner is provisioning a workspace", async () => {
+  it("asks with the workspace id when the runner's own git works in a workspace", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" })),
     );
 
     const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_RUNNER_SOCKET: served.path,
-      HERCULE_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
+      [RUNNER_WORKSPACE_VARIABLE]: "0199e0e7-0000-7000-8000-00000000000b",
     });
 
-    // There is no session yet, so the helper sends the id of the workspace being provisioned.
+    // No session exists while the runner provisions a workspace or runs a
+    // workspace step, so the helper sends the workspace's id instead.
     expect(asked).toEqual([
       { remote: "github.com/acme/web", workspaceId: "0199e0e7-0000-7000-8000-00000000000b" },
     ]);

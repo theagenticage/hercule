@@ -52,7 +52,7 @@ import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
-import { Inbound, Pipeline, Provisioning, sweepSessionsOnLostRunners } from "../daemon";
+import { Arrival, Inbound, Pipeline, Provisioning, sweepSessionsOnLostRunners } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
@@ -213,10 +213,11 @@ export const serve = (bundle: WebBundle | undefined) =>
     // rest, so no runner's hello is missed. The probe driver also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.
     yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
-    // Workspaces: a runner that connects receives its pending provisioning,
-    // and workspaces nothing needs any more are removed from their runner's
-    // disk. Forked before the listener binds, like the probe driver, so no
-    // arrival is missed.
+    // A runner that connects is sent the work owed to it: its pending
+    // provisioning and its running workspace steps. Forked before the
+    // listener binds, like the probe driver, so no arrival is missed.
+    yield* Effect.forkScoped(Effect.flatMap(Arrival, (arrival) => arrival.driving));
+    // Workspaces nothing needs any more are removed from their runner's disk.
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner

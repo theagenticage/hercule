@@ -11,12 +11,24 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
 import { Authenticated } from "../security";
 
+/**
+ * Where a workflow action runs, a fixed property of the action:
+ *
+ * - `controller`: the controller calls it. Every plugin action runs here.
+ * - `workspace`: the run's runner runs it in the run's workspace, such as
+ *   `git.commit`. The run's first such step pins the run to a runner.
+ */
+export const WorkflowActionRunsIn = Schema.Literals(["controller", "workspace"]);
+
+export type WorkflowActionRunsIn = Schema.Schema.Type<typeof WorkflowActionRunsIn>;
+
 /** A workflow action that a step can call, and the params it takes. */
 export const WorkflowAction = Schema.Struct({
   /** What a step writes after `action:`: an operation id, or `<pluginId>/<word>`. */
   id: Schema.String,
   displayName: Schema.String,
   description: Schema.String,
+  runsIn: WorkflowActionRunsIn,
   /**
    * The JSON Schema of the params a step writes. Typed as an open record,
    * because a JSON Schema object can hold any keyword.

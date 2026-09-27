@@ -1242,8 +1242,8 @@ const IDS = {
   runbooks: "01a06d02-7100-7000-8000-000000000003",
   primary: "01a06d02-7200-7000-8000-000000000001",
   primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
-  run3f1: "01a06d02-7200-7000-8000-000000000002",
-  run3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
+  thread3f1: "01a06d02-7200-7000-8000-000000000002",
+  thread3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
   flakyThread: "01a06d02-7400-7000-8000-000000000001",
   runbookThread: "01a06d02-7400-7000-8000-000000000002",
 };
@@ -1320,16 +1320,16 @@ const buildWorkspace = (
   disposedAt: null,
 });
 
-/** webshop's main workspace on moss; `hercule/run-3f1` is one of its branches. */
+/** webshop's main workspace on moss; `hercule/thread-3f1` is one of its branches. */
 const W_PRIMARY_WEBSHOP: Workspace = {
   ...WORLD.PRIMARY,
   designatedConnectionId: GITHUB_ID,
   sessionIds: [BUMP_THE_BUN_PIN],
 };
 
-const W_RUN_3F1: Workspace = { ...WORLD.RUN_3F1, designatedConnectionId: GITHUB_ID };
+const W_THREAD_3F1: Workspace = { ...WORLD.THREAD_3F1, designatedConnectionId: GITHUB_ID };
 
-const W_RUN_8A0 = buildWorkspace(
+const W_THREAD_8A0 = buildWorkspace(
   "01a06d02-7200-7000-8000-000000000003",
   "ephemeral",
   COVE.id,
@@ -1338,8 +1338,8 @@ const W_RUN_8A0 = buildWorkspace(
       "01a06d02-7300-7000-8000-000000000003",
       R_WEBSHOP.id,
       "worktree",
-      "hercule/run-8a0",
-      ["hercule/run-8a0"],
+      "hercule/thread-8a0",
+      ["hercule/thread-8a0"],
       "main",
     ),
   ],
@@ -1398,13 +1398,13 @@ const buildThread = (
 });
 
 const SESSIONS: readonly Session[] = [
-  buildThread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_RUN_3F1.id),
-  buildThread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_RUN_3F1.id),
+  buildThread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_THREAD_3F1.id),
+  buildThread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_THREAD_3F1.id),
   buildThread(
     "01a06d02-7400-7000-8000-000000000003",
     "Runner drain command",
     WEBSHOP.id,
-    W_RUN_8A0.id,
+    W_THREAD_8A0.id,
     COVE.id,
   ),
   buildThread(BUMP_THE_BUN_PIN, "Bump the Bun pin", WEBSHOP.id, W_PRIMARY_WEBSHOP.id),
@@ -1446,8 +1446,8 @@ const SLACK: Connection = {
 
 const WORKSPACES: readonly Workspace[] = [
   W_PRIMARY_WEBSHOP,
-  W_RUN_3F1,
-  W_RUN_8A0,
+  W_THREAD_3F1,
+  W_THREAD_8A0,
   W_PRIMARY_INFRA,
   W_PRIMARY_RUNBOOKS,
 ];
@@ -1678,10 +1678,10 @@ describe("Composer: the workspace selector", () => {
     expect(text).toContain("a fresh worktree of webshop on a new branch");
     // The project's live ephemeral workspaces, named after their branch, with
     // their machine and the threads already in them.
-    expect(text).toContain("hercule/run-3f1");
+    expect(text).toContain("hercule/thread-3f1");
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
-    expect(text).toContain("hercule/run-8a0");
+    expect(text).toContain("hercule/thread-8a0");
     expect(text).not.toContain("None");
   });
 
@@ -1774,7 +1774,7 @@ describe("Composer: the workspace selector", () => {
     });
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hercule\/run-3f1/);
+    await pickRow(user, /hercule\/thread-3f1/);
     // When joining, the sentence names the threads already working there,
     // not the workspace.
     await waitFor(() => {
@@ -1833,7 +1833,7 @@ describe("Composer: the workspace selector", () => {
     );
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hercule\/run-3f1/);
+    await pickRow(user, /hercule\/thread-3f1/);
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -1848,7 +1848,7 @@ describe("Composer: the workspace selector", () => {
     );
     expect(spawn?.body).toMatchObject({
       projectId: WEBSHOP.id,
-      workspace: { kind: "existing", workspaceId: W_RUN_3F1.id },
+      workspace: { kind: "existing", workspaceId: W_THREAD_3F1.id },
     });
   });
 
@@ -1881,10 +1881,10 @@ describe("Composer: the workspace selector", () => {
   });
 
   it("preselects the workspace named in the URL", async () => {
-    await openDraftAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
+    await openDraftAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_THREAD_3F1.id}`);
 
     expect(
-      await screen.findByRole("button", { name: /^workspace hercule\/run-3f1$/ }),
+      await screen.findByRole("button", { name: /^workspace hercule\/thread-3f1$/ }),
     ).toBeDefined();
   });
 });
@@ -1901,11 +1901,11 @@ describe("Composer: the branch selector", () => {
     expect(text).toContain("the checkout switches to it");
     expect(text).toContain("release/2.4");
     expect(text).toContain("current");
-    // `hercule/run-3f1` is a branch of the primary workspace, but a ready
+    // `hercule/thread-3f1` is a branch of the primary workspace, but a ready
     // ephemeral workspace on the same machine has it checked out. The row is
     // dimmed and shows which workspace holds it.
-    expect(text).toContain("in workspace hercule/run-3f1");
-    expect(within(menu).queryByRole("button", { name: /hercule\/run-3f1/ })).toBeNull();
+    expect(text).toContain("in workspace hercule/thread-3f1");
+    expect(within(menu).queryByRole("button", { name: /hercule\/thread-3f1/ })).toBeNull();
   });
 
   // The branch name is what the user picks, so it is never truncated. The
@@ -1919,11 +1919,11 @@ describe("Composer: the branch selector", () => {
 
     // The note is the truncated cell, and its title holds the full text so
     // the cut-off part can still be read.
-    const note = within(menu).getByTitle("in workspace hercule/run-3f1");
+    const note = within(menu).getByTitle("in workspace hercule/thread-3f1");
     expect(note.className).toContain("truncate");
 
     // The branch cell takes the width it needs and is never truncated.
-    const branch = within(menu).getByText("hercule/run-3f1", { selector: "span.font-mono" });
+    const branch = within(menu).getByText("hercule/thread-3f1", { selector: "span.font-mono" });
     expect(branch.parentElement?.className).not.toContain("truncate");
 
     // The note stays at the row's right edge: its column is the wide one and
@@ -1966,7 +1966,7 @@ describe("Composer: the branch selector", () => {
     expect(text).toContain("the new branch starts from it");
     expect(text).toContain("default");
     expect(text).toContain(
-      "The new branch is hercule/run-…, named after the thread, and starts from origin/main when the remote has it.",
+      "The new branch is hercule/thread-…, named after the thread, and starts from origin/main when the remote has it.",
     );
   });
 
@@ -1998,7 +1998,7 @@ describe("Composer: the branch selector", () => {
     const joined = await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hercule\/run-3f1/);
+    await pickRow(user, /hercule\/thread-3f1/);
     await waitFor(() => {
       expect(screen.queryByText("Branch")).toBeNull();
     });
@@ -2020,9 +2020,9 @@ describe("Composer: the machine selector follows the workspace", () => {
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
-    await pickRow(user, /hercule\/run-8a0/);
+    await pickRow(user, /hercule\/thread-8a0/);
 
-    const locked = await screen.findByText("set by the workspace hercule/run-8a0");
+    const locked = await screen.findByText("set by the workspace hercule/thread-8a0");
     expect(locked.closest("button")).toBeNull();
     await user.click(locked);
     expect(screen.queryByRole("dialog")).toBeNull();

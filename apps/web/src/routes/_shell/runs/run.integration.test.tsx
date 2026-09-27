@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeActor } from "@hercule/client-core";
-import type { Run, StepStatus, WorkflowDefinition } from "@hercule/contract";
+import { buildCheckout, buildRunner, buildWorkspace } from "@hercule/client-core/threads/testing";
+import type { Run, RunnerDetail, StepStatus, WorkflowDefinition } from "@hercule/contract";
 import {
   buildErrorBody,
   readPageText,
@@ -752,6 +753,233 @@ describe("A run's page > routing in the steps", { timeout: GRAPH_TEST_TIMEOUT_MS
       expect(getStepsRegion().querySelector('svg[data-mark="skipped"]')).not.toBeNull();
     });
     expect(readPageText(getStepsRegion()).toLowerCase()).toMatch(/\bskipped\b/);
+  });
+});
+
+describe("A run's page > its runner and workspace", () => {
+  const RUNNER_ID = "0199c0ff-3333-7000-8000-000000000001";
+  const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000001";
+  const BRANCH = `hercule/run-${RUNNING_RUN.id}`;
+  const OFFLINE_RUNNER: RunnerDetail = {
+    ...buildRunner(RUNNER_ID, "mac-mini"),
+    connectivity: "offline",
+    lastSeenAt: addSeconds(T0, 20),
+    negotiatedCapabilities: null,
+    protocolVersion: null,
+  };
+  /**
+   * The running run, pinned to the runner and working in an ephemeral
+   * workspace, with two steps running: `start`, which commits in the
+   * workspace, and `note`, which runs on the controller.
+   */
+  const PINNED_RUN: Run = {
+    ...RUNNING_RUN,
+    plan: {
+      ...PLAN,
+      steps: [
+        ...PLAN.steps.filter((step) => step.id !== "start"),
+        { id: "start", kind: "action", action: "git.commit" },
+      ],
+    },
+    steps: [
+      CREATE_DONE,
+      { stepId: "note", iteration: 1, status: "running", startedAt: T0 },
+      { stepId: "start", iteration: 1, status: "running", startedAt: addSeconds(T0, 12) },
+    ],
+    runnerId: RUNNER_ID,
+    workspaceId: WORKSPACE_ID,
+  };
+  const ACTIONS = [
+    { id: "git.commit", runsIn: "workspace" },
+    { id: "task.query", runsIn: "controller" },
+  ].map((action) => ({ ...action, displayName: action.id, description: "", inputSchema: {} }));
+
+  it("shows the runner and the workspace, and a running workspace step waits while the runner is offline", async () => {
+    let runner = OFFLINE_RUNNER;
+    const { live } = await openRunPage(PINNED_RUN, {
+      overrides: {
+        [`GET /api/v1/runners/${RUNNER_ID}`]: () => ({ body: runner }),
+        [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: {
+          body: buildWorkspace({
+            id: WORKSPACE_ID,
+            runnerId: RUNNER_ID,
+            kind: "ephemeral",
+            checkouts: [
+              {
+                ...buildCheckout(TASK_ID, BRANCH),
+                checkoutId: "0199c0ff-5555-7000-8000-000000000001",
+              },
+            ],
+          }),
+        },
+        "GET /api/v1/resources": { body: { items: [] } },
+        "GET /api/v1/workflow-actions": { body: ACTIONS },
+      },
+    });
+
+    const header = await findPageHeader();
+    const runnerLink = within(header).getByRole("link", { name: "mac-mini" });
+    expect(runnerLink.getAttribute("href")).toBe(`/fleet/${RUNNER_ID}`);
+    expect(readPageText(header)).toContain(BRANCH);
+    expect(readPageText(getStepRow("start"))).toMatch(
+      /Waiting for runner mac-mini to reconnect \(offline since .+\)/,
+    );
+    // Only a running step that runs in the workspace waits for the runner.
+    expect(readPageText(getStepRow("create"))).not.toContain("Waiting for runner");
+    expect(readPageText(getStepRow("note"))).not.toContain("Waiting for runner");
+
+    // The timeline shows the same line, once.
+    await userEvent.setup().click(screen.getByRole("radio", { name: "Timeline" }));
+    await waitFor(() => {
+      expect(readPageText(getStepsRegion()).match(/Waiting for runner mac-mini/g)).toHaveLength(1);
+    });
+
+    runner = { ...OFFLINE_RUNNER, connectivity: "online" };
+    await waitFor(() => {
+      expect(live.topics()).toContain("runner");
+    });
+    act(() => {
+      live.push("runner", { _tag: "invalidate", ids: [RUNNER_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(readPageText(getStepsRegion())).not.toContain("Waiting for runner");
+    });
+  });
+
+  it("shows what runner a pending workspace step waits for while no runner has taken the run", async () => {
+    const unpinned: Run = {
+      ...RUNNING_RUN,
+      plan: PINNED_RUN.plan,
+      steps: [
+        CREATE_DONE,
+        { stepId: "note", iteration: 1, status: "running", startedAt: T0 },
+        { stepId: "start", iteration: 1, status: "pending" },
+      ],
+    };
+    await openRunPage(unpinned, {
+      overrides: { "GET /api/v1/workflow-actions": { body: ACTIONS } },
+    });
+
+    await findPageHeader();
+    expect(readPageText(getStepRow("start"))).toContain(
+      "Waiting for a runner that can run git.commit",
+    );
+    expect(readPageText(getStepRow("note"))).not.toContain("Waiting for");
+  });
+});
+
+describe("A run's page > what happens to its workspace", () => {
+  const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000002";
+  const WORKSPACE = buildWorkspace({
+    id: WORKSPACE_ID,
+    runnerId: "0199c0ff-3333-7000-8000-000000000002",
+    kind: "ephemeral",
+  });
+  /** The run working in an ephemeral workspace, not yet pinned to a runner. */
+  const IN_WORKSPACE: Run = { ...RUNNING_RUN, workspaceId: WORKSPACE_ID };
+  /** 23:30 UTC on 8 Oct is 9 Oct in Amsterdam, the user's timezone. */
+  const KEPT_UNTIL = "2026-10-08T23:30:00.000Z";
+  const FAILED_KEPT: Run = {
+    ...FAILED_RUN,
+    workspaceId: WORKSPACE_ID,
+    workspaceKeptUntil: KEPT_UNTIL,
+  };
+
+  /**
+   * Opens the page of `run`, whose workspace the stub controller holds as
+   * `workspace` until the workspace is deleted.
+   */
+  const openWithWorkspace = (run: Run, overrides: Readonly<Record<string, Handler>> = {}) => {
+    let workspace = WORKSPACE;
+    return openRunPage(run, {
+      overrides: {
+        [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: () => ({ body: workspace }),
+        [`DELETE /api/v1/workspaces/${WORKSPACE_ID}`]: () => {
+          workspace = { ...WORKSPACE, status: "deleted", disposedAt: "2026-10-03T08:00:00.000Z" };
+          return { body: {} };
+        },
+        "GET /api/v1/resources": { body: { items: [] } },
+        [`POST /api/v1/runs/${run.id}/cancel`]: { body: CANCELLED_RUN },
+        ...overrides,
+      },
+    });
+  };
+
+  const getWorkspaceCheckbox = (): HTMLInputElement =>
+    screen.getByRole("checkbox", { name: "Delete the run's workspace too" });
+
+  it("asks on cancel whether to delete the workspace too, ticked by default, and sends the answer", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(IN_WORKSPACE);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    expect(getWorkspaceCheckbox().checked).toBe(true);
+    await user.click(getWorkspaceCheckbox());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(listCancels(api, IN_WORKSPACE.id).map((call) => call.body)).toEqual([
+        { keepWorkspace: true },
+      ]);
+    });
+  });
+
+  it("deletes the workspace on cancel when the box stays ticked, and says it will be deleted shortly", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(IN_WORKSPACE, {
+      [`POST /api/v1/runs/${IN_WORKSPACE.id}/cancel`]: {
+        body: { ...CANCELLED_RUN, workspaceId: WORKSPACE_ID },
+      },
+    });
+
+    const header = await findPageHeader();
+    await user.click(within(header).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(listCancels(api, IN_WORKSPACE.id).map((call) => call.body)).toEqual([
+        { keepWorkspace: false },
+      ]);
+    });
+    // The workspace exists until the controller's next sweep deletes it.
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace will be deleted shortly");
+    });
+    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
+  });
+
+  it("does not ask about a workspace when the run has none", async () => {
+    const user = userEvent.setup();
+    await openRunPage(RUNNING_RUN);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("says until when a failed run's workspace is kept, and after Delete workspace, when it was deleted", async () => {
+    const user = userEvent.setup();
+    const { api } = await openWithWorkspace(FAILED_KEPT);
+
+    const header = await findPageHeader();
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace kept for inspection until 9 Oct");
+    });
+
+    await user.click(within(header).getByRole("button", { name: "Delete workspace" }));
+    // Nothing is deleted until the question is answered.
+    const confirm = screen.getByRole("button", { name: "Delete" });
+    expect(api.calls.filter((call) => call.method === "DELETE")).toEqual([]);
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace deleted 3 Oct");
+    });
+    expect(readPageText(header)).not.toContain("kept for inspection");
+    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
+    expect(api.calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
+      `/api/v1/workspaces/${WORKSPACE_ID}`,
+    ]);
   });
 });
 

@@ -11,6 +11,12 @@
  * A frame is built as a value and the controller daemon sends it. That keeps
  * the domain graph a DAG: `pnpm dep-lint` fails if an edge back appears.
  */
-export { gitCredentials, buildGitIdentity, type GitCredential } from "./credentials";
+export { gitCredentials, type GithubAccount } from "./credentials";
 export { buildReadyClause, buildResumableClause } from "./repository";
-export { WorkspaceService, WorkspaceServiceLayer, type QueryInput } from "./service";
+export {
+  buildRunBranch,
+  buildThreadBranch,
+  WorkspaceService,
+  WorkspaceServiceLayer,
+  type QueryInput,
+} from "./service";

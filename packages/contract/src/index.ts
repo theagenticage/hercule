@@ -335,6 +335,7 @@ export {
   listEntrySteps,
   readFieldNotation,
   WorkflowDefinition,
+  WorkspacePolicy,
   type FieldNotation,
 } from "./groups/workflow-definition";
 export {
@@ -348,6 +349,7 @@ export {
   FailedEdge,
   FailureReason,
   Run,
+  RunCancelInput,
   RUN_SORT_FIELDS,
   RUN_STATUSES,
   RunFilter,
@@ -362,7 +364,7 @@ export {
   StepStatus,
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
-export { WorkflowAction } from "./groups/workflow-action";
+export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {
   TRIGGER_SORT_FIELDS,

@@ -33,6 +33,7 @@ import {
   listFramesTagged,
   provisionWorkspaceOrFail,
   readWorkspace,
+  reportWorkspaceReady,
   createRepo,
   withFleet,
   type WorkspaceRecord,
@@ -43,26 +44,6 @@ const SWEEP = Duration.millis(50);
 
 const withSweep = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { workspaceSweepInterval: SWEEP });
-
-/** Reports the workspace ready, so the session waiting on it can be dispatched. */
-const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
-  const workspace = await readWorkspace(arranged, id);
-  arranged.wire.send({
-    _tag: "workspaceReport",
-    workspaceId: id,
-    status: "ready",
-    checkouts: workspace.checkouts.map((checkout) => ({
-      checkoutId: checkout.checkoutId,
-      branch: "main",
-      branches: ["main"],
-      defaultBranch: "main",
-    })),
-  } as never);
-  return await waitUntil("made the workspace ready", async () => {
-    const one = await readWorkspace(arranged, id);
-    return one.status === "ready" ? one : undefined;
-  });
-};
 
 const at = "2026-09-16T10:00:00.000Z";
 
@@ -79,7 +60,7 @@ const spawnThreadIn = async (
     prompt: "hello",
     workspace: { kind: "ephemeral", checkouts: [{ resourceId }] },
   });
-  await makeReady(arranged, String(session.workspaceId));
+  await reportWorkspaceReady(arranged, String(session.workspaceId));
   await waitForFrames<SessionStart>(arranged.wire, "sessionStart", count);
   reportEvent(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
@@ -338,7 +319,7 @@ describe("the workspace expiry sweep", () => {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      await makeReady(arranged, primary.id);
+      await reportWorkspaceReady(arranged, primary.id);
 
       await ageWorkspace(arranged, primary.id, 90 * 24);
       const taken = await createDecoy(arranged, web, 1);
@@ -393,7 +374,7 @@ describe("the workspace expiry sweep", () => {
       await ageWorkspace(arranged, workspaceId, 1);
       const aged = await readWorkspace(arranged, workspaceId);
 
-      await makeReady(arranged, workspaceId);
+      await reportWorkspaceReady(arranged, workspaceId);
       await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
       reportEvent(arranged.wire, 1, {
         eventId: crypto.randomUUID(),

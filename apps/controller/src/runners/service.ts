@@ -316,9 +316,11 @@ const make = Effect.gen(function* () {
             // The new override may move the watermark past the free disk this
             // runner already reported. That is the same change a
             // `watermarkReport` would detect, and it is recorded the same way.
+            let becameAccepting = false;
             if (before.watermark !== null && edit.diskWatermarkBytes !== undefined) {
               const wasAccepting = before.watermark.diskFreeBytes >= before.diskWatermarkBytes;
               const accepting = before.watermark.diskFreeBytes >= edit.diskWatermarkBytes;
+              becameAccepting = !wasAccepting && accepting;
               if (wasAccepting !== accepting) {
                 yield* audit.append({
                   kind: "runner.placementsChanged",
@@ -332,7 +334,17 @@ const make = Effect.gen(function* () {
             return {
               // Read back rather than merged, so the caller gets the written row.
               detail: yield* readRunnerOrFail(id),
-              placements: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
+              // Only a change that gives the runner room for work it could
+              // not take before counts:
+              // - a raised cap;
+              // - a lowered watermark that brings the free disk above it;
+              // - no longer reserved, so it can take work that names no
+              //   runner, such as a run waiting for one. `edit.reserved` is
+              //   set only when the value changed.
+              placements:
+                (cap !== undefined && cap > before.maxConcurrentSessions) ||
+                becameAccepting ||
+                edit.reserved === false,
             };
           }),
         );

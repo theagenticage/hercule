@@ -425,18 +425,21 @@ const Edge = closedStruct({
 });
 
 /**
- * The workspace that every agent step of a run works in: a repo's main
- * workspace, or an ephemeral workspace created for the run. The schemas are
+ * The workspace that the agent steps and the workspace actions (such as
+ * `git.commit`) of a run work in: a repo's main workspace, or an ephemeral
+ * workspace created for the run. The schemas are
  * the ones `session.spawn` accepts, except that a run cannot use an existing
  * workspace.
  */
-const WorkspacePolicy = Schema.Union([
+export const WorkspacePolicy = Schema.Union([
   closedStruct(PrimarySpawnWorkspace.fields),
   closedStruct({
     ...EphemeralSpawnWorkspace.fields,
     checkouts: atMost(closedStruct(SpawnCheckout.fields), MAX_SPAWN_CHECKOUTS),
   }),
 ]);
+
+export type WorkspacePolicy = Schema.Schema.Type<typeof WorkspacePolicy>;
 
 /**
  * The schema of a workflow definition: what a workflow's YAML source parses

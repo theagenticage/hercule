@@ -5,8 +5,9 @@
  * The helper stores nothing. It asks the runner daemon over this machine's
  * socket and prints the credential it gets back. To identify itself it sends
  * what its environment holds: the session's own token, or the id of the
- * workspace the runner is provisioning. In every other case it prints nothing,
- * so git moves on to the machine's own helpers instead of failing.
+ * workspace the runner is provisioning or running a workspace step in. In
+ * every other case it prints nothing, so git moves on to the machine's own
+ * helpers instead of failing.
  */
 import { createConnection } from "node:net";
 import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
@@ -15,10 +16,12 @@ import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
 const TOKEN = "HERCULE_TOKEN";
 
 /**
- * The workspace the runner is provisioning, set for the runner's own git commands during
- * provisioning.
+ * The environment variable that holds the id of the workspace the runner's
+ * own git works in. The runner sets it for its git commands while it
+ * provisions a workspace and while it runs a workspace step, because no
+ * session, and so no session token, exists then.
  */
-const PROVISIONING = "HERCULE_WORKSPACE_PROVISIONING";
+export const RUNNER_WORKSPACE_VARIABLE = "HERCULE_RUNNER_WORKSPACE";
 
 const SOCKET = "HERCULE_RUNNER_SOCKET";
 
@@ -59,12 +62,12 @@ export const answerCredentialQuestion = async (
   const path = env[SOCKET];
   if (path === undefined || path.length === 0) return "";
   const token = env[TOKEN];
-  const provisioning = env[PROVISIONING];
+  const workspaceId = env[RUNNER_WORKSPACE_VARIABLE];
   const claim =
     token !== undefined && token.length > 0
       ? { sessionToken: token }
-      : provisioning !== undefined && provisioning.length > 0
-        ? { workspaceId: provisioning }
+      : workspaceId !== undefined && workspaceId.length > 0
+        ? { workspaceId }
         : undefined;
   // Without a token or a workspace id the daemon would reject the request
   // anyway, so skip the round trip while git waits.

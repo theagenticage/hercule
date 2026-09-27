@@ -4,8 +4,9 @@
  * `run.start` action through this, and hands each run to the Run Executor
  * once it commits.
  *
- * Starting a run reads the workflows domain, the action catalog and the
- * controller's settings. All three sit below runs in the domain graph.
+ * Starting a run reads the workflows domain, the action catalog, the fleet's
+ * runners and the controller's settings. All four sit below runs in the
+ * domain graph.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -33,9 +34,11 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { afterCommit, nowIso } from "../db";
 import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
+import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import { workflowRepository, WorkflowService } from "../workflows";
 import { runRepository } from "./repository";
+import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
 import { commitUninterruptibly } from "./transaction";
 
 /**
@@ -88,10 +91,11 @@ const listUnsupportedElements = (
         },
       ];
     }
+    const action = actions.find((candidate) => candidate.id === step.action);
     // Which of a step's params names the Connection is not settled yet, and
     // an action called without its Connection would fail in ways its author
     // never planned for.
-    return actions.find((action) => action.id === step.action)?.connection === undefined
+    return action?.connection === undefined
       ? []
       : [
           {
@@ -124,6 +128,7 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
     const workflows = yield* WorkflowService;
     const host = yield* PluginHost;
     const settings = yield* Settings;
+    const runners = yield* runnerRepository;
 
     /**
      * Checks that a run started by a step of another run is not nested
@@ -149,11 +154,12 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
 
     /**
      * Writes a run of the plan `readPlan` returns: validates the plan again,
-     * refuses what runs cannot execute yet, checks how deep the run is
-     * nested, resolves the inputs, and writes the run and its entry step
-     * records. Returns the run's id at once, without waiting for any step.
-     * Fails with `Validation`, starting no run, when the plan does not
-     * validate or the inputs do not match its declarations; with
+     * refuses what runs cannot execute yet and what no runner can run, checks
+     * how deep the run is nested, resolves the inputs, and writes the run and
+     * its entry step records. Returns the run's id at once, without waiting
+     * for any step. Fails with `Validation`, starting no run, when the plan
+     * does not validate, no runner can run it, or the inputs do not match its
+     * declarations; with
      * `CapExceeded` when the run is nested too deep; and with whatever
      * `readPlan` fails with.
      *
@@ -185,6 +191,21 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
                 run.workflowId === null
                   ? "this workflow cannot run"
                   : "this workflow cannot run as it is saved now",
+              ),
+            );
+          }
+          // A retired runner never takes the run, and neither does a reserved
+          // one, because a run names no runner. An offline or draining one
+          // may come back, and the run waits for it.
+          const missingRunner = describeMissingCapableRunner(
+            listWorkspaceActionIds(plan),
+            yield* runners.listPlacementCandidates(),
+          );
+          if (missingRunner !== undefined) {
+            return yield* Effect.fail(
+              createValidationError(
+                [{ path: [], message: missingRunner }],
+                "no runner can run this workflow",
               ),
             );
           }
@@ -227,7 +248,9 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
      *
      * - `Validation`, starting no run, when the request names no workflow or
      *   more than one, the workflow does not validate or has an element runs
-     *   cannot execute yet, or the inputs do not match its declarations;
+     *   cannot execute yet, no runner that is not retired offers every
+     *   workspace action the workflow uses, or the inputs do not match its
+     *   declarations;
      * - `NotFound` for an unknown `workflowId`;
      * - `CapExceeded` when the run would be nested deeper than the
      *   controller's `run.nestingLimit`.

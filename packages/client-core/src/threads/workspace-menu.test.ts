@@ -11,7 +11,7 @@ import {
   INFRA,
   MOSS,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
   RUNBOOKS,
   WEBSHOP,
   WEBSHOP_PROJECT,
@@ -28,7 +28,7 @@ const buildMenu = (over: Partial<Parameters<typeof buildWorkspaceMenu>[0]> = {})
   buildWorkspaceMenu({
     project: WEBSHOP_PROJECT,
     repos: [WEBSHOP],
-    workspaces: [PRIMARY, RUN_3F1],
+    workspaces: [PRIMARY, THREAD_3F1],
     sessions: SESSIONS,
     runners: [MOSS, COVE],
     runnerId: MOSS.id,
@@ -42,7 +42,7 @@ describe("buildWorkspaceMenu", () => {
     expect(buildMenu().rows.map((row) => row.name)).toEqual([
       "Main workspace",
       "New workspace",
-      "hercule/run-3f1",
+      "hercule/thread-3f1",
     ]);
   });
 
@@ -91,8 +91,8 @@ describe("buildWorkspaceMenu", () => {
 
   it("uses the current row's name as the selector's label", () => {
     expect(buildMenu().label).toBe("Main workspace");
-    expect(buildMenu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
-      "hercule/run-3f1",
+    expect(buildMenu({ pick: { kind: "existing", workspaceId: THREAD_3F1.id } }).label).toBe(
+      "hercule/thread-3f1",
     );
   });
 });

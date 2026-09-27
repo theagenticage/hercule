@@ -744,7 +744,7 @@ export const CLI = {
   },
   "workspace.dispose": {
     command: "workspace dispose",
-    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down.",
+    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down. Use it to delete the workspace a failed or cancelled run kept for inspection before its window ends.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -755,7 +755,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, and a workspace that is already gone has nothing left to tear down",
+        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and the workspace of a run that has not finished stays until the run is cancelled",
     },
   },
 
@@ -1133,7 +1133,7 @@ export const CLI = {
 
   "workflowAction.query": {
     command: "workflow-action list",
-    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?, and --json prints the params as JSON Schema. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
+    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?, and --json prints the params as JSON Schema and says where each action runs: `controller`, or `workspace` for an action a runner runs in the run's workspace, such as git.commit. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
     examples: [{ args: [] }, { args: ["--json"] }],
     fields: {},
   },
@@ -1241,13 +1241,17 @@ export const CLI = {
   },
   "run.cancel": {
     command: "run cancel",
-    help: "Cancels a run that is pending or running. The step running now is cancelled with it, and no later step starts. What a finished step did stays done. Check the result with `hercule run read`.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Cancels a run that is pending or running. The step running now is cancelled with it, and no later step starts. What a finished step did stays done. The run's ephemeral workspace is deleted, unless --keep-workspace keeps it for inspection. Check the result with `hercule run read`.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--keep-workspace", "true"] }],
     fields: {
       id: {
         positional: true,
         help: "The run's id, or a tail of eight or more characters.",
         resolves: "run.query",
+      },
+      keepWorkspace: {
+        flag: "keep-workspace",
+        help: "true keeps the ephemeral workspace of the run, and of every run cancelled with it, until it is disposed or its failed-run window ends.",
       },
     },
     errors: {

@@ -70,6 +70,8 @@ export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
 export {
   describeFailureReason,
   describeRunOrigin,
+  describeRunnerWait,
+  type RunnerWait,
   describeRunStatus,
   describeStepDuration,
   describeStepState,
@@ -92,6 +94,7 @@ export {
   type StepLine,
   type Timeline,
 } from "./run-graph";
+export { describeRunWorkspace, type RunWorkspaceReading } from "./run-workspace";
 export {
   buildRunInputDraft,
   buildRunInputs,
@@ -114,6 +117,7 @@ export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-st
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
   chooseStamps,
+  formatDay,
   formatPreciseStamp,
   formatSince,
   formatStamp,
@@ -181,6 +185,7 @@ export {
   formatRepoName,
   findRunnerForPick,
   withBranch,
+  formatWorkspaceLabel,
   formatWorkspaceName,
   type DraftSubject,
   type Phrase,

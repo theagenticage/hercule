@@ -15,7 +15,7 @@ import {
   MOSS,
   OPS_PROJECT,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
   WEBSHOP,
   WEBSHOP_PROJECT,
   buildSession,
@@ -28,7 +28,7 @@ const SESSIONS = [
     id: "s-flaky",
     title: "Fix flaky webhook tests",
     projectId: WEBSHOP_PROJECT.id,
-    workspaceId: RUN_3F1.id,
+    workspaceId: THREAD_3F1.id,
     lastActivityAt: buildTimestamp(5),
   }),
   buildSession({
@@ -63,7 +63,7 @@ const buildGroups = (
   buildThreadGroups({
     sessions: SESSIONS,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-    workspaces: [PRIMARY, RUN_3F1],
+    workspaces: [PRIMARY, THREAD_3F1],
     resources: [WEBSHOP],
     runners: [MOSS],
     mode: "meta",
@@ -84,7 +84,7 @@ describe("decideDraftPlace", () => {
         projectId: WEBSHOP_PROJECT.id,
         workspaceId: null,
         resources,
-        workspaces: [PRIMARY, RUN_3F1],
+        workspaces: [PRIMARY, THREAD_3F1],
         runnerId: MOSS.id,
       }),
     ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id });
@@ -119,12 +119,12 @@ describe("decideDraftPlace", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
-        workspaceId: RUN_3F1.id,
+        workspaceId: THREAD_3F1.id,
         resources,
-        workspaces: [PRIMARY, RUN_3F1],
+        workspaces: [PRIMARY, THREAD_3F1],
         runnerId: MOSS.id,
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: RUN_3F1.id });
+    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id });
   });
 });
 
@@ -139,14 +139,14 @@ describe("buildThreadGroups", () => {
 
   it("puts the worktrees first, then the main workspace, then the threads with no workspace", () => {
     expect(listLaneLabels(buildGroups()[0])).toEqual([
-      "hercule/run-3f1",
+      "hercule/thread-3f1",
       "webshop · moss",
       "no workspace",
     ]);
   });
 
   it("keeps the worktrees in catalog order, however recent their threads are", () => {
-    const second = { ...RUN_3F1, id: "ws-run-8a0" };
+    const second = { ...THREAD_3F1, id: "ws-thread-8a0" };
     const ordered = buildThreadGroups({
       sessions: [
         buildSession({
@@ -158,8 +158,8 @@ describe("buildThreadGroups", () => {
         ...SESSIONS,
       ],
       projects: [WEBSHOP_PROJECT],
-      // The catalog lists run-3f1 first, although run-8a0 has the newer thread.
-      workspaces: [RUN_3F1, second, PRIMARY],
+      // The catalog lists thread-3f1 first, although thread-8a0 has the newer thread.
+      workspaces: [THREAD_3F1, second, PRIMARY],
       resources: [WEBSHOP],
       runners: [MOSS],
       mode: "meta",
@@ -167,8 +167,8 @@ describe("buildThreadGroups", () => {
     })[0];
 
     expect(listLaneLabels(ordered)).toEqual([
-      "hercule/run-3f1",
-      "hercule/run-3f1",
+      "hercule/thread-3f1",
+      "hercule/thread-3f1",
       "webshop · moss",
       "no workspace",
     ]);
@@ -185,7 +185,11 @@ describe("buildThreadGroups", () => {
     const lane = webshop?.workspaces.find((each) => each.draft);
 
     expect(lane?.label === null ? null : joinLabelText(lane!.label)).toBe("webshop · moss");
-    expect(listLaneLabels(webshop)).toEqual(["hercule/run-3f1", "webshop · moss", "no workspace"]);
+    expect(listLaneLabels(webshop)).toEqual([
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "no workspace",
+    ]);
   });
 
   it("shows the draft's project even when it has no threads yet", () => {
@@ -209,7 +213,7 @@ describe("buildThreadGroups", () => {
       // holds nothing else.
       sessions: SESSIONS.filter((each) => each.workspaceId !== null),
       projects: [WEBSHOP_PROJECT],
-      workspaces: [PRIMARY, RUN_3F1],
+      workspaces: [PRIMARY, THREAD_3F1],
       resources: [WEBSHOP],
       runners: [MOSS],
       mode: "meta",
@@ -225,7 +229,7 @@ describe("buildThreadGroups", () => {
     const loose = buildThreadGroups({
       sessions: SESSIONS,
       projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-      workspaces: [PRIMARY, RUN_3F1],
+      workspaces: [PRIMARY, THREAD_3F1],
       resources: [WEBSHOP],
       runners: [MOSS],
       mode: "meta",
@@ -261,7 +265,7 @@ describe("buildThreadGroups", () => {
         }),
       ],
       projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-      workspaces: [PRIMARY, RUN_3F1],
+      workspaces: [PRIMARY, THREAD_3F1],
       resources: [WEBSHOP],
       runners: [MOSS],
       mode: "meta",

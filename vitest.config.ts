@@ -16,11 +16,12 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and fail with a clear error when `./hercule` is missing; the three that test the
+ * itself and fail with a clear error when `./hercule` is missing; the four that test the
  * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
- * `e2e/github-push.test.ts` and `e2e/workflows.test.ts` - are the same program
- * either way, so with no build they run the dispatcher's source instead
- * (`releaseBinary` in `e2e/harness.ts`).
+ * `e2e/workspace-steps.test.ts`, `e2e/github-push.test.ts` and
+ * `e2e/workflows.test.ts` - are the same program either way, so with no build
+ * they run the dispatcher's source instead (`findReleaseBinary` in
+ * `e2e/harness.ts`).
  */
 const reactPackages = ["apps/web", "packages/ui"];
 
@@ -49,6 +50,7 @@ const binaryTests = [
   "e2e/agent-session.test.ts",
   "e2e/subscription-wake.test.ts",
   "e2e/workspace.test.ts",
+  "e2e/workspace-steps.test.ts",
   "e2e/github-push.test.ts",
   "e2e/workflows.test.ts",
   "e2e/binary-size.test.ts",

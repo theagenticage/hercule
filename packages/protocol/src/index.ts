@@ -38,10 +38,17 @@ import {
   WorkspaceProvision,
   WorkspaceReport,
 } from "./workspaces";
+import {
+  WorkspaceStepResult,
+  WorkspaceStepsReport,
+  WorkspaceStepStart,
+  WorkspaceStepSettle,
+} from "./workspace-steps";
 
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
+export * from "./workspace-steps";
 export * from "./workspaces";
 export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
 
@@ -472,6 +479,8 @@ export const RunnerToController = Schema.Union([
   SessionsReport,
   WorkspaceReport,
   CredentialRequest,
+  WorkspaceStepResult,
+  WorkspaceStepsReport,
   Goodbye,
 ]);
 
@@ -552,6 +561,8 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceProvision,
   WorkspaceDispose,
   CredentialAnswer,
+  WorkspaceStepStart,
+  WorkspaceStepSettle,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

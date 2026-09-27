@@ -61,7 +61,7 @@ const make = Effect.gen(function* () {
             const room = runner.maxConcurrentSessions - (yield* runners.runningSessions(runnerId));
             if (room <= 0) return [];
             return yield* sessions.starting(runnerId, room, {
-              accountOf: credentials.githubAccountOf,
+              readGithubAccount: credentials.readGithubAccount,
               secretsOf: (instanceId, providerId) =>
                 Effect.flatMap(host.providers(), (registered) =>
                   readInstanceSecrets(secrets, registered, instanceId, providerId),

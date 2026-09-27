@@ -15,14 +15,14 @@ import {
   COVE,
   MOSS,
   PRIMARY,
-  RUN_3F1,
+  THREAD_3F1,
   WEBSHOP,
   INFRA,
   buildWorkspace,
   buildCheckout,
 } from "./workspaces.testing";
 
-const around = { workspaces: [PRIMARY, RUN_3F1], runnerId: MOSS.id };
+const around = { workspaces: [PRIMARY, THREAD_3F1], runnerId: MOSS.id };
 
 describe("buildBranchField: a main workspace", () => {
   const field = buildBranchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
@@ -38,7 +38,7 @@ describe("buildBranchField: a main workspace", () => {
     expect(field?.rows).toEqual([
       { branch: "main", badge: "current", dimmed: null },
       { branch: "release/2.4", badge: null, dimmed: null },
-      { branch: "hercule/run-3f1", badge: null, dimmed: "in workspace hercule/run-3f1" },
+      { branch: "hercule/thread-3f1", badge: null, dimmed: "in workspace hercule/thread-3f1" },
     ]);
   });
 
@@ -46,7 +46,7 @@ describe("buildBranchField: a main workspace", () => {
     const elsewhere = buildBranchField(
       { kind: "primary", resourceId: WEBSHOP.id },
       {
-        workspaces: [PRIMARY, { ...RUN_3F1, runnerId: COVE.id }],
+        workspaces: [PRIMARY, { ...THREAD_3F1, runnerId: COVE.id }],
         runnerId: MOSS.id,
       },
     );
@@ -97,10 +97,10 @@ describe("buildBranchField: a new worktree", () => {
     expect(field?.label).toBe("from main");
     expect(field?.rows.find((row) => row.branch === "main")?.badge).toBe("default");
     expect(joinPhraseText(field?.foot ?? [])).toBe(
-      "The new branch is hercule/run-…, named after the thread, and starts from origin/main when the remote has it.",
+      "The new branch is hercule/thread-…, named after the thread, and starts from origin/main when the remote has it.",
     );
     // The two git names in it are mono, as git names are everywhere.
-    expect(field?.foot).toContainEqual({ text: "hercule/run-…", mono: true });
+    expect(field?.foot).toContainEqual({ text: "hercule/thread-…", mono: true });
     expect(field?.foot).toContainEqual({ text: "origin/main", mono: true });
   });
 
@@ -149,7 +149,7 @@ describe("buildBranchField: a new worktree", () => {
 
 describe("buildBranchField: no branch to choose", () => {
   it("returns null for a workspace the thread joins, which is named after its branch", () => {
-    expect(buildBranchField({ kind: "existing", workspaceId: RUN_3F1.id }, around)).toBeNull();
+    expect(buildBranchField({ kind: "existing", workspaceId: THREAD_3F1.id }, around)).toBeNull();
   });
 
   it("returns null for a thread with no checkout", () => {

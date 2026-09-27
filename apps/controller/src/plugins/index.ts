@@ -8,7 +8,10 @@ export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {
-  isBuiltInActionId,
-  type BuiltInActionId,
+  isBuiltInControllerActionId,
+  runsInWorkspace,
+  WORKSPACE_ACTION_IDS,
+  type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
+  type WorkspaceActionId,
 } from "./workflow-actions";

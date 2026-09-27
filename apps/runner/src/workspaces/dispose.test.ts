@@ -1,11 +1,11 @@
 /**
  * Tests for disposing a workspace:
  *
- * - the branch is kept after the directory is removed,
+ * - the branch is kept after the directory and the step result files are removed,
  * - a primary is never torn down,
  * - disposing a workspace that is already gone still succeeds.
  */
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
@@ -45,12 +45,19 @@ describe("disposing an ephemeral workspace", () => {
     );
     const directory = join(storageDir, "workspaces", workspaceId);
     const cache = join(storageDir, "cache", `${resourceId}.git`);
+    // A result file of one of the workspace's steps, which lives outside the
+    // workspace directory.
+    const stepResults = join(storageDir, "step-results", workspaceId);
+    mkdirSync(stepResults, { recursive: true });
+    writeFileSync(join(stepResults, "run-commit-1.json"), "{}");
 
     const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
 
     expect(report.status).toBe("deleted");
     expect(report.workspaceId).toBe(workspaceId);
     expect(existsSync(directory)).toBe(false);
+    // No step of a disposed workspace is asked about again.
+    expect(existsSync(stepResults)).toBe(false);
     // The work the agent did is not thrown away with the directory.
     expect(runGitOrThrow(cache, "rev-parse", "--verify", "hercule/run-4d4d4d4d")).toMatch(
       /^[0-9a-f]{40}$/,

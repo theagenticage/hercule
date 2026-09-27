@@ -1,6 +1,7 @@
 import { assert, describe, it } from "vitest";
 import {
   chooseStamps,
+  formatDay,
   formatPreciseStamp,
   formatSince,
   formatStamp,
@@ -88,6 +89,20 @@ describe("chooseStamps", () => {
     );
 
     assert.deepStrictEqual(stamps, ["4 Sep 15:21", undefined, undefined]);
+  });
+});
+
+describe("formatDay", () => {
+  it("formats the day in the given zone", () => {
+    // 23:30 on the eighth in UTC is already the ninth in Amsterdam.
+    const instant = new Date("2026-10-08T23:30:00Z");
+    assert.strictEqual(formatDay(instant, "Europe/Amsterdam"), "9 Oct");
+    assert.strictEqual(formatDay(instant, "UTC"), "8 Oct");
+  });
+
+  it("returns undefined for an unusable zone or an invalid date", () => {
+    assert.isUndefined(formatDay(MONDAY_MORNING, "Europe/Nowhere"));
+    assert.isUndefined(formatDay(new Date(Number.NaN), "UTC"));
   });
 });
 

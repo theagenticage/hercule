@@ -499,6 +499,15 @@ export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
 const MAX_TOKEN_LENGTH = 128;
 
 /**
+ * Who a commit is made as: the account of the Connection the work acts
+ * through. A session start and a workspace step start both carry it, so the
+ * machine sets the same identity whichever of them commits.
+ */
+export const GitIdentity = Schema.Struct({ name: Fact, email: Fact });
+
+export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
+
+/**
  * Starts one session. It carries the instance's decoded config, as a probe
  * does, because the runner holds no Hercule state and cannot look it up.
  */
@@ -527,7 +536,7 @@ export const SessionStart = Schema.Struct({
    * when no Connection backs it; the machine then leaves git's own identity
    * unchanged rather than inventing one.
    */
-  gitIdentity: Schema.optionalKey(Schema.Struct({ name: Fact, email: Fact })),
+  gitIdentity: Schema.optionalKey(GitIdentity),
   /** The branch the session's checkout is switched to before the harness starts. */
   checkoutBranch: Schema.optionalKey(Fact),
 });

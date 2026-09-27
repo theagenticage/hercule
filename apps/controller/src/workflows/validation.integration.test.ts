@@ -67,7 +67,15 @@ import {
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** The ids of the built-in actions. A step can use them with no plugin enabled. */
-const BUILT_IN_ACTION_IDS = ["run.start", "task.create", "task.query", "task.update", "wait"];
+const BUILT_IN_ACTION_IDS = [
+  "git.commit",
+  "git.push",
+  "run.start",
+  "task.create",
+  "task.query",
+  "task.update",
+  "wait",
+];
 
 /** The event kinds the core emits. A trigger on one of them takes no Connection. */
 const CORE_EVENT_KINDS = [
@@ -1212,6 +1220,89 @@ ${buildTaskStep(
 });
 
 /* ------------------------------------------------------------------------ */
+/* The workspace actions.                                                    */
+/* ------------------------------------------------------------------------ */
+
+/** Two repos for the workspaces below. No save checks that they exist. */
+const FIRST_REPO_ID = "0199f0b7-0000-7000-8000-00000000a001";
+const SECOND_REPO_ID = "0199f0b7-0000-7000-8000-00000000a002";
+
+/** Builds a workflow with one git.commit step, `params` lines under it, and `workspace` lines. */
+const buildCommitSource = (workspace: ReadonlyArray<string>, params: ReadonlyArray<string> = []) =>
+  [
+    "name: Commit the work",
+    ...workspace,
+    "steps:",
+    "  - id: commit",
+    "    kind: action",
+    "    action: git.commit",
+    "    params:",
+    "      message: Save the work",
+    ...params.map((line) => `      ${line}`),
+    "",
+  ].join("\n");
+
+const TWO_CHECKOUTS = [
+  "workspace:",
+  "  kind: ephemeral",
+  "  checkouts:",
+  `    - resourceId: ${FIRST_REPO_ID}`,
+  `    - resourceId: ${SECOND_REPO_ID}`,
+];
+
+const WORKSPACE_ACTION_WITHOUT_WORKSPACE: InvalidFixture = {
+  description: "a git.commit step in a workflow with no workspace",
+  build: () => buildCommitSource([]),
+  paths: [["steps", "0", "action"]],
+};
+
+const GIT_ACTION_WITHOUT_CHECKOUT: InvalidFixture = {
+  description: "a git.commit step in a workspace with no checkout",
+  build: () => buildCommitSource(["workspace:", "  kind: ephemeral", "  checkouts: []"]),
+  paths: [["steps", "0", "action"]],
+};
+
+const GIT_ACTION_WITHOUT_RESOURCE: InvalidFixture = {
+  description: "a git.commit step with no resourceId in a workspace of two checkouts",
+  build: () => buildCommitSource(TWO_CHECKOUTS),
+  paths: [["steps", "0", "params"]],
+};
+
+describe("the workspace actions", () => {
+  it("rejects a workspace action in a workflow with no workspace, a git action in a workspace with no checkout, and a git action that does not say which of several checkouts it works in", async () => {
+    await withArrangedController(async (controller) => {
+      const [noWorkspace] = await expectErrorsAt(controller, WORKSPACE_ACTION_WITHOUT_WORKSPACE);
+      expect(noWorkspace!.message).toContain("kind: ephemeral");
+      const [noCheckout] = await expectErrorsAt(controller, GIT_ACTION_WITHOUT_CHECKOUT);
+      expect(noCheckout!.message).toContain("workspace.checkouts");
+      const [noResource] = await expectErrorsAt(controller, GIT_ACTION_WITHOUT_RESOURCE);
+      expect(noResource!.message).toContain("resourceId");
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("accepts a git action in a workspace of one checkout, and one that names its checkout among several", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "one checkout",
+        buildCommitSource([
+          "workspace:",
+          "  kind: ephemeral",
+          "  checkouts:",
+          `    - resourceId: ${FIRST_REPO_ID}`,
+        ]),
+      );
+      await expectAccepted(
+        controller,
+        "two checkouts, one named",
+        buildCommitSource(TWO_CHECKOUTS, [`resourceId: ${SECOND_REPO_ID}`]),
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
 /* Agents and output schemas.                                                */
 /* ------------------------------------------------------------------------ */
 
@@ -2112,6 +2203,7 @@ interface WorkflowActionItem {
   readonly id: string;
   readonly displayName: string;
   readonly description: string;
+  readonly runsIn: string;
   readonly inputSchema: {
     readonly type?: unknown;
     readonly properties?: Record<string, unknown>;
@@ -2166,6 +2258,7 @@ describe("workflowAction.query", () => {
           "displayName",
           "id",
           "inputSchema",
+          "runsIn",
         ]);
         expect(action.displayName.trim(), action.id).not.toBe("");
         expect(action.description.trim(), action.id).not.toBe("");
@@ -2180,6 +2273,11 @@ describe("workflowAction.query", () => {
         "text",
       ]);
       expect(noteAppend.inputSchema.required).toEqual(["text"]);
+
+      // Every plugin action runs on the controller; a git step runs in the workspace.
+      expect(noteAppend.runsIn).toBe("controller");
+      expect(findActionById(actions, "task.create").runsIn).toBe("controller");
+      expect(findActionById(actions, "git.commit").runsIn).toBe("workspace");
 
       // A built-in action's input schema is the input schema of its operation.
       const taskCreate = findActionById(actions, "task.create");

@@ -7,6 +7,6 @@
  * - the environment that tells git to use the helper.
  */
 export { buildGitCredentialEnv, buildSocketPath } from "./env";
-export { answerCredentialQuestion, runCredentialAction } from "./helper";
+export { answerCredentialQuestion, RUNNER_WORKSPACE_VARIABLE, runCredentialAction } from "./helper";
 export { makeCredentialRelay, type CredentialRelay } from "./relay";
 export { serveCredentialSocket, type CredentialAsk } from "./socket";

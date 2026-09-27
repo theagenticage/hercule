@@ -11,7 +11,8 @@
  * All workspace decisions are made here. Nothing outside this domain knows how
  * a multi-repo workspace is laid out, what a thread's branch is called, or
  * which Connection the work in a workspace acts through. A spawn passes in
- * what it asked for and the session id, and gets back where the session works.
+ * what it asked for and the branch this module named for it, and gets back
+ * where the session works.
  *
  * A primary is provisioned by name and never torn down: it is the repo's main
  * workspace on that runner, shared by every session that runs in it. An
@@ -40,6 +41,7 @@ import {
   Subdirectory,
   type CredentialAnswer,
   type CredentialRequest,
+  type GitIdentity,
   type WorkspaceDispose,
   type WorkspaceProvision,
   type WorkspaceReport,
@@ -87,7 +89,12 @@ import {
   buildProvisionFrame,
   type OpeningCheckout,
 } from "./provisioning";
-import { workspaceRepository, type StoredCheckout, type StoredWorkspace } from "./repository";
+import {
+  workspaceRepository,
+  type StoredCheckout,
+  type StoredWorkspace,
+  type SweepCandidate,
+} from "./repository";
 
 const QueryInput = Schema.Struct({
   ...WorkspaceFilter.fields,
@@ -111,6 +118,13 @@ const DEFAULT_ORPHAN_TTL_HOURS = 24;
 
 /** How long an ephemeral workspace with a resumable session is kept unused, in days. */
 const DEFAULT_IDLE_TTL_DAYS = 30;
+
+/**
+ * How long the ephemeral workspace of a failed run, or of a run cancelled
+ * with its workspace kept, is kept for inspection after the run finished, in
+ * days.
+ */
+const DEFAULT_FAILED_RUN_TTL_DAYS = 14;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -146,12 +160,22 @@ const describeUnnameableRepo = (name: string): string =>
  * timestamp, so two threads started in the same millisecond share their first
  * eight characters and would ask one runner for the same branch twice.
  */
-const buildThreadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
+export const buildThreadBranch = (sessionId: string): string =>
+  `hercule/thread-${sessionId.slice(-8)}`;
+
+/**
+ * Builds the name of the branch a run's own worktree is created on. The whole
+ * run id is used, so the branch of a run can be found from the run alone.
+ */
+export const buildRunBranch = (runId: string): string => `hercule/run-${runId}`;
 
 const ALREADY_GONE = "that workspace is already gone";
 
 const describeLiveSessions = (sessions: number): string =>
   `${String(sessions)} session(s) in that workspace have not exited; stop them first`;
+
+const RUN_UNFINISHED =
+  "that workspace belongs to a run that has not finished; cancel the run first, and choose there whether to keep its workspace";
 
 /**
  * Where a session that asked for a workspace will work, once the rows are
@@ -185,34 +209,71 @@ interface Settled {
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
-/** Why the sweep disposed of a workspace, as opposed to a user disposing of it. */
-type Expiry = "orphan" | "idle";
+/**
+ * Why the sweep disposed of a workspace, as opposed to a user disposing of
+ * it. The audit entry records it, so a reader can tell which rule applied:
+ *
+ * - `orphan`: no session can resume in it, and the orphan window ended
+ * - `idle`: a session could still resume in it, and the idle window ended
+ * - `run-completed`: it was the workspace of a run that completed
+ * - `run-cancelled`: it was the workspace of a run cancelled without keeping it
+ * - `run-failed`: it was the workspace of a failed run, and the failed-run
+ *   window ended
+ * - `run-kept`: it was the workspace of a run cancelled with its workspace
+ *   kept, and the failed-run window ended
+ */
+type Expiry = "orphan" | "idle" | "run-completed" | "run-cancelled" | "run-failed" | "run-kept";
 
-/** One workspace the sweep may dispose of, and the window it outlived. */
+/** One workspace the sweep may dispose of, and the rule that applied. */
 interface Expired {
   readonly id: string;
   readonly reason: Expiry;
 }
 
 /**
- * Decides whether a workspace has expired, and returns the window it outlived,
- * or `undefined` if it has not expired. A workspace with a running session
- * never expires. A thread that can still be resumed keeps its worktree,
- * because that worktree holds its work, so its workspace outlives the orphan
- * window and expires only on the longer idle window.
+ * Returns the time a finished run's workspace, kept for inspection, is due
+ * for deletion: the time the run finished plus the failed-run window.
+ */
+const addFailedRunWindow = (finishedAt: string, controller: ScopeSettings<"controller">): string =>
+  new Date(
+    Date.parse(finishedAt) +
+      (controller["workspace.failedRunTtlDays"] ?? DEFAULT_FAILED_RUN_TTL_DAYS) * DAY_MS,
+  ).toISOString();
+
+/**
+ * Decides whether a workspace is due for deletion, and returns the rule that
+ * applied, or `undefined` if the workspace stays. A workspace with a running
+ * session always stays.
+ *
+ * The workspace of a finished run follows how the run ended: it is deleted at
+ * once when the run completed, or was cancelled by a user who did not keep
+ * it. After a failure, or a cancel that kept it, it stays for the failed-run
+ * window, so the user can look at what the run left behind.
+ *
+ * Any other workspace belongs to threads. A thread that can still be resumed
+ * keeps its worktree, because that worktree holds its work, so its workspace
+ * outlives the orphan window and expires only on the longer idle window.
  */
 const decideExpiry = (
-  candidate: { readonly liveSessions: number; readonly resumableSessions: number },
-  idleFor: number,
+  candidate: SweepCandidate,
+  now: number,
   controller: ScopeSettings<"controller">,
 ): Expiry | undefined => {
   if (candidate.liveSessions > 0) return undefined;
-  const reason: Expiry = candidate.resumableSessions > 0 ? "idle" : "orphan";
+  const { run } = candidate;
+  if (run !== undefined) {
+    if (run.status === "completed") return "run-completed";
+    if (run.status === "cancelled" && !run.keepsWorkspace) return "run-cancelled";
+    const due = Date.parse(addFailedRunWindow(run.finishedAt, controller));
+    if (now <= due) return undefined;
+    return run.status === "failed" ? "run-failed" : "run-kept";
+  }
+  const reason = candidate.resumableSessions > 0 ? "idle" : "orphan";
   const window =
     reason === "idle"
       ? (controller["workspace.idleTtlDays"] ?? DEFAULT_IDLE_TTL_DAYS) * DAY_MS
       : (controller["workspace.orphanTtlHours"] ?? DEFAULT_ORPHAN_TTL_HOURS) * HOUR_MS;
-  return idleFor > window ? reason : undefined;
+  return now - Date.parse(candidate.usedAt) > window ? reason : undefined;
 };
 
 const make = Effect.gen(function* () {
@@ -337,6 +398,29 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Rebuilds the provision frame of a workspace from its rows and the repos
+   * behind its checkouts. The rows hold everything provisioning needs, so the
+   * rebuilt frame is the same as the frame that was first sent, and asks for
+   * the same clone or worktree.
+   */
+  const rebuildProvisionFrame = (
+    workspace: StoredWorkspace,
+  ): Effect.Effect<WorkspaceProvision, SqlError> =>
+    Effect.gen(function* () {
+      const checkouts = (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
+      const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
+      const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
+      for (const checkout of checkouts) {
+        const resource = named.get(checkout.resourceId);
+        // Only a repo is ever checked out, so a checkout of any other kind of
+        // resource cannot be provisioned.
+        if (resource === undefined || resource.kind !== "repo") continue;
+        plans.push({ checkout, resource });
+      }
+      return buildProvisionFrame(workspace, plans);
+    });
+
+  /**
    * Decides where a spawned session works, and writes the rows in the
    * caller's transaction. Returns an `Opened`, with the frame to send once the
    * transaction has committed. Fails with a validation error if the requested
@@ -347,11 +431,11 @@ const make = Effect.gen(function* () {
    * - what the requested workspace means
    * - reading the repos behind it and checking they belong to the project
    * - the layout of a multi-repo workspace
-   * - the branch the thread's own worktree is created on
    * - the Connection the work acts through
    *
-   * The caller passes a session id that does not exist yet, because the
-   * branch is named after the thread.
+   * The caller names the branch a new worktree is created on, because the
+   * branch is named after whatever the workspace is for: a thread
+   * (`buildThreadBranch`) or a run (`buildRunBranch`).
    *
    * For an `existing` workspace, this does not check again whether it is
    * ready: `machineFor` checked that before the session was placed, because
@@ -365,7 +449,8 @@ const make = Effect.gen(function* () {
     readonly heldWorkspaceId: string | null;
     readonly runnerId: string;
     readonly projectId: string | undefined;
-    readonly sessionId: string;
+    /** The branch each checkout of a new ephemeral workspace is created on. */
+    readonly branch: string;
     readonly at: string;
   }): Effect.Effect<Opened, Validation | SqlError> =>
     Effect.gen(function* () {
@@ -466,7 +551,7 @@ const make = Effect.gen(function* () {
         // A single repo is checked out at the root of the workspace; several
         // repos sit side by side, each in a directory named after the repo.
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
-        branch: buildThreadBranch(input.sessionId),
+        branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
       }));
       const opened = yield* openWorkspace(
@@ -572,6 +657,9 @@ const make = Effect.gen(function* () {
      * - it is already deleted or lost
      * - a session in it has not exited, because removing the directory would
      *   break a running harness
+     * - it is the workspace of a run that has not finished, because the run's
+     *   next steps work in it. Cancelling the run is the way to stop it, and
+     *   the cancel asks whether to keep the workspace.
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
@@ -580,6 +668,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+        }
+        if (yield* workspaces.hasUnfinishedRun(id)) {
+          return yield* Effect.fail(createInvalidStateError(RUN_UNFINISHED));
         }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         if (living.length > 0)
@@ -600,15 +691,25 @@ const make = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const due: Array<Expired> = [];
         for (const candidate of candidates) {
-          const reason = decideExpiry(candidate, now - Date.parse(candidate.usedAt), controller);
+          const reason = decideExpiry(candidate, now, controller);
           if (reason !== undefined) due.push({ id: candidate.id, reason });
         }
         return due;
       }),
 
     /**
+     * Returns when the sweep deletes the ephemeral workspace of a run that
+     * finished at `finishedAt` and keeps its workspace for inspection: after
+     * a failure, or a cancel that kept it. The window is the controller
+     * setting `workspace.failedRunTtlDays`, read now, so a change to the
+     * setting moves the time.
+     */
+    computeKeptUntil: (finishedAt: string): Effect.Effect<string, SettingError | SqlError> =>
+      Effect.map(settings.all(), (controller) => addFailedRunWindow(finishedAt, controller)),
+
+    /**
      * Returns the workspace if the sweep may still dispose of it, or
-     * `undefined` if it is no longer ready or a session is running in it. A
+     * `undefined` if its files are gone or a session is running in it. A
      * sweep reads every candidate up front, and a session can start in one
      * while an earlier one is being disposed of. A workspace with a running
      * harness in it is never disposed of.
@@ -616,7 +717,12 @@ const make = Effect.gen(function* () {
     sweepable: (id: string): Effect.Effect<StoredWorkspace | undefined, SqlError> =>
       Effect.gen(function* () {
         const found = yield* workspaces.one(id);
-        if (Option.isNone(found) || found.value.status !== "ready") return undefined;
+        if (
+          Option.isNone(found) ||
+          (found.value.status !== "ready" && found.value.status !== "failed")
+        ) {
+          return undefined;
+        }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         return living.length > 0 ? undefined : found.value;
       }),
@@ -666,28 +772,27 @@ const make = Effect.gen(function* () {
      * provisioning needs, so a rebuilt frame is the same as the frame that was
      * sent, and asks for the same clone or worktree.
      */
-    owedProvisioning: (
+    listOwedProvisioning: (
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceProvision>, SqlError> =>
+      Effect.flatMap(workspaces.provisioningOn(runnerId), (owed) =>
+        Effect.forEach(owed, rebuildProvisionFrame),
+      ),
+
+    /**
+     * Returns the provision frame of one workspace, rebuilt from its rows, if
+     * the workspace is still `provisioning`, and `none` otherwise. A run's
+     * first workspace step sends this before the step itself, so a runner that
+     * missed the first frame still provisions the workspace before it is
+     * asked to work in it.
+     */
+    rebuildOwedProvision: (
+      workspaceId: string,
+    ): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
       Effect.gen(function* () {
-        const owed = yield* workspaces.provisioningOn(runnerId);
-        const frames: Array<WorkspaceProvision> = [];
-        for (const workspace of owed) {
-          const checkouts =
-            (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
-          const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
-          const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
-          for (const checkout of checkouts) {
-            const resource = named.get(checkout.resourceId);
-            if (resource === undefined) continue;
-            // Only a repo is ever checked out, so a checkout of any other kind
-            // of resource cannot be provisioned.
-            if (resource.kind !== "repo") continue;
-            plans.push({ checkout, resource });
-          }
-          frames.push(buildProvisionFrame(workspace, plans));
-        }
-        return frames;
+        const found = yield* workspaces.one(workspaceId);
+        if (Option.isNone(found) || found.value.status !== "provisioning") return Option.none();
+        return Option.some(yield* rebuildProvisionFrame(found.value));
       }),
 
     /**
@@ -744,6 +849,33 @@ const make = Effect.gen(function* () {
       Effect.map(workspaces.one(workspaceId), (found) =>
         Option.isNone(found) ? undefined : found.value.status,
       ),
+
+    /**
+     * Returns the ids of the runners that hold a ready primary of this
+     * resource. A run whose steps work in the main workspace prefers one of
+     * these runners, because its steps can start there without a fresh clone.
+     */
+    listRunnersWithReadyPrimary: (
+      resourceId: string,
+    ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      workspaces.listRunnersWithReadyPrimary(resourceId),
+
+    /**
+     * Returns the identity a workspace step's commits are made as: that of
+     * the workspace's designated Connection, the account the work in the
+     * workspace commits and pushes as. It is read now rather than stored, the
+     * way a session start reads its account. Returns `undefined` when no
+     * Connection backs the workspace, when there is no such workspace, or
+     * when the Connection has no usable account; the runner then leaves git's
+     * own identity unchanged.
+     */
+    readCommitAuthor: (workspaceId: string): Effect.Effect<GitIdentity | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const found = yield* workspaces.one(workspaceId);
+        const connectionId = Option.isNone(found) ? null : found.value.designatedConnectionId;
+        if (connectionId === null) return undefined;
+        return (yield* credentials.readGithubAccount(connectionId))?.gitIdentity;
+      }),
 
     /**
      * Marks a workspace as used just now, which keeps the sweep from disposing

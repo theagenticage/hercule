@@ -55,6 +55,8 @@ export interface StoredCheckout {
   readonly branch: string | null;
   readonly branches: ReadonlyArray<string>;
   readonly defaultBranch: string | null;
+  /** The branch a new branch was asked to start from; `null` means the resource's default. */
+  readonly baseBranch: string | null;
 }
 
 /** One checkout to insert with a new workspace. */
@@ -63,6 +65,7 @@ export interface NewCheckout {
   readonly form: CheckoutForm;
   readonly subdirectory: string | null;
   readonly branch: string | null;
+  readonly baseBranch: string | null;
 }
 
 export interface WorkspacePageRequest {
@@ -87,7 +90,8 @@ export interface CheckoutState {
 
 /**
  * One ephemeral workspace the sweep considers: how many sessions are running
- * in it, how many could still be resumed in it, and when it was last used.
+ * in it, how many could still be resumed in it, when it was last used, and,
+ * for the workspace of a run, how that run ended.
  */
 export interface SweepCandidate {
   readonly id: string;
@@ -95,6 +99,13 @@ export interface SweepCandidate {
   readonly liveSessions: number;
   readonly resumableSessions: number;
   readonly usedAt: string;
+  /** The finished run whose workspace this is; absent for a workspace no run opened. */
+  readonly run?: {
+    readonly status: "completed" | "failed" | "cancelled";
+    /** Whether the user who cancelled the run chose to keep its workspace. */
+    readonly keepsWorkspace: boolean;
+    readonly finishedAt: string;
+  };
 }
 
 /**
@@ -170,6 +181,7 @@ interface CheckoutRow {
   readonly branch: string | null;
   readonly branches: string;
   readonly default_branch: string | null;
+  readonly base_branch: string | null;
 }
 
 const COLUMNS =
@@ -182,7 +194,7 @@ const WORKSPACE_COLUMNS = COLUMNS.split(", ")
   .join(", ");
 
 const CHECKOUT_COLUMNS =
-  "id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch";
+  "id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch, base_branch";
 
 const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   id: uuidToString(row.id),
@@ -207,6 +219,7 @@ const toCheckout = (row: CheckoutRow): StoredCheckout => ({
   branch: row.branch,
   branches: JSON.parse(row.branches) as ReadonlyArray<string>,
   defaultBranch: row.default_branch,
+  baseBranch: row.base_branch,
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -321,10 +334,10 @@ const make = Effect.gen(function* () {
           const id = mintUuid();
           yield* sql`
             INSERT INTO checkouts (id, workspace_id, resource_id, form, subdirectory, branch,
-                                   branches, default_branch, position, created_at)
+                                   base_branch, branches, default_branch, position, created_at)
             VALUES (${id}, ${uuidFromString(workspaceId)}, ${uuidFromString(checkout.resourceId)},
                     ${checkout.form}, ${checkout.subdirectory}, ${checkout.branch},
-                    '[]', NULL, ${position}, ${at})
+                    ${checkout.baseBranch}, '[]', NULL, ${position}, ${at})
           `;
           return {
             id: uuidToString(id),
@@ -335,6 +348,7 @@ const make = Effect.gen(function* () {
             branch: checkout.branch,
             branches: [],
             defaultBranch: null,
+            baseBranch: checkout.baseBranch,
           } satisfies StoredCheckout;
         }),
       ),
@@ -358,6 +372,20 @@ const make = Effect.gen(function* () {
           LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
+      ),
+
+    /** Returns the ids of the runners that hold a ready primary of this resource. */
+    listRunnersWithReadyPrimary: (
+      resourceId: string,
+    ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly runner_id: Uint8Array }>`
+          SELECT w.runner_id
+          FROM workspaces w JOIN checkouts c ON c.workspace_id = w.id
+          WHERE w.kind = 'primary' AND w.status = 'ready'
+            AND c.resource_id = ${uuidFromString(resourceId)}
+        `,
+        (rows) => new Set(rows.map((row) => uuidToString(row.runner_id))),
       ),
 
     /** Returns every workspace this runner was asked to provision and has not yet reported on. */
@@ -486,8 +514,16 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every ephemeral workspace the sweep could act on: each one that
-     * is ready, on a runner that is online to receive the dispose frame. The
-     * service decides from the counts which ones to keep.
+     * still has files on its runner (`ready`, or `failed`, whose files may be
+     * on disk), on a runner that is online to receive the dispose frame, and
+     * not the workspace of an unfinished run. The service decides from the
+     * counts, and from how the workspace's run ended, which ones to keep.
+     *
+     * An unfinished run's workspace is left out whatever its age, because a
+     * run can sleep between two steps for longer than any expiry window. Each
+     * workspace belongs to at most one run, found through the
+     * `runs_workspace` index; its sessions are counted through the
+     * `sessions_workspace` index.
      */
     sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
       Effect.map(
@@ -497,16 +533,22 @@ const make = Effect.gen(function* () {
           readonly live: number;
           readonly resumable: number;
           readonly used_at: string;
+          readonly run_status: "completed" | "failed" | "cancelled" | null;
+          readonly keep_workspace: number | null;
+          readonly finished_at: string | null;
         }>`
           SELECT w.id, w.runner_id,
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
                   AND s.status IN ('queued', 'starting', 'idle', 'busy')) AS live,
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
                   AND ${sql.literal(buildResumableClause("s"))}) AS resumable,
-                 COALESCE(w.last_used_at, w.created_at) AS used_at
+                 COALESCE(w.last_used_at, w.created_at) AS used_at,
+                 runs.status AS run_status, runs.keep_workspace, runs.finished_at
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
-          WHERE w.kind = 'ephemeral' AND w.status = 'ready'
+            LEFT JOIN runs ON runs.workspace_id = w.id
+          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed')
             AND ${sql.literal(buildOnlineClause("r"))}
+            AND (runs.id IS NULL OR runs.status NOT IN ('pending', 'running'))
         `,
         (rows) =>
           rows.map((row) => ({
@@ -515,7 +557,32 @@ const make = Effect.gen(function* () {
             liveSessions: row.live,
             resumableSessions: row.resumable,
             usedAt: row.used_at,
+            ...(row.run_status === null
+              ? {}
+              : {
+                  run: {
+                    status: row.run_status,
+                    keepsWorkspace: row.keep_workspace === 1,
+                    // The query keeps only finished runs, and the run engine
+                    // writes `finished_at` in the same update that ends a run.
+                    finishedAt: row.finished_at as string,
+                  },
+                }),
           })),
+      ),
+
+    /**
+     * Checks whether this workspace belongs to a run that has not finished
+     * yet. Returns `false` for a workspace no run opened.
+     */
+    hasUnfinishedRun: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE workspace_id = ${uuidFromString(workspaceId)}
+            AND status IN ('pending', 'running')
+        `,
+        (rows) => rows.length > 0,
       ),
 
     list: (

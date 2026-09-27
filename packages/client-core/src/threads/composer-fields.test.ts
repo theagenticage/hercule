@@ -390,25 +390,25 @@ const PRIMARY: Workspace = {
 };
 
 /** A live worktree of webshop, which another thread is already working in. */
-const RUN_3F1: Workspace = {
+const THREAD_3F1: Workspace = {
   ...PRIMARY,
-  id: "ws-run-3f1",
+  id: "ws-thread-3f1",
   kind: "ephemeral",
   checkouts: [
     {
-      checkoutId: "co-run-3f1",
+      checkoutId: "co-thread-3f1",
       resourceId: WEBSHOP.id,
       form: "worktree",
       subdirectory: null,
-      branch: "hercule/run-3f1",
-      branches: ["hercule/run-3f1"],
+      branch: "hercule/thread-3f1",
+      branches: ["hercule/thread-3f1"],
       defaultBranch: "main",
     },
   ],
   sessionIds: ["s-flaky", "s-runbook"],
 };
 
-/** Returns a thread working in `RUN_3F1`, as the session list has it. */
+/** Returns a thread working in `THREAD_3F1`, as the session list has it. */
 const buildThread = (id: string, title: string): Session => ({
   id,
   title,
@@ -420,7 +420,7 @@ const buildThread = (id: string, title: string): Session => ({
   conversationId: null,
   instanceId: CLAUDE.id,
   runnerId: LOCAL.id,
-  workspaceId: "ws-run-3f1",
+  workspaceId: "ws-thread-3f1",
   projectId: WEBSHOP_PROJECT.id,
   requestedAccessMode: "approval-required",
   accessMode: "approval-required",
@@ -444,7 +444,7 @@ const SESSIONS = [
 const withRepos = (
   projects: readonly Project[],
   resources: readonly Resource[],
-  workspaces: readonly Workspace[] = [PRIMARY, RUN_3F1],
+  workspaces: readonly Workspace[] = [PRIMARY, THREAD_3F1],
 ) => ({
   instances: [CLAUDE],
   runners: [LOCAL, OTHER],
@@ -545,12 +545,12 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
-        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
       "draft",
     );
 
-    expect(fields.workspace.value).toEqual({ kind: "existing", workspaceId: RUN_3F1.id });
+    expect(fields.workspace.value).toEqual({ kind: "existing", workspaceId: THREAD_3F1.id });
   });
 });
 
@@ -591,12 +591,12 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
-        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
       "draft",
     );
 
-    expect(fields.machine.label).toBe("set by the workspace hercule/run-3f1");
+    expect(fields.machine.label).toBe("set by the workspace hercule/thread-3f1");
     expect(fields.machine.locked).toBe("The workspace it joins decides the machine");
   });
 
@@ -605,7 +605,7 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
-        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
       "active",
     );
@@ -685,7 +685,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
-        workspace: { kind: "existing", workspaceId: RUN_3F1.id },
+        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
       "draft",
     );
@@ -697,7 +697,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
 
   // At most two titles; the rest are counted.
   it("counts the threads past the second rather than naming them all", () => {
-    const three = { ...RUN_3F1, sessionIds: ["s-flaky", "s-runbook", "s-third"] };
+    const three = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-runbook", "s-third"] };
     const fields = buildComposerFields(
       withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, three]),
       buildDraftConfig({
@@ -714,7 +714,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
 
   // A workspace with no threads has none to name, so the lead names the workspace.
   it("names the workspace itself when it has no threads yet", () => {
-    const empty = { ...RUN_3F1, sessionIds: [] };
+    const empty = { ...THREAD_3F1, sessionIds: [] };
     const fields = buildComposerFields(
       withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, empty]),
       buildDraftConfig({
@@ -725,7 +725,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
-      "It joins “hercule/run-3f1” there: the agents see each other's edits, on one branch.",
+      "It joins “hercule/thread-3f1” there: the agents see each other's edits, on one branch.",
     );
   });
 

@@ -6,7 +6,7 @@
  * A workspace has no name of its own:
  *
  * - an ephemeral workspace is named after the branch its checkout is on
- *   (`hercule/run-3f1`), which Hercule generated;
+ *   (`hercule/thread-3f1`), which Hercule generated;
  * - a primary workspace, the repo's **main workspace**, is named after the
  *   repo and the runner it is on, because there is exactly one per repo and
  *   runner.

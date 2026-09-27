@@ -169,10 +169,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workflowAction.query");
         const actions = yield* host.listActiveWorkflowActions();
-        return actions.map(({ id, displayName, description, inputSchema }) => ({
+        return actions.map(({ id, displayName, description, runsIn, inputSchema }) => ({
           id,
           displayName,
           description,
+          runsIn,
           inputSchema,
         }));
       }),

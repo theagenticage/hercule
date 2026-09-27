@@ -39,6 +39,18 @@ export const tearDown = async (
   }
 };
 
+/** Returns the directory that holds one directory of step result files per workspace. */
+export const buildStepResultsRoot = (storageDir: string): string =>
+  joinPath(storageDir, "step-results");
+
+/**
+ * Returns the directory that holds the result files of one workspace's
+ * workspace steps. It sits outside every checkout, so a step's result can
+ * never be committed, and a checkout's owner never sees it.
+ */
+export const buildStepResultsDir = (storageDir: string, workspaceId: string): string =>
+  joinPath(buildStepResultsRoot(storageDir), workspaceId);
+
 /**
  * Prunes every cache on this runner. This cleans up after a failed
  * provisioning, which can leave a worktree recorded in a cache without a
@@ -84,6 +96,9 @@ export const disposeWorkspace = async (
   // of them. This runs after the directories are gone, like the prunes inside
   // `tearDown`.
   if (entry === undefined) await pruneEveryCache(substrate);
+  // The controller disposes a workspace only once it owes none of its steps,
+  // so no step of this workspace will be asked about again.
+  rmSync(buildStepResultsDir(substrate.storageDir, workspaceId), { recursive: true, force: true });
   await substrate.registry.update((entries) =>
     entries.filter((held) => held.workspaceId !== workspaceId),
   );

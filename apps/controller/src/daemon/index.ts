@@ -23,10 +23,12 @@
  *   the routing tables and deliveries in `events/routing/`;
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
  *   removes the ones nothing needs any more;
- * - `runners/`: handling what runners report, and retiring a runner;
+ * - `runners/`: sending a runner that connects the work owed to it, handling
+ *   what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
  * - `workflows/`: what the workflows domain reads from the runs domain;
- * - `runs/`: the Run Executor, which gives each run's execution a fiber.
+ * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
+ *   Workspace Steps, which hands a workspace step to its runner and stops it.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -50,8 +52,15 @@ export {
   PipelineLayer,
 } from "./events";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
-export { Inbound, InboundLayer, Retirement, RetirementLayer } from "./runners";
-export { RunExecutorLayer, RunFibers } from "./runs";
+export {
+  Arrival,
+  ArrivalLayer,
+  Inbound,
+  InboundLayer,
+  Retirement,
+  RetirementLayer,
+} from "./runners";
+export { RunExecutorLayer, RunFibers, WorkspaceStepsLayer } from "./runs";
 export {
   AssistantSessionsLayer,
   DispatchLayer,

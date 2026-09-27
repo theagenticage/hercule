@@ -48,6 +48,27 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 
 *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* A resume rides the existing `SessionStart` for the same `sessionId`, with `spec.continue = { nativeSessionId, mode: "resume" }`, the session's current `modelSelection`, and a fresh token; no new frame.
 
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)* **Workspace steps add four frames.** A workspace step is a step of a run whose action runs in the run's workspace on a runner, such as `git.commit` ([./07-workflows.md](./07-workflows.md) section 4.4). Every frame names its step by the **step key** `{ runId, stepId, iteration }`.
+
+- Controller to runner: `WorkspaceStepStart { runId, stepId, iteration, workspaceId, action, input, resourceId?, gitIdentity? }`. It carries everything the runner needs, because the runner holds no Hercule state: the action's id, its `input` as the controller stored it on the step record, the checkout to work in when the workspace has more than one, and who a commit is made as (the workspace's designated Connection, as `SessionStart` carries it; absent when no Connection backs the workspace).
+- Controller to runner: `WorkspaceStepSettle { steps }`: the controller no longer owes these steps, because their records have ended. Settling a step means more than stopping it: the runner stops the step if it is still running, deletes its result file, and remembers its key so a start of it that arrives late is ignored. There is no reply. The controller sends it when a run ends with a workspace step running, once it has recorded a step's result, and for every reported step whose record has ended.
+- Runner to controller: `WorkspaceStepResult { runId, stepId, iteration, outcome }`, sent once the step has finished. `outcome` is `{ status: "completed", output }` or `{ status: "failed", code, message }`. `code` is one of `action_failed` (the action ran and failed), `timeout` (it ran past its deadline and was stopped), `unsupported_action` (this runner's build does not implement it) and `interrupted` (it was stopped before it finished).
+- Runner to controller: `WorkspaceStepsReport { steps }`: the steps the runner is running now, sent on connect like `SessionsReport`. The controller settles each one whose record is no longer `running`.
+- A frame lists at most 256 step keys, which only refuses a nonsense frame.
+
+Delivery is idempotent by the step key, not sequenced. The controller sends a `WorkspaceStepStart` again whenever it cannot know whether the runner has the step: on every connect, for every workspace step still `running` in a run pinned to that runner. The runner ignores a repeated start while the step runs, answers it with the stored result once the step has finished, and runs it only when it has no trace of it. So a result lost with a dropped socket is answered again on the next connect. While the run's workspace is still `provisioning`, the controller sends the workspace's provision frame before the start. It rebuilds that frame from the workspace's rows, the checkout's base branch included, so a repeated provision is identical to the first. The runner keeps each step's result in a file outside every checkout, `<runner storage>/step-results/<workspaceId>/<runId>-<stepId>-<iteration>.json`, so a commit never picks it up. The files of a workspace are deleted when the workspace is disposed. A primary workspace is never disposed, so there a step's file is deleted once the controller no longer owes the step: the report's answer shows its record ended, or a `WorkspaceStepSettle` for it arrives.
+
+`PROTOCOL_VERSION` stays 1. The frames are sent only to a runner that implements them; [#258](https://github.com/theagenticage/hercule/issues/258) makes that a checked rule, with the workspace actions a runner lists at hello (section 2.2's capability list).
+
+*(Amended 2026-09-25, [#258](https://github.com/theagenticage/hercule/issues/258).)* **The capability list holds one capability per workspace action**, spelled `action:<id>`, for example `action:git.commit`. `buildWorkspaceActionCapability` in `@hercule/protocol` is the one place that spelling is written.
+
+- The runner lists one for each workspace action its build implements, derived from its own registry of workspace actions.
+- The controller lists one for each workspace action in its catalog (every action with `runsIn: "workspace"`), derived from the catalog.
+- Neither list is kept by hand. The controller stores the intersection as the runner's `negotiatedCapabilities`, as before, so a runner on an older build negotiates only the workspace actions it has.
+- Run pinning reads the negotiated list (section 5.1). The runner's `unsupported_action` answer stays as the last line of defence.
+
+Versions are still not compared, and section 2.4 is unchanged: the only hard refusal at hello is an incompatible protocol version. A runner that lacks a workspace action stays online and takes every other placement.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -148,6 +169,20 @@ No load balancing, no migration, no failover.
 
 *(Amended 2026-09-17, [#208](https://github.com/theagenticage/hercule/issues/208).)* Steps 3 and 4 are **not implemented as written**: a request that names no runner is placed on any placeable runner holding a logged-in snapshot for the instance, and neither the fleet default nor the controller's local runner is consulted. The ladder above is what the system is to do; tracked in [#210](https://github.com/theagenticage/hercule/issues/210).
 
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Run pinning until the ladder is built.** A run is pinned to a runner in the transaction that starts its first workspace step ([./07-workflows.md](./07-workflows.md) section 4.4). Until [#210](https://github.com/theagenticage/hercule/issues/210) replaces it with the ladder above, the rule is:
+
+- The run is pinned to a **placeable** runner: `online`, `active`, and not reserved. A reserved runner is never picked, because a run names no runner (section 5.5).
+- For a `primary` policy, a placeable runner that already holds a `ready` main workspace of the policy's resource is preferred, so the run works in the clone the user already has there.
+- When no runner is placeable, the step record stays `pending` and the run sleeps. It is not failed: the controller wakes every run that waits for a runner when a runner connects, and when a connected runner may have become placeable (it is undrained, no longer reserved, or given more room). [#258](https://github.com/theagenticage/hercule/issues/258) adds the capability part: a runner must also implement every workspace action in the plan.
+- From then on the run is pinned, as section 5.2 says of any work: every later workspace step goes to the same runner. A run whose runner is `offline` or `unreachable` waits for it with no time limit. Cancelling the run, or retiring the runner, are the only ways out; retiring fails the run with `workspace-failed`.
+
+*(Amended 2026-09-25, [#258](https://github.com/theagenticage/hercule/issues/258).)* **The capability filter in run pinning.** A run is pinned only to a runner whose negotiated capabilities (section 2.2) hold every workspace action in the plan, not just the one about to run, because every later workspace step goes to the same runner.
+
+- **At `run.start`**, a plan whose workspace actions no runner that is neither retired nor reserved offers is refused with `validation`, naming the missing actions: "No runner can run git.commit; update a runner to this version." When each action is offered by some runner but no runner offers them all, every workspace action in the plan is named. An offline or draining runner still counts, because it may take the run later. A reserved runner does not count: a run names no runner, so it is never pinned to a reserved one (above), and counting one would let the run wait forever. A plan that only reserved runners offer is refused with the same message.
+- A plan that some runner offers, but no placeable one, starts, and its step record stays `pending` until a capable runner is placeable, as above.
+- **At pinning time**, if every runner that offered the plan's workspace actions has been retired or reserved since the run started, the run fails with `workspace-failed` at the step about to start, with the same message. Retiring a runner wakes every run waiting for a runner, so such a run fails at once rather than waiting for a runner that will never come.
+- A run that is already pinned is not checked again. If its runner comes back on a build without the action, the runner answers the step with `unsupported_action`.
+
 ### 5.2 Pin once landed
 
 - A Workspace is pinned to the runner it was provisioned on.
@@ -235,7 +270,7 @@ Concurrent sessions in one primary workspace are allowed; the UI surfaces the ov
 | `lost` | its runner was retired, or the runner reported the directory gone |
 | `deleted` | torn down by teardown or the TTL reaper; terminal, record kept |
 
-Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (teardown after clean completion, dismissal of the failed run, or reaping); any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`. The status is the material state on the runner and nothing more: whether an ephemeral is kept for inspection is teardown policy read off its run (6.7), never a workspace state (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped).
+Transitions: `provisioning -> ready | failed`; `ready | failed -> deleted` (teardown after clean completion, ~~dismissal of the failed run~~ `workspace.dispose` on the failed run's kept workspace *(amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260))*, or reaping); any non-terminal status `-> lost` on runner retirement. Primaries are `ready` for their whole life unless they become `lost`. The status is the material state on the runner and nothing more: whether an ephemeral is kept for inspection is teardown policy read off its run (6.7), never a workspace state (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46): `unusable` renamed `failed`, `kept-on-failure` dropped).
 
 Non-repo resources get no workspaces in v1: folder resources need a versioning story for non-git materials (post-v1), and mailboxes never produce workspaces.
 
@@ -243,13 +278,13 @@ Non-repo resources get no workspaces in v1: folder resources need a versioning s
 
 ### 6.4 Checkouts, cache and provisioning
 
-- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hercule/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
+- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names ~~(default `hercule/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4)~~. No worktree pooling. *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* The branch has a fixed name. A run's ephemeral checkout is on `hercule/run-<runId>`, and a thread's is on `hercule/thread-<last 8 of the session id>` ([07-workflows.md](./07-workflows.md) section 4.4).
 - **Primary.** Always a standalone clone with `origin` pointing at the real remote, cloned once from the cache with hardlink object sharing and then pointed at the remote. ~~*Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.~~ *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* **Struck: adopt-in-place is not built.** `workspace.provision` takes `{resourceId, runnerId}` and no path; a checkout the user already has on that machine is never read, written or taken over. The consequences are deliberate and are the reason it went: nothing the controller holds could rebuild a frame naming a folder, so a provisioning frame could never be re-sent to a machine that was away; the machine had to read the folder's `origin` to decide whether it was the right repository at all; and "Hercule never writes under a folder you did not give it" is a promise with no exception to explain.
 - Primaries, caches and ephemerals all live under the runner's storage directory.
 - Git's one-branch-one-worktree guard applies uniformly across a runner's ephemerals; primaries are standalone clones, so the guard never spans the two kinds.
 - Git credentials for clone, fetch and push derive from the checkout's Connection and are delivered on demand, never written to runner disk; mechanics in [13-security](./13-security.md) ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)).
 
-Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: default `hercule/run-<runId>`, overridable per workflow, renamable by the agent; "task branch" is a shipped-workflow convention.
+Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: ~~default `hercule/run-<runId>`, overridable per workflow,~~ renamable by the agent; "task branch" is a shipped-workflow convention. *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* A run's branch is always `hercule/run-<runId>`; the workspace policy has no branch template. A thread's branch is `hercule/thread-<last 8 of the session id>`, so the two kinds never share a name.
 
 ### 6.5 Setup command and `.workspaceinclude`
 
@@ -269,16 +304,34 @@ The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#
 | Situation | Ephemeral workspace |
 |---|---|
 | Clean completion | deleted |
-| Failure | kept until the user dismisses the failed run; re-runs provision fresh workspaces |
+| Failure | kept until the user ~~dismisses the failed run~~ deletes it with `workspace.dispose`, or for 14 days *(amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260), below)*; re-runs provision fresh workspaces |
 | Orphaned (owning run gone, session gone, runner restarted mid-job) | collected by the runner's TTL reaper |
 
 Primary workspaces are never torn down by Hercule and bare caches persist for the runner's life (this spec's consolidation; the ticket's teardown rules cover ephemerals only).
 
 A retired runner's workspaces are marked `lost` in the controller (section 7); the disk itself is not touched.
 
-*(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* The reaper is a **controller sweep the runner executes**: every ten minutes the controller disposes, by the same frame `workspace.dispose` uses, every ephemeral workspace on an online runner that is either orphaned for longer than `workspace.orphanTtlHours` (default **24 hours**) or idle for longer than `workspace.idleTtlDays` (default **30 days**), both controller settings. The runner never decides on its own: it lacks the facts the rule is written in - session status, resumability, last activity. A thread's worktree is its work, so a workspace whose threads are still resumable is not orphaned and expires only on the idle TTL, which the user can raise. A workspace on an offline or unreachable runner waits for the next sweep after it returns. The **14-day** window below is a rule about runs - it keeps a failed run's ephemerals until the run is dismissed - and v1 has no runs, so it is unimplemented; the sweep knows only the orphan and idle TTLs.
+*(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* The reaper is a **controller sweep the runner executes**: every ten minutes the controller disposes, by the same frame `workspace.dispose` uses, every ephemeral workspace on an online runner that is either orphaned for longer than `workspace.orphanTtlHours` (default **24 hours**) or idle for longer than `workspace.idleTtlDays` (default **30 days**), both controller settings. The runner never decides on its own: it lacks the facts the rule is written in - session status, resumability, last activity. A thread's worktree is its work, so a workspace whose threads are still resumable is not orphaned and expires only on the idle TTL, which the user can raise. A workspace on an offline or unreachable runner waits for the next sweep after it returns. ~~The **14-day** window below is a rule about runs - it keeps a failed run's ephemerals until the run is dismissed - and v1 has no runs, so it is unimplemented; the sweep knows only the orphan and idle TTLs.~~ *(Struck 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260): the 14-day window is built, below.)*
 
 Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
+
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Runs now have workspaces, and the sweep leaves an unfinished run's workspace alone.** The sweep never disposes of a workspace whose run is `pending` or `running`, however long the run has waited. A run can wait for its runner with no time limit (section 5.1), and its workspace holds the work of the steps already done. What happens to a run's workspace once the run ends - deleted on clean completion, kept after a failure, the 14-day window above - is [#260](https://github.com/theagenticage/hercule/issues/260). ~~Until #260 lands, a finished run's ephemeral workspace is orphaned and falls to the 24-hour orphan rule.~~ *(Struck 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260): #260 has landed, below.)*
+
+*(Amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260).)* **The sweep tears down a run's ephemeral workspace by how the run ended.** One rule in one place: the same ten-minute sweep, on an online runner only, so an offline runner needs no special case. A `primary` workspace is never deleted by a run.
+
+| The run is | Its ephemeral workspace | The audit `reason` |
+|---|---|---|
+| `pending` or `running` | never touched, however old | - |
+| `completed` | deleted by the next sweep | `run-completed` |
+| `cancelled`, the workspace not kept | deleted by the next sweep | `run-cancelled` |
+| `failed` | kept for `workspace.failedRunTtlDays` after the run finished (default **14**), then deleted | `run-failed` |
+| `cancelled` with `keepWorkspace` | kept like a failed run's | `run-kept` |
+
+- **The 14-day window is built** as the controller setting `workspace.failedRunTtlDays`, counted from the run's `finishedAt`. The orphan and idle TTLs do not apply to a run's workspace: its run's rule decides. A thread's workspace keeps the reasons `orphan` and `idle`.
+- **Dismissing is `workspace.dispose` on the kept workspace.** There is no dismiss operation for runs. `workspace.dispose` refuses a workspace whose run is `pending` or `running` with `invalid_state`, and the message says to cancel the run first. Cancelling is where the user chooses whether the workspace stays: `run.cancel { keepWorkspace }` ([07-workflows.md](./07-workflows.md) section 7.2).
+- **Deleting after a clean completion can lag by up to ten minutes.** That is the price of one rule in one place.
+- **The sweep also takes `failed` ephemeral workspaces**, not only `ready` ones. A run whose setup command failed leaves a `failed` workspace that may hold files, and it is deleted after the window like any failed run's. A thread's `failed` ephemeral falls to the orphan and idle TTLs like a `ready` one.
+- **The "workspace reaped" note** is read off the workspace itself: its `deleted` status and `disposedAt`. The run needs no column for it. Until the workspace is deleted, a failed or kept run answers `workspaceKeptUntil` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), and the run's page shows both ([14-web-app.md](./14-web-app.md)).
 
 ## 7. Runner lifecycle and connectivity
 
@@ -390,5 +443,6 @@ ADRs:
 - [ADR 0005 - Promotion is migration behind a stable controller identity](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)
 - [ADR 0016 - Git credentials derive from connections](../adr/0016-git-credentials-derive-from-connections.md) (referenced)
 - [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md) (referenced)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace steps and their frames, run pinning)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`).
