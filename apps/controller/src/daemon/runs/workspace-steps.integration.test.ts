@@ -70,7 +70,7 @@ const waitForFrame = (
 const waitForStepStart = (wire: Wire, runId: string): Promise<Frame> =>
   waitForFrame(wire, "workspaceStepStart", (frame) => frame["runId"] === runId);
 
-/** Checks whether a stop frame names the given step key. */
+/** Checks whether a settle frame names the given step key. */
 const namesStep =
   (key: ReturnType<typeof commitKey>) =>
   (frame: Frame): boolean =>
@@ -78,9 +78,9 @@ const namesStep =
       (step) => JSON.stringify(step) === JSON.stringify(key),
     );
 
-/** Counts the stop frames that name a step key. */
-const countStops = (wire: Wire, key: ReturnType<typeof commitKey>): number =>
-  listFramesTagged(wire, "workspaceStepStop").filter(namesStep(key)).length;
+/** Counts the settle frames that name a step key. */
+const countSettles = (wire: Wire, key: ReturnType<typeof commitKey>): number =>
+  listFramesTagged(wire, "workspaceStepSettle").filter(namesStep(key)).length;
 
 /** Reads a run until `holds` is true for it. */
 const waitForRunTo = (
@@ -161,7 +161,7 @@ describe("workspace steps over the runner socket", () => {
           expect(await readCommitStatus(arranged, runId)).toBe("running");
 
           // A runner the run is not pinned to cannot end its step, and is told
-          // to drop it.
+          // the controller does not owe it the step.
           const other = await arranged.enlist();
           const result = {
             _tag: "workspaceStepResult" as const,
@@ -169,7 +169,7 @@ describe("workspace steps over the runner socket", () => {
             outcome: { status: "completed" as const, output: COMMITTED },
           };
           other.wire.send(result);
-          await waitForFrame(other.wire, "workspaceStepStop", namesStep(key));
+          await waitForFrame(other.wire, "workspaceStepSettle", namesStep(key));
           expect(await readCommitStatus(arranged, runId)).toBe("running");
 
           wire.send(result);
@@ -188,18 +188,18 @@ describe("workspace steps over the runner socket", () => {
             output: { title: "Committed abc123" },
           });
           // Once its end is recorded, the runner may delete the step's result.
-          await waitUntil("stopped the recorded step", () =>
-            countStops(wire, key) >= 1 ? true : undefined,
+          await waitUntil("settled the recorded step", () =>
+            countSettles(wire, key) >= 1 ? true : undefined,
           );
-          expect(countStops(wire, key)).toBe(1);
+          expect(countSettles(wire, key)).toBe(1);
 
           // A late copy of the same result changes nothing, and is answered
-          // with a stop too, so the runner still deletes the result.
+          // with a settle too, so the runner still deletes the result.
           wire.send(result);
-          await waitUntil("stopped the duplicate", () =>
-            countStops(wire, key) >= 2 ? true : undefined,
+          await waitUntil("settled the duplicate", () =>
+            countSettles(wire, key) >= 2 ? true : undefined,
           );
-          expect(countStops(wire, key)).toBe(2);
+          expect(countSettles(wire, key)).toBe(2);
           expect(await readRun(arranged.harness.base, arranged.token, runId)).toEqual(ended);
         },
         { plugins: [githubPlugin] },
@@ -288,7 +288,7 @@ describe("workspace steps over the runner socket", () => {
   );
 
   it(
-    "stops a step cancelled while its runner was away, and sends the runner that returns the steps it owes and the runs waiting for it",
+    "settles a step cancelled while its runner was away, and sends the runner that returns the steps it owes and the runs waiting for it",
     async () => {
       await withFleet(async (arranged) => {
         const repoId = await createRepo(arranged, "https://github.com/o/away.git");
@@ -309,7 +309,7 @@ describe("workspace steps over the runner socket", () => {
         const back = await arranged.reconnect();
         // The runner still holds the cancelled step, and reports it.
         back.send({ _tag: "workspaceStepsReport", steps: [commitKey(cancelled)] });
-        await waitForFrame(back, "workspaceStepStop", namesStep(commitKey(cancelled)));
+        await waitForFrame(back, "workspaceStepSettle", namesStep(commitKey(cancelled)));
         // The runner's return wakes the waiting run, whose step starts there.
         await waitForStepStart(back, waiting);
         expect(listFramesTagged(back, "workspaceStepStart").map((frame) => frame["runId"])).toEqual(
@@ -363,7 +363,7 @@ describe("workspace steps over the runner socket", () => {
           status: "failed",
           error: { code: "workspace_failed", message: "The clone failed: repository not found." },
         });
-        await waitForFrame(arranged.wire, "workspaceStepStop", namesStep(commitKey(runId)));
+        await waitForFrame(arranged.wire, "workspaceStepSettle", namesStep(commitKey(runId)));
       });
     },
     WAIT_DEADLINE_MS * 2,

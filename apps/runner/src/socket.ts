@@ -603,8 +603,8 @@ export const connect = (
           // A step runs in a fiber of its own, so these return at once.
           case "workspaceStepStart":
             return yield* options.workspaceSteps.start(message);
-          case "workspaceStepStop":
-            return yield* options.workspaceSteps.stop(message);
+          case "workspaceStepSettle":
+            return yield* options.workspaceSteps.settle(message);
         }
         // Every frame the protocol defines is handled above. This fails to
         // compile when a new frame is added, so it cannot be dropped silently.
@@ -637,7 +637,7 @@ export const connect = (
       // while the socket was down (spec 03 section 2.3).
       yield* Effect.forkIn(supervisor.relay, connection);
       yield* supervisor.report;
-      // Like the sessions report: the controller stops every listed step
+      // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at
       // most `MAX_WORKSPACE_STEPS` steps, so a longer list is sent in parts.
       const inFlight = options.workspaceSteps.listInFlight();

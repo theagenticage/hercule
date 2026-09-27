@@ -88,16 +88,23 @@ export const WorkspaceStepStart = Schema.Struct({
 export type WorkspaceStepStart = Schema.Schema.Type<typeof WorkspaceStepStart>;
 
 /**
- * Asks the runner to stop these steps if they are still running, for example
- * because their run was cancelled. A step the runner does not have, or has
- * finished, needs nothing done, so there is no reply frame.
+ * Settles these steps: tells the runner that the controller no longer owes
+ * them, because their records have ended, for example because their run was
+ * cancelled or the runner already reported how they ended. The runner:
+ *
+ * - stops a step that is still running, and drops a queued one;
+ * - deletes the step's result file;
+ * - remembers the step's key, so a start of the step that arrives late is
+ *   ignored.
+ *
+ * There is no reply frame.
  */
-export const WorkspaceStepStop = Schema.Struct({
-  _tag: Schema.Literal("workspaceStepStop"),
+export const WorkspaceStepSettle = Schema.Struct({
+  _tag: Schema.Literal("workspaceStepSettle"),
   steps: Schema.Array(WorkspaceStepKey).check(Schema.isMaxLength(MAX_WORKSPACE_STEPS)),
 });
 
-export type WorkspaceStepStop = Schema.Schema.Type<typeof WorkspaceStepStop>;
+export type WorkspaceStepSettle = Schema.Schema.Type<typeof WorkspaceStepSettle>;
 
 /**
  * Why a workspace step failed:
@@ -146,7 +153,7 @@ export type WorkspaceStepResult = Schema.Schema.Type<typeof WorkspaceStepResult>
 /**
  * The workspace steps the runner is running now: started and not yet
  * finished. Sent on connect, like `sessionsReport`, so the controller can
- * stop every step whose record ended while the runner was away.
+ * settle every step whose record ended while the runner was away.
  */
 export const WorkspaceStepsReport = Schema.Struct({
   _tag: Schema.Literal("workspaceStepsReport"),

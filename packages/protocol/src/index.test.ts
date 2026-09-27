@@ -267,7 +267,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     resourceId: RESOURCE_ID,
     gitIdentity: { name: "octocat", email: "octocat@users.noreply.github.com" },
   },
-  { _tag: "workspaceStepStop", steps: [STEP_KEY] },
+  { _tag: "workspaceStepSettle", steps: [STEP_KEY] },
 ];
 
 describe("the protocol version", () => {

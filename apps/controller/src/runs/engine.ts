@@ -77,8 +77,8 @@
  *
  * Cancelling a run ends it, its unfinished step records, and every unfinished
  * run its steps started, directly or further down, in one transaction. Then
- * the Run Executor stops their executions, and the runners are asked to stop
- * the workspace steps that were running. A plugin's action in flight sees its
+ * the Run Executor stops their executions, and the workspace steps that were
+ * running are settled with their runners, which stop them. A plugin's action in flight sees its
  * signal abort. An action that returns after the cancel cannot end its step
  * record any more, so the run stays cancelled and no later step starts.
  *
@@ -143,7 +143,7 @@ import { commitUninterruptibly } from "./transaction";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
-  type WorkspaceStepToStop,
+  type WorkspaceStepToSettle,
 } from "./workspace-steps";
 
 /**
@@ -278,14 +278,14 @@ const findWorkspaceStepError = (
 };
 
 /**
- * Returns the stops to send for the records of a run that were running when
- * the run ended: those of its workspace steps, on the runner the run is
+ * Returns the workspace steps to settle for the records of a run that were
+ * running when the run ended: those of its workspace steps, on the runner the run is
  * pinned to. A run that was never pinned has no workspace step running.
  */
-const listWorkspaceStepsToStop = (
+const listWorkspaceStepsToSettle = (
   run: Run,
   wasRunning: ReadonlyArray<StepRecordId>,
-): ReadonlyArray<WorkspaceStepToStop> => {
+): ReadonlyArray<WorkspaceStepToSettle> => {
   const { runnerId } = run;
   if (runnerId === undefined) return [];
   return wasRunning
@@ -326,8 +326,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * through here, inside the transaction that decided it, so a reader never
    * sees an ended run with a step record still pending or running.
    *
-   * Once the transaction has committed, the run's runner is told to stop
-   * the workspace steps whose records were running (see `stopWorkspaceSteps`).
+   * Once the transaction has committed, the workspace steps whose records
+   * were running are settled with the run's runner (see
+   * `settleWorkspaceSteps`).
    */
   const writeRunEnding = (
     runId: string,
@@ -339,21 +340,22 @@ export const makeRunEngine = Effect.gen(function* () {
       const run = Option.getOrThrow(yield* runs.read(runId));
       const wasRunning = yield* runs.cancelUnfinishedSteps(runId, at);
       yield* runs.finish(runId, outcome, at);
-      yield* stopWorkspaceSteps(run, wasRunning);
+      yield* settleWorkspaceSteps(run, wasRunning);
     });
 
   /**
-   * Tells the runner a run is pinned to that the records among `ended`
-   * that belong to workspace steps have ended, once the caller's transaction
-   * has committed. The runner stops such a step if it is still running.
+   * Settles the workspace steps among `ended` with the runner the run is
+   * pinned to, once the caller's transaction has committed: the controller
+   * no longer owes them. The runner stops such a step if it is still
+   * running, deletes its result file, and ignores a late start of it.
    * Records of steps that run on the controller are left out.
    */
-  const stopWorkspaceSteps = (
+  const settleWorkspaceSteps = (
     run: Run,
     ended: ReadonlyArray<StepRecordId>,
   ): Effect.Effect<void> => {
-    const toStop = listWorkspaceStepsToStop(run, ended);
-    return toStop.length === 0 ? Effect.void : afterCommit(() => workspaceSteps.stop(toStop));
+    const toSettle = listWorkspaceStepsToSettle(run, ended);
+    return toSettle.length === 0 ? Effect.void : afterCommit(() => workspaceSteps.settle(toSettle));
   };
 
   /**
@@ -912,7 +914,7 @@ export const makeRunEngine = Effect.gen(function* () {
           at,
         );
         // No result from the runner ended this record, so the runner is told.
-        return yield* stopWorkspaceSteps(run, [running]);
+        return yield* settleWorkspaceSteps(run, [running]);
       }
       yield* Effect.logWarning(`Run ${runId} failed because its workspace failed: ${message}`);
       yield* writeRunEnding(runId, { status: "failed", failureReason: "workspace-failed" }, at);
@@ -986,8 +988,8 @@ export const makeRunEngine = Effect.gen(function* () {
      * ended, and every unfinished run that its steps started, directly or
      * further down, with their step records. Then the Run Executor stops
      * their executions, which aborts the signal of a plugin action in
-     * flight, and the runners are asked to stop the workspace steps that
-     * were running (see `writeRunEnding`). A step whose action ends after
+     * flight, and the workspace steps that were running are settled with
+     * their runners, which stop them (see `writeRunEnding`). A step whose action ends after
      * the cancel cannot end its record any more, and no later step starts.
      *
      * `input.keepWorkspace` is recorded on the run and on every run cancelled
@@ -1197,13 +1199,13 @@ export const makeRunEngine = Effect.gen(function* () {
     /**
      * Returns the steps among `steps` that a runner reports it is running but
      * should not be: the run is unknown, has ended, or is not pinned to the
-     * runner, or the step record is not running. The controller daemon asks
-     * the runner to stop each one.
+     * runner, or the step record is not running. The controller daemon
+     * settles each one with the runner.
      */
     listEndedWorkspaceSteps: (
       runnerId: string,
       steps: ReadonlyArray<WorkspaceStepKey>,
-    ): Effect.Effect<ReadonlyArray<WorkspaceStepToStop>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<WorkspaceStepToSettle>, SqlError> =>
       Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) => {
         const running = new Set(records.map(formatStepKey));
         return steps

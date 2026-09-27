@@ -1,6 +1,6 @@
 /**
  * Workspace Steps: sends a workspace step to the runner its run is pinned to,
- * and asks runners to stop steps.
+ * and settles the steps the controller no longer owes with their runners.
  *
  * It lives in the controller daemon because only the controller daemon holds
  * the connections to runners. It sits in `runs/` because the port it
@@ -19,7 +19,7 @@ import { WorkspaceService } from "../../workspaces";
 const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
-  // The port's `stop` is synchronous, so its frames are sent on fibers of
+  // The port's `settle` is synchronous, so its frames are sent on fibers of
   // their own. They end with the controller.
   const runInBackground = yield* FiberSet.makeRuntime();
 
@@ -76,7 +76,7 @@ const make = Effect.gen(function* () {
         ),
       ),
 
-    stop: (steps) => {
+    settle: (steps) => {
       const byRunner = new Map<string, Array<WorkspaceStepKey>>();
       for (const { runnerId, runId, stepId, iteration } of steps) {
         const onRunner = byRunner.get(runnerId) ?? [];
@@ -84,7 +84,9 @@ const make = Effect.gen(function* () {
         byRunner.set(runnerId, onRunner);
       }
       for (const [runnerId, onRunner] of byRunner) {
-        runInBackground(connections.tell(runnerId, { _tag: "workspaceStepStop", steps: onRunner }));
+        runInBackground(
+          connections.tell(runnerId, { _tag: "workspaceStepSettle", steps: onRunner }),
+        );
       }
     },
   });

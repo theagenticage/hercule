@@ -11,5 +11,5 @@ export { resumeUnfinishedRuns, RunService, RunServiceLayer } from "./service";
 export {
   WorkspaceSteps,
   type WorkspaceStepToStart,
-  type WorkspaceStepToStop,
+  type WorkspaceStepToSettle,
 } from "./workspace-steps";

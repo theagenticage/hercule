@@ -4,7 +4,7 @@
  * a `:memory:` database, with the real workspaces domain and Run Executor.
  *
  * No runner is connected. Workspace Steps is a fake that records what the
- * run engine hands to runners and asks them to stop, and the test plays the
+ * run engine hands to runners and settles with them, and the test plays the
  * runner by calling `recordStepResult` with a step's result, as the controller
  * daemon does when a result arrives. The fake also notes every call made
  * inside a database transaction, and each test fails if there is one: a
@@ -31,7 +31,7 @@ import { RunService, RunServiceLayer } from "./service";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
-  type WorkspaceStepToStop,
+  type WorkspaceStepToSettle,
 } from "./workspace-steps";
 
 const at = "2026-09-25T10:00:00.000Z";
@@ -39,8 +39,8 @@ const at = "2026-09-25T10:00:00.000Z";
 /** What the fake Workspace Steps was asked to do, in order. */
 interface Recorded {
   readonly starts: Array<WorkspaceStepToStart>;
-  readonly stops: Array<WorkspaceStepToStop>;
-  /** The calls, `start` or `stop`, that were made inside a database transaction. */
+  readonly settles: Array<WorkspaceStepToSettle>;
+  /** The calls, `start` or `settle`, that were made inside a database transaction. */
   readonly callsInTransaction: Array<string>;
 }
 
@@ -52,10 +52,10 @@ type Deps = RunService | WorkspaceService | WorkflowService | SqlClient.SqlClien
  * `body` reads from `recorded`.
  */
 const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>): Promise<A> => {
-  const recorded: Recorded = { starts: [], stops: [], callsInTransaction: [] };
+  const recorded: Recorded = { starts: [], settles: [], callsInTransaction: [] };
   const workspaceSteps = Layer.effect(WorkspaceSteps)(
     Effect.map(SqlClient.SqlClient, (sql) => {
-      // `stop` is synchronous, so the transaction is looked up in the
+      // `settle` is synchronous, so the transaction is looked up in the
       // services of the fiber that calls it.
       const noteIfInTransaction = (call: string) => {
         const fiber = Fiber.getCurrent();
@@ -72,9 +72,9 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
             noteIfInTransaction("start");
             recorded.starts.push(step);
           }),
-        stop: (steps) => {
-          noteIfInTransaction("stop");
-          recorded.stops.push(...steps);
+        settle: (steps) => {
+          noteIfInTransaction("settle");
+          recorded.settles.push(...steps);
         },
       };
     }),
@@ -326,7 +326,7 @@ describe("a workspace step", () => {
     );
   });
 
-  it("asks the runner to stop the step when the run is cancelled, and lists it as ended from then on", async () => {
+  it("settles the step with the runner when the run is cancelled, and lists it as ended from then on", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
         const { runnerId, runId } = yield* startCommitRun(recorded);
@@ -339,7 +339,7 @@ describe("a workspace step", () => {
         ]);
 
         yield* runs.cancel(runId, {});
-        expect(recorded.stops).toEqual([{ runnerId, ...key }]);
+        expect(recorded.settles).toEqual([{ runnerId, ...key }]);
         expect(yield* runs.listEndedWorkspaceSteps(runnerId, [key])).toEqual([
           { runnerId, ...key },
         ]);
@@ -388,7 +388,7 @@ describe("a workspace step", () => {
     );
   });
 
-  it("asks the runner to stop a running step when another step fails the run", async () => {
+  it("settles a running step with the runner when another step fails the run", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
         const runnerId = yield* insertRunner();
@@ -420,8 +420,8 @@ describe("a workspace step", () => {
           failedStepId: "first",
         });
         // The runner reported how the first step ended, so only the second
-        // is stopped here.
-        expect(recorded.stops).toEqual([{ runnerId, runId, stepId: "second", iteration: 1 }]);
+        // is settled here.
+        expect(recorded.settles).toEqual([{ runnerId, runId, stepId: "second", iteration: 1 }]);
       }),
     );
   });

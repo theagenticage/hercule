@@ -90,18 +90,18 @@ const make = Effect.gen(function* () {
           // The step's end is recorded now, or was already, or the result
           // was ignored because the runner has no business with the step.
           // Either way the controller never asks for this result again, so
-          // the runner is told it may delete the step's result file. For a
+          // the step is settled, and the runner deletes its result file. For a
           // step in a repo's main workspace, which is never deleted, nothing
           // else deletes it.
           const { runId, stepId, iteration } = result;
-          workspaceSteps.stop([{ runnerId, runId, stepId, iteration }]);
+          workspaceSteps.settle([{ runnerId, runId, stepId, iteration }]);
         });
       case "workspaceStepsReported":
         // The runner holds steps whose records ended while it was away, for
-        // example because their run was cancelled. Each one is stopped.
+        // example because their run was cancelled. Each one is settled.
         return Effect.map(
           runs.listEndedWorkspaceSteps(traffic.runnerId, traffic.report.steps),
-          workspaceSteps.stop,
+          workspaceSteps.settle,
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's

@@ -7,15 +7,16 @@
  * outside every checkout, so a commit can never pick one up. They are deleted:
  *
  * - all at once, when their workspace is disposed;
- * - one by one, when a stop for the step arrives. The controller stops a
- *   step when it cancels it, and also once it has recorded how the step
- *   ended, to say it will never ask for that result again.
+ * - one by one, when a settle for the step arrives. The controller settles
+ *   a step once it no longer owes it: when it cancels the step, and also
+ *   once it has recorded how the step ended, to say it will never ask for
+ *   that result again.
  *
  * The runner cannot tell on its own when the controller has read a result it
  * sent: a result can be lost with the connection, and the controller then
- * asks again on reconnect. So a file stays until that stop arrives, or until
- * its workspace is disposed. The stop matters most for a primary, which is
- * never disposed.
+ * asks again on reconnect. So a file stays until that settle arrives, or
+ * until its workspace is disposed. The settle matters most for a primary,
+ * which is never disposed.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -83,7 +84,7 @@ export const writeStepResult = (
 };
 
 /**
- * Deletes the step's result file, whichever workspace it is in. A stop names
+ * Deletes the step's result file, whichever workspace it is in. A settle names
  * only the step, not its workspace, so every workspace's directory is looked
  * in. Does nothing when there is no such file.
  */

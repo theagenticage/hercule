@@ -1,6 +1,7 @@
 /**
  * Workspace Steps: the port through which the runs domain hands a workspace
- * step to the runner its run is pinned to, and asks that runner to stop one.
+ * step to the runner its run is pinned to, and settles the step with that
+ * runner once the controller no longer owes it.
  *
  * A workspace step is a step whose action runs in the run's workspace on a
  * runner, such as `git.commit`, rather than on the controller. The runs
@@ -13,8 +14,8 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type { WorkspaceStepKey } from "@hercule/protocol";
 
-/** A workspace step to stop: its step key, and the runner that runs it. */
-export interface WorkspaceStepToStop extends WorkspaceStepKey {
+/** A workspace step to settle: its step key, and the runner that runs it. */
+export interface WorkspaceStepToSettle extends WorkspaceStepKey {
   /** The runner the step's run is pinned to. */
   readonly runnerId: string;
 }
@@ -65,19 +66,25 @@ export class WorkspaceSteps extends Context.Service<
     readonly start: (step: WorkspaceStepToStart) => Effect.Effect<void>;
 
     /**
-     * Tells the runners that these steps are no longer owed: their records
-     * have ended, for example because their run was cancelled or failed, or
-     * because the runner reported how they ended. A runner stops a step that
-     * is still running, and deletes the result file of one that finished.
-     * Returns at once, without waiting for the stops to be sent. It is
+     * Settles these steps with their runners: tells each runner that the
+     * controller no longer owes the step, because its record has ended. The
+     * record ended because the step's run was cancelled or failed, or
+     * because the runner reported how the step ended. Settling means two
+     * things on the runner:
+     *
+     * - a step that is still running is stopped, and a queued one dropped;
+     * - the step's result file is deleted, and its key remembered, so a
+     *   start of the step that arrives late is ignored.
+     *
+     * Returns at once, without waiting for the frames to be sent. It is
      * synchronous so that it can run right after a commit (see
      * `afterCommit`).
      *
-     * A stop that cannot be delivered because the runner is not connected
+     * A settle that cannot be delivered because the runner is not connected
      * is not retried: when the runner connects, it reports the steps it
-     * holds, and the controller daemon stops each one whose record has
+     * holds, and the controller daemon settles each one whose record has
      * ended.
      */
-    readonly stop: (steps: ReadonlyArray<WorkspaceStepToStop>) => void;
+    readonly settle: (steps: ReadonlyArray<WorkspaceStepToSettle>) => void;
   }
 >()("hercule/controller/runs/WorkspaceSteps") {}

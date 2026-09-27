@@ -419,7 +419,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(head);
   });
 
-  it("deletes a finished step's result file when the step is stopped, and ignores a later start of it", async () => {
+  it("deletes a finished step's result file when the step is settled, and ignores a later start of it", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
     const frame = buildStart(workspace, { message: "Add a" });
@@ -433,14 +433,14 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(existsSync(file)).toBe(true);
     const head = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
 
-    await Effect.runPromise(runner.steps.stop({ _tag: "workspaceStepStop", steps: [frame] }));
+    await Effect.runPromise(runner.steps.settle({ _tag: "workspaceStepSettle", steps: [frame] }));
 
-    // The controller stops a step once it has recorded how the step ended.
+    // The controller settles a step once it has recorded how the step ended.
     expect(existsSync(file)).toBe(false);
-    // The step already sent its result, so the stop sends nothing more.
+    // The step already sent its result, so the settle sends nothing more.
     expect(listResults(runner, frame)).toHaveLength(1);
 
-    // A start that reaches the runner after the step's stop, with a change
+    // A start that reaches the runner after the step's settle, with a change
     // in the checkout that running the step again would commit.
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
     await startStep(runner, frame);
@@ -450,7 +450,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(head);
   });
 
-  it("stops its git's whole process group when the step is stopped, with SIGKILL once the grace period has passed, and answers interrupted", async () => {
+  it("stops its git's whole process group when a running step is settled, with SIGKILL once the grace period has passed, and answers interrupted", async () => {
     const runner = makeRunner({ stopGrace: Duration.millis(300) });
     const workspace = await runner.provisionWorkspace();
     const before = runGitOrThrow(workspace.dir, "rev-parse", "HEAD");
@@ -473,7 +473,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     };
 
     try {
-      await Effect.runPromise(runner.steps.stop({ _tag: "workspaceStepStop", steps: [frame] }));
+      await Effect.runPromise(runner.steps.settle({ _tag: "workspaceStepSettle", steps: [frame] }));
       const outcome = await waitForResult(runner, frame);
 
       expect(outcome).toMatchObject({ status: "failed", code: "interrupted" });
@@ -482,7 +482,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
       await waitUntil(() => !isHookAlive(), "the hook to be killed");
       expect(runGitOrThrow(workspace.dir, "rev-parse", "HEAD")).toBe(before);
       expect(runner.steps.listInFlight()).toEqual([]);
-      // A stopped step leaves no result file behind.
+      // A settled step leaves no result file behind.
       const results = join(runner.storageDir, "step-results", workspace.workspaceId);
       expect(existsSync(join(results, `${frame.runId}-commit-1.json`))).toBe(false);
     } finally {

@@ -21,7 +21,7 @@ import {
   type WorkspaceStepOutcome,
   type WorkspaceStepResult,
   type WorkspaceStepStart,
-  type WorkspaceStepStop,
+  type WorkspaceStepSettle,
 } from "@hercule/protocol";
 import { buildGitCredentialEnv, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
 import { describeCause } from "../report";
@@ -35,18 +35,18 @@ import { buildStepName, deleteStepResult, readStepResult, writeStepResult } from
 export const ACTION_DEADLINE: Duration.Duration = Duration.minutes(10);
 
 /**
- * How many stopped steps this runner remembers, to ignore a start of one that
- * arrives after its stop. Such a start is at most a few frames late, so the
- * most recent stops are the ones that matter, and the oldest is forgotten
+ * How many settled steps this runner remembers, to ignore a start of one that
+ * arrives after its settle. Such a start is at most a few frames late, so the
+ * most recent settles are the ones that matter, and the oldest is forgotten
  * first.
  */
-const REMEMBERED_STOPS = 1024;
+const REMEMBERED_SETTLED = 1024;
 
 type Send = (frame: WorkspaceStepResult) => Effect.Effect<void, unknown>;
 
 /**
  * The workspace steps this runner holds, for the connection to the controller
- * to drive: it passes on each step start and stop it receives, attaches
+ * to drive: it passes on each step start and settle it receives, attaches
  * itself to receive the results, and lists the steps in flight when it
  * reconnects.
  */
@@ -60,7 +60,7 @@ export interface WorkspaceSteps {
   /**
    * Starts a step, unless this runner already knows it:
    *
-   * - a step that was stopped is ignored, because the controller has
+   * - a step that was settled is ignored, because the controller has
    *   already recorded how it ended;
    * - a step that is queued or running is left alone;
    * - a step that finished is answered from its result file;
@@ -71,14 +71,17 @@ export interface WorkspaceSteps {
    */
   readonly start: (frame: WorkspaceStepStart) => Effect.Effect<void>;
   /**
-   * Stops the listed steps and deletes their result files. A running step's
-   * git is stopped and the step is answered with `interrupted`; a queued step
-   * is dropped without an answer. A finished step only loses its result
-   * file: the controller also stops every step whose end it has recorded, to
-   * say it will not ask for that result again. A later start of a stopped
-   * step is ignored.
+   * Settles the listed steps: the controller no longer owes them, because
+   * their records have ended. For each step:
+   *
+   * - a running step's git is stopped and the step is answered with
+   *   `interrupted`; a queued step is dropped without an answer;
+   * - its result file is deleted. For a finished step that is all that
+   *   happens: the controller settles every step whose end it has recorded,
+   *   to say it will not ask for that result again;
+   * - its key is remembered, so a later start of the step is ignored.
    */
-  readonly stop: (frame: WorkspaceStepStop) => Effect.Effect<void>;
+  readonly settle: (frame: WorkspaceStepSettle) => Effect.Effect<void>;
   /** Returns the key of every step that is queued or running now. */
   readonly listInFlight: () => ReadonlyArray<WorkspaceStepKey>;
 }
@@ -89,7 +92,7 @@ interface HeldStep {
   readonly workspaceId: string;
   /** Queued behind another step of its workspace, or running its action. */
   phase: "queued" | "running";
-  /** Set once the step has written its result, so a stop that raced it sends no second answer. */
+  /** Set once the step has written its result, so a settle that raced it sends no second answer. */
   finished: boolean;
   /** Set by the first stop of the step. */
   stopping: boolean;
@@ -134,12 +137,12 @@ export const makeWorkspaceSteps = (options: {
   const stopGrace = options.stopGrace ?? STOP_GRACE;
   const held = new Map<string, HeldStep>();
   /**
-   * The names of the steps stopped most recently, oldest first. A start and
-   * a stop of one step can reach this runner in the wrong order, and a step
-   * the controller has stopped must never run afterwards: its end is already
+   * The names of the steps settled most recently, oldest first. A start and
+   * a settle of one step can reach this runner in the wrong order, and a step
+   * the controller has settled must never run afterwards: its end is already
    * recorded, and a push would be made that no run knows about.
    */
-  const stopped = new Set<string>();
+  const settled = new Set<string>();
   /**
    * One lock per workspace with a step queued or running. The steps of one
    * workspace run one at a time, because two git processes in one checkout
@@ -269,7 +272,7 @@ export const makeWorkspaceSteps = (options: {
   /**
    * Runs a held step: waits for its workspace's lock, runs its action, then
    * writes, forgets and sends its result. A step whose workspace failed to
-   * provision is forgotten with no result. Never fails; a stop
+   * provision is forgotten with no result. Never fails; a settle
    * interrupts it.
    */
   const runStep = (
@@ -294,8 +297,8 @@ export const makeWorkspaceSteps = (options: {
 
   /**
    * Stops one held step, then forgets it. A running step is answered with
-   * `interrupted`, unless it finished on its own while the stop was on its
-   * way: that step already sent its result.
+   * `interrupted`, unless it finished on its own while the settle was on
+   * its way: that step already sent its result.
    */
   const stopStep = (step: HeldStep): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -334,7 +337,7 @@ export const makeWorkspaceSteps = (options: {
       Effect.gen(function* () {
         const key = readKey(frame);
         const name = buildStepName(key);
-        if (stopped.has(name) || held.has(name)) return;
+        if (settled.has(name) || held.has(name)) return;
         const recorded = readStepResult(storageDir, frame.workspaceId, key);
         if (recorded !== undefined) return yield* send(buildResultFrame(key, recorded));
         const action = findWorkspaceAction(frame.action);
@@ -369,16 +372,16 @@ export const makeWorkspaceSteps = (options: {
         step.fiber = yield* Effect.forkDetach(runStep(frame, action, step));
       }),
 
-    stop: (frame) =>
+    settle: (frame) =>
       Effect.gen(function* () {
         for (const key of frame.steps) {
           // Deleted whether the step is running or long finished: the
-          // controller never asks again for the result of a step it stops.
+          // controller never asks again for the result of a step it settles.
           deleteStepResult(storageDir, key);
           const name = buildStepName(key);
-          stopped.delete(name);
-          stopped.add(name);
-          if (stopped.size > REMEMBERED_STOPS) stopped.delete(stopped.values().next().value!);
+          settled.delete(name);
+          settled.add(name);
+          if (settled.size > REMEMBERED_SETTLED) settled.delete(settled.values().next().value!);
           const step = held.get(name);
           // Detached, because stopping git can take the full grace period,
           // and the connection must go on handling frames meanwhile.

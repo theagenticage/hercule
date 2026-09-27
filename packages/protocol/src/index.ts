@@ -42,7 +42,7 @@ import {
   WorkspaceStepResult,
   WorkspaceStepsReport,
   WorkspaceStepStart,
-  WorkspaceStepStop,
+  WorkspaceStepSettle,
 } from "./workspace-steps";
 
 export * from "./output-schema";
@@ -562,7 +562,7 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceDispose,
   CredentialAnswer,
   WorkspaceStepStart,
-  WorkspaceStepStop,
+  WorkspaceStepSettle,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;
