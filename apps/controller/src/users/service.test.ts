@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { hashPassword, PasswordCost, TEST_PASSWORD_PARAMS, verifyPassword } from "./password";
 import { Users, UsersLayer } from "./repository";
 import { User, UserLayer } from "./service";
@@ -10,7 +12,7 @@ import { User, UserLayer } from "./service";
 const CURRENT = "correct horse battery staple";
 const NEXT = "a different long passphrase";
 
-type Deps = User | Users | AuditLog;
+type Deps = User | Users | SqlClient.SqlClient;
 
 const layer = UserLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(UsersLayer, AuditLogLayer)),
@@ -46,7 +48,6 @@ describe("user.setPassword", () => {
       Effect.gen(function* () {
         const user = yield* User;
         const users = yield* Users;
-        const audit = yield* AuditLog;
         const answer = yield* user.setPassword({ current: CURRENT, next: NEXT });
         const stored = yield* users.findByUsername("rogier");
         const hash = Option.getOrThrow(stored).passwordHash;
@@ -54,7 +55,7 @@ describe("user.setPassword", () => {
           answer,
           next: yield* verifyPassword(NEXT, hash),
           old: yield* verifyPassword(CURRENT, hash),
-          entries: yield* audit.listByKind("user.passwordChanged"),
+          entries: yield* readEventsOfKind("user.passwordChanged"),
         };
       }),
     );
@@ -72,13 +73,12 @@ describe("user.setPassword", () => {
       Effect.gen(function* () {
         const user = yield* User;
         const users = yield* Users;
-        const audit = yield* AuditLog;
         const failure = yield* Effect.flip(user.setPassword({ current: "guess", next: NEXT }));
         const stored = yield* users.findByUsername("rogier");
         return {
           failure,
           unchanged: yield* verifyPassword(CURRENT, Option.getOrThrow(stored).passwordHash),
-          entries: yield* audit.listByKind("user.passwordChanged"),
+          entries: yield* readEventsOfKind("user.passwordChanged"),
         };
       }),
     );

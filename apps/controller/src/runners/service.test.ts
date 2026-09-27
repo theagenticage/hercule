@@ -14,7 +14,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { RunnerDetail, RunnerLifecycle } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { nowIso } from "../db";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
@@ -33,7 +34,7 @@ const layer = RunnerServiceLayer.pipe(
 );
 
 /** The services a test in this file may use. */
-type Provided = RunnerService | Settings | AuditLog | SqlClient.SqlClient;
+type Provided = RunnerService | Settings | SqlClient.SqlClient;
 
 /** A valid id that matches no runner: the grant check fails before the lookup. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
@@ -129,7 +130,6 @@ describe("the errors the service returns on its own", () => {
           ],
           Effect.flip,
         );
-        const audit = yield* AuditLog;
         return {
           errors,
           after: yield* Effect.forEach([active, draining, retired], (runner) =>
@@ -137,7 +137,7 @@ describe("the errors the service returns on its own", () => {
           ),
           trail: yield* Effect.forEach(
             ["runner.drained", "runner.undrained", "runner.retired"] as const,
-            (kind) => audit.listByKind(kind),
+            (kind) => readEventsOfKind(kind),
           ),
         };
       }),

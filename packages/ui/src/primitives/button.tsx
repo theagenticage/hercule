@@ -62,13 +62,17 @@ export type ButtonVariant = keyof typeof variants;
 /**
  * Builds the class names for a button of the given variant, with the caller's
  * `className` applied last. Use it directly to style a Link as a button.
+ *
+ * A button's label never wraps: a label broken over two lines, such as "Re-"
+ * above "run", no longer reads as one button. A row too narrow for its
+ * buttons must give way somewhere else.
  */
 export const buildButtonClassName = (
   variant: ButtonVariant,
   className: string | undefined,
 ): string =>
   cn(
-    "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph",
+    "inline-flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-row leading-none font-emph whitespace-nowrap",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
     variants[variant],
     className,

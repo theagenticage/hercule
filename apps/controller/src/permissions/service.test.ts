@@ -4,12 +4,13 @@ import type { Grant } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { PermissionProfiles, PermissionProfilesLayer } from "./profiles";
 import { Profiles, ProfilesLayer } from "./service";
 import { SessionTokensLayer } from "./tokens";
 
-type Deps = Profiles | PermissionProfiles | AuditLog | SqlClient.SqlClient;
+type Deps = Profiles | PermissionProfiles | SqlClient.SqlClient;
 
 const layer = ProfilesLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(PermissionProfilesLayer, AuditLogLayer, SessionTokensLayer)),
@@ -38,9 +39,8 @@ describe("profile.create", () => {
     const { profile, entries } = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        return { profile: created, entries: yield* audit.listByKind("profile.created") };
+        return { profile: created, entries: yield* readEventsOfKind("profile.created") };
       }),
     );
     expect(profile).toMatchObject({ name: "reviewer", grants: READER, shipped: false });
@@ -55,10 +55,9 @@ describe("profile.create", () => {
     const outcome = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
         const error = yield* Effect.flip(profiles.update({ id: created.id }));
-        return { error, entries: yield* audit.listByKind("profile.updated") };
+        return { error, entries: yield* readEventsOfKind("profile.updated") };
       }),
     );
     expect(outcome.error).toMatchObject({ error: { code: "validation" } });
@@ -80,10 +79,9 @@ describe("profile.create", () => {
     const entries = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
         yield* profiles.create({ name: "reviewer", grants: READER });
         yield* Effect.ignore(profiles.create({ name: "reviewer", grants: [] }));
-        return yield* audit.listByKind("profile.created");
+        return yield* readEventsOfKind("profile.created");
       }),
     );
     expect(entries).toHaveLength(1);
@@ -147,11 +145,10 @@ describe("profile.update", () => {
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
         const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
         yield* store.ensureShipped("worker", ["task.read"]);
         const shipped = Option.getOrThrow(yield* store.getByName("worker"));
         const changed = yield* profiles.update({ id: shipped.id, grants: READER });
-        return { updated: changed, entries: yield* audit.listByKind("profile.updated") };
+        return { updated: changed, entries: yield* readEventsOfKind("profile.updated") };
       }),
     );
     expect(updated).toMatchObject({ name: "worker", grants: READER, shipped: true });
@@ -174,10 +171,9 @@ describe("profile.update", () => {
     const outcome = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
-        const audit = yield* AuditLog;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
         const error = yield* Effect.flip(profiles.update({ id: created.id }));
-        return { error, entries: yield* audit.listByKind("profile.updated") };
+        return { error, entries: yield* readEventsOfKind("profile.updated") };
       }),
     );
     expect(outcome.error).toMatchObject({ error: { code: "validation" } });

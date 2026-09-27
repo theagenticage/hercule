@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { Users, UsersLayer } from "../users";
 import { Credentials, CredentialsLayer } from "./repository";
 import { ApiKeys, ApiKeysLayer } from "./service";
 import { hashToken } from "./token";
 
-type Deps = ApiKeys | Credentials | Users | AuditLog;
+type Deps = ApiKeys | Credentials | Users | SqlClient.SqlClient;
 
 const layer = ApiKeysLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(CredentialsLayer, UsersLayer, AuditLogLayer)),
@@ -57,9 +59,8 @@ describe("apiKey.create", () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
-        const audit = yield* AuditLog;
         const minted = yield* apiKeys.create({ name: "laptop" });
-        return { minted, entries: yield* audit.listByKind("auth.apiKey.minted") };
+        return { minted, entries: yield* readEventsOfKind("auth.apiKey.minted") };
       }),
     );
 
@@ -126,11 +127,10 @@ describe("apiKey.revoke", () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
-        const audit = yield* AuditLog;
         const minted = yield* apiKeys.create({ name: "laptop" });
         const first = yield* apiKeys.revoke({ id: minted.id });
         const second = yield* Effect.flip(apiKeys.revoke({ id: minted.id }));
-        return { minted, first, second, entries: yield* audit.listByKind("auth.apiKey.revoked") };
+        return { minted, first, second, entries: yield* readEventsOfKind("auth.apiKey.revoked") };
       }),
     );
 
@@ -144,9 +144,8 @@ describe("apiKey.revoke", () => {
     const entries = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
-        const audit = yield* AuditLog;
         yield* Effect.flip(apiKeys.revoke({ id: "0199f0b7-0000-7000-8000-000000000000" }));
-        return yield* audit.listByKind("auth.apiKey.revoked");
+        return yield* readEventsOfKind("auth.apiKey.revoked");
       }),
     );
 

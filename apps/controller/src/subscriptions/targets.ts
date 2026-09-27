@@ -18,17 +18,24 @@ const quoteAsCelString = (value: string): string => JSON.stringify(value);
 /**
  * Returns the CEL source that matches the events a target waits on.
  *
- * Three of the four expansions read a platform event that this version does
- * not emit yet. They are written out because workflows and Permission Requests
- * will depend on them, and because `subscription.create` rejects those target
- * kinds by name rather than storing a condition that can never match.
+ * The session and request expansions read platform events that this version
+ * does not emit yet. They are written out because workflows and Permission
+ * Requests will depend on them, and because `subscription.create` rejects
+ * those target kinds by name rather than storing a condition that can never
+ * match.
  */
 export const expandTarget = (target: SubscriptionTarget): string => {
   switch (target.kind) {
     case "ref":
       return `${quoteAsCelString(target.ref)} in event.refs`;
     case "run":
-      return `event.kind.startsWith("run.") && event.payload.runId == ${quoteAsCelString(target.runId)}`;
+      // Only the controller writes platform events. A plugin whose id is
+      // `run` could declare a `run.*` kind, and an event of it must not pass
+      // for news about the run.
+      return (
+        `event.source == "platform" && event.kind.startsWith("run.") && ` +
+        `event.payload.runId == ${quoteAsCelString(target.runId)}`
+      );
     case "session":
       return (
         `event.kind.startsWith("session.") && ` +

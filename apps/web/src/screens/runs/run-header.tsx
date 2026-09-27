@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import { Fragment, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   describeRunOrigin,
@@ -7,10 +7,11 @@ import {
   formatPreciseStamp,
   readTimestamps,
   toIdTail,
+  type RerunsReading,
 } from "@hercule/client-core";
 import type { Run, Runner } from "@hercule/contract";
 import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
-import { ActorLink } from "../actor-link";
+import { ActorLink, INLINE_LINK } from "../actor-link";
 import { Connectivity } from "../connectivity";
 import { FailureText } from "./step-parts";
 
@@ -23,11 +24,18 @@ const QUIET_LINK =
  * the run list and the workflow's name, with the page's actions on the right.
  * The second line shows where the run is: its status mark and status with its
  * duration, why it failed, who started it and how, when it started and ended,
- * and its id's tail, which the CLI takes. Once the run is pinned to a runner,
- * the next line shows where it works: the runner, linked to its page, with
- * whether the controller can reach it, the run's workspace, and the note on
- * what happens to the workspace, such as "Workspace deleted 3 Oct". A run that
- * failed at an edge has a last line: what went wrong there.
+ * and its id's tail, which the CLI takes. For a run that is a re-run, or that
+ * was re-run, the next line links the runs on either side, such as "re-run of
+ * run 1f3a9c2e" or "re-run as run 4e5f6a7b, run 8c9d0e1f, run 2b7c4d9a and 2
+ * more". Once the run is pinned to a runner, the next line shows where it
+ * works: the runner, linked to its page, with whether the controller can
+ * reach it, the run's workspace, and the note on what happens to the
+ * workspace, such as "Workspace deleted 3 Oct". A run that failed at an edge
+ * has a last line: what went wrong there.
+ *
+ * Below the header's lines, each on a row of its own, come why the controller
+ * refused one of the page's actions, and the question shown before an action
+ * is done.
  *
  * The title sits where the shell's top bar puts every other screen's title,
  * so the page does not jump when it opens.
@@ -37,9 +45,11 @@ export function RunHeader({
   runner,
   workspaceLabel,
   workspaceNote,
+  reruns,
   now,
   timezone,
   children,
+  refusals,
   question,
 }: {
   readonly run: Run;
@@ -49,18 +59,27 @@ export function RunHeader({
   readonly workspaceLabel: string | undefined;
   /** What happens to the run's workspace, such as "Workspace kept until 9 Oct". */
   readonly workspaceNote: string | undefined;
+  /** The runs that re-ran this one. */
+  readonly reruns: RerunsReading;
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
   readonly timezone: string;
   /**
-   * The actions on the right: Cancel or Delete workspace, and the question
-   * shown before either is done.
+   * The actions on the right: Cancel, Delete workspace or Re-run, and the
+   * question shown before Cancel or Delete workspace is done.
    */
   readonly children: ReactNode;
   /**
-   * The question shown before an action is done, when the page is too narrow
-   * to show it beside the title. It takes a row of its own below the header's
-   * lines.
+   * Why the controller refused the page's actions, one text per action, such
+   * as "Not re-run: This run's workflow has been deleted...". Each is shown
+   * in full, wrapped over as many lines as it needs, because its end often
+   * says what to do instead.
+   */
+  readonly refusals: ReadonlyArray<string>;
+  /**
+   * The question shown before an action is done, when it is not shown beside
+   * the title: the re-run question, and the others on a page too narrow for
+   * them there. It takes a row of its own below the header's lines.
    */
   readonly question?: ReactNode;
 }): JSX.Element {
@@ -147,6 +166,32 @@ export function RunHeader({
           </span>
         </span>
       </p>
+      {run.originalRunId === undefined && reruns.runIds.length === 0 ? null : (
+        <p className="mt-1 flex h-5 min-w-0 items-center text-meta whitespace-nowrap text-muted">
+          {/* One run of text, cut off at its end on a narrow page, like the line above. */}
+          <span className="min-w-0 truncate">
+            {run.originalRunId === undefined ? null : (
+              <>
+                {"re-run of "}
+                <RunLink runId={run.originalRunId} />
+              </>
+            )}
+            {run.originalRunId === undefined || reruns.runIds.length === 0 ? null : <Dot inline />}
+            {reruns.runIds.length === 0 ? null : (
+              <>
+                {"re-run as "}
+                {reruns.runIds.map((runId, index) => (
+                  <Fragment key={runId}>
+                    {index === 0 ? null : ", "}
+                    <RunLink runId={runId} />
+                  </Fragment>
+                ))}
+                {reruns.unlinkedCountText === undefined ? null : ` and ${reruns.unlinkedCountText}`}
+              </>
+            )}
+          </span>
+        </p>
+      )}
       {runner === undefined && workspaceLabel === undefined ? null : (
         <p className="mt-1 flex h-5 min-w-0 items-center gap-2 text-meta whitespace-nowrap text-muted">
           {runner === undefined ? null : (
@@ -192,8 +237,25 @@ export function RunHeader({
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
       ) : null}
+      {refusals.map((refusal) => (
+        <p key={refusal} role="alert" className="mt-3 text-fine text-pretty text-fail">
+          {refusal}
+        </p>
+      ))}
       {question === undefined ? null : <div className="mt-3">{question}</div>}
     </header>
+  );
+}
+
+/**
+ * Renders another run as "run 1f3a9c2e", linked to its page, in the style of
+ * the link to a run that started this one.
+ */
+function RunLink({ runId }: { readonly runId: string }): JSX.Element {
+  return (
+    <Link to="/runs/$runId" params={{ runId }} className={INLINE_LINK}>
+      {`run ${toIdTail(runId)}`}
+    </Link>
   );
 }
 

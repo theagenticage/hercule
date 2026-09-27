@@ -51,7 +51,13 @@ import {
 import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
+import {
+  AuditLogLayer,
+  PlatformEventsLayer,
+  type AuditKind,
+  type PlatformEventKind,
+} from "../events";
+import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
@@ -149,6 +155,7 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
         SettingsLayer,
         PermissionProfilesLayer,
         AuditLogLayer,
+        PlatformEventsLayer,
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,
@@ -178,8 +185,15 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   return `http://127.0.0.1:${address.port}`;
 });
 
-/** Reads back what a request wrote to the audit log. */
-export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
+/** Reads back the audit entries of one kind a request wrote, oldest first. */
+export type AuditReader = <Kind extends AuditKind>(
+  kind: Kind,
+) => Promise<ReadonlyArray<LoggedEvent<Kind>>>;
+
+/** Reads back the platform events of one kind the controller emitted, oldest first. */
+export type PlatformEventReader = <Kind extends PlatformEventKind>(
+  kind: Kind,
+) => Promise<ReadonlyArray<LoggedEvent<Kind>>>;
 
 /**
  * Inserts a runner row. No operation adds a runner (a runner joins over the
@@ -233,11 +247,18 @@ export interface ServerHarness {
   /** An address a fetch can use. */
   readonly base: string;
   readonly audit: AuditReader;
+  readonly platformEvents: PlatformEventReader;
   readonly sql: SqlClient.SqlClient;
   readonly live: LiveReader;
   readonly insertRunner: RunnerArranger;
   readonly joinToken: JoinTokenArranger;
   readonly reboot: RebootArranger;
+  /**
+   * Checks whether a fiber is still executing the run. A cancelled run's
+   * fiber lives on until its steps have stopped, so a test that checks what a
+   * step does after the cancel waits for this to turn false first.
+   */
+  readonly isRunExecuting: (runId: string) => boolean;
 }
 
 /** The options a test can set on the controller it runs. */
@@ -333,10 +354,14 @@ export const withServer = (
         );
         yield* serve(bundle);
         const base = yield* baseUrl;
-        // Reads the audit log through the service that wrote it, like any other
-        // reader.
-        const log = yield* AuditLog;
-        const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
+        const audit: AuditReader = (kind) =>
+          Effect.runPromise(
+            Effect.orDie(Effect.provideService(readEventsOfKind(kind), SqlClient.SqlClient, sql)),
+          );
+        const platformEvents: PlatformEventReader = (kind) =>
+          Effect.runPromise(
+            Effect.orDie(Effect.provideService(readEventsOfKind(kind), SqlClient.SqlClient, sql)),
+          );
         // Reads the controller's live subscriptions through the service that
         // holds them, so a test checks what the running server has, not what it
         // can infer from the wire.
@@ -376,7 +401,17 @@ export const withServer = (
             ),
           );
         yield* Effect.promise(() =>
-          body({ base, audit, sql, live, insertRunner, joinToken, reboot }),
+          body({
+            base,
+            audit,
+            platformEvents,
+            sql,
+            live,
+            insertRunner,
+            joinToken,
+            reboot,
+            isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
+          }),
         );
       }),
     ).pipe(

@@ -72,6 +72,8 @@ export {
   describeRunOrigin,
   describeRunnerWait,
   type RunnerWait,
+  describeReruns,
+  type RerunsReading,
   describeRunStatus,
   describeStepDuration,
   describeStepState,
@@ -79,6 +81,8 @@ export {
   findFailedEdge,
   formatElapsed,
   isRunLive,
+  listRerunChoices,
+  type RerunChoice,
   readTimestamps,
   shouldRunRecede,
 } from "./run-display";

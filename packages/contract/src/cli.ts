@@ -911,7 +911,11 @@ export const CLI = {
   "subscription.create": {
     command: "subscription create",
     help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can hold a subscription, and the calling session becomes the holder.",
-    examples: [{ args: ["github:pr:o/r#87"] }, { args: ["gmail:thread:19b2c"] }],
+    examples: [
+      { args: ["github:pr:o/r#87"] },
+      { args: ["gmail:thread:19b2c"] },
+      { args: ["run:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+    ],
     fields: {
       target: {
         positional: true,
@@ -921,8 +925,12 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "this version has no runs, no session platform events and no Permission Requests, so only a ref target can be waited on",
-      validation: "a user credential holds no subscription; call this on a session token",
+        "the run has already ended, so no event about it will arrive: read it with `hercule run read <id>`. Or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run instead",
+      not_found: "no run has the id in a run:<id> target",
+      forbidden:
+        "a run target needs the run.read grant, because the events about a run describe it",
+      validation:
+        "the target is not written in one of the forms above, or a run target's id is not a full run id; or a user credential holds no subscription: call this on a session token",
     },
   },
   "subscription.cancel": {
@@ -1147,7 +1155,7 @@ export const CLI = {
 
   "run.start": {
     command: "run start",
-    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`.",
+    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`, or subscribe to it with `hercule subscription create run:<id>` to hear when it ends.",
     examples: [
       { args: ["--workflow", "1f3a9c2e"] },
       { args: ["--workflow", "1f3a9c2e", "--inputs", '{"title":"Fix login"}'] },
@@ -1225,6 +1233,11 @@ export const CLI = {
         flag: "actor",
         help: "Only runs started by this actor: user, session:<id>, or run:<id> for the runs a run started.",
       },
+      originalRunId: {
+        flag: "original-run",
+        help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
+        resolves: "run.query",
+      },
     },
   },
   "run.read": {
@@ -1256,6 +1269,30 @@ export const CLI = {
     },
     errors: {
       invalid_state: "the run has already completed, failed or been cancelled",
+    },
+  },
+  "run.rerun": {
+    command: "run rerun",
+    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the original run froze instead. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the original run as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--mode", "replay"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The run to re-run, by its id or a tail of eight or more characters.",
+        resolves: "run.query",
+      },
+      mode: {
+        flag: "mode",
+        help: "re-stamp (the default) runs the workflow as it is stored now; replay runs the plan the original run froze.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the run has not ended yet: wait for it to end or cancel it first; or it has no stored workflow to re-stamp from: re-run it with --mode replay",
+      validation:
+        "the new run cannot start: the workflow as it is stored now cannot run or does not accept the original run's inputs (--mode replay may still run), the original run's plan cannot run any more, or no runner can run it. Each printed line gives the path and the problem; no run was started",
+      cap_exceeded:
+        "the run would be nested deeper than the controller's run.nestingLimit setting; no run was started",
     },
   },
 
@@ -2581,7 +2618,7 @@ export const NOUNS = {
   run: {
     summary:
       "Runs: a workflow's steps carried out once, each run with a frozen copy of the workflow.",
-    flow: "hercule run start starts one, hercule run list shows the latest, hercule run read shows how far one got, hercule run cancel stops one.",
+    flow: "hercule run start starts one, hercule run list shows the latest, hercule run read shows how far one got, hercule run cancel stops one, hercule run rerun runs an ended one again.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

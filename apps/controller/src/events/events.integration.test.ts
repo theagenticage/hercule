@@ -439,6 +439,38 @@ describe("POST /events/:id/enrich", () => {
     });
   });
 
+  /**
+   * A platform event is routed, unlike an audit entry, so an added ref would
+   * make it match subscriptions it was never about: a task's creation could
+   * wake a session waiting on a pull request. It records what the controller
+   * itself did, so it is refused exactly like an audit entry.
+   */
+  it("returns not_found for a platform event, and leaves it unchanged", async () => {
+    await withEvents(async ({ base, platformEvents }, token) => {
+      const created = await post(
+        base,
+        "/api/v1/tasks",
+        { title: "Fix the lid", description: "" },
+        token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const before = (await platformEvents("task.created"))[0]!;
+
+      const response = await enrich(base, token, before.id, {
+        url: "https://github.com/octo/repo/issues/42",
+        refs: [REF],
+      });
+
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(404);
+      expect(refusal.code).toBe("not_found");
+      const after = await readEvent(base, token, before.id);
+      expect(after.kind).toBe("task.created");
+      expect(after.url).toBeNull();
+      expect(after.refs).toEqual([]);
+    });
+  });
+
   it("records the caller of the amendment in an audit entry beside the event", async () => {
     await withEvents(async ({ base, sql, audit }, token) => {
       const eventId = await emitEventOrFail(base, token, {

@@ -25,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { Mutable } from "effect/Types";
 import {
   createDecodeValidationError,
   createNotFoundError,
@@ -41,13 +42,14 @@ import {
   type NotFound,
   type ProvenanceEntry,
   type Task,
+  type TaskUpdatedEventPayload,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
-import { AuditLog } from "../events";
-import { taskRepository, type TaskOrder } from "./repository";
+import { announce, nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import { AuditLog, PlatformEvents } from "../events";
+import { taskRepository, type TaskEdit, type TaskOrder } from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -78,29 +80,15 @@ export interface TaskPage {
   readonly nextCursor?: string;
 }
 
-/** How a `task.updated` event reports a change to a field with a single value. */
-interface ScalarChange {
-  readonly old: unknown;
-  readonly new: unknown;
-}
-
-/**
- * How a `task.updated` event reports a change to a list field. Provenance
- * entries are never removed.
- */
-interface ListChange {
-  readonly added: ReadonlyArray<unknown>;
-  readonly removed: ReadonlyArray<unknown>;
-}
-
 /** Newest work first: a task list is read to see what is going on now. */
 const DEFAULT_ORDER: TaskOrder = { _tag: "column", field: "updatedAt", direction: "desc" };
 
 const NO_SUCH_TASK = "no such task";
 const NO_SUCH_PROJECT = "no such project";
 
-/** The scalar fields an edit may change, in the order an event reports them. */
-const SCALARS = ["title", "description", "status", "priority"] as const;
+/** Returns true if an edit gives a field a value other than the one it holds. */
+const isNewValue = <Value>(next: Value | undefined, held: Value): next is Value =>
+  next !== undefined && next !== held;
 
 /** Returns the values with duplicates removed, keeping the first of each. */
 const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
@@ -135,6 +123,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tasks = yield* taskRepository;
   const audit = yield* AuditLog;
+  const platformEvents = yield* PlatformEvents;
 
   const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
     Effect.flatMap(
@@ -227,13 +216,8 @@ const make = Effect.gen(function* () {
               at,
               actor,
             });
-            yield* audit.append({
-              kind: "task.created",
-              actor,
-              record: { topic: "task", id: task.id },
-              payload: { task },
-              at,
-            });
+            yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
+            yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
             return task;
           }),
         );
@@ -266,19 +250,30 @@ const make = Effect.gen(function* () {
             const before = yield* readLiveTaskOrFail(id);
             yield* ensureProjectExists(patch.projectId);
 
-            const changes: Record<string, ScalarChange | ListChange> = {};
-            const edit: Record<string, unknown> = {};
-            for (const field of SCALARS) {
-              const next = patch[field];
-              if (next !== undefined && next !== before[field]) {
-                changes[field] = { old: before[field], new: next };
-                edit[field] = next;
-              }
+            // Each field is compared on its own, rather than in a loop over
+            // the field names, so each change keeps the type of its field.
+            const changes: Mutable<TaskUpdatedEventPayload["changes"]> = {};
+            const edit: Mutable<TaskEdit> = {};
+            if (isNewValue(patch.title, before.title)) {
+              changes.title = { old: before.title, new: patch.title };
+              edit.title = patch.title;
+            }
+            if (isNewValue(patch.description, before.description)) {
+              changes.description = { old: before.description, new: patch.description };
+              edit.description = patch.description;
+            }
+            if (isNewValue(patch.status, before.status)) {
+              changes.status = { old: before.status, new: patch.status };
+              edit.status = patch.status;
+            }
+            if (isNewValue(patch.priority, before.priority)) {
+              changes.priority = { old: before.priority, new: patch.priority };
+              edit.priority = patch.priority;
             }
             const project = before.projectId ?? null;
-            if (patch.projectId !== undefined && patch.projectId !== project) {
-              changes["projectId"] = { old: project, new: patch.projectId };
-              edit["projectId"] = patch.projectId;
+            if (isNewValue(patch.projectId, project)) {
+              changes.projectId = { old: project, new: patch.projectId };
+              edit.projectId = patch.projectId;
             }
 
             // A label in both lists is added and removed in one call, so the
@@ -304,8 +299,8 @@ const make = Effect.gen(function* () {
                   ]),
                 );
               }
-              changes["labels"] = { added, removed };
-              edit["labels"] = [...kept, ...added];
+              changes.labels = { added, removed };
+              edit.labels = [...kept, ...added];
             }
 
             const appended = patch.provenance ?? [];
@@ -315,7 +310,7 @@ const make = Effect.gen(function* () {
                 at,
                 actor,
               }));
-              changes["provenance"] = { added: entries, removed: [] };
+              changes.provenance = { added: entries, removed: [] };
             }
 
             // If nothing changes, the task is returned as it is, with no row
@@ -323,13 +318,13 @@ const make = Effect.gen(function* () {
             if (Object.keys(changes).length === 0) return before;
 
             yield* tasks.update(id, edit, appended, at, actor);
-            yield* audit.append({
+            yield* platformEvents.emit({
               kind: "task.updated",
               actor,
-              record: { topic: "task", id },
               payload: { taskId: id, changes },
               at,
             });
+            yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
             // Read back rather than merged in memory, so the caller gets the
             // row that was written, whatever the edit changed.
             return yield* readLiveTaskOrFail(id);
@@ -375,5 +370,8 @@ export class TaskService extends Context.Service<TaskService, Effect.Success<typ
   "hercule/controller/tasks/TaskService",
 ) {}
 
-export const TaskServiceLayer: Layer.Layer<TaskService, never, SqlClient.SqlClient | AuditLog> =
-  Layer.effect(TaskService)(make);
+export const TaskServiceLayer: Layer.Layer<
+  TaskService,
+  never,
+  SqlClient.SqlClient | AuditLog | PlatformEvents
+> = Layer.effect(TaskService)(make);

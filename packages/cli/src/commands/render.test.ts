@@ -260,7 +260,11 @@ describe("hercule run", () => {
   it("prints the new run's full id after run start, and the command that shows it", () => {
     expect(
       renderHuman({ kind: "value", value: { runId: RUN } }, lookUpCommand("run", "start")),
-    ).toEqual([`run ${RUN} started`, "", `see how far it got with \`hercule run read ${RUN}\``]);
+    ).toEqual([
+      `run ${RUN} started`,
+      "",
+      `subscribe for updates: hercule subscription create run:${RUN}`,
+    ]);
   });
 
   it("prints a run as a summary with its full id, its inputs and one row per step, without the plan or the outputs", () => {

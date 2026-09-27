@@ -4,13 +4,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { hashPassword, TEST_PASSWORD_PARAMS, Users, UsersLayer } from "../users";
 import { Auth, AuthLayer } from "./service";
 
 const PASSWORD = "correct horse battery staple";
 
-type Deps = Auth | Users | Credentials | AuditLog | SqlClient.SqlClient;
+type Deps = Auth | Users | Credentials | SqlClient.SqlClient;
 
 const layer = AuthLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(UsersLayer, CredentialsLayer, AuditLogLayer)),
@@ -71,11 +72,10 @@ describe("auth.login", () => {
     const rows = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;
-        const log = yield* AuditLog;
         yield* withUser;
         yield* Effect.flip(auth.login({ username: "rogier", password: "guess" }));
         yield* Effect.flip(auth.login({ username: "nobody", password: PASSWORD }));
-        return yield* log.listByKind("auth.login.failed");
+        return yield* readEventsOfKind("auth.login.failed");
       }),
     );
 

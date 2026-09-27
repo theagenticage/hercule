@@ -4,12 +4,14 @@ import {
   describeFailureReason,
   findFailedEdge,
   describeRunOrigin,
+  describeReruns,
   describeRunnerWait,
   describeRunStatus,
   describeStepDuration,
   describeStepState,
   describeUnstartedStep,
   formatElapsed,
+  listRerunChoices,
   measureElapsed,
   readTimestamps,
   shouldRunRecede,
@@ -35,6 +37,76 @@ describe("describeRunOrigin", () => {
     assert.strictEqual(child.starter.label, "run 1f3a9c2e");
     assert.deepStrictEqual(child.starter.link, { kind: "run", runId: PARENT });
     assert.strictEqual(child.howStarted, "at step spawn");
+  });
+});
+
+describe("listRerunChoices", () => {
+  it("offers a stored workflow's run both modes, re-stamping from the current workflow first", () => {
+    const choices = listRerunChoices({ workflowId: PARENT }, false);
+    assert.deepStrictEqual(
+      choices.map((choice) => [choice.mode, choice.label]),
+      [
+        ["re-stamp", "From the current workflow"],
+        ["replay", "As it ran"],
+      ],
+    );
+  });
+
+  it("offers a run of a workflow that was never stored only a replay, and says why", () => {
+    const choices = listRerunChoices({ workflowId: null }, false);
+    assert.deepStrictEqual(
+      choices.map((choice) => choice.mode),
+      ["replay"],
+    );
+    assert.match(choices[0]?.explanation ?? "", /never saved/);
+  });
+
+  it("offers a run whose workflow was deleted only a replay, and says why", () => {
+    const choices = listRerunChoices({ workflowId: PARENT }, true);
+    assert.deepStrictEqual(
+      choices.map((choice) => [choice.mode, choice.label]),
+      [["replay", "As it ran"]],
+    );
+    assert.match(choices[0]?.explanation ?? "", /workflow was deleted/);
+  });
+});
+
+describe("describeReruns", () => {
+  const listIds = (count: number): ReadonlyArray<{ readonly id: string }> =>
+    Array.from({ length: count }, (_, index) => ({ id: `run-${String(index + 1)}` }));
+
+  it("links every re-run when there are three or fewer", () => {
+    assert.deepStrictEqual(describeReruns({ items: [] }), {
+      runIds: [],
+      unlinkedCountText: undefined,
+    });
+    assert.deepStrictEqual(describeReruns({ items: listIds(3) }), {
+      runIds: ["run-1", "run-2", "run-3"],
+      unlinkedCountText: undefined,
+    });
+  });
+
+  it("links the newest three, in the order the page lists them, and counts the rest", () => {
+    assert.deepStrictEqual(describeReruns({ items: listIds(5) }), {
+      runIds: ["run-1", "run-2", "run-3"],
+      unlinkedCountText: "2 more",
+    });
+  });
+
+  it("counts the rest as at least that many when the page has a next page", () => {
+    assert.strictEqual(
+      describeReruns({ items: listIds(50), nextCursor: "next" }).unlinkedCountText,
+      "47+ more",
+    );
+  });
+
+  it("says only that there are more when the page has a next page and every re-run on it is linked", () => {
+    for (const count of [2, 3]) {
+      assert.strictEqual(
+        describeReruns({ items: listIds(count), nextCursor: "next" }).unlinkedCountText,
+        "more",
+      );
+    }
   });
 });
 

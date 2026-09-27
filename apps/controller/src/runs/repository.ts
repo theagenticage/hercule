@@ -56,6 +56,8 @@ export interface NewRun {
   readonly origin: RunOrigin;
   /** The steps the run starts at. Each gets a pending step record. */
   readonly entryStepIds: ReadonlyArray<string>;
+  /** The run this one re-runs, when `run.rerun` starts it. */
+  readonly originalRunId?: string;
 }
 
 /** How a step record ends. */
@@ -138,6 +140,7 @@ interface RunRow {
   readonly failed_edge_index: number | null;
   readonly failure_message: string | null;
   readonly output: string | null;
+  readonly original_run_id: Uint8Array | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -202,8 +205,8 @@ const requireColumn = <A extends string>(value: A | null, table: string, column:
   return value;
 };
 
-/** Maps a step row to a `StepRecord`. A NULL column becomes an absent field, not `null`. */
-const toStepRecord = (row: StepRow): StepRecord => {
+/** Parses a step row into a `StepRecord`. A NULL column becomes an absent field, not `null`. */
+const parseStepRow = (row: StepRow): StepRecord => {
   const identity = {
     stepId: row.step_id,
     iteration: row.iteration,
@@ -333,12 +336,12 @@ const parseRunStatusColumns = (row: RunRow) => {
 };
 
 /**
- * Maps a run row, its step rows and its traversal rows to a `Run`. The JSON
+ * Parses a run row, its step rows and its traversal rows into a `Run`. The JSON
  * columns are parsed without being decoded again: the run engine wrote them
  * from values that were already validated. An edge with no traversal row
  * has been followed 0 times.
  */
-const toRun = (
+const parseRunRow = (
   row: RunRow,
   steps: ReadonlyArray<StepRow>,
   traversals: ReadonlyArray<TraversalRow>,
@@ -354,15 +357,16 @@ const toRun = (
     origin: JSON.parse(row.origin) as RunOrigin,
     ...(row.runner_id === null ? {} : { runnerId: uuidToString(row.runner_id) }),
     ...(row.workspace_id === null ? {} : { workspaceId: uuidToString(row.workspace_id) }),
-    steps: steps.map(toStepRecord),
+    steps: steps.map(parseStepRow),
     edgeTraversals,
+    ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
     createdAt: row.created_at,
     ...parseRunStatusColumns(row),
   };
 };
 
-/** Maps a summary row to a `RunSummary`. */
-const toSummary = (row: SummaryRow): RunSummary => ({
+/** Parses a summary row into a `RunSummary`. */
+const parseSummaryRow = (row: SummaryRow): RunSummary => ({
   id: uuidToString(row.id),
   workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
   workflowName: row.workflow_name,
@@ -398,11 +402,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at)
+          INSERT INTO runs (id, workflow_id, plan, inputs, origin, original_run_id, status, created_at)
           VALUES (${id},
                   ${run.workflowId === null ? null : uuidFromString(run.workflowId)},
                   ${JSON.stringify(run.plan)}, ${JSON.stringify(run.inputs)},
-                  ${JSON.stringify(run.origin)}, 'pending', ${at})
+                  ${JSON.stringify(run.origin)},
+                  ${run.originalRunId === undefined ? null : uuidFromString(run.originalRunId)},
+                  'pending', ${at})
         `;
         const runId = uuidToString(id);
         yield* insertSteps(runId, run.entryStepIds, at);
@@ -430,7 +436,7 @@ const make = Effect.gen(function* () {
           const traversals = yield* sql<TraversalRow>`
             SELECT edge_index, count FROM run_edge_traversals WHERE run_id = ${bytes}
           `;
-          return Option.some(toRun(row, steps, traversals));
+          return Option.some(parseRunRow(row, steps, traversals));
         }),
       ),
 
@@ -461,6 +467,9 @@ const make = Effect.gen(function* () {
           clauses.push(sql`workflow_id = ${uuidFromString(request.workflowId)}`);
         }
         if (request.status !== undefined) clauses.push(sql`status = ${request.status}`);
+        if (request.originalRunId !== undefined) {
+          clauses.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
+        }
         if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
         if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
         if (request.actor !== undefined) {
@@ -475,7 +484,7 @@ const make = Effect.gen(function* () {
         return yield* buildPage(
           rows,
           request.limit,
-          (page) => Effect.succeed(page.map(toSummary)),
+          (page) => Effect.succeed(page.map(parseSummaryRow)),
           (last) => encodeCursor(scope, last.createdAt, last.id),
         );
       }),

@@ -9,12 +9,12 @@
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
-import type { Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
+import type { Grant, Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, createPluginFixture } from "../plugins/testing";
 import type { RunPage } from "./service";
 import { waitUntil, withFleet as sharedWithFleet, type Arranged } from "../sessions/testing";
-import { readIssues } from "../workflows/testing";
+import { createWorkflowOrFail, readIssues } from "../workflows/testing";
 import { FACTS, MODELS, PROVIDER, runEffect } from "../daemon/testing";
 
 const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
@@ -140,6 +140,17 @@ export const expectStatus = <T extends { readonly status: string }, S extends T[
 ): Extract<T, { readonly status: S }> => {
   expect(value?.status, JSON.stringify(value)).toBe(status);
   return value as Extract<T, { readonly status: S }>;
+};
+
+/** A run that has ended. */
+export type EndedRun = Exclude<Run, { readonly status: "pending" | "running" }>;
+
+/** Returns the run narrowed to an ended one. Fails the test when it has not ended. */
+export const expectEnded = (run: Run): EndedRun => {
+  if (run.status === "pending" || run.status === "running") {
+    expect.fail(`the run has not ended: ${JSON.stringify(run)}`);
+  }
+  return run;
 };
 
 /**
@@ -466,6 +477,31 @@ export const waitForHeldExecutions = (
   waitUntil(`started ${String(count)} held action(s)`, () =>
     held.contexts.length >= count ? held.contexts : undefined,
   );
+
+/**
+ * Starts a run of a stored workflow `Wait`, whose one step `first` calls the
+ * held action, and returns the run's id once the step has started. The run
+ * stays `running` until the test releases the held action or cancels the run.
+ */
+export const startHeldRun = async (
+  base: string,
+  token: string,
+  held: HeldAction,
+): Promise<string> => {
+  const workflow = await createWorkflowOrFail(base, token, {
+    definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
+  });
+  const runId = await startRun(base, token, workflow.id);
+  await waitForHeldExecutions(held, 1);
+  return runId;
+};
+
+/** The grants of a session that may wait on a run: it may subscribe, and read runs. */
+export const RUN_WATCHER_GRANTS: ReadonlyArray<Grant> = [
+  "subscription.write",
+  "subscription.read",
+  "run.read",
+];
 
 /**
  * Runs `body` against a controller with one connected runner, so sessions can

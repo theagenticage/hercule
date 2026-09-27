@@ -1,6 +1,6 @@
 /**
  * Tests the shorthand a person or an agent types: `hercule subscription create
- * run:r_3`, or a bare External Ref. The schema does all of the parsing and
+ * run:<run id>`, or a bare External Ref. The schema does all of the parsing and
  * formatting, so a command line and a stored target can never disagree about
  * what a token means.
  */
@@ -24,12 +24,15 @@ const readRefusal = (input: string): string => {
   return Cause.pretty(exit.cause);
 };
 
+/** A run id, which is a UUIDv7 like every id the controller mints. */
+const RUN_ID = "0199f0b7-0000-7000-8000-00000000a001";
+
 const encodeTarget = (target: unknown): unknown =>
   Effect.runSync(Schema.encodeUnknownEffect(SubscriptionTargetFromShorthand)(target));
 
 describe("SubscriptionTargetFromShorthand", () => {
   it("decodes each prefixed form into its union member", () => {
-    expect(decodeOrFail("run:r_3")).toEqual({ kind: "run", runId: "r_3" });
+    expect(decodeOrFail(`run:${RUN_ID}`)).toEqual({ kind: "run", runId: RUN_ID });
     expect(decodeOrFail("session:s_12")).toEqual({ kind: "session", sessionId: "s_12" });
     expect(decodeOrFail("request:pr_7")).toEqual({ kind: "request", requestId: "pr_7" });
   });
@@ -39,7 +42,7 @@ describe("SubscriptionTargetFromShorthand", () => {
   });
 
   it("encodes every member back to the string it was written as", () => {
-    for (const shorthand of ["run:r_3", "session:s_12", "request:pr_7", "github:pr:o/r#87"]) {
+    for (const shorthand of [`run:${RUN_ID}`, "session:s_12", "request:pr_7", "github:pr:o/r#87"]) {
       expect(encodeTarget(decodeOrFail(shorthand)), shorthand).toBe(shorthand);
     }
   });
@@ -51,5 +54,9 @@ describe("SubscriptionTargetFromShorthand", () => {
         expect(message, `${nonsense} -> ${message}`).toContain(form);
       }
     }
+  });
+
+  it("rejects a run target whose id is not a run id, because runs exist and their ids are UUIDs", () => {
+    expect(readRefusal("run:r_3")).toMatch(/UUID[\s\S]*runId/);
   });
 });

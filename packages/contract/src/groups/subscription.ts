@@ -43,10 +43,11 @@ import { EventId } from "./event";
 export const MAX_TARGET_ID_LENGTH = 512;
 
 /**
- * The id of the thing a target waits on. It is not the `Id` schema: run ids
- * and Permission Request ids come from systems this version does not have
- * yet, and rejecting an id format before those systems exist would reject it
- * for the wrong reason.
+ * The id of a session or a Permission Request a target waits on. It is not
+ * the `Id` schema: waiting on either is refused until their events are
+ * emitted, and rejecting an id format first would refuse such a target for the
+ * wrong reason. A run target holds an `Id`, because runs exist and a
+ * malformed run id can only be a mistake.
  */
 const TargetId = bounded(1, MAX_TARGET_ID_LENGTH);
 
@@ -56,7 +57,7 @@ const TargetId = bounded(1, MAX_TARGET_ID_LENGTH);
  */
 const TargetValue = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("ref"), ref: ExternalRef }),
-  Schema.Struct({ kind: Schema.Literal("run"), runId: TargetId }),
+  Schema.Struct({ kind: Schema.Literal("run"), runId: Id }),
   Schema.Struct({ kind: Schema.Literal("session"), sessionId: TargetId }),
   Schema.Struct({ kind: Schema.Literal("request"), requestId: TargetId }),
 ]);
@@ -244,7 +245,7 @@ export const subscription = HttpApiGroup.make("subscription")
     HttpApiEndpoint.post("create", "/subscriptions", {
       payload: SubscriptionCreateInput,
       success: SubscriptionCreated,
-      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("cancel", "/subscriptions/:id", {
       params: { id: Id },

@@ -139,7 +139,7 @@ Plugin state is a **namespaced key-value table inside the same database**: `(plu
 
 The event log **is** the audit log; there is no separate audit subsystem.
 
-- Every mutation through the service layer is stamped `actor: user | session:<id>` and recorded as an event log entry (ticket 16). Task priority changes, status changes and provenance appends are examples: `task.updated` carries `{taskId, actor, changes}`.
+- Every mutation through the service layer is stamped `actor: user | session:<id>` and recorded as an event log entry (ticket 16). Task priority changes, status changes and provenance appends are examples: `task.updated` carries ~~`{taskId, actor, changes}`~~ `{taskId, changes}`, with the actor on the event's envelope *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81); [./08-events-and-connections.md](./08-events-and-connections.md) section 2)*.
 - Security event kinds are part of the log: login success and failure, API key minted and revoked, permission request raised and decided, secret created and rotated ([./13-security.md](./13-security.md)).
 - Hard-deleting a Task removes the row; the event log keeps the audit ([./09-tasks.md](./09-tasks.md)).
 

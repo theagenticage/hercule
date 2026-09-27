@@ -1,6 +1,7 @@
 /**
  * How a run and its steps are described on screen: who started the run, the
- * words for its status and its failure, and how long it and its steps took.
+ * words for its status and its failure, how long it and its steps took, and
+ * how it can be re-run and which runs re-ran it.
  *
  * The rules live here with a test rather than inside a component, so the run
  * list and a run's page use the same words for a run's status and failure.
@@ -10,6 +11,7 @@
  */
 import type {
   FailureReason,
+  RerunMode,
   Run,
   RunOrigin,
   RunStatus,
@@ -41,6 +43,115 @@ export const isRunLive = (status: RunStatus): boolean =>
  */
 export const shouldRunRecede = (status: RunStatus): boolean =>
   status === "completed" || status === "cancelled";
+
+/** One way to re-run a run, as the question before a re-run offers it. */
+export interface RerunChoice {
+  readonly mode: RerunMode;
+  /** The words on the choice, such as "As it ran". */
+  readonly label: string;
+  /** One sentence on what the new run will do, shown under the choice. */
+  readonly explanation: string;
+}
+
+/**
+ * Returns the ways an ended run can be re-run, the default first, so the
+ * list is never empty. Both start the new run with the original run's inputs:
+ *
+ * - `re-stamp`, "From the current workflow": the workflow as it is saved now.
+ *   This is the default, because a re-run usually follows a fix to the
+ *   workflow.
+ * - `replay`, "As it ran": the plan the original run froze when it started.
+ *
+ * A run with no saved workflow to start from offers only `replay`, with an
+ * explanation that says why. That is a run of a workflow sent with
+ * `run.start`, and a run whose workflow was deleted since, which the run
+ * itself cannot tell: pass `isWorkflowDeleted` as true when reading the run's
+ * workflow failed with `not_found`. The controller refuses `re-stamp` for
+ * both.
+ */
+export const listRerunChoices = (
+  run: Pick<Run, "workflowId">,
+  isWorkflowDeleted: boolean,
+): readonly [RerunChoice, ...RerunChoice[]] => {
+  if (run.workflowId === null) {
+    return [
+      {
+        mode: "replay",
+        label: "As it ran",
+        explanation:
+          "This run's workflow was sent with the run and never saved, so the new run follows this run's plan, as it was frozen when the run started.",
+      },
+    ];
+  }
+  if (isWorkflowDeleted) {
+    return [
+      {
+        mode: "replay",
+        label: "As it ran",
+        explanation:
+          "This run's workflow was deleted, so the new run follows this run's plan, as it was frozen when the run started.",
+      },
+    ];
+  }
+  return [
+    {
+      mode: "re-stamp",
+      label: "From the current workflow",
+      explanation: "The new run follows the workflow as it is saved now.",
+    },
+    {
+      mode: "replay",
+      label: "As it ran",
+      explanation: "The new run follows this run's plan, as it was frozen when the run started.",
+    },
+  ];
+};
+
+/** How many of a run's re-runs its header links to. */
+const SHOWN_RERUN_COUNT = 3;
+
+/** The re-runs of a run, as its header shows them. */
+export interface RerunsReading {
+  /** The ids of the newest re-runs, newest first, at most three. */
+  readonly runIds: ReadonlyArray<string>;
+  /**
+   * How many re-runs are not linked, such as "2 more". When the page read
+   * has a next page, the count is a lower bound, such as "47+ more", or just
+   * "more" when every re-run on the page is linked. `undefined` when every
+   * re-run is linked.
+   */
+  readonly unlinkedCountText: string | undefined;
+}
+
+/**
+ * Returns the re-runs a run's header links to: the newest three of one page
+ * of `run.query` with `originalRunId`, which lists them newest first, and how
+ * many more there are. A run rarely has more than a few re-runs, so the header
+ * counts the rest instead of listing them, and reads only the first page.
+ */
+export const describeReruns = (page: {
+  readonly items: ReadonlyArray<{ readonly id: string }>;
+  readonly nextCursor?: string;
+}): RerunsReading => {
+  const runIds = page.items.slice(0, SHOWN_RERUN_COUNT).map((rerun) => rerun.id);
+  const unlinkedCount = page.items.length - runIds.length;
+  return { runIds, unlinkedCountText: describeUnlinkedCount(unlinkedCount, page.nextCursor) };
+};
+
+/**
+ * Returns the words for the re-runs a run's header does not link, or
+ * `undefined` when there are none. `unlinkedCount` counts the ones on the page
+ * read; a next page means there are more than that.
+ */
+const describeUnlinkedCount = (
+  unlinkedCount: number,
+  nextCursor: string | undefined,
+): string | undefined => {
+  if (nextCursor === undefined) {
+    return unlinkedCount === 0 ? undefined : `${String(unlinkedCount)} more`;
+  }
+  return unlinkedCount === 0 ? "more" : `${String(unlinkedCount)}+ more`;
+};
 
 /** Who started a run, and how, if not by hand. */
 export interface RunOriginReading {

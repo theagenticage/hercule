@@ -20,6 +20,18 @@ import {
   withAgentFleet,
   type Arranged,
 } from "../sessions/testing";
+import {
+  buildCreateStep,
+  buildHeldAction,
+  buildHeldStep,
+  insertPendingRun,
+  RUN_WATCHER_GRANTS,
+  startHeldRun,
+  startRun,
+  waitForRunToFinish,
+  withRunFleet,
+} from "../runs/testing";
+import { createWorkflowOrFail } from "../workflows/testing";
 
 /** Starting the fleet is the slow part of each case; the timeout allows three waits. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -106,6 +118,13 @@ const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRo
     ),
   );
 
+/** Returns the condition a run target expands into. */
+const buildRunCondition = (runId: string): string =>
+  `event.source == "platform" && event.kind.startsWith("run.") && event.payload.runId == "${runId}"`;
+
+/** The id of the pending run a test inserts. A UUIDv7, like every id the controller mints. */
+const PENDING_RUN_ID = "0199f0b7-0000-7000-8000-00000000c001";
+
 const cancelSubscription = (arranged: Arranged, id: string, token: string): Promise<Response> =>
   del(arranged.harness.base, `/api/v1/subscriptions/${id}`, token);
 
@@ -139,7 +158,6 @@ describe("subscription.create", () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
-        [{ kind: "run", runId: "r_3" }, /run/i],
         [{ kind: "session", sessionId: agent.session.id }, /session/i],
         [{ kind: "request", requestId: "pr_7" }, /permission request/i],
       ];
@@ -166,6 +184,158 @@ describe("subscription.create", () => {
       expect(refused.code).toBe("validation");
       expect(refused.message).toMatch(/session/i);
     });
+  });
+});
+
+/**
+ * A run emits one event, `run.completed`, `run.failed` or `run.cancelled`,
+ * when it ends. So a session may wait on a run that has not ended, and is
+ * refused a run that has ended or that does not exist.
+ */
+describe("subscription.create with a run target", () => {
+  it("stores a run target for a running run, with the expansion that matches its ending", async () => {
+    const held = buildHeldAction();
+    await withRunFleet(
+      async (arranged) => {
+        try {
+          const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
+          const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+          const subscriptionId = await createSubscriptionOrFail(
+            arranged,
+            { kind: "run", runId },
+            agent.token,
+          );
+
+          const items = await listPage(arranged, agent.token);
+          expect(items.map((one) => one.id)).toEqual([subscriptionId]);
+          expect(items[0]!.target).toEqual({ kind: "run", runId });
+          expect(items[0]!.condition).toBe(buildRunCondition(runId));
+          expect(items[0]!.holder).toEqual({ kind: "session", id: agent.session.id });
+        } finally {
+          held.release();
+        }
+      },
+      [held.plugin],
+    );
+  });
+
+  it("stores a run target for a pending run", async () => {
+    const held = buildHeldAction();
+    await withRunFleet(
+      async (arranged) => {
+        try {
+          const definition = { name: "Wait", steps: [buildHeldStep(held, "first")] };
+          const workflow = await createWorkflowOrFail(arranged.harness.base, arranged.token, {
+            definition,
+          });
+          // No request can hold a run at pending, so its rows are written directly.
+          await insertPendingRun(arranged.harness, {
+            id: PENDING_RUN_ID,
+            workflowId: workflow.id,
+            plan: definition,
+            stepId: "first",
+          });
+          const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+          await createSubscriptionOrFail(
+            arranged,
+            { kind: "run", runId: PENDING_RUN_ID },
+            agent.token,
+          );
+
+          const items = await listPage(arranged, agent.token);
+          expect(items.map((one) => one.condition)).toEqual([buildRunCondition(PENDING_RUN_ID)]);
+        } finally {
+          held.release();
+        }
+      },
+      [held.plugin],
+    );
+  });
+
+  it("rejects a run that has already ended with invalid_state, says so, and stores nothing", async () => {
+    await withRunFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const workflow = await createWorkflowOrFail(base, arranged.token, {
+        definition: { name: "One task", steps: [buildCreateStep("create")] },
+      });
+      const runId = await startRun(base, arranged.token, workflow.id);
+      const ended = await waitForRunToFinish(base, arranged.token, runId);
+      expect(ended.status).toBe("completed");
+      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+      const response = await createSubscription(arranged, { kind: "run", runId }, agent.token);
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(409);
+      expect(refused.code).toBe("invalid_state");
+      expect(refused.message).toMatch(/already ended/i);
+      expect(refused.message).toContain("completed");
+      expect(await listPage(arranged, agent.token)).toEqual([]);
+    });
+  });
+
+  it("rejects a run id that is not a UUID with validation, and stores nothing", async () => {
+    await withAgentFleet(async (arranged) => {
+      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+      // The shorthand's prefix written into the id is the likeliest mistake.
+      const response = await createSubscription(
+        arranged,
+        { kind: "run", runId: "run:abc" },
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(400);
+      expect(refused.code).toBe("validation");
+      expect(refused.issues).toEqual([["target", "runId"]]);
+      expect(await listPage(arranged, agent.token)).toEqual([]);
+    });
+  });
+
+  it("returns not_found for a run id that matches no run, and stores nothing", async () => {
+    await withAgentFleet(async (arranged) => {
+      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+      const response = await createSubscription(
+        arranged,
+        { kind: "run", runId: ABSENT_ID },
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(404);
+      expect(refused.code).toBe("not_found");
+      expect(await listPage(arranged, agent.token)).toEqual([]);
+    });
+  });
+
+  it("rejects a session without run.read with forbidden, names the grant, and stores nothing", async () => {
+    const held = buildHeldAction();
+    await withRunFleet(
+      async (arranged) => {
+        try {
+          const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
+          const agent = await spawnAgentWithGrants(arranged, "subscribers", [
+            "subscription.write",
+            "subscription.read",
+          ]);
+
+          const response = await createSubscription(arranged, { kind: "run", runId }, agent.token);
+
+          const refused = await readErrorBody(response);
+          expect(response.status, refused.text).toBe(403);
+          expect(refused.code).toBe("forbidden");
+          expect(refused.grant).toBe("run.read");
+          expect(await listPage(arranged, agent.token)).toEqual([]);
+        } finally {
+          held.release();
+        }
+      },
+      [held.plugin],
+    );
   });
 });
 

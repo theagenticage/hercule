@@ -10,28 +10,38 @@ import * as Layer from "effect/Layer";
 import type { DeclaredEventKind, Forbidden } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
+import type { PlatformEventKind } from "./platform-events";
 
 /** The only event kind whose triggers have a schedule. The Scheduler emits it. */
 export const CRON_TICK_EVENT_KIND = "cron.tick";
 
 /**
+ * The description of each platform event kind. The record's type names every
+ * kind the controller emits, so a kind cannot be emitted without being in the
+ * catalog, where a trigger can name it.
+ */
+const PLATFORM_EVENT_DESCRIPTIONS: Record<PlatformEventKind, string> = {
+  "run.completed": "A run completed.",
+  "run.failed": "A run failed.",
+  "run.cancelled": "A run was cancelled. A cancellation is not a failure.",
+  "task.created": "A Task was created.",
+  "task.updated": "A Task was changed.",
+};
+
+/**
  * The event kinds the core declares. They live here and not in a plugin
  * because the core emits them: the Scheduler emits `cron.tick`, and the
- * controller emits the run and task kinds.
+ * controller emits the platform events.
  */
 const CORE_EVENT_KINDS: ReadonlyArray<DeclaredEventKindWithConnectionType> = [
   {
     kind: CRON_TICK_EVENT_KIND,
     description: "A cron trigger's schedule came due. The schedule is set on the trigger.",
   },
-  { kind: "run.completed", description: "A run completed." },
-  { kind: "run.failed", description: "A run failed." },
-  {
-    kind: "run.cancelled",
-    description: "A run was cancelled. A cancellation is not a failure.",
-  },
-  { kind: "task.created", description: "A Task was created." },
-  { kind: "task.updated", description: "A Task was changed." },
+  ...Object.entries(PLATFORM_EVENT_DESCRIPTIONS).map(([kind, description]) => ({
+    kind,
+    description,
+  })),
 ];
 
 /**

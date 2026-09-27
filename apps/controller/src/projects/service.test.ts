@@ -6,15 +6,16 @@ import { MAX_PROJECT_NAME_LENGTH } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput } from "./index";
 
-type Deps = ProjectService | TaskService | AuditLog | SqlClient.SqlClient;
+type Deps = ProjectService | TaskService | SqlClient.SqlClient;
 
 const layer = ProjectServiceLayer.pipe(
   Layer.provideMerge(TaskServiceLayer),
-  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );
 
@@ -243,9 +244,8 @@ describe("the event log", () => {
     const { project, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         const project = yield* projects.create({ name: "Hercule", description: "d" });
-        return { project, entries: yield* audit.listByKind(CREATED) };
+        return { project, entries: yield* readEventsOfKind(CREATED) };
       }),
     );
     expect(entries).toHaveLength(1);
@@ -263,14 +263,13 @@ describe("the event log", () => {
     const entries = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         const created = yield* projects.create({
           name: "Old name",
           description: "untouched description",
         });
         yield* TestClock.adjust(A_MINUTE);
         yield* projects.update({ id: created.id, name: "New name" });
-        return yield* audit.listByKind(UPDATED);
+        return yield* readEventsOfKind(UPDATED);
       }),
     );
     expect(entries).toHaveLength(1);
@@ -283,11 +282,10 @@ describe("the event log", () => {
     const { project, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         const project = yield* projects.create({ name: "Gone" });
         yield* TestClock.adjust(A_MINUTE);
         yield* projects.delete(project.id);
-        return { project, entries: yield* audit.listByKind(DELETED) };
+        return { project, entries: yield* readEventsOfKind(DELETED) };
       }),
     );
     expect(entries).toHaveLength(1);
@@ -301,14 +299,13 @@ describe("the event log", () => {
     const { created, updated, deleted } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         yield* Effect.ignore(projects.create({ name: "" }));
         yield* Effect.ignore(projects.update({ id: UNKNOWN_ID, name: "Renamed" }));
         yield* Effect.ignore(projects.delete(UNKNOWN_ID));
         return {
-          created: yield* audit.listByKind(CREATED),
-          updated: yield* audit.listByKind(UPDATED),
-          deleted: yield* audit.listByKind(DELETED),
+          created: yield* readEventsOfKind(CREATED),
+          updated: yield* readEventsOfKind(UPDATED),
+          deleted: yield* readEventsOfKind(DELETED),
         };
       }),
     );
@@ -408,14 +405,13 @@ describe("updates that change nothing", () => {
     const { empty, before, after, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         const before = yield* projects.create({ name: "Hercule", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         return {
           empty: yield* Effect.flip(projects.update({ id: before.id })),
           before,
           after: yield* projects.update({ id: before.id, name: "Hercule", description: "d" }),
-          entries: yield* audit.listByKind(UPDATED),
+          entries: yield* readEventsOfKind(UPDATED),
         };
       }),
     );
@@ -428,12 +424,11 @@ describe("updates that change nothing", () => {
     const { cleared, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
-        const audit = yield* AuditLog;
         const created = yield* projects.create({ name: "Hercule", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         return {
           cleared: yield* projects.update({ id: created.id, description: null }),
-          entries: yield* audit.listByKind(UPDATED),
+          entries: yield* readEventsOfKind(UPDATED),
         };
       }),
     );

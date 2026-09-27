@@ -20,7 +20,8 @@ import type {
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { mintConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
 import { runnerRepository } from "./repository";
 
@@ -58,7 +59,6 @@ describe("the fleet a stopped controller left behind", () => {
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
-        const audit = yield* AuditLog;
         const arranged = yield* insertFleet([
           { connectivity: "online" },
           { connectivity: "offline" },
@@ -77,7 +77,7 @@ describe("the fleet a stopped controller left behind", () => {
             }),
           ),
         );
-        const entries = yield* audit.listByKind("runner.stateChanged");
+        const entries = yield* readEventsOfKind("runner.stateChanged");
         return {
           rows,
           recorded: entries.map((entry) => ({

@@ -145,6 +145,52 @@ export const Task = Schema.Struct({
 export type Task = Schema.Schema.Type<typeof Task>;
 
 /**
+ * The payload of `task.created`, which the controller emits when a task is
+ * created: the task as it was stored. The event's `actor` holds who created
+ * it.
+ */
+export const TaskCreatedEventPayload = Schema.Struct({ task: Task });
+
+export type TaskCreatedEventPayload = Schema.Schema.Type<typeof TaskCreatedEventPayload>;
+
+/** Returns the schema of a change to a field that holds one value: its old value and its new one. */
+const buildValueChange = <Value extends Schema.Top>(value: Value) =>
+  Schema.Struct({ old: value, new: value });
+
+/**
+ * The payload of `task.updated`, which the controller emits once per task
+ * update: the task's id, and one entry in `changes` for each field the update
+ * changed. A field that did not change has no entry, so a trigger can filter
+ * on `has(event.payload.changes.status)`.
+ *
+ * - A field that holds one value reports `{ old, new }`.
+ * - `labels` reports the labels `added` and `removed`.
+ * - `provenance` reports the entries `added`. Provenance is only ever
+ *   appended to, so `removed` is always empty.
+ *
+ * The event's `actor` holds who updated the task.
+ */
+export const TaskUpdatedEventPayload = Schema.Struct({
+  taskId: Id,
+  changes: Schema.Struct({
+    title: Schema.optionalKey(buildValueChange(TaskTitle)),
+    description: Schema.optionalKey(buildValueChange(TaskDescription)),
+    status: Schema.optionalKey(buildValueChange(TaskStatus)),
+    priority: Schema.optionalKey(buildValueChange(TaskPriority)),
+    /** `null` when the task had, or now has, no project. */
+    projectId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
+    labels: Schema.optionalKey(
+      Schema.Struct({ added: Schema.Array(Label), removed: Schema.Array(Label) }),
+    ),
+    provenance: Schema.optionalKey(
+      Schema.Struct({ added: Schema.Array(ProvenanceEntry), removed: Schema.Tuple([]) }),
+    ),
+  }),
+});
+
+export type TaskUpdatedEventPayload = Schema.Schema.Type<typeof TaskUpdatedEventPayload>;
+
+/**
  * The filters of `task.query`. Within one field, a task matches any of the
  * values; across fields, a task must match every field. There is no `or`
  * across fields and no negation. `text` is a full-text search over the title

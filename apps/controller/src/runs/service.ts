@@ -1,5 +1,5 @@
 /**
- * The run operations: `run.start`, `run.cancel`, `run.query` and `run.read`,
+ * The run operations: `run.start`, `run.rerun`, `run.cancel`, `run.query` and `run.read`,
  * resuming unfinished runs when the controller starts, and what the
  * controller daemon calls about workspace steps: their results, the runners
  * and workspaces that fail under them, and the steps a runner is owed.
@@ -32,6 +32,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { buildPageInputFields, refuseCursor, type AfterCommit } from "../db";
+import type { PlatformEvents } from "../events";
 import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
 import type { TaskService } from "../tasks";
@@ -63,6 +64,7 @@ const make = Effect.gen(function* () {
 
   return {
     start: engine.start,
+    rerun: engine.rerun,
 
     /** `run.cancel`: cancels a run and returns it, as the run engine's `cancel` describes. */
     cancel: engine.cancel,
@@ -131,6 +133,7 @@ export const RunServiceLayer: Layer.Layer<
   | RunExecutor
   | WorkspaceService
   | WorkspaceSteps
+  | PlatformEvents
 > = Layer.effect(RunService)(make);
 
 /**

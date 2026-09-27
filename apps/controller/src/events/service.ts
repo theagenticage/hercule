@@ -5,7 +5,7 @@
  * the controller daemon.
  *
  * One table holds both pipeline events and audit entries, and this reader
- * mostly treats them the same: a `task.created` row and a `github.issue.opened`
+ * mostly treats them the same: a `task.deleted` row and a `github.issue.opened`
  * row come back from the same unfiltered call, and differ only in their `kind`.
  * The log is also the audit log, and people usually open it to see what
  * happened around something, so one grant reads both.
@@ -19,8 +19,9 @@
  * sortable field. `since` and `until` filter on `received_at`, which increases
  * with the id, so a time window never conflicts with the order of the page.
  *
- * Audit entries are not written here. The audit writer appends those, one row
- * per mutation, inside that mutation's transaction.
+ * Audit entries and platform events are not written here. The audit writer
+ * and the platform event writer append those, one row per change, inside that
+ * change's transaction.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
@@ -67,9 +68,9 @@ import {
   uuidFromString,
   withTransaction,
 } from "../db";
-import { AUDIT_KINDS, SECURITY_KINDS } from "./audit-log";
+import { SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
-import { EVENT_COLUMNS, toEvent, type EventRow } from "./log";
+import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
 
 /** The filters and paging options of `event.query`. */
 const QueryInput = Schema.Struct({
@@ -149,9 +150,6 @@ const createPayloadValidationError = (error: Schema.SchemaError): Validation =>
  */
 const readSystemFromKind = (kind: string): string => kind.slice(0, kind.indexOf("."));
 
-/** The audit kinds, as a set. Enrichment may not amend an audit entry. */
-const AUDIT_KIND_NAMES: ReadonlySet<string> = new Set(AUDIT_KINDS);
-
 /** Returns the event's refs followed by the added refs, with each ref once. */
 const mergeRefs = (
   held: ReadonlyArray<string>,
@@ -227,7 +225,7 @@ const make = Effect.gen(function* () {
         const page = yield* buildPage(
           rows,
           limit,
-          (read) => Effect.succeed(read.map(toEvent)),
+          (read) => Effect.succeed(read.map(parseEventRow)),
           (last) => encodeIntegerKeyCursor(scope, last.id),
         );
         return {
@@ -255,7 +253,7 @@ const make = Effect.gen(function* () {
         const row = rows[0];
         return row === undefined
           ? yield* Effect.fail(createNotFoundError("no such event"))
-          : toEvent(row);
+          : parseEventRow(row);
       }),
 
     /**
@@ -367,10 +365,12 @@ const make = Effect.gen(function* () {
      * only added, so an event that has already matched on a ref never stops
      * matching on it.
      *
-     * Only a pipeline event can be amended. An audit entry records a mutation,
-     * and nothing may rewrite it. The id of an audit entry fails with
-     * `NotFound`, exactly like an id that matches nothing, so the log's
-     * contents cannot be probed through this operation either.
+     * Only an event from outside the controller can be amended. An audit
+     * entry or a platform event records what the controller itself did, and
+     * nothing may rewrite it: an added ref could make a run's end match a
+     * subscription it was never about. Such an id fails with `NotFound`,
+     * exactly like an id that matches nothing, so the log's contents cannot
+     * be probed through this operation either.
      *
      * The caller opens the transaction, because the read and the write must be
      * in one transaction and the caller has more to put inside it.
@@ -381,10 +381,14 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${input.id}
         `;
         const row = rows[0];
-        if (row === undefined || AUDIT_KIND_NAMES.has(row.kind)) {
+        // Only the events the controller logs about itself, audit entries and
+        // platform events, have the source "platform". A core emitter added later, such as the
+        // Scheduler's `cron.tick`, must use its own source name, or its events
+        // could never be amended.
+        if (row === undefined || row.source === "platform") {
           return yield* Effect.fail(createNotFoundError("no such event"));
         }
-        const held = toEvent(row);
+        const held = parseEventRow(row);
 
         const system = input.system ?? held.system;
         const url = input.url ?? held.url;

@@ -488,7 +488,7 @@ interface Run {
     | { kind: "action"; parentRunId: string; stepId: string }
     | { kind: "api"; actor: Actor }    // run.start over the API (amended 2026-09-24, #79)
   triggerEvent?: Event                 // copy of the triggering event
-  rerunOf?: string                     // run id this run was re-run from (field name provisional)
+  originalRunId?: string               // the run this run re-runs (amended 2026-09-27, #81: named originalRunId, not the provisional rerunOf)
   status: "pending" | "running" | "completed" | "failed" | "cancelled"
   failureReason?: FailureReason
   failedStepId?: string                // the step, or for expression-error the step or edge site
@@ -549,6 +549,7 @@ interface Run {
   startedAt?: string
   finishedAt?: string
   output?: unknown                     // on a completed run: the output of the terminal step that ended it; absent without one (amended 2026-09-25, #80)
+  originalRunId?: string               // the run this run re-runs, when run.rerun started it (amended 2026-09-27, #81)
 }
 
 interface StepRecord {
@@ -563,7 +564,7 @@ interface StepRecord {
 }
 ```
 
-- **Fields that join later**, each with the ticket that sets it: ~~`workspaceId`, `runnerId` and~~ a step record's `sessionId` with agent steps *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257): `workspaceId` and `runnerId` joined with workspace steps, below)* ([#83](https://github.com/theagenticage/hercule/issues/83)); `triggerEvent` and the `trigger` origin with trigger effects ([#82](https://github.com/theagenticage/hercule/issues/82)); `rerunOf` with re-run ([#81](https://github.com/theagenticage/hercule/issues/81)); ~~the run's final output, which is its terminal step's output, with terminal steps ([#80](https://github.com/theagenticage/hercule/issues/80));~~ `taskId` ([./02-domain-model.md](./02-domain-model.md)) with the ticket that links a run to a Task.
+- **Fields that join later**, each with the ticket that sets it: ~~`workspaceId`, `runnerId` and~~ a step record's `sessionId` with agent steps *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257): `workspaceId` and `runnerId` joined with workspace steps, below)* ([#83](https://github.com/theagenticage/hercule/issues/83)); `triggerEvent` and the `trigger` origin with trigger effects ([#82](https://github.com/theagenticage/hercule/issues/82)); ~~`rerunOf` with re-run ([#81](https://github.com/theagenticage/hercule/issues/81));~~ *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81): the field joined with re-run as `originalRunId`, section 7.4)* ~~the run's final output, which is its terminal step's output, with terminal steps ([#80](https://github.com/theagenticage/hercule/issues/80));~~ `taskId` ([./02-domain-model.md](./02-domain-model.md)) with the ticket that links a run to a Task.
 - **`origin`.** `manual` when the user starts a run by hand, from the web app or the CLI; `api` when a session calls ~~`workflow.run`; always `api` for `workflow.submit`, whoever calls it (section 9)~~ `run.start`, for a stored workflow or a sent one alike *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; `action` for a run that a ~~`workflow.run`~~ `run.start` step started (section 8). `actor` is the starter's actor stamp. The user who sends a workflow with `run.start` starts it by hand as much as one who names a stored workflow, so the origin follows who started the run, not which kind of workflow it runs.
 - **A step record's `error` is `{ code, message }`**, not a string, so a client can tell the kinds of failure apart. `code` is one of:
   - an error code of the API, when the action's operation failed with one, such as `not_found` or `validation`. `validation` is also the code when the rendered params do not match the action's input (section 5);
@@ -609,7 +610,13 @@ interface StepRecord {
 
 At a terminal state the controller emits `run.completed`, `run.failed` or `run.cancelled` into the pipeline; other workflows may trigger on them (this is how a "learning" workflow over run outcomes, or a failure-notification workflow, is built). Cancellation is not a failure: a "notify me on failures" workflow must not fire when the user cancels on purpose, so cancel has its own kind. The payload shapes are owned outright by [./08-events-and-connections.md](./08-events-and-connections.md).
 
-*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Not emitted yet: a run reaches its terminal state and emits nothing into the pipeline until [#81](https://github.com/theagenticage/hercule/issues/81). Until then a client learns that a run ended from `run.read` and from the live topic `run` (section 7.2).
+~~*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Not emitted yet: a run reaches its terminal state and emits nothing into the pipeline until [#81](https://github.com/theagenticage/hercule/issues/81). Until then a client learns that a run ended from `run.read` and from the live topic `run` (section 7.2).~~
+
+*(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* **Emitted as built.** Every run that ends emits exactly one of the three events.
+
+- The event is written in the transaction that ends the run, by the one function every way a run ends goes through (section 7.2). So the run's status and its event commit together or not at all. A run ends only once, so it emits only once.
+- A session's subscription to the run receives the event now ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Triggers receive it when triggers start runs ([#82](https://github.com/theagenticage/hercule/issues/82)).
+- The payloads, and what they leave out for now, are in [./08-events-and-connections.md](./08-events-and-connections.md) section 5.5.
 
 ### 7.4 Re-run
 
@@ -619,6 +626,17 @@ Re-run is whole-run only; there is no "re-run failed steps only". Two modes:
 - **Replay**: create a new run from the original run's frozen plan with the same inputs. Reproduces exactly what ran before.
 
 Both create a new Run that references the original. Re-runs provision fresh ephemeral workspaces; the failed run's kept workspace stays until ~~dismissed~~ disposed of or its window ends *(amended 2026-09-25, [#260](https://github.com/theagenticage/hercule/issues/260), section 4.4)*. Submitted runs (section 9) can only replay (there is no stored workflow to re-stamp from). Both are the `run.rerun` operation ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+
+*(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* **Re-run as built.** `run.rerun` takes the run's id and an optional `mode`, and answers `{ runId }` at once, as `run.start` does.
+
+- **Only a run that has ended.** A `completed`, `failed` or `cancelled` run can be re-run. A `pending` or `running` run is refused with `invalid_state`.
+- **Re-stamp** is the default. The new run's plan is the workflow as it is stored now, and its inputs are the original run's resolved inputs.
+- **Replay** starts the original run's frozen plan with the original run's resolved inputs.
+- **Checked like any start by request** (section 7.1). When the new run cannot start, the request is refused with `validation`, and no run is created. For example, a re-stamp whose stored workflow no longer accepts the old inputs, because an input was removed, is refused this way, and the message points to replay.
+- **No stored workflow, no re-stamp.** A run of a workflow sent with `run.start`, or of a workflow deleted since, has no stored workflow to re-stamp from. A re-stamp of it is refused with `invalid_state`, and the message tells the caller to replay. This holds when `mode` is left out, too. The controller never falls back to replay by itself, because the caller would get the old plan without knowing it.
+- **The new run** names the original in `originalRunId` (section 7.2). The mode is not stored. The new run's `origin` follows who called `run.rerun`, exactly as for `run.start` (section 7.2), and the nesting limit of `run.start` applies to it (section 8). It gets a fresh workspace, like any run.
+- **No triggering event.** A re-run is started by its caller, not by an event, so it has no triggering event (section 7.1 step 4) and does not copy the original's. The original keeps its own copy, and `originalRunId` leads to it. No run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82).
+- **Lineage.** `run.query` with `originalRunId` lists the re-runs of a run.
 
 ### 7.5 Cleanup and supervision
 

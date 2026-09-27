@@ -5,19 +5,24 @@
  * There is no separate audit subsystem. The `events` table holds two
  * populations: pipeline events, which the event router evaluates against triggers
  * and subscriptions, and audit entries, which it never does. An audit entry is
- * a platform event - `source: "platform"`, no Connection - carrying the actor
- * of the mutation that caused it.
+ * a row the controller writes about itself - `source: "platform"`, no
+ * Connection - carrying the actor of the mutation that caused it. A mutation
+ * whose record a trigger may listen for, such as a task's creation, is
+ * recorded as a platform event instead (`platform-events.ts`), which carries
+ * the actor the same way.
  */
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
 import { announce, nowIso } from "../db";
+import { appendPlatformSourceEvent } from "./platform-source-event";
 
 /**
  * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
  * grows as more operations become auditable, and is never re-cut, so a kind
- * stays readable in old rows.
+ * stays readable in old rows. A kind moves off it only to become a platform
+ * event, which is read the same way: `task.created` and `task.updated` did.
  */
 export const AUDIT_KINDS = [
   "auth.login.succeeded",
@@ -35,8 +40,6 @@ export const AUDIT_KINDS = [
   "secret.rotated",
   "secret.deleted",
   "event.enriched",
-  "task.created",
-  "task.updated",
   "task.deleted",
   "project.created",
   "project.updated",
@@ -116,8 +119,6 @@ export const SECURITY_KINDS: ReadonlyArray<AuditKind> = AUDIT_KINDS.filter((kind
  * the verb.
  */
 const RECORD_KINDS = {
-  "task.created": "created",
-  "task.updated": "updated",
   "task.deleted": "deleted",
   "runner.joined": "created",
   "runner.updated": "updated",
@@ -191,15 +192,6 @@ export type AuditEntry =
       readonly record?: undefined;
     });
 
-/** An audit entry as it reads back out of the log. */
-export interface AuditRow {
-  readonly id: number;
-  readonly kind: AuditKind;
-  readonly actor: Actor | null;
-  readonly payload: Readonly<Record<string, unknown>>;
-  readonly receivedAt: string;
-}
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -211,24 +203,13 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = entry.at ?? (yield* nowIso);
-        // `dedup_key` is an emitter's idempotency key, and an audit entry has
-        // none: two logins a second apart are two facts, not one repeated. A
-        // random value per row satisfies the NOT NULL column, and on purpose
-        // means the unique index never matches two audit entries.
-        const dedupKey = crypto.randomUUID();
-        yield* sql`
-          INSERT INTO events
-            (source, connection_id, system, kind, occurred_at, received_at,
-             dedup_key, refs, url, payload, raw, actor)
-          VALUES
-            ('platform', NULL, 'platform', ${entry.kind}, ${at}, ${at},
-             ${dedupKey}, '[]', NULL, ${JSON.stringify(entry.payload)}, NULL, ${entry.actor})
-        `;
-        // The log is a Live Topic of its own, so every appended row is
-        // announced as a change to the log. A row about a record is also
-        // announced as a change to that record.
-        yield* announce({ _tag: "event" });
+        yield* appendPlatformSourceEvent(sql, {
+          kind: entry.kind,
+          actor: entry.actor,
+          payload: entry.payload,
+          at: entry.at ?? (yield* nowIso),
+        });
+        // A row about a record is also announced as a change to that record.
         if (entry.record !== undefined) {
           yield* announce({
             _tag: "record",
@@ -238,26 +219,6 @@ const make = Effect.gen(function* () {
           });
         }
       }),
-
-    /** Returns the entries of one kind, oldest first. Only tests use it. */
-    listByKind: (kind: AuditKind): Effect.Effect<ReadonlyArray<AuditRow>, SqlError> =>
-      sql<{
-        readonly id: number;
-        readonly kind: string;
-        readonly actor: string | null;
-        readonly payload: string;
-        readonly received_at: string;
-      }>`SELECT id, kind, actor, payload, received_at FROM events WHERE kind = ${kind} ORDER BY id`.pipe(
-        Effect.map((rows) =>
-          rows.map((row) => ({
-            id: row.id,
-            kind: row.kind as AuditKind,
-            actor: row.actor,
-            payload: JSON.parse(row.payload) as Readonly<Record<string, unknown>>,
-            receivedAt: row.received_at,
-          })),
-        ),
-      ),
   };
 });
 
