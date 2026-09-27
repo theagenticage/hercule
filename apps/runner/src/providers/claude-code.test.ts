@@ -1834,3 +1834,185 @@ describe("the structured result of a turn with an output schema", () => {
     expect("structuredResult" in completed).toBe(false);
   });
 });
+
+/**
+ * Messages of a real foreground shell command the user stopped halfway, in the
+ * order the CLI sent them. Captured from a live CLI (2.1.283) through
+ * `query().interrupt()`, with ids shortened. The CLI announces the command as a
+ * task, then after the interrupt reports the task as stopped, rejects the tool
+ * call, and ends the turn with `aborted_tools`.
+ */
+const STOPPED_COMMAND = "toolu_018PeXXcwHTRzcjmrhPb1L3s";
+const STOPPED_TURN: ReadonlyArray<unknown> = [
+  {
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: STOPPED_COMMAND,
+          name: "Bash",
+          input: {
+            command: "for i in $(seq 1 30); do echo $i; sleep 1; done",
+            description: "Count from 1 to 30, one per second",
+          },
+        },
+      ],
+    },
+    parent_tool_use_id: null,
+    session_id: SESSION,
+  },
+  {
+    type: "system",
+    subtype: "task_started",
+    task_id: "b0hua8a7p",
+    tool_use_id: STOPPED_COMMAND,
+    description: "Count from 1 to 30, one per second",
+    is_backgrounded: false,
+    task_type: "local_bash",
+    uuid: "0199e0e7-0000-7000-8000-000000000101",
+    session_id: SESSION,
+  },
+  {
+    type: "system",
+    subtype: "task_notification",
+    task_id: "b0hua8a7p",
+    tool_use_id: STOPPED_COMMAND,
+    status: "stopped",
+    output_file: "",
+    summary: "Count from 1 to 30, one per second",
+    uuid: "0199e0e7-0000-7000-8000-000000000102",
+    session_id: SESSION,
+  },
+  {
+    type: "user",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: STOPPED_COMMAND,
+          is_error: true,
+          content:
+            "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+        },
+      ],
+    },
+    parent_tool_use_id: null,
+    session_id: SESSION,
+  },
+  {
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "[Request interrupted by user for tool use]" }],
+    },
+    parent_tool_use_id: null,
+    session_id: SESSION,
+  },
+  {
+    ...RESULT,
+    subtype: "error_during_execution",
+    is_error: true,
+    stop_reason: "tool_use",
+    errors: ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"],
+    terminal_reason: "aborted_tools",
+  },
+];
+
+/**
+ * Messages of a real background shell command that finished after the turn
+ * that started it had ended, captured from the same live CLI. The CLI reports
+ * the task's end, then the model answers it in a turn of its own.
+ */
+const FINISHED_TASK: ReadonlyArray<unknown> = [
+  {
+    type: "system",
+    subtype: "background_tasks_changed",
+    uuid: "0199e0e7-0000-7000-8000-000000000201",
+    session_id: SESSION,
+  },
+  {
+    type: "system",
+    subtype: "task_updated",
+    task_id: "bf2g0pk9r",
+    patch: { status: "completed", end_time: 1790000000000 },
+    uuid: "0199e0e7-0000-7000-8000-000000000202",
+    session_id: SESSION,
+  },
+  {
+    type: "system",
+    subtype: "task_notification",
+    task_id: "bf2g0pk9r",
+    status: "completed",
+    output_file: "/tmp/claude/tasks/bf2g0pk9r.output",
+    summary: 'Background command "Count 1 to 20 with one-second pauses" completed (exit code 0)',
+    uuid: "0199e0e7-0000-7000-8000-000000000203",
+    session_id: SESSION,
+  },
+];
+
+const FOLLOW_UP = "The background count has finished.";
+
+const FINISHED_TASK_ANSWER: ReadonlyArray<unknown> = [
+  {
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text: FOLLOW_UP }] },
+    parent_tool_use_id: null,
+    session_id: SESSION,
+  },
+  RESULT,
+];
+
+describe("a turn the user interrupts", () => {
+  it("ends as interrupted, with the stopped command failed and no item for the task messages", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "count to 30" }));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    for (const message of STOPPED_TURN) run.say(message);
+    await waitUntil("closed the turn", () =>
+      run.seen.some((event) => event._tag === "turn.completed"),
+    );
+
+    const completed = run.seen.find((event) => event._tag === "turn.completed");
+    expect(completed).toMatchObject({ state: "interrupted" });
+    expect(
+      filterItems(run.seen, "command_execution").map((event) =>
+        event._tag === "item.completed" ? event.status : "started",
+      ),
+    ).toEqual(["started", "failed"]);
+    expect(filterItems(run.seen, "unknown")).toEqual([]);
+    expect(listOpenedTurns(run.seen)).toHaveLength(1);
+  });
+});
+
+describe("a background task that finishes between turns", () => {
+  it("opens no turn for the task messages, and the model's answer is one turn with its text", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "count in the background" }));
+    run.say(RESULT);
+    await waitUntil("closed the first turn", () =>
+      run.seen.some((event) => event._tag === "turn.completed"),
+    );
+
+    for (const message of FINISHED_TASK) run.say(message);
+    for (const message of FINISHED_TASK_ANSWER) run.say(message);
+    await waitUntil(
+      "closed the answer's turn",
+      () => run.seen.filter((event) => event._tag === "turn.completed").length === 2,
+    );
+
+    // Two turns: the user's, and the one the model's answer opened. The task
+    // messages in between open none.
+    expect(listOpenedTurns(run.seen)).toHaveLength(2);
+    expect(filterItems(run.seen, "unknown")).toEqual([]);
+    const answerTurn = listOpenedTurns(run.seen)[1];
+    const text = run.seen.flatMap((event) =>
+      event._tag === "content.delta" && event.turnId === answerTurn ? [event.delta] : [],
+    );
+    expect(text.join("")).toBe(FOLLOW_UP);
+  });
+});

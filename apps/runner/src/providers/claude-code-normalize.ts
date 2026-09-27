@@ -146,6 +146,15 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "system:hook_progress",
   "system:hook_response",
   "system:files_persisted",
+  // The lifecycle of a background or subagent task. None of these is model
+  // work: a task's command already shows as its tool item, and when a
+  // background task finishes, the model's answer to it arrives as ordinary
+  // `assistant` messages and a `result`, which open and close a real turn.
+  // Kept, each one became an empty synthetic turn.
+  "system:task_started",
+  "system:task_progress",
+  "system:task_updated",
+  "system:task_notification",
 ]);
 
 /** Truncates text to the longest message the protocol accepts. */

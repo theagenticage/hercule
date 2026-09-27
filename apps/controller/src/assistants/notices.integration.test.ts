@@ -7,15 +7,16 @@
  * `notice`, stamped with the system. There are two:
  *
  * - "<name> was interrupted: <why>", when a reply was cut off: a turn failed
- *   while the session lives, or the session exited while a turn was running,
+ *   or was stopped while the session lives, or the session exited while a
+ *   turn was running,
  *   however it ended: an exit the runner reports, or a runner that restarted,
  *   was retired or was lost;
  * - "<name> can't be reached: <why>", when a message waits for a session that
  *   exited and cannot be resumed, such as one that exited before it ever
  *   started, or for a resumed session that exited before it started a turn.
  *
- * A turn the user interrupted writes no notice, only the reply text it
- * produced. An exit while idle writes none, a message still waiting
+ * A stopped turn writes the reply text it produced, then its notice. An exit
+ * while idle writes none, a message still waiting
  * included: the message is kept for the resumed process. A Thread writes
  * none at all.
  */
@@ -250,21 +251,40 @@ describe("a turn that fails while the session lives", () => {
   });
 });
 
-describe("a turn the user interrupts while the session lives", () => {
-  it("writes no notice when the turn produced no text", async () => {
+/** The notice for a turn that was stopped. */
+const TURN_STOPPED = "Ada was interrupted: its turn was stopped";
+
+describe("a turn that is stopped while the session lives", () => {
+  it("writes the notice, stamped with the system, when the turn produced no text", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
 
       await runTurn(arranged, session.id, 2, "t1", [], { state: "interrupted" });
 
-      expect(await listAnswers(arranged, conversation.id)).toEqual([]);
+      const answers = await listAnswers(arranged, conversation.id);
+      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([["notice", TURN_STOPPED]]);
+      expect(answers[0]).toMatchObject({ sessionId: session.id, actor: "system" });
+    });
+  });
+
+  it("in segments mode, keeps the reply already stored and writes the notice after it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation, session } = await startAda(arranged, "segments");
+
+      await runTurn(arranged, session.id, 2, "t1", ["a"], { state: "interrupted" });
+
+      const answers = await listAnswers(arranged, conversation.id);
+      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
+        ["assistant", "a"],
+        ["notice", TURN_STOPPED],
+      ]);
     });
   });
 
   // A turn is split into several texts by its tool calls. A completed turn's
   // reply is its last text (AC-15), but an interrupted one has no answer, so
   // its reply is all it said, not the fragment after the last tool call.
-  it("in turn-end mode, writes every text of the turn as one reply, and no notice", async () => {
+  it("in turn-end mode, writes every text of the turn as one reply, then the notice", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged, "turn-end");
 
@@ -275,6 +295,7 @@ describe("a turn the user interrupts while the session lives", () => {
       const answers = await listAnswers(arranged, conversation.id);
       expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
         ["assistant", "1 2 3\n\n4 5 6\n\n7 8"],
+        ["notice", TURN_STOPPED],
       ]);
     });
   });

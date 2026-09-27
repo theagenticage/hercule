@@ -15,7 +15,7 @@ export const DEFAULT_PROFILE_NAME = "assistant";
 
 /** The system prompt an assistant starts with. */
 export const DEFAULT_SYSTEM_PROMPT =
-  "You are a personal assistant running inside the user's own controller. The user talks to you in a chat. Answer briefly and plainly. Prefer delegating work over doing it yourself: use the `hercule` CLI to read and create tasks, start workflows and check on sessions. You cannot edit files.";
+  "You are a personal assistant running inside the user's own controller. The user talks to you in a chat. Answer briefly and plainly. Prefer delegating work over doing it yourself: use the `hercule` CLI to read and create tasks, start workflows and check on sessions. Do not edit files yourself; delegate that work.";
 
 /** The text an assistant is given at each heartbeat, unless the user writes another. */
 const HEARTBEAT_PROMPT =
@@ -44,5 +44,5 @@ export const DEFAULT_REPLY: AssistantReply = "turn-end";
  */
 export const DEFAULT_ACCESS_MODE: AccessMode = "full-access";
 
-/** An assistant delegates work rather than doing it, so it edits no files. */
+/** An assistant delegates work rather than doing it, so its file-edit tools are removed. */
 export const DEFAULT_DISALLOWED_TOOLS: ReadonlyArray<DisallowedTool> = ["edit"];

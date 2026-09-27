@@ -460,7 +460,7 @@ describe("resuming an exited session", () => {
 });
 
 describe("whether a session's conversation was deleted", () => {
-  it("is true only for a session whose conversation no longer exists", async () => {
+  it("is true only for a session whose conversation no longer exists, and such a session has ended for good", async () => {
     const deleted = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -475,15 +475,32 @@ describe("whether a session's conversation was deleted", () => {
         yield* sql`UPDATE sessions SET conversation_id = ${conversation}
                    WHERE id = ${uuidFromString(sessionId)}`;
         const answersOne = yield* sessions.one(sessionId);
+        const endedWhileAnswering = yield* sessions.listEndedForGood([sessionId]);
         yield* sql`DELETE FROM conversations WHERE id = ${conversation}`;
         const answeredDeleted = yield* sessions.one(sessionId);
-        return [answersNone, answersOne, answeredDeleted].map((row) =>
-          Option.map(row, (stored) => stored.conversationDeleted),
-        );
+        const endedOnceDeleted = yield* sessions.listEndedForGood([sessionId]);
+        return {
+          rows: [answersNone, answersOne, answeredDeleted].map((row) =>
+            Option.map(row, (stored) => [stored.conversationDeleted, stored.resumable]),
+          ),
+          endedWhileAnswering,
+          endedOnceDeleted,
+          sessionId,
+        };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(deleted).toEqual([Option.some(false), Option.some(false), Option.some(true)]);
+    // The transcript is still there, but a session whose conversation is gone
+    // takes no input, so it must not read as resumable.
+    expect(deleted.rows).toEqual([
+      Option.some([false, true]),
+      Option.some([false, true]),
+      Option.some([true, false]),
+    ]);
+    // So it has ended for good, and whatever it holds, such as subscriptions,
+    // is ended with it.
+    expect(deleted.endedWhileAnswering).toEqual([]);
+    expect(deleted.endedOnceDeleted).toEqual([deleted.sessionId]);
   });
 });
 

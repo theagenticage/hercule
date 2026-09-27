@@ -33,7 +33,7 @@ const PROVIDERS: ReadonlyArray<ProviderDefinition> = [
 
 /** The system prompt an assistant gets when the create names none. */
 const SYSTEM_PROMPT =
-  "You are a personal assistant running inside the user's own controller. The user talks to you in a chat. Answer briefly and plainly. Prefer delegating work over doing it yourself: use the `hercule` CLI to read and create tasks, start workflows and check on sessions. You cannot edit files.";
+  "You are a personal assistant running inside the user's own controller. The user talks to you in a chat. Answer briefly and plainly. Prefer delegating work over doing it yourself: use the `hercule` CLI to read and create tasks, start workflows and check on sessions. Do not edit files yourself; delegate that work.";
 
 /** The standing heartbeat prompt of spec 12 §8.2, which every new assistant gets. */
 const HEARTBEAT_PROMPT =

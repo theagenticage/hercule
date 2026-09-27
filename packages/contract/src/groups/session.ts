@@ -63,9 +63,13 @@ export const Session = Schema.Struct({
   title: Schema.String,
   status: SessionStatus,
   /**
-   * Computed when the session is read, never stored: true when the session is
-   * `exited`, has a `nativeSessionId`, and its runner is not retired. True
-   * means the next `session.input` resumes it in place.
+   * Computed when the session is read, never stored. True when all of these hold:
+   *
+   * - the session is `exited` and has a `nativeSessionId`;
+   * - its runner is not retired, and its workspace is still ready;
+   * - it answered no assistant's conversation, or that conversation still exists.
+   *
+   * True means the next input resumes it in place.
    */
   resumable: Schema.Boolean,
   /**

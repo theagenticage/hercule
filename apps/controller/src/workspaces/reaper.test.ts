@@ -282,6 +282,39 @@ describe("the workspace expiry sweep", () => {
     });
   });
 
+  it("disposes of the workspace past the orphan window when the thread's conversation was deleted", async () => {
+    await withSweep(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnThreadIn(arranged, web, 1);
+      await endResumable(arranged, session);
+      const workspaceId = String(session.workspaceId);
+      // The session answered a conversation that has since been deleted. It
+      // takes no input, so it can never be resumed, and its worktree holds no
+      // work anyone can come back to.
+      await Effect.runPromise(
+        Effect.orDie(
+          Effect.gen(function* () {
+            const sql = arranged.harness.sql;
+            const conversation = crypto.randomUUID().replaceAll("-", "");
+            yield* sql`
+              INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+              VALUES (unhex(${conversation}), randomblob(16), 'web', NULL, ${at})`;
+            yield* sql`
+              UPDATE sessions SET conversation_id = unhex(${conversation})
+              WHERE id = unhex(replace(${session.id}, '-', ''))`;
+            yield* sql`DELETE FROM conversations WHERE id = unhex(${conversation})`;
+          }),
+        ),
+      );
+
+      // Past one day, well short of thirty: only a session that has ended for
+      // good lets the workspace go this early.
+      await ageWorkspace(arranged, workspaceId, 25);
+      const gone = await waitForDisposed(arranged, workspaceId);
+      expect(gone.status).toBe("deleted");
+    });
+  });
+
   it("leaves a workspace with a running session, however old its row is", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");

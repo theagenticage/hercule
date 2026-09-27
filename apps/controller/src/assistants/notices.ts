@@ -6,7 +6,7 @@
  * There are exactly two notices, and no caller writes the wording itself:
  *
  * - "<name> was interrupted: <why>", when a reply was cut off: the session
- *   exited while a turn was running, or the turn failed;
+ *   exited while a turn was running, or the turn failed or was stopped;
  * - "<name> can't be reached: <why>", when a message could not be delivered:
  *   no session could take it, the session that held it ended and cannot be
  *   resumed, or the session exited before it could start a turn and is held
@@ -50,6 +50,22 @@ export const buildInterruptedText = (name: string, reason: SessionEndReason): st
  */
 export const buildTurnFailedText = (name: string, error: string | undefined): string =>
   `${name} was interrupted: its turn failed${error === undefined ? "" : `: ${error}`}`;
+
+/**
+ * Builds the notice text for a turn that was stopped while its session lives.
+ * The text does not say who stopped it, because a runner reports the same
+ * interrupted turn for all of these:
+ *
+ * - the owner pressed Stop;
+ * - a steer on a provider without native steering stopped the turn to send
+ *   the new message as the next one;
+ * - a stop of the whole session, where the adapter ends the running turn
+ *   before it reports the exit (pi, and Codex when the turn's end arrives
+ *   first). The exit then finds the session idle and writes no notice of
+ *   its own.
+ */
+export const buildTurnStoppedText = (name: string): string =>
+  `${name} was interrupted: its turn was stopped`;
 
 /** Builds the notice text for a message that could not be delivered, for the reason `why`. */
 export const buildUnreachableText = (name: string, why: string): string =>

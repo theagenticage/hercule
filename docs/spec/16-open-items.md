@@ -64,7 +64,6 @@ Not design questions. The constraint is stated where one exists.
 
 - 12 §10: `assistant.delete` tells the assistant's live sessions to stop after the delete commits and does not wait. A session whose runner is not connected at that moment is not stopped: it runs on until its idle unload or its runner restarts, and whatever it reports afterwards is written nowhere, because its conversation is gone. The warning is logged. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
 - 06 §5: a conversation input on the wire when its session exits waits for its answer, or for its deadline (`SessionInputDeadline`, 10 seconds), before it is put back and the session is resumed for it. The owner sees no reply for that long. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
-- 12 §9: a turn that ends `interrupted` while its session lives leaves its partial reply in the conversation with nothing to say it was cut short. Two things interrupt a turn: the user, and the steering fallback of 06 §5, which interrupts the running turn when a message is steered on a provider that cannot steer, so the message opens the next turn. No notice is written for either, because an interrupt is not a failure and the session is still there to answer; but a reader of the conversation cannot tell a reply cut short from a finished one. *(added 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92))*
 
 ## Not yet specified (map fog)
 

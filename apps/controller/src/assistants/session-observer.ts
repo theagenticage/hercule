@@ -4,9 +4,10 @@
  * conversation.
  *
  * - A report writes the replies the assistant's reply mode takes from it.
- * - A turn that fails writes "<name> was interrupted: its turn failed", after
- *   any reply it produced. A turn the user interrupted writes no notice: the
- *   user knows why it stopped.
+ * - A turn that fails writes "<name> was interrupted: its turn failed", and a
+ *   turn that is stopped writes "<name> was interrupted: its turn was
+ *   stopped", each after any reply it produced. Without the notice, a stopped
+ *   turn's partial reply would read like a finished answer.
  * - An exit while a turn is running writes "<name> was interrupted: <why>".
  * - An exit that leaves the session held back by the crash-loop guard writes
  *   "<name> can't be reached: <why>": the message waits, and only another
@@ -36,6 +37,7 @@ import { readAssistantTexts, SessionObserver, type StoredSession } from "../sess
 import {
   buildInterruptedText,
   buildTurnFailedText,
+  buildTurnStoppedText,
   buildUnreachableText,
   makeNoticeWriter,
 } from "./notices";
@@ -112,15 +114,15 @@ const make = Effect.gen(function* () {
         }
         // Written after the partial reply, so the owner reads what the
         // assistant said and then why it stopped.
-        if (
-          event._tag === "turn.completed" &&
-          event.state !== "completed" &&
-          event.state !== "interrupted"
-        ) {
+        if (event._tag === "turn.completed" && event.state !== "completed") {
+          const { name } = answered.value;
           yield* appendNotice({
             conversationId: answered.value.conversationId,
-            name: answered.value.name,
-            text: buildTurnFailedText(answered.value.name, event.error),
+            name,
+            text:
+              event.state === "failed"
+                ? buildTurnFailedText(name, event.error)
+                : buildTurnStoppedText(name),
             sessionId: session.id,
           });
         }

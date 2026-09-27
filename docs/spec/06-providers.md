@@ -318,7 +318,7 @@ A turn is the user-visible episode: from user input until the agent goes idle. I
 | Codex | native `turn/started` id | `turn/started` | `turn/completed { status }` |
 | pi | adapter-minted | `agent_start` | **`agent_settled`** (not `agent_end`: `agent_end` fires once per low-level run and carries `willRetry`; auto-retry, overflow-compaction re-prompts and queued follow-ups continue the episode past it). pi's `turn_start/turn_end` is one LLM round-trip and maps to item grouping. Intermediate `agent_end { willRetry: true }` becomes at most a `runtime.warning`. |
 
-State mapping: `interrupted` <- Codex `interrupted`, Claude abort terminal reasons, pi `aborted`; `failed` <- Claude `error_*` result subtypes, Codex `failed`, pi `stopReason: "error"`. **Synthetic turns** are opened for unsolicited output outside any user turn (Claude task notifications trailing a result).
+State mapping: `interrupted` <- Codex `interrupted`, Claude abort terminal reasons, pi `aborted`; `failed` <- Claude `error_*` result subtypes, Codex `failed`, pi `stopReason: "error"`. **Synthetic turns** are opened for unsolicited output outside any user turn ~~(Claude task notifications trailing a result)~~ *(Claude's answer to a background task that finished after the turn that started it: the model's `assistant` messages and their `result` form the synthetic turn. The task lifecycle messages themselves (`task_started`, `task_progress`, `task_updated`, `task_notification`) are not output and are trimmed (section 6.7); kept, each one read as an empty turn. Amended 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92).)*
 
 ### 6.3 Items
 
@@ -373,7 +373,7 @@ A request stays open until `respondToRequest`; the controller surfaces it as a N
 
 ### 6.7 Trimmed on purpose
 
-Auth, account, rate-limit and MCP-status events are snapshot material (section 3), not session events; rate-limit pushes arriving mid-session lag the probe cadence, accepted for v1. `turn.aborted`, `turn.diff.updated` (diffs come from workspace checkpoints), hooks, realtime audio, files-persisted, and vendor-specific items (review mode, image generation) are dropped; all are additive later via new kinds or `raw`. Claude's long informational tail (`tool_use_summary`, `prompt_suggestion`, 20+ system subtypes) is whitelisted-in and raw-logged otherwise.
+Auth, account, rate-limit and MCP-status events are snapshot material (section 3), not session events; rate-limit pushes arriving mid-session lag the probe cadence, accepted for v1. `turn.aborted`, `turn.diff.updated` (diffs come from workspace checkpoints), hooks, realtime audio, files-persisted, and vendor-specific items (review mode, image generation) are dropped; all are additive later via new kinds or `raw`. Claude's long informational tail (`tool_use_summary`, `prompt_suggestion`, 20+ system subtypes) is whitelisted-in and raw-logged otherwise. Claude's task lifecycle system messages (`task_started`, `task_progress`, `task_updated`, `task_notification`) are among the trimmed: a task's command already shows as its tool item, and a stopped task shows as that item failing *(amended 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92))*.
 
 ## 7. Structured output
 
