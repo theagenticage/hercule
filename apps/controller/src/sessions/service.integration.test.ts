@@ -29,7 +29,9 @@ import { SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
-import { gitCredentials } from "../workspaces";
+import { RunWorkspaceStepActivityLayer } from "../runs";
+import { SettingsLayer } from "../settings";
+import { githubAccounts, WorkspaceServiceLayer } from "../workspaces";
 import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
@@ -79,7 +81,19 @@ const ignoreSessions = Layer.succeed(
   }),
 );
 
+/**
+ * Builds the workspace service a session takes and releases its leases
+ * through, with the runs domain answering whether a workspace step is running,
+ * as in the real boot.
+ */
+const buildWorkspaceLayer = () =>
+  WorkspaceServiceLayer.pipe(
+    Layer.provideMerge(RunWorkspaceStepActivityLayer),
+    Layer.provideMerge(SettingsLayer),
+  );
+
 const layer = SessionServiceLayer.pipe(
+  Layer.provideMerge(buildWorkspaceLayer()),
   Layer.provideMerge(
     Layer.mergeAll(
       AuditLogLayer,
@@ -196,6 +210,7 @@ const buildGatedCredentialStack = (
     })),
   );
   return SessionServiceLayer.pipe(
+    Layer.provideMerge(buildWorkspaceLayer()),
     Layer.provideMerge(
       Layer.mergeAll(
         AuditLogLayer,
@@ -544,9 +559,9 @@ describe("SessionService.starting", () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const credentials = yield* gitCredentials;
+          const accounts = yield* githubAccounts;
           const connectionId = yield* aGithubConnection;
-          const reader = yield* Effect.forkChild(credentials.readGithubAccount(connectionId));
+          const reader = yield* Effect.forkChild(accounts.readGithubAccount(connectionId));
           yield* Deferred.await(entered);
           // The interruption arrives through the dependency itself, as a
           // catchable cause. The reader's error handling must not treat it as
@@ -575,7 +590,7 @@ describe("SessionService.starting", () => {
           const sql = yield* SqlClient.SqlClient;
           const rows = yield* sessionRepository;
           const sessions = yield* SessionService;
-          const credentials = yield* gitCredentials;
+          const accounts = yield* githubAccounts;
           const instanceId = yield* insertInstance("an-adapter", {});
           const runnerId = mintId();
           const connectionId = yield* aGithubConnection;
@@ -587,7 +602,7 @@ describe("SessionService.starting", () => {
           const claim = withTransaction(
             sql,
             sessions.starting(runnerId, 1, {
-              readGithubAccount: credentials.readGithubAccount,
+              readGithubAccount: accounts.readGithubAccount,
               secretsOf: NO_SECRETS,
             }),
           );

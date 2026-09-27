@@ -8,6 +8,7 @@
 export { RunExecutor } from "./executor";
 export { runRepository } from "./repository";
 export { resumeUnfinishedRuns, RunService, RunServiceLayer } from "./service";
+export { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 export {
   WorkspaceSteps,
   type WorkspaceStepToStart,

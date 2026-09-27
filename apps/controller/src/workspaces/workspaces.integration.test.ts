@@ -546,7 +546,7 @@ describe("workspace.dispose", () => {
     });
   });
 
-  it("fails while a session is still running in it, and gives the number of sessions", async () => {
+  it("fails while a session is still running in it, and names the session to stop", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -563,7 +563,7 @@ describe("workspace.dispose", () => {
       );
       const said = await refused.clone().text();
       expect(await readErrorCode(refused)).toBe("invalid_state");
-      expect(said).toContain("1 session(s)");
+      expect(said).toContain(`stop sessions ${session.id} first`);
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
       expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
 

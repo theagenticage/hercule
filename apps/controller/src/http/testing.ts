@@ -72,6 +72,7 @@ import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
+import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
@@ -117,9 +118,14 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
           Layer.provide(AssistantSessionObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
-        WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
+      ).pipe(
+        // As in the real boot: sessions take and release workspace leases,
+        // and the workspace service asks the runs domain whether a workspace
+        // step is running.
+        Layer.provideMerge(WorkspaceServiceLayer),
+        Layer.provideMerge(RunWorkspaceStepActivityLayer),
       ),
     ),
     // One connection map and one probe driver: the socket route and every

@@ -149,12 +149,6 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
-          // Same transaction as the session's write. A session starting or
-          // ending counts as activity in its workspace, which keeps the
-          // workspace from expiring while in use.
-          if (applied.worked !== undefined) {
-            yield* workspaces.touched(applied.worked.workspaceId, applied.worked.at);
-          }
           // A session that went idle can take its oldest queued input. The
           // input is claimed in the same transaction as the change to idle,
           // so no delivery pass can read the session as idle and claim an

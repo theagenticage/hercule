@@ -75,7 +75,7 @@ import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
-import type { GithubAccount } from "../workspaces";
+import { WorkspaceService, type GithubAccount } from "../workspaces";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -224,12 +224,10 @@ export interface FoldedReport {
 
 /**
  * What the controller daemon still has to do after a report's rows are
- * committed. Each item affects something outside the session's own rows, such
- * as its workspace or its runner, so this domain does not do it itself.
+ * committed. Each item means sending a frame to a runner, which this domain
+ * never does itself.
  */
 export interface AppliedReport {
-  /** The session's workspace was used at this time. */
-  readonly worked?: { readonly workspaceId: string; readonly at: string };
   /** The session's new status, or `undefined` when this report did not change it. */
   readonly moved: SessionStatus | undefined;
   /**
@@ -335,6 +333,7 @@ const make = Effect.gen(function* () {
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
   const observer = yield* SessionObserver;
+  const workspaces = yield* WorkspaceService;
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -386,6 +385,9 @@ const make = Effect.gen(function* () {
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
         yield* sessions.resume(sessionId, yield* buildSpec(session), at);
+        if (session.workspaceId !== null) {
+          yield* workspaces.acquire({ kind: "session", id: sessionId }, session.workspaceId, at);
+        }
         // Armed until the resumed process starts a turn or new input is
         // stored. If it exits before either, it is not resumed again for the
         // same input (`isResumeHeld`).
@@ -473,6 +475,9 @@ const make = Effect.gen(function* () {
    *
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`);
+   * - releases its lease on its workspace: `idle` when it can be resumed,
+   *   so a thread the user may come back to keeps its files for the long
+   *   window, and `orphan` when it cannot;
    * - tells `SessionObserver` that the session exited, and whether the
    *   crash-loop guard now holds it back from a resume;
    * - forgets its token and ingest state, and announces it once.
@@ -492,6 +497,13 @@ const make = Effect.gen(function* () {
         // Read again after the exit and the cancel: whether the guard holds
         // the session depends on the input that is still waiting.
         const after = yield* sessions.one(session.id);
+        if (session.workspaceId !== null && Option.isSome(after)) {
+          yield* workspaces.release(
+            { kind: "session", id: session.id },
+            after.value.resumable ? "idle" : "orphan",
+            after.value.exitedAt ?? (yield* nowIso),
+          );
+        }
         yield* observer.sessionExited({
           session,
           reason,
@@ -1103,17 +1115,30 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Cancels every queued input of every session that answers the
-     * conversation, sent or not, with `reason`, so none of those sessions is
-     * resumed to run it. Joins the caller's transaction.
+     * Prepares the sessions of a conversation that is about to be deleted.
+     * Joins the caller's transaction. It:
+     *
+     * - cancels every queued input of every session that answers the
+     *   conversation, sent or not, with `reason`, so none of those sessions
+     *   is resumed to run it;
+     * - releases the workspace lease of every exited session in it again, as
+     *   `orphan`. Such a session released its lease as `idle` when it could
+     *   still be resumed, but once its conversation is gone nothing can
+     *   resume it, so its workspace is kept only for the short window.
+     *
+     * A session that has not exited yet is left to its own exit, which
+     * releases its lease as `orphan` because its conversation is gone by then.
      */
-    cancelConversationInputs: (
-      conversationId: string,
-      reason: string,
-    ): Effect.Effect<void, SqlError> =>
+    abandonConversation: (conversationId: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         for (const sessionId of yield* inputs.cancelForConversation(conversationId, reason)) {
           yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+        const at = yield* nowIso;
+        for (const sessionId of yield* sessions.listExitedWithWorkspaceInConversation(
+          conversationId,
+        )) {
+          yield* workspaces.release({ kind: "session", id: sessionId }, "orphan", at);
         }
       }),
 
@@ -1400,6 +1425,15 @@ const make = Effect.gen(function* () {
           yield* sessions.bind(id, runnerId, session.instanceId, native);
         }
         if (park !== undefined) yield* sessions.setOpenRequest(id, park);
+        // A session starting or exiting is what counts as use of its
+        // workspace. The time is shown to the user; how long the workspace is
+        // kept is decided by its leases, not by this time.
+        if (
+          session.workspaceId !== null &&
+          (event._tag === "session.started" || event._tag === "session.exited")
+        ) {
+          yield* workspaces.touched(session.workspaceId, at);
+        }
         // `exited` is final (spec 06 section 4.1), so a stray event after it
         // is still recorded but never brings the session back to life.
         const moved =
@@ -1446,12 +1480,6 @@ const make = Effect.gen(function* () {
           }
         });
         return {
-          // A session starting or exiting counts as use of its workspace,
-          // which keeps the workspace from expiring while it is in use.
-          ...(session.workspaceId !== null &&
-          (event._tag === "session.started" || event._tag === "session.exited")
-            ? { worked: { workspaceId: session.workspaceId, at } }
-            : {}),
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
         };
@@ -1547,7 +1575,7 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost | SessionObserver
+  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost | SessionObserver | WorkspaceService
 > = Layer.effect(SessionService)(make);
 
 /**

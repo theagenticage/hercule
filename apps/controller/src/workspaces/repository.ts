@@ -1,12 +1,11 @@
 /**
- * Workspace rows and the checkouts inside them. Nothing here decides policy:
- * the service decides what may be provisioned, what may be torn down and what
- * has expired.
+ * Workspace rows, the checkouts inside them, and the leases held on them.
+ * Nothing here decides policy: the service decides what may be provisioned,
+ * what may be torn down and how long a released lease keeps its workspace.
  *
- * This module reads the sessions table for two facts about a workspace: which
- * sessions are running in it, and which could still be resumed in it. The
- * sweep decides on those two facts. Nothing else about a session is read, and
- * this domain imports nothing from the sessions domain.
+ * The only other domain's table read here is `runners`, for whether a runner
+ * is online. Which sessions and runs use a workspace is known from their
+ * leases, which they acquire and release through the service.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -88,24 +87,34 @@ export interface CheckoutState {
   readonly defaultBranch: string | null;
 }
 
-/**
- * One ephemeral workspace the sweep considers: how many sessions are running
- * in it, how many could still be resumed in it, when it was last used, and,
- * for the workspace of a run, how that run ended.
- */
-export interface SweepCandidate {
+/** A session or a run that uses a workspace, and so holds a lease on it. */
+export interface WorkspaceHolder {
+  readonly kind: "session" | "run";
   readonly id: string;
-  readonly runnerId: string;
-  readonly liveSessions: number;
-  readonly resumableSessions: number;
-  readonly usedAt: string;
-  /** The finished run whose workspace this is; absent for a workspace no run opened. */
-  readonly run?: {
-    readonly status: "completed" | "failed" | "cancelled";
-    /** Whether the user who cancelled the run chose to keep its workspace. */
-    readonly keepsWorkspace: boolean;
-    readonly finishedAt: string;
-  };
+}
+
+/**
+ * How long a released lease keeps its workspace. The holder picks one when it
+ * releases the lease, and the workspaces domain owns the length of each:
+ *
+ * - `none`: not at all. A completed run, or a run cancelled without keeping
+ *   its workspace, leaves nothing worth looking at.
+ * - `orphan`: the orphan window. No session can be resumed from the work.
+ * - `idle`: the idle window. A thread that can still be resumed keeps its
+ *   worktree, because the worktree holds its work.
+ * - `inspection`: the inspection window. A failed run, or a run cancelled
+ *   with its workspace kept, leaves its workspace for the user to look at.
+ */
+export type Retention = "none" | "orphan" | "idle" | "inspection";
+
+/**
+ * The lease that kept a workspace longest, once every lease on it has run
+ * out. Its retention is the reason the sweep records for deleting the
+ * workspace, and its holder is recorded beside it.
+ */
+export interface ExpiredLease {
+  readonly retention: Retention;
+  readonly holder: WorkspaceHolder;
 }
 
 /**
@@ -122,35 +131,23 @@ export const buildReadyClause = (alias: string): string =>
   `(${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
   `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
 
-/**
- * Builds a SQL expression, over a row of `sessions` under the given alias,
- * that is true when the session can be resumed. All of these must hold:
- *
- * - the session has exited
- * - its provider-native transcript is known
- * - its runner is not retired
- * - its workspace is ready (see `buildReadyClause`)
- * - it answers no assistant's conversation, or that conversation still
- *   exists. A session whose conversation was deleted takes no input, so
- *   nothing can ever resume it.
- *
- * It lives here rather than in the sessions domain because the sweep below
- * uses it: a thread that can still be resumed keeps its worktree, so its
- * workspace expires on the long window rather than the short one. The sessions
- * repository uses the same expression, for example to compute `resumable`.
- * Here is the only place both domains can import it from without importing
- * each other.
- */
-export const buildResumableClause = (alias: string): string =>
-  `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
-  `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
-  `AND runners.lifecycle <> 'retired') ` +
-  `AND ${buildReadyClause(alias)} ` +
-  `AND (${alias}.conversation_id IS NULL OR EXISTS (SELECT 1 FROM conversations ` +
-  `WHERE conversations.id = ${alias}.conversation_id))`;
-
 /** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
+
+/**
+ * A condition on a lease's `workspace_id`, true when a released lease on that
+ * workspace means nothing and is deleted rather than kept:
+ *
+ * - on a primary, because the sweep never deletes a primary;
+ * - on a workspace that is gone, because there is nothing left to keep.
+ *
+ * Only an active lease matters on such a workspace: the credential rule
+ * reads it, and `Workspace.sessionIds` lists it. Deleting the rest keeps the
+ * table from growing with every session and run that ever ended.
+ */
+const NO_RETENTION_CLAUSE =
+  "workspace_id IN (SELECT id FROM workspaces " +
+  "WHERE kind = 'primary' OR status IN ('deleted', 'lost'))";
 
 /**
  * The statuses in which a primary blocks another primary of the same repo on
@@ -264,30 +261,6 @@ const make = Effect.gen(function* () {
   return {
     one,
     listCheckouts,
-
-    /** The sessions in each of these workspaces that have not exited. */
-    sessionIdsOf: (
-      ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
-      ids.length === 0
-        ? Effect.succeed(new Map())
-        : Effect.map(
-            sql<{ readonly id: Uint8Array; readonly workspace_id: Uint8Array }>`
-              SELECT id, workspace_id FROM sessions
-              WHERE workspace_id IN ${sql.in(ids.map(uuidFromString))} AND status <> 'exited'
-              ORDER BY created_at, id
-            `,
-            (rows) => {
-              const found = new Map<string, Array<string>>();
-              for (const row of rows) {
-                const key = uuidToString(row.workspace_id);
-                const list = found.get(key) ?? [];
-                list.push(uuidToString(row.id));
-                found.set(key, list);
-              }
-              return found;
-            },
-          ),
 
     insert: (workspace: {
       readonly runnerId: string;
@@ -485,104 +458,220 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Marks a live workspace as `deleted`, and returns whether the status
-     * changed, for the same reason as `markFailed`.
+     * Marks a live workspace as `deleted`, deletes the released leases on
+     * it, and returns whether the status changed, for the same reason as
+     * `markFailed`.
      */
     markDisposed: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
+      Effect.gen(function* () {
+        const moved = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET status = 'deleted', disposed_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ${sql.literal(LIVE_STATUSES)}
           RETURNING id
-        `,
-        (rows) => rows.length > 0,
-      ),
+        `;
+        // A gone workspace keeps nothing; see `NO_RETENTION_CLAUSE`.
+        yield* sql`
+          DELETE FROM workspace_leases
+          WHERE workspace_id = ${uuidFromString(id)} AND released_at IS NOT NULL
+        `;
+        return moved.length > 0;
+      }),
 
-    /** Marks every live workspace on a retired runner as `lost`, because they are gone with it. */
+    /**
+     * Marks every live workspace on a retired runner as `lost`, because they
+     * are gone with it, and deletes the released leases on them.
+     */
     lostOnRunner: (runnerId: string, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE workspaces SET status = 'lost', disposed_at = ${at}
-        WHERE runner_id = ${uuidFromString(runnerId)}
-          AND status IN ${sql.literal(LIVE_STATUSES)}
-      `),
+      Effect.gen(function* () {
+        yield* sql`
+          UPDATE workspaces SET status = 'lost', disposed_at = ${at}
+          WHERE runner_id = ${uuidFromString(runnerId)}
+            AND status IN ${sql.literal(LIVE_STATUSES)}
+        `;
+        // Every workspace on the runner is gone now, and a gone workspace
+        // keeps nothing; see `NO_RETENTION_CLAUSE`.
+        yield* sql`
+          DELETE FROM workspace_leases
+          WHERE released_at IS NOT NULL
+            AND workspace_id IN (SELECT id FROM workspaces
+                                 WHERE runner_id = ${uuidFromString(runnerId)})
+        `;
+      }),
 
-    /** Marks a workspace as used just now, which keeps the sweep from expiring it. */
+    /** Marks a workspace as used just now. Only the API shows this time; the sweep reads leases. */
     touched: (workspaceId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE workspaces SET last_used_at = ${at} WHERE id = ${uuidFromString(workspaceId)}
       `),
 
     /**
-     * Returns every ephemeral workspace the sweep could act on: each one that
-     * still has files on its runner (`ready`, or `failed`, whose files may be
-     * on disk), on a runner that is online to receive the dispose frame, and
-     * not the workspace of an unfinished run. The service decides from the
-     * counts, and from how the workspace's run ended, which ones to keep.
-     *
-     * An unfinished run's workspace is left out whatever its age, because a
-     * run can sleep between two steps for longer than any expiry window. Each
-     * workspace belongs to at most one run, found through the
-     * `runs_workspace` index; its sessions are counted through the
-     * `sessions_workspace` index.
+     * Makes this holder's lease on the workspace active, as of `at`. Creates
+     * the lease if the holder has none on the workspace yet. Otherwise it
+     * clears the release of the lease the holder has, which is what resuming
+     * a session does.
      */
-    sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
+    acquireLease: (
+      workspaceId: string,
+      holder: WorkspaceHolder,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+        VALUES (${uuidFromString(workspaceId)}, ${holder.kind}, ${uuidFromString(holder.id)},
+                ${at})
+        ON CONFLICT (workspace_id, holder_kind, holder_id) DO UPDATE
+        SET acquired_at = excluded.acquired_at, released_at = NULL, retention = NULL,
+            kept_until = NULL
+      `),
+
+    /**
+     * Releases every lease this holder has, with this retention, and stamps
+     * each lease's kept-until time: its release time plus `windowMs`.
+     *
+     * - An active lease is released as of `at`.
+     * - A lease that is already released keeps its release time. Only its
+     *   retention and kept-until time are written again.
+     * - A holder with no lease is left alone.
+     * - A lease on a primary, or on a workspace that is gone, is deleted
+     *   instead, because nothing reads a released lease there; see
+     *   `NO_RETENTION_CLAUSE`. Resuming the session inserts it again.
+     *
+     * The time is computed in SQL, because each lease adds the window to its
+     * own release time. The format is the ISO 8601 form `nowIso` writes, so a
+     * kept-until time compares correctly with every other timestamp as text.
+     */
+    releaseLeases: (
+      holder: WorkspaceHolder,
+      retention: Retention,
+      windowMs: number,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`
+          DELETE FROM workspace_leases
+          WHERE holder_kind = ${holder.kind} AND holder_id = ${uuidFromString(holder.id)}
+            AND ${sql.literal(NO_RETENTION_CLAUSE)}
+        `;
+        yield* sql`
+          UPDATE workspace_leases
+          SET released_at = COALESCE(released_at, ${at}),
+              retention = ${retention},
+              kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(released_at, ${at}),
+                                    ${`+${String(windowMs / 1000)} seconds`})
+          WHERE holder_kind = ${holder.kind} AND holder_id = ${uuidFromString(holder.id)}
+        `;
+      }),
+
+    /** Returns the holders of the active leases on each of these workspaces, oldest first. */
+    listActiveHolders: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<WorkspaceHolder>>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly workspace_id: Uint8Array;
+              readonly holder_kind: WorkspaceHolder["kind"];
+              readonly holder_id: Uint8Array;
+            }>`
+              SELECT workspace_id, holder_kind, holder_id FROM workspace_leases
+              WHERE workspace_id IN ${sql.in(ids.map(uuidFromString))}
+                AND released_at IS NULL
+              ORDER BY acquired_at, holder_id
+            `,
+            (rows) => {
+              const found = new Map<string, Array<WorkspaceHolder>>();
+              for (const row of rows) {
+                const key = uuidToString(row.workspace_id);
+                const list = found.get(key) ?? [];
+                list.push({ kind: row.holder_kind, id: uuidToString(row.holder_id) });
+                found.set(key, list);
+              }
+              return found;
+            },
+          ),
+
+    /**
+     * Returns, for each of these workspaces whose leases are all released,
+     * the latest kept-until time among them. A workspace with an active
+     * lease, or with no lease, is left out of the map.
+     */
+    listKeptUntil: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly workspace_id: Uint8Array; readonly kept_until: string }>`
+              SELECT workspace_id, MAX(kept_until) AS kept_until FROM workspace_leases
+              WHERE workspace_id IN ${sql.in(ids.map(uuidFromString))}
+              GROUP BY workspace_id
+              HAVING COUNT(released_at) = COUNT(*)
+            `,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.workspace_id), row.kept_until])),
+          ),
+
+    /**
+     * Returns the lease that kept this workspace longest, if every lease on
+     * it is released and the latest kept-until time is before `now`. Returns
+     * `none` while a lease is active, while a lease still keeps the
+     * workspace, and when there is no lease at all.
+     */
+    findExpiredLease: (
+      workspaceId: string,
+      now: string,
+    ): Effect.Effect<Option.Option<ExpiredLease>, SqlError> =>
       Effect.map(
         sql<{
-          readonly id: Uint8Array;
-          readonly runner_id: Uint8Array;
-          readonly live: number;
-          readonly resumable: number;
-          readonly used_at: string;
-          readonly run_status: "completed" | "failed" | "cancelled" | null;
-          readonly keep_workspace: number | null;
-          readonly finished_at: string | null;
+          readonly retention: Retention;
+          readonly holder_kind: WorkspaceHolder["kind"];
+          readonly holder_id: Uint8Array;
         }>`
-          SELECT w.id, w.runner_id,
-                 (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
-                  AND s.status IN ('queued', 'starting', 'idle', 'busy')) AS live,
-                 (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
-                  AND ${sql.literal(buildResumableClause("s"))}) AS resumable,
-                 COALESCE(w.last_used_at, w.created_at) AS used_at,
-                 runs.status AS run_status, runs.keep_workspace, runs.finished_at
-          FROM workspaces w JOIN runners r ON r.id = w.runner_id
-            LEFT JOIN runs ON runs.workspace_id = w.id
-          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed')
-            AND ${sql.literal(buildOnlineClause("r"))}
-            AND (runs.id IS NULL OR runs.status NOT IN ('pending', 'running'))
+          SELECT retention, holder_kind, holder_id FROM (
+            SELECT retention, holder_kind, holder_id, kept_until FROM workspace_leases
+            WHERE workspace_id = ${uuidFromString(workspaceId)}
+              AND NOT EXISTS (SELECT 1 FROM workspace_leases a
+                              WHERE a.workspace_id = ${uuidFromString(workspaceId)}
+                                AND a.released_at IS NULL)
+            ORDER BY kept_until DESC
+            LIMIT 1
+          )
+          WHERE kept_until < ${now}
         `,
         (rows) =>
-          rows.map((row) => ({
-            id: uuidToString(row.id),
-            runnerId: uuidToString(row.runner_id),
-            liveSessions: row.live,
-            resumableSessions: row.resumable,
-            usedAt: row.used_at,
-            ...(row.run_status === null
-              ? {}
-              : {
-                  run: {
-                    status: row.run_status,
-                    keepsWorkspace: row.keep_workspace === 1,
-                    // The query keeps only finished runs, and the run engine
-                    // writes `finished_at` in the same update that ends a run.
-                    finishedAt: row.finished_at as string,
-                  },
-                }),
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            retention: row.retention,
+            holder: { kind: row.holder_kind, id: uuidToString(row.holder_id) },
           })),
       ),
 
     /**
-     * Checks whether this workspace belongs to a run that has not finished
-     * yet. Returns `false` for a workspace no run opened.
+     * Returns the ids of the ephemeral workspaces the sweep may delete at
+     * `now`. That is each one that:
+     *
+     * - still has files on its runner: it is `ready`, or `failed`, whose
+     *   files may be on disk;
+     * - is on a runner that is online to receive the dispose frame;
+     * - has no active lease;
+     * - has a latest kept-until time before `now`.
+     *
+     * A workspace with no lease at all is never returned, because the inner
+     * join leaves it out. Every workspace gets its first lease in the
+     * transaction that opens it, so a workspace without one is a mistake, and
+     * keeping its files is the safe way to be wrong.
      */
-    hasUnfinishedRun: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+    listSweepCandidates: (now: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM runs
-          WHERE workspace_id = ${uuidFromString(workspaceId)}
-            AND status IN ('pending', 'running')
+          SELECT w.id
+          FROM workspaces w JOIN runners r ON r.id = w.runner_id
+            JOIN workspace_leases l ON l.workspace_id = w.id
+          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed')
+            AND ${sql.literal(buildOnlineClause("r"))}
+          GROUP BY w.id
+          HAVING COUNT(l.released_at) = COUNT(*) AND MAX(l.kept_until) < ${now}
         `,
-        (rows) => rows.length > 0,
+        (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
     list: (

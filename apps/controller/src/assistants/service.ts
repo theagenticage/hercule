@@ -409,8 +409,9 @@ const make = Effect.gen(function* () {
               // An exited session can still hold input, such as a message
               // waiting for a session that was unloaded while idle. Left
               // waiting, it would resume the session after the assistant is
-              // gone.
-              yield* sessionService.cancelConversationInputs(conversation.id, ASSISTANT_DELETED);
+              // gone. Its workspace is also kept for the idle window, which
+              // no longer applies once nothing can resume it.
+              yield* sessionService.abandonConversation(conversation.id, ASSISTANT_DELETED);
               yield* conversations.delete(conversation.id);
             }
             yield* assistants.delete(id);

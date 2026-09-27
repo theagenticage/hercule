@@ -38,9 +38,29 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
-import { buildReadyClause, buildResumableClause } from "../workspaces";
+import { buildReadyClause } from "../workspaces";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
+
+/**
+ * Builds a SQL expression, over a row of `sessions` under the given alias,
+ * that is true when the session can be resumed. All of these must hold:
+ *
+ * - the session has exited
+ * - its provider-native transcript is known
+ * - its runner is not retired
+ * - its workspace is ready (see `buildReadyClause`)
+ * - it answers no assistant's conversation, or that conversation still
+ *   exists. A session whose conversation was deleted takes no input, so
+ *   nothing can ever resume it.
+ */
+const buildResumableClause = (alias: string): string =>
+  `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
+  `AND runners.lifecycle <> 'retired') ` +
+  `AND ${buildReadyClause(alias)} ` +
+  `AND (${alias}.conversation_id IS NULL OR EXISTS (SELECT 1 FROM conversations ` +
+  `WHERE conversations.id = ${alias}.conversation_id))`;
 
 /** A session as it is stored. `resumable` is computed on read; see above. */
 export interface StoredSession {
@@ -413,6 +433,19 @@ const make = Effect.gen(function* () {
           ORDER BY created_at, id
         `,
         (rows) => rows.map(toSession),
+      ),
+
+    /** Returns the ids of the exited sessions of one conversation that have a workspace. */
+    listExitedWithWorkspaceInConversation: (
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM sessions
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
+            AND workspace_id IS NOT NULL
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
       ),
 
     /**

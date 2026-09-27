@@ -8,7 +8,9 @@
  * exit. The sessions and their transcripts stay, as history. Input still
  * waiting for a session is cancelled, so no session comes back for an
  * assistant that is gone, and a report that arrives from a stopped session
- * afterwards writes nothing.
+ * afterwards writes nothing. A workspace an exited session still keeps for
+ * the idle window is kept only for the orphan window from then on, because
+ * nothing can resume the session any more.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
@@ -47,6 +49,9 @@ const CONVERSATION_DELETED =
 const NEVER_RESUMED =
   "the session could not be resumed: that session answered an assistant's conversation " +
   "that was deleted, so it is kept as history and is never resumed";
+
+/** The id of a workspace a test writes straight into the database. */
+const KEPT_WORKSPACE = "0199e0e7-0000-7000-8000-0000000000c1";
 
 /** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
@@ -104,6 +109,34 @@ const insertHeldInput = (arranged: Arranged, sessionId: string): Promise<unknown
                 'user', 'user', 'are you there?', 'queued', ${at})`,
     ),
   );
+
+/**
+ * Writes an ephemeral workspace on the fleet's runner straight into the
+ * database, moves the exited session into it, and gives the session a lease
+ * on it that it released as `idle` at `at`, kept for thirty days. In v1 a
+ * conversation session never has a workspace, so a real session cannot
+ * arrange this state for the test.
+ */
+const insertIdleWorkspace = (arranged: Arranged, sessionId: string): Promise<unknown> => {
+  const workspace = KEPT_WORKSPACE.replaceAll("-", "");
+  const session = sessionId.replaceAll("-", "");
+  const keptUntil = new Date(Date.parse(at) + 30 * 24 * 3_600_000).toISOString();
+  return Effect.runPromise(
+    Effect.orDie(
+      Effect.all([
+        arranged.harness.sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+          VALUES (unhex(${workspace}), unhex(${arranged.runnerId.replaceAll("-", "")}),
+                  'ephemeral', 'ready', ${at})`,
+        arranged.harness.sql`UPDATE sessions SET workspace_id = unhex(${workspace})
+          WHERE id = unhex(${session})`,
+        arranged.harness.sql`INSERT INTO workspace_leases
+            (workspace_id, holder_kind, holder_id, acquired_at, released_at, retention, kept_until)
+          VALUES (unhex(${workspace}), 'session', unhex(${session}), ${at}, ${at}, 'idle',
+                  ${keptUntil})`,
+      ]),
+    ),
+  );
+};
 
 describe("assistant.delete", () => {
   it("deletes the assistant without waiting for its busy session to exit, then stops the session and keeps it as history", async () => {
@@ -247,6 +280,28 @@ describe("assistant.delete", () => {
       // session stays exited and its runner is never asked to start it again.
       expect(await readSession(arranged, session.id)).toMatchObject({ status: "exited" });
       expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
+    });
+  });
+
+  it("keeps an exited session's workspace only for the orphan window, counted from when the session released it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistant, conversation } = await readDefaultConversation(arranged);
+      const session = await startConversationSession(arranged, conversation.id, "hi");
+      await exitAfterIdleUnload(arranged, session.id);
+      await insertIdleWorkspace(arranged, session.id);
+
+      const response = await del(
+        arranged.harness.base,
+        `/api/v1/assistants/${assistant.id}`,
+        arranged.token,
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const workspace = (await (
+        await get(arranged.harness.base, `/api/v1/workspaces/${KEPT_WORKSPACE}`, arranged.token)
+      ).json()) as { readonly keptUntil: string | null };
+      // Twenty-four hours, the default orphan window.
+      expect(workspace.keptUntil).toBe(new Date(Date.parse(at) + 24 * 3_600_000).toISOString());
     });
   });
 

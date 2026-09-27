@@ -1,10 +1,11 @@
 /**
  * A fleet with workspaces on it, for the tests that drive them over the real
  * API and the real runner socket. It is shared by this domain's own suites
- * (provisioning, the expiry sweep and git credentials) and by the resources
- * suite, because all four set up the same runner and read the same records
- * back. A second copy of what a workspace looks like on the wire would be a
- * second place for the tests and the controller to drift apart.
+ * (provisioning, the expiry sweep and git credentials), by the sweep's tests
+ * on the workspaces of runs, and by the resources suite, because all of them
+ * set up the same runner and read the same records back. A second copy of
+ * what a workspace looks like on the wire would be a second place for the
+ * tests and the controller to drift apart.
  *
  * What differs between callers is passed in: extra plugins besides the
  * provider fixture, and the sweep interval for a test that watches the sweep.
@@ -12,7 +13,8 @@
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type * as Duration from "effect/Duration";
-import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
+import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hercule/protocol";
+import type { Session } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -22,6 +24,9 @@ import {
 import { get, post } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
+  reportEvent,
+  spawnSessionOrFail,
+  waitForFrames,
   waitUntil,
   withFleet as withRunnerFleet,
   type Arranged,
@@ -158,6 +163,7 @@ export interface WorkspaceRecord {
   readonly lastUsedAt: string | null;
   readonly disposedAt: string | null;
   readonly sessionIds: ReadonlyArray<string>;
+  readonly keptUntil: string | null;
   readonly message?: string | null;
 }
 
@@ -228,4 +234,156 @@ export const reportWorkspaceReady = async (
     const one = await readWorkspace(arranged, id);
     return one.status === "ready" ? one : undefined;
   });
+};
+
+/** The time the runner stamps on the events these helpers report. */
+const REPORTED_AT = "2026-09-16T10:00:00.000Z";
+
+/** Reads a session through the API. */
+const readThread = async (arranged: Arranged, id: string): Promise<Session> =>
+  (await (
+    await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token)
+  ).json()) as Session;
+
+/**
+ * Spawns a thread in the workspace `workspace` asks for, and waits until it
+ * is started on the runner and busy with the turn its prompt opened. A new
+ * workspace is reported ready first. `count` is how many `sessionStart`
+ * frames the runner has been sent once this one is, counting the earlier
+ * sessions of the test.
+ */
+export const spawnThread = async (
+  arranged: Arranged,
+  workspace: unknown,
+  count: number,
+): Promise<Session> => {
+  const session = await spawnSessionOrFail(arranged, { prompt: "hello", workspace });
+  const workspaceId = String(session.workspaceId);
+  if ((await readWorkspace(arranged, workspaceId)).status === "provisioning") {
+    await reportWorkspaceReady(arranged, workspaceId);
+  }
+  await waitForFrames<SessionStart>(arranged.wire, "sessionStart", count);
+  reportEvent(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at: REPORTED_AT,
+    _tag: "session.started",
+  });
+  await waitUntil("started the session", async () => {
+    const one = await readThread(arranged, session.id);
+    return one.status === "busy" ? one : undefined;
+  });
+  return session;
+};
+
+/**
+ * Has the runner report that the thread's provider transcript is known, which
+ * a session needs before it can be resumed.
+ */
+export const bindTranscript = async (arranged: Arranged, session: Session): Promise<void> => {
+  arranged.wire.send({
+    _tag: "sessionsReport",
+    sessions: [
+      {
+        sessionId: session.id,
+        nativeSessionId: "native-1",
+        instanceId: arranged.instances[0]!.id,
+      },
+    ],
+  });
+  await waitUntil("bound the native session", async () => {
+    const one = await readThread(arranged, session.id);
+    return one.nativeSessionId !== null ? one : undefined;
+  });
+};
+
+/**
+ * Has the runner report that the thread exited, and waits until the
+ * controller has recorded the exit. Returns the session as it is then.
+ */
+export const reportThreadExit = async (
+  arranged: Arranged,
+  session: Session,
+  reason: "crash" | "stopped",
+): Promise<Session> => {
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at: REPORTED_AT,
+    _tag: "session.exited",
+    reason,
+  });
+  return await waitUntil("ended the session", async () => {
+    const one = await readThread(arranged, session.id);
+    return one.status === "exited" ? one : undefined;
+  });
+};
+
+/** Ends the thread with nothing to resume from, so it releases its lease as `orphan`. */
+export const endUnresumable = async (arranged: Arranged, session: Session): Promise<void> => {
+  const ended = await reportThreadExit(arranged, session, "crash");
+  expect(ended.resumable).toBe(false);
+};
+
+/** Ends the thread so that the next input resumes it in place, so it releases its lease as `idle`. */
+export const endResumable = async (arranged: Arranged, session: Session): Promise<void> => {
+  await bindTranscript(arranged, session);
+  const ended = await reportThreadExit(arranged, session, "stopped");
+  expect(ended.resumable).toBe(true);
+};
+
+/**
+ * Moves the release time and the kept-until time of every released lease on
+ * a workspace back by `hours`. That is how a test crosses a window without
+ * waiting for it: the shortest window any setting allows is an hour.
+ */
+export const ageLeases = (
+  arranged: Arranged,
+  workspaceId: string,
+  hours: number,
+): Promise<unknown> => {
+  const shift = `-${String(hours)} hours`;
+  return Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql`
+        UPDATE workspace_leases
+        SET released_at = strftime('%Y-%m-%dT%H:%M:%fZ', released_at, ${shift}),
+            kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', kept_until, ${shift})
+        WHERE workspace_id = unhex(replace(${workspaceId}, '-', ''))
+          AND released_at IS NOT NULL`,
+    ),
+  );
+};
+
+/**
+ * Returns how many lease rows a workspace has, active or released. No API
+ * shows a released lease, so a test that checks the table does not grow reads
+ * it directly.
+ */
+export const countLeases = async (arranged: Arranged, workspaceId: string): Promise<number> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM workspace_leases
+        WHERE workspace_id = unhex(replace(${workspaceId}, '-', ''))`,
+    ),
+  );
+  return rows[0]?.count ?? 0;
+};
+
+/** Returns the `workspace.deleted` audit entries, with their actors and payloads. */
+export const listWorkspaceDeletions = async (
+  arranged: Arranged,
+): Promise<
+  ReadonlyArray<{ readonly actor: string | null; readonly payload: Record<string, unknown> }>
+> => {
+  const response = await get(arranged.harness.base, "/api/v1/events", arranged.token);
+  const log = (await response.json()) as {
+    readonly items: ReadonlyArray<{
+      readonly kind: string;
+      readonly actor: string | null;
+      readonly payload: Record<string, unknown>;
+    }>;
+  };
+  return log.items.filter((entry) => entry.kind === "workspace.deleted");
 };

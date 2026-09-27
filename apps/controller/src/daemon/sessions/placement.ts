@@ -508,6 +508,7 @@ const make = Effect.gen(function* () {
           // what the thread's branch is called and which Connection the work
           // uses.
           const opened = yield* workspaces.openFor({
+            holder: { kind: "session", id: sessionId },
             wish: open.workspace,
             heldWorkspaceId: open.spec.workspaceId,
             runnerId: open.runnerId,
