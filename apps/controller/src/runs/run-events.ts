@@ -3,7 +3,7 @@
  * and `run.cancelled`. The run engine emits one from the single place a run
  * ends (`writeRunEnding` in `engine.ts`), in the transaction that ends it.
  */
-import type { Actor as ActorStamp, Run } from "@hercule/contract";
+import type { Run } from "@hercule/contract";
 import type { PlatformEvent } from "../events";
 import type { RunOutcome } from "./repository";
 
@@ -17,7 +17,7 @@ export const buildRunEndedEvent = (
   run: Run,
   outcome: RunOutcome,
   at: string,
-  actor: ActorStamp,
+  actor: PlatformEvent["actor"],
 ): PlatformEvent => {
   const fields = {
     runId: run.id,

@@ -11,10 +11,11 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer, type QueryInput, type TaskPage } from "./index";
 
-type Deps = TaskService | AuditLog | PlatformEvents | SqlClient.SqlClient;
+type Deps = TaskService | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
@@ -248,7 +249,6 @@ describe("task.delete", () => {
     const { result, readError, listed, found, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const audit = yield* AuditLog;
         const created = yield* tasks.create({
           title: "Retire the placeholder screen",
           description: "d",
@@ -259,7 +259,7 @@ describe("task.delete", () => {
           readError: yield* Effect.flip(tasks.read(created.id)),
           listed: (yield* tasks.query({})).items,
           found: (yield* tasks.query({ text: "placeholder" })).items,
-          entries: yield* audit.listByKind("task.deleted"),
+          entries: yield* readEventsOfKind("task.deleted"),
         };
       }),
     );
@@ -622,14 +622,13 @@ describe("the event log", () => {
     const { created, updated, createdEvents, updatedEvents } = await runTicking(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const platformEvents = yield* PlatformEvents;
         const created = yield* tasks.create({ title: "Before", description: "d" });
         const updated = yield* tasks.update({ id: created.id, title: "After" });
         return {
           created,
           updated,
-          createdEvents: yield* platformEvents.listByKind("task.created"),
-          updatedEvents: yield* platformEvents.listByKind("task.updated"),
+          createdEvents: yield* readEventsOfKind("task.created"),
+          updatedEvents: yield* readEventsOfKind("task.updated"),
         };
       }),
     );
@@ -643,9 +642,8 @@ describe("the event log", () => {
     const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const platformEvents = yield* PlatformEvents;
         const task = yield* tasks.create({ title: "Write it down", description: "d" });
-        return { task, events: yield* platformEvents.listByKind("task.created") };
+        return { task, events: yield* readEventsOfKind("task.created") };
       }),
     );
     expect(events).toHaveLength(1);
@@ -658,7 +656,6 @@ describe("the event log", () => {
     const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const platformEvents = yield* PlatformEvents;
         const created = yield* tasks.create({ title: "Before", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         yield* tasks.update({
@@ -667,7 +664,7 @@ describe("the event log", () => {
           addLabels: ["code"],
           provenance: [{ ref: ISSUE_REF }],
         });
-        return { task: created, events: yield* platformEvents.listByKind("task.updated") };
+        return { task: created, events: yield* readEventsOfKind("task.updated") };
       }),
     );
     expect(events).toHaveLength(1);
@@ -691,10 +688,9 @@ describe("the event log", () => {
     const { task, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const audit = yield* AuditLog;
         const created = yield* tasks.create({ title: "Gone", description: "d" });
         yield* tasks.delete(created.id);
-        return { task: created, entries: yield* audit.listByKind("task.deleted") };
+        return { task: created, entries: yield* readEventsOfKind("task.deleted") };
       }),
     );
     expect(entries).toHaveLength(1);
@@ -709,15 +705,13 @@ describe("the event log", () => {
     const { created, updated, deleted } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const audit = yield* AuditLog;
-        const platformEvents = yield* PlatformEvents;
         yield* Effect.ignore(tasks.create({ title: "", description: "d" }));
         yield* Effect.ignore(tasks.update({ id: UNKNOWN_ID, title: "x" }));
         yield* Effect.ignore(tasks.delete(UNKNOWN_ID));
         return {
-          created: yield* platformEvents.listByKind("task.created"),
-          updated: yield* platformEvents.listByKind("task.updated"),
-          deleted: yield* audit.listByKind("task.deleted"),
+          created: yield* readEventsOfKind("task.created"),
+          updated: yield* readEventsOfKind("task.updated"),
+          deleted: yield* readEventsOfKind("task.deleted"),
         };
       }),
     );
@@ -870,7 +864,6 @@ describe("an update that changes nothing", () => {
     const { before, after, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const platformEvents = yield* PlatformEvents;
         const before = yield* tasks.create({ title: "Steady", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         const after = yield* tasks.update({
@@ -880,7 +873,7 @@ describe("an update that changes nothing", () => {
           projectId: null,
           addLabels: [],
         });
-        return { before, after, events: yield* platformEvents.listByKind("task.updated") };
+        return { before, after, events: yield* readEventsOfKind("task.updated") };
       }),
     );
     expect(after).toEqual(before);
@@ -891,7 +884,6 @@ describe("an update that changes nothing", () => {
     const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const platformEvents = yield* PlatformEvents;
         const created = yield* tasks.create({
           title: "Both ways",
           description: "d",
@@ -902,7 +894,7 @@ describe("an update that changes nothing", () => {
           addLabels: ["code"],
           removeLabels: ["code"],
         });
-        return { task, events: yield* platformEvents.listByKind("task.updated") };
+        return { task, events: yield* readEventsOfKind("task.updated") };
       }),
     );
     expect(task.labels).toEqual(["code"]);

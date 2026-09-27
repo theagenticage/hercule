@@ -8,13 +8,14 @@ import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { AuditLog, EventKindsLayer } from "../events";
+import { EventKindsLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "./index";
 import { buildFileTaskSource } from "./testing";
 
-type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
+type Deps = WorkflowService | PluginHost | SqlClient.SqlClient;
 
 /**
  * Uses the real plugin host, because a save validates each step's action
@@ -86,14 +87,13 @@ describe("event log entries for workflow writes", () => {
     const entries = await run(
       Effect.gen(function* () {
         const workflows = yield* WorkflowService;
-        const audit = yield* AuditLog;
         const created = yield* workflows.create({ source: buildSource("Audited") });
         yield* workflows.update({ id: created.workflow.id, source: buildSource("Audited again") });
         yield* workflows.delete(created.workflow.id);
         return [
-          ...(yield* audit.listByKind("workflow.created")),
-          ...(yield* audit.listByKind("workflow.updated")),
-          ...(yield* audit.listByKind("workflow.deleted")),
+          ...(yield* readEventsOfKind("workflow.created")),
+          ...(yield* readEventsOfKind("workflow.updated")),
+          ...(yield* readEventsOfKind("workflow.deleted")),
         ];
       }),
     );
@@ -112,7 +112,6 @@ describe("event log entries for workflow writes", () => {
     const changes = await run(
       Effect.gen(function* () {
         const workflows = yield* WorkflowService;
-        const audit = yield* AuditLog;
         const source = buildSource("Unchanged");
         const { workflow } = yield* workflows.create({ source });
         // Same source, same enabled state.
@@ -121,7 +120,7 @@ describe("event log entries for workflow writes", () => {
         yield* workflows.update({ id: workflow.id, source, enabled: true });
         // New source, same enabled state.
         yield* workflows.update({ id: workflow.id, source: buildSource("Changed"), enabled: true });
-        return (yield* audit.listByKind("workflow.updated")).map((entry) => entry.payload.changed);
+        return (yield* readEventsOfKind("workflow.updated")).map((entry) => entry.payload.changed);
       }),
     );
 

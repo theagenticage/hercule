@@ -73,7 +73,7 @@ export type RunRerunError = RunStartError | InvalidState;
  * What a refused re-run tells the caller to do instead, when the original
  * run's plan may still run although the stored workflow cannot.
  */
-const REPLAY_HINT = "Re-run with mode replay to run the original run's plan instead.";
+const REPLAY_HINT = "Replay the original run's plan instead.";
 
 /**
  * The messages of the `Validation` errors `writeRun` fails with, which differ

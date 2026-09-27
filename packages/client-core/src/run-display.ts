@@ -62,13 +62,16 @@ export interface RerunChoice {
  *   workflow.
  * - `replay`, "As it ran": the plan the original run froze when it started.
  *
- * A run of a workflow sent with `run.start` has no saved workflow to start
- * from, so it offers only `replay`, with an explanation that says why. The
- * controller also refuses `re-stamp` for a run whose workflow was deleted
- * since, which the run itself cannot tell.
+ * A run with no saved workflow to start from offers only `replay`, with an
+ * explanation that says why. That is a run of a workflow sent with
+ * `run.start`, and a run whose workflow was deleted since, which the run
+ * itself cannot tell: pass `isWorkflowDeleted` as true when reading the run's
+ * workflow failed with `not_found`. The controller refuses `re-stamp` for
+ * both.
  */
 export const listRerunChoices = (
   run: Pick<Run, "workflowId">,
+  isWorkflowDeleted: boolean,
 ): readonly [RerunChoice, ...RerunChoice[]] => {
   if (run.workflowId === null) {
     return [
@@ -77,6 +80,16 @@ export const listRerunChoices = (
         label: "As it ran",
         explanation:
           "This run's workflow was sent with the run and never saved, so the new run follows this run's plan, as it was frozen when the run started.",
+      },
+    ];
+  }
+  if (isWorkflowDeleted) {
+    return [
+      {
+        mode: "replay",
+        label: "As it ran",
+        explanation:
+          "This run's workflow was deleted, so the new run follows this run's plan, as it was frozen when the run started.",
       },
     ];
   }

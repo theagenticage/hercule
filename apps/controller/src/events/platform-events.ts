@@ -4,9 +4,9 @@
  * triggers and subscriptions. A workflow that starts when another one fails,
  * or a session that waits for a run to end, listens for these.
  *
- * A platform event is written like an audit entry (`controller-row.ts`), in
- * the transaction of the change it reports, so the event and the change commit
- * together or not at all. Unlike an audit entry, every kind here has a payload
+ * A platform event is written like an audit entry (`platform-source-event.ts`),
+ * in the transaction of the change it reports, so the event and the change
+ * commit together or not at all. Unlike an audit entry, every kind here has a payload
  * schema in the contract, because triggers filter on its fields and readers
  * of the log decode it.
  */
@@ -24,7 +24,7 @@ import {
   TaskUpdatedEventPayload,
   type Actor,
 } from "@hercule/contract";
-import { appendControllerRow, listControllerRows, type ControllerRow } from "./controller-row";
+import { appendPlatformSourceEvent } from "./platform-source-event";
 
 /** The payload schema of each platform event kind. */
 const PLATFORM_EVENT_PAYLOADS = {
@@ -55,9 +55,6 @@ export type PlatformEvent = {
   };
 }[PlatformEventKind];
 
-/** A platform event as it reads back out of the log. */
-export type PlatformEventRow = ControllerRow<PlatformEventKind>;
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -79,18 +76,13 @@ const make = Effect.gen(function* () {
         const payload = yield* Effect.orDie(
           Schema.encodeUnknownEffect(PLATFORM_EVENT_PAYLOADS[event.kind])(event.payload),
         );
-        yield* appendControllerRow(sql, {
+        yield* appendPlatformSourceEvent(sql, {
           kind: event.kind,
           actor: event.actor,
           payload,
           at: event.at,
         });
       }),
-
-    /** Returns the events of one kind, oldest first. Only tests use it. */
-    listByKind: (
-      kind: PlatformEventKind,
-    ): Effect.Effect<ReadonlyArray<PlatformEventRow>, SqlError> => listControllerRows(sql, kind),
   };
 });
 

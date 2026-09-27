@@ -155,8 +155,7 @@ const createConnection = async (
 };
 
 /** Reads the audit rows of one kind. */
-const readAuditRows = (arranged: Arranged, kind: string) =>
-  arranged.harness.audit(kind as AuditKind);
+const readAuditRows = (arranged: Arranged, kind: AuditKind) => arranged.harness.audit(kind);
 
 describe("resource.create", () => {
   it("canonicalizes a repo's remote to host/owner/repo, however it was written", async () => {

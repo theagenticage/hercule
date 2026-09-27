@@ -16,13 +16,13 @@ import {
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import { CurrentActor } from "../actor";
-import { AuditLog } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { Secret, Secrets } from "../secrets";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import { asUser, createPluginFixture, buildPluginStack, USER, type Fixture } from "./testing";
 
-type Services = Plugins | PluginHost | Secret | Secrets | AuditLog | SqlClient.SqlClient;
+type Services = Plugins | PluginHost | Secret | Secrets | SqlClient.SqlClient;
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
@@ -179,7 +179,7 @@ describe("disabling and enabling a plugin", () => {
         yield* host.boot([alpha.plugin, beta.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("alpha")),
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.disabled")),
+          rows: yield* readEventsOfKind("plugin.disabled"),
           owned: yield* readOwnerEnabled("alpha"),
         };
       }),
@@ -205,7 +205,7 @@ describe("disabling and enabling a plugin", () => {
         yield* plugins.disable("alpha");
         return {
           detail: yield* plugins.enable("alpha"),
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.enabled")),
+          rows: yield* readEventsOfKind("plugin.enabled"),
           owned: yield* readOwnerEnabled("alpha"),
         };
       }),
@@ -239,7 +239,7 @@ describe("configuring a plugin", () => {
           detail: yield* Effect.flatMap(Plugins, (plugins) =>
             plugins.configure("alpha", { config: { model: "sonnet" } }),
           ),
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.configured")),
+          rows: yield* readEventsOfKind("plugin.configured"),
         };
       }),
     );
@@ -291,7 +291,7 @@ describe("a plugin whose activate fails", () => {
         yield* host.boot([flaky.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("flaky")),
-          errors: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
+          errors: yield* readEventsOfKind("plugin.errored"),
         };
       }),
     );
@@ -315,7 +315,7 @@ describe("a plugin whose activate fails", () => {
         yield* host.boot([flaky.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.retry("flaky")),
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.retried")),
+          rows: yield* readEventsOfKind("plugin.retried"),
         };
       }),
     );
@@ -356,7 +356,7 @@ describe("a plugin whose deactivate fails", () => {
         yield* host.boot([stuck.plugin]);
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("stuck")),
-          errors: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
+          errors: yield* readEventsOfKind("plugin.errored"),
           owned: yield* readOwnerEnabled("stuck"),
         };
       }),
@@ -461,7 +461,7 @@ describe("resetting a plugin's state", () => {
           detail,
           alpha: yield* readKeyValueStore(alpha).get("k"),
           beta: yield* readKeyValueStore(beta).get("k"),
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.stateReset")),
+          rows: yield* readEventsOfKind("plugin.stateReset"),
         };
       }),
     );
@@ -699,7 +699,7 @@ describe("two lifecycle changes on one plugin at the same time", () => {
         yield* Effect.all([plugins.disable("alpha"), plugins.disable("alpha")], {
           concurrency: "unbounded",
         });
-        return yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.disabled"));
+        return yield* readEventsOfKind("plugin.disabled");
       }),
     );
 
@@ -739,7 +739,7 @@ describe("a lifecycle change that changes nothing", () => {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
         yield* Effect.flatMap(Plugins, (plugins) => plugins.enable("alpha"));
-        return yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.enabled"));
+        return yield* readEventsOfKind("plugin.enabled");
       }),
     );
 
@@ -757,7 +757,7 @@ describe("a lifecycle change that changes nothing", () => {
         const plugins = yield* Plugins;
         yield* plugins.disable("alpha");
         yield* plugins.disable("alpha");
-        return yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.disabled"));
+        return yield* readEventsOfKind("plugin.disabled");
       }),
     );
 
@@ -858,7 +858,7 @@ describe("a plugin that fails with a very long message", () => {
         const host = yield* PluginHost;
         yield* host.boot([shouty]);
         return {
-          rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
+          rows: yield* readEventsOfKind("plugin.errored"),
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("shouty")),
         };
       }),
@@ -891,7 +891,6 @@ describe("a caller with no credential behind it", () => {
           Effect.flip(plugins.retry("alpha")),
           Effect.flip(plugins.resetState("alpha")),
         ]);
-        const log = yield* AuditLog;
         return {
           failures,
           rows: yield* Effect.forEach(
@@ -902,7 +901,7 @@ describe("a caller with no credential behind it", () => {
               "plugin.retried",
               "plugin.stateReset",
             ] as const,
-            (kind) => log.listByKind(kind),
+            (kind) => readEventsOfKind(kind),
           ),
         };
       }).pipe(Effect.provide(buildPluginStack())),

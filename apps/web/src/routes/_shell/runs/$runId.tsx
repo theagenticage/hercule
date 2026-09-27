@@ -19,6 +19,7 @@ import {
   runsQuery,
   settingsQuery,
   workflowActionsQuery,
+  workflowQuery,
   workspaceQuery,
 } from "../../../app/queries";
 import { RunPage, type StepsView } from "./-page";
@@ -32,9 +33,10 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
     search["steps"] === "timeline" ? { steps: "timeline" } : {},
   // Loads the run, the runner and workspace it is pinned to, the run's
-  // re-runs, and the action catalog before the page renders, so the page
-  // never waits on them. The catalog tells which steps run in the workspace,
-  // and so which ones wait for a runner.
+  // re-runs, the action catalog and the run's saved workflow before the page
+  // renders, so the page never waits on them. The catalog tells which steps
+  // run in the workspace, and so which ones wait for a runner. The workflow
+  // tells whether it still exists to re-run from.
   loader: async ({ context: { client, queryClient }, params }) => {
     const [run] = await Promise.all([
       queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {
@@ -45,8 +47,12 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
       queryClient.ensureQueryData(workflowActionsQuery(client)),
       queryClient.ensureInfiniteQueryData(runsQuery(client, { originalRunId: params.runId })),
     ]);
-    const { runnerId, workspaceId } = run;
+    const { runnerId, workspaceId, workflowId } = run;
     await Promise.all([
+      // A deleted workflow's read fails with not_found. `prefetchQuery` keeps
+      // that error in the cache instead of throwing it, so the run's page
+      // still opens, and offers only to re-run the run as it ran.
+      workflowId === null ? null : queryClient.prefetchQuery(workflowQuery(client, workflowId)),
       runnerId === undefined ? null : queryClient.ensureQueryData(runnerQuery(client, runnerId)),
       workspaceId === undefined
         ? null
@@ -60,13 +66,15 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
 });
 
 /**
- * Renders a run's page, kept current by two topics:
+ * Renders a run's page, kept current by three topics:
  *
  * - `run`: the run engine publishes the run's id on it after every change to
  *   the run or to one of its step records, and a new run's id when one
  *   starts, which may be a re-run of this run;
  * - `runner`: the run's runner going offline or coming back changes what a
- *   running step shows.
+ *   running step shows;
+ * - `workflow`: the run's workflow being deleted takes away the re-run from
+ *   the current workflow.
  *
  * The runner and the workspace are read only once the run is pinned to
  * them. The loader has read them for a run that already was; a run pinned
@@ -84,6 +92,7 @@ function RunScreen(): JSX.Element {
 
   useLiveInvalidation(live, queryClient, "run");
   useLiveInvalidation(live, queryClient, "runner");
+  useLiveInvalidation(live, queryClient, "workflow");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
   const isLive = isRunLive(run.status);
@@ -107,6 +116,16 @@ function RunScreen(): JSX.Element {
   }).data;
   const resources = useQuery({ ...resourcesQuery(client), enabled: workspace !== undefined }).data;
   const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
+  // The workflow is read only to learn whether it still exists. A deleted
+  // workflow's read keeps failing with not_found, so a read that already
+  // failed is not tried again when the page mounts. After a workflow is
+  // deleted while the page is open, the refetch fails and the query keeps
+  // its last data, so the error is what tells.
+  const workflowRead = useQuery({
+    ...workflowQuery(client, run.workflowId ?? ""),
+    enabled: run.workflowId !== null,
+    retryOnMount: false,
+  });
 
   return (
     <RunPage
@@ -123,6 +142,7 @@ function RunScreen(): JSX.Element {
       }
       workspaceReading={describeRunWorkspace(run, workspace, timezone)}
       runnerWait={describeRunnerWait(run, runner, actions, timezone)}
+      isWorkflowDeleted={isNotFound(workflowRead.error)}
       timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>

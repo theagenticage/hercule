@@ -24,7 +24,8 @@ import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } fr
 import { hashToken } from "../credentials";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
@@ -761,7 +762,6 @@ describe("SessionService.endOnLostRunners", () => {
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
         const inputs = yield* inputRepository;
-        const log = yield* AuditLog;
         const runnerId = mintId();
         const busy = yield* insertRunningSession(runnerId, "busy", 2 * HOUR_MS);
         // Resolved while the session runs, so the resolver has it cached. The
@@ -785,7 +785,7 @@ describe("SessionService.endOnLostRunners", () => {
           status: yield* readStatus(busy.sessionId),
           hash: yield* readTokenHash(busy.sessionId),
           input: Option.getOrThrow(yield* inputs.one(busy.sessionId, waiting.id)),
-          audit: yield* log.listByKind("session.reconciled"),
+          audit: yield* readEventsOfKind("session.reconciled"),
         };
       }),
     );

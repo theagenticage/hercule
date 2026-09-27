@@ -645,8 +645,9 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
-  // A run target is checked against its run, so the subscription service
-  // reads runs.
+  // The subscription service needs the run layers only to check a run
+  // target: it reads the run through RunService.read to check that the run
+  // exists, that the caller may read it, and that it has not ended.
   SubscriptionServiceLayer.pipe(Layer.provide(RunLayers)),
   EventKindsOperationLayer,
   RunLayers,

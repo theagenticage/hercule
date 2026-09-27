@@ -42,7 +42,7 @@ describe("describeRunOrigin", () => {
 
 describe("listRerunChoices", () => {
   it("offers a stored workflow's run both modes, re-stamping from the current workflow first", () => {
-    const choices = listRerunChoices({ workflowId: PARENT });
+    const choices = listRerunChoices({ workflowId: PARENT }, false);
     assert.deepStrictEqual(
       choices.map((choice) => [choice.mode, choice.label]),
       [
@@ -53,12 +53,21 @@ describe("listRerunChoices", () => {
   });
 
   it("offers a run of a workflow that was never stored only a replay, and says why", () => {
-    const choices = listRerunChoices({ workflowId: null });
+    const choices = listRerunChoices({ workflowId: null }, false);
     assert.deepStrictEqual(
       choices.map((choice) => choice.mode),
       ["replay"],
     );
     assert.match(choices[0]?.explanation ?? "", /never saved/);
+  });
+
+  it("offers a run whose workflow was deleted only a replay, and says why", () => {
+    const choices = listRerunChoices({ workflowId: PARENT }, true);
+    assert.deepStrictEqual(
+      choices.map((choice) => [choice.mode, choice.label]),
+      [["replay", "As it ran"]],
+    );
+    assert.match(choices[0]?.explanation ?? "", /workflow was deleted/);
   });
 });
 

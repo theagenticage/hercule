@@ -421,7 +421,8 @@ The ringfence exists so a visual drag-and-drop editor can replace the module's i
 
 *(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* A run's page offers to re-run the run, and shows the run's lineage ([./07-workflows.md](./07-workflows.md) section 7.4):
 
-- **Re-run.** The page offers **Re-run** once the run has ended: `completed`, `failed` or `cancelled`. It asks for the mode. Re-stamp is the default and runs the workflow as it is stored now; replay runs the plan this run froze. A run of a workflow sent with `run.start` offers replay only, because there is no stored workflow to re-stamp from.
+- **Re-run.** The page offers **Re-run** once the run has ended: `completed`, `failed` or `cancelled`. It asks for the mode. Re-stamp is the default and runs the workflow as it is stored now; replay runs the plan this run froze. A run of a workflow sent with `run.start`, and a run whose workflow was deleted since, offer replay only, because there is no stored workflow to re-stamp from; the question says which of the two it is. The page reads the run's workflow to learn whether it still exists, and a delete pushed while the page is open takes re-stamp away.
+- **A refused action.** When the controller refuses Cancel, Delete workspace or Re-run, the page says why in full, in the fail hue, on a row of its own below the header's lines and above any question, never cut short beside the title, because the end of the message often says what to do instead.
 - **Lineage, both ways.** A run that is a re-run says "Re-run of run X", with X linking to the original run. A run that was re-run lists the runs it was re-run as, each linking to its page; the list is `run.query` with `originalRunId`.
 
 ## Onboarding and first run

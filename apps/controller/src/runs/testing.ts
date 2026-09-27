@@ -9,7 +9,7 @@
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
-import type { Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
+import type { Grant, Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, createPluginFixture } from "../plugins/testing";
 import type { RunPage } from "./service";
@@ -497,7 +497,7 @@ export const startHeldRun = async (
 };
 
 /** The grants of a session that may wait on a run: it may subscribe, and read runs. */
-export const RUN_WATCHER_GRANTS: ReadonlyArray<string> = [
+export const RUN_WATCHER_GRANTS: ReadonlyArray<Grant> = [
   "subscription.write",
   "subscription.read",
   "run.read",

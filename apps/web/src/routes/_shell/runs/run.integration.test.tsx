@@ -333,10 +333,20 @@ const buildRerunSummary = (id: string): RunSummary => ({
   finishedAt: addSeconds(T0, 14),
 });
 
+/** The route that reads the run's saved workflow. */
+const WORKFLOW_READ = `GET /api/v1/workflows/${WORKFLOW_ID}`;
+
+/** The controller's answer to a read of a workflow that was deleted. */
+const WORKFLOW_DELETED = {
+  status: 404,
+  body: buildErrorBody("not_found", "No workflow has that id."),
+} as const;
+
 /**
  * Renders the run's page against a stub controller that holds `run`. The
- * run's workflow is gone from the controller in every test, which the page
- * must not need: everything it shows comes from the run.
+ * run's saved workflow still exists, but its source is empty, which the page
+ * must not need: everything it shows comes from the run. The workflow is
+ * read only to learn whether it still exists.
  * - `reruns` are the runs that re-ran it, newest first, which the run list
  *   returns for `originalRunId`. By default there are none.
  * - `overrides` replaces the handler of a route, or adds a route.
@@ -368,9 +378,8 @@ const openRunPage = async (
       },
     },
     [`GET /api/v1/runs/${run.id}`]: () => ({ body: held }),
-    [`GET /api/v1/workflows/${WORKFLOW_ID}`]: {
-      status: 404,
-      body: buildErrorBody("not_found", "No workflow has that id."),
+    [WORKFLOW_READ]: {
+      body: { id: WORKFLOW_ID, enabled: true, source: "", createdAt: T0, updatedAt: T0 },
     },
     "GET /api/v1/workflows": { body: { items: [] } },
     "GET /api/v1/workflow-actions": { body: [] },
@@ -633,7 +642,7 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
   });
 
   it("shows everything from the run when its workflow was deleted", async () => {
-    await openRunPage(COMPLETED_RUN);
+    await openRunPage(COMPLETED_RUN, { overrides: { [WORKFLOW_READ]: WORKFLOW_DELETED } });
 
     await findPageHeader();
     const graph = await findRunGraph();
@@ -1125,6 +1134,14 @@ const findRerunQuestion = (): Promise<HTMLElement> =>
 const queryRerunLine = (header: HTMLElement): HTMLElement | null =>
   within(header).queryByText(/^re-run (of|as)\b/);
 
+/** Returns the smallest element that holds both `a` and `b`. */
+const findSmallestCommonAncestor = (a: HTMLElement, b: HTMLElement): HTMLElement => {
+  let ancestor: HTMLElement | null = a;
+  while (ancestor !== null && !ancestor.contains(b)) ancestor = ancestor.parentElement;
+  if (ancestor === null) throw new Error("the two elements are not in one document");
+  return ancestor;
+};
+
 /** Returns the header's link to run `id`, named by its id's tail. */
 const getHeaderRunLink = (header: HTMLElement, id: string): HTMLElement =>
   within(header).getByRole("link", { name: `run ${toIdTail(id)}` });
@@ -1249,23 +1266,98 @@ describe("A run's page > Re-run", () => {
     });
   });
 
-  it("stays on the run and says why when the controller refuses the re-run", async () => {
+  it("offers a run whose workflow was deleted only a re-run as it ran, and says why", async () => {
     const user = userEvent.setup();
-    const { router } = await openRunPage(COMPLETED_RUN, {
+    const { api } = await openRunPage(COMPLETED_RUN, {
       overrides: {
-        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: {
-          status: 409,
-          body: buildErrorBody("invalid_state", "The run's workflow was deleted."),
-        },
+        [WORKFLOW_READ]: WORKFLOW_DELETED,
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: { body: { runId: RERUN.id } },
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
       },
     });
 
     await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    const question = await findRerunQuestion();
+    expect(within(question).queryAllByRole("radio")).toEqual([]);
+    expect(readPageText(question)).toContain("workflow was deleted");
+
+    await user.click(within(question).getByRole("button", { name: "Re-run" }));
+
+    await waitFor(() => {
+      expect(listReruns(api, COMPLETED_RUN.id).map((call) => call.body)).toEqual([
+        { mode: "replay" },
+      ]);
+    });
+  });
+
+  it("offers only a re-run as it ran once the workflow is deleted while the question shows", async () => {
+    const user = userEvent.setup();
+    let isDeleted = false;
+    const { api, live } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [WORKFLOW_READ]: () =>
+          isDeleted
+            ? WORKFLOW_DELETED
+            : {
+                body: { id: WORKFLOW_ID, enabled: true, source: "", createdAt: T0, updatedAt: T0 },
+              },
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: { body: { runId: RERUN.id } },
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
+      },
+    });
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    const question = await findRerunQuestion();
+    expect(within(question).getAllByRole("radio")).toHaveLength(2);
+
+    isDeleted = true;
+    await waitFor(() => {
+      expect(live.topics()).toContain("workflow");
+    });
+    act(() => {
+      live.push("workflow", { _tag: "invalidate", ids: [WORKFLOW_ID], kind: "deleted" });
+    });
+
+    await waitFor(() => {
+      expect(within(question).queryAllByRole("radio")).toEqual([]);
+    });
+    expect(readPageText(question)).toContain("workflow was deleted");
+    await user.click(within(question).getByRole("button", { name: "Re-run" }));
+    await waitFor(() => {
+      expect(listReruns(api, COMPLETED_RUN.id).map((call) => call.body)).toEqual([
+        { mode: "replay" },
+      ]);
+    });
+  });
+
+  it("stays on the run and says why in full, on a row of its own, when the controller refuses the re-run", async () => {
+    const user = userEvent.setup();
+    const message =
+      "This run's workflow has been deleted, so there is no stored workflow to re-stamp from. Replay the original run's plan instead.";
+    const { router } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", message),
+        },
+      },
+    });
+
+    const header = await findPageHeader();
+    await user.click(within(header).getByRole("button", { name: "Re-run" }));
     await user.click(within(await findRerunQuestion()).getByRole("button", { name: "Re-run" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Not re-run");
-    expect(alert.textContent).toContain("The run's workflow was deleted.");
+    const alert = await within(header).findByRole("alert");
+    expect(alert.textContent).toBe(`Not re-run: ${message}`);
+    expect(alert.className).not.toContain("truncate");
+    // The title and the Re-run button share the title row, and the refusal
+    // is not on it.
+    const title = within(header).getByRole("heading", { level: 1, name: WORKFLOW_NAME });
+    const titleRow = findSmallestCommonAncestor(
+      title,
+      within(header).getByRole("button", { name: "Re-run" }),
+    );
+    expect(titleRow).not.toBe(header);
+    expect(titleRow.contains(alert)).toBe(false);
     expect(router.state.location.pathname).toBe(`/runs/${COMPLETED_RUN.id}`);
   });
 

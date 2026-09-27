@@ -4,6 +4,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { withTransaction } from "../db/client";
 import { AuditLog, AuditLogLayer, SECURITY_KINDS } from "./audit-log";
+import { readEventsOfKind } from "./testing";
 
 const layer = AuditLogLayer.pipe(Layer.provideMerge(TestDatabase));
 
@@ -58,7 +59,7 @@ describe("AuditLog", () => {
         const audit = yield* AuditLog;
         yield* audit.append({ kind: "auth.login.failed", actor: "user", payload: { attempt: 1 } });
         yield* audit.append({ kind: "auth.login.failed", actor: "user", payload: { attempt: 2 } });
-        return yield* audit.listByKind("auth.login.failed");
+        return yield* readEventsOfKind("auth.login.failed");
       }),
     );
     expect(entries.map((entry) => entry.payload)).toEqual([{ attempt: 1 }, { attempt: 2 }]);
@@ -70,7 +71,7 @@ describe("AuditLog", () => {
       Effect.gen(function* () {
         const audit = yield* AuditLog;
         yield* audit.append({ kind: "secret.created", actor, payload: { owner: "connection" } });
-        return yield* audit.listByKind("secret.created");
+        return yield* readEventsOfKind("secret.created");
       }),
     );
     expect(entries[0]?.actor).toBe(actor);
@@ -100,7 +101,7 @@ describe("AuditLog", () => {
           readonly name: string;
         }>`SELECT name FROM permission_profiles WHERE name = 'reviewer'`;
         return {
-          audit: yield* audit.listByKind("profile.created"),
+          audit: yield* readEventsOfKind("profile.created"),
           profiles,
         };
       }),
@@ -122,7 +123,7 @@ describe("AuditLog", () => {
               actor: "user",
               payload: { id: "reviewer" },
             });
-            return yield* audit.listByKind("profile.updated");
+            return yield* readEventsOfKind("profile.updated");
           }),
         );
       }),

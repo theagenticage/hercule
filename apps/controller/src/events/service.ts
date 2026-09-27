@@ -381,6 +381,10 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${input.id}
         `;
         const row = rows[0];
+        // Only the events the controller logs about itself, audit entries and
+        // platform events, have the source "platform". A core emitter added later, such as the
+        // Scheduler's `cron.tick`, must use its own source name, or its events
+        // could never be amended.
         if (row === undefined || row.source === "platform") {
           return yield* Effect.fail(createNotFoundError("no such event"));
         }

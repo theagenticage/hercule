@@ -52,15 +52,12 @@ import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import {
-  AuditLog,
   AuditLogLayer,
-  PlatformEvents,
   PlatformEventsLayer,
   type AuditKind,
-  type AuditRow,
   type PlatformEventKind,
-  type PlatformEventRow,
 } from "../events";
+import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
@@ -188,13 +185,15 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   return `http://127.0.0.1:${address.port}`;
 });
 
-/** Reads back what a request wrote to the audit log. */
-export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
+/** Reads back the audit entries of one kind a request wrote, oldest first. */
+export type AuditReader = <Kind extends AuditKind>(
+  kind: Kind,
+) => Promise<ReadonlyArray<LoggedEvent<Kind>>>;
 
 /** Reads back the platform events of one kind the controller emitted, oldest first. */
-export type PlatformEventReader = (
-  kind: PlatformEventKind,
-) => Promise<ReadonlyArray<PlatformEventRow>>;
+export type PlatformEventReader = <Kind extends PlatformEventKind>(
+  kind: Kind,
+) => Promise<ReadonlyArray<LoggedEvent<Kind>>>;
 
 /**
  * Inserts a runner row. No operation adds a runner (a runner joins over the
@@ -355,13 +354,14 @@ export const withServer = (
         );
         yield* serve(bundle);
         const base = yield* baseUrl;
-        // Reads the audit log through the service that wrote it, like any other
-        // reader.
-        const log = yield* AuditLog;
-        const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        const platformEventWriter = yield* PlatformEvents;
+        const audit: AuditReader = (kind) =>
+          Effect.runPromise(
+            Effect.orDie(Effect.provideService(readEventsOfKind(kind), SqlClient.SqlClient, sql)),
+          );
         const platformEvents: PlatformEventReader = (kind) =>
-          Effect.runPromise(Effect.orDie(platformEventWriter.listByKind(kind)));
+          Effect.runPromise(
+            Effect.orDie(Effect.provideService(readEventsOfKind(kind), SqlClient.SqlClient, sql)),
+          );
         // Reads the controller's live subscriptions through the service that
         // holds them, so a test checks what the running server has, not what it
         // can infer from the wire.

@@ -30,7 +30,7 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
-import type { Input, Profile, Session } from "@hercule/contract";
+import type { Grant, Input, Profile, Session } from "@hercule/contract";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -433,7 +433,7 @@ export const readProfileNamed = async (arranged: Arranged, name: string): Promis
 export const createProfile = async (
   arranged: Arranged,
   name: string,
-  grants: ReadonlyArray<string>,
+  grants: ReadonlyArray<Grant>,
 ): Promise<Profile> => {
   const response = await post(
     arranged.harness.base,
@@ -502,7 +502,7 @@ export interface Agent {
 export const spawnAgentWithGrants = async (
   arranged: Arranged,
   name: string,
-  grants: ReadonlyArray<string>,
+  grants: ReadonlyArray<Grant>,
 ): Promise<Agent> => spawnAgentUnder(arranged, await createProfile(arranged, name, grants));
 
 /**

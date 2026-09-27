@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option, Redacted } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { buildHomePaths, HerculeHome } from "../config";
 import { masterKeyLayer } from "./masterKey";
 import { Secrets, secretsLayer } from "./repository";
@@ -46,7 +48,7 @@ const buildStack = () => {
   );
 };
 
-type Services = Secret | Secrets | AuditLog;
+type Services = Secret | Secrets | SqlClient.SqlClient;
 
 /** Runs a call as the user actor, which is the actor of a request through the API. */
 const run = <A, E>(body: (secret: Secret["Service"]) => Effect.Effect<A, E, Services>) =>
@@ -112,10 +114,9 @@ describe("secret.set", () => {
       Effect.gen(function* () {
         yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
         yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: "rotated" });
-        const log = yield* AuditLog;
         return {
-          created: yield* log.listByKind("secret.created"),
-          rotated: yield* log.listByKind("secret.rotated"),
+          created: yield* readEventsOfKind("secret.created"),
+          rotated: yield* readEventsOfKind("secret.rotated"),
         };
       }),
     );
@@ -226,10 +227,9 @@ describe("secret.delete", () => {
         yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
         yield* secret.delete({ ...buildOwnerFields(CONNECTION), name: "token" });
         const secrets = yield* Secrets;
-        const log = yield* AuditLog;
         return {
           stored: yield* secrets.get(CONNECTION, "token"),
-          deleted: yield* log.listByKind("secret.deleted"),
+          deleted: yield* readEventsOfKind("secret.deleted"),
         };
       }),
     );

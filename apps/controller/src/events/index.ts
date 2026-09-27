@@ -9,14 +9,7 @@
  * the catalog of event kinds a trigger can listen for, which `eventKind.query`
  * lists.
  */
-export {
-  AUDIT_KINDS,
-  AuditLog,
-  AuditLogLayer,
-  type AuditEntry,
-  type AuditKind,
-  type AuditRow,
-} from "./audit-log";
+export { AUDIT_KINDS, AuditLog, AuditLogLayer, type AuditEntry, type AuditKind } from "./audit-log";
 export { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
 export { CRON_TICK_EVENT_KIND, EventKinds, EventKindsLayer, isCoreEventKind } from "./kinds";
 export {
@@ -32,6 +25,5 @@ export {
   PlatformEventsLayer,
   type PlatformEvent,
   type PlatformEventKind,
-  type PlatformEventRow,
 } from "./platform-events";
 export { EventService, EventServiceLayer } from "./service";

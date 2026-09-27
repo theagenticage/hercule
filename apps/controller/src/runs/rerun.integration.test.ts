@@ -45,7 +45,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
  * pointing the caller to replay. A re-stamp that no runner can run gets no
  * hint, because a replay needs the same runners.
  */
-const REPLAY_HINT = "Re-run with mode replay to run the original run's plan instead.";
+const REPLAY_HINT = "Replay the original run's plan instead.";
 
 /** A run id no run has. */
 const UNKNOWN_RUN_ID = "0199f0b7-0000-7000-8000-00000000f001";
@@ -480,6 +480,7 @@ describe("run.rerun refuses", () => {
       [buildActionPlugin("notes", NOTE_APPEND_ACTION)],
     );
   });
+
   it("a re-stamp whose stored workflow no runner can run, with validation and no hint to replay", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {

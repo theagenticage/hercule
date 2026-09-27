@@ -47,14 +47,17 @@ export const useRerun = (client: HerculeClient, runId: string) => {
  */
 export function RerunQuestion({
   run,
+  isWorkflowDeleted,
   onDecline,
   onAccept,
 }: {
   readonly run: Pick<Run, "workflowId">;
+  /** Whether the run's saved workflow was deleted, so there is none to re-run from. */
+  readonly isWorkflowDeleted: boolean;
   readonly onDecline: () => void;
   readonly onAccept: (mode: RerunMode) => void;
 }): JSX.Element {
-  const choices = listRerunChoices(run);
+  const choices = listRerunChoices(run, isWorkflowDeleted);
   const [rerunMode, setRerunMode] = useState(choices[0].mode);
   const picked = choices.find((choice) => choice.mode === rerunMode) ?? choices[0];
   return (
@@ -74,7 +77,8 @@ export function RerunQuestion({
           className="w-auto self-start"
           value={picked.mode}
           onValueChange={(next) => {
-            setRerunMode(next === "replay" ? "replay" : "re-stamp");
+            const nextChoice = choices.find((choice) => choice.mode === next);
+            if (nextChoice !== undefined) setRerunMode(nextChoice.mode);
           }}
         >
           {choices.map((choice) => (

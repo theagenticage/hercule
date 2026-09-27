@@ -519,11 +519,10 @@ export const run = HttpApiGroup.make("run")
     /**
      * Starts a new run with the inputs of a run that has ended, and returns
      * its id at once. The new run records the original run in
-     * `originalRunId`. Fails
-     * with `invalid_state` for a run that has not ended, and for a `re-stamp`
-     * of a run with no stored workflow to re-stamp from; with `validation`
-     * when the new run cannot start, as for `run.start`; and with
-     * `cap_exceeded` when it would be nested too deep.
+     * `originalRunId`. Fails with `invalid_state` for a run that has not
+     * ended, and for a `re-stamp` of a run with no stored workflow to
+     * re-stamp from; with `validation` when the new run cannot start, as for
+     * `run.start`; and with `cap_exceeded` when it would be nested too deep.
      */
     HttpApiEndpoint.post("rerun", "/runs/:id/rerun", {
       params: { id: Id },

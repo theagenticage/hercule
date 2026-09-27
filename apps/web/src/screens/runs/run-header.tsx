@@ -33,6 +33,10 @@ const QUIET_LINK =
  * workspace, such as "Workspace deleted 3 Oct". A run that failed at an edge
  * has a last line: what went wrong there.
  *
+ * Below the header's lines, each on a row of its own, come why the controller
+ * refused one of the page's actions, and the question shown before an action
+ * is done.
+ *
  * The title sits where the shell's top bar puts every other screen's title,
  * so the page does not jump when it opens.
  */
@@ -45,6 +49,7 @@ export function RunHeader({
   now,
   timezone,
   children,
+  refusals,
   question,
 }: {
   readonly run: Run;
@@ -64,6 +69,13 @@ export function RunHeader({
    * question shown before Cancel or Delete workspace is done.
    */
   readonly children: ReactNode;
+  /**
+   * Why the controller refused the page's actions, one text per action, such
+   * as "Not re-run: This run's workflow has been deleted...". Each is shown
+   * in full, wrapped over as many lines as it needs, because its end often
+   * says what to do instead.
+   */
+  readonly refusals: ReadonlyArray<string>;
   /**
    * The question shown before an action is done, when it is not shown beside
    * the title: the re-run question, and the others on a page too narrow for
@@ -225,6 +237,11 @@ export function RunHeader({
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
       ) : null}
+      {refusals.map((refusal) => (
+        <p key={refusal} role="alert" className="mt-3 text-fine text-pretty text-fail">
+          {refusal}
+        </p>
+      ))}
       {question === undefined ? null : <div className="mt-3">{question}</div>}
     </header>
   );

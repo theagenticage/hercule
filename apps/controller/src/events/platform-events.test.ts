@@ -12,6 +12,7 @@ import type { Change } from "../db";
 import { withTransaction } from "../db/client";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "./audit-log";
+import { readEventsOfKind } from "./testing";
 import { EVENT_COLUMNS, readPipelineEventsAfter, type EventRow } from "./log";
 import { PlatformEvents, PlatformEventsLayer, type PlatformEvent } from "./platform-events";
 
@@ -115,7 +116,7 @@ describe("PlatformEvents", () => {
       Effect.gen(function* () {
         const platformEvents = yield* PlatformEvents;
         yield* platformEvents.emit(RUN_COMPLETED);
-        return yield* platformEvents.listByKind("run.completed");
+        return yield* readEventsOfKind("run.completed");
       }),
     );
     expect(rows).toHaveLength(1);
@@ -169,7 +170,7 @@ describe("PlatformEvents", () => {
             return yield* Effect.fail(new Error("the operation failed after the event"));
           }),
         ).pipe(Effect.ignore);
-        return yield* platformEvents.listByKind("task.created");
+        return yield* readEventsOfKind("task.created");
       }),
     );
     expect(rows).toEqual([]);
@@ -182,7 +183,7 @@ describe("PlatformEvents", () => {
         const platformEvents = yield* PlatformEvents;
         const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(sql, platformEvents.emit(TASK_UPDATED));
-        return yield* platformEvents.listByKind("task.updated");
+        return yield* readEventsOfKind("task.updated");
       }),
     );
     expect(rows).toHaveLength(1);

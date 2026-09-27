@@ -73,7 +73,9 @@ const PAGE_PADDING = 32;
  * focus can return to it when the question is declined. On a wide page the
  * cancel and delete questions sit beside the title; on a narrow one they have
  * a row of their own below the header's lines. The re-run question always has
- * that row, because it explains each choice.
+ * that row, because it explains each choice. When the controller refuses an
+ * action, the page says why in full on a row of its own below the header's
+ * lines, above any question.
  *
  * The page reads the runs that re-ran this one, which the header links. The
  * route's loader has already read them, so the page does not wait for them.
@@ -85,12 +87,15 @@ export function RunPage({
   workspaceLabel,
   workspaceReading,
   runnerWait,
+  isWorkflowDeleted,
   timezone,
   stepsView,
   onStepsViewChange,
 }: {
   readonly client: HerculeClient;
   readonly run: Run;
+  /** Whether the run's saved workflow was deleted, so a re-run can only replay the run's plan. */
+  readonly isWorkflowDeleted: boolean;
   /** The runner the run is pinned to, once it is pinned and the runner has been read. */
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
@@ -202,6 +207,7 @@ export function RunPage({
     rerun: (
       <RerunQuestion
         run={run}
+        isWorkflowDeleted={isWorkflowDeleted}
         onDecline={() => {
           setAsking(undefined);
         }}
@@ -216,6 +222,13 @@ export function RunPage({
   // lines. The other two have that row only on a narrow page.
   const questionBelowHeader =
     asking !== undefined && (asking === "rerun" || stacksQuestion) ? questions[asking] : undefined;
+  const refusals = [
+    cancel.error === null ? undefined : `Not cancelled: ${readErrorMessage(cancel.error)}`,
+    deleteWorkspace.error === null
+      ? undefined
+      : `Not deleted: ${readErrorMessage(deleteWorkspace.error)}`,
+    rerun.error === null ? undefined : `Not re-run: ${readErrorMessage(rerun.error)}`,
+  ].filter((refusal) => refusal !== undefined);
 
   return (
     <div ref={observePage} className="flex min-h-0 flex-1 flex-col pb-28">
@@ -227,23 +240,9 @@ export function RunPage({
         now={now}
         reruns={describeReruns(rerunsPage)}
         timezone={timezone}
+        refusals={refusals}
         question={questionBelowHeader}
       >
-        {cancel.error === null ? null : (
-          <span role="alert" className="min-w-0 truncate text-fine text-fail">
-            {`Not cancelled: ${readErrorMessage(cancel.error)}`}
-          </span>
-        )}
-        {deleteWorkspace.error === null ? null : (
-          <span role="alert" className="min-w-0 truncate text-fine text-fail">
-            {`Not deleted: ${readErrorMessage(deleteWorkspace.error)}`}
-          </span>
-        )}
-        {rerun.error === null ? null : (
-          <span role="alert" className="min-w-0 truncate text-fine text-fail">
-            {`Not re-run: ${readErrorMessage(rerun.error)}`}
-          </span>
-        )}
         {!isLive ? null : (
           <>
             {asking === "cancel" && !stacksQuestion ? cancelQuestion : null}

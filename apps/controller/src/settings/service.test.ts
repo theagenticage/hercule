@@ -11,11 +11,12 @@ import { completeSetup, get, post, send, withServer, type ServerHarness } from "
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLogLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { Settings, SettingsLayer } from "./repository";
 import { SettingsOperations, SettingsOperationsLayer } from "./service";
 
-type Deps = SettingsOperations | Settings | AuditLog | SqlClient.SqlClient;
+type Deps = SettingsOperations | Settings | SqlClient.SqlClient;
 
 const layer = SettingsOperationsLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(SettingsLayer, AuditLogLayer)),
@@ -114,12 +115,11 @@ describe("settings.update", () => {
     const entries = await run(
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
-        const audit = yield* AuditLog;
         yield* settings.update({
           controller: { "backup.time": "03:30" },
           user: { timezone: "UTC" },
         });
-        return yield* audit.listByKind("settings.updated");
+        return yield* readEventsOfKind("settings.updated");
       }),
     );
     expect(entries).toHaveLength(1);
@@ -137,9 +137,8 @@ describe("settings.update", () => {
     const error = await run(
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
-        const audit = yield* AuditLog;
         const failure = yield* Effect.flip(settings.update({}));
-        expect(yield* audit.listByKind("settings.updated")).toEqual([]);
+        expect(yield* readEventsOfKind("settings.updated")).toEqual([]);
         return failure;
       }),
     );

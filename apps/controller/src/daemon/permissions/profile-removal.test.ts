@@ -13,7 +13,8 @@ import { CurrentActor, type Actor } from "../../actor";
 import { agentRepository } from "../../agents";
 import { mintUuid, uuidFromString, uuidToString } from "../../db";
 import { TestDatabase } from "../../db/testing";
-import { AuditLog, AuditLogLayer } from "../../events";
+import { AuditLogLayer } from "../../events";
+import { readEventsOfKind } from "../../events/testing";
 import {
   PermissionProfiles,
   PermissionProfilesLayer,
@@ -23,7 +24,7 @@ import {
 } from "../../permissions";
 import { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";
 
-type Deps = ProfileRemoval | Profiles | PermissionProfiles | AuditLog | SqlClient.SqlClient;
+type Deps = ProfileRemoval | Profiles | PermissionProfiles | SqlClient.SqlClient;
 
 const layer = ProfileRemovalLayer.pipe(
   Layer.provideMerge(ProfilesLayer),
@@ -97,12 +98,11 @@ describe("profile.delete", () => {
       Effect.gen(function* () {
         const profiles = yield* Profiles;
         const removal = yield* ProfileRemoval;
-        const audit = yield* AuditLog;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
         yield* removal.deleteProfile({ id: created.id });
         return {
           remaining: (yield* profiles.query({})).items,
-          entries: yield* audit.listByKind("profile.deleted"),
+          entries: yield* readEventsOfKind("profile.deleted"),
         };
       }),
     );
