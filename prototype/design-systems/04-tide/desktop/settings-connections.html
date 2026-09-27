@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Connections · Settings · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .set-scroll { padding-top: 18px; }
+      .conn-head { align-items: end; padding-bottom: 10px; }
+      .head-num { grid-column: 1 / 4; display: flex; align-items: flex-end; gap: 12px; padding-bottom: 20px; }
+      .head-num .num { font-size: var(--fs-num-xl); }
+      .head-num span:last-child { display: flex; flex-direction: column; gap: 2px; padding-bottom: 4px; font-size: var(--fs-md); font-weight: var(--w-emph); }
+      .head-chart { position: relative; }
+      .head-chart [data-tide] { height: 72px; }
+      .axis { position: relative; height: 18px; margin-top: 4px; }
+      .axis span { position: absolute; top: 2px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+      .axis span:first-child { transform: none; }
+      .head-side { grid-column: 5 / 7; display: flex; flex-direction: column; gap: 6px; padding: 0 0 24px 12px; font-size: var(--fs-sm); color: var(--muted); }
+      .head-side span { display: flex; align-items: center; gap: 7px; }
+      .head-side .m { width: 14px; height: 14px; }
+      .head-side b { font-family: var(--font-mono); font-weight: 400; color: var(--ink); }
+      .conn-nowline { top: 10px; bottom: 0; }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="settings" data-active="connections"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title"><h1 class="page-title">Connections</h1><span class="bar-when">event sources and channels · last 24 hours</span></div>
+        <div class="bar-end"><button class="btn btn-sm btn-ghost">Manage topics</button><button class="btn btn-sm"><i data-m="plus" class="xs"></i>Add connection</button></div>
+      </header>
+      <div class="set-scroll">
+        <div class="conns">
+          <div class="conn-head">
+            <div class="head-num"><span class="num">2,418</span><span>events in 24h<span class="t-mono">212 since you last looked, 18:20</span></span></div>
+            <div class="head-chart">
+              <div data-tide="spark:7,2418" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="20" role="img" aria-label="Events per 20 minutes over the last 24 hours, quieter at night"></div>
+              <div class="axis"><span style="left: 0">yesterday 09:41</span><span style="left: 34.65%">18:00</span><span style="left: 59.65%">00:00</span><span style="left: 84.65%">06:00</span></div>
+            </div>
+            <div class="head-side">
+              <span><i data-m="done"></i><b>10</b> healthy</span>
+              <span class="tx-fail"><i data-m="unreachable"></i><b class="tx-fail">1</b> reconnecting</span>
+            </div>
+          </div>
+
+          <div class="conn-sec"><span class="label">Event sources<span class="n">8</span></span><span class="t-mono" style="grid-column: 3">default Topic</span><span class="t-mono" style="grid-column: 5; text-align: right">24h</span></div>
+            <div class="conn"><i data-b="github"></i><span class="conn-name"><b>GitHub</b><span> · rogier</span></span><span class="topic-chip">Releases</span><span class="conn-spark" data-tide="spark:21,312" data-peak="0.47" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">312</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="gmail"></i><span class="conn-name"><b>Gmail</b><span> · rogier@personal</span></span><span class="topic-chip">Customers</span><span class="conn-spark" data-tide="spark:22,188" data-peak="0.37" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">188</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="sentry"></i><span class="conn-name"><b>Sentry</b><span> · webshop-prod</span></span><span class="topic-chip">Checkout</span><span class="conn-spark" data-tide="spark:23,1406" data-peak="1.0" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">1,406</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="posthog"></i><span class="conn-name"><b>PostHog</b><span> · webshop</span></span><span class="topic-chip">Checkout</span><span class="conn-spark" data-tide="spark:24,96" data-peak="0.26" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">96</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="intercom"></i><span class="conn-name"><b>Intercom</b><span> · support</span></span><span class="topic-chip">Customers</span><span class="conn-spark" data-tide="spark:25,61" data-peak="0.21" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">61</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="grafana"></i><span class="conn-name"><b>Grafana</b><span> · ops</span></span><span class="topic-chip">Infrastructure</span><span class="conn-spark" data-tide="spark:26,44" data-peak="0.2" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">44</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="stripe"></i><span class="conn-name"><b>Stripe</b><span> · live</span></span><span class="topic-chip">Checkout</span><span class="conn-spark" data-tide="spark:27,209" data-peak="0.39" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">209</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn"><i data-b="cron"></i><span class="conn-name"><b>Cron</b><span> · schedules</span></span><span class="faint sm">no default</span><span class="conn-spark" data-tide="spark:28,102" data-peak="0.27" data-from="-859" data-to="581" data-now="off" data-night="on" data-bucket="30"></span><span class="conn-n">102</span><span class="health"><i data-m="done"></i>healthy</span></div>
+
+          <div class="conn-sec"><span class="label">Channels<span class="n">3</span></span><span class="t-mono" style="grid-column: 3">bound</span></div>
+            <div class="conn"><i data-b="slack"></i><span class="conn-name"><b>Slack</b><span> · acme-hq</span></span><span class="bound"><span class="av working">A</span><span class="av">M</span>Ada, Milo</span><span class="uptime" role="img" aria-label="Connected all day"></span><span class="conn-n is-none">-</span><span class="health"><i data-m="done"></i>healthy</span></div>
+            <div class="conn is-fail"><i data-b="discord"></i><span class="conn-name"><b>Discord</b><span> · community</span></span><span class="bound"><span class="av asleep">J</span>Juno</span><span class="uptime" style="--up: 97.99%" role="img" aria-label="Connected until 09:12, reconnecting since"><i class="gap"></i></span><span class="conn-n is-none">-</span><span class="health is-fail"><i data-m="unreachable"></i>reconnecting · since 09:12</span></div>
+            <div class="conn"><i data-m="webchat"></i><span class="conn-name"><b>Web chat</b><span> · built in</span></span><span class="bound"><span class="av working">A</span>Ada</span><span class="uptime" role="img" aria-label="Connected all day"></span><span class="conn-n is-none">-</span><span class="health"><i data-m="done"></i>healthy</span></div>
+
+          <div class="conn-nowline" aria-hidden="true"><span class="nowtab">09:41</span></div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

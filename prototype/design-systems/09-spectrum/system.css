@@ -1,0 +1,3375 @@
+/* Spectrum - system.css: the components every page uses.
+ * Pages set data-space on the window (webshop, payments-api, ops or all); everything tinted
+ * derives from that one attribute (see tokens.css). */
+
+/* ---------- Base ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+* {
+  margin: 0;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  font-family: var(--font-sans);
+  font-size: var(--t-ui);
+  line-height: 1.45;
+  font-weight: var(--w-regular);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: inherit;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+ul,
+ol {
+  list-style: none;
+  padding: 0;
+}
+:focus-visible {
+  outline: 2px solid var(--space, var(--ink));
+  outline-offset: 2px;
+}
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 0.86em;
+  font-weight: 380;
+  letter-spacing: -0.01em;
+}
+code {
+  padding: 0.08em 0.36em;
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+.strong {
+  font-weight: var(--w-strong);
+}
+.medium {
+  font-weight: var(--w-medium);
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.ell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sep {
+  color: var(--faint);
+  padding: 0 0.3em;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.col {
+  display: flex;
+  flex-direction: column;
+}
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 18%, transparent) transparent;
+}
+.hide-scroll {
+  scrollbar-width: none;
+}
+
+/* ---------- Icons and marks ---------- */
+.i,
+.i14,
+.i16,
+.i18,
+.i20 {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  display: inline-block;
+  vertical-align: -1px;
+}
+.i14 {
+  width: 14px;
+  height: 14px;
+}
+.i16 {
+  width: 16px;
+  height: 16px;
+}
+.i18 {
+  width: 18px;
+  height: 18px;
+}
+.i20 {
+  width: 20px;
+  height: 20px;
+}
+.brand {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  display: inline-block;
+  vertical-align: -2px;
+  color: var(--muted);
+}
+
+/* Project swatch: the smallest unit of the doctrine. A rounded square of the project hue. */
+.sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+  display: inline-block;
+  background: var(--p);
+  vertical-align: -0.5px;
+}
+.sw.lg {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+.sw.xl {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+}
+.sw.all {
+  background: var(--spectrum-conic);
+}
+.sw.mix-wp {
+  background: linear-gradient(135deg in oklch, var(--p-webshop) 30%, var(--p-payments) 70%);
+}
+.sw.none {
+  background: none;
+  box-shadow: inset 0 0 0 1.2px var(--faint);
+  border: 0;
+  background-image: repeating-linear-gradient(135deg, var(--line) 0 1.5px, transparent 1.5px 3.5px);
+}
+.pname {
+  color: var(--p-ink);
+  font-weight: var(--w-medium);
+}
+
+/* Priority: bars, 1 to 4, drawn in ink. Never a color. */
+.prio {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 11px;
+  vertical-align: -1px;
+}
+.prio i {
+  width: 2.5px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.prio i:nth-child(1) {
+  height: 4px;
+}
+.prio i:nth-child(2) {
+  height: 6.5px;
+}
+.prio i:nth-child(3) {
+  height: 9px;
+}
+.prio i:nth-child(4) {
+  height: 11px;
+}
+.prio[data-n="1"] i:nth-child(-n + 1),
+.prio[data-n="2"] i:nth-child(-n + 2),
+.prio[data-n="3"] i:nth-child(-n + 3),
+.prio[data-n="4"] i:nth-child(-n + 4) {
+  background: var(--ink);
+}
+
+/* ---------- State: shape and luminance ----------
+ * .st is a mark plus a word. Luminance rises with how much it wants you:
+ * idle (faint) < working (project hue, full) < needs you (solid ink, inverted). */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.st .i {
+  color: var(--faint);
+}
+.st.work .i {
+  color: var(--p, var(--space));
+}
+.st.work {
+  color: var(--ink);
+}
+.st.idle .i {
+  opacity: 0.55;
+}
+.st.fail .i {
+  color: var(--fail);
+}
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--attn);
+  color: var(--on-attn);
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.need .q {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--p, var(--space));
+  color: var(--p-on, var(--space-on));
+}
+.need .q .i {
+  width: 10px;
+  height: 10px;
+}
+.need.sm {
+  height: 18px;
+  font-size: var(--t-fine);
+}
+/* The question mark alone, in a solid ink disc: "needs you" at icon size. */
+.qdot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  background: var(--attn);
+  color: var(--on-attn);
+}
+.qdot .i {
+  width: 11px;
+  height: 11px;
+}
+/* A failure: the cross on a hatch, in ink. */
+.hatch {
+  background-image: repeating-linear-gradient(135deg, var(--hatch) 0 1.5px, transparent 1.5px 4px);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-meta);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  white-space: nowrap;
+}
+.tag.p {
+  color: var(--p-ink);
+  background: color-mix(in oklab, var(--p) 14%, transparent);
+}
+.tag.line {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-family: var(--font-sans);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--ink) 10%, transparent);
+  line-height: 1;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  font-weight: var(--w-medium);
+  font-size: var(--t-ui);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 1px 1px color-mix(in oklab, var(--ink) 5%, transparent);
+  transition:
+    background var(--d-fast) var(--ease),
+    box-shadow var(--d-fast) var(--ease);
+}
+.btn:hover {
+  background: color-mix(in oklab, var(--ink) 4%, var(--raised));
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 9px;
+  font-size: var(--t-meta);
+  border-radius: 7px;
+}
+.btn.lg {
+  height: 38px;
+  padding: 0 16px;
+  font-size: 14px;
+  border-radius: var(--r-lg);
+}
+.btn.ghost {
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+}
+.btn.ghost:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+/* Primary is painted in the hue of the project the action lands in. Outside a project it is ink. */
+.btn.go {
+  color: var(--p-on, var(--space-on));
+  background: var(--p, var(--space));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 8%, transparent),
+    0 1px 2px color-mix(in oklab, var(--p, var(--space)) 40%, transparent);
+}
+.btn.go:hover {
+  background: color-mix(in oklab, var(--p, var(--space)) 88%, var(--ink));
+}
+.btn.ink {
+  color: var(--on-attn);
+  background: var(--attn);
+  box-shadow: none;
+}
+.btn.icon {
+  width: 30px;
+  padding: 0;
+}
+.btn.icon.sm {
+  width: 26px;
+}
+.iconbtn {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  flex: none;
+}
+.iconbtn:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+
+/* ---------- Desktop window ----------
+ * The window is the tinted frame. The sidebar sits on it; the content is one inset panel. */
+.win {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 264px 1fr;
+  background: var(--chrome);
+  transition: background var(--d-hue) var(--ease);
+  overflow: hidden;
+}
+.win[data-space="all"] {
+  background:
+    linear-gradient(180deg in oklch,
+      color-mix(in oklab, var(--p-webshop) calc(var(--tint) * 0.7), var(--surface)),
+      color-mix(in oklab, var(--p-payments) calc(var(--tint) * 0.7), var(--surface)) 55%,
+      color-mix(in oklab, var(--p-ops) calc(var(--tint) * 0.7), var(--surface))) 0 0 / 264px 100% no-repeat,
+    var(--surface);
+}
+.traffic {
+  position: absolute;
+  top: 17px;
+  left: 18px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.traffic i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.14);
+}
+.traffic i:nth-child(2) {
+  background: #febc2e;
+}
+.traffic i:nth-child(3) {
+  background: #28c840;
+}
+.panel {
+  position: relative;
+  margin: 8px 8px 8px 0;
+  border-radius: 12px;
+  background: var(--canvas);
+  box-shadow:
+    0 0 0 1px var(--panel-line),
+    var(--sh-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---------- Sidebar ---------- */
+.side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 50px 10px 10px 12px;
+}
+.side-top {
+  position: absolute;
+  top: 11px;
+  right: 10px;
+  display: flex;
+  gap: 2px;
+}
+.side .iconbtn {
+  color: color-mix(in oklab, var(--ink) 55%, var(--chrome));
+}
+.space-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 12px;
+}
+.space-head .name {
+  font-size: 15px;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.space-head .sub {
+  font-size: var(--t-fine);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  letter-spacing: -0.01em;
+}
+.cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--raised) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 7%, transparent);
+  color: var(--muted);
+  font-size: var(--t-ui);
+}
+.cmd .grow {
+  color: var(--faint);
+}
+.newthread {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin-top: 6px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  font-weight: var(--w-medium);
+  color: var(--space-ink);
+}
+.newthread:hover {
+  background: var(--space-soft);
+}
+.newthread .kbd {
+  margin-left: auto;
+}
+.side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 8px -6px 0 0;
+  padding-right: 6px;
+  scrollbar-width: none;
+}
+.group {
+  margin-top: 14px;
+}
+.group-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--t-fine);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+.group-h .grow + * {
+  color: var(--faint);
+}
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: color-mix(in oklab, var(--ink) 86%, var(--chrome));
+  font-weight: var(--w-medium);
+}
+.nav .i16 {
+  color: color-mix(in oklab, var(--ink) 58%, var(--chrome));
+}
+.nav .count {
+  margin-left: auto;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-regular);
+}
+.nav:hover,
+.trow:hover {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.nav.on,
+.trow.on {
+  background: var(--raised);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ink) 6%, transparent),
+    var(--sh-1);
+  color: var(--ink);
+}
+.nav.on .i16 {
+  color: var(--ink);
+}
+/* A thread row at meta density: title, then a faint mono line. */
+.trow {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  column-gap: 7px;
+  align-items: center;
+  padding: 6px 8px 6px 7px;
+  border-radius: 8px;
+  color: color-mix(in oklab, var(--ink) 88%, var(--chrome));
+}
+.trow .mk {
+  display: grid;
+  place-items: center;
+  grid-row: 1;
+}
+.trow .t {
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-ui);
+}
+.trow .m {
+  grid-column: 2 / 4;
+  font-weight: 360;
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 10.5px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.trow .r {
+  font-size: var(--t-fine);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.trow .mk .i {
+  color: var(--p, var(--space));
+}
+.trow.idle .mk .i {
+  color: var(--faint);
+}
+.wsp {
+  font-weight: 380;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 3px;
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: -0.01em;
+}
+.wsp .i14 {
+  color: var(--faint);
+}
+.more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 30px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+
+/* The foot: the band (the pulse of the fleet), then the space switcher. */
+.side-foot {
+  padding: 10px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spaces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 0;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 8%, transparent);
+}
+.spaces .sp {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+.spaces .sp:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.spaces .sp .sw {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+.spaces .sp.on {
+  background: var(--raised);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ink) 6%, transparent),
+    var(--sh-1);
+}
+.spaces .label {
+  font-size: var(--t-meta);
+  color: var(--muted);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* ---------- The band: every live session is a segment ----------
+ * Color is the project; brightness is how alive the session is; a flag above a segment means it
+ * needs you. Segments are grouped by project; mixed contexts (assistants) wear the spectrum. */
+.band {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  padding-top: 18px;
+}
+.band .seg {
+  position: relative;
+  flex: 1 1 0;
+  height: 9px;
+  border-radius: 2.5px;
+  background: color-mix(in oklab, var(--p) 34%, var(--chrome, var(--surface)));
+}
+.band .seg.gap {
+  margin-left: 5px;
+}
+.band .seg.work {
+  background-color: var(--p);
+  background-image: linear-gradient(90deg, transparent 0%, color-mix(in oklab, white 45%, transparent) 50%, transparent 100%);
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  animation: seg-flow var(--d-flow) linear infinite;
+}
+.band .seg.wait {
+  background: var(--p);
+}
+.band .seg.paused {
+  background: repeating-linear-gradient(135deg, var(--p) 0 1.6px, color-mix(in oklab, var(--p) 25%, transparent) 1.6px 3.6px);
+}
+.band .seg.asleep {
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--p) 60%, transparent);
+}
+.band .seg.mixed {
+  --p: var(--p-payments);
+  background-image: var(--spectrum);
+  background-size: 100% 100%;
+}
+.band .seg.mixed.idle {
+  opacity: 0.4;
+}
+.band .flag {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  translate: -50% 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  background: var(--attn);
+  color: var(--on-attn);
+}
+.band .flag .i {
+  width: 11px;
+  height: 11px;
+}
+.band .flag::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1.5px;
+  height: 3px;
+  translate: -50% 0;
+  background: var(--attn);
+}
+@keyframes seg-flow {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+.pulse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pulse b {
+  color: var(--ink);
+  font-weight: var(--w-strong);
+  font-variant-numeric: tabular-nums;
+}
+.pulse .st {
+  font-size: var(--t-fine);
+  gap: 4px;
+}
+.pulse .st.work .i {
+  color: var(--ink);
+}
+
+/* ---------- Panel header ---------- */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 14px 0 20px;
+  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+}
+.bar h1 {
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  letter-spacing: -0.015em;
+  line-height: 1;
+}
+.bar .crumb {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.bar .title {
+  font-weight: var(--w-strong);
+  font-size: 14px;
+  letter-spacing: -0.005em;
+}
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.tab.on {
+  color: var(--ink);
+  font-weight: var(--w-strong);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--sh-1);
+}
+.tab .qdot {
+  width: 15px;
+  height: 15px;
+}
+.tab .i {
+  color: var(--p, var(--space));
+}
+.tab .n {
+  font-size: var(--t-fine);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.seg-ctl {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.seg-ctl button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  font-size: var(--t-meta);
+}
+.seg-ctl button[aria-pressed="true"] {
+  /* On dark grounds the raised tone sits too close to the track, so the pressed segment lifts
+   * further toward the ink. */
+  background: light-dark(var(--raised), color-mix(in oklab, var(--ink) 14%, var(--raised)));
+  color: var(--ink);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ink) 6%, transparent),
+    var(--sh-1);
+}
+
+/* ---------- Thread: transcript ---------- */
+.thread {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.transcript {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 16%, transparent) transparent;
+  padding: 26px 0 var(--stack-h, 430px);
+}
+.tcol {
+  width: 740px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.origin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  padding-bottom: 6px;
+}
+.origin a {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  border-bottom: 1px solid var(--space-line);
+}
+.bubble {
+  align-self: flex-end;
+  max-width: 560px;
+  padding: 10px 14px;
+  border-radius: 16px 16px 5px 16px;
+  background: color-mix(in oklab, var(--space) 13%, var(--raised));
+  font-size: var(--t-prose);
+  line-height: 1.55;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--space) 16%, transparent);
+}
+.who {
+  align-self: flex-end;
+  font-size: var(--t-fine);
+  color: var(--faint);
+  margin: 0 4px -12px 0;
+}
+.prose {
+  font-size: var(--t-prose);
+  line-height: 1.62;
+  color: var(--ink);
+}
+.prose p + p {
+  margin-top: 10px;
+}
+.prose code {
+  font-size: 12px;
+}
+.worked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.worked::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+.worked b {
+  font-weight: var(--w-medium);
+  color: var(--ink);
+}
+.worked .faint {
+  font-size: var(--t-fine);
+}
+.code {
+  border-radius: var(--r-lg);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  overflow: hidden;
+}
+.code-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+}
+.code pre {
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink);
+  white-space: pre;
+}
+.code pre .k {
+  color: var(--space-ink);
+}
+.code pre .s {
+  color: var(--muted);
+}
+.files {
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--raised);
+  overflow: hidden;
+}
+.files-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px;
+  font-weight: var(--w-medium);
+}
+.files-r {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 14px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 12px;
+}
+.files-f {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-soft);
+}
+/* Diffstat: additions in ink, removals muted, and a strip of filled vs hollow cells. No red/green. */
+.dstat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.dstat .a {
+  color: var(--ink);
+  font-weight: 600;
+}
+.dstat .d {
+  color: var(--faint);
+}
+.cells {
+  display: inline-flex;
+  gap: 1.5px;
+}
+.cells i {
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--ink);
+}
+.cells i.d {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.cells i.z {
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.checks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.checks .ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- The composer stack: request dock, queued row, card, lip ----------
+ * Glass. It sits over the transcript; when you scroll up it shrinks and turns see-through,
+ * and it comes back when you reach the bottom or focus it. */
+.composer-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 36px 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--canvas) 88%, transparent) 36%);
+  transition: background var(--d-glass) var(--ease);
+}
+.composer-stack {
+  width: 760px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  transition: width var(--d-glass) var(--ease-out);
+}
+.dock {
+  margin: 0 14px;
+  border-radius: 16px 16px 0 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    var(--sh-2);
+  overflow: hidden;
+}
+.dock-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: var(--attn);
+  color: var(--on-attn);
+  font-weight: var(--w-medium);
+}
+.dock-h .mono {
+  font-size: 12px;
+  background: color-mix(in oklab, var(--on-attn) 14%, transparent);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.dock-h .qdot {
+  background: var(--space);
+  color: var(--space-on);
+}
+.dock-h .by {
+  margin-left: auto;
+  font-size: var(--t-fine);
+  font-weight: var(--w-regular);
+  opacity: 0.7;
+}
+.answers {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+/* One answer is one row, and the row is the button: label, then the describe line. */
+.ans {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: left;
+}
+.ans + .ans {
+  box-shadow: 0 -1px 0 var(--line-soft);
+}
+.ans:hover,
+.ans.hover {
+  background: var(--space-soft);
+  box-shadow: none;
+}
+.ans:hover + .ans,
+.ans.hover + .ans {
+  box-shadow: none;
+}
+.ans .l {
+  font-weight: var(--w-medium);
+  color: var(--muted);
+}
+.ans.primary .l {
+  color: var(--ink);
+  font-weight: var(--w-strong);
+}
+.ans .d {
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.ans .d b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ans .d small {
+  display: block;
+  font-size: var(--t-fine);
+  color: var(--faint);
+  margin-top: 1px;
+}
+.queued {
+  margin: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 8px 0 14px;
+  border-radius: 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  font-size: var(--t-meta);
+}
+.queued .t {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.composer {
+  position: relative;
+  border-radius: 20px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    var(--sh-3);
+  transition:
+    background var(--d-glass) var(--ease),
+    box-shadow var(--d-glass) var(--ease);
+}
+.composer::before {
+  /* A hairline of the space hue along the top edge: the composer belongs to this project. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--space) 55%, transparent), transparent 60%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.composer textarea {
+  display: block;
+  width: 100%;
+  height: 56px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: none;
+  padding: 15px 18px 0;
+  font-size: var(--t-prose);
+  line-height: 1.5;
+  transition: height var(--d-glass) var(--ease-out);
+}
+.composer textarea::placeholder {
+  color: var(--faint);
+}
+.c-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 10px 10px;
+  transition:
+    padding var(--d-glass) var(--ease-out),
+    opacity var(--d-glass) var(--ease);
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pick:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+.pick .i14 {
+  color: var(--faint);
+}
+.pick .chev {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+  margin-left: -2px;
+}
+.pick.model {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.pick.model .brand {
+  color: var(--ink);
+}
+.opts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  transition:
+    max-width var(--d-glass) var(--ease-out),
+    opacity var(--d-glass) var(--ease);
+  max-width: 600px;
+}
+.send {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--space);
+  color: var(--space-on);
+  box-shadow: 0 2px 8px -2px color-mix(in oklab, var(--space) 60%, transparent);
+  flex: none;
+}
+.send.wide {
+  width: auto;
+  padding: 0 12px 0 14px;
+  gap: 6px;
+  border-radius: var(--r-pill);
+  display: inline-flex;
+  align-items: center;
+  font-weight: var(--w-strong);
+  font-size: var(--t-meta);
+}
+.send.wide .k {
+  opacity: 0.7;
+  font-weight: var(--w-regular);
+}
+.lip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px 0;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  transition: opacity var(--d-glass) var(--ease);
+}
+.lip .mono {
+  font-size: 11px;
+  color: var(--ink);
+}
+.lip .i14 {
+  color: var(--faint);
+}
+
+/* Scrolled: the stack narrows to a see-through pill; answers and options fold away. */
+html[data-state="scrolled"] .composer-wrap {
+  background: none;
+}
+html[data-state="scrolled"] .composer-stack {
+  width: 540px;
+}
+html[data-state="scrolled"] .composer,
+html[data-state="scrolled"] .dock,
+html[data-state="scrolled"] .queued {
+  background: var(--glass-thin);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+}
+html[data-state="scrolled"] .composer {
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    var(--sh-2);
+}
+html[data-state="scrolled"] .composer textarea {
+  height: 44px;
+  padding-top: 12px;
+}
+html[data-state="scrolled"] .composer .c-row {
+  position: absolute;
+  right: 0;
+  top: 0;
+  padding: 5px 5px;
+}
+html[data-state="scrolled"] .opts,
+html[data-state="scrolled"] .c-row .spacer,
+html[data-state="scrolled"] .c-row .voice {
+  max-width: 0;
+  opacity: 0;
+  display: none;
+}
+html[data-state="scrolled"] .answers,
+html[data-state="scrolled"] .queued,
+html[data-state="scrolled"] .lip {
+  display: none;
+}
+html[data-state="scrolled"] .dock {
+  margin: 0 18px 0;
+  border-radius: 14px 14px 0 0;
+}
+html[data-state="scrolled"] .dock-h {
+  padding: 8px 12px;
+  font-size: var(--t-meta);
+  background: color-mix(in oklab, var(--attn) 88%, transparent);
+}
+html[data-state="scrolled"] .dock-h .by {
+  display: none;
+}
+.dock-h .fold {
+  display: none;
+  margin-left: auto;
+  font-size: var(--t-fine);
+  opacity: 0.75;
+  font-weight: var(--w-regular);
+}
+html[data-state="scrolled"] .dock-h .fold {
+  display: inline;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .composer,
+  .dock,
+  .queued,
+  html[data-state="scrolled"] .composer,
+  html[data-state="scrolled"] .dock,
+  html[data-state="scrolled"] .queued {
+    background: var(--raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+/* ---------- Assistants ----------
+ * An assistant belongs to no project, so it wears the spectrum: a mixed context. */
+.av {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  font-weight: var(--w-strong);
+  font-size: 13px;
+  color: var(--ink);
+  background:
+    linear-gradient(var(--raised), var(--raised)) padding-box,
+    var(--spectrum-conic) border-box;
+  border: 2px solid transparent;
+}
+.av.sm {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  border-width: 1.5px;
+}
+.av.lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  font-size: 18px;
+  border-width: 3px;
+}
+.av.off {
+  background:
+    linear-gradient(var(--raised), var(--raised)) padding-box,
+    linear-gradient(var(--line), var(--line)) border-box;
+  color: var(--faint);
+}
+.bar-div {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+.queued:first-child {
+  border-radius: 14px 14px 0 0;
+}
+.dock + .queued {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- Draft thread: the empty state ---------- */
+.draft {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: 40px;
+}
+.draft-in {
+  width: 700px;
+  display: flex;
+  flex-direction: column;
+}
+.draft-q {
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.draft-sub {
+  margin: 6px 0 22px 32px;
+  color: var(--muted);
+}
+.composer.static textarea {
+  height: 84px;
+}
+.lip.static {
+  padding-left: 18px;
+}
+.starts {
+  margin-top: 34px;
+}
+.starts-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 6px;
+  font-size: var(--t-fine);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+}
+/* A starting point: one row, one hairline. The spine on the left is its project. */
+.start {
+  display: grid;
+  grid-template-columns: 4px 104px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 12px 0 10px;
+  border-radius: 10px;
+  width: 100%;
+  text-align: left;
+}
+.start + .start {
+  box-shadow: 0 -1px 0 var(--line-soft);
+}
+.start:hover,
+.start.hover {
+  background: color-mix(in oklab, var(--p) 12%, transparent);
+  box-shadow: none;
+}
+.start:hover + .start,
+.start.hover + .start {
+  box-shadow: none;
+}
+.spine {
+  width: 4px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--p);
+}
+.spine.mix {
+  background: linear-gradient(180deg in oklch, var(--p-webshop), var(--p-payments));
+}
+.spine.none {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+  background-image: repeating-linear-gradient(135deg, var(--faint) 0 1px, transparent 1px 3px);
+}
+.start .wf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  color: var(--p-ink);
+  white-space: nowrap;
+}
+.start .t {
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.start .x {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.start .x .brand {
+  color: var(--faint);
+}
+
+/* ---------- Page heads and lanes ---------- */
+.bar .meta {
+  font-size: var(--t-meta);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.bar .meta b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.subbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  padding: 0 14px 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+}
+.topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.topic:hover {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--ink);
+}
+.topic.on {
+  color: var(--ink);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--sh-1);
+}
+.topic .n {
+  font-size: var(--t-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+.topic.on .n {
+  color: var(--ink);
+}
+/* Which projects a topic holds, as a stack of tiny swatches. */
+.mini {
+  display: inline-flex;
+}
+.mini .sw {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--canvas);
+}
+.mini .sw + .sw {
+  margin-left: -2px;
+}
+.lane {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 26px 0 8px;
+  font-size: var(--t-meta);
+  font-weight: var(--w-strong);
+  color: var(--ink);
+}
+.lane .n {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.lane .note {
+  margin-left: auto;
+  font-weight: var(--w-regular);
+  color: var(--faint);
+}
+
+/* Headline: numerals carry it; words only label them. */
+.headline {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+}
+.headline .h {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.headline .h b {
+  font-size: 24px;
+  line-height: 1.05;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.headline .h span {
+  font-size: var(--t-meta);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.headline .h.quiet b {
+  color: var(--faint);
+}
+
+/* ---------- The lead Proposal: washed in its project ---------- */
+.lead {
+  position: relative;
+  border-radius: var(--r-xl);
+  padding: 18px 20px 0;
+  background: color-mix(in oklab, var(--p) 9%, var(--raised));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--p) 28%, transparent),
+    var(--sh-2);
+  overflow: hidden;
+}
+.lead::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--p);
+}
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.kicker .k {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  color: var(--p-ink);
+  background: color-mix(in oklab, var(--p) 16%, transparent);
+  white-space: nowrap;
+}
+.pchip .sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.lead h2 {
+  margin: 8px 0 6px;
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.012em;
+}
+.lead .gist {
+  font-size: var(--t-prose);
+  line-height: 1.55;
+  color: color-mix(in oklab, var(--ink) 84%, var(--p));
+  max-width: 640px;
+}
+/* Evidence: what the Proposal is made from. Numerals first; one hairline between sources. */
+.made {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr));
+  margin: 16px 0 0;
+}
+.made > div {
+  padding: 2px 14px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.made > div + div {
+  padding-left: 14px;
+  box-shadow: -1px 0 0 color-mix(in oklab, var(--p) 24%, transparent);
+}
+.made .src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.made .num {
+  font-size: 19px;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.made .num small {
+  font-size: var(--t-meta);
+  font-weight: var(--w-regular);
+  color: var(--muted);
+  letter-spacing: 0;
+}
+.made .what {
+  font-size: var(--t-fine);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The horizontal ledger: each answer is a cell with its describe line. Declining first, accepting last. */
+.hledger {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.25fr;
+  margin: 18px -20px 0;
+  border-top: 1px solid color-mix(in oklab, var(--p) 22%, transparent);
+}
+.hledger button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 20px 13px;
+  text-align: left;
+}
+.hledger button + button {
+  box-shadow: -1px 0 0 color-mix(in oklab, var(--p) 22%, transparent);
+}
+.hledger button:hover {
+  background: color-mix(in oklab, var(--p) 10%, transparent);
+}
+.hledger .l {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: var(--w-strong);
+}
+.hledger .d {
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.hledger .go {
+  background: var(--p);
+  color: var(--p-on);
+  box-shadow: none;
+}
+.hledger .go:hover {
+  background: color-mix(in oklab, var(--p) 90%, var(--ink));
+}
+.hledger .go .d {
+  color: color-mix(in oklab, var(--p-on) 78%, var(--p));
+}
+.hledger .kbd {
+  margin-left: auto;
+}
+.hledger .go .kbd {
+  color: var(--p-on);
+  background: color-mix(in oklab, var(--p-on) 12%, transparent);
+  box-shadow: none;
+}
+.aside-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -20px;
+  padding: 10px 20px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--p) 5%, var(--raised));
+  border-top: 1px solid color-mix(in oklab, var(--p) 16%, transparent);
+}
+
+/* ---------- Intake rows ----------
+ * One row per item. Spine = project, mark = kind, bars = priority, sources as marks.
+ * The row's suggested answer sits at the right, painted in the project it lands in. */
+.irow {
+  display: grid;
+  grid-template-columns: 4px 18px 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 11px 10px 11px 10px;
+  border-radius: 12px;
+}
+.irow + .irow {
+  box-shadow: 0 -1px 0 var(--line-soft);
+}
+.irow:hover,
+.irow.hover {
+  background: color-mix(in oklab, var(--p, var(--ink)) 7%, transparent);
+  box-shadow: none;
+}
+.irow:hover + .irow,
+.irow.hover + .irow {
+  box-shadow: none;
+}
+.irow .spine {
+  height: 30px;
+}
+.irow .mk {
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+.irow .body {
+  min-width: 0;
+}
+.irow .t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.irow .t span.ell {
+  min-width: 0;
+}
+.irow .m {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.irow .m .brand {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+.irow .acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.irow .desc {
+  grid-column: 3 / 5;
+  margin-top: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.irow .desc b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.irow.dim .t {
+  color: color-mix(in oklab, var(--ink) 80%, var(--canvas));
+}
+/* A question with a few answers, shown as chips on the row itself. */
+.choices {
+  grid-column: 3 / 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-md);
+  font-weight: var(--w-medium);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 1px 1px color-mix(in oklab, var(--ink) 4%, transparent);
+  white-space: nowrap;
+}
+.choice:hover {
+  box-shadow: inset 0 0 0 1.5px var(--p, var(--ink));
+}
+.choice small {
+  font-size: var(--t-fine);
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.choice .sw {
+  width: 11px;
+  height: 11px;
+}
+.choice.both .sw {
+  background: linear-gradient(135deg in oklch, var(--p-webshop) 25%, var(--p-payments) 75%);
+}
+
+/* ---------- The right rail ---------- */
+.rail {
+  border-left: 1px solid var(--line-soft);
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 20px 20px 24px;
+}
+.rail-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-meta);
+  font-weight: var(--w-strong);
+  margin-bottom: 10px;
+}
+.rail-h .n {
+  font-weight: var(--w-regular);
+  color: var(--faint);
+}
+.rail-h .grow + * {
+  font-weight: var(--w-regular);
+  color: var(--muted);
+}
+.rail-sec + .rail-sec {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+}
+/* One connection per line: its mark, a volume bar in the project it feeds, the count, what it became. */
+.came {
+  display: grid;
+  grid-template-columns: 14px 1fr 34px;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  padding: 6px 0;
+}
+.came .brand {
+  color: var(--muted);
+}
+.came .nm {
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.came .c {
+  text-align: right;
+  font-size: var(--t-meta);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-medium);
+}
+.came .vol {
+  grid-column: 2 / 4;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  overflow: hidden;
+}
+.came .vol i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--p);
+}
+.came .vol i.mix {
+  background: var(--spectrum);
+}
+.came .vol i.none {
+  background: var(--faint);
+}
+.came .bec {
+  grid-column: 2 / 4;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.receipt {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: var(--muted);
+  font-weight: 380;
+}
+.receipt b {
+  color: var(--ink);
+  font-weight: 560;
+}
+.fyi {
+  display: flex;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  align-items: flex-start;
+}
+.fyi .brand {
+  margin-top: 2px;
+}
+.fyi b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+/* An action that lands in two projects: ink text inside a two-hue edge. */
+.btn.mixgo {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(var(--raised), var(--raised)) padding-box,
+    linear-gradient(90deg in oklch, var(--p-webshop), var(--p-payments)) border-box;
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 10%, transparent);
+}
+
+/* ---------- Conversation (assistants) ---------- */
+.day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--t-fine);
+  font-weight: var(--w-medium);
+  color: var(--faint);
+}
+.day::before,
+.day::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.quiet .ticks {
+  display: inline-flex;
+  gap: 3px;
+}
+.quiet .ticks i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.2px var(--faint);
+}
+.msg {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  column-gap: 12px;
+}
+.msg .av {
+  grid-row: 1 / 3;
+}
+.msg-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--faint);
+  margin-bottom: 3px;
+}
+.msg-h b {
+  color: var(--ink);
+  font-weight: var(--w-strong);
+  font-size: var(--t-ui);
+}
+.msg .prose + * {
+  margin-top: 10px;
+}
+/* A project named in a message gets its chip, so a sentence carries its context. */
+.pref {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px 0 5px;
+  border-radius: 6px;
+  font-size: 0.92em;
+  font-weight: var(--w-medium);
+  color: var(--p-ink);
+  background: color-mix(in oklab, var(--p) 15%, transparent);
+  vertical-align: 0.5px;
+  line-height: 1.5;
+}
+.pref .sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+/* A linked item inside a message: one row, its project spine, its state. */
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px 0 0;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--p, transparent) 7%, var(--raised));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--p, var(--line)) 24%, var(--line));
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  max-width: 560px;
+}
+.link-row::before {
+  content: "";
+  align-self: stretch;
+  width: 4px;
+  background: var(--p, var(--line));
+}
+.link-row .m {
+  font-size: var(--t-meta);
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.link-row + .link-row {
+  margin-top: 6px;
+}
+.bubble.me {
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--sh-1);
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.notice .nk {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.notice b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.remcard {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--sh-1);
+  font-weight: var(--w-medium);
+}
+.remcard .when {
+  font-size: var(--t-meta);
+  color: var(--muted);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 2px;
+  background: var(--spectrum-v);
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+/* Heartbeat: one tick per hour in the window; filled = spoke, ring = quiet, outline = next. */
+.hb {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 26px;
+}
+.hb i {
+  flex: 1;
+  height: 12px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+.hb i.q {
+  background: none;
+  box-shadow: inset 0 0 0 1.2px var(--faint);
+}
+.hb i.s {
+  height: 20px;
+  background: var(--ink);
+}
+.hb i.n {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.hb-l {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ink);
+}
+.kv {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  padding: 3px 0;
+}
+.kv b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.kv .grow + * {
+  font-variant-numeric: tabular-nums;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.remrow {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  font-size: var(--t-meta);
+}
+.remrow .i {
+  color: var(--muted);
+}
+.remrow .w {
+  grid-column: 2 / 4;
+  font-size: var(--t-fine);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: -2px;
+}
+
+/* ---------- Settings ---------- */
+.set {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.set-in {
+  width: 840px;
+  margin: 0 auto;
+  padding: 8px 0 48px;
+}
+.sec {
+  padding: 22px 0 20px;
+}
+.sec + .sec {
+  border-top: 1px solid var(--line-soft);
+}
+.sec-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.sec-h h2 {
+  font-size: var(--t-section);
+  font-weight: var(--w-strong);
+  letter-spacing: -0.01em;
+}
+.sec-h p {
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.fld {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 24px;
+  min-height: 50px;
+  padding: 8px 0;
+}
+.fld + .fld {
+  border-top: 1px solid var(--line-soft);
+}
+.fld .lbl b {
+  display: block;
+  font-weight: var(--w-medium);
+}
+.fld .lbl span {
+  display: block;
+  font-size: var(--t-meta);
+  color: var(--muted);
+  margin-top: 1px;
+}
+.fld .ctl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 16%, transparent);
+  transition: background var(--d-base) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: translate var(--d-base) var(--ease);
+}
+.switch.on {
+  background: var(--space, var(--ink));
+}
+.switch.on::after {
+  translate: 14px 0;
+}
+.select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 1px 1px color-mix(in oklab, var(--ink) 4%, transparent);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.select .chev {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+/* A table without boxes: rows separated by hairlines, a quiet header. */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tbl th {
+  text-align: left;
+  font-size: var(--t-fine);
+  font-weight: var(--w-medium);
+  color: var(--faint);
+  padding: 0 10px 8px;
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 0 10px;
+  height: 46px;
+  border-top: 1px solid var(--line-soft);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tbl td:first-child,
+.tbl th:first-child {
+  padding-left: 4px;
+}
+.tbl td > * {
+  vertical-align: middle;
+}
+.tbl .num {
+  text-align: right;
+}
+.bar-h {
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  overflow: hidden;
+}
+.bar-h i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--p, var(--faint));
+}
+.bar-h i.mix {
+  background: var(--spectrum);
+}
+
+/* ---------- Theme preview: a whole window in miniature, rendered in the real theme ----------
+ * The card sets --ring from the page theme before the preview switches theme, so the selection
+ * ring always contrasts with the page, not with the preview. */
+.tc {
+  --ring: var(--ink);
+  --ring-gap: var(--canvas, var(--bg));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  min-width: 0;
+}
+.tc-prev {
+  position: relative;
+  display: block;
+  height: 108px;
+  border-radius: 12px;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--bg);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ring) 12%, transparent);
+  transition: box-shadow var(--d-base) var(--ease);
+}
+.tc.on .tc-prev {
+  box-shadow:
+    0 0 0 2px var(--ring-gap),
+    0 0 0 3.5px var(--ring);
+}
+.mw {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 36% 1fr;
+  background: var(--chrome);
+}
+.mw-side {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 17px 6px 8px 8px;
+}
+.mw-side .dots {
+  position: absolute;
+  top: 6px;
+  left: 7px;
+  display: flex;
+  gap: 3px;
+}
+.mw-side .dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.mw-l {
+  display: block;
+  height: 4px;
+  width: 78%;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 20%, transparent);
+}
+.mw-l.s {
+  width: 50%;
+}
+.mw-l.on {
+  height: 10px;
+  width: 100%;
+  border-radius: 3px;
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.mw-band {
+  margin-top: auto;
+  display: flex;
+  gap: 1px;
+}
+.mw-band i {
+  flex: 1;
+  height: 5px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--p) 35%, var(--chrome));
+}
+.mw-band i.w {
+  background: var(--p);
+}
+.mw-band i.q {
+  background: var(--ink);
+}
+.mw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 5px 5px 5px 0;
+  padding: 12px 9px 6px;
+  border-radius: 6px;
+  background: var(--canvas);
+  box-shadow: 0 0 0 0.5px var(--panel-line);
+}
+.mw-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mw-top::after {
+  content: "";
+  width: 18px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--space);
+}
+.mw-bub {
+  align-self: flex-end;
+  width: 46%;
+  height: 9px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, var(--raised));
+}
+.mw-comp {
+  position: relative;
+  margin-top: auto;
+  height: 20px;
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+}
+.mw-comp::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--space);
+}
+.tc-name {
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  gap: 7px;
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+}
+.tc-name small {
+  font-size: var(--t-fine);
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.tc-name .grow + * {
+  margin-left: auto;
+}
+.tc-hues {
+  display: inline-flex;
+  gap: 3px;
+}
+.tc-hues .sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  font-weight: var(--w-medium);
+  color: var(--on-attn);
+  background: var(--attn);
+  white-space: nowrap;
+}
+.pill.soft {
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+/* Hue picker: the hues a project can wear. The picked one is ringed. */
+.hues {
+  display: flex;
+  gap: 9px;
+}
+.hues i {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--h);
+}
+.hues i.on {
+  box-shadow:
+    0 0 0 2px var(--canvas, var(--bg)),
+    0 0 0 3.5px var(--h);
+}
+/* A hue another project wears: drawn hollow, so it reads as unavailable rather than as a paler hue. */
+.hues i.taken {
+  background: none;
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--h) 45%, transparent);
+}
+
+/* ---------- A Request with its answers, outside the composer ----------
+ * The question sits on solid ink (it needs you); the answers are a vertical ledger below it,
+ * and the first answer is painted in the hue of the project it lands in. Used by the office
+ * rail, the quick panel, the decision page and the mobile sheet. */
+.ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px 12px 0 0;
+  background: var(--attn);
+  color: var(--on-attn);
+  font-weight: var(--w-medium);
+  font-size: var(--t-ui);
+}
+.ask .qdot {
+  background: var(--p, var(--space));
+  color: var(--p-on, var(--space-on));
+  margin-top: 1px;
+}
+.ask .mono {
+  font-size: 11.5px;
+  background: color-mix(in oklab, var(--on-attn) 14%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.vled {
+  padding: 3px;
+  border-radius: 0 0 12px 12px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.vled button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-weight: var(--w-medium);
+  text-align: left;
+}
+.vled button + button {
+  box-shadow: 0 -1px 0 var(--line-soft);
+}
+.vled button.go {
+  background: var(--p, var(--space));
+  color: var(--p-on, var(--space-on));
+  box-shadow: none;
+}
+.vled button.go + button {
+  box-shadow: none;
+}
+.vled .kbd {
+  margin-left: auto;
+}
+.vled button.go .kbd {
+  background: color-mix(in oklab, var(--p-on, var(--space-on)) 16%, transparent);
+  color: inherit;
+  box-shadow: none;
+}
+
+/* ---------- App icon ----------
+ * The mark on a dark squircle. The icon carries its own hues so it looks the same in every theme
+ * and on every wallpaper. Size it with --s. */
+.appicon {
+  --p-webshop: oklch(0.76 0.16 55);
+  --p-payments: oklch(0.7 0.165 295);
+  --p-ops: oklch(0.77 0.16 152);
+  width: var(--s, 64px);
+  height: var(--s, 64px);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 23%;
+  background: linear-gradient(165deg, oklch(0.3 0.006 70), oklch(0.17 0.004 70));
+  box-shadow:
+    inset 0 0 0 0.5px oklch(1 0 0 / 0.14),
+    inset 0 1px 0 oklch(1 0 0 / 0.1),
+    0 calc(var(--s, 64px) * 0.04) calc(var(--s, 64px) * 0.12) oklch(0 0 0 / 0.28);
+}
+.appicon svg {
+  width: 62%;
+  height: 62%;
+}
+
+/* ---------- Web app shell ----------
+ * In a browser the desktop sidebar splits in two: a rail of spaces and places on the far left,
+ * and the current space's list beside it. The band becomes a strip along the top edge of the
+ * page, so the fleet stays in view on every screen. A page without a list adds .solo. */
+.web {
+  --side-w: 320px;
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 64px 256px minmax(0, 1fr);
+  grid-template-rows: 4px minmax(0, 1fr);
+  background: var(--chrome);
+  transition: background var(--d-hue) var(--ease);
+  overflow: hidden;
+}
+.web.solo {
+  --side-w: 64px;
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+.web[data-space="all"] {
+  background:
+    linear-gradient(180deg in oklch,
+      color-mix(in oklab, var(--p-webshop) calc(var(--tint) * 0.7), var(--surface)),
+      color-mix(in oklab, var(--p-payments) calc(var(--tint) * 0.7), var(--surface)) 55%,
+      color-mix(in oklab, var(--p-ops) calc(var(--tint) * 0.7), var(--surface))) 0 0 / var(--side-w) 100% no-repeat,
+    var(--surface);
+}
+.web > .panel {
+  margin: 8px 8px 8px 0;
+}
+.web.solo > .panel {
+  margin-left: 0;
+}
+
+/* The strip: one cell per live session, in the band's order. Needs-you cells are ink. */
+.strip {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 1px;
+}
+.strip .seg {
+  flex: 1 1 0;
+  background: color-mix(in oklab, var(--p) 30%, var(--chrome));
+}
+.strip .seg.gap {
+  margin-left: 4px;
+}
+.strip .seg.work {
+  background: var(--p);
+}
+.strip .seg.wait {
+  background: var(--attn);
+}
+.strip .seg.paused {
+  background: repeating-linear-gradient(135deg, var(--p) 0 1.5px, color-mix(in oklab, var(--p) 30%, var(--chrome)) 1.5px 3.5px);
+}
+.strip .seg.mixed {
+  --p: var(--p-payments);
+  background: var(--spectrum);
+}
+.strip .seg.mixed.idle {
+  opacity: 0.4;
+}
+
+/* The rail */
+.wrail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 0 12px;
+}
+.wr-logo {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+}
+.wr-logo svg {
+  width: 24px;
+  height: 24px;
+}
+.wr-sp,
+.wr-av {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+}
+.wr-sp .sw {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+.wr-sp:hover,
+.wr-av:hover,
+.wr-nav:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.wr-sp.on,
+.wr-av.on,
+.wr-nav.on {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ink) 6%, transparent),
+    var(--sh-1);
+}
+.wr-q {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--attn);
+  color: var(--on-attn);
+  box-shadow: 0 0 0 2px var(--chrome);
+}
+.wr-q .i {
+  width: 10px;
+  height: 10px;
+}
+.wr-div {
+  width: 24px;
+  height: 1px;
+  flex: none;
+  margin: 6px 0;
+  background: color-mix(in oklab, var(--ink) 11%, transparent);
+}
+.wr-nav {
+  position: relative;
+  width: 52px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 0 5px;
+  border-radius: 11px;
+  font-size: 10.5px;
+  font-weight: var(--w-medium);
+  color: color-mix(in oklab, var(--ink) 64%, var(--chrome));
+}
+.wr-nav.bare {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+}
+.wr-n {
+  position: absolute;
+  top: 1px;
+  left: 29px;
+  min-width: 17px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: var(--w-strong);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent);
+}
+.wr-nav.bare .wr-n {
+  top: 3px;
+  left: 23px;
+}
+.wr-av .av {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+.wr-av .pres {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 0 0 1.5px var(--chrome);
+}
+.wr-av .pres .i {
+  width: 9px;
+  height: 9px;
+}
+.wr-me {
+  width: 30px;
+  height: 30px;
+  margin-top: 6px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12.5px;
+  font-weight: var(--w-strong);
+}
+
+/* The list: the current space's threads, runs or domains. */
+.wlist {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px 10px 4px;
+}
+.wlist .space-head {
+  padding: 6px 6px 12px;
+}
+.wl-foot {
+  padding: 10px 8px 0;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 8%, transparent);
+}
+
+/* ---------- Mobile shell ----------
+ * A phone page is 390 x 844. The status bar and the home indicator are drawn by the page; the
+ * tab bar sits in the thumb zone and carries the band along its top edge, so the state of every
+ * live session stays in view on every screen. */
+.phone {
+  position: relative;
+  width: 390px;
+  height: 844px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  font-size: 15px;
+}
+.ph-status {
+  position: relative;
+  z-index: 30;
+  flex: none;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 28px 0 50px;
+  font-size: 16.5px;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.ph-island {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  width: 125px;
+  height: 37px;
+  margin-left: -62.5px;
+  border-radius: 19px;
+  background: #000;
+}
+.ph-sys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ph-sys svg {
+  display: block;
+  fill: currentColor;
+}
+.ph-home {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  bottom: 8px;
+  width: 134px;
+  height: 5px;
+  margin-left: -67px;
+  border-radius: 3px;
+  background: var(--ink);
+}
+.ph-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ph-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+/* A screen header: title left, actions right; the space name rides above the title. */
+.ph-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 16px 0 20px;
+}
+.ph-head h1 {
+  font-size: 22px;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.02em;
+}
+.ph-head .sub {
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.ph-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 19px;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.ph-icon .i {
+  width: 18px;
+  height: 18px;
+}
+/* The space dots: swipe sideways between spaces; each dot wears its space's hue. */
+.ph-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ph-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--p);
+  opacity: 0.45;
+}
+.ph-dots i.all {
+  background: var(--spectrum);
+}
+.ph-dots i.on {
+  width: 18px;
+  border-radius: 3px;
+  opacity: 1;
+}
+/* The tab bar. Glass, so content scrolls under it. */
+.ph-tabs {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 86px;
+  padding: 3px 6px 34px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+}
+.ph-tabs .strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+.ph-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: var(--w-medium);
+  color: var(--faint);
+}
+.ph-tab .i {
+  width: 22px;
+  height: 22px;
+}
+.ph-tab.on {
+  color: var(--ink);
+}
+.ph-tab .bd {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 6px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: var(--w-strong);
+  background: var(--attn);
+  color: var(--on-attn);
+  box-shadow: 0 0 0 2px var(--canvas);
+}
+.ph-tab .av {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.ph-new {
+  align-self: center;
+  justify-self: center;
+  width: 48px;
+  height: 40px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--space);
+  color: var(--space-on);
+  box-shadow: var(--sh-2);
+}
+[data-space="all"] .ph-new {
+  background: var(--ink);
+  color: var(--bg);
+}
+.ph-new .i {
+  width: 20px;
+  height: 20px;
+}
+/* A bottom sheet: grabber, glass, a scrim behind it when it is modal. */
+.ph-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  background: var(--scrim);
+}
+.sheet {
+  position: absolute;
+  z-index: 25;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 8px 16px 42px;
+  border-radius: 30px 30px 0 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+  box-shadow:
+    inset 0 1px 0 var(--glass-line),
+    0 -10px 40px -12px oklch(0 0 0 / 0.3);
+}
+.sheet::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 12px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 22%, transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ph-tabs,
+  .sheet {
+    background: var(--raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+/* Big answer rows: one per answer, full width, at thumb height. The first is painted in the
+ * project hue; the describe line says what the tap does. */
+.bigans {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bigans button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 16px;
+  border-radius: 18px;
+  text-align: left;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.bigans button .i {
+  width: 22px;
+  height: 22px;
+  justify-self: center;
+}
+.bigans .l {
+  display: block;
+  font-size: 16px;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.01em;
+}
+.bigans .d {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.bigans button.go {
+  min-height: 68px;
+  background: var(--p, var(--space));
+  color: var(--p-on, var(--space-on));
+  box-shadow: var(--sh-2);
+}
+.bigans button.go .d {
+  color: color-mix(in oklab, var(--p-on, var(--space-on)) 78%, transparent);
+}
+.bigans.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.bigans.pair button.go {
+  grid-column: 1 / -1;
+}
+/* A haptic annotation: where a tap is felt. Dashed and mono, so it never reads as UI. */
+.hap {
+  position: absolute;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border-radius: 11px;
+  font-family: var(--font-mono);
+  font-stretch: var(--mono-stretch);
+  font-size: 10px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--bg) 88%, transparent);
+  border: 1px dashed color-mix(in oklab, var(--ink) 55%, transparent);
+  pointer-events: none;
+}
+.hap .i {
+  width: 12px;
+  height: 12px;
+}

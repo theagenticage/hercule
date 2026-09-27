@@ -1,0 +1,443 @@
+/* =============================================================================
+   Console - tokens
+   "Keyboard at the speed of thought."
+
+   COLOR DOCTRINE: color is syntax.
+   A theme is a terminal theme: a ground, an ink, and sixteen ANSI slots. Every
+   hue on screen is one of those sixteen slots, and every slot has one job, the
+   way a syntax theme gives every token type one color. If you know what a color
+   means in one place, you know what it means everywhere.
+
+   Diagnostics (state)            Identifiers (projects)        Keywords (you)
+   c1  red      failed, burning   c4  blue    webshop           c5  magenta  the cursor:
+   c3  yellow   waits on you: ?,  c13 violet  payments-api          focus, keys, the
+                paused, held,     c9  orange  ops                   selected row, the
+                unsure            c12 c14 c10 c11 next projects,     primary answer, the
+   c2  green    done, healthy,                in that order          mode chip. It is the
+                additions                                            brand and it is the
+   c6  cyan     working, live,                                       same hue in every
+                streaming                                            theme.
+   c8  grey     idle, queued,
+                asleep, cancelled
+
+   Rules
+   - Ink is for words. Hue is for meaning. Never color a word for decoration.
+   - One hue per slot per row. A row shows at most one state hue and one project hue.
+   - Yellow is reserved for "this needs you". Nothing else may be yellow. The mark
+     says how: ? waits on your answer, ! is degraded (at cap, reconnecting, held)
+     and may need you, || is paused until you act.
+   - Magenta is where the cursor is. Only one magenta thing is "hot" per pane.
+   - Source systems (Sentry, Gmail...) are shape, not color: monochrome marks in ink.
+   - Code in transcripts and diffs uses the same slots: keywords c5, strings c2,
+     functions c4, numbers c9, types c6, comments c8.
+
+   Surfaces: panes are tiled edge to edge on --bg and split by 1px --line hairlines.
+   The frame (titlebar, sidebar, status line) sits one step down on --bg-sunk.
+   Only things that float (composer, palette, popovers, sheets) are --raised and
+   get a shadow; they may be glass.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- fonts --- */
+/* Mona Sans (prose) and JetBrains Mono (chrome, data, keys). Both SIL OFL 1.1,
+   self-hosted variable fonts, latin + latin-ext. See fonts/LICENSES.md. */
+@font-face {
+  font-family: "Mona Sans";
+  src: url("fonts/mona-sans-latin-wght.woff2") format("woff2");
+  font-weight: 200 900;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Mona Sans";
+  src: url("fonts/mona-sans-latin-ext-wght.woff2") format("woff2");
+  font-weight: 200 900;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-ext-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ------------------------------------------------------ theme-free tokens --- */
+:root {
+  /* Type. Prose is Mona Sans; everything you could type or read off a machine
+     (keys, ids, counts, paths, times) is JetBrains Mono. */
+  --font-sans: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --fs-micro: 10.5px;   /* keycaps, fine print */
+  --fs-small: 11.5px;   /* mono metadata, status line */
+  --fs-mono: 12px;      /* mono body: paths, commands, code */
+  --fs-body: 13.5px;    /* prose */
+  --fs-lead: 15px;      /* the lead row's title, transcript prose */
+  --fs-title: 17px;     /* pane titles that carry a subject */
+  --fs-display: 20px;   /* the largest text on any screen */
+
+  --lh-tight: 1.25;
+  --lh-body: 1.55;
+  --w-regular: 420;
+  --w-emph: 580;
+  --w-strong: 680;
+
+  /* Space: a 4px grid. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Layout. The screen is a grid of fixed strips and tiled panes. */
+  --titlebar-h: 40px;
+  --status-h: 26px;
+  --pane-head-h: 36px;
+  --sidebar-w: 232px;
+  --row-h: 30px;
+  --column: 720px;      /* the thread column */
+
+  /* Shape. Small radii: a terminal has none, a keycap has a little. */
+  --r-cell: 2px;
+  --r-key: 4px;
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 11px;
+  --r-pill: 999px;
+
+  /* Motion. The cursor moves instantly; things that float settle. */
+  --dur-instant: 60ms;
+  --dur-quick: 140ms;
+  --dur-settle: 240ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  --blink: 1.06s;
+
+  --glass-blur: 22px;
+}
+
+/* Density: the same screen at a tighter row. Set on <html data-density="compact">. */
+[data-density="compact"] {
+  --row-h: 26px;
+  --fs-body: 13px;
+  --fs-lead: 14px;
+  --pane-head-h: 32px;
+}
+
+/* ================================================================ themes === */
+/* Each theme sets: ground (--bg-sunk, --bg, --surface, --raised), lines, ink
+   (--ink, --muted, --faint), the sixteen ANSI slots --c0..--c15, and the ink
+   that sits on a magenta fill. Everything else is derived below. */
+
+/* Phosphor - dark flagship. A green-black ground like a phosphor tube at rest,
+   with vivid slots. The magenta cursor is complementary to the ground. */
+:root,
+[data-theme="phosphor"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-sunk: oklch(15.2% 0.015 162);
+  --bg: oklch(18% 0.017 162);
+  --surface: oklch(21.4% 0.019 162);
+  --raised: oklch(24.4% 0.021 162);
+  --line: oklch(30.5% 0.022 162);
+  --line-soft: oklch(24.8% 0.019 162);
+  --ink: oklch(93.5% 0.024 150);
+  --muted: oklch(77% 0.026 155);
+  --faint: oklch(59% 0.024 158);
+
+  --c0: oklch(24% 0.02 162);
+  --c1: oklch(70% 0.19 24);
+  --c2: oklch(84% 0.2 144);
+  --c3: oklch(87% 0.16 94);
+  --c4: oklch(75% 0.13 242);
+  --c5: oklch(71% 0.23 344);
+  --c6: oklch(84% 0.12 192);
+  --c7: oklch(86% 0.02 150);
+  --c8: oklch(58% 0.024 158);
+  --c9: oklch(77% 0.16 56);
+  --c10: oklch(91% 0.17 140);
+  --c11: oklch(93% 0.13 100);
+  --c12: oklch(84% 0.1 242);
+  --c13: oklch(75% 0.15 302);
+  --c14: oklch(92% 0.09 192);
+  --c15: oklch(98% 0.012 150);
+
+  --on-accent: oklch(17% 0.03 344);
+  --tint: 15%;
+  --tint-sel: 11%;
+  --scrim: oklch(8% 0.01 162 / 0.5);
+  --edge: oklch(100% 0 0 / 0.06);
+  --shadow-float: 0 22px 60px -16px oklch(3% 0.01 162 / 0.75), 0 2px 8px oklch(3% 0.01 162 / 0.35);
+}
+
+/* Graphite - dark, neutral. No hue in the ground at all; the slots are a
+   little calmer. For people who want the machine to disappear. */
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --bg-sunk: oklch(15.8% 0 0);
+  --bg: oklch(19% 0 0);
+  --surface: oklch(22.4% 0 0);
+  --raised: oklch(25.4% 0 0);
+  --line: oklch(31.5% 0 0);
+  --line-soft: oklch(25.8% 0 0);
+  --ink: oklch(93% 0 0);
+  --muted: oklch(76% 0 0);
+  --faint: oklch(58.5% 0 0);
+
+  --c0: oklch(25% 0 0);
+  --c1: oklch(69% 0.17 25);
+  --c2: oklch(80% 0.16 146);
+  --c3: oklch(85% 0.14 88);
+  --c4: oklch(74% 0.12 246);
+  --c5: oklch(70% 0.21 344);
+  --c6: oklch(81% 0.1 200);
+  --c7: oklch(85% 0 0);
+  --c8: oklch(57% 0 0);
+  --c9: oklch(76% 0.15 56);
+  --c10: oklch(88% 0.14 146);
+  --c11: oklch(91% 0.12 96);
+  --c12: oklch(83% 0.09 246);
+  --c13: oklch(73% 0.14 302);
+  --c14: oklch(89% 0.08 200);
+  --c15: oklch(98% 0 0);
+
+  --on-accent: oklch(16% 0.02 344);
+  --tint: 15%;
+  --tint-sel: 11%;
+  --scrim: oklch(5% 0 0 / 0.55);
+  --edge: oklch(100% 0 0 / 0.06);
+  --shadow-float: 0 22px 60px -16px oklch(0% 0 0 / 0.8), 0 2px 8px oklch(0% 0 0 / 0.4);
+}
+
+/* Ember - dark, warm. A brown-black ground and cream ink, like amber-screen
+   terminals. Easiest on the eyes late at night. */
+[data-theme="ember"] {
+  color-scheme: dark;
+  --bg-sunk: oklch(15.8% 0.017 48);
+  --bg: oklch(18.8% 0.02 50);
+  --surface: oklch(22.2% 0.022 52);
+  --raised: oklch(25.2% 0.024 54);
+  --line: oklch(31.5% 0.026 55);
+  --line-soft: oklch(25.6% 0.022 54);
+  --ink: oklch(93% 0.035 80);
+  --muted: oklch(77% 0.035 72);
+  --faint: oklch(59% 0.03 62);
+
+  --c0: oklch(25% 0.02 50);
+  --c1: oklch(69% 0.19 28);
+  --c2: oklch(81% 0.15 128);
+  --c3: oklch(86% 0.15 86);
+  --c4: oklch(75% 0.1 236);
+  --c5: oklch(72% 0.2 350);
+  --c6: oklch(81% 0.1 186);
+  --c7: oklch(86% 0.03 78);
+  --c8: oklch(58% 0.03 62);
+  --c9: oklch(77% 0.16 55);
+  --c10: oklch(89% 0.14 128);
+  --c11: oklch(92% 0.12 92);
+  --c12: oklch(84% 0.08 236);
+  --c13: oklch(75% 0.13 306);
+  --c14: oklch(89% 0.08 186);
+  --c15: oklch(98% 0.015 80);
+
+  --on-accent: oklch(17% 0.03 350);
+  --tint: 16%;
+  --tint-sel: 12%;
+  --scrim: oklch(6% 0.01 50 / 0.55);
+  --edge: oklch(100% 0.02 80 / 0.06);
+  --shadow-float: 0 22px 60px -16px oklch(4% 0.01 50 / 0.78), 0 2px 8px oklch(4% 0.01 50 / 0.38);
+}
+
+/* Void - dark, true black for OLED panels. Maximum contrast, fully saturated
+   slots, hairlines do all the separating. */
+[data-theme="void"] {
+  color-scheme: dark;
+  --bg-sunk: oklch(0% 0 0);
+  --bg: oklch(0% 0 0);
+  --surface: oklch(13.5% 0 0);
+  --raised: oklch(17% 0 0);
+  --line: oklch(26% 0 0);
+  --line-soft: oklch(19% 0 0);
+  --ink: oklch(97% 0 0);
+  --muted: oklch(79% 0 0);
+  --faint: oklch(61% 0 0);
+
+  --c0: oklch(18% 0 0);
+  --c1: oklch(68% 0.22 25);
+  --c2: oklch(86% 0.23 146);
+  --c3: oklch(90% 0.17 96);
+  --c4: oklch(73% 0.16 250);
+  --c5: oklch(70% 0.26 346);
+  --c6: oklch(87% 0.14 196);
+  --c7: oklch(88% 0 0);
+  --c8: oklch(58% 0 0);
+  --c9: oklch(78% 0.18 55);
+  --c10: oklch(92% 0.2 146);
+  --c11: oklch(95% 0.15 100);
+  --c12: oklch(83% 0.12 250);
+  --c13: oklch(74% 0.18 302);
+  --c14: oklch(93% 0.1 196);
+  --c15: oklch(100% 0 0);
+
+  --on-accent: oklch(12% 0.03 346);
+  --tint: 18%;
+  --tint-sel: 14%;
+  --scrim: oklch(0% 0 0 / 0.6);
+  --edge: oklch(100% 0 0 / 0.08);
+  --shadow-float: 0 0 0 1px oklch(30% 0 0), 0 24px 60px -16px oklch(0% 0 0 / 0.9);
+}
+
+/* Paper Tape - light flagship. Warm paper, near-black ink, slots deep enough
+   to read as text. Printer paper from a teletype, not a white web page. */
+[data-theme="paper-tape"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-sunk: oklch(95.4% 0.014 86);
+  --bg: oklch(98.6% 0.008 90);
+  --surface: oklch(96.6% 0.012 88);
+  --raised: oklch(99.7% 0.004 90);
+  --line: oklch(88.2% 0.018 84);
+  --line-soft: oklch(92.4% 0.014 85);
+  --ink: oklch(23% 0.02 60);
+  --muted: oklch(44% 0.022 62);
+  --faint: oklch(56% 0.02 68);
+
+  --c0: oklch(26% 0.02 60);
+  --c1: oklch(53% 0.2 27);
+  --c2: oklch(52% 0.15 150);
+  --c3: oklch(57% 0.14 68);
+  --c4: oklch(50% 0.16 256);
+  --c5: oklch(53% 0.23 350);
+  --c6: oklch(54% 0.1 212);
+  --c7: oklch(42% 0.02 62);
+  --c8: oklch(61% 0.018 70);
+  --c9: oklch(58% 0.17 46);
+  --c10: oklch(62% 0.16 146);
+  --c11: oklch(72% 0.15 88);
+  --c12: oklch(60% 0.14 256);
+  --c13: oklch(50% 0.19 300);
+  --c14: oklch(63% 0.1 208);
+  --c15: oklch(18% 0.02 60);
+
+  --on-accent: oklch(99% 0.01 350);
+  --tint: 13%;
+  --tint-sel: 6%;
+  --scrim: oklch(25% 0.02 60 / 0.2);
+  --edge: oklch(100% 0 0 / 0.75);
+  --shadow-float: 0 20px 48px -18px oklch(30% 0.04 60 / 0.32), 0 2px 6px oklch(30% 0.04 60 / 0.08);
+}
+
+/* Porcelain - light, cool and neutral. Bright white, graphite ink, crisp slots.
+   For daylight and projectors. */
+[data-theme="porcelain"] {
+  color-scheme: light;
+  --bg-sunk: oklch(96% 0.004 250);
+  --bg: oklch(99.4% 0.002 250);
+  --surface: oklch(97.2% 0.004 250);
+  --raised: oklch(100% 0 0);
+  --line: oklch(89.5% 0.007 250);
+  --line-soft: oklch(93.6% 0.005 250);
+  --ink: oklch(22% 0.012 262);
+  --muted: oklch(45% 0.014 262);
+  --faint: oklch(57% 0.012 262);
+
+  --c0: oklch(24% 0.012 262);
+  --c1: oklch(54% 0.21 25);
+  --c2: oklch(53% 0.16 155);
+  --c3: oklch(57.5% 0.14 72);
+  --c4: oklch(52% 0.18 258);
+  --c5: oklch(54% 0.24 348);
+  --c6: oklch(55% 0.11 215);
+  --c7: oklch(42% 0.012 262);
+  --c8: oklch(62% 0.01 262);
+  --c9: oklch(60% 0.18 44);
+  --c10: oklch(63% 0.17 150);
+  --c11: oklch(73% 0.15 90);
+  --c12: oklch(62% 0.15 258);
+  --c13: oklch(52% 0.2 298);
+  --c14: oklch(64% 0.11 212);
+  --c15: oklch(16% 0.012 262);
+
+  --on-accent: oklch(100% 0 0);
+  --tint: 12%;
+  --tint-sel: 5.5%;
+  --scrim: oklch(25% 0.01 262 / 0.18);
+  --edge: oklch(100% 0 0 / 0.9);
+  --shadow-float: 0 20px 48px -18px oklch(30% 0.02 262 / 0.3), 0 2px 6px oklch(30% 0.02 262 / 0.08);
+}
+
+/* ------------------------------------------------------- derived tokens --- */
+/* Declared on every theme scope, so a nested [data-theme] (a theme preview card)
+   derives from its own slots, not from the page's. */
+:root,
+[data-theme] {
+  /* Diagnostics: state. Names kept from today's packages/ui where the meaning holds. */
+  --fail: var(--c1);
+  --ok: var(--c2);
+  --attn: var(--c3);
+  --live: var(--c6);
+  --idle: var(--c8);
+
+  /* Keywords: the cursor. */
+  --accent: var(--c5);
+  --cursor: var(--c5);
+
+  /* Identifiers: projects. */
+  --project-webshop: var(--c4);
+  --project-payments-api: var(--c13);
+  --project-ops: var(--c9);
+
+  /* Code. */
+  --syn-key: var(--c5);
+  --syn-string: var(--c2);
+  --syn-fn: var(--c4);
+  --syn-number: var(--c9);
+  --syn-type: var(--c6);
+  --syn-comment: var(--c8);
+  --syn-punctuation: var(--muted);
+  --add: var(--c2);
+  --del: var(--c1);
+
+  /* Tints: a hue laid over the ground, for row washes and diff lines. */
+  --fail-soft: color-mix(in oklab, var(--fail) var(--tint), transparent);
+  --ok-soft: color-mix(in oklab, var(--ok) var(--tint), transparent);
+  --attn-soft: color-mix(in oklab, var(--attn) var(--tint), transparent);
+  --live-soft: color-mix(in oklab, var(--live) var(--tint), transparent);
+  --accent-soft: color-mix(in oklab, var(--accent) var(--tint), transparent);
+  --sel: color-mix(in oklab, var(--accent) var(--tint-sel), var(--bg));
+
+  /* Glass: only for things that float over a scrolling pane. */
+  --glass: color-mix(in oklab, var(--raised) 74%, transparent);
+  --glass-thin: color-mix(in oklab, var(--raised) 34%, transparent);
+
+  /* Keycaps. */
+  --key-bg: var(--surface);
+  --key-line: var(--line);
+  --key-ink: var(--muted);
+}
+
+/* Glass off: floating things turn solid. Motion off: the cursor stops blinking,
+   nothing slides. The design must read the same either way. */
+@media (prefers-reduced-transparency: reduce) {
+  :root, [data-theme] {
+    --glass: var(--raised);
+    --glass-thin: var(--raised);
+    --glass-blur: 0px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-quick: 0ms;
+    --dur-settle: 0ms;
+  }
+}

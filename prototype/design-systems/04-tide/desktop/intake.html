@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Intake · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      /* The Now line sits at x = 548 inside the main area. The past fills the left of it, what
+         needs Rogier now hangs off its right. The titlebar tideline is placed so its own Now line
+         meets this one. */
+      .bar-center { left: 352px; transform: none; }
+      .body { position: relative; flex: 1; min-height: 0; }
+      .past {
+        position: absolute; left: 0; top: 0; bottom: 0; width: 548px;
+        padding: 14px 0 16px 28px;
+        display: flex; flex-direction: column; gap: 20px;
+        background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--surface) 45%, transparent));
+      }
+      .body > .nowline { left: 547.25px; top: -9px; }
+      .present { position: absolute; left: 540px; right: 0; top: 0; bottom: 0; padding: 14px 28px 40px 36px; }
+
+      .big { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; }
+      .big .num { color: var(--ink); }
+      .big-l { display: flex; flex-direction: column; gap: 1px; padding-bottom: 3px; }
+      .big-l b { font-weight: var(--w-emph); font-size: var(--fs-md); }
+      .receipt { width: 504px; margin-bottom: 10px; }
+      .rkey { display: inline-grid; place-items: center; width: 8px; }
+      .rkey .rc { display: block; }
+
+      .row2 { display: grid; grid-template-columns: 136px 1fr; column-gap: 12px; }
+      .legend { display: flex; flex-direction: column; gap: 8px; padding-top: 70px; font-size: var(--fs-xs); color: var(--muted); }
+      .legend span { display: flex; align-items: center; gap: 7px; }
+      .sw-night { width: 14px; height: 10px; border-radius: 2px; background: var(--night); box-shadow: inset 0 0 0 1px var(--line-soft); }
+      .sw-triage { width: 14px; height: 10px; position: relative; }
+      .sw-triage::after { content: ""; position: absolute; left: 6px; bottom: 0; width: 1.5px; height: 6px; border-radius: 1px; background: var(--future-ink); }
+      .sw-tide { width: 14px; height: 10px; border-radius: 2px 2px 0 0; background: var(--past-soft); box-shadow: inset 0 1.5px 0 var(--past); }
+      .legend .t-mono { margin-top: 4px; line-height: 1.5; }
+
+      .track { position: relative; }
+      .pins { position: relative; height: 50px; }
+      .pin { position: absolute; bottom: -140px; top: var(--y); width: 0; }
+      .pin::before { content: ""; position: absolute; left: -0.5px; top: 7px; bottom: 0; width: 1px; background: var(--line); }
+      .pin-l { position: absolute; right: 9px; top: 0; white-space: nowrap; font-size: 11px; color: var(--muted); line-height: 14px; }
+      .pin-l .mono { font-size: 10.5px; color: var(--faint); margin-right: 4px; }
+      .pin.is-now::before { background: var(--now); opacity: 0.6; }
+      .pin.is-now .pin-l { color: var(--now-ink); font-weight: var(--w-emph); }
+      .pin-dot { position: absolute; left: -4px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 2px var(--bg); z-index: 2; }
+      .pin.is-now .pin-dot { background: var(--now); }
+      .pin-dot.hollow { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--ink), 0 0 0 2px var(--bg); }
+      .tide-chart { height: 140px; }
+      .axis { position: relative; height: 18px; margin-top: 4px; }
+      .axis span { position: absolute; top: 2px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+      .axis span:first-child { transform: none; }
+      .night-l { position: absolute; top: 56px; font-family: var(--font-mono); font-size: 10px; color: var(--faint); transform: translateX(-50%); }
+
+      .lanes { display: flex; flex-direction: column; }
+      .lanes > .label { margin-bottom: 4px; }
+      .lane { position: relative; display: grid; grid-template-columns: 136px 1fr; column-gap: 12px; align-items: center; height: 42px; }
+      .lane + .lane { border-top: 1px solid var(--line-soft); }
+      .lane-name { display: grid; grid-template-columns: 14px 1fr auto; column-gap: 8px; align-items: center; }
+      .lane-name .b { color: var(--muted); }
+      .lane-name span { font-size: var(--fs-sm); font-weight: var(--w-emph); }
+      .lane-name b { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--ink); }
+      .lane-name em { grid-column: 2 / 4; font-style: normal; font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+      .lane-track { height: 22px; position: relative; }
+      .lane-track svg { display: block; }
+      .held { position: absolute; top: -3px; height: 28px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--now); background: var(--now-wash); }
+      .held-l { position: absolute; top: 5px; right: calc(100% + 6px); white-space: nowrap; font-family: var(--font-mono); font-size: 10px; color: var(--now-ink); }
+
+      .fyi { margin-top: auto; padding-right: 26px; }
+      .fyi .label { margin-bottom: 2px; }
+
+      .headline { margin: 2px 0 14px; }
+      .topics { display: flex; align-items: center; gap: 2px; margin-bottom: 18px; }
+      .topics .aside { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--faint); }
+      .topics .aside .m { width: 13px; height: 13px; color: var(--future-ink); }
+      .needs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .present .sec-head { margin-top: 24px; }
+      .attached { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 0 6px; font-size: var(--fs-xs); color: var(--muted); }
+      .attached .m { width: 14px; height: 14px; color: var(--faint); }
+      .attached b { font-weight: var(--w-emph); color: var(--ink); }
+
+      /* ?state=swarm: the same page at ten times today's load. Nothing gets longer: counts grow,
+         lanes turn into density, and Proposals that share a cause are answered together. */
+      :root:not([data-state="swarm"]) .swarm,
+      :root[data-state="swarm"] .calm { display: none !important; }
+      :root[data-state="swarm"] .receipt { grid-template-columns: repeat(auto-fill, 5px); gap: 1.5px; }
+      :root[data-state="swarm"] .rc { width: 5px; height: 5px; border-radius: 1px; }
+      .per-sq { font-family: var(--font-mono); font-size: 10px; color: var(--faint); margin: 0 0 6px; }
+      .lane-track[data-tide] { height: 22px; }
+      .lane-more .lane-name .b { width: 12px; height: 12px; }
+      .more-marks { display: inline-flex; gap: 3px; color: var(--muted); }
+      .horizon { margin: 0 0 16px; }
+      /* The 60 Proposals by when they need Rogier: now in coral, today solid, later hollow. */
+      .hz-bar { display: flex; gap: 3px; height: 22px; }
+      .hz-bar span { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 0 8px; border-radius: 6px; font-size: var(--fs-xs); font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; }
+      .hz-bar b { font-family: var(--font-mono); font-weight: 500; }
+      .hz-now { background: var(--now); color: var(--on-now); }
+      .hz-today { background: var(--ink); color: var(--bg); }
+      .hz-later { box-shadow: inset 0 0 0 1.5px var(--future); background: var(--future-wash); color: var(--future-ink); }
+      .lead-made { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; overflow: hidden; }
+      .lead-made .b { width: 13px; height: 13px; }
+      .lead-made .mono { font-size: 11px; color: var(--faint); }
+      .group { display: grid; grid-template-columns: 34px minmax(0, 1fr) 76px auto; align-items: center; column-gap: 14px; padding: 10px 8px 10px 4px; }
+      .group + .group { box-shadow: 0 -1px 0 var(--line-soft); }
+      .group .num { font-size: 24px; text-align: right; }
+      .g-title { font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .g-gist .kind { color: var(--muted); }
+      .g-gist { margin-top: 2px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; overflow: hidden; }
+      .g-gist .b { width: 12px; height: 12px; color: var(--muted); }
+      .g-spark { height: 26px; }
+      .g-act { display: flex; gap: 4px; }
+      :root[data-state="swarm"] .lead .proactive { display: none; }
+      :root[data-state="swarm"] .lead-gist { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .needs-sum { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); }
+      .needs-sum .num { font-size: 24px; color: var(--now-ink); }
+      .needs-parts { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--muted); }
+      .needs-parts b { color: var(--ink); font-weight: var(--w-emph); }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="hercule" data-active="intake"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title"><h1 class="page-title">Intake</h1><span class="bar-when">since yesterday 18:20</span></div>
+        <div class="bar-center" data-tideline="day" data-w="300"></div>
+        <div class="bar-end">
+          <button class="search-btn"><i data-m="search"></i>Search<kbd>⌘K</kbd></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <!-- The past: everything that came in since Rogier last looked, on one time axis. -->
+        <section class="past scroll" aria-label="What came in">
+          <div class="calm">
+            <div class="big">
+              <span class="num num-xl">212</span>
+              <span class="big-l"><b>events since you last looked</b><span class="t-mono">yesterday 18:20 → today 09:41</span></span>
+            </div>
+            <div class="receipt" data-receipt="lead:1,proposal:5,offer:2,unsure:2,attached:1,fyi:3,none:198" role="img" aria-label="212 events: 6 proposals, 2 offers, 2 unsure, 1 attached, 3 FYI, 198 no action"></div>
+            <ul class="receipt-key">
+              <li><span class="rkey"><i class="rc rc-proposal"></i></span><b>6</b> proposals</li>
+              <li><span class="rkey"><i class="rc rc-offer"></i></span><b>2</b> offers</li>
+              <li><span class="rkey"><i class="rc rc-unsure"></i></span><b>2</b> unsure</li>
+              <li><span class="rkey"><i class="rc rc-attached"></i></span><b>1</b> attached</li>
+              <li><span class="rkey"><i class="rc rc-fyi"></i></span><b>3</b> FYI</li>
+              <li><span class="rkey"><i class="rc"></i></span><b>198</b> no action</li>
+            </ul>
+          </div>
+          <div class="swarm">
+            <div class="big">
+              <span class="num num-xl">2,684</span>
+              <span class="big-l"><b>events since you last looked</b><span class="t-mono">yesterday 18:20 → today 09:41 · 11 connections</span></span>
+            </div>
+            <p class="per-sq">one square = 10 events</p>
+            <div class="receipt" data-receipt="lead:1,proposal:6,offer:2,unsure:1,attached:1,fyi:3,none:255" role="img" aria-label="2,684 events: 60 proposals, 18 offers, 6 unsure, 14 attached, 31 FYI, 2,555 no action"></div>
+            <ul class="receipt-key">
+              <li><span class="rkey"><i class="rc rc-proposal"></i></span><b>60</b> proposals</li>
+              <li><span class="rkey"><i class="rc rc-offer"></i></span><b>18</b> offers</li>
+              <li><span class="rkey"><i class="rc rc-unsure"></i></span><b>6</b> unsure</li>
+              <li><span class="rkey"><i class="rc rc-attached"></i></span><b>14</b> attached</li>
+              <li><span class="rkey"><i class="rc rc-fyi"></i></span><b>31</b> FYI</li>
+              <li><span class="rkey"><i class="rc"></i></span><b>2,555</b> no action</li>
+            </ul>
+          </div>
+
+          <div class="row2">
+            <div class="legend">
+              <span class="label" style="padding:0;margin-bottom:2px">Tide</span>
+              <span><i class="sw-tide"></i>events per 20 min</span>
+              <span><i class="sw-night"></i>night</span>
+              <span><i class="sw-triage"></i>triage pass</span>
+              <span class="t-mono">last pass 09:00<br />took 42s</span>
+            </div>
+            <div class="track">
+              <div class="pins">
+                <div class="pin is-now" style="left: 94.68%; --y: 0px"><span class="pin-l"><span class="mono">08:52</span>Checkout fails for EU cards</span><i class="pin-dot"></i></div>
+                <div class="pin" style="left: 90.55%; --y: 17px"><span class="pin-l"><span class="mono">08:14</span>Spawn Bound tripped, 34 held</span><i class="pin-dot hollow"></i></div>
+                <div class="pin" style="left: 75.57%; --y: 34px"><span class="pin-l"><span class="mono">05:56</span>backup timed out</span><i class="pin-dot"></i></div>
+              </div>
+              <div class="tide-chart" data-tide="since" data-night="on" data-ticks="on" data-bucket="20"></div>
+              <span class="night-l" style="left: 56.46%">night</span>
+              <div class="axis">
+                <span style="left: 0">18:20</span><span style="left: 17.37%">21:00</span><span style="left: 36.92%">00:00</span><span style="left: 56.46%">03:00</span><span style="left: 76.00%">06:00</span><span style="left: 89.03%">08:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="lanes calm">
+            <div class="label">What came in <span class="n">7 connections</span></div>
+            <div class="lane"><div class="lane-name"><i data-b="sentry"></i><span>Sentry</span><b>131</b><em>1 proposal · 1 attached</em></div><div class="lane-track" data-ticks-of="sentry"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="github"></i><span>GitHub</span><b>38</b><em>1 offer · 34 held</em></div><div class="lane-track" data-ticks-of="github"></div><span class="held" style="left: calc(136px + 12px + (100% - 148px) * 0.8925 - 3px); width: 11px"><span class="held-l">34 held</span></span></div>
+            <div class="lane"><div class="lane-name"><i data-b="gmail"></i><span>Gmail</span><b>17</b><em>1 proposal · 1 offer</em></div><div class="lane-track" data-ticks-of="gmail"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="stripe"></i><span>Stripe</span><b>12</b><em>1 proposal · 1 FYI</em></div><div class="lane-track" data-ticks-of="stripe"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="intercom"></i><span>Intercom</span><b>9</b><em>1 unsure · 1 proposal</em></div><div class="lane-track" data-ticks-of="intercom"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="posthog"></i><span>PostHog</span><b>3</b><em>part of the lead · 1 FYI</em></div><div class="lane-track" data-ticks-of="posthog"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="grafana"></i><span>Grafana</span><b>2</b><em>1 proposal</em></div><div class="lane-track" data-ticks-of="grafana"></div></div>
+          </div>
+
+          <div class="lanes swarm">
+            <div class="label">What came in <span class="n">11 connections · busiest first</span></div>
+            <div class="lane"><div class="lane-name"><i data-b="sentry"></i><span>Sentry</span><b>1,402</b><em>9 proposals</em></div><div class="lane-track" data-tide="spark:31,1402" data-peak="1" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="github"></i><span>GitHub</span><b>431</b><em>12 offers · 34 held</em></div><div class="lane-track" data-tide="spark:32,431" data-peak="0.55" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="stripe"></i><span>Stripe</span><b>262</b><em>9 proposals · 8 FYI</em></div><div class="lane-track" data-tide="spark:33,262" data-peak="0.43" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="gmail"></i><span>Gmail</span><b>204</b><em>8 proposals · 6 offers</em></div><div class="lane-track" data-tide="spark:34,204" data-peak="0.38" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+            <div class="lane"><div class="lane-name"><i data-b="intercom"></i><span>Intercom</span><b>138</b><em>5 proposals · 4 unsure</em></div><div class="lane-track" data-tide="spark:35,138" data-peak="0.31" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+            <div class="lane"><div class="lane-name"><i data-m="connections"></i><span>6 more</span><b>247</b><em>28 proposals · 23 FYI</em></div><div class="lane-track" data-tide="spark:36,247" data-peak="0.42" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="15" data-floor="1"></div></div>
+          </div>
+          <div class="fyi calm">
+            <div class="label">FYI <span class="n">3</span></div>
+            <div class="fyi-row"><i data-b="github"></i><span>Release <b>v2.14.0</b> of payments-api was published</span><span class="when">19:12</span></div>
+            <div class="fyi-row"><i data-b="posthog"></i><span>Sign-ups up <b>+9%</b> week over week</span><span class="when">07:00</span></div>
+            <div class="fyi-row"><i data-b="stripe"></i><span>Payout of <b>€18,240</b> arrives Thursday</span><span class="when">06:14</span></div>
+          </div>
+          <div class="fyi swarm">
+            <div class="label">FYI <span class="n">31 in 3 groups</span></div>
+            <div class="fyi-row"><i data-b="github"></i><span><b>9</b> releases published, newest <b>v2.14.0</b> of payments-api</span><span class="when">19:12</span></div>
+            <div class="fyi-row"><i data-b="posthog"></i><span><b>14</b> metric changes, largest sign-ups <b>+9%</b></span><span class="when">07:00</span></div>
+            <div class="fyi-row"><i data-b="stripe"></i><span><b>8</b> payouts, <b>€18,240</b> arrives Thursday</span><span class="when">06:14</span></div>
+          </div>
+        </section>
+
+        <div class="nowline" aria-hidden="true"></div>
+
+        <!-- Now: what needs Rogier, tethered to the Now line. -->
+        <section class="present scroll" aria-label="Needs you">
+          <div class="headline swarm">
+            <div class="hn is-now"><span class="num">1</span><span class="hn-l"><i data-m="decision" class="now xs"></i>burning</span></div>
+            <div class="hn"><span class="num">60</span><span class="hn-l">proposals</span></div>
+            <div class="hn"><span class="num">9</span><span class="hn-l">need a call</span></div>
+            <span class="hn-sep" aria-hidden="true"></span>
+            <div class="hn is-past"><span class="num">31</span><span class="hn-l">FYI</span></div>
+            <div class="hn is-past"><span class="num">2,555</span><span class="hn-l">handled quietly</span></div>
+          </div>
+          <div class="horizon swarm" role="img" aria-label="60 proposals: 4 now, 21 today, 35 when you can">
+            <div class="hz-bar"><span class="hz-now" style="flex: 4"><b>4</b>now</span><span class="hz-today" style="flex: 21"><b>21</b>today</span><span class="hz-later" style="flex: 35"><b>35</b>when you can</span></div>
+          </div>
+          <div class="topics swarm" role="tablist" aria-label="Topics">
+            <button class="tab-pill" role="tab" aria-selected="true">All <span class="n">60</span></button>
+            <button class="tab-pill" role="tab">Checkout <span class="n">19</span></button>
+            <button class="tab-pill" role="tab">Infrastructure <span class="n">12</span></button>
+            <button class="tab-pill" role="tab">Customers <span class="n">17</span></button>
+            <button class="tab-pill" role="tab">Releases <span class="n">12</span></button>
+          </div>
+          <div class="headline calm">
+            <div class="hn is-now"><span class="num">1</span><span class="hn-l"><i data-m="decision" class="now xs"></i>burning</span></div>
+            <div class="hn"><span class="num">6</span><span class="hn-l">proposals</span></div>
+            <div class="hn"><span class="num">2</span><span class="hn-l">need a call</span></div>
+            <span class="hn-sep" aria-hidden="true"></span>
+            <div class="hn is-past"><span class="num">3</span><span class="hn-l">FYI</span></div>
+            <div class="hn is-past"><span class="num">198</span><span class="hn-l">handled quietly</span></div>
+          </div>
+          <div class="topics calm" role="tablist" aria-label="Topics">
+            <button class="tab-pill" role="tab" aria-selected="true">All</button>
+            <button class="tab-pill" role="tab">Checkout</button>
+            <button class="tab-pill" role="tab">Infrastructure</button>
+            <button class="tab-pill" role="tab">Customers</button>
+            <button class="tab-pill" role="tab">Releases</button>
+          </div>
+
+          <article class="lead">
+            <span class="tether" aria-hidden="true"></span>
+            <header class="lead-head">
+              <span class="prio" data-p="4" role="img" aria-label="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+              <span class="lead-kind tx-now">Urgent</span>
+              <span class="dotsep">·</span><span>Checkout</span>
+              <span class="dotsep">·</span><span class="proj lane-webshop">webshop</span>
+              <span class="lead-seen">first seen 08:52 · 49m ago</span>
+            </header>
+            <h2 class="lead-title">Checkout fails for EU cards with 3-D Secure</h2>
+            <p class="lead-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+            <div class="lead-made swarm"><span>Made from</span><i data-b="sentry"></i><span class="mono">412 events</span><i data-b="gmail"></i><span class="mono">3 emails</span><i data-b="posthog"></i><span class="mono">-18%</span><i data-b="github"></i><span class="mono">deploy #1289</span></div>
+            <div class="lead-part story calm" aria-label="When it happened">
+              <div class="story-night" style="left: 45.7%; width: 40.6%"><span>night</span></div>
+              <div class="story-axis"></div>
+              <div class="story-errors" style="left: 0.85%; right: 0"></div>
+              <span class="story-pt" style="left: 8px"><i data-b="github"></i></span>
+              <span class="story-pt" style="left: 28.8%"><i data-b="gmail"></i></span>
+              <span class="story-pt" style="left: 91%"><i data-b="gmail"></i></span>
+              <span class="story-pt is-now" style="left: calc(100% - 8px)"><i data-m="decision"></i></span>
+              <span class="story-lab top" style="left: 0"><b>14:02</b> deploy #1289</span>
+              <span class="story-lab bottom" style="left: 0"><b>14:10</b> conversion -18%, EU only</span>
+              <span class="story-lab top" style="left: 28.8%; transform: translateX(-50%)">first email</span>
+              <span class="story-lab top end" style="left: 100%">first seen <b>08:52</b></span>
+              <span class="story-lab bottom end" style="left: 100%">412 errors · 188 users · 3 emails</span>
+            </div>
+
+            <div class="lead-part calm">
+              <div class="label">Made from <span class="n">4 sources</span></div>
+              <div class="made made-1">
+                <div class="made-row"><i data-b="sentry"></i><span><span class="mono fact-code">PaymentError: authentication_required</span> · 412 events, 188 users<span class="src">Sentry · webshop-prod</span></span></div>
+                <div class="made-row"><i data-b="gmail"></i><span>3 customer emails: "Card declined at checkout", "Can't pay with my Rabobank card", …<span class="src">Gmail · rogier@personal</span></span></div>
+                <div class="made-row"><i data-b="posthog"></i><span>Checkout conversion -18% since 14:10 yesterday, EU only<span class="src">PostHog · webshop</span></span></div>
+                <div class="made-row"><i data-b="github"></i><span>Deploy #1289 at 14:02 yesterday, "Upgrade Stripe SDK to v14"<span class="src">GitHub · rogier/webshop</span></span></div>
+              </div>
+            </div>
+
+            <div class="ledger" role="group" aria-label="Answers">
+              <button class="ans is-go"><span class="ans-label"><i data-m="run" class="sm"></i>Start "Fix bug"</span><span class="ans-say"><b>Starts Fix bug on webshop in a new worktree</b><span class="sub">Claude Code · Opus 5.5 · studio-mac</span></span><kbd><i data-m="return" class="xs"></i></kbd></button>
+              <button class="ans"><span class="ans-label"><i data-m="task" class="sm"></i>Accept</span><span class="ans-say">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans"><span class="ans-label"><i data-m="close" class="sm"></i>Dismiss</span><span class="ans-say">Closes the Proposal</span><kbd>D</kbd></button>
+            </div>
+            <p class="proactive"><i data-m="queued" class="sm"></i>I can also draft a reply to the 3 customers once the fix ships.</p>
+          </article>
+
+          <div class="swarm">
+            <div class="sec-head"><i data-m="unsure" class="now sm"></i>Needs a call <span class="n">9</span><span class="aside">triage could not decide these</span></div>
+            <div class="needs-sum">
+              <span class="num">9</span>
+              <div class="needs-parts"><span><b>6 unsure</b> which project, 4 of them from Intercom</span><span><b>3 breakers tripped</b>, 112 events held</span></div>
+              <button class="btn btn-sm btn-ink">Answer 9 in a row<i data-m="return" class="xs"></i></button>
+            </div>
+            <div class="sec-head"><i data-m="triage" class="sm muted"></i>Answer together <span class="n">35 in 4 groups</span><span class="aside">one answer covers the group</span></div>
+            <div class="group">
+              <span class="num">12</span>
+              <div><div class="g-title">Merge 12 dependency bumps</div><div class="g-gist"><span class="kind">Offers</span><i data-b="github"></i><span>Releases</span><span>all green, patch versions only</span></div></div>
+              <div class="g-spark" data-tide="spark:51,36" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="45" data-floor="1"></div>
+              <div class="g-act"><button class="btn btn-sm btn-ink">Merge all 12</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+            </div>
+            <div class="group">
+              <span class="num">9</span>
+              <div><div class="g-title">Webhook retries at 9 merchants</div><div class="g-gist"><span class="kind">Proposals</span><i data-b="stripe"></i><i data-b="sentry"></i><span class="proj lane-payments">payments-api</span><span>one cause</span></div></div>
+              <div class="g-spark" data-tide="spark:52,27" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="45" data-floor="1"></div>
+              <div class="g-act"><button class="btn btn-sm btn-ink"><i data-m="run" class="xs"></i>Start "Fix bug"</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+            </div>
+            <div class="group">
+              <span class="num">8</span>
+              <div><div class="g-title">Disk and certificate warnings</div><div class="g-gist"><span class="kind">Proposals</span><i data-b="grafana"></i><i data-b="cron"></i><span class="proj lane-ops">ops</span><span>4 hosts</span></div></div>
+              <div class="g-spark" data-tide="spark:53,24" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="45" data-floor="1"></div>
+              <div class="g-act"><button class="btn btn-sm btn-ink"><i data-m="run" class="xs"></i>Start "Investigate"</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+            </div>
+            <div class="group">
+              <span class="num">6</span>
+              <div><div class="g-title">Draft replies to 6 customers</div><div class="g-gist"><span class="kind">Offers</span><i data-b="gmail"></i><i data-b="intercom"></i><span>Customers</span><span>invoices and API limits</span></div></div>
+              <div class="g-spark" data-tide="spark:54,18" data-from="-340" data-to="581" data-now="off" data-night="on" data-bucket="45" data-floor="1"></div>
+              <div class="g-act"><button class="btn btn-sm btn-ink">Draft 6 replies</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+            </div>
+            <div class="group">
+              <span class="num">42</span>
+              <div><div class="g-title">more Proposals, one at a time</div><div class="g-gist"><b class="tx-now">3 now</b><span>· 4 today · 35 when you can</span></div></div>
+              <span></span>
+              <div class="g-act"><button class="btn btn-sm">Review in order</button><span style="width: 28px"></span></div>
+            </div>
+          </div>
+          <div class="calm">
+          <div class="sec-head"><i data-m="unsure" class="now sm"></i>Needs a call <span class="n">2</span><span class="aside">triage could not decide these</span></div>
+          <div class="needs">
+            <div class="need">
+              <div class="need-meta"><span class="kind">Unsure</span><span class="dotsep">·</span><i data-b="intercom"></i>Intercom · 7 conversations</div>
+              <div class="need-title">App is slow on Android</div>
+              <p class="need-q">"I can't tell which project this belongs to."</p>
+              <div class="quick"><button><span class="proj lane-webshop">webshop</span></button><button><span class="proj lane-payments">payments-api</span></button><button>Both</button><button>Not work</button></div>
+            </div>
+            <div class="need">
+              <div class="need-meta"><span class="kind">Breaker tripped</span><span class="dotsep">·</span><i data-b="github"></i>GitHub · 08:14</div>
+              <div class="need-title">"Label new issues" held 34 events</div>
+              <p class="need-q">Its Spawn Bound of 20 per hour tripped after a bot opened 34 issues.</p>
+              <div class="quick"><button>Keep held</button><button>Release all 34</button><button>Raise bound to 50/h</button></div>
+            </div>
+          </div>
+
+          <div class="sec-head"><i data-m="sun" class="sm muted"></i>Today <span class="n">4</span></div>
+          <div class="prow">
+            <span class="prio" data-p="3" role="img" aria-label="Priority high, 3 of 4"><i></i><i></i><i></i><i></i></span>
+            <div><div class="prow-title">Nightly backup job timing out on ops-db</div><div class="prow-meta"><i data-b="grafana"></i><i data-b="cron"></i><span>Infrastructure</span><span class="proj lane-ops">ops</span><span class="fact">3 nights in a row; the job hits its 2h limit at 04:00.</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm btn-ink"><i data-m="run" class="xs"></i>Start "Investigate"</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+          </div>
+          <div class="prow">
+            <i data-m="offer" class="muted"></i>
+            <div><div class="prow-title">Draft a reply to Marta at Brightline</div><div class="prow-meta"><i data-b="gmail"></i><span class="kind">Offer</span><span>Customers</span><span class="fact">Asks for invoice INV-2291 in the company name, not hers.</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm btn-ink">Draft reply</button><button class="btn btn-sm btn-ghost">Not now</button></div>
+          </div>
+          <div class="prow">
+            <span class="prio" data-p="2" role="img" aria-label="Priority medium, 2 of 4"><i></i><i></i><i></i><i></i></span>
+            <div><div class="prow-title">Stripe webhook retries rising</div><div class="prow-meta"><i data-b="stripe"></i><i data-b="sentry"></i><span>Checkout</span><span class="proj lane-payments">payments-api</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm btn-ink"><i data-m="run" class="xs"></i>Start "Investigate"</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+          </div>
+          <div class="prow">
+            <i data-m="offer" class="muted"></i>
+            <div><div class="prow-title">Merge 4 dependency bumps</div><div class="prow-meta"><i data-b="github"></i><span class="kind">Offer</span><span>Releases</span><span class="fact">All green, patch versions only.</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm btn-ink">Merge all 4</button><button class="btn btn-sm btn-ghost">Review first</button></div>
+          </div>
+
+          <div class="sec-head"><i data-m="clock" class="sm muted"></i>When you can <span class="n">2</span></div>
+          <div class="prow">
+            <span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span>
+            <div><div class="prow-title">SSL certificate for status.acme.dev expires in 12 days</div><div class="prow-meta"><i data-b="cron"></i><span>Infrastructure</span><span class="proj lane-ops">ops</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm"><i data-m="run" class="xs"></i>Start "Fix bug"</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+          </div>
+          <div class="prow">
+            <span class="prio" data-p="1" role="img" aria-label="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span>
+            <div><div class="prow-title">Add iDEAL as a payment method</div><div class="prow-meta"><i data-b="intercom"></i><span>5 requests</span><span class="proj lane-webshop">webshop</span></div></div>
+            <div class="prow-act"><button class="btn btn-sm"><i data-m="task" class="xs"></i>Accept</button><button class="icon-btn" aria-label="More answers"><i data-m="more"></i></button></div>
+          </div>
+          <p class="attached"><i data-m="attach"></i>2 new Sentry events attached to the Task <b>Cart total rounding on discounts</b></p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

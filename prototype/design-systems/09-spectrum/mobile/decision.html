@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout fails for EU cards with 3-D Secure · Proposal</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.phone { background: linear-gradient(to bottom, color-mix(in oklab, var(--p) 10%, var(--canvas)), var(--canvas) 360px); }
+.nav-m { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px 0 10px; flex: none; }
+.nav-m .back { display: inline-flex; align-items: center; gap: 2px; font-size: 16px; color: var(--p-ink); font-weight: var(--w-medium); }
+.nav-m .back .i { width: 20px; height: 20px; }
+.nav-m .pos { flex: 1; text-align: center; font-size: var(--t-meta); color: var(--muted); font-variant-numeric: tabular-nums; }
+.dc { padding: 4px 20px 240px; }
+.dc .kicker { font-size: var(--t-fine); }
+.dc h1 { margin: 8px 0 6px; font-size: 22px; line-height: 1.22; font-weight: var(--w-strong); letter-spacing: -0.02em; }
+.dc .gist { font-size: 14.5px; line-height: 1.5; color: color-mix(in oklab, var(--ink) 84%, var(--p)); }
+.mchart { margin-top: 16px; }
+.mchart-h { display: flex; justify-content: space-between; font-size: var(--t-fine); color: var(--muted); margin-bottom: 6px; }
+.mbars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 64px; box-shadow: inset 0 -1px 0 var(--line); }
+.mbars i { flex: 1; border-radius: 2px 2px 1px 1px; background: color-mix(in oklab, var(--p) 60%, transparent); }
+.mbars i.pre { background: var(--line); }
+.mbars i.now { background: var(--p); }
+.mbars .dep { position: absolute; left: calc(2 * (100% + 2px) / 22 - 1px); top: -4px; bottom: 0; border-left: 1.5px dashed var(--ink); }
+.mbars .dep span { position: absolute; left: 5px; top: -3px; font-size: 10.5px; font-weight: var(--w-medium); white-space: nowrap; }
+.evs { margin-top: 14px; }
+.ev { display: grid; grid-template-columns: 16px 104px minmax(0, 1fr); align-items: center; column-gap: 10px; height: 44px; box-shadow: inset 0 1px 0 var(--line-soft); }
+.ev .brand { width: 14px; height: 14px; }
+.ev .n { font-size: 17px; font-weight: var(--w-strong); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev .n small { margin-left: 4px; font-size: var(--t-fine); font-weight: var(--w-regular); color: var(--muted); letter-spacing: 0; }
+.ev .w { font-size: var(--t-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-m { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; padding: 12px 16px 40px; background: var(--glass); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6); backdrop-filter: blur(var(--glass-blur)) saturate(1.6); box-shadow: inset 0 1px 0 var(--glass-line); }
+.runs-m { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; font-size: var(--t-fine); color: var(--muted); }
+.runs-m .i, .runs-m .brand { width: 12px; height: 12px; }
+@media (prefers-reduced-transparency: reduce) { .dock-m { background: var(--raised); backdrop-filter: none; -webkit-backdrop-filter: none; } }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone p-webshop" data-space="webshop">
+  <div class="ph-status">
+    <span class="time">9:41</span>
+    <span class="ph-island"></span>
+    <span class="ph-sys" aria-label="Full signal, wifi, battery 82%">
+      <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 2.6c2.2 0 4.2.85 5.7 2.25l1.1-1.15A9.6 9.6 0 0 0 8 1 9.6 9.6 0 0 0 1.2 3.7l1.1 1.15A8.1 8.1 0 0 1 8 2.6Zm0 3.2c1.35 0 2.6.52 3.5 1.38l1.1-1.15A6.5 6.5 0 0 0 8 4.2 6.5 6.5 0 0 0 3.4 6.03L4.5 7.18A5 5 0 0 1 8 5.8Zm0 3.2c.5 0 .95.2 1.3.5L8 11 6.7 9.5c.35-.3.8-.5 1.3-.5Z"/></svg>
+      <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="16.5" height="9" rx="2.4"/><path d="M25 4.5v4a2.2 2.2 0 0 0 0-4Z" opacity=".45"/></svg>
+    </span>
+  </div>
+  <div class="ph-body">
+    <div class="nav-m"><a class="back"><svg class="i" aria-hidden="true"><use href="#i-chev-left"/></svg>Intake</a><span class="pos">1 of 9</span><a class="ph-icon" aria-label="Share link"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></a></div>
+    <div class="ph-scroll">
+      <div class="dc">
+        <div class="kicker"><span class="k"><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>Proposal</span><span class="sep">·</span><span class="prio" data-n="4" title="priority urgent"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="grow"></span><span class="pchip"><span class="sw"></span>webshop</span></div>
+        <h1>Checkout fails for EU cards with 3-D Secure</h1>
+        <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+        <div class="mchart">
+          <div class="mchart-h"><span>Sentry errors per hour</span><span>12:00 → 09:41</span></div>
+          <div class="mbars" role="img" aria-label="Errors start right after deploy 1289 and peak this morning"><i class="pre" style="height:4.0%"></i><i class="pre" style="height:4.0%"></i><i class="" style="height:26.1%"></i><i class="" style="height:44.9%"></i><i class="" style="height:49.3%"></i><i class="" style="height:52.2%"></i><i class="" style="height:47.8%"></i><i class="" style="height:42.0%"></i><i class="" style="height:34.8%"></i><i class="" style="height:24.6%"></i><i class="" style="height:14.5%"></i><i class="" style="height:8.7%"></i><i class="" style="height:4.3%"></i><i class="" style="height:4.0%"></i><i class="" style="height:4.0%"></i><i class="" style="height:4.0%"></i><i class="" style="height:4.0%"></i><i class="" style="height:7.2%"></i><i class="" style="height:20.3%"></i><i class="" style="height:43.5%"></i><i class="" style="height:68.1%"></i><i class=" now" style="height:100.0%"></i><span class="dep"><span>#1289</span></span></div>
+        </div>
+        <div class="evs">
+          <div class="ev"><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg><span class="n">412<small>events</small></span><span class="w">188 users · PaymentError</span></div>
+          <div class="ev"><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg><span class="n">3<small>emails</small></span><span class="w">"Card declined at checkout"</span></div>
+          <div class="ev"><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg><span class="n">-18%<small>conv.</small></span><span class="w">EU only, since 14:10 yesterday</span></div>
+          <div class="ev"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg><span class="n">#1289<small>deploy</small></span><span class="w">"Upgrade Stripe SDK to v14"</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="dock-m">
+      <div class="bigans pair">
+        <button class="go"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg><span><span class="l">Start "Fix bug"</span><span class="d">Starts Fix bug on webshop in a new worktree</span></span></button>
+        <button><svg class="i" aria-hidden="true"><use href="#m-task"/></svg><span><span class="l">Accept</span><span class="d">Adds a Task</span></span></button>
+        <button><svg class="i" aria-hidden="true"><use href="#i-x"/></svg><span><span class="l">Dismiss</span><span class="d">Closes it</span></span></button>
+      </div>
+      <div class="runs-m"><svg class="i" aria-hidden="true"><use href="#i-machine"/></svg>studio-mac<span>·</span><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg>Claude Code · Opus 5.5<span>·</span><a style="text-decoration:underline;text-underline-offset:3px">Change</a></div>
+    </div>
+  </div>
+  <span class="ph-home" aria-hidden="true"></span>
+  <span class="hap" style="right: 20px; top: 612px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>success · Start</span>
+  <span class="hap" style="left: 20px; top: 612px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>light tap · Accept, Dismiss</span>
+</div>
+</body>
+</html>

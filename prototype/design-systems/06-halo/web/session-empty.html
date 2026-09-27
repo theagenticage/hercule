@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) New thread in webshop · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="threads" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="chrome">
+          <button class="crumb-pick" title="Switch project or thread">webshop<i data-icon="down" class="v"></i></button>
+          <span class="crumb">/</span>
+          <button class="ttab" aria-selected="true"><i data-icon="compose" style="width: 14px; height: 14px"></i>New thread</button>
+          <span class="right">
+            <span class="chip line">Draft · starts when you send</span>
+          </span>
+        </header>
+
+        <section class="start">
+          <div class="w-projects" role="radiogroup" aria-label="Project">
+            <button role="radio" aria-checked="true">
+              <span data-halo="slot1 wait1 work1 pause1" data-size="72" data-center="+"
+                aria-label="webshop: 1 waiting on you, 1 working, 1 paused; the dashed slot is the thread you are about to start"></span>
+              <b>webshop</b><span class="n">3 sessions · <em>1 waits</em></span>
+            </button>
+            <button role="radio" aria-checked="false">
+              <span data-halo="wait1 work1 idle1" data-size="72" data-center="3" aria-label="payments-api: 1 waiting on you, 1 working, 1 idle"></span>
+              <b>payments-api</b><span class="n">3 sessions · <em>1 waits</em></span>
+            </button>
+            <button role="radio" aria-checked="false">
+              <span data-halo="wait1 work1" data-size="72" data-center="2" aria-label="ops: 1 waiting on you, 1 working"></span>
+              <b>ops</b><span class="n">2 sessions · <em>1 waits</em></span>
+            </button>
+          </div>
+          <h1 class="q">What should the agent do in webshop?</h1>
+          <p class="sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+          <div class="composer">
+            <div class="card">
+              <textarea placeholder="Say what you want done…" aria-label="Message" autofocus></textarea>
+              <div class="tools">
+                <button class="icon-btn" title="Attach"><i data-icon="plus"></i></button>
+                <button class="sel"><i data-icon="edit"></i>Auto-accept edits<i data-icon="down" class="v"></i></button>
+                <span class="grow"></span>
+                <button class="sel" style="color: var(--ink)">High<i data-icon="down" class="v"></i></button>
+                <span class="pill"><i data-brand="claude"></i>Claude Code · Opus 5.5</span>
+                <button class="icon-btn" title="Voice"><i data-icon="mic"></i></button>
+                <button class="send" title="Send ⏎" disabled><i data-icon="send"></i></button>
+              </div>
+            </div>
+            <div class="lip">
+              <button class="pick"><i data-icon="worktree"></i>New worktree<i data-icon="down" class="v"></i></button><span class="rule"></span>
+              <button class="pick mono"><i data-icon="branch"></i>from main<i data-icon="down" class="v"></i></button>
+              <button class="pick" style="margin-left: auto"><i data-icon="machine"></i>studio-mac<i data-icon="down" class="v"></i></button>
+            </div>
+          </div>
+
+          <div class="starts-label">Or start from</div>
+          <div class="starts">
+            <a href="decision.html"><i data-mark="pri4"></i>Fix: Checkout fails for EU cards<span class="from-where">Intake</span></a>
+            <a href="intake.html"><i data-mark="pri1"></i>Add iDEAL as a payment method<span class="from-where">Intake</span></a>
+            <a href="#"><i data-mark="task"></i>Cart total rounding on discounts<span class="from-where">Task</span></a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

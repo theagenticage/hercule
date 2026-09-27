@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ada · Hercule</title>
+<style>
+  .mhead { padding-left: 4px; gap: 6px; border-bottom: 1px solid var(--line-soft); height: 56px; }
+  .mhead .mbtn .i { width: 22px; height: 22px; }
+  .mhead .avatar { width: 32px; height: 32px; border-radius: 10px; font-size: 14px; }
+  .ttl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ttl > b { font-size: 16px; font-weight: 640; }
+  .ttl > span { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); white-space: nowrap; }
+
+  .stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .thread .col { padding: 0 16px 150px; }
+  .daysep { margin-top: 18px; }
+  .quiet { font-size: 13px; margin: 14px 0; }
+  .amsg { grid-template-columns: 26px 1fr; column-gap: 10px; margin: 18px 0; }
+  .prose { font-size: 15px; line-height: 1.55; }
+  .minicard { margin-top: 24px; }
+  .minicard .mc-q { flex-wrap: wrap; row-gap: 2px; padding: 11px 12px 10px; }
+  .minicard .mc-q .t { font-size: 15px; width: 100%; }
+  .minicard .mc-q .s { margin-left: 0; }
+  .minicard .verb { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; padding: 0 8px; }
+  .minicard .verb .v { font-size: 14.5px; }
+  .minicard .verb .i { width: 15px; height: 15px; }
+  .minicard .verbs { border-radius: 0 0 var(--r-md) var(--r-md); overflow: hidden; }
+  .bubble-row { margin: 20px 0 14px; }
+  .bubble { max-width: 84%; font-size: 15px; }
+
+  .composer { padding: 0 12px 36px; }
+  .lipm { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; font-size: 11.5px; color: var(--faint); }
+  .lipm .b, .lipm .i { width: 12px; height: 12px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="island"></span><span class="sys"><svg class="sig"><use href="#sb-signal"/></svg><svg class="wifi"><use href="#sb-wifi"/></svg><svg class="bat"><use href="#sb-battery"/></svg></span></div>
+
+  <header class="mhead">
+    <button class="mbtn" aria-label="Back to Assistants"><svg class="i"><use href="#i-chev-l"/></svg></button>
+    <span class="avatar avatar--asst">A</span>
+    <div class="ttl">
+      <b>Ada</b>
+      <span><span class="eq"><i></i><i></i><i></i></span><span class="accent">working</span> · Sonnet 5</span>
+    </div>
+    <div class="tools"><button class="mbtn" aria-label="Ada's settings"><svg class="i"><use href="#i-gear"/></svg></button></div>
+  </header>
+
+  <div class="stage">
+    <div class="thread" id="thread">
+      <div class="col">
+        <div class="daysep"><span>Today</span></div>
+        <div class="quiet"><svg class="m"><use href="#m-idle"/></svg>2 quiet check-ins<span class="stamp">07:00 · 08:00</span></div>
+        <div class="amsg">
+          <span class="avatar avatar--asst">A</span>
+          <div>
+            <div class="who"><b>Ada</b><svg class="i i--s"><use href="#i-heart"/></svg>heartbeat<span class="stamp">09:00</span></div>
+            <div class="prose"><p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push.</p></div>
+            <div class="minicard kind-request">
+              <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+              <div class="mc-q"><span class="t">Run <code>git push</code>?</span><span class="s">Fix 3-D Secure checkout · 32s</span></div>
+              <div class="verbs">
+                <button class="verb verb--nogo"><svg class="i"><use href="#i-x"/></svg><span class="v">Deny</span></button>
+                <button class="verb verb--go is-primary"><svg class="i"><use href="#i-check"/></svg><span class="v">Allow once</span></button>
+              </div>
+            </div>
+            <div class="minicard kind-offer">
+              <span class="ktab"><svg class="m"><use href="#m-bolt"/></svg>Offer</span>
+              <div class="mc-q"><span class="t">Draft a reply to Marta at Brightline</span><span class="s">Gmail · INV-2291</span></div>
+              <div class="verbs">
+                <button class="verb verb--hold"><span class="v">Not now</span></button>
+                <button class="verb verb--go is-primary"><span class="v">Draft reply</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bubble-row"><span class="stamp">09:38</span><div class="bubble">What's the status of the backup job?</div></div>
+        <div class="amsg">
+          <span class="avatar avatar--asst">A</span>
+          <div>
+            <div class="who"><b>Ada</b><span class="eq"><i></i><i></i><i></i></span><span class="accent">working</span></div>
+            <div class="prose"><p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret"></span></p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="vbar">
+        <button class="vplus" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+        <span class="vfield">Reply to Ada, or hold to talk</span>
+        <button class="vmic" aria-label="Hold to talk"><svg class="i"><use href="#i-mic"/></svg></button>
+      </div>
+      <p class="lipm"><svg class="i"><use href="#i-chat"/></svg>Web chat · also on <svg class="b"><use href="#b-slack"/></svg>Slack DM</p>
+    </div>
+  </div>
+  <div class="homebar"></div>
+</div>
+<script>
+  // The conversation opens at its newest message.
+  (function () {
+    var thread = document.getElementById("thread");
+    thread.scrollTop = thread.scrollHeight;
+  })();
+</script>
+</body>
+</html>

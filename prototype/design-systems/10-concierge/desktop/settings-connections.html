@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Connections · Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="settings" data-active="Connections"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i data-i="plug" class="t-glyph"></i>
+      <h1>Connections</h1><span class="crumb">Settings</span>
+      <div class="tools">
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada about Connections</span><kbd class="kbd">&#8997;Space</kbd></label>
+      </div>
+    </header>
+
+    <section class="pane">
+      <div class="scroll">
+        <div class="set set-wide">
+          <div class="cx-top">
+            <div class="nums">
+              <span class="n"><b>2,418</b>events in 24h</span>
+              <span class="n"><b>212</b>since you last checked</span>
+              <span class="n is-quiet"><b>8</b>event sources</span>
+              <span class="n is-quiet"><b>3</b>channels</span>
+              <span class="n is-attn"><b>1</b>reconnecting</span>
+            </div>
+            <p class="aside-voice cx-say"><i class="orb" data-v="ada" data-p="working" style="--size:16px"></i><span>Discord has been reconnecting since 09:12, so Juno can't hear #support. I'll tell you if it's still down at 10:00. <a href="#discord">Show me</a></span></p>
+          </div>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Event sources</h2><small>where events come from; triage files each into its default Topic</small><button class="end btn btn-sm"><i data-i="plus"></i>Add event source</button></div>
+            <div class="cx cx-cols"><span></span><span>Source</span><span>Default Topic</span><span>Last 24 hours</span><span class="r">Events</span><span>Health</span><span></span></div>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="github"></i></span><span class="cx-t"><b>GitHub</b><small>rogier · 3 repos</small></span><span class="select">Releases<i data-i="down"></i></span><span class="spark" data-shape="day" data-seed="1"></span><span class="cx-n num">312</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="gmail"></i></span><span class="cx-t"><b>Gmail</b><small>rogier@personal</small></span><span class="select">Customers<i data-i="down"></i></span><span class="spark" data-shape="day" data-seed="2"></span><span class="cx-n num">188</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="sentry"></i></span><span class="cx-t"><b>Sentry</b><small>webshop-prod</small></span><span class="select">Checkout<i data-i="down"></i></span><span class="spark is-hot" data-shape="deploy" data-seed="3"></span><span class="cx-n num">1,406</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="posthog"></i></span><span class="cx-t"><b>PostHog</b><small>webshop</small></span><span class="select">Checkout<i data-i="down"></i></span><span class="spark" data-shape="flat" data-seed="4"></span><span class="cx-n num">96</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="intercom"></i></span><span class="cx-t"><b>Intercom</b><small>support</small></span><span class="select">Customers<i data-i="down"></i></span><span class="spark" data-shape="day" data-seed="5"></span><span class="cx-n num">61</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="grafana"></i></span><span class="cx-t"><b>Grafana</b><small>ops</small></span><span class="select">Infrastructure<i data-i="down"></i></span><span class="spark" data-shape="night" data-seed="6"></span><span class="cx-n num">44</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="stripe"></i></span><span class="cx-t"><b>Stripe</b><small>live</small></span><span class="select">Checkout<i data-i="down"></i></span><span class="spark" data-shape="deploy-day" data-seed="7"></span><span class="cx-n num">209</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx" href="#"><span class="bind-ic"><i data-b="cron"></i></span><span class="cx-t"><b>Cron</b><small>schedules · 6 triggers</small></span><span class="select is-none">no default<i data-i="down"></i></span><span class="spark" data-shape="even" data-seed="8"></span><span class="cx-n num">102</span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <div class="cx cx-total"><span></span><span>Total</span><span></span><span class="spark-axis"><span>10:00</span><span>deploy #1289</span><span>now</span></span><span class="cx-n num">2,418</span><span class="faint">212 since 18:20</span><span></span></div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Channels</h2><small>where assistants talk; each binding sends a place to one assistant</small><button class="end btn btn-sm"><i data-i="plus"></i>Add channel</button></div>
+            <a class="cx cx-ch" href="#"><span class="bind-ic"><i data-b="slack"></i></span><span class="cx-t"><b>Slack</b><small>acme-hq</small></span><span class="binds"><span class="bchip"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i>Ada<small>DMs</small></span><span class="bchip"><i class="orb" data-v="milo" data-p="idle" style="--size:12px"></i>Milo<small>#ops</small></span></span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx cx-ch is-warn" href="#" id="discord"><span class="bind-ic"><i data-b="discord"></i></span><span class="cx-t"><b>Discord</b><small>community</small></span><span class="binds"><span class="bchip"><i class="orb" data-v="juno" data-p="asleep" style="--size:12px"></i>Juno<small>#support</small></span></span><span class="bind-h cx-warn"><i class="dot-warn"></i>reconnecting<small>since 09:12 · try 6</small></span><i data-i="right" class="cx-go"></i></a>
+            <a class="cx cx-ch" href="#"><span class="bind-ic"><i data-b="webchat"></i></span><span class="cx-t"><b>Web chat</b><small>built in</small></span><span class="binds"><span class="bchip"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i>Ada</span><span class="bchip"><i class="orb" data-v="milo" data-p="idle" style="--size:12px"></i>Milo</span><span class="bchip"><i class="orb" data-v="juno" data-p="asleep" style="--size:12px"></i>Juno</span></span><span class="bind-h"><i class="dot-ok"></i>healthy</span><i data-i="right" class="cx-go"></i></a>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+  // Draws each source's last 24 hours as 24 hourly bars (10:00 yesterday to 09:00 today).
+  // The shapes are fixture data: the Sentry and Stripe climbs start at deploy #1289, 17:00 yesterday.
+  document.addEventListener("DOMContentLoaded", function () {
+    var shapes = {
+      day: function (h) { var t = (h + 10) % 24; return t >= 8 && t <= 19 ? 0.75 : t >= 22 || t <= 5 ? 0.12 : 0.4; },
+      flat: function () { return 0.45; },
+      even: function (h) { return h % 6 === 0 ? 0.95 : 0.4; },
+      night: function (h) { var t = (h + 10) % 24; return t === 4 ? 1 : t === 5 ? 0.6 : 0.2; },
+      deploy: function (h) { return h < 7 ? 0.14 : Math.min(1, 0.5 + h * 0.02); },
+      "deploy-day": function (h) { var t = (h + 10) % 24; var base = t >= 8 && t <= 19 ? 0.55 : t >= 22 || t <= 5 ? 0.1 : 0.3; return h < 7 ? base : Math.min(1, base + 0.3); },
+    };
+    document.querySelectorAll(".spark[data-shape]").forEach(function (el) {
+      var f = shapes[el.dataset.shape], seed = Number(el.dataset.seed), html = "";
+      for (var h = 0; h < 24; h++) {
+        var jitter = 0.82 + 0.18 * Math.abs(Math.sin(seed * 12.9898 + h * 78.233));
+        html += '<i style="--h:' + Math.max(0.08, f(h) * jitter).toFixed(2) + '"></i>';
+      }
+      el.innerHTML = html;
+    });
+  });
+</script>
+</body>
+</html>

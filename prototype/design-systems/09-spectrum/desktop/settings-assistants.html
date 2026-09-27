@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ada · Assistants · Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.aset { width: 1080px; margin: 0 auto; padding: 22px 0 40px; }
+.idn { display: flex; align-items: center; gap: 14px; padding-bottom: 20px; border-bottom: 1px solid var(--line-soft); }
+.idn h2 { font-size: var(--t-title); font-weight: var(--w-strong); letter-spacing: -0.015em; line-height: 1.2; }
+.idn .sub { display: flex; align-items: center; gap: 6px; font-size: var(--t-meta); color: var(--muted); margin-top: 2px; }
+.idn .sub .st { color: var(--ink); }
+.facts { display: flex; gap: 14px; align-items: flex-end; }
+.fact { display: flex; flex-direction: column; gap: 5px; }
+.fact .k { font-size: var(--t-fine); color: var(--faint); font-weight: var(--w-medium); }
+.fact .select .brand { width: 13px; height: 13px; }
+.fact .tag { height: 20px; }
+.acols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; }
+.acols .sec { padding-top: 20px; }
+.acols .sec-h { margin-bottom: 14px; }
+.core-h, .sub-h { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-meta); color: var(--muted); margin-bottom: 8px; }
+.core-h b, .sub-h b { color: var(--ink); font-weight: var(--w-strong); }
+.core-h .num b { font-weight: var(--w-medium); }
+.core-t { margin-top: 10px; font-size: var(--t-ui); line-height: 1.5; color: var(--muted); max-width: 620px; }
+.sub-h { margin-top: 22px; margin-bottom: 4px; }
+.mem td { height: 40px; }
+.mem .tn { display: inline-flex; align-items: center; gap: 8px; font-weight: var(--w-medium); }
+.mem .gist { color: var(--muted); width: 100%; }
+.mem .sz { text-align: right; }
+.mem .sz { display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: 40px; }
+.mem .sz .bar-h { width: 52px; }
+.mem .sz b { width: 30px; font-weight: var(--w-medium); }
+.side-col .blk + .blk { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.side-col .rail-h { margin-bottom: 8px; }
+.every { font-size: var(--t-ui); margin-bottom: 10px; }
+.every b { font-weight: var(--w-medium); }
+.ctx { position: relative; margin-top: 4px; }
+.ctx .meter i { width: 38%; }
+.ctx .tick { position: absolute; left: 70%; top: -3px; width: 2px; height: 12px; border-radius: 1px; background: var(--ink); }
+.ctx-l { display: flex; justify-content: space-between; font-size: var(--t-fine); color: var(--muted); margin-top: 5px; font-variant-numeric: tabular-nums; }
+.ctx-l span:last-child { position: absolute; left: 70%; translate: -50% 0; }
+.ctx-l { position: relative; }
+.fresh { margin-top: 6px; font-size: var(--t-fine); color: var(--faint); }
+.rot { display: flex; align-items: flex-start; gap: 20px; margin-top: 10px; }
+.rot .btn { margin-top: -6px; }
+.sub-h span b { font-weight: var(--w-medium); }
+.idn .sub { white-space: nowrap; }
+.bind { display: flex; align-items: center; gap: 9px; height: 34px; font-size: var(--t-ui); }
+.bind b { font-weight: var(--w-medium); }
+.bind .m { color: var(--muted); font-size: var(--t-meta); }
+.bind .st { margin-left: auto; font-size: var(--t-meta); color: var(--muted); }
+.reply { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.reply-d { font-size: var(--t-fine); color: var(--muted); margin-top: 7px; }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win" data-space="all">
+  <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+  <aside class="side">
+  <div class="side-top"><button class="iconbtn" title="Notifications"><svg class="i16" aria-hidden="true"><use href="#i-bell"/></svg></button><button class="iconbtn" title="Hide sidebar"><svg class="i16" aria-hidden="true"><use href="#i-sidebar"/></svg></button></div>
+  <div class="space-head"><button class="iconbtn" title="Back" style="margin-left:-4px"><svg class="i16" aria-hidden="true"><use href="#i-chev-left"/></svg></button><div class="grow"><div class="name">Settings</div><div class="sub">controller · studio-mac</div></div></div>
+  <div class="cmd"><svg class="i16" aria-hidden="true"><use href="#i-search"/></svg><span class="grow">Search settings</span><span class="kbd">⌘,</span></div>
+  <div class="side-scroll">
+    <div class="group">
+      <div class="group-h"><span class="grow">You</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-user"/></svg>Profile</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-palette"/></svg>Appearance</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-chat"/></svg>Threads</a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Agents</span></div>
+      <a class="nav on"><svg class="i16" aria-hidden="true"><use href="#i-users"/></svg>Assistants<span class="count">3</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-sparkle"/></svg>Providers<span class="count">3</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-machine"/></svg>Machines<span class="count">3</span></a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Access</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-plug"/></svg>Connections<span class="count">11</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-key"/></svg>Identities</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-shield"/></svg>Permission profiles</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-lock"/></svg>Secrets</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-gauge"/></svg>Bounds</a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Instance</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-layers"/></svg>Plugins</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-server"/></svg>System</a>
+    </div>
+  </div>
+  <div class="side-foot"><div class="band" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div><div class="spaces"><button class="sp on" title="All projects"><span class="sw all"></span></button><button class="sp" title="webshop"><span class="sw p-webshop"></span></button><button class="sp" title="payments-api"><span class="sw p-payments"></span></button><button class="sp" title="ops"><span class="sw p-ops"></span></button><span class="label">All projects</span><span class="grow"></span><button class="iconbtn" title="Settings"><svg class="i16" aria-hidden="true"><use href="#i-gear"/></svg></button></div></div>
+</aside>
+  <main class="panel">
+    <header class="bar"><span class="crumb">Settings /</span><span class="title">Assistants</span><span class="grow"></span><button class="btn sm"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg>New assistant</button></header>
+    <nav class="subbar">
+      <a class="topic on"><span class="av sm">A</span>Ada<span class="st work" style="color:var(--ink)"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span></a>
+      <a class="topic"><span class="av sm">M</span>Milo<span class="n">idle</span></a>
+      <a class="topic"><span class="av sm off">J</span>Juno<span class="n">asleep</span></a>
+    </nav>
+    <div class="set">
+      <div class="aset">
+        <div class="idn">
+          <span class="av lg">A</span>
+          <div class="grow">
+            <h2>Ada</h2>
+            <div class="sub">personal assistant<span class="sep">·</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>working</span></div>
+          </div>
+          <div class="facts">
+            <div class="fact"><span class="k">Provider</span><span class="select"><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg>Claude Code · Sonnet 5<svg class="chev" aria-hidden="true"><use href="#i-chev-down"/></svg></span></div>
+            <div class="fact"><span class="k">Access mode</span><span class="select"><svg class="i14" aria-hidden="true"><use href="#i-shield"/></svg>Full access<svg class="chev" aria-hidden="true"><use href="#i-chev-down"/></svg></span></div>
+            <div class="fact"><span class="k">Disallowed tools</span><span class="select"><span class="tag line mono">edit</span><svg class="chev" aria-hidden="true"><use href="#i-plus"/></svg></span></div>
+          </div>
+          <button class="btn sm" style="margin-left:6px;align-self:flex-end"><svg class="i14" aria-hidden="true"><use href="#i-chat"/></svg>Open Conversation</button>
+        </div>
+        <div class="acols">
+          <section class="sec">
+            <div class="sec-h"><h2>Memory</h2><p>What Ada carries from one Conversation to the next</p></div>
+            <div class="core-h"><b>Core note</b><span>always loaded</span><span class="grow"></span><span class="num"><b>1,284</b> of 4,000 characters</span></div>
+            <div class="meter"><i style="width:32%"></i></div>
+            <p class="core-t">"Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…"</p>
+            <div class="sub-h"><b>Topics</b><span>loaded when a Conversation touches them</span><span class="grow"></span><span><b>7</b> of 24 · up to 12,000 characters each</span></div>
+            <table class="tbl mem">
+              <tr>
+                <td><span class="tn"><span class="sw" style="visibility:hidden"></span>work-style</span></td>
+                <td class="gist">Prefers short answers; decides fast; hates long preambles</td>
+                <td class="sz"><span class="bar-h"><i style="width:10%"></i></span><b>1.2k</b></td>
+              </tr>
+              <tr class="p-webshop">
+                <td><span class="tn"><span class="sw  p-webshop"></span>webshop</span></td>
+                <td class="gist">Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</td>
+                <td class="sz"><span class="bar-h"><i style="width:28%"></i></span><b>3.4k</b></td>
+              </tr>
+              <tr class="p-payments">
+                <td><span class="tn"><span class="sw  p-payments"></span>payments-api</span></td>
+                <td class="gist">Owns webhooks + payouts; v2.x; publish via npm</td>
+                <td class="sz"><span class="bar-h"><i style="width:18%"></i></span><b>2.1k</b></td>
+              </tr>
+              <tr class="p-ops">
+                <td><span class="tn"><span class="sw  p-ops"></span>ops</span></td>
+                <td class="gist">Backups nightly 04:00 to B2; certs on status.acme.dev</td>
+                <td class="sz"><span class="bar-h"><i style="width:15%"></i></span><b>1.8k</b></td>
+              </tr>
+              <tr>
+                <td><span class="tn"><span class="sw" style="visibility:hidden"></span>customers</span></td>
+                <td class="gist">Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</td>
+                <td class="sz"><span class="bar-h"><i style="width:23%"></i></span><b>2.7k</b></td>
+              </tr>
+              <tr>
+                <td><span class="tn"><span class="sw" style="visibility:hidden"></span>family</span></td>
+                <td class="gist">School run Tue/Thu; no meetings before 09:30</td>
+                <td class="sz"><span class="bar-h"><i style="width:5%"></i></span><b>0.6k</b></td>
+              </tr>
+              <tr>
+                <td><span class="tn"><span class="sw" style="visibility:hidden"></span>reading</span></td>
+                <td class="gist">Wants summaries of the weekly Rust + Postgres newsletters</td>
+                <td class="sz"><span class="bar-h"><i style="width:8%"></i></span><b>0.9k</b></td>
+              </tr>
+            </table>
+            <div class="sub-h"><b>Rotation</b><span>at <b>70%</b> of context or <b>200k</b> tokens, and daily at <b>04:00</b></span></div>
+            <div class="rot">
+              <div class="grow"><div class="ctx"><div class="meter"><i></i></div><span class="tick"></span></div>
+              <div class="ctx-l"><span>now 38% · 76k tokens · last rotated today 04:00</span><span>70%</span></div></div>
+              <button class="btn sm"><svg class="i14" aria-hidden="true"><use href="#i-refresh"/></svg>Start fresh</button>
+            </div>
+            <div class="fresh">Start fresh ends the session now. Memory stays; the Conversation carries on in a new session.</div>
+          </section>
+          <div class="side-col">
+            <section class="sec">
+              <div class="sec-h"><h2>Schedule</h2></div>
+              <div class="blk">
+                <div class="rail-h"><svg class="i14" aria-hidden="true"><use href="#m-heartbeat"/></svg>Heartbeat<span class="grow"></span><span>next 10:00</span></div>
+                <div class="every">Every <b>1 h</b>, <b>07:00-23:00</b> → <svg class="i14" aria-hidden="true"><use href="#i-webchat"/></svg> <b>Web chat</b></div>
+                <div class="hb" aria-label="Heartbeats 07:00 to 23:00: 07 and 08 quiet, 09 spoke, next at 10">
+                  <i class="q"></i><i class="q"></i><i class="s"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </div>
+                <div class="hb-l"><span>07</span><span>10</span><span>13</span><span>16</span><span>19</span><span>23</span></div>
+              </div>
+              <div class="blk">
+                <div class="rail-h"><svg class="i14" aria-hidden="true"><use href="#m-reminder"/></svg>Reminders<span class="n">3</span></div>
+                <div class="remrow"><svg class="i14" aria-hidden="true"><use href="#m-reminder"/></svg><span>Call the accountant</span><span></span><span class="w">Thu 1 Oct · 16:00</span></div>
+                <div class="remrow"><svg class="i14" aria-hidden="true"><use href="#m-reminder"/></svg><span>Renew the SSL cert for ops</span><span class="sw  p-ops"></span><span class="w">Fri 2 Oct · 09:00</span></div>
+                <div class="remrow"><svg class="i14" aria-hidden="true"><use href="#i-refresh"/></svg><span>Weekly revenue summary</span><span></span><span class="w">every Monday · 08:30</span></div>
+              </div>
+            </section>
+            <section class="sec">
+              <div class="sec-h"><h2>Channels</h2><span class="grow"></span><button class="btn sm ghost"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg>Bind</button></div>
+              <div class="bind"><svg class="i16" aria-hidden="true"><use href="#i-webchat"/></svg><b>Web chat</b><span class="m">always</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg>healthy</span></div>
+              <div class="bind"><svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg><b>Slack · acme-hq</b><span class="m">DM with Rogier</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg>healthy</span></div>
+              <div class="reply"><span style="font-size:var(--t-meta);color:var(--muted)" class="grow">Reply mode</span><div class="seg-ctl"><button aria-pressed="true">Turn end</button><button aria-pressed="false">Segments</button></div></div>
+              <div class="reply-d">One message when her turn ends, not one per step.</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

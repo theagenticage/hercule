@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Ada · Assistants · Settings · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .bar { gap: 18px; }
+      .tabs .av { width: 18px; height: 18px; font-size: 9.5px; }
+      .tab-pill[aria-selected="true"] .av { box-shadow: none; background: var(--bg); color: var(--ink); }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="settings" data-active="assistants"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title"><h1 class="page-title">Assistants</h1></div>
+        <div class="tabs" role="tablist" aria-label="Assistants">
+          <button class="tab-pill" role="tab" aria-selected="true"><span class="av working">A</span>Ada<i data-m="working" class="sm"></i></button>
+          <button class="tab-pill" role="tab" aria-selected="false"><span class="av">M</span>Milo<i data-m="idle" class="sm"></i></button>
+          <button class="tab-pill" role="tab" aria-selected="false"><span class="av asleep">J</span>Juno<i data-m="asleep" class="sm"></i></button>
+        </div>
+        <div class="bar-end"><button class="btn btn-sm"><i data-m="plus" class="xs"></i>New assistant</button></div>
+      </header>
+
+      <div class="set-scroll">
+        <div class="record">
+          <!-- How Ada works -->
+          <div>
+            <div class="id-row">
+              <span class="av av-lg working" aria-hidden="true">A</span>
+              <div><span class="id-name">Ada</span><span class="id-role">personal assistant</span></div>
+              <span class="c-spacer"></span>
+              <span class="chip"><i data-m="working" class="live"></i>working</span>
+              <a class="btn btn-sm btn-ghost" href="assistant.html">Open Conversation</a>
+            </div>
+            <section class="set-sec" style="margin-top: 4px">
+              <div class="set-row"><span class="set-name">Provider</span><button class="c-pill"><i data-b="anthropic"></i>Claude Code<span class="acct">·</span>Sonnet 5</button></div>
+              <div class="set-row"><span class="set-name">Access mode</span><span class="kv"><i data-m="shield"></i>full access<span class="faint">·</span>not allowed:<span class="code-chip">edit</span></span></div>
+              <div class="set-row">
+                <div><span class="set-name">Reply mode</span><span class="set-hint">When Ada's words reach the channel</span></div>
+                <div class="seg" role="tablist"><button role="tab" aria-selected="true">At turn end</button><button role="tab" aria-selected="false">In segments</button></div>
+              </div>
+            </section>
+
+            <section class="set-sec">
+              <div class="label">Heartbeat<span class="n">every 1h · 07:00-23:00</span><span class="c-spacer"></span><button class="switch" role="switch" aria-checked="true" aria-label="Heartbeat on"></button></div>
+              <div class="beats" data-beats data-w="496"></div>
+              <div class="rail-fact"><i data-m="heartbeat"></i><span>next <b class="mono">10:00</b> → <b>Web chat</b><span class="faint"> · a quiet check-in posts nothing</span></span></div>
+            </section>
+
+            <section class="set-sec">
+              <div class="label">Rotation<span class="n">at 70% of context or 200k tokens · daily 04:00</span></div>
+              <div class="meter" role="img" aria-label="Context 41% used; rotates at 70%"><i style="width: 41%"></i><span class="mark" style="left: 70%"></span></div>
+              <div class="meter-row"><span><b class="mono">41%</b> used · 82k tokens</span><span class="t-mono">last rotated today 04:00</span></div>
+              <div style="margin-top: 10px"><button class="btn btn-sm"><i data-m="rotate" class="xs"></i>Start fresh</button></div>
+            </section>
+
+            <section class="set-sec">
+              <div class="label">Channel bindings<span class="n">2</span></div>
+              <div class="bind"><i data-m="webchat"></i><span>Web chat<small> · always bound</small></span><span class="t-mono">heartbeats post here</span></div>
+              <div class="bind"><i data-b="slack"></i><span>Slack · acme-hq<small> · DM with Rogier</small></span><button class="btn btn-sm btn-ghost">Unbind</button></div>
+            </section>
+          </div>
+
+          <!-- What Ada remembers -->
+          <div>
+            <section class="set-sec">
+              <div class="label">Memory<span class="n">core note</span><span class="c-spacer"></span><button class="btn btn-sm btn-ghost">Edit core note</button></div>
+              <div class="meter" role="img" aria-label="Core note: 1,284 of 4,000 characters"><i style="width: 32.1%"></i></div>
+              <div class="meter-row"><span><b class="mono">1,284</b> of 4,000 characters</span><span>read at the start of every turn</span></div>
+              <p class="core-note">Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…</p>
+            </section>
+
+            <section class="set-sec">
+              <div class="label">Topics<span class="n">7 of 24 · up to 12,000 characters each</span></div>
+              <div class="mem-topics">
+                <div class="mem-topic"><code>work-style</code><span class="gist">Prefers short answers; decides fast; hates long preambles</span><span class="fillbar"><i style="width: 10%"></i></span><span class="size">1.2k</span></div>
+                <div class="mem-topic"><code>webshop</code><span class="gist">Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span><span class="fillbar"><i style="width: 28%"></i></span><span class="size">3.4k</span></div>
+                <div class="mem-topic"><code>payments-api</code><span class="gist">Owns webhooks + payouts; v2.x; publish via npm</span><span class="fillbar"><i style="width: 18%"></i></span><span class="size">2.1k</span></div>
+                <div class="mem-topic"><code>ops</code><span class="gist">Backups nightly 04:00 to B2; certs on status.acme.dev</span><span class="fillbar"><i style="width: 15%"></i></span><span class="size">1.8k</span></div>
+                <div class="mem-topic"><code>customers</code><span class="gist">Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span><span class="fillbar"><i style="width: 23%"></i></span><span class="size">2.7k</span></div>
+                <div class="mem-topic"><code>family</code><span class="gist">School run Tue/Thu; no meetings before 09:30</span><span class="fillbar"><i style="width: 5%"></i></span><span class="size">0.6k</span></div>
+                <div class="mem-topic"><code>reading</code><span class="gist">Wants summaries of the weekly Rust + Postgres newsletters</span><span class="fillbar"><i style="width: 8%"></i></span><span class="size">0.9k</span></div>
+              </div>
+            </section>
+
+            <section class="set-sec">
+              <div class="label">Reminders<span class="n">3</span></div>
+              <div class="rem-list">
+                <div class="rem"><time>Thu 1 Oct<br />16:00</time><b>Call the accountant</b><small>once</small></div>
+                <div class="rem is-new"><time>Fri 2 Oct<br />09:00</time><b>Renew the SSL cert for ops</b><small>once · set today 09:20</small></div>
+                <div class="rem"><time>Mon 5 Oct<br />08:30</time><b>Weekly revenue summary</b><small>every Monday</small></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

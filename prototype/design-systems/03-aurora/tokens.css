@@ -1,0 +1,437 @@
+/* =============================================================================
+   Aurora - tokens
+   Calm glass, living light.
+
+   COLOR DOCTRINE - color is light, and light means something:
+   1. Urgency is light. Aurora green = calm / working / healthy. Amber = waits on
+      you. Coral = burning or failed. The more something needs you, the brighter
+      it glows - and the glow sits on the side of the screen where it lives.
+   2. Place is tint. Each project tints the ambient field while you are inside it
+      (webshop sky, payments-api orchid, ops lichen), and marks its chip.
+   3. Violet is Hercule's own light: selection, focus, send, the mark.
+      Never green, amber or coral - those words are taken by urgency.
+   4. Everything else is glass and ink. Source systems are monochrome marks.
+
+   Glass never costs legibility: panes are opaque enough that ink stays >= 4.5:1
+   over every field, and prefers-reduced-transparency swaps panes for solids.
+
+   Names shared with today's packages/ui/src/styles.css keep their meaning:
+   --bg --surface --raised --ink --muted --faint --line --line-soft
+   --attn --fail --live --ok (all text-grade: usable as text on any pane).
+   ============================================================================= */
+
+@font-face {
+  font-family: "Figtree";
+  src: url("fonts/figtree-latin-wght.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Figtree";
+  src: url("fonts/figtree-latin-ext-wght.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
+/* ---- Theme-independent scales ------------------------------------------------ */
+:root {
+  --font-ui: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type: quiet. Hierarchy comes from numerals and light, not from big headings. */
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-ui: 13px;
+  --t-md: 14px;
+  --t-body: 15px;
+  --t-lg: 16px;
+  --t-title: 18px; /* page titles, never larger on desktop */
+  --t-num: 26px; /* numerals that carry a count */
+  --t-big: 36px; /* the one numeral a screen is about */
+  --w-reg: 430;
+  --w-med: 540;
+  --w-semi: 630;
+  --w-bold: 720;
+  --lh-tight: 1.25;
+  --lh-ui: 1.4;
+  --lh-body: 1.62;
+  --track-title: -0.012em;
+  --track-num: -0.03em;
+
+  /* Shape: big soft radii; a pane's radius grows with its size. */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* Space: a 4px base. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
+
+  /* Glass */
+  --glass-blur: 26px;
+  --glass-sat: 1.7;
+
+  /* Motion: panes rise and settle; the field drifts slower than 0.2 Hz. */
+  --dur-quick: 140ms;
+  --dur-soft: 280ms;
+  --dur-settle: 520ms;
+  --dur-drift: 46s;
+  --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Dawn - light flagship. Pearl with a lilac sheen. ------------------------ */
+:root,
+[data-theme="light"],
+[data-theme="dawn"] {
+  color-scheme: light;
+  --bg: oklch(95.6% 0.008 310);
+  --surface: oklch(97.4% 0.006 310);
+  --raised: oklch(99.3% 0.004 310);
+  --ink: oklch(23.5% 0.02 300);
+  --muted: oklch(46% 0.02 300);
+  --faint: oklch(54% 0.017 300);
+  --line: oklch(30% 0.03 300 / 0.11);
+  --line-soft: oklch(30% 0.03 300 / 0.065);
+
+  /* urgency, text-grade */
+  --live: oklch(50.5% 0.1 172);
+  --ok: oklch(50.5% 0.11 150);
+  --attn: oklch(51.5% 0.12 65);
+  --fail: oklch(51.5% 0.17 29);
+  /* urgency as light: glows, lit fills, mark discs */
+  --live-light: oklch(80% 0.13 168);
+  --attn-light: oklch(81% 0.14 76);
+  --fail-light: oklch(70% 0.17 30);
+  --live-wash: oklch(80% 0.13 168 / 0.2);
+  --attn-wash: oklch(84% 0.13 78 / 0.28);
+  --fail-wash: oklch(74% 0.15 30 / 0.2);
+
+  /* Hercule's own light */
+  --accent: oklch(50% 0.18 298);
+  --accent-light: oklch(72% 0.14 300);
+  --accent-wash: oklch(72% 0.14 300 / 0.16);
+  --on-accent: oklch(99% 0.005 300);
+
+  /* place */
+  --p-webshop: oklch(54% 0.12 240);
+  --p-payments: oklch(53% 0.16 342);
+  --p-ops: oklch(54% 0.11 118);
+
+  /* glass */
+  --glass: oklch(99.5% 0.004 310 / 0.6);
+  --glass-strong: oklch(99.6% 0.003 310 / 0.84);
+  --glass-thin: oklch(99.5% 0.004 310 / 0.38);
+  --glass-solid: oklch(98.6% 0.005 310);
+  --rim: oklch(100% 0 0 / 0.7);
+  --rim-top: oklch(100% 0 0 / 1);
+  --edge: oklch(30% 0.04 300 / 0.1);
+  --hover: oklch(30% 0.04 300 / 0.05);
+  --press: oklch(30% 0.04 300 / 0.09);
+
+  /* the field */
+  --field-calm: oklch(86% 0.1 170);
+  --field-wait: oklch(88% 0.11 78);
+  --field-burn: oklch(81% 0.13 28);
+  --field-own: oklch(84% 0.09 300);
+  --field-webshop: oklch(86% 0.07 235);
+  --field-payments: oklch(85% 0.08 338);
+  --field-ops: oklch(89% 0.08 118);
+  --field-opacity: 0.9;
+  --grain: 0.03;
+
+  --code-bg: oklch(30% 0.03 300 / 0.045);
+  --shadow-1: 0 1px 2px oklch(25% 0.04 300 / 0.06), 0 2px 8px -2px oklch(25% 0.04 300 / 0.06);
+  --shadow-2: 0 1px 2px oklch(25% 0.04 300 / 0.05), 0 12px 32px -12px oklch(25% 0.05 300 / 0.2);
+  --shadow-3: 0 2px 6px oklch(25% 0.04 300 / 0.06), 0 28px 70px -20px oklch(25% 0.06 300 / 0.32);
+  --scrim: oklch(25% 0.03 300 / 0.16);
+  --glow-strength: 0.75;
+  --dock-tint: 30%;
+}
+
+/* ---- Mist - light. Sage-grey morning. ---------------------------------------- */
+[data-theme="mist"] {
+  color-scheme: light;
+  --bg: oklch(93.3% 0.012 155);
+  --surface: oklch(95.8% 0.009 155);
+  --raised: oklch(98.8% 0.005 155);
+  --ink: oklch(24% 0.018 165);
+  --muted: oklch(44.5% 0.018 165);
+  --faint: oklch(53% 0.016 165);
+  --line: oklch(30% 0.03 165 / 0.12);
+  --line-soft: oklch(30% 0.03 165 / 0.07);
+
+  --live: oklch(49.5% 0.095 175);
+  --ok: oklch(49.5% 0.1 150);
+  --attn: oklch(50.5% 0.115 65);
+  --fail: oklch(50.5% 0.16 29);
+  --live-light: oklch(78% 0.12 170);
+  --attn-light: oklch(80% 0.13 76);
+  --fail-light: oklch(69% 0.16 30);
+  --live-wash: oklch(78% 0.12 170 / 0.22);
+  --attn-wash: oklch(83% 0.12 78 / 0.3);
+  --fail-wash: oklch(72% 0.14 30 / 0.2);
+
+  --accent: oklch(48.5% 0.16 298);
+  --accent-light: oklch(70% 0.12 300);
+  --accent-wash: oklch(70% 0.12 300 / 0.16);
+  --on-accent: oklch(99% 0.005 300);
+
+  --p-webshop: oklch(52% 0.11 240);
+  --p-payments: oklch(52% 0.15 342);
+  --p-ops: oklch(52% 0.1 118);
+
+  --glass: oklch(98.8% 0.006 155 / 0.58);
+  --glass-strong: oklch(99% 0.005 155 / 0.84);
+  --glass-thin: oklch(98.8% 0.006 155 / 0.36);
+  --glass-solid: oklch(97.6% 0.007 155);
+  --rim: oklch(100% 0 0 / 0.66);
+  --rim-top: oklch(100% 0 0 / 0.95);
+  --edge: oklch(30% 0.04 165 / 0.11);
+  --hover: oklch(30% 0.04 165 / 0.05);
+  --press: oklch(30% 0.04 165 / 0.09);
+
+  --field-calm: oklch(84% 0.08 168);
+  --field-wait: oklch(87% 0.09 80);
+  --field-burn: oklch(80% 0.11 30);
+  --field-own: oklch(85% 0.05 300);
+  --field-webshop: oklch(86% 0.06 230);
+  --field-payments: oklch(85% 0.07 338);
+  --field-ops: oklch(88% 0.08 118);
+  --field-opacity: 0.85;
+  --grain: 0.03;
+
+  --code-bg: oklch(30% 0.03 165 / 0.05);
+  --shadow-1: 0 1px 2px oklch(25% 0.03 165 / 0.07), 0 2px 8px -2px oklch(25% 0.03 165 / 0.06);
+  --shadow-2: 0 1px 2px oklch(25% 0.03 165 / 0.06), 0 12px 32px -12px oklch(25% 0.04 165 / 0.2);
+  --shadow-3: 0 2px 6px oklch(25% 0.03 165 / 0.06), 0 28px 70px -20px oklch(25% 0.05 165 / 0.3);
+  --scrim: oklch(25% 0.03 165 / 0.16);
+  --glow-strength: 0.7;
+  --dock-tint: 30%;
+}
+
+/* ---- Dusk - dark flagship. Plum-violet night, never navy. -------------------- */
+[data-theme="dark"],
+[data-theme="dusk"] {
+  color-scheme: dark;
+  --bg: oklch(17.5% 0.024 320);
+  --surface: oklch(21% 0.026 320);
+  --raised: oklch(25% 0.028 320);
+  --ink: oklch(95% 0.012 320);
+  --muted: oklch(77.5% 0.022 318);
+  --faint: oklch(63% 0.026 318);
+  --line: oklch(92% 0.03 320 / 0.11);
+  --line-soft: oklch(92% 0.03 320 / 0.065);
+
+  --live: oklch(83% 0.13 170);
+  --ok: oklch(80% 0.12 152);
+  --attn: oklch(84% 0.13 78);
+  --fail: oklch(75% 0.15 30);
+  --live-light: oklch(78% 0.14 168);
+  --attn-light: oklch(81% 0.15 74);
+  --fail-light: oklch(69% 0.18 28);
+  --live-wash: oklch(78% 0.14 168 / 0.13);
+  --attn-wash: oklch(81% 0.15 74 / 0.15);
+  --fail-wash: oklch(69% 0.18 28 / 0.16);
+
+  --accent: oklch(79% 0.12 305);
+  --accent-light: oklch(68% 0.16 305);
+  --accent-wash: oklch(68% 0.16 305 / 0.2);
+  --on-accent: oklch(20% 0.04 305);
+
+  --p-webshop: oklch(79% 0.1 235);
+  --p-payments: oklch(77% 0.13 342);
+  --p-ops: oklch(81% 0.11 118);
+
+  --glass: oklch(31% 0.032 320 / 0.5);
+  --glass-strong: oklch(27% 0.03 320 / 0.82);
+  --glass-thin: oklch(31% 0.032 320 / 0.3);
+  --glass-solid: oklch(24.5% 0.028 320);
+  --rim: oklch(100% 0 0 / 0.075);
+  --rim-top: oklch(100% 0 0 / 0.15);
+  --edge: oklch(0% 0 0 / 0.34);
+  --hover: oklch(100% 0 0 / 0.055);
+  --press: oklch(100% 0 0 / 0.09);
+
+  --field-calm: oklch(52% 0.12 170);
+  --field-wait: oklch(60% 0.13 70);
+  --field-burn: oklch(55% 0.17 25);
+  --field-own: oklch(46% 0.15 305);
+  --field-webshop: oklch(50% 0.1 235);
+  --field-payments: oklch(48% 0.14 338);
+  --field-ops: oklch(55% 0.1 118);
+  --field-opacity: 0.55;
+  --grain: 0.05;
+
+  --code-bg: oklch(100% 0 0 / 0.045);
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.3), 0 14px 36px -10px oklch(0% 0 0 / 0.5);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.3), 0 30px 80px -20px oklch(0% 0 0 / 0.65);
+  --scrim: oklch(8% 0.02 320 / 0.5);
+  --glow-strength: 1;
+}
+
+/* ---- Boreal - dark. Deep green-black, the classic aurora sky. ----------------- */
+[data-theme="boreal"] {
+  color-scheme: dark;
+  --bg: oklch(16.5% 0.017 172);
+  --surface: oklch(20% 0.019 172);
+  --raised: oklch(24% 0.021 172);
+  --ink: oklch(95% 0.014 165);
+  --muted: oklch(77.5% 0.022 168);
+  --faint: oklch(62.5% 0.026 168);
+  --line: oklch(92% 0.03 168 / 0.11);
+  --line-soft: oklch(92% 0.03 168 / 0.065);
+
+  --live: oklch(84% 0.14 168);
+  --ok: oklch(81% 0.12 150);
+  --attn: oklch(84% 0.13 80);
+  --fail: oklch(75% 0.15 30);
+  --live-light: oklch(80% 0.15 166);
+  --attn-light: oklch(81% 0.15 76);
+  --fail-light: oklch(69% 0.18 28);
+  --live-wash: oklch(80% 0.15 166 / 0.13);
+  --attn-wash: oklch(81% 0.15 76 / 0.15);
+  --fail-wash: oklch(69% 0.18 28 / 0.16);
+
+  --accent: oklch(80% 0.11 300);
+  --accent-light: oklch(68% 0.15 300);
+  --accent-wash: oklch(68% 0.15 300 / 0.2);
+  --on-accent: oklch(20% 0.04 300);
+
+  --p-webshop: oklch(80% 0.09 235);
+  --p-payments: oklch(78% 0.12 342);
+  --p-ops: oklch(83% 0.1 118);
+
+  --glass: oklch(29% 0.026 172 / 0.5);
+  --glass-strong: oklch(25.5% 0.024 172 / 0.84);
+  --glass-thin: oklch(29% 0.026 172 / 0.3);
+  --glass-solid: oklch(23% 0.021 172);
+  --rim: oklch(100% 0 0 / 0.075);
+  --rim-top: oklch(100% 0 0 / 0.14);
+  --edge: oklch(0% 0 0 / 0.36);
+  --hover: oklch(100% 0 0 / 0.055);
+  --press: oklch(100% 0 0 / 0.09);
+
+  --field-calm: oklch(55% 0.14 165);
+  --field-wait: oklch(60% 0.13 76);
+  --field-burn: oklch(55% 0.17 26);
+  --field-own: oklch(47% 0.15 300);
+  --field-webshop: oklch(50% 0.09 232);
+  --field-payments: oklch(48% 0.13 338);
+  --field-ops: oklch(56% 0.1 120);
+  --field-opacity: 0.58;
+  --grain: 0.05;
+
+  --code-bg: oklch(100% 0 0 / 0.045);
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.32);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.32), 0 14px 36px -10px oklch(0% 0 0 / 0.55);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.32), 0 30px 80px -20px oklch(0% 0 0 / 0.7);
+  --scrim: oklch(7% 0.02 172 / 0.5);
+  --glow-strength: 1;
+}
+
+/* ---- Ember - dark. Warm cocoa, a fire burned low. ----------------------------- */
+[data-theme="ember"] {
+  color-scheme: dark;
+  --bg: oklch(18% 0.018 48);
+  --surface: oklch(21.5% 0.02 48);
+  --raised: oklch(25.5% 0.022 48);
+  --ink: oklch(95% 0.013 70);
+  --muted: oklch(78% 0.022 62);
+  --faint: oklch(63.5% 0.026 58);
+  --line: oklch(92% 0.03 60 / 0.11);
+  --line-soft: oklch(92% 0.03 60 / 0.065);
+
+  --live: oklch(83% 0.12 168);
+  --ok: oklch(81% 0.11 150);
+  --attn: oklch(85% 0.13 82);
+  --fail: oklch(75% 0.15 28);
+  --live-light: oklch(78% 0.13 166);
+  --attn-light: oklch(82% 0.15 78);
+  --fail-light: oklch(68% 0.18 27);
+  --live-wash: oklch(78% 0.13 166 / 0.12);
+  --attn-wash: oklch(82% 0.15 78 / 0.14);
+  --fail-wash: oklch(68% 0.18 27 / 0.16);
+
+  --accent: oklch(79% 0.11 318);
+  --accent-light: oklch(68% 0.14 318);
+  --accent-wash: oklch(68% 0.14 318 / 0.2);
+  --on-accent: oklch(20% 0.035 318);
+
+  --p-webshop: oklch(80% 0.09 235);
+  --p-payments: oklch(78% 0.12 342);
+  --p-ops: oklch(83% 0.1 118);
+
+  --glass: oklch(31% 0.024 48 / 0.5);
+  --glass-strong: oklch(27% 0.022 48 / 0.84);
+  --glass-thin: oklch(31% 0.024 48 / 0.3);
+  --glass-solid: oklch(25% 0.022 48);
+  --rim: oklch(100% 0 0 / 0.075);
+  --rim-top: oklch(100% 0.02 70 / 0.15);
+  --edge: oklch(0% 0 0 / 0.34);
+  --hover: oklch(100% 0 0 / 0.055);
+  --press: oklch(100% 0 0 / 0.09);
+
+  --field-calm: oklch(52% 0.1 160);
+  --field-wait: oklch(62% 0.13 70);
+  --field-burn: oklch(56% 0.17 28);
+  --field-own: oklch(45% 0.12 318);
+  --field-webshop: oklch(50% 0.08 232);
+  --field-payments: oklch(48% 0.12 338);
+  --field-ops: oklch(55% 0.09 118);
+  --field-opacity: 0.55;
+  --grain: 0.05;
+
+  --code-bg: oklch(100% 0 0 / 0.045);
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.3), 0 14px 36px -10px oklch(0% 0 0 / 0.5);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.3), 0 30px 80px -20px oklch(0% 0 0 / 0.65);
+  --scrim: oklch(8% 0.02 48 / 0.5);
+  --glow-strength: 1;
+}
+
+/* ---- Accessibility fallbacks ---------------------------------------------------
+   Reduced transparency: every pane turns solid and the field dims, so nothing
+   behind a pane can ever touch the text on it. `html:root` outranks the theme
+   selectors above. ?state=solid forces it for screenshots. */
+@media (prefers-reduced-transparency: reduce) {
+  html:root {
+    --glass: var(--glass-solid);
+    --glass-strong: var(--glass-solid);
+    --glass-thin: var(--glass-solid);
+    --glass-blur: 0px;
+    --field-opacity: 0.3;
+  }
+}
+html:root[data-state~="solid"] {
+  --glass: var(--glass-solid);
+  --glass-strong: var(--glass-solid);
+  --glass-thin: var(--glass-solid);
+  --glass-blur: 0px;
+  --field-opacity: 0.3;
+}

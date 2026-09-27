@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Fix 3-D Secure checkout for EU cards · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .thread-pane { flex: 1.3 1 0; }
+  .changes-pane { flex: 1 1 0; }
+  .changes-pane .diff { font-size: 11.5px; }
+  .file-tabs { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+  .file-tab { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; height: 28px; padding: 0 14px 0 12px; font: 450 12px / 1 var(--font-mono); color: var(--muted); }
+  .file-tab .mk { color: var(--faint); }
+  .file-tab .dir { color: var(--faint); }
+  .file-tab.is-cursor { color: var(--ink); }
+  .diff-head { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); font: 500 12px / 1 var(--font-mono); color: var(--ink); }
+  .diff-head .act { margin-left: auto; height: 22px; font-size: 11.5px; }
+  .diff { padding: 4px 0 16px; }
+  .test-foot { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-top: 1px solid var(--line-soft); font: 450 11.5px / 1 var(--font-mono); color: var(--muted); flex: none; }
+  .test-foot .ok { color: var(--ok); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
+  .agent-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .agent-mark .brand { width: 10px; height: 10px; color: var(--ink); }
+  .msg-agent .code { margin-top: 12px; }
+  .ttab .mk { width: 11px; height: 11px; }
+  .ttab.new { padding: 0 8px; color: var(--faint); }
+  .thread-actions { margin-left: auto; display: flex; gap: 4px; }
+  .composer-card .ctx { font: 450 11px / 1 var(--font-mono); color: var(--faint); padding: 0 4px; }
+  .made-from { display: flex; align-items: center; gap: 8px; margin: 0 0 22px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: 8px; font-size: 12.5px; color: var(--muted); }
+  .made-from .mk { color: var(--accent); }
+  .made-from b { color: var(--ink); font-weight: var(--w-emph); }
+  .made-from .src { margin-left: auto; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="threads" data-active="fix-3ds"></nav>
+
+  <main class="main">
+    <!-- Pane 1: the thread -->
+    <section class="pane is-focus thread-pane">
+      <header class="thread-chrome">
+        <span class="pane-num">1</span>
+        <span class="crumb">webshop /</span>
+        <a class="ttab is-on" href="#"><svg class="mk tone-attn"><use href="#m-decision"/></svg>Fix 3-D Secure checkout for EU cards</a>
+        <a class="ttab" href="#"><svg class="mk tone-live"><use href="#m-working"/></svg>Refactor cart totals</a>
+        <a class="ttab new" href="#" title="New thread in this worktree"><svg class="mk"><use href="#c-plus"/></svg></a>
+        <span class="thread-actions">
+          <button class="act" type="button"><kbd>⌘</kbd><kbd>D</kbd>Diff</button>
+        </span>
+      </header>
+
+      <div class="transcript" data-composer="#composer" data-scrolled-to=".msg-user">
+        <div class="thread-col">
+          <div class="made-from">
+            <svg class="mk"><use href="#g-proposal"/></svg>
+            <span>Started 09:02 from the Proposal <b>Checkout fails for EU cards with 3-D Secure</b></span>
+            <span class="src"><svg class="brand"><use href="#b-sentry"/></svg>+3 sources</span>
+          </div>
+
+          <div class="msg-user">
+            <div class="msg-meta">Rogier · 09:02</div>
+            <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+          </div>
+
+          <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked for <b>2m 14s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="x"></i></span><span>read 6 files · ran 1 command</span></div>
+
+          <div class="msg-agent">
+            <div class="msg-meta"><span class="agent-mark"><svg class="brand"><use href="#b-claude"/></svg></span>Claude Code · Opus 5.5 · 09:04</div>
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+            <pre class="code" id="at-code"><header><svg class="mk"><use href="#g-file"/></svg>src/checkout/payment.ts<button class="act" type="button">Copy</button></header><code><span class="k">if</span> <span class="p">(</span>result<span class="p">.</span>status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span>
+  <span class="k">return</span> <span class="f">openThreeDSModal</span><span class="p">(</span>result<span class="p">.</span>clientSecret<span class="p">);</span>
+<span class="p">}</span></code></pre>
+          </div>
+
+          <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+
+          <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked for <b>4m 51s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="x"></i></span><span>edited 3 files · ran 3 commands</span></div>
+
+          <div class="changes">
+            <header>Changed files <span class="muted mono" style="font-size:11.5px">3</span><span class="plus">+48</span><span class="minus">−12</span><span style="margin-left:auto;display:flex;gap:2px"><button class="act" type="button"><kbd>f</kbd>Show files</button><button class="act" type="button"><kbd>⌘</kbd><kbd>D</kbd>Open diff</button></span></header>
+            <ul>
+              <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.ts</span><span><span class="plus">+21</span> <span class="minus">−9</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span></li>
+              <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.test.ts</span><span><span class="plus">+19</span> <span class="minus">−0</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span></li>
+              <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>3ds-modal.tsx</span><span><span class="plus">+8</span> <span class="minus">−3</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span></li>
+            </ul>
+          </div>
+
+          <div class="testline"><span class="ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span><span>pnpm test checkout</span><span class="faint">· 3.8s</span></div>
+
+          <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </div>
+
+      <div class="composer-dock" id="composer">
+          <div class="queued card-glass">
+            <svg class="mk"><use href="#m-queued"/></svg>
+            <span class="q-text">Also check the Apple Pay path</span>
+            <span class="q-state">queued · runs next</span>
+            <button class="act" type="button"><kbd>⌘</kbd><kbd>⏎</kbd>Steer</button>
+            <button class="act" type="button">Cancel</button>
+          </div>
+          <div class="dock card-glass" role="group" aria-label="Request">
+            <svg class="mk"><use href="#m-decision"/></svg>
+            <div>
+              <div class="dock-title">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+              <div class="dock-note">Auto-accept edits covers file edits only. Pushing needs your OK.</div>
+              <div class="ledger">
+                <button class="ans is-primary" type="button"><kbd>y</kbd><b>Allow once</b><span>Runs this one command</span></button>
+                <button class="ans" type="button"><kbd>a</kbd><b>Always allow git push</b><span>Adds a Grant for this thread</span></button>
+                <button class="ans" type="button"><kbd>n</kbd><b>Deny</b><span>The agent is told no and keeps going</span></button>
+              </div>
+            </div>
+            <div class="dock-mini"><svg class="mk"><use href="#m-decision"/></svg><span>Waits on you:</span><b>git push -u origin fix/3ds-eu-cards</b><span style="margin-left:auto"><kbd>y</kbd> <kbd>a</kbd> <kbd>n</kbd></span></div>
+          </div>
+          <div class="composer-card card-glass">
+            <div class="composer-input"><span class="ph">Say what's next. Press <kbd>i</kbd> to type</span></div>
+            <div class="composer-row">
+              <button class="c-btn" type="button" title="Attach"><svg class="mk"><use href="#c-plus"/></svg></button>
+              <button class="c-sel ink" type="button"><svg class="mk" style="color:var(--accent)"><use href="#g-lock"/></svg>auto-accept edits<svg class="mk"><use href="#c-down"/></svg></button>
+              <button class="c-sel" type="button"><span class="lbl">effort</span>high<svg class="mk"><use href="#c-down"/></svg></button>
+              <span class="c-spacer"></span>
+              <span class="ctx">41% context</span>
+              <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Opus 5.5</span>
+              <button class="c-btn" type="button" title="Voice"><svg class="mk"><use href="#c-mic"/></svg></button>
+              <button class="send" type="button" disabled title="Send"><svg class="mk"><use href="#c-send"/></svg></button>
+            </div>
+          </div>
+          <div class="composer-lip">
+            <span class="br"><svg class="mk"><use href="#g-branch"/></svg>fix/3ds-eu-cards</span>
+            <span>from main</span>
+            <span class="rule"></span>
+            <span>own worktree</span>
+            <span class="rule"></span>
+            <span class="br"><svg class="mk"><use href="#g-runner"/></svg>studio-mac</span>
+            <span class="right"><svg class="brand" style="width:12px;height:12px"><use href="#b-anthropic"/></svg>rogier@personal</span>
+          </div>
+        </div>
+    </section>
+
+    <!-- Pane 2: the changes -->
+    <section class="pane changes-pane">
+      <header class="pane-head">
+        <span class="pane-num">2</span>
+        <span class="pane-title">Changes</span>
+        <span class="pane-sub">3 files</span>
+        <span class="plus">+48</span><span class="minus">−12</span>
+        <span class="pane-actions">
+          <button class="act" type="button"><kbd>c</kbd>Commit</button>
+          <button class="act" type="button"><svg class="mk"><use href="#c-split"/></svg></button>
+        </span>
+      </header>
+      <div class="file-tabs" data-list>
+        <div class="file-tab is-cursor" data-row><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.ts</span><span class="plus">+21</span><span class="minus">−9</span></div>
+        <div class="file-tab" data-row><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.test.ts</span><span class="plus">+19</span><span class="minus">−0</span></div>
+        <div class="file-tab" data-row><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">−3</span></div>
+      </div>
+      <div class="diff-head"><svg class="mk tone-idle"><use href="#g-file"/></svg>payment.ts<span class="faint">2 hunks</span><button class="act" type="button"><kbd>]</kbd>next hunk</button></div>
+      <div class="pane-body">
+        <div class="diff">
+          <div class="hunk">@@ -1,6 +1,7 @@</div>
+          <div class="ln"><i>1</i><i>1</i><u> </u><span><span class="k">import</span> <span class="p">{</span> stripe <span class="p">}</span> <span class="k">from</span> <span class="s">"./stripe"</span><span class="p">;</span></span></div>
+          <div class="ln"><i>2</i><i>2</i><u> </u><span><span class="k">import</span> <span class="k">type</span> <span class="p">{</span> <span class="t">PaymentResult</span> <span class="p">}</span> <span class="k">from</span> <span class="s">"./types"</span><span class="p">;</span></span></div>
+          <div class="ln add"><i></i><i>3</i><u>+</u><span><span class="k">import</span> <span class="p">{</span> openThreeDSModal <span class="p">}</span> <span class="k">from</span> <span class="s">"./3ds-modal"</span><span class="p">;</span></span></div>
+          <div class="ln"><i>3</i><i>4</i><u> </u><span></span></div>
+          <div class="hunk">@@ -38,12 +39,20 @@ handlePaymentResult</div>
+          <div class="ln"><i>38</i><i>39</i><u> </u><span><span class="k">export async function</span> <span class="f">handlePaymentResult</span><span class="p">(</span></span></div>
+          <div class="ln"><i>39</i><i>40</i><u> </u><span>  elements<span class="p">:</span> <span class="t">StripeElements</span><span class="p">,</span></span></div>
+          <div class="ln"><i>40</i><i>41</i><u> </u><span><span class="p">):</span> <span class="t">Promise</span><span class="p">&lt;</span><span class="t">PaymentResult</span><span class="p">&gt; {</span></span></div>
+          <div class="ln"><i>41</i><i>42</i><u> </u><span>  <span class="k">const</span> result <span class="p">=</span> <span class="k">await</span> stripe<span class="p">.</span><span class="f">confirmPayment</span><span class="p">({</span></span></div>
+          <div class="ln"><i>42</i><i>43</i><u> </u><span>    elements<span class="p">,</span></span></div>
+          <div class="ln del"><i>43</i><i></i><u>−</u><span>    redirect<span class="p">:</span> <span class="s">"always"</span><span class="p">,</span></span></div>
+          <div class="ln add"><i></i><i>44</i><u>+</u><span>    redirect<span class="p">:</span> <span class="s">"if_required"</span><span class="p">,</span></span></div>
+          <div class="ln"><i>44</i><i>45</i><u> </u><span>  <span class="p">});</span></span></div>
+          <div class="ln add"><i></i><i>46</i><u>+</u><span>  <span class="c">// Stripe SDK v14: 3-D Secure cards need an action.</span></span></div>
+          <div class="ln add"><i></i><i>47</i><u>+</u><span>  <span class="k">if</span> <span class="p">(</span>result<span class="p">.</span>status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span></span></div>
+          <div class="ln add"><i></i><i>48</i><u>+</u><span>    <span class="k">return</span> <span class="f">openThreeDSModal</span><span class="p">(</span>result<span class="p">.</span>clientSecret<span class="p">);</span></span></div>
+          <div class="ln add"><i></i><i>49</i><u>+</u><span>  <span class="p">}</span></span></div>
+          <div class="ln"><i>45</i><i>50</i><u> </u><span>  <span class="k">if</span> <span class="p">(</span>result<span class="p">.</span>status <span class="p">===</span> <span class="s">"succeeded"</span><span class="p">) {</span></span></div>
+          <div class="ln"><i>46</i><i>51</i><u> </u><span>    <span class="k">return</span> <span class="p">{</span> ok<span class="p">:</span> <span class="k">true</span> <span class="p">};</span></span></div>
+          <div class="ln"><i>47</i><i>52</i><u> </u><span>  <span class="p">}</span></span></div>
+          <div class="ln del"><i>48</i><i></i><u>−</u><span>  <span class="k">return</span> <span class="p">{</span> ok<span class="p">:</span> <span class="k">false</span><span class="p">,</span> reason<span class="p">:</span> <span class="s">"Card declined"</span> <span class="p">};</span></span></div>
+          <div class="ln add"><i></i><i>53</i><u>+</u><span>  <span class="k">return</span> <span class="p">{</span> ok<span class="p">:</span> <span class="k">false</span><span class="p">,</span> reason<span class="p">:</span> <span class="f">declineReason</span><span class="p">(</span>result<span class="p">.</span>error<span class="p">) };</span></span></div>
+          <div class="ln"><i>49</i><i>54</i><u> </u><span><span class="p">}</span></span></div>
+          <div class="ln"><i>50</i><i>55</i><u> </u><span></span></div>
+          <div class="ln"><i>51</i><i>56</i><u> </u><span><span class="k">function</span> <span class="f">declineReason</span><span class="p">(</span>error<span class="p">?:</span> <span class="t">StripeError</span><span class="p">) {</span></span></div>
+          <div class="ln del"><i>52</i><i></i><u>−</u><span>  <span class="k">return</span> <span class="s">"Card declined"</span><span class="p">;</span></span></div>
+          <div class="ln add"><i></i><i>57</i><u>+</u><span>  <span class="k">return</span> error<span class="p">?.</span>message <span class="p">??</span> <span class="s">"Card declined"</span><span class="p">;</span></span></div>
+          <div class="ln"><i>53</i><i>58</i><u> </u><span><span class="p">}</span></span></div>
+        </div>
+      </div>
+      <div class="test-foot"><span class="ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span><span>pnpm test checkout</span><span class="faint" style="margin-left:auto">ran 09:09 · after the last edit</span></div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="DECIDE" data-context="Run git push -u origin fix/3ds-eu-cards?" data-keys="y:allow once|a:always|n:deny|i:type|⌘ D:diff"></footer>
+</div>
+</body>
+</html>

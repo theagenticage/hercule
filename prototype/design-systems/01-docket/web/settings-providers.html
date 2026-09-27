@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(12) Providers · Settings · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 7.5C4 6.12 5.12 5 6.5 5h6.2c.9 0 1.6.5 2 1.2l.8 1.3H25.5C26.88 7.5 28 8.62 28 10v15.5c0 1.38-1.12 2.5-2.5 2.5h-19A2.5 2.5 0 0 1 4 25.5z' fill='%231f1b16'/%3E%3Cpath d='M11 12.6v10.6M21 12.6v10.6' stroke='%23f4f1ea' stroke-width='3.1'/%3E%3Cpath d='M12.3 17.9h7.4' stroke='%2322a55a' stroke-width='3.1'/%3E%3Ccircle cx='26' cy='7' r='5.5' fill='%23f0a020' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .whead .iconbtn[aria-current="page"] { background: var(--sel); color: var(--ink); }
+  .wbody { grid-template-columns: 220px 1fr; }
+  .wside { padding-top: 16px; }
+  .wside .label { padding: 0 20px 10px; }
+  .page { flex: 1; min-height: 0; overflow: auto; padding: 0 36px 28px; }
+  .topbar { padding: 0; height: 60px; }
+  .topbar h1 { font-size: var(--fs-title); }
+  .topbar .when { font-size: var(--fs-small); }
+
+  .sec-h { display: flex; align-items: baseline; gap: 10px; height: 52px; padding-top: 34px; font-size: var(--fs-small); color: var(--faint); font-weight: 500; }
+  .sec-h b { color: var(--ink); font-weight: 600; font-size: var(--fs-ui); }
+
+  /* One provider instance per row. The grid is shared by the header row. */
+  .pi-head, .pi-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 96px 224px 200px; column-gap: 20px; }
+  .pi-head { height: 34px; align-items: end; padding-bottom: 8px; font-size: var(--fs-small); color: var(--faint); font-weight: 500; }
+  .pi-row { padding: 18px 0; border-top: 1px solid var(--line-soft); align-items: start; }
+  .who { display: grid; grid-template-columns: 34px 1fr; column-gap: 12px; row-gap: 2px; }
+  .who .tile { grid-row: 1 / 4; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in oklab, var(--ink) 6%, transparent); color: var(--ink); }
+  .who .tile .b { width: 17px; height: 17px; }
+  .who .tile .pi { font: 600 18px/1 var(--font-mono); }
+  .who .n { font-weight: 600; font-size: var(--fs-body); }
+  .who .acct { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .who .st { font-size: var(--fs-small); margin-top: 4px; }
+  .models { display: grid; gap: 4px; font-size: var(--fs-ui); }
+  .models span { white-space: nowrap; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .models .def { color: var(--ink); font-weight: 560; }
+  .models .def em { font-style: normal; font-size: 11px; font-weight: 550; color: var(--faint); }
+  .eff { font-size: var(--fs-ui); color: var(--ink); display: grid; gap: 3px; }
+  .eff small { font-size: var(--fs-small); color: var(--faint); }
+
+  /* The access-mode ladder: four steps from least to most permissive.
+     Steps up to the default are filled; a step the provider lacks is dashed and named below. */
+  .acc { display: grid; gap: 7px; }
+  .acc .top { display: flex; align-items: center; gap: 10px; font-size: var(--fs-ui); color: var(--ink); font-weight: 520; }
+  .ladder { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .ladder i { width: 6px; border-radius: 1.5px; background: color-mix(in oklab, var(--ink) 14%, transparent); }
+  .ladder i:nth-child(1) { height: 40%; }
+  .ladder i:nth-child(2) { height: 60%; }
+  .ladder i:nth-child(3) { height: 80%; }
+  .ladder i:nth-child(4) { height: 100%; }
+  .ladder i.on { background: var(--accent); }
+  .ladder i.no { background: transparent; box-shadow: inset 0 0 0 1px var(--faint); opacity: .7; background-image: repeating-linear-gradient(135deg, var(--faint) 0 1px, transparent 1px 3px); }
+  .acc .steps { display: flex; gap: 12px; font-size: 11px; color: var(--faint); }
+  .acc .steps .cur { color: var(--ink); font-weight: 560; }
+  .acc .fallback { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--hold-text); }
+  .acc .fallback .m { flex: none; }
+
+  .use { display: grid; gap: 6px; }
+  .use .n { display: flex; align-items: baseline; gap: 6px; }
+  .use .num { font-size: var(--fs-num-s); }
+  .use .n span { font-size: var(--fs-small); color: var(--muted); }
+  .use .meter { width: 100%; }
+  .use small { font-size: var(--fs-small); color: var(--faint); }
+
+  /* Machines by provider instance: where each one is installed and signed in. */
+  .mx-head, .mx-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 96px 224px 200px; column-gap: 20px; align-items: center; }
+  .mx-head { height: 30px; font-size: var(--fs-small); color: var(--faint); font-weight: 500; }
+  .mx-head span { display: flex; align-items: center; gap: 6px; }
+  .mx-head .b { width: 12px; height: 12px; }
+  .mx-row { height: 50px; border-top: 1px solid var(--line-soft); font-size: var(--fs-ui); }
+  .mx-row .mn { display: grid; grid-template-columns: 34px 1fr; column-gap: 12px; align-items: center; }
+  .mx-row .mn .i { width: 16px; height: 16px; justify-self: center; color: var(--muted); }
+  .mx-row .mn b { font-weight: 560; font-family: var(--font-mono); font-size: 12.5px; }
+  .mx-row .mn small { display: block; font-size: var(--fs-small); color: var(--faint); }
+  .mx-row .st { font-size: var(--fs-small); }
+  .cap { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; align-items: center; }
+  .slots { display: flex; gap: 2px; }
+  .slots i { flex: 1; height: 12px; border-radius: 2px; background: color-mix(in oklab, var(--ink) 10%, transparent); }
+  .slots i.on { background: var(--ink); }
+  .cap.hold .slots i.on { background: var(--hold); }
+  .consequence { display: flex; align-items: center; gap: 8px; height: 40px; padding-left: 46px; margin-top: -1px; font-size: var(--fs-small); color: var(--muted); background: linear-gradient(90deg, var(--tint-hold), transparent 60%); box-shadow: inset 2px 0 0 var(--hold); }
+  .consequence .btn { margin-left: auto; margin-right: 12px; }
+  .cap .num { font-size: var(--fs-small); color: var(--muted); white-space: nowrap; }
+  .cap.hold .num { color: var(--hold-text); font-weight: 600; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web">
+  <header class="whead">
+    <a class="logo"><svg><use href="#logo"/></svg>Hercule</a>
+    <nav class="wnav">
+      <a>Intake <span class="dot-count">12</span></a>
+      <a>Threads <span class="count">4</span></a>
+      <a>Assistants <span class="count">3</span></a>
+      <a>Check-in <span class="count">3</span></a>
+      <a>Tasks <span class="count">18</span></a>
+      <a>Runs <span class="count">4</span></a>
+      <a>Workflows</a>
+      <a>Fleet</a>
+    </nav>
+    <div class="tools">
+      <div class="wsearch"><svg class="i i--s"><use href="#i-search"/></svg>Search or jump to<span class="key key--s">⌘K</span></div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 3 wait</span></div>
+      <button class="iconbtn" aria-label="Settings" aria-current="page"><svg class="i"><use href="#i-gear"/></svg></button>
+      <span class="avatar">R</span>
+    </div>
+  </header>
+
+  <div class="wbody">
+    <aside class="wside" aria-label="Settings">
+      <div class="label">Settings</div>
+      <nav class="nav">
+        <a><svg class="i i--s"><use href="#i-user"/></svg>Profile</a>
+        <a><svg class="i i--s"><use href="#i-palette"/></svg>Appearance</a>
+        <a><svg class="i i--s"><use href="#i-chat"/></svg>Threads</a>
+        <a><svg class="i i--s"><use href="#i-assistant"/></svg>Assistants<span class="count">3</span></a>
+        <a><svg class="i i--s"><use href="#i-globe"/></svg>Connections<span class="count count--hold">1</span></a>
+        <a aria-current="page"><svg class="i i--s"><use href="#i-sparkle"/></svg>Providers<span class="count">3</span></a>
+        <a><svg class="i i--s"><use href="#i-server"/></svg>Machines<span class="count">3</span></a>
+        <div class="gap"></div>
+        <a><svg class="i i--s"><use href="#i-key"/></svg>Identities</a>
+        <a><svg class="i i--s"><use href="#i-shield"/></svg>Permission profiles</a>
+        <a><svg class="i i--s"><use href="#i-lock"/></svg>Secrets</a>
+        <a><svg class="i i--s"><use href="#i-gauge"/></svg>Bounds</a>
+        <a><svg class="i i--s"><use href="#i-plug"/></svg>Plugins</a>
+        <a><svg class="i i--s"><use href="#i-cube"/></svg>System</a>
+      </nav>
+    </aside>
+
+    <main class="wmain">
+      <div class="page">
+        <header class="topbar">
+          <h1>Providers</h1>
+          <span class="when">3 provider instances on 3 machines</span>
+          <div class="tools">
+            <button class="pillbtn"><svg class="i"><use href="#i-refresh"/></svg>Probe again</button>
+            <button class="pillbtn"><svg class="i"><use href="#i-plus"/></svg>Add provider instance</button>
+          </div>
+        </header>
+
+        <div class="pi-head"><span>Provider instance</span><span>Models</span><span>Effort</span><span>Default access mode</span><span>Usage</span></div>
+
+        <div class="pi-row">
+          <div class="who">
+            <span class="tile"><svg class="b"><use href="#b-claude"/></svg></span>
+            <span class="n">Claude Code</span>
+            <span class="acct">rogier@personal</span>
+            <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in on 3 of 3</span>
+          </div>
+          <div class="models">
+            <span class="def">Opus 5.5 <em>default</em></span>
+            <span>Sonnet 5</span>
+            <span>Haiku 4.5</span>
+          </div>
+          <div class="eff">high<small>per model</small></div>
+          <div class="acc">
+            <span class="top"><span class="ladder" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i></span>auto-accept-edits</span>
+            <span class="steps">all 4 modes supported</span>
+          </div>
+          <div class="use">
+            <span class="n"><span class="num">61%</span><span>of the 5-hour window</span></span>
+            <span class="meter"><i style="width:61%;--mc:var(--accent)"></i></span>
+            <small>resets 11:00</small>
+          </div>
+        </div>
+
+        <div class="pi-row">
+          <div class="who">
+            <span class="tile"><svg class="b"><use href="#b-openai"/></svg></span>
+            <span class="n">Codex</span>
+            <span class="acct">work</span>
+            <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in on 2 of 2</span>
+          </div>
+          <div class="models">
+            <span class="def">gpt-5.4 <em>default</em></span>
+            <span>gpt-5.4-mini</span>
+          </div>
+          <div class="eff">medium<small>per model</small></div>
+          <div class="acc">
+            <span class="top"><span class="ladder" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>auto</span>
+            <span class="steps">all 4 modes supported</span>
+          </div>
+          <div class="use">
+            <span class="n"><span class="num">18%</span><span>of the 5-hour window</span></span>
+            <span class="meter"><i style="width:18%;--mc:var(--accent)"></i></span>
+            <small>resets 13:20</small>
+          </div>
+        </div>
+
+        <div class="pi-row">
+          <div class="who">
+            <span class="tile"><span class="pi">π</span></span>
+            <span class="n">pi</span>
+            <span class="acct">local · llama.cpp</span>
+            <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>running on 1 of 1</span>
+          </div>
+          <div class="models">
+            <span class="def">qwen3-coder 30b <em>default</em></span>
+          </div>
+          <div class="eff">low<small>thinking level</small></div>
+          <div class="acc">
+            <span class="top"><span class="ladder" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="no"></i><i></i></span>auto-accept-edits</span>
+            <span class="fallback"><svg class="m"><use href="#m-skipped"/></svg>auto runs as auto-accept-edits</span>
+          </div>
+          <div class="use">
+            <span class="n"><span class="num">1</span><span>live session</span></span>
+            <small>local model · no usage window</small>
+          </div>
+        </div>
+
+        <div class="sec-h"><b>Machines</b><span>which provider instances each runner can start</span></div>
+        <div class="mx-head">
+          <span>Runner</span>
+          <span><svg class="b"><use href="#b-claude"/></svg>Claude Code</span>
+          <span><svg class="b"><use href="#b-openai"/></svg>Codex</span>
+          <span>π pi</span>
+          <span>Sessions</span>
+        </div>
+        <div class="mx-row">
+          <span class="mn"><svg class="i"><use href="#i-machine"/></svg><span><b>studio-mac</b><small>Rogier's desktop · local</small></span></span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in</span>
+          <span class="st st--quiet"><svg class="m"><use href="#m-cancelled"/></svg>not installed</span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>running</span>
+          <span class="cap"><span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="num">5 of 6</span></span>
+        </div>
+        <div class="mx-row">
+          <span class="mn"><svg class="i"><use href="#i-server"/></svg><span><b>build-box-1</b><small>Linux server</small></span></span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in</span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in</span>
+          <span class="st st--quiet"><svg class="m"><use href="#m-cancelled"/></svg>not installed</span>
+          <span class="cap hold"><span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="num">8 of 8 · at cap</span></span>
+        </div>
+        <div class="consequence"><svg class="m hold"><use href="#m-paused"/></svg>build-box-1 is at cap. New Codex sessions go to build-box-2 until a slot frees.<button class="btn btn--s">Raise the cap</button></div>
+        <div class="mx-row">
+          <span class="mn"><svg class="i"><use href="#i-server"/></svg><span><b>build-box-2</b><small>Linux server</small></span></span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in</span>
+          <span class="st st--go"><svg class="m"><use href="#m-done"/></svg>signed in</span>
+          <span class="st st--quiet"><svg class="m"><use href="#m-cancelled"/></svg>not installed</span>
+          <span class="cap"><span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span><span class="num">3 of 8</span></span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

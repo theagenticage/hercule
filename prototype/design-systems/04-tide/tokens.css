@@ -1,0 +1,446 @@
+/* PROTOTYPE - Tide: every theme and every scale of the Hercule design system "Tide".
+
+   Color doctrine: color = time and rhythm.
+   - The past is sand. Finished work loses its color and fades into the ground (--past, --muted).
+   - Now is coral. The Now line, and anything that needs Rogier right now (a decision, a burning
+     Proposal, a waiting session), is the one vivid warm color on screen (--now, alias --attn).
+   - What is live is sea. A session or assistant that is working right now is sea teal (--live).
+   - The future is sea-glass, drawn hollow or dashed: scheduled triage, heartbeats, reminders,
+     queued input (--future). Solid means it happened; outline means it will.
+   - Failure is chart magenta, the one color that is neither time nor place (--fail).
+   - Projects own a lane color (--lane-webshop, --lane-payments, --lane-ops). Sources stay
+     monochrome: their marks are drawn in currentColor.
+   State is never color alone: every color above travels with a mark, a shape or a word. */
+
+@font-face {
+  font-family: "Sora";
+  src: url("fonts/sora-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("fonts/dm-mono-latin-300-normal.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("fonts/dm-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("fonts/dm-mono-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+}
+
+/* ---------------------------------------------------------------- scales (every theme) */
+:root {
+  --font-sans: "Sora", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type. Body is 13px; page titles never pass 20px. Size hierarchy comes from numerals. */
+  --fs-micro: 10.5px; /* mono time tabs and axis labels */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px; /* transcript prose */
+  --fs-xl: 16px;
+  --fs-title: 20px;
+  --fs-num: 28px; /* headline numerals */
+  --fs-num-xl: 40px;
+  --w-regular: 400;
+  --w-emph: 540;
+  --w-strong: 620;
+  --lh-tight: 1.25;
+  --lh: 1.5;
+  --lh-prose: 1.62;
+  --tracking-title: -0.012em;
+  --tracking-num: -0.03em;
+
+  /* Space: a 4px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Shape: soft, pebble-like. */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Motion: things arrive like water - quick out, long settle. */
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 380ms;
+  --dur-tide: 900ms;
+  --ease-tide: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-swell: cubic-bezier(0.45, 0, 0.25, 1);
+
+  /* The Now line. */
+  --now-w: 1.5px;
+
+  /* Glass: blur plus a little saturation, so color under the glass stays alive. */
+  --glass-blur: 10px; /* above ~12px, headless Chromium drops the blur on small elements */
+  --glass-sat: 1.5;
+}
+
+/* ---------------------------------------------------------------- Sand (light, flagship) */
+:root,
+:root[data-theme="light"],
+:root[data-theme="sand"],
+[data-preview="sand"] {
+  color-scheme: light;
+  --bg: oklch(96.4% 0.012 85);
+  --surface: oklch(93.8% 0.016 82);
+  --raised: oklch(99.3% 0.004 85);
+  --sunken: oklch(92.4% 0.017 82);
+  --ink: oklch(24% 0.02 165);
+  --muted: oklch(45% 0.018 155);
+  --faint: oklch(57% 0.016 130);
+  --line: oklch(32% 0.03 130 / 0.15);
+  --line-soft: oklch(32% 0.03 130 / 0.08);
+  --hover: oklch(32% 0.03 130 / 0.06);
+
+  --now: oklch(65% 0.175 36);
+  --now-ink: oklch(53% 0.17 33);
+  --now-wash: oklch(65% 0.175 36 / 0.11);
+  --on-now: oklch(99% 0.01 60);
+  --attn: var(--now);
+
+  --live: oklch(55% 0.095 188);
+  --live-ink: oklch(48% 0.085 190);
+  --live-wash: oklch(55% 0.095 188 / 0.12);
+
+  --future: oklch(64% 0.075 170);
+  --future-ink: oklch(48% 0.07 172);
+  --future-wash: oklch(64% 0.075 170 / 0.1);
+
+  --fail: oklch(52% 0.2 355);
+  --fail-wash: oklch(52% 0.2 355 / 0.1);
+  --ok: oklch(50% 0.05 150);
+
+  /* The past as a fill: the tide curve, finished bars, history. */
+  --past: oklch(80% 0.035 85);
+  --past-soft: oklch(88% 0.026 85);
+  --night: oklch(40% 0.04 170 / 0.06);
+
+  --lane-webshop: oklch(57% 0.13 128);
+  --lane-webshop-ink: oklch(48% 0.11 128);
+  --lane-payments: oklch(54% 0.14 300);
+  --lane-payments-ink: oklch(50% 0.14 300);
+  --lane-ops: oklch(68% 0.13 75);
+  --lane-ops-ink: oklch(52% 0.11 70);
+
+  --glass: color-mix(in oklch, var(--raised) 74%, transparent);
+  --glass-thin: color-mix(in oklch, var(--raised) 52%, transparent);
+  --glass-side: color-mix(in oklch, var(--surface) 80%, transparent);
+  --glass-edge: inset 0 1px 0 oklch(100% 0 0 / 0.7);
+
+  --shadow-1: 0 1px 2px oklch(30% 0.04 80 / 0.08);
+  --shadow-2: 0 1px 2px oklch(30% 0.04 80 / 0.08), 0 6px 18px -6px oklch(30% 0.04 80 / 0.16);
+  --shadow-3: 0 2px 4px oklch(30% 0.04 80 / 0.06), 0 22px 48px -16px oklch(30% 0.05 80 / 0.3);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--live);
+
+  /* Office scene: sky at 09:41 on a clear September morning. */
+  --sky-a: oklch(88% 0.06 215);
+  --sky-b: oklch(93% 0.04 80);
+  --wood: oklch(84% 0.04 75);
+  --wood-dark: oklch(74% 0.045 70);
+  --floor: oklch(91% 0.02 85);
+  /* Office agents: small pebbles, light enough to read on every floor. */
+  --pebble: oklch(99.2% 0.005 85);
+  --pebble-shade: oklch(88% 0.02 82);
+  --pebble-eye: oklch(24% 0.02 160);
+}
+
+/* ---------------------------------------------------------------- Shell (light) */
+:root[data-theme="shell"],
+[data-preview="shell"] {
+  color-scheme: light;
+  --bg: oklch(97.4% 0.008 25);
+  --surface: oklch(94.8% 0.012 22);
+  --raised: oklch(99.5% 0.003 25);
+  --sunken: oklch(93.4% 0.013 22);
+  --ink: oklch(25% 0.022 350);
+  --muted: oklch(46% 0.02 355);
+  --faint: oklch(58% 0.018 10);
+  --line: oklch(30% 0.04 350 / 0.14);
+  --line-soft: oklch(30% 0.04 350 / 0.075);
+  --hover: oklch(30% 0.04 350 / 0.055);
+
+  --now: oklch(64% 0.18 36);
+  --now-ink: oklch(53% 0.17 33);
+  --now-wash: oklch(64% 0.18 36 / 0.1);
+  --on-now: oklch(99% 0.01 60);
+  --attn: var(--now);
+
+  --live: oklch(54% 0.09 195);
+  --live-ink: oklch(47% 0.085 195);
+  --live-wash: oklch(54% 0.09 195 / 0.11);
+
+  --future: oklch(64% 0.07 175);
+  --future-ink: oklch(48% 0.07 175);
+  --future-wash: oklch(64% 0.07 175 / 0.1);
+
+  --fail: oklch(51% 0.2 355);
+  --fail-wash: oklch(51% 0.2 355 / 0.09);
+  --ok: oklch(50% 0.04 150);
+
+  --past: oklch(82% 0.03 20);
+  --past-soft: oklch(89.5% 0.02 20);
+  --night: oklch(40% 0.04 330 / 0.055);
+
+  --lane-webshop: oklch(57% 0.13 128);
+  --lane-webshop-ink: oklch(48% 0.11 128);
+  --lane-payments: oklch(53% 0.15 300);
+  --lane-payments-ink: oklch(50% 0.15 300);
+  --lane-ops: oklch(68% 0.13 75);
+  --lane-ops-ink: oklch(52% 0.11 70);
+
+  --glass: color-mix(in oklch, var(--raised) 74%, transparent);
+  --glass-thin: color-mix(in oklch, var(--raised) 52%, transparent);
+  --glass-side: color-mix(in oklch, var(--surface) 80%, transparent);
+  --glass-edge: inset 0 1px 0 oklch(100% 0 0 / 0.75);
+
+  --shadow-1: 0 1px 2px oklch(30% 0.05 20 / 0.08);
+  --shadow-2: 0 1px 2px oklch(30% 0.05 20 / 0.08), 0 6px 18px -6px oklch(30% 0.05 20 / 0.16);
+  --shadow-3: 0 2px 4px oklch(30% 0.05 20 / 0.06), 0 22px 48px -16px oklch(30% 0.06 20 / 0.3);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--live);
+
+  --sky-a: oklch(88% 0.05 230);
+  --sky-b: oklch(93% 0.04 40);
+  --wood: oklch(86% 0.035 40);
+  --wood-dark: oklch(76% 0.04 35);
+  --floor: oklch(93% 0.015 25);
+  --pebble: oklch(99.4% 0.004 30);
+  --pebble-shade: oklch(89% 0.018 30);
+  --pebble-eye: oklch(24% 0.02 160);
+}
+
+/* ---------------------------------------------------------------- Kelp (dark, flagship) */
+:root[data-theme="dark"],
+:root[data-theme="kelp"],
+[data-preview="kelp"] {
+  color-scheme: dark;
+  --bg: oklch(19.5% 0.016 158);
+  --surface: oklch(22.4% 0.018 158);
+  --raised: oklch(26% 0.02 158);
+  --sunken: oklch(17.4% 0.015 158);
+  --ink: oklch(93.5% 0.014 110);
+  --muted: oklch(76% 0.016 135);
+  --faint: oklch(61% 0.016 150);
+  --line: oklch(90% 0.03 140 / 0.13);
+  --line-soft: oklch(90% 0.03 140 / 0.07);
+  --hover: oklch(90% 0.03 140 / 0.06);
+
+  --now: oklch(73% 0.155 38);
+  --now-ink: oklch(77% 0.14 40);
+  --now-wash: oklch(73% 0.155 38 / 0.14);
+  --on-now: oklch(20% 0.03 38);
+  --attn: var(--now);
+
+  --live: oklch(76% 0.105 182);
+  --live-ink: oklch(79% 0.1 182);
+  --live-wash: oklch(76% 0.105 182 / 0.13);
+
+  --future: oklch(80% 0.075 165);
+  --future-ink: oklch(81% 0.075 165);
+  --future-wash: oklch(80% 0.075 165 / 0.1);
+
+  --fail: oklch(71% 0.17 358);
+  --fail-wash: oklch(71% 0.17 358 / 0.13);
+  --ok: oklch(72% 0.05 150);
+
+  --past: oklch(40% 0.03 150);
+  --past-soft: oklch(31% 0.024 155);
+  --night: oklch(8% 0.02 160 / 0.3);
+
+  --lane-webshop: oklch(78% 0.13 125);
+  --lane-webshop-ink: oklch(79% 0.13 125);
+  --lane-payments: oklch(74% 0.12 300);
+  --lane-payments-ink: oklch(77% 0.11 300);
+  --lane-ops: oklch(81% 0.12 80);
+  --lane-ops-ink: oklch(82% 0.11 80);
+
+  --glass: color-mix(in oklch, var(--raised) 76%, transparent);
+  --glass-thin: color-mix(in oklch, var(--raised) 54%, transparent);
+  --glass-side: color-mix(in oklch, var(--surface) 82%, transparent);
+  --glass-edge: inset 0 1px 0 oklch(100% 0 0 / 0.06);
+
+  --shadow-1: 0 1px 2px oklch(5% 0.02 160 / 0.4);
+  --shadow-2: 0 1px 2px oklch(5% 0.02 160 / 0.4), 0 8px 22px -8px oklch(5% 0.02 160 / 0.6);
+  --shadow-3: 0 2px 4px oklch(5% 0.02 160 / 0.4), 0 24px 56px -16px oklch(4% 0.02 160 / 0.75);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--live);
+
+  --sky-a: oklch(50% 0.05 195);
+  --sky-b: oklch(70% 0.07 60);
+  --wood: oklch(34% 0.03 70);
+  --wood-dark: oklch(28% 0.028 70);
+  --floor: oklch(25% 0.02 158);
+  --pebble: oklch(89% 0.02 105);
+  --pebble-shade: oklch(71% 0.026 120);
+  --pebble-eye: oklch(24% 0.02 160);
+}
+
+/* ---------------------------------------------------------------- Driftwood (dark) */
+:root[data-theme="driftwood"],
+[data-preview="driftwood"] {
+  color-scheme: dark;
+  --bg: oklch(20.5% 0.012 60);
+  --surface: oklch(23.4% 0.013 60);
+  --raised: oklch(27% 0.014 60);
+  --sunken: oklch(18.4% 0.011 60);
+  --ink: oklch(92.5% 0.014 80);
+  --muted: oklch(75% 0.016 70);
+  --faint: oklch(61% 0.015 65);
+  --line: oklch(90% 0.03 70 / 0.13);
+  --line-soft: oklch(90% 0.03 70 / 0.07);
+  --hover: oklch(90% 0.03 70 / 0.06);
+
+  --now: oklch(73% 0.15 38);
+  --now-ink: oklch(77% 0.14 40);
+  --now-wash: oklch(73% 0.15 38 / 0.14);
+  --on-now: oklch(20% 0.03 38);
+  --attn: var(--now);
+
+  --live: oklch(76% 0.1 182);
+  --live-ink: oklch(79% 0.1 182);
+  --live-wash: oklch(76% 0.1 182 / 0.13);
+
+  --future: oklch(80% 0.07 165);
+  --future-ink: oklch(81% 0.07 165);
+  --future-wash: oklch(80% 0.07 165 / 0.1);
+
+  --fail: oklch(71% 0.17 358);
+  --fail-wash: oklch(71% 0.17 358 / 0.13);
+  --ok: oklch(72% 0.045 110);
+
+  --past: oklch(42% 0.026 65);
+  --past-soft: oklch(32% 0.02 62);
+  --night: oklch(8% 0.02 60 / 0.3);
+
+  --lane-webshop: oklch(78% 0.13 125);
+  --lane-webshop-ink: oklch(79% 0.13 125);
+  --lane-payments: oklch(74% 0.12 300);
+  --lane-payments-ink: oklch(77% 0.11 300);
+  --lane-ops: oklch(81% 0.12 80);
+  --lane-ops-ink: oklch(82% 0.11 80);
+
+  --glass: color-mix(in oklch, var(--raised) 76%, transparent);
+  --glass-thin: color-mix(in oklch, var(--raised) 54%, transparent);
+  --glass-side: color-mix(in oklch, var(--surface) 82%, transparent);
+  --glass-edge: inset 0 1px 0 oklch(100% 0 0 / 0.06);
+
+  --shadow-1: 0 1px 2px oklch(5% 0.02 60 / 0.4);
+  --shadow-2: 0 1px 2px oklch(5% 0.02 60 / 0.4), 0 8px 22px -8px oklch(5% 0.02 60 / 0.6);
+  --shadow-3: 0 2px 4px oklch(5% 0.02 60 / 0.4), 0 24px 56px -16px oklch(4% 0.02 60 / 0.75);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--live);
+
+  --sky-a: oklch(50% 0.04 65);
+  --sky-b: oklch(72% 0.08 60);
+  --wood: oklch(36% 0.03 60);
+  --wood-dark: oklch(29% 0.026 60);
+  --floor: oklch(26% 0.014 60);
+  --pebble: oklch(89% 0.02 75);
+  --pebble-shade: oklch(71% 0.026 70);
+  --pebble-eye: oklch(24% 0.02 160);
+}
+
+/* ---------------------------------------------------------------- Low Tide (dark, near-neutral) */
+:root[data-theme="low-tide"],
+[data-preview="low-tide"] {
+  color-scheme: dark;
+  --bg: oklch(21.5% 0.005 150);
+  --surface: oklch(24.4% 0.006 150);
+  --raised: oklch(28% 0.007 150);
+  --sunken: oklch(19.4% 0.005 150);
+  --ink: oklch(94% 0.006 120);
+  --muted: oklch(76% 0.008 140);
+  --faint: oklch(62% 0.008 145);
+  --line: oklch(92% 0.01 140 / 0.13);
+  --line-soft: oklch(92% 0.01 140 / 0.07);
+  --hover: oklch(92% 0.01 140 / 0.06);
+
+  --now: oklch(73% 0.15 38);
+  --now-ink: oklch(77% 0.14 40);
+  --now-wash: oklch(73% 0.15 38 / 0.14);
+  --on-now: oklch(20% 0.03 38);
+  --attn: var(--now);
+
+  --live: oklch(76% 0.1 182);
+  --live-ink: oklch(79% 0.1 182);
+  --live-wash: oklch(76% 0.1 182 / 0.13);
+
+  --future: oklch(80% 0.07 165);
+  --future-ink: oklch(81% 0.07 165);
+  --future-wash: oklch(80% 0.07 165 / 0.1);
+
+  --fail: oklch(71% 0.17 358);
+  --fail-wash: oklch(71% 0.17 358 / 0.13);
+  --ok: oklch(72% 0.03 150);
+
+  --past: oklch(42% 0.008 150);
+  --past-soft: oklch(33% 0.007 150);
+  --night: oklch(8% 0.005 150 / 0.3);
+
+  --lane-webshop: oklch(78% 0.13 125);
+  --lane-webshop-ink: oklch(79% 0.13 125);
+  --lane-payments: oklch(74% 0.12 300);
+  --lane-payments-ink: oklch(77% 0.11 300);
+  --lane-ops: oklch(81% 0.12 80);
+  --lane-ops-ink: oklch(82% 0.11 80);
+
+  --glass: color-mix(in oklch, var(--raised) 76%, transparent);
+  --glass-thin: color-mix(in oklch, var(--raised) 54%, transparent);
+  --glass-side: color-mix(in oklch, var(--surface) 82%, transparent);
+  --glass-edge: inset 0 1px 0 oklch(100% 0 0 / 0.06);
+
+  --shadow-1: 0 1px 2px oklch(5% 0 0 / 0.4);
+  --shadow-2: 0 1px 2px oklch(5% 0 0 / 0.4), 0 8px 22px -8px oklch(5% 0 0 / 0.6);
+  --shadow-3: 0 2px 4px oklch(5% 0 0 / 0.4), 0 24px 56px -16px oklch(4% 0 0 / 0.75);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--live);
+
+  --sky-a: oklch(50% 0.04 195);
+  --sky-b: oklch(70% 0.06 70);
+  --wood: oklch(35% 0.012 150);
+  --wood-dark: oklch(29% 0.01 150);
+  --floor: oklch(27% 0.006 150);
+  --pebble: oklch(89% 0.01 140);
+  --pebble-shade: oklch(71% 0.012 145);
+  --pebble-eye: oklch(24% 0.02 160);
+}
+
+/* Accessibility preferences: glass turns solid, motion stops. The page's own toggles set the
+   same attributes on <html> so the settings page can show both states. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass: var(--raised);
+    --glass-thin: var(--raised);
+    --glass-side: var(--surface);
+    --glass-blur: 0px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+    --dur-tide: 0ms;
+  }
+}

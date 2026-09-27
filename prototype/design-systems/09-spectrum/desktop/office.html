@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet · Office · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.office { display: block; width: 820px; height: 600px; overflow: visible; }
+.office text { font-family: inherit; }
+.office .floor { fill: color-mix(in oklab, var(--ink) 3%, var(--bg)); stroke: var(--line); stroke-width: 1; }
+.office .slab.l { fill: color-mix(in oklab, var(--ink) 12%, var(--bg)); }
+.office .slab.r { fill: color-mix(in oklab, var(--ink) 18%, var(--bg)); }
+.office .wall.bk { fill: color-mix(in oklab, var(--ink) 6%, var(--surface)); }
+.office .wall.lf { fill: color-mix(in oklab, var(--ink) 10%, var(--surface)); }
+.office .wall.cap { fill: color-mix(in oklab, var(--ink) 20%, var(--surface)); }
+.office .zone { fill: color-mix(in oklab, var(--p) 11%, transparent); stroke: color-mix(in oklab, var(--p) 45%, transparent); stroke-width: 1; }
+.office .zone.lounge { fill: url(#spec-rug); fill-opacity: 0.12; stroke: color-mix(in oklab, var(--ink) 18%, transparent); }
+.office .zone.machines { fill: color-mix(in oklab, var(--ink) 4%, transparent); stroke: color-mix(in oklab, var(--ink) 14%, transparent); stroke-dasharray: 4 3; }
+.office .zl { font-size: 14px; font-weight: 620; fill: var(--p-ink); letter-spacing: -0.01em; }
+.office .lounge-l { fill: var(--ink); }
+.office .sel { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-dasharray: 4 3; }
+.office .dk.t { fill: var(--raised); }
+.office .dk.l { fill: color-mix(in oklab, var(--ink) 12%, var(--raised)); }
+.office .dk.r { fill: color-mix(in oklab, var(--ink) 22%, var(--raised)); }
+.office .chair.t, .office .sofa.t, .office .table.t { fill: color-mix(in oklab, var(--ink) 16%, var(--raised)); }
+.office .chair.l, .office .sofa.l, .office .table.l { fill: color-mix(in oklab, var(--ink) 26%, var(--raised)); }
+.office .chair.r, .office .sofa.r, .office .table.r { fill: color-mix(in oklab, var(--ink) 34%, var(--raised)); }
+.office .mon.t, .office .mon.r { fill: color-mix(in oklab, var(--ink) 34%, var(--raised)); }
+.office .mon.l { fill: color-mix(in oklab, var(--ink) 16%, var(--raised)); }
+.office .mon.work.l, .office .mon.wait.l { fill: var(--p); filter: drop-shadow(0 0 5px var(--p)); }
+.office .mon.paused.l { fill: color-mix(in oklab, var(--p) 45%, var(--raised)); }
+.office .desk.idle .dk { opacity: 0.8; }
+.office .fig { fill: var(--p); }
+.office .desk.work .fig { animation: bob 2.4s var(--ease) infinite; transform-box: fill-box; }
+@keyframes bob { 50% { translate: 0 -1.5px; } }
+.office .flag line { stroke: var(--attn); stroke-width: 1.5; }
+.office .flag rect { fill: var(--attn); }
+.office .flag .q { fill: var(--on-attn); font-size: 13px; font-weight: 700; text-anchor: middle; }
+.office .flag .tt { fill: var(--on-attn); font-size: 11.5px; font-weight: 530; }
+.office .mk { color: var(--ink); }
+.office .mk.paused { color: var(--p-ink); }
+.office .cab.t { fill: color-mix(in oklab, var(--ink) 10%, var(--raised)); }
+.office .cab.l { fill: color-mix(in oklab, var(--ink) 62%, var(--raised)); }
+.office .cab.r { fill: color-mix(in oklab, var(--ink) 48%, var(--raised)); }
+.office .led { fill: color-mix(in oklab, var(--raised) 22%, transparent); }
+.office .led.on { fill: var(--raised); }
+.office .cab-t { font-size: 11.5px; font-weight: 620; fill: var(--ink); }
+.office .cab-l { font-size: 11px; font-weight: 500; fill: var(--muted); }
+.office .bs { fill: color-mix(in oklab, var(--p) 34%, var(--surface)); }
+.office .bs.work, .office .bs.wait { fill: var(--p); }
+.office .bs.paused { fill: color-mix(in oklab, var(--p) 60%, var(--surface)); }
+.office .bs.mix { fill: url(#spec-rug); }
+.office .bs.mix.idle { fill-opacity: 0.4; }
+.office .asst .disc { fill: url(#spec-rug); fill-opacity: 0.22; stroke: url(#spec-rug); stroke-width: 2; }
+.office .asst.work .disc { fill-opacity: 0.35; filter: drop-shadow(0 0 6px color-mix(in oklab, var(--p-payments) 50%, transparent)); }
+.office .asst .shadow { fill: color-mix(in oklab, var(--ink) 18%, transparent); }
+.office .asst .tile { fill: var(--raised); stroke: url(#spec-rug); stroke-width: 3; }
+.office .asst .lt { font-size: 13px; font-weight: 700; fill: var(--ink); text-anchor: middle; }
+.office .asst.idle .disc { fill-opacity: 0.1; stroke-opacity: 0.5; }
+.office .asst.asleep .disc { fill: none; stroke: var(--faint); stroke-dasharray: 3 3; }
+.office .asst.asleep .tile { stroke: var(--line); }
+.office .asst.asleep .lt { fill: var(--faint); }
+.office .as-l { font-size: 11.5px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+.office .as-l .n { font-weight: 420; fill: var(--muted); }
+.office .zz { font-size: 12px; font-weight: 600; fill: var(--muted); }
+.office .zz.s { font-size: 9px; }
+@media (prefers-reduced-motion: reduce) { .office .desk.work .fig { animation: none; } }
+
+.fleet { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 312px; }
+.stage { position: relative; display: grid; place-items: center; overflow: hidden; }
+.stage .office { margin-top: -18px; }
+.legend { position: absolute; left: 24px; bottom: 18px; display: flex; gap: 16px; font-size: var(--t-meta); color: var(--muted); }
+.legend .st { gap: 5px; }
+.legend .qdot { width: 14px; height: 14px; }
+.legend .glow { width: 14px; height: 9px; border-radius: 2px; background: var(--p-webshop); box-shadow: 0 0 5px var(--p-webshop); }
+.legend .off { width: 14px; height: 9px; border-radius: 2px; background: color-mix(in oklab, var(--ink) 30%, var(--raised)); }
+.zoom { position: absolute; right: 18px; bottom: 16px; display: flex; gap: 6px; }
+.sel-card { padding-bottom: 4px; }
+.sel-card .t { font-size: var(--t-section); font-weight: var(--w-strong); letter-spacing: -0.01em; line-height: 1.3; margin: 8px 0 4px; }
+.sel-card .m { font-size: var(--t-meta); color: var(--muted); line-height: 1.5; }
+.sel-card .kick { display: flex; align-items: center; gap: 6px; font-size: var(--t-meta); color: var(--p-ink); font-weight: var(--w-medium); }
+.ask { margin-top: 14px; padding: 10px 12px; border-radius: 12px 12px 0 0; background: var(--attn); color: var(--on-attn); font-weight: var(--w-medium); font-size: var(--t-ui); display: flex; gap: 8px; align-items: flex-start; }
+.ask .qdot { background: var(--p); color: var(--p-on); margin-top: 1px; }
+.ask .mono { font-size: 11.5px; background: color-mix(in oklab, var(--on-attn) 14%, transparent); padding: 1px 5px; border-radius: 4px; }
+.vled { border-radius: 0 0 12px 12px; box-shadow: inset 0 0 0 1px var(--line); padding: 3px; }
+.vled button { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 9px; border-radius: 9px; font-weight: var(--w-medium); text-align: left; }
+.vled button + button { box-shadow: 0 -1px 0 var(--line-soft); }
+.vled button.go { background: var(--p); color: var(--p-on); box-shadow: none; }
+.vled button.go + button { box-shadow: none; }
+.vled .kbd { margin-left: auto; }
+.vled button.go .kbd { background: color-mix(in oklab, var(--p-on) 16%, transparent); color: inherit; box-shadow: none; }
+.open { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: var(--t-meta); color: var(--muted); }
+.rn { display: grid; grid-template-columns: 16px auto auto 1fr auto; align-items: center; column-gap: 7px; row-gap: 6px; padding: 6px 0; font-size: var(--t-meta); }
+.rn .i { color: var(--muted); }
+.rn b { font-weight: var(--w-medium); }
+.rn .c { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rn .c.full { color: var(--ink); font-weight: var(--w-medium); }
+.rn .slots { grid-column: 2 / -1; display: flex; gap: 2px; }
+.rn .slots i { flex: 1; height: 5px; border-radius: 1.5px; background: color-mix(in oklab, var(--ink) 9%, transparent); }
+.rn .slots i.on { background: var(--ink); }
+.nr { display: flex; align-items: center; gap: 9px; padding: 7px 8px; margin: 0 -8px; border-radius: 9px; font-size: var(--t-meta); }
+.nr .qdot { width: 16px; height: 16px; }
+.nr b { display: block; font-weight: var(--w-medium); color: var(--ink); font-size: var(--t-ui); }
+.nr span span { color: var(--muted); }
+.nr.on { background: color-mix(in oklab, var(--p) 12%, transparent); }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win" data-space="all">
+  <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+  <aside class="side">
+  <div class="side-top"><button class="iconbtn" title="Notifications"><svg class="i16" aria-hidden="true"><use href="#i-bell"/></svg></button><button class="iconbtn" title="Hide sidebar"><svg class="i16" aria-hidden="true"><use href="#i-sidebar"/></svg></button></div>
+  <div class="space-head"><span class="sw xl all"></span><div class="grow"><div class="name">All projects</div><div class="sub">3 projects · 23 live</div></div><svg class="i16 faint" aria-hidden="true"><use href="#i-chev-down"/></svg></div>
+  <div class="cmd"><svg class="i16" aria-hidden="true"><use href="#i-search"/></svg><span class="grow">Search or run a command</span><span class="kbd">⌘K</span></div>
+  <a class="newthread"><svg class="i16" aria-hidden="true"><use href="#i-plus"/></svg>New thread<span class="kbd">⌘N</span></a>
+  <div class="side-scroll">
+    <div class="group" style="margin-top:8px">
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-sun-rise"/></svg>Intake<span class="count">9</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-eye"/></svg>Check-in</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-layers"/></svg>Tasks<span class="count">14</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-play"/></svg>Runs<span class="count">11</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-grid"/></svg>Workflows<span class="count">6</span></a>
+    </div>
+    <div class="group">
+      <a class="nav on"><svg class="i16" aria-hidden="true"><use href="#i-cube"/></svg>Fleet<span class="count">23 live</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-plug"/></svg>Connections<span class="count">1 reconnecting</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-bell"/></svg>Notifications<span class="count">5</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-gear"/></svg>Settings</a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Projects</span></div>
+      <a class="nav proj p-webshop"><span class="sw lg p-webshop"></span>webshop<span class="count">10 · <span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span></a>
+      <a class="nav proj p-payments"><span class="sw lg p-payments"></span>payments-api<span class="count">6 · <span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span></a>
+      <a class="nav proj p-ops"><span class="sw lg p-ops"></span>ops<span class="count">5 · <span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span></a>
+    </div>
+    <div class="group">
+  <div class="group-h"><span class="grow">Assistants</span></div>
+  <a class="trow"><span class="mk"><span class="av sm">A</span></span><span class="t">Ada</span><span class="r"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span><span class="m">working · heartbeat 09:00</span></a>
+  <a class="trow idle"><span class="mk"><span class="av sm">M</span></span><span class="t">Milo</span><span class="r"></span><span class="m">idle · Slack #ops</span></a>
+  <a class="trow idle"><span class="mk"><span class="av sm off">J</span></span><span class="t">Juno</span><span class="r"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg></span><span class="m">asleep · Discord reconnecting</span></a>
+</div>
+  </div>
+  <div class="side-foot"><div class="band" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div><div class="spaces"><button class="sp on" title="All projects"><span class="sw all"></span></button><button class="sp" title="webshop"><span class="sw p-webshop"></span></button><button class="sp" title="payments-api"><span class="sw p-payments"></span></button><button class="sp" title="ops"><span class="sw p-ops"></span></button><span class="label">All projects</span><span class="grow"></span><button class="iconbtn" title="Settings"><svg class="i16" aria-hidden="true"><use href="#i-gear"/></svg></button></div></div>
+</aside>
+  <main class="panel">
+    <header class="bar">
+      <h1>Fleet</h1>
+      <span class="meta"><b>23</b> live · 8 working · 3 need you · 12 idle</span>
+      <span class="grow"></span>
+      <div class="seg-ctl"><button aria-pressed="false"><svg class="i14" aria-hidden="true"><use href="#i-list"/></svg>List</button><button aria-pressed="true"><svg class="i14" aria-hidden="true"><use href="#i-cube"/></svg>Office</button></div>
+    </header>
+    <div class="fleet">
+      <div class="stage">
+        <svg class="office" viewBox="0 0 820 600" role="img" aria-label="The office: 23 live sessions at desks, grouped by project; 3 need you">
+  <defs>
+    <linearGradient id="spec-rug" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--p-webshop)"/><stop offset="0.5" stop-color="var(--p-payments)"/><stop offset="1" stop-color="var(--p-ops)"/></linearGradient>
+    <linearGradient id="spec-h" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--p-webshop)"/><stop offset="0.5" stop-color="var(--p-payments)"/><stop offset="1" stop-color="var(--p-ops)"/></linearGradient>
+  </defs>
+  <polygon class="slab l" points="20.0,292.0 505.0,572.0 505.0,584.6 20.0,304.6"/>
+  <polygon class="slab r" points="796.0,404.0 505.0,572.0 505.0,584.6 796.0,416.6"/>
+  <polygon class="floor" points="311.0,124.0 796.0,404.0 505.0,572.0 20.0,292.0"/>
+  <polygon class="wall bk" points="311.0,124.0 796.0,404.0 796.0,320.0 311.0,40.0"/>
+  <polygon class="wall lf" points="311.0,124.0 20.0,292.0 20.0,208.0 311.0,40.0"/>
+  <polygon class="wall cap" points="311.0,40.0 796.0,320.0 801.3,316.9 311.0,33.8 14.7,204.9 20.0,208.0"/>
+  <polygon class="zone p-webshop" points="311.0,140.8 514.7,258.4 354.6,350.8 151.0,233.2"/>
+  <g class="p-webshop"><polygon class="bs work " points="325.1,82.3 343.3,92.8 343.3,86.6 325.1,76.1"/><polygon class="bs work " points="345.7,94.2 363.9,104.7 363.9,98.5 345.7,88.0"/><polygon class="bs work " points="366.3,106.1 384.5,116.6 384.5,110.4 366.3,99.9"/><polygon class="bs wait " points="386.9,118.0 405.1,128.5 405.1,122.3 386.9,111.8"/><polygon class="bs paused " points="407.5,129.9 425.7,140.4 425.7,134.2 407.5,123.7"/><polygon class="bs idle " points="428.1,141.8 446.3,152.3 446.3,146.1 428.1,135.6"/><polygon class="bs idle " points="448.7,153.7 466.9,164.2 466.9,158.0 448.7,147.5"/><polygon class="bs idle " points="469.3,165.6 487.5,176.1 487.5,169.9 469.3,159.4"/><polygon class="bs idle " points="490.0,177.5 508.1,188.0 508.1,181.8 490.0,171.3"/><polygon class="bs idle " points="510.6,189.4 528.8,199.9 528.8,193.7 510.6,183.2"/><text class="zl" transform="matrix(0.866 0.5 0 1 326.8 69.3)">webshop · 10</text></g>
+  <polygon class="zone p-payments" points="529.2,266.8 645.6,334.0 485.6,426.4 369.2,359.2"/>
+  <g class="p-payments"><polygon class="bs work " points="543.3,208.3 560.7,218.3 560.7,212.2 543.3,202.1"/><polygon class="bs work " points="563.1,219.7 580.5,229.7 580.5,223.6 563.1,213.6"/><polygon class="bs wait " points="582.9,231.1 600.3,241.2 600.3,235.0 582.9,225.0"/><polygon class="bs idle " points="602.7,242.6 620.1,252.6 620.1,246.5 602.7,236.4"/><polygon class="bs idle " points="622.5,254.0 639.9,264.0 639.9,257.9 622.5,247.9"/><polygon class="bs idle " points="642.3,265.4 659.7,275.5 659.7,269.3 642.3,259.3"/><text class="zl" transform="matrix(0.866 0.5 0 1 545.0 195.3)">payments-api · 6</text></g>
+  <polygon class="zone p-ops" points="660.2,342.4 766.9,404.0 606.8,496.4 500.1,434.8"/>
+  <g class="p-ops"><polygon class="bs work " points="674.2,283.9 693.6,295.1 693.6,288.9 674.2,277.7"/><polygon class="bs work " points="696.1,296.5 715.5,307.7 715.5,301.5 696.1,290.3"/><polygon class="bs wait " points="717.9,309.1 737.3,320.3 737.3,314.1 717.9,302.9"/><polygon class="bs idle " points="739.7,321.7 759.1,332.9 759.1,326.7 739.7,315.5"/><polygon class="bs idle " points="761.5,334.3 780.9,345.5 780.9,339.3 761.5,328.1"/><text class="zl" transform="matrix(0.866 0.5 0 1 675.9 270.9)">ops · 5</text></g>
+  <polygon class="zone lounge" points="134.0,243.0 337.7,360.6 252.8,409.6 49.1,292.0"/>
+  <polygon class="bs work mix" points="112.6,188.7 78.7,208.3 78.7,202.1 112.6,182.5"/><polygon class="bs idle mix" points="76.3,209.7 42.3,229.3 42.3,223.1 76.3,203.5"/>
+  <text class="zl lounge-l" transform="matrix(0.866 -0.5 0 1 41.8 215.6)">Assistants · 3</text>
+  <polygon class="zone machines" points="352.2,369.0 589.9,506.2 505.0,555.2 267.4,418.0"/>
+  <g class="p-webshop desk idle"><polygon class="chair t" points="296.5,160.4 308.6,167.4 297.7,173.7 285.5,166.7"/><polygon class="chair l" points="285.5,177.9 297.7,184.9 297.7,173.7 285.5,166.7"/><polygon class="chair r" points="308.6,178.6 297.7,184.9 297.7,173.7 308.6,167.4"/><polygon class="dk t" points="308.6,131.0 344.9,152.0 325.5,163.2 289.2,142.2"/><polygon class="dk l" points="289.2,161.8 325.5,182.8 325.5,163.2 289.2,142.2"/><polygon class="dk r" points="344.9,171.6 325.5,182.8 325.5,163.2 344.9,152.0"/><polygon class="mon idle t" points="313.4,119.8 335.2,132.4 333.6,133.4 311.7,120.8"/><polygon class="mon idle l" points="311.7,137.0 333.6,149.6 333.6,133.4 311.7,120.8"/><polygon class="mon idle r" points="335.2,148.6 333.6,149.6 333.6,133.4 335.2,132.4"/></g>
+  <g class="p-webshop desk work"><polygon class="chair t" points="346.2,189.1 358.3,196.1 347.4,202.4 335.2,195.4"/><polygon class="chair l" points="335.2,206.6 347.4,213.6 347.4,202.4 335.2,195.4"/><polygon class="chair r" points="358.3,207.3 347.4,213.6 347.4,202.4 358.3,196.1"/><polygon class="dk t" points="358.3,159.7 394.7,180.7 375.3,191.9 338.9,170.9"/><polygon class="dk l" points="338.9,190.5 375.3,211.5 375.3,191.9 338.9,170.9"/><polygon class="dk r" points="394.7,200.3 375.3,211.5 375.3,191.9 394.7,180.7"/><polygon class="mon work t" points="363.1,148.5 385.0,161.1 383.3,162.1 361.4,149.5"/><polygon class="mon work l" points="361.4,165.7 383.3,178.3 383.3,162.1 361.4,149.5"/><polygon class="mon work r" points="385.0,177.3 383.3,178.3 383.3,162.1 385.0,161.1"/><g class="fig"><ellipse cx="346.9" cy="189.5" rx="7" ry="9.5"/><circle cx="346.9" cy="169.9" r="5.2"/></g></g>
+  <g class="p-webshop desk work"><polygon class="chair t" points="245.5,189.8 257.7,196.8 246.7,203.1 234.6,196.1"/><polygon class="chair l" points="234.6,207.3 246.7,214.3 246.7,203.1 234.6,196.1"/><polygon class="chair r" points="257.7,208.0 246.7,214.3 246.7,203.1 257.7,196.8"/><polygon class="dk t" points="257.7,160.4 294.0,181.4 274.6,192.6 238.3,171.6"/><polygon class="dk l" points="238.3,191.2 274.6,212.2 274.6,192.6 238.3,171.6"/><polygon class="dk r" points="294.0,201.0 274.6,212.2 274.6,192.6 294.0,181.4"/><polygon class="mon work t" points="262.5,149.2 284.3,161.8 282.6,162.8 260.8,150.2"/><polygon class="mon work l" points="260.8,166.4 282.6,179.0 282.6,162.8 260.8,150.2"/><polygon class="mon work r" points="284.3,178.0 282.6,179.0 282.6,162.8 284.3,161.8"/><g class="fig"><ellipse cx="246.3" cy="190.2" rx="7" ry="9.5"/><circle cx="246.3" cy="170.6" r="5.2"/></g></g>
+  <g class="p-webshop desk idle"><polygon class="chair t" points="395.9,217.8 408.0,224.8 397.1,231.1 385.0,224.1"/><polygon class="chair l" points="385.0,235.3 397.1,242.3 397.1,231.1 385.0,224.1"/><polygon class="chair r" points="408.0,236.0 397.1,242.3 397.1,231.1 408.0,224.8"/><polygon class="dk t" points="408.0,188.4 444.4,209.4 425.0,220.6 388.6,199.6"/><polygon class="dk l" points="388.6,219.2 425.0,240.2 425.0,220.6 388.6,199.6"/><polygon class="dk r" points="444.4,229.0 425.0,240.2 425.0,220.6 444.4,209.4"/><polygon class="mon idle t" points="412.8,177.2 434.7,189.8 433.0,190.8 411.1,178.2"/><polygon class="mon idle l" points="411.1,194.4 433.0,207.0 433.0,190.8 411.1,178.2"/><polygon class="mon idle r" points="434.7,206.0 433.0,207.0 433.0,190.8 434.7,189.8"/></g>
+  <g class="p-webshop desk wait"><polygon class="sel" points="306.2,201.0 357.1,230.4 309.8,257.7 258.9,228.3"/><polygon class="chair t" points="295.2,218.5 307.4,225.5 296.5,231.8 284.3,224.8"/><polygon class="chair l" points="284.3,236.0 296.5,243.0 296.5,231.8 284.3,224.8"/><polygon class="chair r" points="307.4,236.7 296.5,243.0 296.5,231.8 307.4,225.5"/><polygon class="dk t" points="307.4,189.1 343.7,210.1 324.3,221.3 288.0,200.3"/><polygon class="dk l" points="288.0,219.9 324.3,240.9 324.3,221.3 288.0,200.3"/><polygon class="dk r" points="343.7,229.7 324.3,240.9 324.3,221.3 343.7,210.1"/><polygon class="mon wait t" points="312.2,177.9 334.0,190.5 332.3,191.5 310.5,178.9"/><polygon class="mon wait l" points="310.5,195.1 332.3,207.7 332.3,191.5 310.5,178.9"/><polygon class="mon wait r" points="334.0,206.7 332.3,207.7 332.3,191.5 334.0,190.5"/><g class="fig"><ellipse cx="296.0" cy="218.9" rx="7" ry="9.5"/><circle cx="296.0" cy="199.3" r="5.2"/></g></g>
+  <g class="p-webshop desk idle"><polygon class="chair t" points="194.6,219.2 206.7,226.2 195.8,232.5 183.7,225.5"/><polygon class="chair l" points="183.7,236.7 195.8,243.7 195.8,232.5 183.7,225.5"/><polygon class="chair r" points="206.7,237.4 195.8,243.7 195.8,232.5 206.7,226.2"/><polygon class="dk t" points="206.7,189.8 243.1,210.8 223.7,222.0 187.3,201.0"/><polygon class="dk l" points="187.3,220.6 223.7,241.6 223.7,222.0 187.3,201.0"/><polygon class="dk r" points="243.1,230.4 223.7,241.6 223.7,222.0 243.1,210.8"/><polygon class="mon idle t" points="211.6,178.6 233.4,191.2 231.7,192.2 209.9,179.6"/><polygon class="mon idle l" points="209.9,195.8 231.7,208.4 231.7,192.2 209.9,179.6"/><polygon class="mon idle r" points="233.4,207.4 231.7,208.4 231.7,192.2 233.4,191.2"/></g>
+  <g class="p-webshop desk paused"><polygon class="chair t" points="445.6,246.5 457.7,253.5 446.8,259.8 434.7,252.8"/><polygon class="chair l" points="434.7,264.0 446.8,271.0 446.8,259.8 434.7,252.8"/><polygon class="chair r" points="457.7,264.7 446.8,271.0 446.8,259.8 457.7,253.5"/><polygon class="dk t" points="457.7,217.1 494.1,238.1 474.7,249.3 438.3,228.3"/><polygon class="dk l" points="438.3,247.9 474.7,268.9 474.7,249.3 438.3,228.3"/><polygon class="dk r" points="494.1,257.7 474.7,268.9 474.7,249.3 494.1,238.1"/><polygon class="mon paused t" points="462.6,205.9 484.4,218.5 482.7,219.5 460.9,206.9"/><polygon class="mon paused l" points="460.9,223.1 482.7,235.7 482.7,219.5 460.9,206.9"/><polygon class="mon paused r" points="484.4,234.7 482.7,235.7 482.7,219.5 484.4,218.5"/><use href="#m-paused" class="mk paused" x="458.7" y="192.1" width="15" height="15"/></g>
+  <g class="p-webshop desk idle"><polygon class="chair t" points="344.9,247.2 357.1,254.2 346.2,260.5 334.0,253.5"/><polygon class="chair l" points="334.0,264.7 346.2,271.7 346.2,260.5 334.0,253.5"/><polygon class="chair r" points="357.1,265.4 346.2,271.7 346.2,260.5 357.1,254.2"/><polygon class="dk t" points="357.1,217.8 393.4,238.8 374.0,250.0 337.7,229.0"/><polygon class="dk l" points="337.7,248.6 374.0,269.6 374.0,250.0 337.7,229.0"/><polygon class="dk r" points="393.4,258.4 374.0,269.6 374.0,250.0 393.4,238.8"/><polygon class="mon idle t" points="361.9,206.6 383.7,219.2 382.0,220.2 360.2,207.6"/><polygon class="mon idle l" points="360.2,223.8 382.0,236.4 382.0,220.2 360.2,207.6"/><polygon class="mon idle r" points="383.7,235.4 382.0,236.4 382.0,220.2 383.7,219.2"/></g>
+  <g class="p-webshop desk idle"><polygon class="chair t" points="244.3,247.9 256.4,254.9 245.5,261.2 233.4,254.2"/><polygon class="chair l" points="233.4,265.4 245.5,272.4 245.5,261.2 233.4,254.2"/><polygon class="chair r" points="256.4,266.1 245.5,272.4 245.5,261.2 256.4,254.9"/><polygon class="dk t" points="256.4,218.5 292.8,239.5 273.4,250.7 237.0,229.7"/><polygon class="dk l" points="237.0,249.3 273.4,270.3 273.4,250.7 237.0,229.7"/><polygon class="dk r" points="292.8,259.1 273.4,270.3 273.4,250.7 292.8,239.5"/><polygon class="mon idle t" points="261.3,207.3 283.1,219.9 281.4,220.9 259.6,208.3"/><polygon class="mon idle l" points="259.6,224.5 281.4,237.1 281.4,220.9 259.6,208.3"/><polygon class="mon idle r" points="283.1,236.1 281.4,237.1 281.4,220.9 283.1,219.9"/></g>
+  <g class="p-webshop desk work"><polygon class="chair t" points="394.7,275.9 406.8,282.9 395.9,289.2 383.7,282.2"/><polygon class="chair l" points="383.7,293.4 395.9,300.4 395.9,289.2 383.7,282.2"/><polygon class="chair r" points="406.8,294.1 395.9,300.4 395.9,289.2 406.8,282.9"/><polygon class="dk t" points="406.8,246.5 443.2,267.5 423.8,278.7 387.4,257.7"/><polygon class="dk l" points="387.4,277.3 423.8,298.3 423.8,278.7 387.4,257.7"/><polygon class="dk r" points="443.2,287.1 423.8,298.3 423.8,278.7 443.2,267.5"/><polygon class="mon work t" points="411.6,235.3 433.5,247.9 431.8,248.9 409.9,236.3"/><polygon class="mon work l" points="409.9,252.5 431.8,265.1 431.8,248.9 409.9,236.3"/><polygon class="mon work r" points="433.5,264.1 431.8,265.1 431.8,248.9 433.5,247.9"/><g class="fig"><ellipse cx="395.4" cy="276.3" rx="7" ry="9.5"/><circle cx="395.4" cy="256.7" r="5.2"/></g></g>
+  <g class="p-payments desk idle"><polygon class="chair t" points="517.1,287.8 529.2,294.8 518.3,301.1 506.2,294.1"/><polygon class="chair l" points="506.2,305.3 518.3,312.3 518.3,301.1 506.2,294.1"/><polygon class="chair r" points="529.2,306.0 518.3,312.3 518.3,301.1 529.2,294.8"/><polygon class="dk t" points="529.2,258.4 565.6,279.4 546.2,290.6 509.8,269.6"/><polygon class="dk l" points="509.8,289.2 546.2,310.2 546.2,290.6 509.8,269.6"/><polygon class="dk r" points="565.6,299.0 546.2,310.2 546.2,290.6 565.6,279.4"/><polygon class="mon idle t" points="534.1,247.2 555.9,259.8 554.2,260.8 532.4,248.2"/><polygon class="mon idle l" points="532.4,264.4 554.2,277.0 554.2,260.8 532.4,248.2"/><polygon class="mon idle r" points="555.9,276.0 554.2,277.0 554.2,260.8 555.9,259.8"/></g>
+  <g class="p-payments desk wait"><polygon class="chair t" points="466.2,317.2 478.3,324.2 467.4,330.5 455.3,323.5"/><polygon class="chair l" points="455.3,334.7 467.4,341.7 467.4,330.5 455.3,323.5"/><polygon class="chair r" points="478.3,335.4 467.4,341.7 467.4,330.5 478.3,324.2"/><polygon class="dk t" points="478.3,287.8 514.7,308.8 495.3,320.0 458.9,299.0"/><polygon class="dk l" points="458.9,318.6 495.3,339.6 495.3,320.0 458.9,299.0"/><polygon class="dk r" points="514.7,328.4 495.3,339.6 495.3,320.0 514.7,308.8"/><polygon class="mon wait t" points="483.2,276.6 505.0,289.2 503.3,290.2 481.5,277.6"/><polygon class="mon wait l" points="481.5,293.8 503.3,306.4 503.3,290.2 481.5,277.6"/><polygon class="mon wait r" points="505.0,305.4 503.3,306.4 503.3,290.2 505.0,289.2"/><g class="fig"><ellipse cx="466.9" cy="317.6" rx="7" ry="9.5"/><circle cx="466.9" cy="298.0" r="5.2"/></g></g>
+  <g class="p-payments desk work"><polygon class="chair t" points="575.3,321.4 587.4,328.4 576.5,334.7 564.4,327.7"/><polygon class="chair l" points="564.4,338.9 576.5,345.9 576.5,334.7 564.4,327.7"/><polygon class="chair r" points="587.4,339.6 576.5,345.9 576.5,334.7 587.4,328.4"/><polygon class="dk t" points="587.4,292.0 623.8,313.0 604.4,324.2 568.0,303.2"/><polygon class="dk l" points="568.0,322.8 604.4,343.8 604.4,324.2 568.0,303.2"/><polygon class="dk r" points="623.8,332.6 604.4,343.8 604.4,324.2 623.8,313.0"/><polygon class="mon work t" points="592.3,280.8 614.1,293.4 612.4,294.4 590.6,281.8"/><polygon class="mon work l" points="590.6,298.0 612.4,310.6 612.4,294.4 590.6,281.8"/><polygon class="mon work r" points="614.1,309.6 612.4,310.6 612.4,294.4 614.1,293.4"/><g class="fig"><ellipse cx="576.0" cy="321.8" rx="7" ry="9.5"/><circle cx="576.0" cy="302.2" r="5.2"/></g></g>
+  <g class="p-payments desk work"><polygon class="chair t" points="415.3,346.6 427.4,353.6 416.5,359.9 404.4,352.9"/><polygon class="chair l" points="404.4,364.1 416.5,371.1 416.5,359.9 404.4,352.9"/><polygon class="chair r" points="427.4,364.8 416.5,371.1 416.5,359.9 427.4,353.6"/><polygon class="dk t" points="427.4,317.2 463.8,338.2 444.4,349.4 408.0,328.4"/><polygon class="dk l" points="408.0,348.0 444.4,369.0 444.4,349.4 408.0,328.4"/><polygon class="dk r" points="463.8,357.8 444.4,369.0 444.4,349.4 463.8,338.2"/><polygon class="mon work t" points="432.2,306.0 454.1,318.6 452.4,319.6 430.5,307.0"/><polygon class="mon work l" points="430.5,323.2 452.4,335.8 452.4,319.6 430.5,307.0"/><polygon class="mon work r" points="454.1,334.8 452.4,335.8 452.4,319.6 454.1,318.6"/><g class="fig"><ellipse cx="416.0" cy="347.0" rx="7" ry="9.5"/><circle cx="416.0" cy="327.4" r="5.2"/></g></g>
+  <g class="p-payments desk idle"><polygon class="chair t" points="524.4,350.8 536.5,357.8 525.6,364.1 513.5,357.1"/><polygon class="chair l" points="513.5,368.3 525.6,375.3 525.6,364.1 513.5,357.1"/><polygon class="chair r" points="536.5,369.0 525.6,375.3 525.6,364.1 536.5,357.8"/><polygon class="dk t" points="536.5,321.4 572.9,342.4 553.5,353.6 517.1,332.6"/><polygon class="dk l" points="517.1,352.2 553.5,373.2 553.5,353.6 517.1,332.6"/><polygon class="dk r" points="572.9,362.0 553.5,373.2 553.5,353.6 572.9,342.4"/><polygon class="mon idle t" points="541.4,310.2 563.2,322.8 561.5,323.8 539.7,311.2"/><polygon class="mon idle l" points="539.7,327.4 561.5,340.0 561.5,323.8 539.7,311.2"/><polygon class="mon idle r" points="563.2,339.0 561.5,340.0 561.5,323.8 563.2,322.8"/></g>
+  <g class="p-ops desk work"><polygon class="chair t" points="645.6,362.0 657.8,369.0 646.8,375.3 634.7,368.3"/><polygon class="chair l" points="634.7,379.5 646.8,386.5 646.8,375.3 634.7,368.3"/><polygon class="chair r" points="657.8,380.2 646.8,386.5 646.8,375.3 657.8,369.0"/><polygon class="dk t" points="657.8,332.6 694.1,353.6 674.7,364.8 638.4,343.8"/><polygon class="dk l" points="638.4,363.4 674.7,384.4 674.7,364.8 638.4,343.8"/><polygon class="dk r" points="694.1,373.2 674.7,384.4 674.7,364.8 694.1,353.6"/><polygon class="mon work t" points="662.6,321.4 684.4,334.0 682.7,335.0 660.9,322.4"/><polygon class="mon work l" points="660.9,338.6 682.7,351.2 682.7,335.0 660.9,322.4"/><polygon class="mon work r" points="684.4,350.2 682.7,351.2 682.7,335.0 684.4,334.0"/><g class="fig"><ellipse cx="646.4" cy="362.4" rx="7" ry="9.5"/><circle cx="646.4" cy="342.8" r="5.2"/></g></g>
+  <g class="p-payments desk idle"><polygon class="chair t" points="473.5,380.2 485.6,387.2 474.7,393.5 462.6,386.5"/><polygon class="chair l" points="462.6,397.7 474.7,404.7 474.7,393.5 462.6,386.5"/><polygon class="chair r" points="485.6,398.4 474.7,404.7 474.7,393.5 485.6,387.2"/><polygon class="dk t" points="485.6,350.8 522.0,371.8 502.6,383.0 466.2,362.0"/><polygon class="dk l" points="466.2,381.6 502.6,402.6 502.6,383.0 466.2,362.0"/><polygon class="dk r" points="522.0,391.4 502.6,402.6 502.6,383.0 522.0,371.8"/><polygon class="mon idle t" points="490.4,339.6 512.3,352.2 510.6,353.2 488.7,340.6"/><polygon class="mon idle l" points="488.7,356.8 510.6,369.4 510.6,353.2 488.7,340.6"/><polygon class="mon idle r" points="512.3,368.4 510.6,369.4 510.6,353.2 512.3,352.2"/></g>
+  <g class="p-ops desk wait"><polygon class="chair t" points="594.7,391.4 606.8,398.4 595.9,404.7 583.8,397.7"/><polygon class="chair l" points="583.8,408.9 595.9,415.9 595.9,404.7 583.8,397.7"/><polygon class="chair r" points="606.8,409.6 595.9,415.9 595.9,404.7 606.8,398.4"/><polygon class="dk t" points="606.8,362.0 643.2,383.0 623.8,394.2 587.4,373.2"/><polygon class="dk l" points="587.4,392.8 623.8,413.8 623.8,394.2 587.4,373.2"/><polygon class="dk r" points="643.2,402.6 623.8,413.8 623.8,394.2 643.2,383.0"/><polygon class="mon wait t" points="611.7,350.8 633.5,363.4 631.8,364.4 610.0,351.8"/><polygon class="mon wait l" points="610.0,368.0 631.8,380.6 631.8,364.4 610.0,351.8"/><polygon class="mon wait r" points="633.5,379.6 631.8,380.6 631.8,364.4 633.5,363.4"/><g class="fig"><ellipse cx="595.4" cy="391.8" rx="7" ry="9.5"/><circle cx="595.4" cy="372.2" r="5.2"/></g></g>
+  <g class="p-ops desk idle"><polygon class="chair t" points="701.4,394.2 713.5,401.2 702.6,407.5 690.5,400.5"/><polygon class="chair l" points="690.5,411.7 702.6,418.7 702.6,407.5 690.5,400.5"/><polygon class="chair r" points="713.5,412.4 702.6,418.7 702.6,407.5 713.5,401.2"/><polygon class="dk t" points="713.5,364.8 749.9,385.8 730.5,397.0 694.1,376.0"/><polygon class="dk l" points="694.1,395.6 730.5,416.6 730.5,397.0 694.1,376.0"/><polygon class="dk r" points="749.9,405.4 730.5,416.6 730.5,397.0 749.9,385.8"/><polygon class="mon idle t" points="718.4,353.6 740.2,366.2 738.5,367.2 716.7,354.6"/><polygon class="mon idle l" points="716.7,370.8 738.5,383.4 738.5,367.2 716.7,354.6"/><polygon class="mon idle r" points="740.2,382.4 738.5,383.4 738.5,367.2 740.2,366.2"/></g>
+  <g class="p-ops desk idle"><polygon class="chair t" points="543.8,420.8 555.9,427.8 545.0,434.1 532.9,427.1"/><polygon class="chair l" points="532.9,438.3 545.0,445.3 545.0,434.1 532.9,427.1"/><polygon class="chair r" points="555.9,439.0 545.0,445.3 545.0,434.1 555.9,427.8"/><polygon class="dk t" points="555.9,391.4 592.3,412.4 572.9,423.6 536.5,402.6"/><polygon class="dk l" points="536.5,422.2 572.9,443.2 572.9,423.6 536.5,402.6"/><polygon class="dk r" points="592.3,432.0 572.9,443.2 572.9,423.6 592.3,412.4"/><polygon class="mon idle t" points="560.8,380.2 582.6,392.8 580.9,393.8 559.1,381.2"/><polygon class="mon idle l" points="559.1,397.4 580.9,410.0 580.9,393.8 559.1,381.2"/><polygon class="mon idle r" points="582.6,409.0 580.9,410.0 580.9,393.8 582.6,392.8"/></g>
+  <g class="p-ops desk work"><polygon class="chair t" points="650.5,423.6 662.6,430.6 651.7,436.9 639.6,429.9"/><polygon class="chair l" points="639.6,441.1 651.7,448.1 651.7,436.9 639.6,429.9"/><polygon class="chair r" points="662.6,441.8 651.7,448.1 651.7,436.9 662.6,430.6"/><polygon class="dk t" points="662.6,394.2 699.0,415.2 679.6,426.4 643.2,405.4"/><polygon class="dk l" points="643.2,425.0 679.6,446.0 679.6,426.4 643.2,405.4"/><polygon class="dk r" points="699.0,434.8 679.6,446.0 679.6,426.4 699.0,415.2"/><polygon class="mon work t" points="667.5,383.0 689.3,395.6 687.6,396.6 665.8,384.0"/><polygon class="mon work l" points="665.8,400.2 687.6,412.8 687.6,396.6 665.8,384.0"/><polygon class="mon work r" points="689.3,411.8 687.6,412.8 687.6,396.6 689.3,395.6"/><g class="fig"><ellipse cx="651.2" cy="424.0" rx="7" ry="9.5"/><circle cx="651.2" cy="404.4" r="5.2"/></g></g>
+  <g class="asst work"><ellipse class="disc" cx="126.7" cy="283.6" rx="30" ry="17.3"/><ellipse class="shadow" cx="126.7" cy="283.6" rx="12" ry="5"/><rect class="tile" x="111.7" y="239.6" width="30" height="30" rx="9"/><text class="lt" x="126.7" y="259.6">A</text><text class="as-l" x="126.7" y="315.6">Ada<tspan class="n"> working</tspan></text><use href="#m-working" class="mk" x="143.7" y="233.6" width="13" height="13"/></g>
+  <g class="asst idle"><ellipse class="disc" cx="195.8" cy="323.5" rx="30" ry="17.3"/><ellipse class="shadow" cx="195.8" cy="323.5" rx="12" ry="5"/><rect class="tile" x="180.8" y="279.5" width="30" height="30" rx="9"/><text class="lt" x="195.8" y="299.5">M</text><text class="as-l" x="195.8" y="355.5">Milo<tspan class="n"> idle</tspan></text></g>
+  <g class="asst asleep"><ellipse class="disc" cx="264.9" cy="363.4" rx="30" ry="17.3"/><ellipse class="shadow" cx="264.9" cy="363.4" rx="12" ry="5"/><rect class="tile" x="249.9" y="319.4" width="30" height="30" rx="9"/><text class="lt" x="264.9" y="339.4">J</text><text class="as-l" x="264.9" y="395.4">Juno<tspan class="n"> asleep</tspan></text><text class="zz" x="283.9" y="323.4">z</text><text class="zz s" x="291.9" y="313.4">z</text></g>
+  <polygon class="cab t" points="357.1,356.4 425.0,395.6 398.3,411.0 330.4,371.8"/><polygon class="cab l" points="330.4,398.4 398.3,437.6 398.3,411.0 330.4,371.8"/><polygon class="cab r" points="425.0,422.2 398.3,437.6 398.3,411.0 425.0,395.6"/><polygon class="led on" points="336.2,391.4 343.5,395.6 343.5,388.9 336.2,384.7"/><polygon class="led on" points="345.9,397.0 353.2,401.2 353.2,394.5 345.9,390.3"/><polygon class="led on" points="355.6,402.6 362.9,406.8 362.9,400.1 355.6,395.9"/><polygon class="led on" points="365.3,408.2 372.6,412.4 372.6,405.7 365.3,401.5"/><polygon class="led on" points="375.0,413.8 382.3,418.0 382.3,411.3 375.0,407.1"/><polygon class="led" points="384.7,419.4 392.0,423.6 392.0,416.9 384.7,412.7"/><text class="cab-t" transform="matrix(0.866 0.5 -0.866 0.5 343.0 370.1)">studio-mac</text><text class="cab-l" transform="matrix(0.866 0.5 -0.866 0.5 313.4 409.6)">5 of 6</text>
+  <polygon class="cab t" points="434.7,401.2 502.6,440.4 475.9,455.8 408.0,416.6"/><polygon class="cab l" points="408.0,443.2 475.9,482.4 475.9,455.8 408.0,416.6"/><polygon class="cab r" points="502.6,467.0 475.9,482.4 475.9,455.8 502.6,440.4"/><polygon class="led on" points="413.8,436.2 418.7,439.0 418.7,432.3 413.8,429.5"/><polygon class="led on" points="421.1,440.4 425.9,443.2 425.9,436.5 421.1,433.7"/><polygon class="led on" points="428.4,444.6 433.2,447.4 433.2,440.7 428.4,437.9"/><polygon class="led on" points="435.6,448.8 440.5,451.6 440.5,444.9 435.6,442.1"/><polygon class="led on" points="442.9,453.0 447.8,455.8 447.8,449.1 442.9,446.3"/><polygon class="led on" points="450.2,457.2 455.0,460.0 455.0,453.3 450.2,450.5"/><polygon class="led on" points="457.5,461.4 462.3,464.2 462.3,457.5 457.5,454.7"/><polygon class="led on" points="464.7,465.6 469.6,468.4 469.6,461.7 464.7,458.9"/><text class="cab-t" transform="matrix(0.866 0.5 -0.866 0.5 420.6 414.9)">build-box-1</text><text class="cab-l" transform="matrix(0.866 0.5 -0.866 0.5 391.0 454.4)">8 of 8 · at cap</text>
+  <polygon class="cab t" points="512.3,446.0 580.2,485.2 553.5,500.6 485.6,461.4"/><polygon class="cab l" points="485.6,488.0 553.5,527.2 553.5,500.6 485.6,461.4"/><polygon class="cab r" points="580.2,511.8 553.5,527.2 553.5,500.6 580.2,485.2"/><polygon class="led on" points="491.4,481.0 496.3,483.8 496.3,477.1 491.4,474.3"/><polygon class="led on" points="498.7,485.2 503.5,488.0 503.5,481.3 498.7,478.5"/><polygon class="led on" points="506.0,489.4 510.8,492.2 510.8,485.5 506.0,482.7"/><polygon class="led" points="513.2,493.6 518.1,496.4 518.1,489.7 513.2,486.9"/><polygon class="led" points="520.5,497.8 525.4,500.6 525.4,493.9 520.5,491.1"/><polygon class="led" points="527.8,502.0 532.6,504.8 532.6,498.1 527.8,495.3"/><polygon class="led" points="535.1,506.2 539.9,509.0 539.9,502.3 535.1,499.5"/><polygon class="led" points="542.3,510.4 547.2,513.2 547.2,506.5 542.3,503.7"/><text class="cab-t" transform="matrix(0.866 0.5 -0.866 0.5 498.2 459.7)">build-box-2</text><text class="cab-l" transform="matrix(0.866 0.5 -0.866 0.5 468.6 499.2)">3 of 8</text>
+  <g class="p-webshop"><g class="flag">
+    <line x1="296.0" y1="185.7" x2="296.0" y2="196.7"/>
+    <rect x="285.0" y="163.7" width="177.20000000000002" height="22" rx="7"/>
+    <text x="296.0" y="179.2" class="q">?</text>
+    <text x="312.0" y="178.9" class="tt">Fix 3-D Secure checkout</text>
+  </g></g>
+  <g class="p-payments"><g class="flag">
+    <line x1="466.9" y1="284.4" x2="466.9" y2="295.4"/>
+    <rect x="455.9" y="262.4" width="145.2" height="22" rx="7"/>
+    <text x="466.9" y="277.9" class="q">?</text>
+    <text x="482.9" y="277.6" class="tt">Ship release v2.15</text>
+  </g></g>
+  <g class="p-ops"><g class="flag">
+    <line x1="595.4" y1="358.6" x2="595.4" y2="369.6"/>
+    <rect x="584.4" y="336.6" width="170.8" height="22" rx="7"/>
+    <text x="595.4" y="352.1" class="q">?</text>
+    <text x="611.4" y="351.8" class="tt">Migrate ops dashboards</text>
+  </g></g>
+</svg>
+        <div class="legend">
+          <span class="st"><span class="glow"></span>working</span>
+          <span class="st"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span>needs you</span>
+          <span class="st"><span class="off"></span>idle</span>
+          <span class="st"><svg class="i" aria-hidden="true"><use href="#m-paused"/></svg>paused</span>
+          <span class="st"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg>asleep</span>
+        </div>
+        <div class="zoom"><button class="btn sm icon" title="Zoom out">−</button><button class="btn sm icon" title="Zoom in"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
+      </div>
+      <aside class="rail">
+        <div class="rail-sec sel-card p-webshop">
+          <div class="kick"><span class="sw  p-webshop"></span>webshop<span class="faint">· Thread · desk 7</span></div>
+          <div class="t">Fix 3-D Secure checkout for EU cards</div>
+          <div class="m"><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg> Claude Code · Opus 5.5 · studio-mac<br>started 09:02 · 3 files +48 -12</div>
+          <div class="ask"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span>Run <span class="mono">git push -u origin fix/3ds-eu-cards</span>?</span></div>
+          <div class="vled">
+            <button class="go">Allow once<span class="kbd">1</span></button>
+            <button>Always allow git push<span class="kbd">2</span></button>
+            <button>Deny<span class="kbd">3</span></button>
+          </div>
+          <a class="open">Open thread <svg class="i14" aria-hidden="true"><use href="#i-arrow-right"/></svg></a>
+        </div>
+        <div class="rail-sec">
+          <div class="rail-h">Needs you<span class="n">3</span></div>
+          <a class="nr p-webshop on"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="grow"><b>Fix 3-D Secure checkout</b><span>approve git push</span></span><span class="sw  p-webshop"></span></a>
+          <a class="nr p-payments"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="grow"><b>Ship release v2.15</b><span>publish to npm</span></span><span class="sw  p-payments"></span></a>
+          <a class="nr p-ops"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="grow"><b>Migrate ops dashboards</b><span>keep the old Grafana folder?</span></span><span class="sw  p-ops"></span></a>
+        </div>
+        <div class="rail-sec">
+          <div class="rail-h">Runners<span class="n">3</span></div>
+          <div class="rn">
+            <svg class="i14" aria-hidden="true"><use href="#i-machine"/></svg><b>studio-mac</b><span class="faint">local</span><span class="grow"></span><span class="c">5 of 6</span>
+            <span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>
+          </div>
+          <div class="rn">
+            <svg class="i14" aria-hidden="true"><use href="#i-machine"/></svg><b>build-box-1</b><span class="faint">linux</span><span class="grow"></span><span class="c full">8 of 8 · at cap</span>
+            <span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>
+          </div>
+          <div class="rn">
+            <svg class="i14" aria-hidden="true"><use href="#i-machine"/></svg><b>build-box-2</b><span class="faint">linux</span><span class="grow"></span><span class="c">3 of 8</span>
+            <span class="slots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</body>
+</html>

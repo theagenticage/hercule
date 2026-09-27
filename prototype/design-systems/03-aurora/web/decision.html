@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>(3) Checkout fails for EU cards with 3-D Secure · Proposal · Hercule</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='w' x1='0' x2='1'%3E%3Cstop offset='0' stop-color='#5fe0b4'/%3E%3Cstop offset='.55' stop-color='#5cc8e6'/%3E%3Cstop offset='1' stop-color='#b48cf5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='#241a33'/%3E%3Crect x='6.5' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Crect x='20' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Cpath d='M12 18.2c1.4-3.2 2.8-3.2 4-1.3s2.6 1.9 4-1.3' fill='none' stroke='url%28#w%29' stroke-width='2.8' stroke-linecap='round'/%3E%3Ccircle cx='26' cy='6' r='5.2' fill='#f4b43c' stroke='#241a33' stroke-width='1.6'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="solo">
+      <div class="field">
+        <i class="burn" style="--x: 34%; --y: 44%; --w: 900px; --h: 720px; --o: 0.8"></i>
+        <i class="own" style="--x: 84%; --y: 30%; --w: 640px; --h: 560px; --o: 0.7"></i>
+        <i class="calm" style="--x: 92%; --y: 100%; --w: 620px; --h: 420px; --o: 0.6"></i>
+        <i class="wait" style="--x: 6%; --y: 100%; --w: 520px; --h: 360px; --o: 0.45"></i>
+      </div>
+
+      <header class="dp-top">
+        <a class="logo"><svg><use href="#logo" /></svg>Hercule</a>
+        <span class="crumb slash">/</span><span class="crumb">Intake</span><span class="crumb slash">/</span><span class="crumb">Proposal</span>
+        <span class="dp-from glass-thin"><svg class="brand"><use href="#b-slack" /></svg>Opened from <b>Slack</b> · acme-hq</span>
+        <span class="spacer grow"></span>
+        <button class="btn sm quiet copy-link" title="Copy link to this Proposal"><svg class="i s14"><use href="#m-link" /></svg>Copy link</button>
+        <button class="btn sm"><svg class="i s14"><use href="#m-intake" /></svg>Open Intake<b class="wr-n burn">9</b></button>
+        <span class="av me">R</span>
+      </header>
+
+      <div class="dp-body">
+        <article class="dp-card glass-strong lit burn">
+          <header class="lead-top">
+            <span class="st burn"><svg class="i"><use href="#m-burning" /></svg>Burning</span>
+            <span class="faint">Proposal</span>
+            <span class="spacer grow"></span>
+            <span class="faint">first seen 08:52 · triage 09:00</span>
+          </header>
+          <h1 class="lead-title">Checkout fails for EU cards with 3-D Secure</h1>
+          <div class="lead-meta">
+            <span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span>Urgent</span>
+            <span class="dot-sep"></span><span class="src"><svg class="i s14"><use href="#m-topic" /></svg>Checkout</span>
+            <span class="dot-sep"></span><span class="proj webshop">webshop</span>
+          </div>
+          <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+          <div class="dp-sec">Made from<span class="n">4 sources</span></div>
+          <div class="dp-ev">
+            <span class="tile"><svg class="brand"><use href="#b-sentry" /></svg></span>
+            <span class="who">Sentry<span>webshop-prod</span></span>
+            <span class="what"><span class="mono">PaymentError: authentication_required</span><small>188 users · none before the deploy</small></span>
+            <span class="num-big"><span class="spark" aria-label="Events per hour since 10:00 yesterday"><i class="before" style="--h: 2px"></i><i class="before" style="--h: 2px"></i><i class="before" style="--h: 2px"></i><i class="before" style="--h: 2px"></i><i style="--h: 60%"></i><i style="--h: 75%"></i><i style="--h: 80%"></i><i style="--h: 85%"></i><i style="--h: 90%"></i><i style="--h: 100%"></i><i style="--h: 88%"></i><i style="--h: 70%"></i><i style="--h: 45%"></i><i style="--h: 25%"></i><i style="--h: 12%"></i><i style="--h: 6%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 5%"></i><i style="--h: 8%"></i><i style="--h: 18%"></i><i style="--h: 40%"></i><i style="--h: 62%"></i><i style="--h: 78%"></i></span>412</span>
+          </div>
+          <div class="dp-ev">
+            <span class="tile"><svg class="brand"><use href="#b-gmail" /></svg></span>
+            <span class="who">Gmail<span>rogier@personal</span></span>
+            <span class="what"><span style="color: var(--ink)">"Card declined at checkout"</span><small>"Can't pay with my Rabobank card" · "Payment keeps failing"</small></span>
+            <span class="num-big">3</span>
+          </div>
+          <div class="dp-ev">
+            <span class="tile"><svg class="brand"><use href="#b-posthog" /></svg></span>
+            <span class="who">PostHog<span>webshop</span></span>
+            <span class="what"><span>Checkout conversion, EU only</span><small>since 14:10 yesterday</small></span>
+            <span class="num-big" style="color: var(--fail)">−18%</span>
+          </div>
+          <div class="dp-ev">
+            <span class="tile"><svg class="brand"><use href="#b-github" /></svg></span>
+            <span class="who">GitHub<span>rogier/webshop</span></span>
+            <span class="what"><span>Deploy · Upgrade Stripe SDK to v14</span><small>14:02 yesterday</small></span>
+            <span class="num-big">#1289</span>
+          </div>
+
+          <p class="offer-note">
+            <svg class="i s14"><use href="#m-offer" /></svg>
+            <span class="grow">I can also draft a reply to the 3 customers once the fix ships.</span>
+            <button class="btn sm quiet">Not now</button>
+            <button class="btn sm">Yes, after the fix</button>
+          </p>
+        </article>
+
+        <aside class="dp-side">
+          <section class="dp-answer glass-strong">
+            <div class="dp-sec">Your answer</div>
+            <div class="ledger">
+              <button class="ans go"><b>Start "Fix bug"</b><span>Starts Fix bug on webshop in a new worktree</span><span class="kbd">⏎</span></button>
+              <button class="ans"><b>Accept</b><span>Adds it to the backlog as a Task</span><span class="kbd">A</span></button>
+              <button class="ans"><b>Dismiss</b><span>Closes the Proposal</span><span class="kbd">D</span></button>
+            </div>
+          </section>
+
+          <section class="dp-plan glass">
+            <div class="dp-sec">If you start it</div>
+            <dl>
+              <dt>Workflow</dt><dd><svg class="i"><use href="#m-workflow" /></svg>Fix bug</dd>
+              <dt>Where</dt><dd><span class="proj webshop">webshop</span><span class="faint">new worktree from main</span></dd>
+              <dt>Agent</dt><dd><svg class="brand"><use href="#b-claude" /></svg>Claude Code · Opus 5.5<span class="faint">effort high</span></dd>
+              <dt>Runner</dt><dd><svg class="i"><use href="#m-machine" /></svg>studio-mac<span class="faint">5 of 6 in use</span></dd>
+              <dt>Access</dt><dd><svg class="i"><use href="#m-shield" /></svg>Auto-accept edits</dd>
+            </dl>
+          </section>
+
+          <a class="dp-next"><svg class="i s14"><use href="#m-intake" /></svg><span class="grow">5 more Proposals in Intake · 3 Requests in Check-in</span><svg class="i s14"><use href="#m-chev-r" /></svg></a>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

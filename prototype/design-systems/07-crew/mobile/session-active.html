@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Fix 3-D Secure checkout · Hercule</title>
+    <style>
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+      }
+      .tx {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 16px 16px 360px;
+      }
+      .tx .provenance {
+        justify-content: flex-start;
+      }
+      .waiting-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--you-ink);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .files-row span:first-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dock {
+        padding: 12px 10px 24px;
+        border-radius: 24px 24px 0 0;
+      }
+      .dock-q {
+        padding: 0 4px;
+        margin-bottom: 10px;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+      .dock-q code {
+        font-size: 12px;
+      }
+      .dock .m-ans {
+        min-height: 54px;
+      }
+      .composer.is-scrolled .dock {
+        padding: 8px 10px 22px 12px;
+      }
+      .dock-mini .btn {
+        height: 32px;
+        padding: 0 12px;
+      }
+      .ch {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        height: 30px;
+        padding: 0 10px;
+        border-radius: var(--r-pill);
+        background: var(--sunken);
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <header class="m-nav">
+        <a class="m-back" href="intake.html"><i data-i="chev-l" data-size="22"></i><b class="tb-badge">9</b></a>
+        <div class="m-head">
+          <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i>
+          <span class="m-head-text"><b>Fix 3-D Secure checkout</b><small>webshop · <span class="you-ink">waiting on you</span></small></span>
+        </div>
+        <button class="ch" title="3 changed files"><span class="plus">+48</span><span class="minus">-12</span></button>
+      </header>
+
+      <div class="stage">
+        <div class="transcript" data-transcript>
+          <div class="tx">
+            <div class="provenance">
+              <span>Started 09:02 from</span>
+              <a href="decision.html"><i data-i="intake" data-size="13"></i>Checkout fails for EU cards</a>
+            </div>
+
+            <div class="msg--me">
+              <div>
+                <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+                <div class="bubble-meta">09:02</div>
+              </div>
+            </div>
+
+            <div class="worked"><b>Worked 2m 14s ›</b><span class="tools"><span>read 6 files</span></span></div>
+
+            <div class="m-msg" style="--hue: var(--hue-peach)">
+              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3-D Secure</b><span>Opus 5.5 · 09:04</span></div>
+              <div class="msg-body">
+                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> treats that as a failure, so we show "Card declined" instead of the 3-D Secure modal.</p>
+                <div class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+                <p>I wrote a failing test first, then the fix.</p>
+              </div>
+            </div>
+
+            <div class="worked"><b>Worked 4m 51s ›</b><span class="tools"><span>edited 3 files</span></span></div>
+
+            <div class="m-msg" style="--hue: var(--hue-peach)">
+              <div class="m-by"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="22"></i><b>Fix 3-D Secure</b><span>09:09</span></div>
+              <div class="msg-body">
+                <div class="card files">
+                  <div class="files-head"><i data-i="diff"></i><span>3 changed files</span><span class="spacer"></span><span class="plus mono">+48</span><span class="minus mono">-12</span></div>
+                  <div class="files-row"><span>checkout/payment.ts</span><span class="spacer"></span><span class="plus">+21</span><span class="minus">-9</span></div>
+                  <div class="files-row"><span>checkout/payment.test.ts</span><span class="spacer"></span><span class="plus">+19</span><span class="minus">-0</span></div>
+                  <div class="files-row"><span>checkout/3ds-modal.tsx</span><span class="spacer"></span><span class="plus">+8</span><span class="minus">-3</span></div>
+                </div>
+                <div class="result"><b>✓ 24 passed</b><code>pnpm test checkout</code></div>
+                <p style="margin-top: 12px">Tests pass. Ready to push the branch and open a pull request.</p>
+              </div>
+            </div>
+
+            <div class="waiting-note"><i data-i="hand" data-size="14"></i>Waiting on you since 09:31 · 10m</div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer" data-composer>
+            <div class="dock">
+              <div class="fold fold--hide">
+                <div>
+                  <div class="dock-q">
+                    <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i>
+                    <span>Run <code>git push -u origin fix/3ds-eu-cards</code>?</span>
+                  </div>
+                  <div class="m-answers">
+                    <button class="m-ans m-ans--you"><i data-i="check" data-size="20"></i><b>Allow once</b><span>Pushes the branch this one time</span><span class="haptic"><i data-i="wave" data-size="11"></i>success</span></button>
+                    <button class="m-ans"><i data-i="key" data-size="20"></i><b>Always allow git push</b><span>Adds a Grant in webshop</span></button>
+                    <button class="m-ans"><i data-i="close" data-size="20"></i><b>Deny</b><span>The branch stays local</span><span class="haptic"><i data-i="wave" data-size="11"></i>warning</span></button>
+                  </div>
+                </div>
+              </div>
+              <div class="dock-mini">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="26"></i>
+                <span class="dock-mini-q">Run <code>git push</code>?</span>
+                <span class="spacer"></span>
+                <span class="btn btn--you">Allow once</span>
+                <span class="btn">Deny</span>
+              </div>
+            </div>
+            <div class="composer-card">
+              <div class="m-comp">
+                <button class="icon-btn" title="Attach"><i data-i="plus" data-size="20"></i></button>
+                <textarea class="composer-input" rows="1" placeholder="Reply or steer…"></textarea>
+                <button class="m-mic" title="Hold to talk"><i data-i="mic" data-size="20"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

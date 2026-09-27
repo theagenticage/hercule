@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>(3) Fix 3-D Secure checkout · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='24.5' cy='8' r='7.5' fill='%23c24e1c' stroke='%23fff' stroke-width='1.6'/%3E%3Ctext x='24.5' y='11.6' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='10.5' text-anchor='middle' fill='%23fff'%3E3%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="web">
+  <header class="wbar" data-web="thread"></header>
+  <div class="wbody">
+    <main class="wmain">
+      <header class="whead">
+        <span class="proj"><i class="room"></i>webshop</span><span class="slash">/</span>
+        <h1>Fix 3-D Secure checkout for EU cards</h1>
+        <span class="state-pill is-attn"><i data-m="q"></i>waiting on you</span>
+        <div class="tools">
+          <button class="btn btn-sm btn-quiet"><i data-i="link"></i>Copy link</button>
+          <button class="iconbtn" aria-label="More"><i data-i="more"></i></button>
+        </div>
+      </header>
+
+      <section class="pane">
+        <div class="scroll" data-glass="#composer" data-scrolled-by="380">
+          <div class="thread">
+            <div class="ts">09:02</div>
+            <div class="me"><div><div class="me-bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div></div></div>
+
+            <button class="worked"><i data-i="right"></i><b>Worked for 2m 14s</b>read 6 files · ran 1 command</button>
+            <div class="prose">
+              <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show “Card declined” instead of opening the 3-D Secure modal.</p>
+            </div>
+            <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+            <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+            <button class="worked"><i data-i="right"></i><b>Worked for 4m 51s</b>edited 3 files · ran 4 commands</button>
+
+            <div class="files">
+              <div class="files-head"><i data-i="diff"></i><span class="grow">3 changed files</span><span class="plus">+48</span><span class="minus">&minus;12</span><span class="files-act"><button class="btn btn-sm btn-quiet">Show files</button><button class="btn btn-sm">Open diff</button></span></div>
+              <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">&minus;9</span></div>
+              <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">&minus;0</span></div>
+              <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">&minus;3</span></div>
+              <div class="files-foot"><i data-m="done"></i><b>24 passed</b><code>pnpm test checkout</code><span class="grow"></span><span class="faint">09:39</span></div>
+            </div>
+
+            <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer" id="composer">
+            <div class="compact-pill"><i data-m="q"></i><b>git push</b>is waiting on you<button class="btn btn-sm btn-accent">Allow once</button></div>
+            <div class="dock">
+              <div class="dock-head"><i data-m="q"></i><span class="grow">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span><small>Request · 09:39</small></div>
+              <div class="ledger">
+                <button class="ans is-primary"><span class="ans-label">Allow once</span><span class="ans-desc">Runs this push; asks again next time</span><kbd class="kbd">&#8629;</kbd></button>
+                <button class="ans"><span class="ans-label">Always allow git push</span><span class="ans-desc">Adds a Grant for <b>git push</b> to this Thread</span><kbd class="kbd">2</kbd></button>
+                <button class="ans"><span class="ans-label">Deny</span><span class="ans-desc">Refuses the push; the agent is told why</span><kbd class="kbd">3</kbd></button>
+              </div>
+            </div>
+            <div class="queued"><i data-m="queued"></i><span class="q-text">Also check the Apple Pay path</span><span>queued · runs next</span><span class="grow"></span><button class="btn btn-sm btn-quiet">Steer</button><button class="btn btn-sm btn-quiet">Cancel</button></div>
+            <div class="cbox">
+              <div class="cbox-main"><div class="cbox-input">Queued until the turn finishes…</div></div>
+              <div class="cbox-row">
+                <button class="sel" aria-label="Attach"><i data-i="plus"></i></button>
+                <button class="sel"><i data-i="shield"></i>auto-accept edits</button>
+                <button class="sel"><i data-i="sliders"></i>High<i data-i="down"></i></button>
+                <span class="grow"></span>
+                <button class="sel"><i data-b="claude"></i>Opus 5.5<i data-i="down"></i></button>
+                <span class="sep"></span>
+                <button class="sel" aria-label="Voice"><i data-i="mic"></i></button>
+                <button class="stopbtn"><i data-i="stop"></i>Stop</button>
+                <button class="send" aria-label="Send"><i data-i="send"></i></button>
+              </div>
+            </div>
+            <div class="lip">
+              <span><i data-i="folder"></i>webshop · worktree</span>
+              <span><i data-i="branch"></i><span class="mono">fix/3ds-eu-cards</span></span>
+              <span><i data-i="machine"></i>studio-mac</span>
+              <span class="end">Claude Code · rogier@personal</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- The web has no sidebar, so the rail carries what the sidebar and the lip carry on desktop:
+         what else waits on you, the thread's facts, and the link to share. -->
+    <aside class="wrail">
+      <section class="wr">
+        <h4><i data-m="q" class="c-attn"></i>Waiting on you<em>3</em><small><kbd class="kbd">J</kbd> next</small></h4>
+        <a class="wq is-here" href="#"><i class="glyph" data-m="session" style="color:var(--project-webshop)"></i><span><b>Fix 3-D Secure checkout</b><small>approve git push <span>· here</span></small></span><kbd class="kbd">&#8629;</kbd></a>
+        <a class="wq" href="#"><i class="glyph" data-m="run" style="color:var(--project-payments-api)"></i><span><b>Ship release v2.15</b><small>publish to npm <span>· Run</span></small></span></a>
+        <a class="wq" href="#"><i class="glyph" data-m="session" style="color:var(--project-ops)"></i><span><b>Migrate ops dashboards</b><small>Keep the old Grafana folder? <span>· pi</span></small></span></a>
+      </section>
+
+      <section class="wr">
+        <h4>This thread<small>started 09:02 by you</small></h4>
+        <dl class="facts">
+          <dt>From</dt><dd><a class="sublink" href="decision.html">Proposal #318</a><small>EU cards fail</small></dd>
+          <dt>Branch</dt><dd><code>fix/3ds-eu-cards</code><small>from main</small></dd>
+          <dt>Workspace</dt><dd>its own worktree</dd>
+          <dt>Machine</dt><dd><i data-i="machine"></i>studio-mac</dd>
+          <dt>Provider</dt><dd><i data-b="claude"></i>Claude Code<small>rogier@personal</small></dd>
+          <dt>Model</dt><dd>Opus 5.5<small>effort high</small></dd>
+          <dt>Access mode</dt><dd>auto-accept edits<small class="locked">locked at start</small></dd>
+        </dl>
+      </section>
+
+      <section class="wr">
+        <h4>In this worktree</h4>
+        <div class="wsib"><i class="glyph" data-m="session" style="color:var(--project-webshop)"></i><span>Refactor cart totals</span><em><i data-m="working"></i>22m</em></div>
+      </section>
+
+      <section class="wr">
+        <h4>Share</h4>
+        <div class="wlink"><span class="grow">hercule.acme.dev/threads/1042</span><button class="btn btn-sm">Copy</button></div>
+        <p class="wr-note">Opens this thread in any browser you are signed in on, or in the desktop app.</p>
+      </section>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

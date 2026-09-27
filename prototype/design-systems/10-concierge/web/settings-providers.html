@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>(3) Providers · Settings · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='24.5' cy='8' r='7.5' fill='%23c24e1c' stroke='%23fff' stroke-width='1.6'/%3E%3Ctext x='24.5' y='11.6' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='10.5' text-anchor='middle' fill='%23fff'%3E3%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="web">
+  <header class="wbar" data-web="settings"></header>
+  <div class="wbody">
+    <nav class="wset">
+      <h2>Settings</h2>
+      <a class="nav" href="#"><i data-i="user"></i><span>Profile</span></a>
+      <a class="nav" href="#"><i data-i="brush"></i><span>Appearance</span></a>
+      <a class="nav" href="#"><i data-i="list"></i><span>Threads</span></a>
+      <a class="nav" href="#"><i class="orb" data-v="ada" data-p="idle" style="--size:12px"></i><span>Assistants</span></a>
+      <a class="nav" href="#"><i data-i="plug"></i><span>Connections</span></a>
+      <a class="nav is-active" href="settings-providers.html"><i data-i="bolt"></i><span>Providers</span></a>
+      <a class="nav" href="#"><i data-i="machine"></i><span>Machines</span></a>
+      <a class="nav" href="#"><i data-i="key"></i><span>Identities</span></a>
+      <a class="nav" href="#"><i data-i="shield"></i><span>Permission profiles</span></a>
+      <a class="nav" href="#"><i data-i="lock"></i><span>Secrets</span></a>
+      <a class="nav" href="#"><i data-m="held"></i><span>Bounds</span></a>
+      <a class="nav" href="#"><i data-i="grid"></i><span>Plugins</span></a>
+      <a class="nav" href="#"><i data-i="gear"></i><span>System</span></a>
+    </nav>
+
+    <main class="wset-main">
+      <div class="set">
+        <div class="set-h"><h1>Providers</h1><button class="end btn btn-sm"><i data-i="plus"></i>Add provider instance</button></div>
+        <p class="set-lede">3 provider instances on 3 machines. A thread picks one when it starts.</p>
+        <p class="aside-voice"><i class="orb" data-v="ada" data-p="working" style="--size:16px"></i><span>Claude Code has used 61% of its window until 11:00. Codex has room if you start something big before then.</span></p>
+
+        <div class="pm" role="table" aria-label="Which provider instance can run on which machine">
+          <span class="pm-h">Provider instance<small>signed in, per machine</small></span>
+          <span class="pm-h">studio-mac<small>5 of 6 sessions</small></span>
+          <span class="pm-h">build-box-1<small class="c-attn">8 of 8 · at cap</small></span>
+          <span class="pm-h">build-box-2<small>3 of 8 sessions</small></span>
+
+          <span class="pm-i"><i data-b="claude"></i><b>Claude Code</b><small>rogier@personal</small></span>
+          <span class="pm-c"><i class="dot-ok"></i>signed in<small>2.1.270</small></span>
+          <span class="pm-c"><i class="dot-ok"></i>signed in<small>2.1.270</small></span>
+          <span class="pm-c"><i class="dot-ok"></i>signed in<small>2.1.270</small></span>
+
+          <span class="pm-i"><i data-b="openai"></i><b>Codex</b><small>work</small></span>
+          <span class="pm-c is-none"><i class="dot"></i>not installed</span>
+          <span class="pm-c"><i class="dot-ok"></i>signed in<small>0.46.0</small></span>
+          <span class="pm-c"><i class="dot-ok"></i>signed in<small>0.46.0</small></span>
+
+          <span class="pm-i"><i data-b="pi"></i><b>pi</b><small>local</small></span>
+          <span class="pm-c"><i class="dot-ok"></i>ready<small>llama.cpp</small></span>
+          <span class="pm-c is-none"><i class="dot"></i>not installed</span>
+          <span class="pm-c is-none"><i class="dot"></i>not installed</span>
+        </div>
+
+        <section class="pv sec">
+          <div class="pv-h"><span class="bind-ic"><i data-b="claude"></i></span><div><h2>Claude Code</h2><small>Anthropic account rogier@personal · on 3 machines</small></div><span class="end"><span class="bind-h"><i class="dot-ok"></i>signed in</span><button class="iconbtn" aria-label="More"><i data-i="more"></i></button></span></div>
+          <div class="frow"><span class="frow-l">Models<small>the first is the default for new threads</small></span><span class="models"><span class="model">Opus 5.5<small>default</small></span><span class="model">Sonnet 5</span><span class="model">Haiku 4.5</span></span><span></span></div>
+          <div class="frow"><span class="frow-l">Default effort<small>a thread can change it at any turn</small></span><span class="seg"><button>Low</button><button>Medium</button><button class="is-on">High</button></span><span></span></div>
+          <div class="frow"><span class="frow-l">Default access mode<small>from most careful to least</small></span><span><span class="amodes"><span>approval required</span><span class="is-on">auto-accept edits</span><span>auto</span><span>full access</span></span><small class="amodes-k">Locked when a session starts. The model stays changeable.</small></span><span></span></div>
+          <div class="frow"><span class="frow-l">Usage<small>the account's 5-hour window</small></span><span class="usage"><span class="meter is-accent"><i style="--v:61%"></i></span><span><b class="num">61%</b> used · resets 11:00</span></span><span></span></div>
+        </section>
+
+        <section class="pv sec">
+          <div class="pv-h"><span class="bind-ic"><i data-b="openai"></i></span><div><h2>Codex</h2><small>OpenAI account work · on build-box-1 and build-box-2</small></div><span class="end"><span class="bind-h"><i class="dot-ok"></i>signed in</span><button class="iconbtn" aria-label="More"><i data-i="more"></i></button></span></div>
+          <div class="frow"><span class="frow-l">Models<small>the first is the default for new threads</small></span><span class="models"><span class="model">gpt-5.4<small>default</small></span><span class="model">gpt-5.4-mini</span></span><span></span></div>
+          <div class="frow"><span class="frow-l">Default effort<small>a thread can change it at any turn</small></span><span class="seg"><button>Low</button><button class="is-on">Medium</button><button>High</button></span><span></span></div>
+          <div class="frow"><span class="frow-l">Default access mode<small>from most careful to least</small></span><span><span class="amodes"><span>approval required</span><span class="is-on">auto-accept edits</span><span>auto</span><span>full access</span></span></span><span></span></div>
+          <div class="frow"><span class="frow-l">Usage<small>the account's 5-hour window</small></span><span class="usage"><span class="meter is-accent"><i style="--v:18%"></i></span><span><b class="num">18%</b> used · resets 12:30</span></span><span></span></div>
+        </section>
+
+        <section class="pv sec">
+          <div class="pv-h"><span class="bind-ic"><i data-b="pi"></i></span><div><h2>pi</h2><small>local model · on studio-mac only</small></div><span class="end"><span class="bind-h"><i class="dot-ok"></i>ready</span><button class="iconbtn" aria-label="More"><i data-i="more"></i></button></span></div>
+          <div class="frow"><span class="frow-l">Model<small>served by llama.cpp on studio-mac</small></span><span class="models"><span class="model">qwen3-coder 30b<small>default</small></span></span><span></span></div>
+          <div class="frow"><span class="frow-l">Default access mode<small>from most careful to least</small></span><span><span class="amodes"><span>approval required</span><span class="is-on">auto-accept edits</span><span class="is-fallback">auto</span><span>full access</span></span><small class="amodes-k c-attn">pi has no auto mode. A thread that asks for auto runs as auto-accept edits, and says so.</small></span><span></span></div>
+          <div class="frow"><span class="frow-l">Usage<small>runs on your own machine</small></span><span class="frow-v">no limit</span><span></span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="settings" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb" style="font-size: var(--t-lg)">Settings</span><span class="crumb" style="font-size: var(--t-lg)">/</span>
+          <h1>Providers</h1>
+          <span class="when">3 instances</span>
+          <span class="right"><button class="btn sm"><i data-icon="plus" style="width: 12px; height: 12px"></i>Add provider instance</button></span>
+        </header>
+
+        <div class="w-settings">
+          <!-- On the web the settings domains become an in-page column, since the rail has no room for them. -->
+          <nav class="w-setnav" aria-label="Settings">
+            <a class="side-row" href="#"><i data-icon="user"></i>Profile</a>
+            <a class="side-row" href="#"><i data-icon="palette"></i>Appearance</a>
+            <a class="side-row" href="#"><i data-icon="threads"></i>Threads</a>
+            <a class="side-row" href="#"><i data-mark="assistant" class="ic"></i>Assistants</a>
+            <a class="side-row" href="#"><i data-icon="plug"></i>Connections</a>
+            <a class="side-row" href="settings-providers.html" aria-current="page"><i data-icon="cpu"></i>Providers</a>
+            <a class="side-row" href="#"><i data-icon="server"></i>Machines</a>
+            <a class="side-row" href="#"><i data-icon="key"></i>Identities</a>
+            <a class="side-row" href="#"><i data-icon="shield"></i>Permission profiles</a>
+            <a class="side-row" href="#"><i data-icon="lock"></i>Secrets</a>
+            <a class="side-row" href="#"><i data-icon="gauge"></i>Bounds</a>
+            <a class="side-row" href="#"><i data-icon="puzzle"></i>Plugins</a>
+            <a class="side-row" href="#"><i data-icon="sliders"></i>System</a>
+          </nav>
+
+          <div class="p-grid">
+            <!-- ============================================================ Claude Code -->
+            <article class="p-card">
+              <header>
+                <span class="p-logo"><i data-brand="claude"></i></span>
+                <span class="p-name"><b>Claude Code</b><span>Anthropic · rogier@personal</span></span>
+                <button class="icon-btn" title="More"><i data-icon="more"></i></button>
+              </header>
+              <div class="p-usage">
+                <span data-halo="ink61 empty39" data-merge data-center="61%" data-size="76" role="img" aria-label="61% of the 5-hour window used"></span>
+                <span><b>61% of the 5-hour window</b><span>resets 11:00</span></span>
+              </div>
+              <div class="p-row"><span class="k">Models</span><span class="v"><span class="chip line on">Opus 5.5 · default</span><span class="chip line">Sonnet 5</span><span class="chip line">Haiku 4.5</span></span></div>
+              <div class="p-row"><span class="k">Effort</span><span class="v"><span class="seg" data-seg><button aria-pressed="false">Low</button><button aria-pressed="false">Medium</button><button aria-pressed="true">High</button></span></span></div>
+              <div class="p-row"><span class="k">Access</span><span class="v"><span class="pill"><i data-icon="edit"></i>Auto-accept edits<i data-icon="down" class="v"></i></span></span></div>
+              <div class="p-machines">
+                <div class="p-label">Installed on</div>
+                <div class="m on"><i data-mark="done"></i><b>studio-mac</b><span>2.1.9 · signed in</span></div>
+                <div class="m on"><i data-mark="done"></i><b>build-box-1</b><span>2.1.9 · signed in</span></div>
+                <div class="m on"><i data-mark="done"></i><b>build-box-2</b><span>2.1.9 · signed in</span></div>
+              </div>
+              <footer>
+                <span data-halo="wait2 work6 pause1 asleep1 idle4" data-size="22" data-still aria-hidden="true"></span>
+                <span>14 sessions · <em>2 wait</em> · 6 working · 6 idle</span>
+              </footer>
+            </article>
+
+            <!-- ============================================================ Codex -->
+            <article class="p-card">
+              <header>
+                <span class="p-logo"><i data-brand="openai"></i></span>
+                <span class="p-name"><b>Codex</b><span>OpenAI · work</span></span>
+                <button class="icon-btn" title="More"><i data-icon="more"></i></button>
+              </header>
+              <div class="p-usage">
+                <span data-halo="ink18 empty82" data-merge data-center="18%" data-size="76" role="img" aria-label="18% of the 5-hour window used"></span>
+                <span><b>18% of the 5-hour window</b><span>resets 12:30</span></span>
+              </div>
+              <div class="p-row"><span class="k">Models</span><span class="v"><span class="chip line on">gpt-5.4 · default</span><span class="chip line">gpt-5.4-mini</span></span></div>
+              <div class="p-row"><span class="k">Effort</span><span class="v"><span class="seg" data-seg><button aria-pressed="false">Low</button><button aria-pressed="true">Medium</button><button aria-pressed="false">High</button></span></span></div>
+              <div class="p-row"><span class="k">Access</span><span class="v"><span class="pill"><i data-icon="shield"></i>Auto<i data-icon="down" class="v"></i></span></span></div>
+              <div class="p-machines">
+                <div class="p-label">Installed on</div>
+                <div class="m"><i data-mark="skipped"></i><b>studio-mac</b><span>not installed</span><button class="btn sm ghost">Install</button></div>
+                <div class="m on"><i data-mark="done"></i><b>build-box-1</b><span>0.61.0 · signed in</span></div>
+                <div class="m on"><i data-mark="done"></i><b>build-box-2</b><span>0.61.0 · signed in</span></div>
+              </div>
+              <footer>
+                <span data-halo="work2 idle6" data-size="22" data-still aria-hidden="true"></span>
+                <span>8 sessions · 2 working · 6 idle</span>
+              </footer>
+            </article>
+
+            <!-- ============================================================ pi -->
+            <article class="p-card">
+              <header>
+                <span class="p-logo pi" aria-hidden="true">π</span>
+                <span class="p-name"><b>pi</b><span>local · llama.cpp</span></span>
+                <button class="icon-btn" title="More"><i data-icon="more"></i></button>
+              </header>
+              <div class="p-usage">
+                <span data-halo="idle1.1" data-center="∞" data-size="76" role="img" aria-label="No usage window: the model runs on studio-mac"></span>
+                <span><b>No usage window</b><span>the model runs on studio-mac</span></span>
+              </div>
+              <div class="p-row"><span class="k">Models</span><span class="v"><span class="chip line on">qwen3-coder 30b · default</span></span></div>
+              <div class="p-row"><span class="k">Effort</span><span class="v"><span class="h">pi has no effort levels</span></span></div>
+              <div class="p-row"><span class="k">Access</span><span class="v"><span class="pill"><i data-icon="lock"></i>Approval required<i data-icon="down" class="v"></i></span><span class="fallback">Lacks auto-accept edits, so it falls back to this and says so.</span></span></div>
+              <div class="p-machines">
+                <div class="p-label">Installed on</div>
+                <div class="m on"><i data-mark="done"></i><b>studio-mac</b><span>0.9.2 · model loaded</span></div>
+                <div class="m"><i data-mark="skipped"></i><b>build-box-1</b><span>needs a GPU</span></div>
+                <div class="m"><i data-mark="skipped"></i><b>build-box-2</b><span>needs a GPU</span></div>
+              </div>
+              <footer>
+                <span data-halo="wait1" data-size="22" data-still aria-hidden="true"></span>
+                <span>1 session · <em>waits on you</em></span>
+              </footer>
+            </article>
+            <p class="p-foot"><i data-icon="refresh"></i>“Installed on” comes from each machine's last report, 09:12.<button class="btn sm ghost">Check again</button></p>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

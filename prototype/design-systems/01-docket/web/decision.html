@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Checkout fails for EU cards with 3-D Secure · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 7.5C4 6.12 5.12 5 6.5 5h6.2c.9 0 1.6.5 2 1.2l.8 1.3H25.5C26.88 7.5 28 8.62 28 10v15.5c0 1.38-1.12 2.5-2.5 2.5h-19A2.5 2.5 0 0 1 4 25.5z' fill='%231f1b16'/%3E%3Cpath d='M11 12.6v10.6M21 12.6v10.6' stroke='%23f4f1ea' stroke-width='3.1'/%3E%3Cpath d='M12.3 17.9h7.4' stroke='%2322a55a' stroke-width='3.1'/%3E%3Ccircle cx='26' cy='7' r='5.5' fill='%23f0a020' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .whead { gap: 14px; }
+  .crumb { display: flex; align-items: center; gap: 8px; color: var(--faint); font-weight: 500; }
+  .crumb a { color: var(--muted); }
+  .crumb .i { width: 12px; height: 12px; }
+  .crumb .vr { width: 1px; height: 18px; background: var(--line); margin-right: 6px; }
+  .crumb b { color: var(--ink); font-weight: 600; }
+  .mydocket { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--muted); padding: 0 6px; }
+  .mydocket b { color: var(--ink); font-weight: 600; }
+  .page { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; align-items: center; padding: 20px 40px 40px; }
+  .colw { width: 820px; }
+  .ch { padding: 20px 24px 18px; }
+  .meta { display: flex; align-items: center; gap: 14px; font-size: var(--fs-small); color: var(--muted); }
+  .meta .age { margin-left: auto; color: var(--faint); }
+  .card h1 { font-size: var(--fs-title); line-height: 1.25; margin-top: 12px; }
+  .gist { margin-top: 8px; font-size: var(--fs-body); line-height: 1.55; color: var(--muted); max-width: 700px; }
+  .gist code { color: var(--ink); }
+  .ev { border-top: 1px solid var(--line-soft); }
+  .ev-row { display: grid; grid-template-columns: 188px 64px 1fr 110px; align-items: center; column-gap: 16px; padding: 10px 24px; min-height: 48px; }
+  .ev-row + .ev-row { border-top: 1px solid var(--line-soft); }
+  .ev-row .src { font-size: var(--fs-ui); }
+  .ev-row .num { font-size: var(--fs-lead); }
+  .ev-row .what { font-size: var(--fs-ui); color: var(--muted); line-height: 1.45; }
+  .ev-row .what code { color: var(--ink); font-size: 12px; }
+  .ev-row .what q { color: var(--ink); quotes: "\201C" "\201D"; }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 20px; justify-self: end; }
+  .spark i { width: 4px; border-radius: 1px; background: color-mix(in oklab, var(--ink) 16%, transparent); }
+  .spark i.hot { background: var(--nogo); }
+  .spark i.mark { background: var(--ink); }
+  .when-lbl { justify-self: end; font-size: var(--fs-small); color: var(--faint); white-space: nowrap; }
+  .with { display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-top: 1px solid var(--line-soft); font-size: var(--fs-small); color: var(--muted); }
+  .with .pick { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border-radius: var(--r-pill); background: color-mix(in oklab, var(--ink) 5%, transparent); color: var(--ink); font-weight: 520; white-space: nowrap; }
+  .with .pick .i { width: 12px; height: 12px; color: var(--muted); }
+  .with .pick .chev { width: 10px; height: 10px; color: var(--faint); }
+  .with .pick .b { width: 12px; height: 12px; }
+  .verb { padding: 15px 18px 16px; }
+  .after { display: flex; align-items: center; gap: 12px; padding: 16px 2px 0; font-size: var(--fs-small); color: var(--muted); }
+  .after .i { width: 14px; height: 14px; color: var(--k-offer); }
+  .after .next { margin-left: auto; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .after .next b { color: var(--ink); font-weight: 580; }
+  .after .next .kbar { height: 14px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web">
+  <header class="whead">
+    <a class="logo"><svg><use href="#logo"/></svg>Hercule</a>
+    <span class="crumb"><span class="vr"></span><a>Intake</a><svg class="i"><use href="#i-chev-r"/></svg><b>Proposal</b></span>
+    <div class="tools">
+      <div class="mydocket">
+        <span class="rail rail--s" aria-hidden="true"><i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i></span>
+        <span><b>1</b> of 12 on your docket</span>
+      </div>
+      <button class="btn btn--s">Open Intake</button>
+      <span class="avatar">R</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="colw">
+      <article class="card kind-proposal">
+        <span class="ktab"><svg class="m"><use href="#m-task"/></svg>Proposal</span>
+        <div class="ch">
+          <div class="meta">
+            <span class="row" style="gap:6px"><span class="prio" data-p="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+            <span class="proj proj--webshop">webshop</span>
+            <span>Checkout</span>
+            <span>first seen 08:52</span>
+            <span class="age">triaged 09:00</span>
+          </div>
+          <h1>Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+        </div>
+        <div class="ev" aria-label="Made from 4 sources">
+          <div class="ev-row">
+            <span class="src"><svg class="b"><use href="#b-sentry"/></svg>Sentry · webshop-prod</span>
+            <span class="num">412</span>
+            <span class="what">events · 188 users · <code>PaymentError: authentication_required</code></span>
+            <span class="spark" aria-label="Events per hour since 14:00 yesterday"><i style="height:10%"></i><i style="height:12%"></i><i class="hot" style="height:55%"></i><i class="hot" style="height:80%"></i><i class="hot" style="height:70%"></i><i class="hot" style="height:62%"></i><i class="hot" style="height:40%"></i><i class="hot" style="height:22%"></i><i class="hot" style="height:14%"></i><i class="hot" style="height:10%"></i><i class="hot" style="height:10%"></i><i class="hot" style="height:12%"></i><i class="hot" style="height:14%"></i><i class="hot" style="height:30%"></i><i class="hot" style="height:62%"></i><i class="hot" style="height:90%"></i><i class="hot" style="height:100%"></i><i class="hot" style="height:84%"></i><i class="hot" style="height:76%"></i><i class="hot" style="height:88%"></i></span>
+          </div>
+          <div class="ev-row">
+            <span class="src"><svg class="b"><use href="#b-gmail"/></svg>Gmail · rogier@personal</span>
+            <span class="num">3</span>
+            <span class="what"><q>Card declined at checkout</q> · <q>Can't pay with my Rabobank card</q> · <q>Payment keeps failing</q></span>
+            <span class="when-lbl">since 07:40</span>
+          </div>
+          <div class="ev-row">
+            <span class="src"><svg class="b"><use href="#b-posthog"/></svg>PostHog · webshop</span>
+            <span class="num nogo">-18%</span>
+            <span class="what">checkout conversion, EU only, since 14:10 yesterday</span>
+            <span class="spark" aria-label="Conversion per hour, falling after 14:10"><i style="height:92%"></i><i style="height:90%"></i><i class="mark" style="height:88%"></i><i class="hot" style="height:74%"></i><i class="hot" style="height:72%"></i><i class="hot" style="height:74%"></i><i class="hot" style="height:71%"></i><i class="hot" style="height:73%"></i><i class="hot" style="height:72%"></i><i class="hot" style="height:74%"></i><i class="hot" style="height:70%"></i><i class="hot" style="height:72%"></i><i class="hot" style="height:73%"></i><i class="hot" style="height:71%"></i><i class="hot" style="height:74%"></i><i class="hot" style="height:72%"></i><i class="hot" style="height:73%"></i><i class="hot" style="height:71%"></i><i class="hot" style="height:72%"></i><i class="hot" style="height:74%"></i></span>
+          </div>
+          <div class="ev-row">
+            <span class="src"><svg class="b"><use href="#b-github"/></svg>GitHub · rogier/webshop</span>
+            <span class="num">#1289</span>
+            <span class="what">deploy · Upgrade Stripe SDK to v14</span>
+            <span class="when-lbl">14:02 yesterday</span>
+          </div>
+        </div>
+        <div class="with">
+          <span>Start with</span>
+          <span class="pick"><span class="proj proj--webshop">webshop</span><svg class="i chev"><use href="#i-chev-d"/></svg></span>
+          <span class="pick"><svg class="i"><use href="#i-worktree"/></svg>new worktree from <span class="mono">main</span><svg class="i chev"><use href="#i-chev-d"/></svg></span>
+          <span class="pick"><svg class="b"><use href="#b-claude"/></svg>Claude Code · Opus 5.5<svg class="i chev"><use href="#i-chev-d"/></svg></span>
+          <span class="pick"><svg class="i"><use href="#i-machine"/></svg>studio-mac<svg class="i chev"><use href="#i-chev-d"/></svg></span>
+        </div>
+        <div class="verbs">
+          <button class="verb verb--nogo"><span class="key">D</span><span class="v">Dismiss</span><span class="d">Closes the Proposal</span></button>
+          <button class="verb verb--hold"><span class="key">↓</span><span class="v">Later</span><span class="d">To the back of the docket; nothing changes</span></button>
+          <button class="verb verb--go"><span class="key">A</span><span class="v">Accept</span><span class="d">Adds it to the backlog as a Task</span></button>
+          <button class="verb verb--go is-primary"><span class="key">Y</span><span class="v">Start "Fix bug"</span><span class="d">Starts Fix bug on <b>webshop</b> in a new worktree</span></button>
+        </div>
+      </article>
+      <div class="after">
+        <svg class="i"><use href="#i-sparkle"/></svg>
+        <span>Triage can also draft a reply to the 3 customers once the fix ships.</span>
+        <span class="next">Next <i class="kbar kind-request"></i><b>Run <span class="mono">git push</span>?</b> · Fix 3-D Secure checkout <span class="key key--s">J</span></span>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

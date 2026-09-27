@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Settings · Assistants · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .asst-tabs { display: flex; align-items: stretch; gap: 2px; height: 40px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); flex: none; }
+  .asst-tabs .ttab .avatar { width: 18px; height: 18px; border-radius: 5px; font-size: 10px; }
+  .asst-tabs .ttab .role { font: 450 11px / 1 var(--font-mono); color: var(--faint); font-weight: 450; }
+  .asst-tabs .ttab .mk { width: 10px; height: 10px; }
+  .asst-tabs .new { margin-left: auto; align-self: center; }
+
+  .rec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); column-gap: 36px; padding: 18px 28px 28px; }
+  .rec .sec:first-child { margin-top: 0; }
+  .rec .kv { grid-template-columns: 120px minmax(0, 1fr); }
+  .rec .kv > dt { padding: 8px 0; }
+  .rec .kv > dd { display: flex; align-items: center; gap: 8px; padding: 6px 0; min-height: 34px; }
+  .rec .kv .brand { width: 12px; height: 12px; color: var(--ink); }
+  .rec .kv .note { font-size: 12px; color: var(--faint); }
+  .rec .kv code { font-size: 11.5px; padding: 1px 6px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .ident { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .ident .avatar { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; }
+  .ident b { display: block; font-size: 15px; font-weight: var(--w-strong); }
+  .ident small { display: flex; align-items: center; gap: 6px; margin-top: 3px; font: 450 11.5px / 1 var(--font-mono); color: var(--live); }
+  .ident small .faint { color: var(--faint); }
+  .ident .acts { margin-left: auto; display: flex; gap: 4px; }
+
+  /* The heartbeat window drawn over the 24 hours of a day. */
+  .day24 { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin-top: 2px; }
+  .day24 i { height: 16px; border-radius: 2px; background: color-mix(in oklab, var(--line-soft) 50%, transparent); }
+  .day24 i.on { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+  .day24 i.q { background: color-mix(in oklab, var(--idle) 45%, transparent); }
+  .day24 i.s { background: var(--live); }
+  .day24 i.now { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .day24-legend { display: flex; gap: 14px; margin-top: 8px; font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .day24-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .day24-axis { display: grid; grid-template-columns: repeat(24, 1fr); margin-top: 5px; font: 450 10px / 1 var(--font-mono); color: var(--faint); }
+  .day24-axis span { grid-column: span 6; }
+  .line-note { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--ink); }
+  .line-note .mk { color: var(--live); }
+  .line-note .faint { color: var(--faint); font-size: 12px; }
+  .line-note .toggle { margin-left: auto; }
+
+  /* Context fill against the rotation threshold. */
+  .rot { position: relative; margin: 6px 0 6px; }
+  .rot .bar { height: 8px; border-radius: 4px; }
+  .rot .bar > i { background: var(--live); border-radius: 4px; }
+  .rot .limit { position: absolute; top: -3px; bottom: -3px; left: 70%; width: 2px; border-radius: 1px; background: var(--attn); }
+  .rot-axis { position: relative; height: 14px; font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+  .rot-axis span { position: absolute; top: 3px; }
+  .rot-axis .at { left: 38%; transform: translateX(-50%); color: var(--live); }
+  .rot-axis .lim { left: 70%; transform: translateX(-50%); color: var(--attn); }
+  .rot-axis .end { right: 0; }
+
+  .bind { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; height: 34px; font-size: 13px; border-top: 1px solid var(--line-soft); }
+  .bind:first-of-type { border-top: 0; }
+  .bind .brand, .bind .mk { width: 13px; height: 13px; color: var(--ink); }
+  .bind small { font: 450 11px / 1 var(--font-mono); color: var(--faint); margin-left: 6px; }
+
+  .mem-head { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 4px; font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .mem-head b { font: 560 12px / 1 var(--font-sans); color: var(--ink); }
+  .rec .topic-row { grid-template-columns: 92px minmax(0, 1fr) 44px 30px; height: 29px; border-top: 1px solid var(--line-soft); }
+  .rec .topic-row:first-of-type { border-top: 0; }
+  .rec .rem-row { grid-template-columns: 16px 118px minmax(0, 1fr) auto; height: 30px; border-top: 1px solid var(--line-soft); }
+  .rec .rem-row:first-of-type { border-top: 0; }
+  .rem-row .every { font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="hercule" data-active="settings"></nav>
+
+  <main class="main">
+    <section class="pane set-pane">
+      <header class="pane-head"><span class="pane-num">1</span><span class="pane-title">Settings</span><span class="pane-actions"><span class="hint"><kbd>⌘</kbd><kbd>,</kbd></span></span></header>
+      <div class="pane-body" data-settings-nav data-active="assistants"></div>
+    </section>
+
+    <section class="pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">2</span><span class="pane-title">Assistants</span><span class="pane-sub">3 assistants · each has its own Memory and Conversation</span>
+      </header>
+      <nav class="asst-tabs" aria-label="Assistants">
+        <a class="ttab is-on" href="#"><span class="avatar ada">A</span>Ada<span class="role">personal</span><svg class="mk tone-live"><use href="#m-working"/></svg></a>
+        <a class="ttab" href="#"><span class="avatar milo">M</span>Milo<span class="role">ops</span><svg class="mk tone-idle"><use href="#m-idle"/></svg></a>
+        <a class="ttab" href="#"><span class="avatar juno">J</span>Juno<span class="role">support</span><svg class="mk tone-idle"><use href="#m-asleep"/></svg></a>
+        <button class="act new" type="button"><svg class="mk"><use href="#c-plus"/></svg>New assistant<kbd>n</kbd></button>
+      </nav>
+
+      <div class="pane-body">
+        <div class="rec">
+          <!-- Left: who Ada is and how she runs -->
+          <div>
+            <div class="ident">
+              <span class="avatar ada">A</span>
+              <div><b>Ada</b><small><svg class="mk" style="width:10px;height:10px"><use href="#m-working"/></svg>working <span class="faint">· personal assistant</span></small></div>
+              <span class="acts">
+                <button class="act" type="button"><kbd>g</kbd><kbd>a</kbd>Conversation</button>
+              </span>
+            </div>
+
+            <dl class="kv">
+              <dt>Provider</dt>
+              <dd><button class="c-sel ink" type="button"><svg class="brand"><use href="#b-claude"/></svg>Claude Code · Sonnet 5<svg class="mk"><use href="#c-down"/></svg></button></dd>
+              <dt>Access mode</dt>
+              <dd><span class="stamp quiet" style="color:var(--ink)"><svg class="mk" style="width:10px;height:10px"><use href="#g-lock"/></svg>full access</span><span class="note">every tool, no prompts</span></dd>
+              <dt>Disallowed tools</dt>
+              <dd><code>edit</code><span class="note">she reads files, never changes them</span></dd>
+              <dt>Reply mode</dt>
+              <dd><span class="seg-ctl"><button class="is-on" type="button">Turn end</button><button type="button">Segments</button></span><span class="note">one message per turn</span></dd>
+            </dl>
+
+            <div class="sec">Heartbeat <span class="n">every 1 h · 07:00 - 23:00 · to Web chat</span></div>
+            <div class="line-note"><svg class="mk"><use href="#g-heartbeat"/></svg>Next check-in at 10:00 <span class="faint">· 2 quiet today, 1 said something</span><span class="toggle is-on" role="switch" aria-checked="true"></span></div>
+            <div class="day24" aria-label="Heartbeat hours">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="q"></i><i class="q"></i><i class="s now"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+            </div>
+            <div class="day24-axis"><span>00</span><span>06</span><span>12</span><span>18</span></div>
+            <div class="day24-legend"><span><i style="background:var(--live)"></i>said something</span><span><i style="background:color-mix(in oklab, var(--idle) 45%, transparent)"></i>quiet</span><span><i style="box-shadow:inset 0 0 0 1px var(--line)"></i>to come</span></div>
+
+            <div class="sec">Rotation <span class="n">at 70% of context or 200k tokens · daily at 04:00</span></div>
+            <div class="rot"><div class="bar"><i style="width:38%"></i></div><span class="limit"></span></div>
+            <div class="rot-axis"><span class="at">38% now</span><span class="lim">70% starts fresh</span><span class="end">200k</span></div>
+            <div class="line-note" style="margin-top:10px"><span class="faint">Last fresh start today 04:00 · Memory carries over</span><button class="act is-line" type="button" style="margin-left:auto"><kbd>⇧</kbd><kbd>F</kbd>Start fresh</button></div>
+
+            <div class="sec">Channel bindings <span class="n">2</span></div>
+            <div class="bind"><svg class="mk"><use href="#g-web"/></svg><span>Web chat<small>always on · built in</small></span><span class="stamp quiet">required</span></div>
+            <div class="bind"><svg class="brand"><use href="#b-slack"/></svg><span>Slack · acme-hq<small>DM with Rogier</small></span><span class="stamp ok">healthy</span></div>
+          </div>
+
+          <!-- Right: what Ada remembers and what she will do later -->
+          <div>
+            <div class="sec">Memory <span class="n">core note + 7 of 24 topics</span></div>
+            <div class="core">
+              <span>Core note <span class="faint" style="font:450 11px/1 var(--font-mono)">read on every turn</span></span><span class="faint" style="font:450 11px/1 var(--font-mono)">1,284 / 4,000</span>
+              <span class="bar"><i style="width:32%"></i></span>
+              <q>Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…</q>
+            </div>
+            <div class="mem-head"><b>Topics</b> read when relevant · up to 12,000 characters each</div>
+            <div class="topic-row"><span class="mem-topic">work-style</span><span class="gist">Prefers short answers; decides fast; hates long preambles</span><span class="bar"><i style="width:10%"></i></span><span class="kb">1.2k</span></div>
+            <div class="topic-row"><span class="mem-topic">webshop</span><span class="gist">Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span><span class="bar"><i style="width:28%"></i></span><span class="kb">3.4k</span></div>
+            <div class="topic-row"><span class="mem-topic">payments-api</span><span class="gist">Owns webhooks + payouts; v2.x; publish via npm</span><span class="bar"><i style="width:18%"></i></span><span class="kb">2.1k</span></div>
+            <div class="topic-row"><span class="mem-topic">ops</span><span class="gist">Backups nightly 04:00 to B2; certs on status.acme.dev</span><span class="bar"><i style="width:15%"></i></span><span class="kb">1.8k</span></div>
+            <div class="topic-row"><span class="mem-topic">customers</span><span class="gist">Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span><span class="bar"><i style="width:23%"></i></span><span class="kb">2.7k</span></div>
+            <div class="topic-row"><span class="mem-topic">family</span><span class="gist">School run Tue/Thu; no meetings before 09:30</span><span class="bar"><i style="width:5%"></i></span><span class="kb">0.6k</span></div>
+            <div class="topic-row"><span class="mem-topic">reading</span><span class="gist">Wants summaries of the weekly Rust + Postgres newsletters</span><span class="bar"><i style="width:8%"></i></span><span class="kb">0.9k</span></div>
+
+            <div class="sec">Reminders <span class="n">3</span></div>
+            <div class="rem-row soon"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Thu 1 Oct 16:00</span><span>Call the accountant</span><span></span></div>
+            <div class="rem-row"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Fri 2 Oct 09:00</span><span>Renew the SSL cert for ops</span><span></span></div>
+            <div class="rem-row"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Mondays 08:30</span><span>Weekly revenue summary</span><span></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="NAV" data-context="Settings · Ada" data-keys="j k:move|⏎:edit|[ ]:assistant|g a:conversation|esc:back"></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Intake · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="intake"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i data-i="tray" class="t-glyph"></i>
+      <h1>Intake</h1><span class="crumb">the full picture</span>
+      <div class="tools">
+        <span class="triage-t"><i data-i="clock"></i>triage 09:00 · 42s · next 11:00</span>
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada about Intake</span><kbd class="kbd">&#8997;Space</kbd></label>
+      </div>
+    </header>
+
+    <section class="pane">
+      <div class="scroll">
+        <div class="ik">
+          <!-- ============ header: Ada's one line, the numerals, the topics ============ -->
+          <div class="ik-head">
+            <p class="ik-say"><i class="orb" data-v="ada" data-p="working" style="--size:22px"></i>
+              <span class="voice only-1x">One thing is burning and two need your call. The rest can wait.</span>
+              <span class="voice only-10x">Three things are burning. Nine need your call; I bundled them so one answer covers many.</span>
+            </p>
+            <div class="nums only-1x">
+              <span class="n is-attn"><b>1</b>burning</span>
+              <span class="n"><b>6</b>proposals</span>
+              <span class="n is-attn"><b>2</b>need a call</span>
+              <span class="n"><b>3</b>FYI</span>
+              <span class="n is-quiet"><b>198</b>handled quietly</span>
+            </div>
+            <div class="nums only-10x">
+              <span class="n is-attn"><b>3</b>burning</span>
+              <span class="n"><b>60</b>proposals</span>
+              <span class="n is-attn"><b>9</b>need a call</span>
+              <span class="n"><b>41</b>FYI</span>
+              <span class="n is-quiet"><b>2,512</b>handled quietly</span>
+            </div>
+          </div>
+          <nav class="tabs ik-tabs">
+            <a class="is-on" href="#">All</a>
+            <a href="#">Checkout <em class="only-1x">2</em><em class="only-10x">19</em></a>
+            <a href="#">Infrastructure <em class="only-1x">2</em><em class="only-10x">17</em></a>
+            <a href="#">Customers <em class="only-1x">3</em><em class="only-10x">15</em></a>
+            <a href="#">Releases <em class="only-1x">2</em><em class="only-10x">9</em></a>
+            <a href="#" class="tabs-manage"><i data-i="gear"></i>Manage topics</a>
+          </nav>
+
+          <div class="ik-cols">
+            <div class="ik-main">
+              <!-- ============ TODAY'S LOAD ============ -->
+              <div class="only-1x">
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="q"></i>Now<em>1</em></h3>
+                  <article class="dcard is-lead">
+                    <div class="dcard-body dc-grid">
+                      <div class="dc-main">
+                        <div class="dc-head"><i data-m="q"></i><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Checkout</span><span class="when">first seen 08:52</span></div>
+                        <h3 class="dc-title">Checkout fails for EU cards with 3-D Secure</h3>
+                        <div class="from">
+                          <span><i data-b="sentry"></i><code class="from-c">PaymentError: authentication_required</code><b>412</b> events · <b>188</b> users</span>
+                          <span><i data-b="gmail"></i><b>3</b> customer emails</span>
+                          <span><i data-b="posthog"></i><b>EU</b> conversion</span>
+                          <span><i data-b="github"></i>deploy <b>#1289</b> · 14:02 yesterday</span>
+                        </div>
+                        <p class="dc-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+                      </div>
+                      <div class="fig"><span class="fig-n c-fail">&minus;18%</span><span class="fig-l">EU checkout conversion since 14:10 yesterday</span></div>
+                    </div>
+                    <a class="dc-live" href="session-active.html"><i data-m="session" style="color:var(--project-webshop)"></i><span>Thread started 09:02 · <b class="c-attn">waiting on you</b> to approve <code>git push</code></span><span class="dc-live-go">Open Thread<i data-i="arrow"></i></span></a>
+                    <div class="ledger">
+                      <button class="ans is-primary"><span class="ans-label">Start “Fix bug”</span><span class="ans-desc">Starts <b>Fix bug</b> on <b>webshop</b> in a new worktree<span class="ans-fine">Claude Code · Opus 5.5 · studio-mac</span></span><kbd class="kbd">1</kbd></button>
+                      <button class="ans"><span class="ans-label">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd class="kbd">2</kbd></button>
+                      <button class="ans"><span class="ans-label">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd class="kbd">3</kbd></button>
+                    </div>
+                  </article>
+                  <p class="aside-voice lane-aside"><i class="orb" data-v="ada" data-p="idle" style="--size:14px"></i><span>I can also draft a reply to the 3 customers once the fix ships.</span></p>
+                </section>
+
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="q"></i>Needs a call<em>2</em><small>triage could not decide</small></h3>
+                  <div class="calls">
+                    <article class="dcard">
+                      <div class="dcard-body">
+                        <div class="dc-head"><i data-m="q"></i><span class="kind">Unsure</span><span class="dot-sep"></span><span class="proj"><i data-b="intercom"></i>Intercom · support</span></div>
+                        <h3 class="dc-title">App is slow on Android</h3>
+                        <p class="dc-gist"><b class="ink">7</b> conversations since Sunday. I can't tell which project this belongs to.</p>
+                      </div>
+                      <div class="agrid agrid-2">
+                        <button class="aopt"><b><i class="room"></i>webshop</b><span>Files it in webshop</span></button>
+                        <button class="aopt"><b><i class="room" data-p="payments-api"></i>payments-api</b><span>Files it in payments-api</span></button>
+                        <button class="aopt"><b>Both</b><span>Files one in each project</span></button>
+                        <button class="aopt"><b>Not work</b><span>Marks the 7 as no action</span></button>
+                      </div>
+                    </article>
+                    <article class="dcard">
+                      <div class="dcard-body">
+                        <div class="dc-head"><i data-m="held"></i><span class="kind">Breaker tripped</span><span class="dot-sep"></span><span class="proj"><i data-b="github"></i>GitHub · rogier</span><span class="when">08:14</span></div>
+                        <h3 class="dc-title">“Label new issues” held 34 events</h3>
+                        <p class="dc-gist">A bot opened 34 issues at once.</p>
+                        <div class="bound-row"><span class="bound"><i style="--v:100%"></i><em style="--at:58.8%"></em></span><span class="num"><b>34</b> / 20 per hour</span></div>
+                      </div>
+                      <div class="ledger ledger-tight" style="--ans-label:128px">
+                        <button class="ans"><span class="ans-label">Keep held</span><span class="ans-desc">Leaves the 34 events held</span></button>
+                        <button class="ans"><span class="ans-label">Release all 34</span><span class="ans-desc">Runs it on all <b>34</b> events</span></button>
+                        <button class="ans"><span class="ans-label">Raise bound to 50/h</span><span class="ans-desc">Sets the Spawn Bound to <b>50</b></span></button>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="queued"></i>Today<em>4</em></h3>
+                  <div class="crows">
+                    <div class="crow"><i data-m="q"></i><span class="crow-t">Nightly backup job timing out on ops-db<small><span class="proj"><i class="room" data-p="ops"></i>ops</span><span class="dot-sep"></span>3 nights in a row; the job hits its 2h limit at 04:00.</small></span><span class="crow-marks"><i data-b="grafana"></i><i data-b="cron"></i></span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span><span class="crow-act"><button class="go is-primary" title="Starts Investigate on ops">Start “Investigate”</button></span><span class="crow-age">04:12</span></div>
+                    <div class="crow"><i data-m="offer"></i><span class="crow-t">Draft a reply to Marta at Brightline<small><span class="proj">Customers</span><span class="dot-sep"></span>Asks for invoice INV-2291 in the company name, not hers.</small></span><span class="crow-marks"><i data-b="gmail"></i></span><span></span><span class="crow-act"><button class="go">Not now</button><button class="go is-primary" title="Starts Draft reply on Marta's email">Draft reply</button></span><span class="crow-age">08:31</span></div>
+                    <div class="crow"><i data-m="q"></i><span class="crow-t">Stripe webhook retries rising<small><span class="proj"><i class="room" data-p="payments-api"></i>payments-api</span><span class="dot-sep"></span>Retries up since the v2.14.0 release.</small></span><span class="crow-marks"><i data-b="stripe"></i><i data-b="sentry"></i></span><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span><span class="crow-act"><button class="go is-primary" title="Starts Investigate on payments-api">Start “Investigate”</button></span><span class="crow-age">07:48</span></div>
+                    <div class="crow"><i data-m="offer"></i><span class="crow-t">Merge 4 dependency bumps<small><span class="proj">Releases</span><span class="dot-sep"></span>All green, patch versions only.</small></span><span class="crow-marks"><i data-b="github"></i></span><span></span><span class="crow-act"><button class="go">Review first</button><button class="go is-primary" title="Merges 4 pull requests">Merge all 4</button></span><span class="crow-age">06:02</span></div>
+                  </div>
+                </section>
+
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="queued"></i>When you can<em>2</em></h3>
+                  <div class="crows">
+                    <div class="crow"><i data-m="q"></i><span class="crow-t">SSL certificate for status.acme.dev expires in 12 days<small><span class="proj"><i class="room" data-p="ops"></i>ops</span></small></span><span class="crow-marks"><i data-b="cron"></i></span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span><span class="crow-act"><button class="go is-primary" title="Starts Fix bug on ops">Start “Fix bug”</button></span><span class="crow-age">00:00</span></div>
+                    <div class="crow"><i data-m="q"></i><span class="crow-t">Add iDEAL as a payment method<small><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span>5 requests from customers.</small></span><span class="crow-marks"><i data-b="intercom"></i></span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span><span class="crow-act"><button class="go is-primary" title="Adds it to the backlog as a Task">Accept</button></span><span class="crow-age">Mon</span></div>
+                  </div>
+                </section>
+
+                <section class="lane lane-fyi">
+                  <h3 class="lane-h"><i data-m="fyi"></i>FYI<em>3</em><small class="lane-att"><i data-m="attached"></i>2 new Sentry events attached to the Task “Cart total rounding on discounts”</small></h3>
+                  <div class="fyis">
+                    <div class="fyi"><b>v2.14.0</b><span><i data-b="github"></i>payments-api release published</span></div>
+                    <div class="fyi"><b class="c-ok">+9%</b><span><i data-b="posthog"></i>sign-ups, week over week</span></div>
+                    <div class="fyi"><b>€18,240</b><span><i data-b="stripe"></i>payout arrives Thursday</span></div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- ============ AT 10x: bundles and a heat map instead of a longer list ============ -->
+              <div class="only-10x">
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="q"></i>Now<em>3</em><small>each links its Thread or Run</small></h3>
+                  <div class="burn">
+                    <a class="burn-i" href="#"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b>Checkout fails for EU cards with 3-D Secure</b><span class="proj"><i class="room"></i>webshop</span><span class="fig-s"><b class="c-fail">&minus;18%</b><small>EU conversion</small></span><span class="state-pill is-attn"><i data-m="q"></i>git push</span></a>
+                    <a class="burn-i" href="#"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b>Payout webhooks rejected by the ledger service</b><span class="proj"><i class="room" data-p="payments-api"></i>payments-api</span><span class="fig-s"><b>1,212</b><small>rejected</small></span><span class="state-pill is-live"><i data-m="working"></i>Fix bug · 4m</span></a>
+                    <a class="burn-i" href="#"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b>Disk at 94% on build-box-4</b><span class="proj"><i class="room" data-p="ops"></i>ops</span><span class="fig-s"><b>94%</b><small>disk used</small></span><span class="state-pill is-live"><i data-m="working"></i>Milo · 2m</span></a>
+                  </div>
+                </section>
+
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="q"></i>Bundles<em>9 calls · 61 items</em><small>one answer applies to each item in the bundle</small></h3>
+                  <div class="bundles">
+                    <article class="dcard bundle">
+                      <div class="dcard-body dc-grid">
+                        <div class="dc-main">
+                          <div class="dc-head"><i data-m="offer"></i><span class="kind">Offer bundle</span><span class="dot-sep"></span><span class="proj"><i data-b="github"></i>5 repos · Releases</span></div>
+                          <h3 class="dc-title">Merge 14 dependency bumps</h3>
+                          <p class="dc-gist">All green, patch versions only. Same shape as the 4 you merged last week.</p>
+                        </div>
+                        <div class="fig"><span class="fig-n">14</span><span class="stack" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+                      </div>
+                      <div class="pair">
+                        <button class="ans"><span class="ans-label">Review first</span><span class="ans-desc">Opens the 14 one by one</span></button>
+                        <button class="ans is-primary"><span class="ans-label">Merge all 14</span><span class="ans-desc">Merges <b>14</b> pull requests in <b>5</b> repos, one bound action each</span><kbd class="kbd">&#8629;</kbd></button>
+                      </div>
+                    </article>
+                    <article class="dcard bundle">
+                      <div class="dcard-body dc-grid">
+                        <div class="dc-main">
+                          <div class="dc-head"><i data-m="q"></i><span class="kind">Unsure bundle</span><span class="dot-sep"></span><span class="proj"><i data-b="intercom"></i>Intercom · support</span></div>
+                          <h3 class="dc-title">23 conversations about slow mobile checkout</h3>
+                          <p class="dc-gist">Android and iOS, since Sunday. I can't tell which project owns them.</p>
+                        </div>
+                        <div class="fig"><span class="fig-n">23</span><span class="fig-l">conversations</span></div>
+                      </div>
+                      <div class="agrid">
+                        <button class="aopt"><b><i class="room"></i>webshop</b><span>Files 1 Proposal for all 23</span></button>
+                        <button class="aopt"><b><i class="room" data-p="payments-api"></i>payments-api</b><span>Files 1 Proposal for all 23</span></button>
+                        <button class="aopt"><b>Split</b><span>Asks per conversation</span></button>
+                        <button class="aopt"><b>Not work</b><span>Marks all 23 no action</span></button>
+                      </div>
+                    </article>
+                    <div class="more-bundles">
+                      <span><i data-m="held"></i><b>3</b> tripped breakers · 212 events held</span>
+                      <span><i data-m="q"></i><b>18</b> low proposals in ops · Accept all</span>
+                      <span><i data-m="q"></i><b>5</b> more bundles</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="lane">
+                  <h3 class="lane-h"><i data-m="queued"></i>Where the 60 proposals sit<small>topic × priority · click a cell to answer that group</small></h3>
+                  <div class="heat">
+                    <span></span><span class="hx">urgent</span><span class="hx">high</span><span class="hx">medium</span><span class="hx">low</span><span class="hx">total</span>
+                    <span class="hy">Checkout</span><button class="hc"><b>2</b><s><i></i><i></i></s></button><button class="hc"><b>5</b><s><i></i><i></i><i></i><i></i><i></i></s></button><button class="hc"><b>7</b><s><i></i><i></i><i></i><i></i><i></i><i></i><i></i></s></button><button class="hc"><b>5</b><s><i></i><i></i><i></i><i></i><i></i></s></button><b>19</b>
+                    <span class="hy">Infrastructure</span><button class="hc"><b>1</b><s><i></i></s></button><button class="hc"><b>3</b><s><i></i><i></i><i></i></s></button><button class="hc"><b>4</b><s><i></i><i></i><i></i><i></i></s></button><button class="hc"><b>9</b><s><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></s></button><b>17</b>
+                    <span class="hy">Customers</span><button class="hc" disabled><b>0</b><s></s></button><button class="hc"><b>2</b><s><i></i><i></i></s></button><button class="hc"><b>8</b><s><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></s></button><button class="hc"><b>5</b><s><i></i><i></i><i></i><i></i><i></i></s></button><b>15</b>
+                    <span class="hy">Releases</span><button class="hc" disabled><b>0</b><s></s></button><button class="hc"><b>1</b><s><i></i></s></button><button class="hc"><b>3</b><s><i></i><i></i><i></i></s></button><button class="hc"><b>5</b><s><i></i><i></i><i></i><i></i><i></i></s></button><b>9</b>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <!-- ============ right: where it came from ============ -->
+            <aside class="ik-side">
+              <section class="ik-sec">
+                <h4>What came in<small class="only-1x">since yesterday 18:20</small><small class="only-10x">since 18:20 · 31,000 a day</small></h4>
+                <div class="flow only-1x">
+                  <div class="fl"><i data-b="sentry"></i><span>Sentry · webshop-prod</span><b>131</b><span class="bar"><i style="--v:100%"></i></span><em>1 proposal, 1 attached</em></div>
+                  <div class="fl"><i data-b="github"></i><span>GitHub · rogier</span><b>38</b><span class="bar"><i style="--v:29%"></i></span><em>1 offer, 34 held</em></div>
+                  <div class="fl"><i data-b="gmail"></i><span>Gmail · rogier@personal</span><b>17</b><span class="bar"><i style="--v:13%"></i></span><em>1 proposal, 1 offer</em></div>
+                  <div class="fl"><i data-b="stripe"></i><span>Stripe · live</span><b>12</b><span class="bar"><i style="--v:9%"></i></span><em>1 proposal, 1 FYI</em></div>
+                  <div class="fl"><i data-b="intercom"></i><span>Intercom · support</span><b>9</b><span class="bar"><i style="--v:7%"></i></span><em>1 unsure, 1 proposal</em></div>
+                  <div class="fl"><i data-b="posthog"></i><span>PostHog · webshop</span><b>3</b><span class="bar"><i style="--v:2.3%"></i></span><em>part of the lead, 1 FYI</em></div>
+                  <div class="fl"><i data-b="grafana"></i><span>Grafana · ops</span><b>2</b><span class="bar"><i style="--v:1.5%"></i></span><em>1 proposal</em></div>
+                </div>
+                <div class="flow only-10x">
+                  <div class="fl"><i data-b="sentry"></i><span>Sentry · 3 projects</span><b>1,480</b><span class="bar"><i style="--v:100%"></i></span><em>11 proposals, 40 attached</em></div>
+                  <div class="fl"><i data-b="github"></i><span>GitHub · 9 repos</span><b>520</b><span class="bar"><i style="--v:35%"></i></span><em>14 offers, 212 held</em></div>
+                  <div class="fl"><i data-b="stripe"></i><span>Stripe · live</span><b>244</b><span class="bar"><i style="--v:16%"></i></span><em>9 proposals, 12 FYI</em></div>
+                  <div class="fl"><i data-b="gmail"></i><span>Gmail · 2 accounts</span><b>190</b><span class="bar"><i style="--v:13%"></i></span><em>8 proposals, 6 offers</em></div>
+                  <div class="fl"><i data-b="intercom"></i><span>Intercom · support</span><b>141</b><span class="bar"><i style="--v:9.5%"></i></span><em>23 unsure, 7 proposals</em></div>
+                  <div class="fl"><i data-b="grafana"></i><span>Grafana · ops</span><b>65</b><span class="bar"><i style="--v:4.4%"></i></span><em>12 proposals</em></div>
+                </div>
+              </section>
+
+              <section class="ik-sec">
+                <h4>Receipt</h4>
+                <div class="rbar only-1x" aria-label="212 events: 6 proposals, 1 attached, 2 offers, 3 FYI, 2 unsure, 198 no action">
+                  <i class="s-prop" style="--w:6"></i><i class="s-att" style="--w:1"></i><i class="s-off" style="--w:2"></i><i class="s-fyi" style="--w:3"></i><i class="s-uns" style="--w:2"></i><i class="s-none" style="--w:198"></i>
+                </div>
+                <p class="receipt-t only-1x"><b>212</b> events → <b>6</b> proposals · <b>1</b> attached · <b>2</b> offers · <b>3</b> FYI · <b>2</b> unsure · <span class="faint"><b>198</b> no action</span></p>
+                <div class="rbar only-10x"><i class="s-prop" style="--w:60"></i><i class="s-att" style="--w:40"></i><i class="s-off" style="--w:20"></i><i class="s-fyi" style="--w:41"></i><i class="s-uns" style="--w:23"></i><i class="s-none" style="--w:2512"></i></div>
+                <p class="receipt-t only-10x"><b>2,640</b> events → <b>60</b> proposals · <b>40</b> attached · <b>20</b> offers · <b>41</b> FYI · <b>23</b> unsure · <span class="faint"><b>2,512</b> no action · 212 held</span></p>
+                <div class="rkey"><span><i class="s-prop"></i>proposal</span><span><i class="s-off"></i>offer</span><span><i class="s-fyi"></i>FYI</span><span><i class="s-uns"></i>unsure</span><span><i class="s-none"></i>no action</span></div>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

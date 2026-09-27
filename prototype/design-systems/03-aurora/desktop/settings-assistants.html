@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="win">
+      <div class="field">
+        <i class="own" style="--x: 72%; --y: 2%; --w: 980px; --h: 520px; --o: 0.75"></i>
+        <i class="calm" style="--x: 30%; --y: 104%; --w: 900px; --h: 480px; --o: 0.75"></i>
+        <i class="wait" style="--x: 3%; --y: 8%; --w: 360px; --o: 0.45"></i>
+        <i class="ops" style="--x: 104%; --y: 78%; --w: 640px; --o: 0.55"></i>
+      </div>
+
+      <aside class="side glass">
+        <div class="side-top">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <button class="icon-btn" title="Hide sidebar"><svg class="i"><use href="#m-sidebar" /></svg></button>
+        </div>
+        <a class="back-row">
+          <svg class="i s14"><use href="#m-chev-l" /></svg>Back to threads
+          <span class="count wait num">3</span>
+        </a>
+        <button class="search-row">
+          <svg class="i s14"><use href="#m-search" /></svg>
+          <span class="grow">Search settings</span>
+          <span class="kbd">⌘K</span>
+        </button>
+
+        <div class="side-scroll">
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-user" /></svg>Profile</a>
+            <a class="nav-item"><svg class="i"><use href="#m-sun" /></svg>Appearance</a>
+            <a class="nav-item"><svg class="i"><use href="#m-session" /></svg>Threads</a>
+            <a class="nav-item" aria-current="page"><svg class="i"><use href="#m-assistant" /></svg>Assistants<span class="count">3</span></a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-connections" /></svg>Connections<span class="count wait">1</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-cpu" /></svg>Providers</a>
+            <a class="nav-item"><svg class="i"><use href="#m-machine" /></svg>Machines<span class="count">3</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-id" /></svg>Identities</a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-shield" /></svg>Permission profiles</a>
+            <a class="nav-item"><svg class="i"><use href="#m-key" /></svg>Secrets</a>
+            <a class="nav-item"><svg class="i"><use href="#m-gauge" /></svg>Bounds</a>
+            <a class="nav-item"><svg class="i"><use href="#m-puzzle" /></svg>Plugins</a>
+            <a class="nav-item"><svg class="i"><use href="#m-sliders" /></svg>System</a>
+          </nav>
+        </div>
+
+        <div class="side-foot">
+          <div class="me-row">
+            <span class="av me">R</span><span class="grow">Rogier</span>
+            <span class="faint num set-ver">v1.0.4</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings</span><span class="crumb slash">/</span>
+          <h1 class="title">Assistants</h1>
+          <nav class="ttabs bar-tabs">
+            <a class="ttab" aria-current="page"><span class="av xs work">A</span>Ada</a>
+            <a class="ttab"><span class="av xs idle">M</span>Milo</a>
+            <a class="ttab"><span class="av xs sleep">J</span>Juno</a>
+            <button class="icon-btn" title="New assistant"><svg class="i"><use href="#m-plus" /></svg></button>
+          </nav>
+        </header>
+
+        <div class="set-scroll">
+          <div class="set-col wide">
+            <div class="who-head">
+              <span class="av lg work">A</span>
+              <div>
+                <div class="who-name">Ada<span class="st work"><svg class="i"><use href="#m-working" /></svg>working</span></div>
+                <div class="who-sub">Personal assistant · answers in Web chat and Slack</div>
+              </div>
+              <span class="grow"></span>
+              <button class="btn sm"><svg class="i s14"><use href="#m-assistant" /></svg>Open Conversation</button>
+              <button class="icon-btn" title="More"><svg class="i"><use href="#m-more" /></svg></button>
+            </div>
+
+            <div class="set-grid">
+              <div class="set-stack">
+                <section>
+                  <div class="sec-h">Agent</div>
+                  <div class="pane glass">
+                    <div class="srow tight">
+                      <div class="l">Provider</div>
+                      <div class="v"><span class="select"><svg class="brand"><use href="#b-claude" /></svg>Claude Code · Sonnet 5<svg class="i chev"><use href="#m-chev-ud" /></svg></span></div>
+                    </div>
+                    <div class="srow tight">
+                      <div class="l">Access mode</div>
+                      <div class="v"><span class="select"><svg class="i s14"><use href="#m-shield" /></svg>Full access<svg class="i chev"><use href="#m-chev-ud" /></svg></span></div>
+                    </div>
+                    <div class="srow tight">
+                      <div class="l">Disallowed tools</div>
+                      <div class="v"><span class="tag mono">edit<svg class="i s12"><use href="#m-close" /></svg></span><button class="btn sm quiet"><svg class="i s14"><use href="#m-plus" /></svg>Add</button></div>
+                    </div>
+                    <div class="srow tight">
+                      <div><div class="l">Reply mode</div><div class="d">Turn end sends one message when Ada is done.</div></div>
+                      <div class="v"><div class="seg"><button aria-pressed="true">Turn end</button><button>Segments</button></div></div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="sec-h">Heartbeat<span class="aside">every hour, 07:00 to 23:00</span></div>
+                  <div class="pane glass beat-pane">
+                    <div class="beats big" aria-label="Heartbeat, 07:00 to 23:00">
+                      <i class="quiet" title="07:00 quiet"></i><i class="quiet" title="08:00 quiet"></i><i class="spoke" title="09:00 spoke"></i><i class="next" title="10:00 next"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                    </div>
+                    <div class="beats-axis big"><span style="grid-column: 1">07</span><span style="grid-column: 5">11</span><span style="grid-column: 9">15</span><span style="grid-column: 13">19</span><span style="grid-column: 17">23</span></div>
+                    <div class="beat-foot">
+                      <span class="key"><i class="k quiet"></i>checked, quiet</span>
+                      <span class="key"><i class="k spoke"></i>spoke</span>
+                      <span class="key"><i class="k next"></i>next 10:00</span>
+                      <span class="grow"></span>
+                      <span class="posts">posts to <b><svg class="i s14"><use href="#m-globe" /></svg>Web chat</b></span>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="sec-h">Rotation<span class="aside">context 41% now</span></div>
+                  <div class="pane glass">
+                    <div class="srow tight">
+                      <div class="rot">
+                        <div class="l">At 70% of context or 200k tokens, and daily at 04:00</div>
+                        <div class="rot-meter" style="--v: 41%; --at: 70%"><span class="meter"><i style="--mc: var(--live-light)"></i></span><b></b></div>
+                      </div>
+                      <div class="v"><button class="btn sm"><svg class="i s14"><use href="#m-refresh" /></svg>Start fresh</button></div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="sec-h">Channels<span class="aside">2 bindings</span></div>
+                  <div class="pane glass">
+                    <div class="srow tight">
+                      <div class="chan-l"><svg class="i s14"><use href="#m-globe" /></svg><span class="l">Web chat</span></div>
+                      <div class="v"><span class="faint">always</span></div>
+                    </div>
+                    <div class="srow tight">
+                      <div class="chan-l"><svg class="brand"><use href="#b-slack" /></svg><span class="l">Slack</span><span class="faint">acme-hq · DM with Rogier</span></div>
+                      <div class="v"><span class="st ok"><svg class="i"><use href="#m-done" /></svg>connected</span></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="set-stack">
+                <section>
+                  <div class="sec-h">Memory<span class="aside">7 of 24 topics</span></div>
+                  <div class="pane glass mem">
+                    <div class="core-note">
+                      <div class="core-h"><b>Core note</b><span class="num faint">1,284 / 4,000</span></div>
+                      <span class="meter"><i style="--v: 32%; --mc: var(--accent-light)"></i></span>
+                      <p>Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…</p>
+                    </div>
+                    <div class="topic-row"><b>work-style</b><span>Prefers short answers; decides fast; hates long preambles</span><span class="tbar" style="--v: 10%"></span><span class="num">1.2k</span></div>
+                    <div class="topic-row hot"><b>webshop</b><span>Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span><span class="tbar" style="--v: 28%"></span><span class="num">3.4k</span></div>
+                    <div class="topic-row"><b>payments-api</b><span>Owns webhooks + payouts; v2.x; publish via npm</span><span class="tbar" style="--v: 18%"></span><span class="num">2.1k</span></div>
+                    <div class="topic-row hot"><b>ops</b><span>Backups nightly 04:00 to B2; certs on status.acme.dev</span><span class="tbar" style="--v: 15%"></span><span class="num">1.8k</span></div>
+                    <div class="topic-row"><b>customers</b><span>Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span><span class="tbar" style="--v: 22%"></span><span class="num">2.7k</span></div>
+                    <div class="topic-row"><b>family</b><span>School run Tue/Thu; no meetings before 09:30</span><span class="tbar" style="--v: 5%"></span><span class="num">0.6k</span></div>
+                    <div class="topic-row"><b>reading</b><span>Wants summaries of the weekly Rust + Postgres newsletters</span><span class="tbar" style="--v: 8%"></span><span class="num">0.9k</span></div>
+                    <div class="mem-foot"><i class="k hot"></i>used in the last turn<span class="grow"></span>each topic holds up to 12,000 characters</div>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="sec-h">Reminders<span class="aside">3</span></div>
+                  <div class="pane glass">
+                    <div class="srow tight rem-row"><b class="num">Thu 1 Oct · 16:00</b><span class="l">Call the accountant</span><button class="icon-btn" title="Cancel reminder"><svg class="i s14"><use href="#m-close" /></svg></button></div>
+                    <div class="srow tight rem-row new"><b class="num">Fri 2 Oct · 09:00</b><span class="l">Renew the SSL cert for ops</span><button class="icon-btn" title="Cancel reminder"><svg class="i s14"><use href="#m-close" /></svg></button></div>
+                    <div class="srow tight rem-row"><b class="num">Mondays · 08:30</b><span class="l">Weekly revenue summary<svg class="i s12 faint"><use href="#m-refresh" /></svg></span><button class="icon-btn" title="Cancel reminder"><svg class="i s14"><use href="#m-close" /></svg></button></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

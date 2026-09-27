@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Ada · Assistants · Settings · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-side="settings" data-current="assistants"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1>Assistants</h1>
+          <span class="when">3</span>
+          <span class="right"><button class="btn sm"><i data-icon="plus" style="width: 12px; height: 12px"></i>New assistant</button></span>
+        </header>
+
+        <div class="split">
+          <nav class="a-list" aria-label="Assistants">
+            <a class="a-item" href="settings-assistants.html" aria-current="page"><span class="face working">A</span><b>Ada</b><span class="presence working">working · personal</span></a>
+            <a class="a-item" href="#"><span class="face idle">M</span><b>Milo</b><span class="presence idle">idle · ops</span></a>
+            <a class="a-item" href="#"><span class="face asleep">J</span><b>Juno</b><span class="presence asleep">asleep · support</span></a>
+          </nav>
+
+          <div class="set-pane" style="padding-top: 0">
+            <div class="rec-head">
+              <span class="face lg working">A</span>
+              <span>
+                <h2>Ada</h2>
+                <span class="role">personal assistant</span>
+              </span>
+              <span class="chip work"><i data-mark="work"></i>working · replying to you</span>
+              <span class="right">
+                <a class="btn sm" href="assistant.html">Open Conversation</a>
+                <button class="btn sm">Start fresh</button>
+              </span>
+            </div>
+
+            <div class="cols">
+              <div>
+                <div class="section-title">Agent</div>
+                <div class="kv"><span class="k">Provider</span><span class="v"><span class="pill"><i data-brand="claude"></i>Claude Code · Sonnet 5<i data-icon="down" style="width: 9px; height: 9px; color: var(--faint)"></i></span></span></div>
+                <div class="kv">
+                  <span class="k">Access mode</span>
+                  <span class="v"><span class="pill"><i data-icon="shield"></i>Full access<i data-icon="down" style="width: 9px; height: 9px; color: var(--faint)"></i></span><span class="h">any tool, no approvals</span></span>
+                </div>
+                <div class="kv">
+                  <span class="k">Disallowed tools</span>
+                  <span class="v"><span class="chip line mono" style="font-size: 11px">edit<i data-icon="close" class="x"></i></span><button class="btn sm ghost">Add</button><span class="h">she delegates code changes</span></span>
+                </div>
+                <div class="kv">
+                  <span class="k">Reply mode</span>
+                  <span class="v"><span class="seg" data-seg><button aria-pressed="true">Turn end</button><button aria-pressed="false">Segments</button></span><span class="h">one message per turn</span></span>
+                </div>
+
+                <div class="section-title">
+                  <i data-mark="heartbeat" style="width: 13px; height: 13px"></i>Heartbeat
+                  <span class="title-ctl">on<button class="switch" role="switch" aria-checked="true" aria-label="Heartbeat"></button></span>
+                </div>
+                <div class="kv">
+                  <span class="k">When</span>
+                  <span class="v">every <span class="field">1 h</span> from <span class="field">07:00</span> to <span class="field">23:00</span></span>
+                </div>
+                <div class="kv"><span class="k">Speaks in</span><span class="v"><span class="chip line"><i data-brand="webchat"></i>Web chat</span><span class="h">stays silent when there is nothing to say</span></span></div>
+                <div class="prompt">Check Intake, my waiting sessions and today's reminders. Tell me only what needs me.</div>
+
+                <div class="section-title"><i data-icon="refresh" style="width: 13px; height: 13px"></i>Rotation</div>
+                <div class="kv">
+                  <span class="k">Context</span>
+                  <span class="v" style="flex-wrap: nowrap; gap: 12px"><span class="ctx" style="--v: 0.41; --at: 0.7" role="img" aria-label="Context 41% used; rotates at 70%"><i></i><b></b></span><span class="mono h">41% · rotates at <span class="field" style="height: 24px; display: inline-flex">70%</span></span></span>
+                </div>
+                <div class="kv">
+                  <span class="k">Also rotate</span>
+                  <span class="v">at <span class="field">200k</span> tokens, and daily at <span class="field">04:00</span></span>
+                </div>
+
+                <div class="section-title"><i data-icon="link" style="width: 13px; height: 13px"></i>Channel bindings</div>
+                <div class="kv"><span class="k"><span class="chip line"><i data-brand="webchat"></i>Web chat</span></span><span class="v"><span class="h">always · built in</span></span></div>
+                <div class="kv">
+                  <span class="k"><span class="chip line"><i data-brand="slack"></i>Slack · acme-hq</span></span>
+                  <span class="v">DM with Rogier<span class="h" style="margin-left: auto"><button class="btn sm ghost">Remove</button></span></span>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-title">Memory <span class="title-ctl"><button class="btn sm ghost">Edit core note</button></span></div>
+                <div class="mem">
+                  <span class="l">Core note</span><span class="v">1,284 of 4,000</span>
+                  <span class="meter wide" style="--v: 0.321" role="img" aria-label="Core note: 1,284 of 4,000 characters"><i></i></span>
+                </div>
+                <div class="core">Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…</div>
+                <div class="mem" style="margin-bottom: 4px">
+                  <span class="l">Topics</span><span class="v">7 of 24 · up to 12,000 each</span>
+                </div>
+                <div class="topics">
+                  <div class="topic"><span class="n">webshop</span><span class="meter" style="--v: 0.283"><i></i></span><span class="sz">3.4k</span><span class="g">Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span></div>
+                  <div class="topic"><span class="n">customers<span class="prov" title="Written while Ada could see messages from other people. Review it before you trust it.">· third-party · review</span></span><span class="meter" style="--v: 0.225"><i></i></span><span class="sz">2.7k</span><span class="g">Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span></div>
+                  <div class="topic"><span class="n">payments-api</span><span class="meter" style="--v: 0.175"><i></i></span><span class="sz">2.1k</span><span class="g">Owns webhooks + payouts; v2.x; publish via npm</span></div>
+                  <div class="topic"><span class="n">ops</span><span class="meter" style="--v: 0.15"><i></i></span><span class="sz">1.8k</span><span class="g">Backups nightly 04:00 to B2; certs on status.acme.dev</span></div>
+                  <div class="topic"><span class="n">work-style</span><span class="meter" style="--v: 0.1"><i></i></span><span class="sz">1.2k</span><span class="g">Prefers short answers; decides fast; hates long preambles</span></div>
+                  <div class="topic"><span class="n">reading</span><span class="meter" style="--v: 0.075"><i></i></span><span class="sz">0.9k</span><span class="g">Wants summaries of the weekly Rust + Postgres newsletters</span></div>
+                  <div class="topic"><span class="n">family</span><span class="meter" style="--v: 0.05"><i></i></span><span class="sz">0.6k</span><span class="g">School run Tue/Thu; no meetings before 09:30</span></div>
+                </div>
+
+                <div class="section-title"><i data-mark="reminder" style="width: 13px; height: 13px"></i>Reminders <span class="faint" style="font-weight: 400">3</span></div>
+                <div class="rem"><i data-mark="reminder"></i><span>Call the accountant</span><span class="w">Thu 1 Oct · 16:00</span></div>
+                <div class="rem"><i data-mark="reminder"></i><span>Renew the SSL cert for ops</span><span class="w">Fri 2 Oct · 09:00</span></div>
+                <div class="rem"><i data-mark="reminder"></i><span>Weekly revenue summary</span><span class="w">every Monday · 08:30</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

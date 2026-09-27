@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fix 3-D Secure checkout for EU cards · webshop</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.phone { background: color-mix(in oklab, var(--space) 7%, var(--canvas)); }
+.th-h { position: relative; z-index: 10; display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px 0 6px; flex: none; box-shadow: 0 1px 0 var(--space-line); }
+.th-h .back { width: 36px; height: 40px; display: grid; place-items: center; color: var(--space-ink); }
+.th-h .back .i { width: 22px; height: 22px; }
+.th-h .t { flex: 1; min-width: 0; }
+.th-h .t b { display: block; font-size: 16px; font-weight: var(--w-strong); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-h .t > span { display: flex; align-items: center; gap: 5px; margin-top: 1px; font-size: var(--t-fine); color: var(--muted); }
+.th-h .t .i { width: 12px; height: 12px; color: var(--faint); }
+.th-h .t .sw { width: 8px; height: 8px; border-radius: 50%; }
+.th-h .t .mono { font-size: 10.5px; color: var(--ink); }
+.dpill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: 16px; font-size: var(--t-meta); background: color-mix(in oklab, var(--ink) 6%, transparent); }
+.dpill .i { width: 14px; height: 14px; }
+.m-tx { position: absolute; left: 0; right: 0; top: 0; bottom: 0; overflow: auto; scrollbar-width: none; padding: 18px 16px 392px; background: var(--canvas); }
+.mcol { display: flex; flex-direction: column; gap: 14px; }
+.mcol .origin { padding-bottom: 2px; font-size: var(--t-fine); gap: 6px; }
+.mcol .origin .i, .mcol .origin .i14 { width: 12px; height: 12px; }
+.mcol .bubble { max-width: 300px; font-size: 15px; line-height: 1.45; }
+.mcol .prose { font-size: 15px; line-height: 1.55; }
+.mcol .code pre { font-size: 11.5px; padding: 10px 12px; }
+.mcol .code-h { height: 30px; }
+.mcol .files-h { height: 44px; padding: 0 12px; font-size: 14px; }
+.mcol .files-r { height: 36px; padding: 0 12px; font-size: 11.5px; }
+.mcol .files-r .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcol .chk { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-top: 1px solid var(--line-soft); font-size: var(--t-meta); }
+.mcol .chk .i { width: 14px; height: 14px; }
+.m-stack { position: absolute; z-index: 20; left: 0; right: 0; bottom: 0; padding: 30px 10px 34px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--canvas) 90%, transparent) 30%); transition: background var(--d-glass) var(--ease), padding var(--d-glass) var(--ease-out); }
+.m-req { border-radius: 24px; overflow: hidden; background: var(--glass); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6); backdrop-filter: blur(var(--glass-blur)) saturate(1.6); box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-3); transition: background var(--d-glass) var(--ease), margin var(--d-glass) var(--ease-out); }
+.m-req-h { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; padding: 11px 14px 11px 12px; background: var(--attn); color: var(--on-attn); font-weight: var(--w-medium); font-size: 14px; line-height: 1.35; }
+.m-req-h .qdot { width: 20px; height: 20px; background: var(--space); color: var(--space-on); }
+.m-req-h .qdot .i { width: 13px; height: 13px; }
+.m-req-h .mono { font-size: 12px; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklab, var(--on-attn) 14%, transparent); }
+.m-req-h .by { font-size: var(--t-fine); font-weight: var(--w-regular); opacity: .7; white-space: nowrap; }
+.m-req-h .fold { display: none; font-size: var(--t-fine); font-weight: var(--w-regular); opacity: .8; white-space: nowrap; align-items: center; gap: 3px; }
+.m-req-h .fold .i { width: 12px; height: 12px; }
+.m-req .bigans { padding: 8px; }
+.m-req .bigans button { background: color-mix(in oklab, var(--ink) 6%, transparent); }
+.m-req .bigans button.go { background: var(--space); color: var(--space-on); }
+.m-req .bigans button.go .d { color: color-mix(in oklab, var(--space-on) 78%, transparent); }
+.m-comp { position: relative; display: flex; align-items: center; gap: 6px; height: 56px; padding: 0 7px 0 8px; border-radius: 28px; background: var(--glass); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6); backdrop-filter: blur(var(--glass-blur)) saturate(1.6); box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-3); transition: margin var(--d-glass) var(--ease-out), height var(--d-glass) var(--ease-out), background var(--d-glass) var(--ease); }
+.m-comp .plus { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); background: color-mix(in oklab, var(--ink) 6%, transparent); flex: none; }
+.m-comp .plus .i { width: 20px; height: 20px; }
+.m-comp input { flex: 1; min-width: 0; height: 40px; border: 0; outline: 0; background: none; font-size: 16px; color: var(--ink); }
+.m-comp input::placeholder { color: var(--faint); }
+.m-comp .mic-s { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--space); color: var(--space-on); box-shadow: 0 4px 14px -4px color-mix(in oklab, var(--space) 70%, transparent); }
+.m-comp .mic-s .i { width: 21px; height: 21px; }
+.m-lip { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--t-fine); color: var(--muted); transition: opacity var(--d-glass) var(--ease); }
+.m-lip .i, .m-lip .brand { width: 12px; height: 12px; }
+.m-lip .sep { color: var(--faint); }
+/* Scrolled: the Request folds to its question, the composer narrows to see-through glass. */
+html[data-state="scrolled"] .m-stack { background: none; padding-top: 12px; }
+html[data-state="scrolled"] .m-req { margin: 0 12px; background: var(--glass-thin); -webkit-backdrop-filter: blur(10px) saturate(1.4); backdrop-filter: blur(10px) saturate(1.4); }
+html[data-state="scrolled"] .m-req .bigans, html[data-state="scrolled"] .m-req-h .by, html[data-state="scrolled"] .m-lip { display: none; }
+html[data-state="scrolled"] .m-req-h { background: color-mix(in oklab, var(--attn) 86%, transparent); font-size: 13px; }
+html[data-state="scrolled"] .m-req-h .fold { display: inline-flex; }
+html[data-state="scrolled"] .m-comp { margin: 0 44px; height: 46px; background: var(--glass-thin); -webkit-backdrop-filter: blur(10px) saturate(1.4); backdrop-filter: blur(10px) saturate(1.4); box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-2); }
+html[data-state="scrolled"] .m-comp .plus { display: none; }
+html[data-state="scrolled"] .m-comp input { padding-left: 10px; }
+html[data-state="scrolled"] .m-comp .mic-s { width: 36px; height: 36px; }
+html[data-state="scrolled"] .hap { display: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .m-req, .m-comp, html[data-state="scrolled"] .m-req, html[data-state="scrolled"] .m-comp { background: var(--raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone" data-space="webshop">
+  <div class="ph-status">
+    <span class="time">9:41</span>
+    <span class="ph-island"></span>
+    <span class="ph-sys" aria-label="Full signal, wifi, battery 82%">
+      <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 2.6c2.2 0 4.2.85 5.7 2.25l1.1-1.15A9.6 9.6 0 0 0 8 1 9.6 9.6 0 0 0 1.2 3.7l1.1 1.15A8.1 8.1 0 0 1 8 2.6Zm0 3.2c1.35 0 2.6.52 3.5 1.38l1.1-1.15A6.5 6.5 0 0 0 8 4.2 6.5 6.5 0 0 0 3.4 6.03L4.5 7.18A5 5 0 0 1 8 5.8Zm0 3.2c.5 0 .95.2 1.3.5L8 11 6.7 9.5c.35-.3.8-.5 1.3-.5Z"/></svg>
+      <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="16.5" height="9" rx="2.4"/><path d="M25 4.5v4a2.2 2.2 0 0 0 0-4Z" opacity=".45"/></svg>
+    </span>
+  </div>
+  <header class="th-h">
+    <a class="back" aria-label="Threads"><svg class="i" aria-hidden="true"><use href="#i-chev-left"/></svg></a>
+    <div class="t"><b>Fix 3-D Secure checkout for EU cards</b><span><span class="sw p-webshop"></span>webshop<span>·</span><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><span class="mono">fix/3ds-eu-cards</span></span></div>
+    <a class="dpill"><svg class="i" aria-hidden="true"><use href="#i-diff"/></svg><span class="dstat"><span class="a">+48</span><span class="d">-12</span></span></a>
+  </header>
+  <div class="ph-body">
+    <div class="m-tx">
+      <div class="mcol">
+        <div class="origin"><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>Started 09:02 from a Proposal<span class="sep">·</span><svg class="i14" aria-hidden="true"><use href="#i-machine"/></svg>studio-mac</div>
+        <div class="who">Rogier · 09:02</div>
+        <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+        <div class="worked"><b>Worked for 2m 14s</b><span class="faint">6 files · 1 command</span></div>
+        <div class="prose"><p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> only handles <code>succeeded</code>, so we show "Card declined" instead of opening the 3-D Secure modal.</p></div>
+        <div class="code"><div class="code-h"><svg class="i14" aria-hidden="true"><use href="#i-folder"/></svg>src/checkout/payment.ts</div><pre><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> openThreeDSModal(result.clientSecret);
+}</pre></div>
+        <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+        <div class="worked"><b>Worked for 4m 51s</b><span class="faint">3 files · 2 commands</span></div>
+        <div class="files">
+          <div class="files-h">3 changed files<span class="grow"></span><span class="dstat"><span class="a">+48</span><span class="d">-12</span></span></div>
+          <div class="files-r"><span class="grow">src/checkout/payment.ts</span><span class="dstat"><span class="a">+21</span><span class="d">-9</span></span></div>
+          <div class="files-r"><span class="grow">src/checkout/payment.test.ts</span><span class="dstat"><span class="a">+19</span><span class="d">-0</span></span></div>
+          <div class="files-r"><span class="grow">src/checkout/3ds-modal.tsx</span><span class="dstat"><span class="a">+8</span><span class="d">-3</span></span></div>
+          <div class="chk"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg><b>24 passed</b><span class="mono faint">pnpm test checkout</span></div>
+        </div>
+        <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+      </div>
+    </div>
+    <div class="m-stack">
+      <div class="m-req" role="group" aria-label="Request">
+        <div class="m-req-h"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span>Run <span class="mono">git push -u origin fix/3ds-eu-cards</span>?</span><span class="by">09:11</span><span class="fold">Answer<svg class="i" aria-hidden="true"><use href="#i-chev-down"/></svg></span></div>
+        <div class="bigans pair">
+          <button class="go"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span><span class="l">Allow once</span><span class="d">Runs git push this one time</span></span></button>
+          <button><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span><span class="l">Always allow</span><span class="d">git push, in this thread</span></span></button>
+          <button><svg class="i" aria-hidden="true"><use href="#i-x"/></svg><span><span class="l">Deny</span><span class="d">Stops before pushing</span></span></button>
+        </div>
+      </div>
+      <div class="m-comp">
+        <a class="plus" aria-label="Attach"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></a>
+        <input placeholder="Reply, or hold to talk" aria-label="Reply">
+        <a class="mic-s" aria-label="Hold to talk"><svg class="i" aria-hidden="true"><use href="#i-mic"/></svg></a>
+      </div>
+      <div class="m-lip"><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg>Opus 5.5<span class="sep">·</span><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>Auto-accept edits<span class="sep">·</span>1 queued</div>
+    </div>
+  </div>
+  <span class="ph-home" aria-hidden="true"></span>
+  <span class="hap" style="right: 18px; top: 481px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>warning · a Request arrives</span>
+  <span class="hap" style="right: 24px; top: 566px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>success · on Allow once</span>
+</div>
+<script>
+// The Request and the composer fold to thin glass while you read back, and return at the bottom or on focus.
+const t = document.querySelector(".m-tx"), root = document.documentElement, stack = document.querySelector(".m-stack");
+t.scrollTop = t.scrollHeight;
+if (root.dataset.state === "scrolled") t.scrollTop = t.scrollHeight - t.clientHeight - 360;
+function update() {
+  const away = t.scrollHeight - t.scrollTop - t.clientHeight > 24;
+  if (away && !stack.contains(document.activeElement)) root.dataset.state = "scrolled";
+  else delete root.dataset.state;
+}
+t.addEventListener("scroll", update, { passive: true });
+stack.addEventListener("focusin", update);
+stack.addEventListener("focusout", () => setTimeout(update));
+update();
+</script>
+</body>
+</html>

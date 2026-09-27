@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) Checkout fails for EU cards with 3-D Secure · Hercule</title>
+<link rel="icon" href="../favicon.svg">
+<script src="../console.js" defer></script>
+<style>
+  /* One Proposal as a page. This is where a link from Slack or email lands, so the
+     page answers three questions in order: what happened, what you can do about
+     it, and why triage thinks so. No sidebar: someone arriving from a link came
+     for this one thing. */
+  .page { display: grid; grid-template-columns: minmax(0, 656px) 300px; column-gap: 52px; justify-content: center; padding: 26px 32px 40px; }
+  .dossier { padding: 0; }
+  .dossier h1 { font-size: var(--fs-display); font-weight: var(--w-strong); line-height: 1.3; letter-spacing: -0.01em; margin: 10px 0 10px; }
+  .dossier .lede { font-size: 14.5px; }
+
+  /* Big answer rows: a landing page gets one decision, so each answer gets room. */
+  .ledger.big { gap: 4px; }
+  .ledger.big .ans { grid-template-columns: 30px 168px minmax(0, 1fr); column-gap: 12px; padding: 11px 14px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-soft); }
+  .ledger.big .ans.is-primary { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent); }
+  .ledger.big .ans kbd { min-width: 26px; height: 26px; font-size: 13px; border-radius: 6px; }
+  .ledger.big .ans b { font-size: 15px; }
+  .ledger.big .ans span { font-size: 13.5px; }
+  .ledger.big .ans small { display: flex; align-items: center; gap: 6px; font: 450 11.5px / 1 var(--font-mono); margin-top: 6px; }
+  .ledger.big .ans small .brand { width: 12px; height: 12px; color: var(--muted); }
+  .proactive { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .proactive .mk { color: var(--faint); }
+  .proactive .act { margin-left: auto; }
+
+  .spark { display: block; width: 100%; height: auto; margin-top: 6px; }
+  .spark rect { fill: var(--fail); }
+  .spark rect.z { fill: var(--line); }
+  .spark .deploy { stroke: var(--accent); stroke-width: 1.25; stroke-dasharray: 3 3; }
+  .spark text { font: 500 10px var(--font-mono); fill: var(--faint); }
+  .spark text.acc { fill: var(--accent); font-weight: 650; }
+
+  /* The side column: the rest of what waits, where this link came from, the link. */
+  .aside .sec:first-child { margin-top: 0; }
+  .wait { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 9px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line-soft); }
+  .wait:first-of-type { border-top: 0; padding-top: 2px; }
+  .wait > .mk { margin-top: 2px; }
+  .wait .t { font-size: 13px; font-weight: var(--w-emph); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wait .q { margin-top: 3px; font: 450 11.5px / 1.4 var(--font-mono); color: var(--muted); }
+  .wait .q .nw { white-space: nowrap; }
+  .wait .k { display: flex; gap: 3px; padding-top: 1px; }
+  .wait .k kbd { color: var(--faint); background: transparent; }
+  .aside .more { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+  .aside .more .act { margin-left: auto; }
+
+  .came-from { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 9px; row-gap: 6px; font-size: 12.5px; }
+  .came-from .brand { width: 14px; height: 14px; margin-top: 1px; color: var(--ink); }
+  .came-from .who { font: 450 11.5px / 1.3 var(--font-mono); color: var(--muted); }
+  .came-from blockquote { grid-column: 2; margin: 0; padding: 1px 0 1px 10px; border-left: 2px solid var(--line); color: var(--ink); line-height: 1.45; }
+  .came-from p { grid-column: 2; margin: 2px 0 0; color: var(--muted); line-height: 1.45; }
+  .linkline { display: flex; align-items: center; gap: 8px; font: 450 11.5px / 1 var(--font-mono); color: var(--muted); }
+  .linkline .mk { width: 11px; height: 11px; color: var(--faint); }
+  .linkline .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link-sec::after { order: 1; }
+  .link-sec .act { order: 2; height: 22px; font-weight: 450; }
+  .aside .note { margin-top: 8px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="webapp no-side">
+  <header class="webbar" data-webbar></header>
+
+  <main class="main">
+    <section class="pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">1</span>
+        <span class="pane-title">Proposal</span>
+        <span class="pane-sub">in Intake since the 09:00 triage</span>
+        <span class="pane-actions">
+          <button class="act" type="button"><kbd>g</kbd><kbd>i</kbd>Intake</button>
+          <button class="act" type="button"><kbd>⇧ C</kbd>Copy link</button>
+        </span>
+      </header>
+      <div class="pane-body">
+        <div class="page">
+          <article class="dossier">
+            <div class="kicker">
+              <span class="urgent"><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+              <span class="proj webshop">webshop</span>
+              <span class="topic">Checkout</span>
+              <span>first seen 08:52</span>
+              <span class="tone-fail">412 errors · 188 users</span>
+            </div>
+            <h1>Checkout fails for EU cards with 3-D Secure</h1>
+            <p class="lede">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+            <div class="sec" style="margin-top:22px">What should happen? <span class="n">one key answers</span></div>
+            <div class="ledger big">
+              <button class="ans is-primary" type="button"><kbd>s</kbd><b>Start "Fix bug"</b><span>Starts Fix bug on webshop in a new worktree</span><small><svg class="brand"><use href="#b-claude"/></svg>Claude Code · Opus 5.5 · studio-mac · auto-accept edits</small></button>
+              <button class="ans" type="button"><kbd>a</kbd><b>Accept</b><span>Adds it to the backlog as a Task</span></button>
+              <button class="ans" type="button"><kbd>d</kbd><b>Dismiss</b><span>Closes the Proposal</span></button>
+            </div>
+            <div class="proactive"><svg class="mk"><use href="#g-offer"/></svg><span>I can also draft a reply to the 3 customers once the fix ships.</span><button class="act" type="button"><kbd>r</kbd>Queue the reply</button></div>
+
+            <div class="sec">Why triage thinks so <span class="n">made from 4 sources</span></div>
+            <div class="source-row"><svg class="brand"><use href="#b-sentry"/></svg><span class="who">Sentry · webshop-prod</span><span class="what"><code>PaymentError: authentication_required</code></span><span class="val tone-fail">412 · 188 users</span></div>
+            <div class="source-row"><svg class="brand"><use href="#b-gmail"/></svg><span class="who">Gmail · rogier@personal</span><span class="what">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span><span class="val">3 emails</span></div>
+            <div class="source-row"><svg class="brand"><use href="#b-posthog"/></svg><span class="who">PostHog · webshop</span><span class="what">Checkout conversion, EU only, since 14:10 yesterday</span><span class="val tone-fail">−18%</span></div>
+            <div class="source-row"><svg class="brand"><use href="#b-github"/></svg><span class="who">GitHub · rogier/webshop</span><span class="what">Deploy #1289 at 14:02 yesterday: "Upgrade Stripe SDK to v14"</span><span class="val tone-accent">#1289</span></div>
+
+            <div class="sec">Errors per hour <span class="n">since 10:00 yesterday</span></div>
+            <svg class="spark" viewBox="0 0 640 98" aria-label="Payment errors per hour since 10:00 yesterday, starting at deploy 1289">
+              <line class="deploy" x1="109.0" y1="4" x2="109.0" y2="80"/>
+              <text class="acc" x="115.0" y="12">deploy #1289 · 14:02</text>
+              <rect class="z" x="4.3" y="78" width="18" height="2" rx="1"/><rect class="z" x="31.0" y="78" width="18" height="2" rx="1"/><rect class="z" x="57.7" y="78" width="18" height="2" rx="1"/><rect class="z" x="84.3" y="78" width="18" height="2" rx="1"/><rect x="111.0" y="69" width="18" height="11" rx="1.5"/><rect x="137.7" y="53" width="18" height="27" rx="1.5"/><rect x="164.3" y="44" width="18" height="36" rx="1.5"/><rect x="191.0" y="35" width="18" height="45" rx="1.5"/><rect x="217.7" y="41" width="18" height="39" rx="1.5"/><rect x="244.3" y="48" width="18" height="32" rx="1.5"/><rect x="271.0" y="35" width="18" height="45" rx="1.5"/><rect x="297.7" y="51" width="18" height="29" rx="1.5"/><rect x="324.3" y="62" width="18" height="18" rx="1.5"/><rect x="351.0" y="69" width="18" height="11" rx="1.5"/><rect x="377.7" y="75" width="18" height="5" rx="1.5"/><rect x="404.3" y="78" width="18" height="2" rx="1.5"/><rect x="431.0" y="79" width="18" height="1" rx="1.5"/><rect x="457.7" y="78" width="18" height="2" rx="1.5"/><rect x="484.3" y="76" width="18" height="4" rx="1.5"/><rect x="511.0" y="73" width="18" height="7" rx="1.5"/><rect x="537.7" y="62" width="18" height="18" rx="1.5"/><rect x="564.3" y="37" width="18" height="43" rx="1.5"/><rect x="591.0" y="18" width="18" height="62" rx="1.5"/><rect x="617.7" y="26" width="18" height="54" rx="1.5"/>
+              <text x="4.3" y="95" text-anchor="start">10:00</text><text x="244.3" y="95" text-anchor="start">19:00</text><text x="457.7" y="95" text-anchor="start">03:00</text><text x="635.7" y="95" text-anchor="end">09:00</text>
+            </svg>
+          </article>
+
+          <aside class="aside">
+            <div class="sec">Also waiting on you <span class="n">3</span></div>
+            <div class="wait"><svg class="mk tone-attn"><use href="#m-decision"/></svg><div><div class="t">Fix 3-D Secure checkout for EU cards</div><div class="q">Run git push -u origin <span class="nw">fix/3ds-eu-cards</span>?</div></div><span class="k"><kbd>1</kbd></span></div>
+            <div class="wait"><svg class="mk tone-attn"><use href="#m-decision"/></svg><div><div class="t">Ship release v2.15</div><div class="q">Publish payments-api 2.15.0 to npm?</div></div><span class="k"><kbd>2</kbd></span></div>
+            <div class="wait"><svg class="mk tone-attn"><use href="#m-decision"/></svg><div><div class="t">Migrate ops dashboards</div><div class="q">Keep the old Grafana folder?</div></div><span class="k"><kbd>3</kbd></span></div>
+            <div class="more"><span>and 2 that need a call in Intake</span><button class="act" type="button"><kbd>g</kbd><kbd>i</kbd>Open</button></div>
+
+            <div class="sec">You came from</div>
+            <div class="came-from">
+              <svg class="brand"><use href="#b-slack"/></svg>
+              <span class="who">Slack · DM from Hercule · 09:01</span>
+              <blockquote>Urgent in webshop: Checkout fails for EU cards with 3-D Secure. 412 errors from 188 users since deploy #1289.</blockquote>
+              <p>That message has the same answers. The first answer counts, wherever you give it, and the other place shows what you chose.</p>
+            </div>
+
+            <div class="sec link-sec">This link <button class="act" type="button"><kbd>⇧ C</kbd>Copy</button></div>
+            <div class="linkline"><svg class="mk"><use href="#g-web"/></svg><span class="url">hercule.home.arpa/proposals/pr_7kq2</span></div>
+            <p class="note">After you answer, the link still works. It shows the answer and when it was given.</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-compact data-mode="DECIDE" data-context="Proposal · webshop" data-keys="s:start|a:accept|d:dismiss|g i:Intake|⇧ C:copy link"></footer>
+</div>
+</body>
+</html>

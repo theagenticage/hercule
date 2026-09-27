@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · Appearance · Hercule</title>
+<style>
+  .index { flex: 1; min-height: 0; overflow: hidden; padding: 0 16px; }
+  .profile-row { display: flex; align-items: center; gap: 12px; padding: 6px 4px 16px; }
+  .profile-row .avatar { width: 44px; height: 44px; border-radius: 14px; font-size: 18px; }
+  .profile-row b { display: block; font-size: 16px; font-weight: 620; }
+  .profile-row div span { font-size: var(--fs-small); color: var(--muted); }
+  .group { border-radius: var(--r-lg); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-soft); overflow: hidden; }
+  .group + .group { margin-top: 14px; }
+  .srow { display: grid; grid-template-columns: 30px 1fr auto 14px; column-gap: 12px; align-items: center; height: 48px; padding: 0 14px 0 12px; font-size: 15px; }
+  .srow + .srow { box-shadow: 0 -1px 0 var(--line-soft); }
+  .srow .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in oklab, var(--ink) 6%, transparent); }
+  .srow .ic .i { width: 16px; height: 16px; }
+  .srow .val { font-size: 14px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .srow > .i { width: 13px; height: 13px; color: var(--faint); }
+  .srow[aria-current="page"] { background: var(--sel); }
+
+  .scrim { position: absolute; inset: 0; z-index: 30; background: color-mix(in oklab, #000 30%, transparent); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 31; padding-bottom: 34px; background: color-mix(in oklab, var(--raised) 94%, transparent); }
+  .sh-head { display: flex; align-items: center; height: 50px; padding: 0 12px 0 20px; }
+  .sh-head h2 { font-size: 17px; font-weight: 640; }
+  .sh-head button { margin-left: auto; height: 36px; padding: 0 10px; font-size: 16px; font-weight: 600; color: var(--accent); }
+  .sh-body { padding: 0 20px; }
+  .sh-label { font-size: var(--fs-small); font-weight: 560; color: var(--muted); margin: 6px 0 10px; }
+  .themes { display: flex; gap: 12px; margin: 0 -20px; padding: 4px 20px 2px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent); mask-image: linear-gradient(90deg, #000 86%, transparent); }
+  .themes .tprev { flex: none; width: 112px; gap: 8px; }
+  .themes .tprev .scr { height: 86px; grid-template-columns: 26px 1fr; }
+  .themes .tprev .sb { padding: 8px 5px; gap: 5px; }
+  .themes .tprev .mn { padding: 22px 9px 0; }
+  .themes .tprev .mb { left: 14px; right: 14px; top: 15px; height: 16px; }
+  .themes .tprev .vd { margin-top: 7px; }
+  .themes .tprev .rl { display: none; }
+  .themes .tprev .cap { font-size: 13px; gap: 6px; }
+
+  .mopt { display: flex; align-items: center; gap: 12px; min-height: 50px; border-top: 1px solid var(--line-soft); font-size: 15px; }
+  .mopt:first-of-type { margin-top: 16px; }
+  .mopt .t { flex: 1; min-width: 0; }
+  .mopt .t small { display: block; margin-top: 1px; font-size: var(--fs-small); color: var(--muted); }
+  .mopt .t small .i { width: 12px; height: 12px; vertical-align: -1px; }
+  .mopt .haptic { margin-right: 2px; }
+  .sheet .toggle { width: 48px; height: 29px; }
+  .sheet .toggle::after { top: 2.5px; left: 2.5px; width: 24px; height: 24px; }
+  .sheet .toggle[aria-checked="true"]::after { transform: translateX(19px); }
+  .sheet .seg button { height: 32px; padding: 0 12px; font-size: 14px; }
+  .sheet .seg .aa { font-weight: 600; }
+  @media (prefers-reduced-transparency: reduce) { .sheet { background: var(--raised); } }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="island"></span><span class="sys"><svg class="sig"><use href="#sb-signal"/></svg><svg class="wifi"><use href="#sb-wifi"/></svg><svg class="bat"><use href="#sb-battery"/></svg></span></div>
+
+  <header class="mhead"><h1>Settings</h1></header>
+
+  <div class="index">
+    <div class="profile-row"><span class="avatar">R</span><div><b>Rogier</b><span>Profile</span></div></div>
+    <div class="group">
+      <a class="srow" aria-current="page"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Appearance<span class="val">Paper</span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-chat"/></svg></span>Threads<span class="val"></span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-assistant"/></svg></span>Assistants<span class="val">3</span><svg class="i"><use href="#i-chev-r"/></svg></a>
+    </div>
+    <div class="group">
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-globe"/></svg></span>Connections<span class="val hold"><svg class="m"><use href="#m-paused"/></svg>1 reconnecting</span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-sparkle"/></svg></span>Providers<span class="val">3</span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-server"/></svg></span>Machines<span class="val">3</span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-key"/></svg></span>Identities<span class="val"></span><svg class="i"><use href="#i-chev-r"/></svg></a>
+      <a class="srow"><span class="ic"><svg class="i"><use href="#i-shield"/></svg></span>Permission profiles<span class="val"></span><svg class="i"><use href="#i-chev-r"/></svg></a>
+    </div>
+  </div>
+
+  <nav class="tabbar" aria-label="Sections">
+    <a><svg class="i"><use href="#i-docket"/></svg>Intake<span class="badge">12</span></a>
+    <a><svg class="i"><use href="#i-threads"/></svg>Threads<span class="badge">2</span></a>
+    <a><svg class="i"><use href="#i-assistant"/></svg>Assistants</a>
+    <a aria-current="page"><svg class="i"><use href="#i-gear"/></svg>Settings</a>
+  </nav>
+
+  <div class="scrim"></div>
+  <section class="sheet" aria-label="Appearance">
+    <div class="grabber"></div>
+    <div class="sh-head"><h2>Appearance</h2><button>Done</button></div>
+    <div class="sh-body">
+      <p class="sh-label">Theme</p>
+      <div class="themes" role="radiogroup" aria-label="Theme">
+        <button class="tprev" role="radio" aria-checked="true" data-pick="paper">
+          <div class="shot"><div class="scr" data-theme="paper"><div class="sb"><i class="on"></i><i></i><i></i></div><div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div></div></div></div>
+          <span class="cap"><span class="radio"></span><b>Paper</b></span>
+        </button>
+        <button class="tprev" role="radio" aria-checked="false" data-pick="graphite">
+          <div class="shot"><div class="scr" data-theme="graphite"><div class="sb"><i class="on"></i><i></i><i></i></div><div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div></div></div></div>
+          <span class="cap"><span class="radio"></span><b>Graphite</b></span>
+        </button>
+        <button class="tprev" role="radio" aria-checked="false" data-pick="bond">
+          <div class="shot"><div class="scr" data-theme="bond"><div class="sb"><i class="on"></i><i></i><i></i></div><div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div></div></div></div>
+          <span class="cap"><span class="radio"></span><b>Bond</b></span>
+        </button>
+        <button class="tprev" role="radio" aria-checked="false" data-pick="oxblood">
+          <div class="shot"><div class="scr" data-theme="oxblood"><div class="sb"><i class="on"></i><i></i><i></i></div><div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div></div></div></div>
+          <span class="cap"><span class="radio"></span><b>Oxblood</b></span>
+        </button>
+        <button class="tprev" role="radio" aria-checked="false" data-pick="moss">
+          <div class="shot"><div class="scr" data-theme="moss"><div class="sb"><i class="on"></i><i></i><i></i></div><div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div></div></div></div>
+          <span class="cap"><span class="radio"></span><b>Moss</b></span>
+        </button>
+      </div>
+
+      <div class="mopt"><span class="t">Follow iPhone<small>Paper by day <svg class="i"><use href="#i-sun"/></svg> · Graphite by night <svg class="i"><use href="#i-moon"/></svg></small></span><span class="toggle" role="switch" aria-checked="true" aria-label="Follow iPhone"></span></div>
+      <div class="mopt"><span class="t">Text size</span><span class="seg"><button aria-pressed="false"><span class="aa" style="font-size:12px">Aa</span></button><button aria-pressed="true"><span class="aa" style="font-size:15px">Aa</span></button><button aria-pressed="false"><span class="aa" style="font-size:18px">Aa</span></button></span></div>
+      <div class="mopt"><span class="t">Haptics<small>A tick on every answer</small></span><span class="haptic"><svg class="i"><use href="#i-wave"/></svg>tick on change</span><span class="toggle" role="switch" aria-checked="true" aria-label="Haptics"></span></div>
+      <div class="mopt"><span class="t">Reduce motion<small>Answered cards fade instead of flying</small></span><span class="toggle" role="switch" aria-checked="false" aria-label="Reduce motion"></span></div>
+      <div class="mopt"><span class="t">Reduce transparency<small>Tab bar, sheets and composer turn solid</small></span><span class="toggle" role="switch" aria-checked="false" aria-label="Reduce transparency"></span></div>
+    </div>
+  </section>
+  <div class="homebar"></div>
+</div>
+<script>
+  // The previews are live: the checked preview follows the page's theme, and a tap switches it.
+  (function () {
+    var root = document.documentElement;
+    var alias = { light: "paper", dark: "graphite" };
+    var buttons = document.querySelectorAll("[data-pick]");
+    function mark() {
+      var current = alias[root.dataset.theme] || root.dataset.theme;
+      buttons.forEach(function (b) { b.setAttribute("aria-checked", String(b.dataset.pick === current)); });
+      document.querySelector(".srow .val").textContent = current.charAt(0).toUpperCase() + current.slice(1);
+      // Keep the checked preview in view, so a theme off to the right is never hidden.
+      var strip = document.querySelector(".themes");
+      var checked = strip.querySelector('[aria-checked="true"]');
+      if (checked) strip.scrollLeft = Math.max(0, checked.offsetLeft + checked.offsetWidth - strip.clientWidth + 40);
+    }
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () { root.dataset.theme = b.dataset.pick; mark(); });
+    });
+    mark();
+  })();
+</script>
+</body>
+</html>

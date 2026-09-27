@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Appearance · Settings · Hercule</title>
+<style>
+  .themes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .tprev { text-align: left; border-radius: 10px; }
+  .tprev .tag { margin-left: auto; display: inline-grid; place-items: center; width: 22px; height: 20px; color: var(--muted); border-radius: var(--r-pill); background: color-mix(in oklab, var(--ink) 6%, transparent); }
+  .tprev .tag .i { width: 13px; height: 13px; }
+  .follow { margin-top: 18px; }
+  .seg .aa { font-weight: 600; }
+  .keys-demo { display: inline-flex; gap: 4px; margin-left: 4px; }
+  .icons { display: flex; gap: 28px; }
+  .icons .ic { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: var(--fs-ui); }
+  .icons .ic .cap { display: flex; align-items: center; gap: 7px; }
+  .icons .ic[aria-checked="true"] svg { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 15px; }
+  .badge-demo { position: relative; }
+  .set-row .ctl { min-width: 0; }
+  .set-row .opt .d { margin-left: 2px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <aside class="side">
+    <div class="side-top">
+      <div class="tl"><i></i><i></i><i></i></div>
+      <button class="iconbtn" aria-label="Hide sidebar"><svg class="i"><use href="#i-sidebar"/></svg></button>
+      <button class="iconbtn" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+    <a class="newrow back"><svg class="i i--s"><use href="#i-arrow-l"/></svg>Settings<span class="key key--s">esc</span></a>
+    <nav class="nav side-scroll">
+      <a data-k="profile"><svg class="i i--s"><use href="#i-user"/></svg>Profile</a>
+      <a data-k="appearance" aria-current="page"><svg class="i i--s"><use href="#i-palette"/></svg>Appearance</a>
+      <a data-k="threads"><svg class="i i--s"><use href="#i-chat"/></svg>Threads</a>
+      <a data-k="assistants"><svg class="i i--s"><use href="#i-assistant"/></svg>Assistants<span class="count">3</span></a>
+      <a data-k="connections"><svg class="i i--s"><use href="#i-globe"/></svg>Connections<span class="count count--hold">1</span></a>
+      <a data-k="providers"><svg class="i i--s"><use href="#i-sparkle"/></svg>Providers<span class="count">3</span></a>
+      <a data-k="machines"><svg class="i i--s"><use href="#i-server"/></svg>Machines<span class="count">3</span></a>
+      <div class="gap"></div>
+      <a data-k="identities"><svg class="i i--s"><use href="#i-key"/></svg>Identities</a>
+      <a data-k="profiles"><svg class="i i--s"><use href="#i-shield"/></svg>Permission profiles</a>
+      <a data-k="secrets"><svg class="i i--s"><use href="#i-lock"/></svg>Secrets</a>
+      <a data-k="bounds"><svg class="i i--s"><use href="#i-gauge"/></svg>Bounds</a>
+      <a data-k="plugins"><svg class="i i--s"><use href="#i-plug"/></svg>Plugins</a>
+      <a data-k="system"><svg class="i i--s"><use href="#i-cube"/></svg>System</a>
+    </nav>
+    <div class="side-foot">
+      <div class="side-docket">
+        <div class="row1"><b>12</b> on your docket <span class="key key--s">⌥</span><span class="key key--s">Space</span></div>
+        <div class="rail rail--s">
+          <i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i>
+        </div>
+      </div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 8 working · 3 wait</span><svg class="i"><use href="#i-chev-r"/></svg></div>
+      <div class="me"><span class="avatar">R</span>Rogier</div>
+    </div>
+  </aside>
+
+
+  <main class="win-main">
+    <header class="topbar">
+      <h1>Appearance</h1>
+    </header>
+    <div class="set">
+      <section class="set-row">
+        <div class="lbl"><h3>Theme</h3><p>Two light grounds, three dark. Verdicts and kinds keep their colors in all five.</p></div>
+        <div class="ctl">
+          <div class="themes" role="radiogroup" aria-label="Theme">
+          <button class="tprev" role="radio" aria-checked="true" data-pick="paper">
+            <div class="shot"><div class="scr" data-theme="paper">
+              <div class="sb"><i class="on"></i><i></i><i></i><i></i></div>
+              <div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div><div class="rl"><i></i><i></i><i></i><i></i></div></div>
+            </div></div>
+            <span class="cap"><span class="radio"></span><b>Paper</b><span class="faint">light</span><span class="tag" title="In use by day"><svg class="i i--s"><use href="#i-sun"/></svg></span></span>
+          </button>
+          <button class="tprev" role="radio" aria-checked="false" data-pick="bond">
+            <div class="shot"><div class="scr" data-theme="bond">
+              <div class="sb"><i class="on"></i><i></i><i></i><i></i></div>
+              <div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div><div class="rl"><i></i><i></i><i></i><i></i></div></div>
+            </div></div>
+            <span class="cap"><span class="radio"></span><b>Bond</b><span class="faint">light</span></span>
+          </button>
+          <button class="tprev" role="radio" aria-checked="false" data-pick="graphite">
+            <div class="shot"><div class="scr" data-theme="graphite">
+              <div class="sb"><i class="on"></i><i></i><i></i><i></i></div>
+              <div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div><div class="rl"><i></i><i></i><i></i><i></i></div></div>
+            </div></div>
+            <span class="cap"><span class="radio"></span><b>Graphite</b><span class="faint">dark</span><span class="tag" title="In use by night"><svg class="i i--s"><use href="#i-moon"/></svg></span></span>
+          </button>
+          <button class="tprev" role="radio" aria-checked="false" data-pick="oxblood">
+            <div class="shot"><div class="scr" data-theme="oxblood">
+              <div class="sb"><i class="on"></i><i></i><i></i><i></i></div>
+              <div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div><div class="rl"><i></i><i></i><i></i><i></i></div></div>
+            </div></div>
+            <span class="cap"><span class="radio"></span><b>Oxblood</b><span class="faint">dark</span></span>
+          </button>
+          <button class="tprev" role="radio" aria-checked="false" data-pick="moss">
+            <div class="shot"><div class="scr" data-theme="moss">
+              <div class="sb"><i class="on"></i><i></i><i></i><i></i></div>
+              <div class="mn"><div class="mb"></div><div class="mc"><span class="ln"></span><span class="ln"></span><div class="vd"><i></i><i></i><i></i></div></div><div class="rl"><i></i><i></i><i></i><i></i></div></div>
+            </div></div>
+            <span class="cap"><span class="radio"></span><b>Moss</b><span class="faint">dark</span></span>
+          </button>
+          </div>
+          <div class="opt follow"><span class="toggle" role="switch" aria-checked="true"></span><span class="t">Follow macOS</span><span class="d muted">Paper by day <svg class="i i--s" style="vertical-align:-3px"><use href="#i-sun"/></svg>, Graphite by night <svg class="i i--s" style="vertical-align:-3px"><use href="#i-moon"/></svg></span></div>
+        </div>
+      </section>
+
+      <section class="set-row">
+        <div class="lbl"><h3>Density</h3></div>
+        <div class="ctl opt">
+          <div class="seg"><button aria-pressed="true"><svg class="i i--s"><use href="#i-list"/></svg>Comfortable</button><button aria-pressed="false"><svg class="i i--s"><use href="#i-grid"/></svg>Compact</button></div>
+          <span class="d muted">Compact fits 18 docket cards on the rail instead of 12</span>
+        </div>
+      </section>
+
+      <section class="set-row">
+        <div class="lbl"><h3>Text size</h3></div>
+        <div class="ctl opt">
+          <div class="seg"><button aria-pressed="false"><span class="aa" style="font-size:12px">Aa</span>Small</button><button aria-pressed="true"><span class="aa" style="font-size:14px">Aa</span>Default</button><button aria-pressed="false"><span class="aa" style="font-size:16px">Aa</span>Large</button></div>
+        </div>
+      </section>
+
+      <section class="set-row">
+        <div class="lbl"><h3>Motion and glass</h3><p>Both follow macOS until you change them here.</p></div>
+        <div class="ctl">
+          <div class="opt"><span class="toggle" role="switch" aria-checked="false"></span><span class="t">Reduce motion</span><span class="d muted">Answered cards fade instead of flying to their verdict</span></div>
+          <div class="opt"><span class="toggle" role="switch" aria-checked="false"></span><span class="t">Reduce transparency</span><span class="d muted">Sidebar, composer and quick panel turn solid</span></div>
+        </div>
+      </section>
+
+      <section class="set-row">
+        <div class="lbl"><h3>Answer keys</h3></div>
+        <div class="ctl opt">
+          <span class="toggle" role="switch" aria-checked="true"></span><span class="t">Show keys on cards</span>
+          <span class="keys-demo"><span class="key key--s">D</span><span class="key key--s">↓</span><span class="key key--s">A</span><span class="key key--s">Y</span></span>
+        </div>
+      </section>
+
+      <section class="set-row">
+        <div class="lbl"><h3>App icon</h3></div>
+        <div class="ctl">
+          <div class="icons" role="radiogroup" aria-label="App icon">
+            <div class="ic" role="radio" aria-checked="true"><svg class="appicon"><use href="#appicon"/></svg><span class="cap"><span class="radio"></span>Paper</span></div>
+            <div class="ic" role="radio" aria-checked="false"><svg class="appicon appicon--dark"><use href="#appicon"/></svg><span class="cap"><span class="radio"></span>Graphite</span></div>
+            <div class="ic" role="radio" aria-checked="false"><svg class="appicon appicon--mono"><use href="#appicon"/></svg><span class="cap"><span class="radio"></span>Mono</span></div>
+          </div>
+          <div class="opt" style="margin-top:16px"><span class="toggle" role="switch" aria-checked="true"></span><span class="t">Dock badge</span><span class="d muted">Counts the cards on your docket, not every event</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<script>
+  // The previews are live: the checked preview follows the page's theme, and a click switches it.
+  (function () {
+    var root = document.documentElement;
+    var alias = { light: "paper", dark: "graphite" };
+    var buttons = document.querySelectorAll("[data-pick]");
+    function mark() {
+      var current = alias[root.dataset.theme] || root.dataset.theme;
+      buttons.forEach(function (b) { b.setAttribute("aria-checked", String(b.dataset.pick === current)); });
+    }
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () { root.dataset.theme = b.dataset.pick; mark(); });
+    });
+    mark();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Hercule on the desktop · menu bar, quick panel, notifications, dock</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="g-desk">
+      <svg class="g-wall" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="g-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" style="stop-color: var(--wall-sky)" />
+            <stop offset="0.62" style="stop-color: var(--wall-horizon)" />
+          </linearGradient>
+          <radialGradient id="g-sun" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" style="stop-color: var(--wall-sun); stop-opacity: 0.9" />
+            <stop offset="1" style="stop-color: var(--wall-sun); stop-opacity: 0" />
+          </radialGradient>
+        </defs>
+        <rect width="1440" height="900" fill="url(#g-sky)" />
+        <circle cx="1120" cy="420" r="360" fill="url(#g-sun)" />
+        <path style="fill: var(--wall-d1)" d="M0 560C180 500 360 520 520 548S860 612 1040 562 1320 498 1440 528V900H0Z" />
+        <path style="fill: var(--wall-d2)" d="M0 652C200 612 420 602 640 640S1000 702 1200 652 1400 612 1440 620V900H0Z" />
+        <path style="fill: var(--wall-d3)" d="M0 742C260 702 480 720 700 760S1100 762 1300 722 1420 702 1440 706V900H0Z" />
+        <path style="fill: var(--wall-d4)" d="M0 832C300 800 600 790 860 820S1260 852 1440 810V900H0Z" />
+      </svg>
+
+      <header class="g-menubar">
+        <span class="app">Terminal</span><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
+        <span class="g-extras">
+          <span class="g-extra is-open" title="Hercule: 3 waiting on you">
+            <span data-halo="wait3 work8 pause1 idle11" data-size="17" data-still aria-hidden="true"></span><b>3</b>
+
+            <section class="g-menu pop" aria-label="Hercule">
+              <div class="g-menu-head">
+                <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-label="waiting on you" data-size="128"></span>
+                <div class="g-legend">
+                  <span><i data-mark="work"></i><b>8</b> working</span><span><i data-mark="pause"></i><b>1</b> paused</span><span><i data-mark="idle"></i><b>11</b> idle</span>
+                </div>
+              </div>
+              <div class="g-sec">Waiting on you <span class="n">3</span><span class="r">oldest first</span></div>
+              <div class="g-q">
+                <i data-mark="wait"></i><b>Fix 3-D Secure checkout</b><span class="age">39m</span>
+                <span class="a">Run git push -u origin fix/3ds-eu-cards?</span>
+                <span class="answers"><button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button></span>
+              </div>
+              <div class="g-q">
+                <i data-mark="wait"></i><b>Migrate ops dashboards</b><span class="age">14m</span>
+                <span class="a">Keep the old Grafana folder?</span>
+                <span class="answers"><button class="btn sm wait">Keep</button><button class="btn sm">Delete</button></span>
+              </div>
+              <div class="g-q">
+                <i data-mark="wait"></i><b>Ship release v2.15</b><span class="age">8m</span>
+                <span class="a">Publish payments-api 2.15.0 to npm?</span>
+                <span class="answers"><button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button></span>
+              </div>
+              <div class="g-menu-foot">
+                <a href="intake.html"><i data-icon="intake"></i>Intake · 9 new<span class="kbd">⌘1</span></a>
+                <a href="session-active.html"><i data-icon="threads"></i>Open Hercule<span class="kbd">⌘O</span></a>
+              </div>
+            </section>
+          </span>
+          <span><i data-icon="moon"></i></span>
+          <span><svg width="16" height="14" viewBox="0 0 16 14" aria-label="Sound" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"><path d="M1.8 5h2.6L8 2v10L4.4 9H1.8z" fill="currentColor" /><path d="M10.6 4.6a3.4 3.4 0 0 1 0 4.8M12.6 2.8a6 6 0 0 1 0 8.4" /></svg></span>
+          <span><svg width="10" height="15" viewBox="0 0 10 15" aria-label="Bluetooth" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"><path d="M1.2 4.2 8.4 10.6 5 13.8V1.2l3.4 3.2-7.2 6.4" /></svg></span>
+          <span><svg width="25" height="12" viewBox="0 0 27 13" aria-label="Battery"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".45" /><rect x="2" y="2" width="15" height="9" rx="2.2" fill="currentColor" /><path d="M25 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".45" /></svg></span>
+          <span><i data-icon="wifi"></i></span>
+          <span><i data-icon="search"></i></span>
+          <span><svg width="16" height="14" viewBox="0 0 16 14" aria-label="Control Center" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="14" height="5" rx="2.5" /><circle cx="12.5" cy="3.5" r="1.4" fill="currentColor" stroke="none" /><rect x="1" y="8" width="14" height="5" rx="2.5" /><circle cx="3.5" cy="10.5" r="1.4" fill="currentColor" stroke="none" /></svg></span>
+          <span class="g-clock">Tue 29 Sep&nbsp;&nbsp;09:41</span>
+        </span>
+      </header>
+
+      <div class="g-term" aria-hidden="true">
+        <div class="tb"><span class="traffic"><i></i><i></i><i></i></span>webshop - zsh - 104×38</div>
+        <pre data-term></pre>
+      </div>
+
+      <section class="g-quick pop" aria-label="Quick panel">
+        <div class="g-field">
+          <span data-halo="wait3 work8 pause1 idle11" data-size="26" data-still aria-hidden="true"></span>
+          <span class="ph"><i class="caret"></i>Answer, jump to a thread, or ask Ada</span>
+          <span class="kbd"><b>⌥</b> <b>Space</b></span>
+        </div>
+        <div class="g-sec">Waiting on you <span class="n">3</span><span class="r">oldest first</span></div>
+        <div class="g-row is-on">
+          <i data-mark="wait"></i>
+          <span class="t"><b>Fix 3-D Secure checkout for EU cards</b><span>webshop · Thread</span></span>
+          <span class="age wait">39m</span>
+          <div class="more">
+            <span class="q">Run this command?<code>git push -u origin fix/3ds-eu-cards</code></span>
+            <span class="answers">
+              <button class="btn sm wait">Allow once <span class="kbd">⌘⏎</span></button><button class="btn sm">Always allow git push</button
+              ><button class="btn sm">Deny <span class="kbd">esc</span></button>
+            </span>
+          </div>
+        </div>
+        <div class="g-row"><i data-mark="wait"></i><span class="t"><b>Migrate ops dashboards</b><span>Keep the old Grafana folder?</span></span><span class="age wait">14m</span></div>
+        <div class="g-row"><i data-mark="wait"></i><span class="t"><b>Ship release v2.15</b><span>Publish payments-api 2.15.0 to npm?</span></span><span class="age wait">8m</span></div>
+
+        <div class="g-sec">Jump to</div>
+        <div class="g-row"><i data-mark="work"></i><span class="t"><b>Refactor cart totals</b><span>webshop · Thread</span></span><span class="age">working 22m</span></div>
+        <div class="g-row"><i data-mark="work"></i><span class="t"><b>Investigate backup timeouts</b><span>ops · Milo's Run</span></span><span class="age">working 6m</span></div>
+
+        <div class="g-sec">Commands</div>
+        <div class="g-row"><i data-icon="compose"></i><span class="t"><b>Create new thread</b></span><span class="kbd">⌘N</span></div>
+        <div class="g-row"><i data-mark="assistant"></i><span class="t"><b>Ask Ada</b><span>she is replying to you</span></span><span class="kbd">⌘J</span></div>
+
+        <div class="g-foot">
+          <span><span class="kbd"><b>↑</b><b>↓</b></span>move</span><span><span class="kbd"><b>⌘⏎</b></span>answer</span><span><span class="kbd"><b>⌘O</b></span>open in Hercule</span>
+          <span class="end"><span class="kbd"><b>esc</b></span>close</span>
+        </div>
+      </section>
+
+      <div class="g-notes">
+        <div class="g-notes-head">Hercule<span class="pill-btn">Show less</span></div>
+        <div class="g-note">
+          <span class="app-icon" data-theme="eclipse" style="--sz: 38px"><span data-halo="wait1.4 work7.3 idle4.1" data-split data-size="25" data-still></span></span>
+          <span class="tx"><b>Fix 3-D Secure checkout<span class="w">2m ago</span></b>Run "git push -u origin fix/3ds-eu-cards"?</span>
+          <span class="acts"><button>Allow once</button><button>Deny</button></span>
+        </div>
+        <div class="g-note">
+          <span class="app-icon" data-theme="eclipse" style="--sz: 38px"><span data-halo="wait1.4 work7.3 idle4.1" data-split data-size="25" data-still></span></span>
+          <span class="tx"><b>Migrate ops dashboards<span class="w">14m ago</span></b>Keep the old Grafana folder?</span>
+          <span class="acts"><button>Keep</button><button>Delete</button></span>
+        </div>
+        <div class="g-note">
+          <span class="face working">A</span>
+          <span class="tx"><b>Ada<span class="w">09:00</span></b>Morning Rogier. One urgent thing: EU card payments that need 3-D Secure…</span>
+          <span class="acts"><button>Reply</button></span>
+        </div>
+      </div>
+
+      <nav class="g-dock" aria-label="Dock">
+        <span class="g-tile" title="Files"><i data-icon="folderplus"></i></span>
+        <span class="g-tile" title="Browser"><i data-icon="globe"></i></span>
+        <span class="g-tile" title="Mail"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="3.5" width="12" height="9" rx="1.6" /><path d="M2.6 4.4 8 8.6l5.4-4.2" /></svg></span>
+        <span class="g-tile cal" title="Calendar">TUE<b>29</b></span>
+        <span class="g-tile term is-running" title="Terminal">&gt;_</span>
+        <span class="rule"></span>
+        <span class="app-icon is-running" data-theme="eclipse" title="Hercule: 3 waiting on you"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-size="38" data-still></span><span class="app-badge">3</span></span>
+      </nav>
+
+      <span class="g-cap" style="left: 116px; top: 722px"><span class="kbd"><b>⌥</b> <b>Space</b></span>from any app<span class="sep">·</span><span class="kbd"><b>⌘K</b></span>inside Hercule, the same panel</span>
+      <span class="g-cap" style="left: 747px; top: 606px">Menu bar: the whole fleet in one ring</span>
+      <span class="g-cap" style="left: 1078px; top: 366px">Answer where the notification lands</span>
+      <span class="g-cap" style="left: 944px; top: 845px">The dock icon is the live ring · its badge is sodium, never red</span>
+    </div>
+
+    <script>
+      // The terminal Rogier is working in, scrolled to its last lines like a real one.
+      document.querySelector("[data-term]").innerHTML = [
+        "<b>rogier@studio-mac webshop %</b> git log --oneline -3",
+        "e41c9a2 (HEAD -> main, origin/main) deploy #1289: bump stripe-js to v14",
+        "7b2d0f1 cart: round totals per line, not per order",
+        "c93e5aa checkout: move the 3-D Secure modal into its own file",
+        "<b>rogier@studio-mac webshop %</b> pnpm test cart",
+        "",
+        " RUN  v3.2.4 /Users/rogier/webshop",
+        "",
+        " ✓ src/cart/totals.test.ts (18 tests) 212ms",
+        " ✓ src/cart/discounts.test.ts (9 tests) 64ms",
+        " ✓ src/cart/shipping.test.ts (7 tests) 41ms",
+        "",
+        " Test Files  3 passed (3)",
+        "      Tests  34 passed (34)",
+        "   Duration  1.18s",
+        "",
+        "<b>rogier@studio-mac webshop %</b> pnpm dev",
+        "",
+        "  VITE v7.1.3  ready in 412 ms",
+        "",
+        "  ➜  Local:   http://localhost:5173/",
+        "",
+        "09:39:12 [vite] hmr update /src/product/ProductGrid.tsx",
+        "09:39:40 [vite] hmr update /src/product/ProductGrid.tsx",
+        "09:40:05 [vite] hmr update /src/product/ProductCard.tsx",
+        "09:40:58 [vite] page reload src/product/filters.ts",
+        "09:41:02 [vite] hmr update /src/product/ProductGrid.tsx",
+      ].join("\n");
+    </script>
+  </body>
+</html>

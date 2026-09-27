@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(12) Ada · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 7.5C4 6.12 5.12 5 6.5 5h6.2c.9 0 1.6.5 2 1.2l.8 1.3H25.5C26.88 7.5 28 8.62 28 10v15.5c0 1.38-1.12 2.5-2.5 2.5h-19A2.5 2.5 0 0 1 4 25.5z' fill='%231f1b16'/%3E%3Cpath d='M11 12.6v10.6M21 12.6v10.6' stroke='%23f4f1ea' stroke-width='3.1'/%3E%3Cpath d='M12.3 17.9h7.4' stroke='%2322a55a' stroke-width='3.1'/%3E%3Ccircle cx='26' cy='7' r='5.5' fill='%23f0a020' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .wbody { grid-template-columns: 240px 1fr 272px; }
+  .tchrome { padding: 0 14px 0 22px; border-bottom: 1px solid var(--line-soft); height: 48px; }
+  .tchrome .crumb { font-size: var(--fs-body); }
+  .ttab { height: 28px; font-size: var(--fs-ui); }
+
+  /* The assistants column: one row per assistant, presence first. */
+  .wside { padding: 14px 10px 0; gap: 4px; }
+  .wside .label { padding: 0 10px 8px; }
+  .arow { display: grid; grid-template-columns: 34px 1fr auto; column-gap: 11px; align-items: center; padding: 10px; border-radius: var(--r-sm); }
+  .arow:hover { background: color-mix(in oklab, var(--ink) 4%, transparent); }
+  .arow[aria-current="page"] { background: color-mix(in oklab, var(--ink) 7%, transparent); }
+  .arow .avatar { width: 34px; height: 34px; border-radius: 9px; font-size: 15px; grid-row: 1 / 4; align-self: start; margin-top: 1px; }
+  .arow .n { font-weight: 600; }
+  .arow .st { font-size: var(--fs-small); justify-self: end; }
+  .arow .sub { grid-column: 2 / 4; font-size: var(--fs-small); color: var(--muted); display: flex; align-items: center; gap: 5px; margin-top: 2px; white-space: nowrap; }
+  .arow .sub + .sub { margin-top: 1px; color: var(--faint); }
+  .arow .sub .b { width: 11px; height: 11px; }
+  .arow.asleep .avatar { opacity: .55; }
+  .arow.asleep .n { color: var(--muted); }
+  .wside .newrow { margin: 0 0 10px; }
+  .arow .sub .hold { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+  .arow .sub .hold .i { width: 11px; height: 11px; }
+
+  .conv { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .conv .col { max-width: 700px; padding-top: 8px; padding-bottom: 170px; }
+  .conv .composer { padding: 0 28px 14px; }
+  .conv .composer-inner { max-width: 700px; }
+
+  .glance { border-left: 1px solid var(--line-soft); background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
+  .g-sec { padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
+  .g-sec:last-child { border-bottom: 0; }
+  .g-sec h3 { font-size: var(--fs-small); font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .g-sec h3 .end { margin-left: auto; font-weight: 450; color: var(--faint); }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: var(--fs-small); }
+  .facts dt { color: var(--faint); }
+  .facts dd { margin: 0; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+  .facts dd .b { width: 12px; height: 12px; }
+  .big-n { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+  .big-n .num { font-size: var(--fs-num-s); }
+  .big-n span { color: var(--muted); font-size: var(--fs-small); }
+  .topics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .topics .chip { height: 22px; font-family: var(--font-mono); font-size: 11px; color: var(--ink); }
+  .rem { display: grid; grid-template-columns: 66px 1fr; gap: 2px 10px; padding: 5px 0; font-size: var(--fs-small); }
+  .rem .d { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .rem .t { color: var(--ink); }
+  .ctx-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin-top: 6px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web">
+  <header class="whead">
+    <a class="logo"><svg><use href="#logo"/></svg>Hercule</a>
+    <nav class="wnav">
+      <a>Intake <span class="dot-count">12</span></a>
+      <a>Threads <span class="count">4</span></a>
+      <a aria-current="page">Assistants <span class="count">3</span></a>
+      <a>Check-in <span class="count">3</span></a>
+      <a>Tasks <span class="count">18</span></a>
+      <a>Runs <span class="count">4</span></a>
+      <a>Workflows</a>
+      <a>Fleet</a>
+    </nav>
+    <div class="tools">
+      <div class="wsearch"><svg class="i i--s"><use href="#i-search"/></svg>Search or jump to<span class="key key--s">⌘K</span></div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 3 wait</span></div>
+      <button class="iconbtn" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
+      <span class="avatar">R</span>
+    </div>
+  </header>
+
+  <div class="wbody">
+    <aside class="wside" aria-label="Assistants">
+      <a class="newrow"><svg class="i i--s"><use href="#i-plus"/></svg>New assistant</a>
+      <div class="label">Assistants <span class="num">3</span></div>
+      <a class="arow" aria-current="page">
+        <span class="avatar avatar--asst">A</span><span class="n">Ada</span>
+        <span class="st st--live"><span class="eq"><i></i><i></i><i></i></span>working</span>
+        <span class="sub">personal assistant</span>
+        <span class="sub">Web chat · <svg class="b"><use href="#b-slack"/></svg>Slack DM</span>
+      </a>
+      <a class="arow">
+        <span class="avatar avatar--asst">M</span><span class="n">Milo</span>
+        <span class="st st--quiet"><svg class="m"><use href="#m-idle"/></svg>idle</span>
+        <span class="sub">ops assistant</span>
+        <span class="sub"><svg class="b"><use href="#b-slack"/></svg>#ops</span>
+      </a>
+      <a class="arow asleep">
+        <span class="avatar avatar--asst">J</span><span class="n">Juno</span>
+        <span class="st st--quiet"><svg class="m"><use href="#m-asleep"/></svg>asleep</span>
+        <span class="sub">support assistant</span>
+        <span class="sub"><svg class="b"><use href="#b-discord"/></svg>#support<span class="hold"><svg class="i"><use href="#i-rotate"/></svg>reconnecting</span></span>
+      </a>
+    </aside>
+
+    <main class="wmain conv">
+      <header class="tchrome">
+        <span class="crumb">Assistants /</span>
+        <span class="ttab" aria-current="page"><span class="eq"><i></i><i></i><i></i></span>Ada</span>
+        <div class="tools">
+          <button class="pillbtn"><svg class="i"><use href="#i-link"/></svg>Copy link</button>
+          <button class="pillbtn"><svg class="i"><use href="#i-gear"/></svg>Ada's settings</button>
+        </div>
+      </header>
+
+      <div class="thread" id="thread">
+        <div class="col">
+          <div class="notice"><svg class="m"><use href="#m-failed"/></svg><span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span><span class="stamp">Mon 22:14</span></div>
+
+          <div class="daysep"><span>Today</span></div>
+          <div class="quiet"><svg class="m"><use href="#m-idle"/></svg>2 quiet check-ins<span class="stamp">07:00 · 08:00</span></div>
+
+          <div class="amsg">
+            <span class="avatar avatar--asst">A</span>
+            <div>
+              <div class="who"><b>Ada</b><svg class="i i--s" style="width:12px;height:12px"><use href="#i-heart"/></svg>heartbeat<span class="stamp">09:00</span></div>
+              <div class="prose"><p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p></div>
+              <div class="minicard kind-request">
+                <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+                <div class="mc-q"><span class="t">Run <code>git push</code>?</span><span class="muted">Fix 3-D Secure checkout</span><span class="s">studio-mac · 32s</span></div>
+                <div class="verbs">
+                  <button class="verb verb--nogo"><span class="key key--s">D</span><span class="v">Deny</span></button>
+                  <button class="verb verb--go"><span class="key key--s">A</span><span class="v">Always allow git push</span></button>
+                  <button class="verb verb--go is-primary"><span class="key key--s">Y</span><span class="v">Allow once</span></button>
+                </div>
+              </div>
+              <div class="minicard kind-offer">
+                <span class="ktab"><svg class="m"><use href="#m-bolt"/></svg>Offer</span>
+                <div class="mc-q"><span class="t">Draft a reply to Marta at Brightline</span><span class="s">Gmail · INV-2291</span></div>
+                <div class="verbs">
+                  <button class="verb verb--hold"><span class="key key--s">N</span><span class="v">Not now</span></button>
+                  <button class="verb verb--go is-primary"><span class="key key--s">Y</span><span class="v">Draft reply</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bubble-row"><span class="stamp">09:20</span><div class="bubble">Remind me Friday to renew the SSL cert for ops.</div></div>
+
+          <div class="amsg">
+            <span class="avatar avatar--asst">A</span>
+            <div>
+              <div class="who"><b>Ada</b><span class="stamp">09:20</span></div>
+              <div class="prose"><p>Done.</p></div>
+              <div class="reminder"><svg class="i"><use href="#i-clock"/></svg><b>Fri 2 Oct · 09:00</b><span>Renew the SSL cert for ops</span></div>
+            </div>
+          </div>
+
+          <div class="bubble-row"><span class="stamp">09:38</span><div class="bubble">What's the status of the backup job?</div></div>
+
+          <div class="amsg">
+            <span class="avatar avatar--asst">A</span>
+            <div>
+              <div class="who"><b>Ada</b><span class="eq"><i></i><i></i><i></i></span><span class="accent">working</span></div>
+              <div class="prose"><p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret"></span></p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="cm-card">
+            <textarea class="cm-text" placeholder="Reply to Ada…" aria-label="Message"></textarea>
+            <div class="cm-row">
+              <button class="cm-pick" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+              <span class="grow"></span>
+              <button class="pill"><svg class="b"><use href="#b-claude"/></svg>Sonnet 5</button>
+              <button class="cm-pick" aria-label="Voice"><svg class="i"><use href="#i-mic"/></svg></button>
+              <button class="cm-stop"><svg class="i i--s"><use href="#i-stop"/></svg>Stop</button>
+              <button class="cm-send" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+            </div>
+          </div>
+          <div class="lip">
+            <span><svg class="i"><use href="#i-chat"/></svg>Web chat</span>
+            <span>also on <svg class="b" style="width:12px;height:12px"><use href="#b-slack"/></svg>Slack DM</span>
+            <span class="end">replies at turn end</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="glance" aria-label="Ada at a glance">
+      <div class="g-sec">
+        <dl class="facts">
+          <dt>Runs on</dt><dd><svg class="b"><use href="#b-claude"/></svg>Claude Code · Sonnet 5</dd>
+          <dt>Access</dt><dd>full access · no edit</dd>
+        </dl>
+      </div>
+      <div class="g-sec">
+        <h3>Heartbeat<span class="end">every hour, 07-23</span></h3>
+        <div class="beat" aria-label="Heartbeats today: 07 and 08 quiet, 09 spoke, 10 to 23 to come">
+          <i class="b-quiet"></i><i class="b-quiet"></i><i class="b-spoke"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="beat-axis"><span>07</span><span>12</span><span>18</span><span>23</span></div>
+        <div class="ctx-legend" style="justify-content:flex-start;gap:14px;margin-top:10px"><span><b class="accent">1</b> spoke</span><span><b style="color:var(--ink)">2</b> quiet</span><span>next 10:00</span></div>
+      </div>
+      <div class="g-sec">
+        <h3>Context<span class="end">rotates at 70%</span></h3>
+        <div class="big-n"><span class="num">38%</span><span>of the window · 76k tokens</span></div>
+        <div class="meter ctx"><i style="width:38%;--mc:var(--accent)"></i></div>
+        <div class="ctx-legend"><span>daily rotation 04:00</span><span>Start fresh</span></div>
+      </div>
+      <div class="g-sec">
+        <h3><svg class="i i--s"><use href="#i-memory"/></svg>Memory<span class="end">7 topics</span></h3>
+        <div class="big-n"><span class="num">1,284</span><span>of 4,000 in the core note</span></div>
+        <div class="meter"><i style="width:32%"></i></div>
+        <div class="topics"><span class="chip">work-style</span><span class="chip">webshop</span><span class="chip">payments-api</span><span class="chip">ops</span><span class="chip">customers</span><span class="chip">family</span><span class="chip">reading</span></div>
+      </div>
+      <div class="g-sec">
+        <h3><svg class="i i--s"><use href="#i-clock"/></svg>Reminders<span class="end">3</span></h3>
+        <div class="rem"><span class="d">Thu 16:00</span><span class="t">Call the accountant</span></div>
+        <div class="rem"><span class="d">Fri 09:00</span><span class="t">Renew the SSL cert for ops</span></div>
+        <div class="rem"><span class="d">Mon 08:30</span><span class="t">Weekly revenue summary</span></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>
+  var t = document.getElementById("thread"); t.scrollTop = t.scrollHeight;
+</script>
+</body>
+</html>

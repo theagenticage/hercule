@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Providers · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      /* In the browser, Settings takes the sidebar's place: one column of domains, and a way back. */
+      .side .back {
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .side .set-nav {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        scrollbar-width: none;
+      }
+      .side .set-nav a {
+        font-size: 13.5px;
+      }
+      .set-body {
+        padding: 4px 32px 28px;
+      }
+      .set-body > .set-inner {
+        max-width: none;
+      }
+      .set-intro p {
+        max-width: 620px;
+      }
+      .provs {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .prov {
+        padding: 16px 20px 6px;
+      }
+      /* The head: a plain plate with the provider's mark, its name, the instance, and use. */
+      .p-head {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) 260px;
+        align-items: center;
+        gap: 14px;
+      }
+      .plate {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        color: var(--ink);
+        background: color-mix(in oklch, var(--ink) 6%, transparent);
+      }
+      .plate .mk {
+        width: 22px;
+        height: 22px;
+      }
+      .p-name {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+      .p-name b {
+        font-size: 15px;
+        font-weight: 640;
+      }
+      .p-name .mono {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .p-name .rs {
+        margin-left: 4px;
+      }
+      .use .meter-line {
+        margin: 0 0 6px;
+      }
+      .use .meter-line b {
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .use .flat {
+        font-size: var(--t-sm);
+        color: var(--muted);
+        text-align: right;
+      }
+      /* The settings: three columns on one line, no boxes around them. */
+      .p-set {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.9fr);
+        gap: 24px;
+        margin: 14px 0 12px 54px;
+      }
+      .p-set .label {
+        display: block;
+        margin-bottom: 7px;
+      }
+      .models {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .models .chip {
+        height: 24px;
+        color: var(--ink);
+        font-size: var(--t-ui);
+      }
+      .models .chip.is-default {
+        box-shadow: inset 0 0 0 1.5px var(--violet);
+        background: none;
+      }
+      .models .chip small {
+        font-size: 10.5px;
+        color: var(--violet);
+      }
+      .p-set .field {
+        width: 100%;
+        justify-content: space-between;
+        height: 30px;
+      }
+      .p-set .field .mk {
+        width: 13px;
+        height: 13px;
+        color: var(--muted);
+      }
+      .p-set .field span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      /* Machines: one stop per runner, on the perforated foot of the sheet. */
+      .p-machines {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        margin-left: 54px;
+        padding: 10px 0 8px;
+        font-size: var(--t-ui);
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 0 0 / var(--perf-pitch) 5px
+          repeat-x;
+      }
+      .p-machines .label {
+        width: 64px;
+        flex: none;
+      }
+      .p-machines .m {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+      }
+      .p-machines .m .mono {
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .p-machines .m.is-off {
+        color: var(--faint);
+      }
+      .p-machines .link {
+        margin-left: auto;
+        font-size: var(--t-sm);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win win--web">
+      <aside class="side">
+        <div class="side-brand"><svg class="logo"><use href="#logo" /></svg><span class="wordmark">Hercule</span><kbd class="side-kbd">⌘K</kbd></div>
+        <a class="side-row back"><svg class="mk"><use href="#chev-left" /></svg><span>Back to Hercule</span></a>
+        <nav data-kit="setnav" data-active="providers"></nav>
+      </aside>
+      <main class="main">
+        <div class="chrome ruled">
+          <span class="crumb">Settings /</span>
+          <h1>Providers</h1>
+          <div class="chrome-actions">
+            <button class="btn btn--ink"><svg class="mk"><use href="#plus" /></svg>Add provider instance</button>
+          </div>
+        </div>
+        <div class="set-body">
+          <div class="set-inner">
+            <div class="set-intro">
+              <p>
+                The coding harnesses your agents run on. Each provider instance is one sign-in, with its own login on every machine. New
+                threads start with these defaults; a thread can change them in its composer.
+              </p>
+            </div>
+
+            <div class="provs">
+              <section class="sheet prov">
+                <div class="p-head">
+                  <span class="plate"><svg class="mk"><use href="#b-claude" /></svg></span>
+                  <div class="p-name">
+                    <b>Claude Code</b><span class="mono">rogier@personal</span>
+                    <span class="rs rs--green tilt-c"><i data-m="done" class="sm"></i>Signed in</span>
+                  </div>
+                  <div class="use">
+                    <div class="meter-line"><span><b>61%</b> of the 5-hour window</span><span class="mono">resets 11:00</span></div>
+                    <div class="meter"><i style="width: 61%"></i></div>
+                  </div>
+                </div>
+                <div class="p-set">
+                  <div>
+                    <span class="label">Models</span>
+                    <div class="models">
+                      <span class="chip is-default">Opus 5.5 <small>default</small></span><span class="chip">Sonnet 5</span><span class="chip">Haiku 4.5</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="label">Default effort</span>
+                    <div class="seg"><button>Low</button><button>Medium</button><button class="is-on">High</button><button>Max</button></div>
+                  </div>
+                  <div>
+                    <span class="label">Default access mode</span>
+                    <button class="field"><span><svg class="mk"><use href="#shield" /></svg>Auto-accept edits</span><svg class="mk"><use href="#chev-down" /></svg></button>
+                  </div>
+                </div>
+                <div class="p-machines">
+                  <span class="label">Machines</span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>studio-mac</span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>build-box-1</span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>build-box-2</span>
+                  <a class="link">Check again</a>
+                </div>
+              </section>
+
+              <section class="sheet prov">
+                <div class="p-head">
+                  <span class="plate"><svg class="mk"><use href="#b-openai" /></svg></span>
+                  <div class="p-name">
+                    <b>Codex</b><span class="mono">work</span>
+                    <span class="rs rs--green tilt-b"><i data-m="done" class="sm"></i>Signed in</span>
+                  </div>
+                  <div class="use">
+                    <div class="meter-line"><span><b>18%</b> of the weekly limit</span><span class="mono">resets Mon</span></div>
+                    <div class="meter"><i style="width: 18%"></i></div>
+                  </div>
+                </div>
+                <div class="p-set">
+                  <div>
+                    <span class="label">Models</span>
+                    <div class="models"><span class="chip is-default">gpt-5.4 <small>default</small></span><span class="chip">gpt-5.4-mini</span></div>
+                  </div>
+                  <div>
+                    <span class="label">Default effort</span>
+                    <div class="seg"><button>Low</button><button class="is-on">Medium</button><button>High</button></div>
+                  </div>
+                  <div>
+                    <span class="label">Default access mode</span>
+                    <button class="field"><span><svg class="mk"><use href="#shield" /></svg>Auto</span><svg class="mk"><use href="#chev-down" /></svg></button>
+                  </div>
+                </div>
+                <div class="p-machines">
+                  <span class="label">Machines</span>
+                  <span class="m is-off"><i data-m="skipped" class="sm"></i>studio-mac <span class="mono">· not on PATH</span></span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>build-box-1</span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>build-box-2</span>
+                  <a class="link">Check again</a>
+                </div>
+              </section>
+
+              <section class="sheet prov">
+                <div class="p-head">
+                  <span class="plate"><svg class="mk"><use href="#b-pi" /></svg></span>
+                  <div class="p-name">
+                    <b>pi</b><span class="mono">local</span>
+                    <span class="rs tilt-a">No sign-in</span>
+                  </div>
+                  <div class="use"><div class="flat">llama.cpp on studio-mac · no usage limit</div></div>
+                </div>
+                <div class="p-set">
+                  <div>
+                    <span class="label">Models</span>
+                    <div class="models"><span class="chip is-default">qwen3-coder 30b <small>default</small></span></div>
+                  </div>
+                  <div>
+                    <span class="label">Default effort</span>
+                    <span class="muted" style="font-size: var(--t-ui)">Not offered by this model</span>
+                  </div>
+                  <div>
+                    <span class="label">Default access mode</span>
+                    <button class="field"><span><svg class="mk"><use href="#shield" /></svg>Approval required</span><svg class="mk"><use href="#chev-down" /></svg></button>
+                  </div>
+                </div>
+                <div class="p-machines">
+                  <span class="label">Machines</span>
+                  <span class="m"><i data-m="done" class="s-ok sm"></i>studio-mac</span>
+                  <span class="m is-off"><i data-m="skipped" class="sm"></i>build-box-1 <span class="mono">· not on PATH</span></span>
+                  <span class="m is-off"><i data-m="skipped" class="sm"></i>build-box-2 <span class="mono">· not on PATH</span></span>
+                  <a class="link">Check again</a>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

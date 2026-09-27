@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .set-body > .set-inner {
+        max-width: none;
+      }
+      .sum {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 28px;
+        padding: 16px 0 18px;
+      }
+      .big {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .big b {
+        font: 640 var(--t-num-lg) / 1 var(--narrow);
+        letter-spacing: -0.01em;
+      }
+      .big span {
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      /* The day's mail as a strip of stamps: one per event source, as wide as its share. */
+      .strip {
+        display: flex;
+        height: 34px;
+        gap: 0;
+        padding: 3px;
+        background: var(--stamp-paper);
+        border-radius: 2px;
+        filter: drop-shadow(0 0 0.5px var(--stamp-edge)) drop-shadow(0 1px 1px var(--stamp-shade));
+      }
+      .strip i {
+        position: relative;
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        background: var(--c);
+        color: var(--stamp-mark);
+      }
+      .strip i + i {
+        margin-left: 5px;
+      }
+      /* Perforation between two stamps of the strip. */
+      .strip i + i::before {
+        content: "";
+        position: absolute;
+        left: -4px;
+        top: -3px;
+        bottom: -3px;
+        width: 3px;
+        background: radial-gradient(circle, var(--bg) 1.1px, #0000 1.5px) 0 1px / 3px 4px repeat-y;
+      }
+      .strip .mk {
+        width: 14px;
+        height: 14px;
+      }
+      .strip-legend {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 6px;
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .sum .btn {
+        align-self: center;
+      }
+      .group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 0 4px;
+      }
+      .group .perf {
+        flex: 1;
+      }
+      .conns {
+        display: grid;
+        grid-template-columns: 60px minmax(0, 1fr) 184px 82px 166px 212px 28px;
+        align-items: center;
+      }
+      .conns > .row {
+        display: contents;
+      }
+      /* No column gap, so each row's hairline runs unbroken; cells pad themselves instead. */
+      .conns > .row > * {
+        padding-right: 16px;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+      }
+      .conns > .row.dim > :not(.health) {
+        opacity: 0.55;
+      }
+      .name {
+        flex-direction: column;
+        align-items: flex-start !important;
+        justify-content: center;
+        gap: 1px;
+      }
+      .name b {
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .name small {
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .spark {
+        gap: 2px;
+        align-items: flex-end !important;
+        padding-bottom: 15px;
+      }
+      .spark i {
+        flex: 1;
+        min-height: 1px;
+        border-radius: 1px;
+        background: color-mix(in oklch, var(--ink) 22%, transparent);
+      }
+      .spark i.hot {
+        background: var(--red);
+      }
+      .spark i.held {
+        background: var(--ochre);
+      }
+      .vol {
+        justify-content: flex-end;
+        font: 620 15px / 1 var(--narrow);
+      }
+      .vol.none {
+        font-weight: 400;
+        color: var(--faint);
+      }
+      .topic .sel {
+        margin-left: -7px;
+        color: var(--ink);
+      }
+      .topic .none {
+        color: var(--faint);
+        font-size: var(--t-ui);
+      }
+      .binds {
+        font-size: var(--t-ui);
+        color: var(--muted);
+        gap: 6px;
+      }
+      .binds .seal {
+        width: 18px;
+        height: 18px;
+        font-size: 9px;
+      }
+      .health {
+        gap: 7px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .health .rs {
+        font-size: 9.5px;
+      }
+      .conns .more {
+        justify-content: center;
+      }
+      .head > * {
+        height: 28px !important;
+        font: var(--w-stamp) var(--t-xs) / 1 var(--narrow);
+        letter-spacing: var(--track-stamp);
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .head .r {
+        justify-content: flex-end;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="hercule" data-active="settings"></aside>
+      <main class="main">
+        <div class="chrome ruled">
+          <span class="crumb">Settings /</span>
+          <h1>Connections</h1>
+          <div class="chrome-actions">
+            <span class="search-pill"><svg class="mk"><use href="#search" /></svg>Find a connection<kbd>/</kbd></span>
+          </div>
+        </div>
+        <div class="settings">
+          <nav data-kit="setnav" data-active="connections"></nav>
+          <div class="set-body">
+            <div class="set-inner">
+              <div class="sum">
+                <div class="big"><b>2,418</b><span>events in 24h · 212 since yesterday 18:20</span></div>
+                <div>
+                  <div class="strip" aria-label="Share of events by source">
+                    <i style="--c: var(--src-sentry); flex: 1406"><svg class="mk"><use href="#b-sentry" /></svg></i>
+                    <i style="--c: var(--src-github); flex: 312"><svg class="mk"><use href="#b-github" /></svg></i>
+                    <i style="--c: var(--src-stripe); flex: 209"><svg class="mk"><use href="#b-stripe" /></svg></i>
+                    <i style="--c: var(--src-gmail); flex: 188"><svg class="mk"><use href="#b-gmail" /></svg></i>
+                    <i style="--c: var(--src-cron); flex: 102"><svg class="mk"><use href="#b-cron" /></svg></i>
+                    <i style="--c: var(--src-posthog); flex: 96"></i>
+                    <i style="--c: var(--src-intercom); flex: 61"></i>
+                    <i style="--c: var(--src-grafana); flex: 44"></i>
+                  </div>
+                  <div class="strip-legend"><span>Sentry 58%</span><span>8 event sources · 3 channels · 10 healthy, 1 reconnecting</span></div>
+                </div>
+                <button class="btn btn--ink"><svg class="mk"><use href="#plus" /></svg>Add connection</button>
+              </div>
+
+              <div class="conns">
+                <div class="row head">
+                  <span></span><span>Event sources 8</span><span>Last 24 h</span><span class="r">Events</span><span>Default Topic</span><span>Health</span><span></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="sentry" data-n="1.4k"></span></span>
+                  <span class="name"><b>Sentry</b><small>webshop-prod</small></span>
+                  <span class="spark" data-spark="1406" data-hot="23"></span>
+                  <span class="vol">1,406</span>
+                  <span class="topic"><button class="sel">Checkout<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="github" data-n="312"></span></span>
+                  <span class="name"><b>GitHub</b><small>rogier</small></span>
+                  <span class="spark" data-spark="312" data-held="22"></span>
+                  <span class="vol">312</span>
+                  <span class="topic"><button class="sel">Releases<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy<span class="rs rs--ochre tilt-b">34 held</span></span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="stripe" data-n="209"></span></span>
+                  <span class="name"><b>Stripe</b><small>live</small></span>
+                  <span class="spark" data-spark="209"></span>
+                  <span class="vol">209</span>
+                  <span class="topic"><button class="sel">Checkout<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="gmail" data-n="188"></span></span>
+                  <span class="name"><b>Gmail</b><small>rogier@personal</small></span>
+                  <span class="spark" data-spark="188"></span>
+                  <span class="vol">188</span>
+                  <span class="topic"><button class="sel">Customers<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="cron" data-n="102"></span></span>
+                  <span class="name"><b>Cron</b><small>schedules</small></span>
+                  <span class="spark" data-spark="102" data-flat></span>
+                  <span class="vol">102</span>
+                  <span class="topic"><span class="none">No default</span></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="posthog" data-n="96"></span></span>
+                  <span class="name"><b>PostHog</b><small>webshop</small></span>
+                  <span class="spark" data-spark="96"></span>
+                  <span class="vol">96</span>
+                  <span class="topic"><button class="sel">Checkout<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="intercom" data-n="61"></span></span>
+                  <span class="name"><b>Intercom</b><small>support</small></span>
+                  <span class="spark" data-spark="61"></span>
+                  <span class="vol">61</span>
+                  <span class="topic"><button class="sel">Customers<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="grafana" data-n="44"></span></span>
+                  <span class="name"><b>Grafana</b><small>ops</small></span>
+                  <span class="spark" data-spark="44"></span>
+                  <span class="vol">44</span>
+                  <span class="topic"><button class="sel">Infrastructure<svg class="mk"><use href="#chev-down" /></svg></button></span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+
+                <div class="row head">
+                  <span></span><span>Channels 3</span><span>Bound assistants</span><span></span><span></span><span></span><span></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="slack"></span></span>
+                  <span class="name"><b>Slack</b><small>acme-hq</small></span>
+                  <span class="binds" style="grid-column: span 3"><span class="seal">M</span>Milo in #ops<span class="sep">·</span><span class="seal">A</span>Ada in your DM</span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row dim">
+                  <span><span class="post post--md" data-src="discord"></span></span>
+                  <span class="name"><b>Discord</b><small>community</small></span>
+                  <span class="binds" style="grid-column: span 3"><span class="seal is-asleep">J</span>Juno in #support · replies wait until it is back</span>
+                  <span class="health"><span class="rs rs--ochre tilt-a"><i data-m="paused" class="sm"></i>Reconnecting</span>since 09:12</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+                <div class="row">
+                  <span><span class="post post--md" data-src="webchat"></span></span>
+                  <span class="name"><b>Web chat</b><small>built in</small></span>
+                  <span class="binds" style="grid-column: span 3"><span class="seal">A</span>Ada, always</span>
+                  <span class="health"><i data-m="done" class="s-ok sm"></i>healthy</span>
+                  <span class="more"><button class="icon-btn sm" aria-label="More"><svg class="mk"><use href="#more" /></svg></button></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // Draws each 24-hour spark: 24 hourly bars, oldest first, the last one is this hour.
+      // The shapes are fixed per source, so the picture is the same on every load.
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll("[data-spark]").forEach((el, k) => {
+          const hot = Number(el.dataset.hot || -1);
+          const held = Number(el.dataset.held || -1);
+          const flat = el.dataset.flat !== undefined;
+          let bars = "";
+          for (let h = 0; h < 24; h++) {
+            // Office hours are busier than the night; a little deterministic wobble per source.
+            const day = h >= 0 && h <= 14 ? 0.9 : 0.35;
+            const wobble = 0.55 + 0.45 * Math.abs(Math.sin((h + 1) * (k + 2) * 1.7));
+            let v = flat ? 0.45 : day * wobble;
+            let cls = "";
+            if (hot >= 0 && h >= hot) (v = 1), (cls = "hot");
+            if (held >= 0 && h === held) (v = 1), (cls = "held");
+            bars += `<i class="${cls}" style="height:${Math.round(4 + v * 18)}px"></i>`;
+          }
+          el.innerHTML = bars;
+        });
+      });
+    </script>
+  </body>
+</html>

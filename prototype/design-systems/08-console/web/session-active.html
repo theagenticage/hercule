@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) ? Fix 3-D Secure checkout for EU cards · Hercule</title>
+<link rel="icon" href="../favicon.svg">
+<script src="../console.js" defer></script>
+<style>
+  .thread-pane { flex: 1 1 0; }
+  .thread-pane .thread-col { padding-left: 24px; padding-right: 24px; }
+  .agent-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .agent-mark .brand { width: 10px; height: 10px; color: var(--ink); }
+  .msg-agent .code { margin-top: 12px; }
+  .ttab .mk { width: 11px; height: 11px; }
+  .thread-actions { margin-left: auto; display: flex; gap: 4px; }
+  .composer-card .ctx { font: 450 11px / 1 var(--font-mono); color: var(--faint); padding: 0 4px; }
+  .made-from { display: flex; align-items: center; gap: 8px; margin: 0 0 22px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: 8px; font-size: 12.5px; color: var(--muted); }
+  .made-from .mk { color: var(--accent); }
+  .made-from b { color: var(--ink); font-weight: var(--w-emph); }
+  .made-from .src { margin-left: auto; }
+
+  /* At 1280 the diff does not get a pane of its own. The thread keeps the width,
+     and pane 2 folds to a rail: the files, the tests, and where the work lives.
+     d opens the diff over pane 1 and esc brings the thread back. */
+  .rail { flex: 0 0 308px; }
+  .rail-sec { padding: 12px 14px 14px; border-bottom: 1px solid var(--line-soft); }
+  .rail-sec:last-child { border-bottom: 0; }
+  .rail-sec .sec { margin: 0 0 8px; }
+  .rail-file { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; height: 28px; margin: 0 -14px; padding: 0 14px; font: 450 12px / 1 var(--font-mono); color: var(--ink); }
+  .rail-file .dir { color: var(--faint); }
+  .rail-file .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-file .nums { display: inline-flex; gap: 6px; }
+  .rail-open { display: flex; gap: 4px; margin-top: 8px; }
+  .rail .kv { grid-template-columns: 78px minmax(0, 1fr); }
+  .rail .kv > dt { font: 450 11px / 18px var(--font-mono); color: var(--faint); padding: 6px 0; }
+  .rail .kv > dd { font-size: 12.5px; line-height: 18px; padding: 6px 0; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .rail .kv .brand { width: 12px; height: 12px; color: var(--ink); }
+  .rail .kv code { font: 450 11.5px / 18px var(--font-mono); }
+  .rail .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font: 600 12px / 1 var(--font-mono); }
+  .rail .testrow { display: flex; align-items: center; gap: 10px; font: 450 11.5px / 1 var(--font-mono); color: var(--muted); }
+  .rail .step { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 26px; font-size: 12.5px; color: var(--muted); }
+  .rail .step .mk { width: 11px; height: 11px; }
+  .rail .step.is-now { color: var(--ink); font-weight: var(--w-emph); }
+  .rail .step small { font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="webapp">
+  <header class="webbar" data-webbar></header>
+  <nav class="side" data-side="threads" data-active="fix-3ds"></nav>
+
+  <main class="main">
+    <!-- Pane 1: the thread -->
+    <section class="pane is-focus thread-pane">
+      <header class="thread-chrome">
+        <span class="pane-num">1</span>
+        <span class="crumb">webshop /</span>
+        <a class="ttab is-on" href="#"><svg class="mk tone-attn"><use href="#m-decision"/></svg>Fix 3-D Secure checkout for EU cards</a>
+        <a class="ttab" href="#"><svg class="mk tone-live"><use href="#m-working"/></svg>Refactor cart totals</a>
+        <span class="thread-actions">
+          <button class="act" type="button"><kbd>⇧</kbd><kbd>C</kbd>Copy link</button>
+        </span>
+      </header>
+
+      <div class="transcript" data-composer="#composer" data-scrolled-to=".msg-user">
+        <div class="thread-col">
+          <div class="made-from">
+            <svg class="mk"><use href="#g-proposal"/></svg>
+            <span>Started 09:02 from the Proposal <b>Checkout fails for EU cards with 3-D Secure</b></span>
+            <span class="src"><svg class="brand"><use href="#b-sentry"/></svg>+3 sources</span>
+          </div>
+
+          <div class="msg-user">
+            <div class="msg-meta">Rogier · 09:02</div>
+            <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+          </div>
+
+          <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked for <b>2m 14s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="x"></i></span><span>read 6 files · ran 1 command</span></div>
+
+          <div class="msg-agent">
+            <div class="msg-meta"><span class="agent-mark"><svg class="brand"><use href="#b-claude"/></svg></span>Claude Code · Opus 5.5 · 09:04</div>
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+            <pre class="code"><header><svg class="mk"><use href="#g-file"/></svg>src/checkout/payment.ts<button class="act" type="button">Copy</button></header><code><span class="k">if</span> <span class="p">(</span>result<span class="p">.</span>status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span>
+  <span class="k">return</span> <span class="f">openThreeDSModal</span><span class="p">(</span>result<span class="p">.</span>clientSecret<span class="p">);</span>
+<span class="p">}</span></code></pre>
+          </div>
+
+          <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+
+          <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked for <b>4m 51s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="x"></i></span><span>edited 3 files · ran 3 commands</span></div>
+
+          <div class="testline"><span class="ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span><span>pnpm test checkout</span><span class="faint">· 3.8s</span></div>
+
+          <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </div>
+
+      <div class="composer-dock" id="composer">
+        <div class="queued card-glass">
+          <svg class="mk"><use href="#m-queued"/></svg>
+          <span class="q-text">Also check the Apple Pay path</span>
+          <span class="q-state">queued · runs next</span>
+          <button class="act" type="button"><kbd>⌘</kbd><kbd>⏎</kbd>Steer</button>
+          <button class="act" type="button">Cancel</button>
+        </div>
+        <div class="dock card-glass" role="group" aria-label="Request">
+          <svg class="mk"><use href="#m-decision"/></svg>
+          <div>
+            <div class="dock-title">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+            <div class="dock-note">Auto-accept edits covers file edits only. Pushing needs your OK.</div>
+            <div class="ledger">
+              <button class="ans is-primary" type="button"><kbd>y</kbd><b>Allow once</b><span>Runs this one command</span></button>
+              <button class="ans" type="button"><kbd>a</kbd><b>Always allow git push</b><span>Adds a Grant for this thread</span></button>
+              <button class="ans" type="button"><kbd>n</kbd><b>Deny</b><span>The agent is told no and keeps going</span></button>
+            </div>
+          </div>
+          <div class="dock-mini"><svg class="mk"><use href="#m-decision"/></svg><span>Waits on you:</span><b>git push -u origin fix/3ds-eu-cards</b><span style="margin-left:auto"><kbd>y</kbd> <kbd>a</kbd> <kbd>n</kbd></span></div>
+        </div>
+        <div class="composer-card card-glass">
+          <div class="composer-input"><span class="ph">Say what's next. Press <kbd>i</kbd> to type</span></div>
+          <div class="composer-row">
+            <button class="c-btn" type="button" title="Attach"><svg class="mk"><use href="#c-plus"/></svg></button>
+            <button class="c-sel ink" type="button"><svg class="mk" style="color:var(--accent)"><use href="#g-lock"/></svg>auto-accept edits<svg class="mk"><use href="#c-down"/></svg></button>
+            <button class="c-sel" type="button"><span class="lbl">effort</span>high<svg class="mk"><use href="#c-down"/></svg></button>
+            <span class="c-spacer"></span>
+            <span class="ctx">41% context</span>
+            <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Opus 5.5</span>
+            <button class="send" type="button" disabled title="Send"><svg class="mk"><use href="#c-send"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pane 2: the thread's rail -->
+    <section class="pane rail">
+      <header class="pane-head">
+        <span class="pane-num">2</span>
+        <span class="pane-title">Changes</span>
+        <span class="pane-sub">3 files</span>
+        <span class="plus">+48</span><span class="minus">-12</span>
+      </header>
+      <div class="pane-body">
+        <div class="rail-sec" data-list>
+          <div class="rail-file is-cursor" data-row><span class="nm"><span class="dir">checkout/</span>payment.ts</span><span class="nums"><span class="plus">+21</span><span class="minus">-9</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span></div>
+          <div class="rail-file" data-row><span class="nm"><span class="dir">checkout/</span>payment.test.ts</span><span class="nums"><span class="plus">+19</span><span class="minus">-0</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span></div>
+          <div class="rail-file" data-row><span class="nm"><span class="dir">checkout/</span>3ds-modal.tsx</span><span class="nums"><span class="plus">+8</span><span class="minus">-3</span></span><span class="diffstat"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span></div>
+          <div class="rail-open"><button class="act is-line" type="button"><kbd>d</kbd>Open diff</button><button class="act" type="button"><kbd>c</kbd>Commit</button></div>
+        </div>
+
+        <div class="rail-sec">
+          <div class="sec">Tests</div>
+          <div class="testrow"><span class="ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span><span>pnpm test checkout</span></div>
+          <div class="testrow" style="margin-top:6px"><span class="faint">ran 09:09 · after the last edit</span></div>
+        </div>
+
+        <div class="rail-sec">
+          <div class="sec">Next</div>
+          <div class="step"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>Reproduce, fix, test</span><small>09:09</small></div>
+          <div class="step is-now"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Push the branch</span><small>waits on you</small></div>
+          <div class="step"><svg class="mk tone-idle"><use href="#m-queued"/></svg><span>Open a pull request</span><small>after push</small></div>
+          <div class="step"><svg class="mk tone-idle"><use href="#m-queued"/></svg><span>Check the Apple Pay path</span><small>queued</small></div>
+        </div>
+
+        <div class="rail-sec">
+          <dl class="kv">
+            <dt>branch</dt><dd><code>fix/3ds-eu-cards</code></dd>
+            <dt>from</dt><dd><code>main</code> · own worktree</dd>
+            <dt>machine</dt><dd>studio-mac</dd>
+            <dt>agent</dt><dd><svg class="brand"><use href="#b-claude"/></svg>Claude Code · Opus 5.5</dd>
+            <dt>account</dt><dd>rogier@personal</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-compact data-mode="DECIDE" data-context="Run git push -u origin fix/3ds-eu-cards?" data-keys="y:allow once|a:always|n:deny|i:type|d:diff"></footer>
+</div>
+</body>
+</html>

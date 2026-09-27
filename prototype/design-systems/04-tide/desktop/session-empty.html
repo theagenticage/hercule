@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>New thread in webshop · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .bar { gap: 6px; }
+      .bar-title { align-items: center; gap: 4px; }
+      .crumb { margin-right: 4px; }
+      .ttabs { display: flex; align-items: center; gap: 2px; }
+      .body { position: relative; flex: 1; min-height: 0; }
+      .ttab .draft-dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px dashed var(--future-ink); }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="threads" data-active="draft"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title">
+          <span class="crumb">webshop /</span>
+          <div class="ttabs" role="tablist" aria-label="Threads in this project">
+            <a class="ttab" role="tab" aria-selected="true"><span class="draft-dot" aria-hidden="true"></span><span>New thread</span></a>
+            <a class="ttab" role="tab" aria-selected="false" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix 3-D Secure checkout for EU cards</span></a>
+            <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
+          </div>
+        </div>
+        <div class="bar-end">
+          <button class="icon-btn" aria-label="More thread actions"><i data-m="more"></i></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <section class="draft">
+          <p class="startline">09:41 <span>starts when you send</span></p>
+          <h1 class="draft-title">What should the agent do in webshop?</h1>
+          <p class="draft-sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+          <div class="composer" data-composer style="width: 720px">
+            <div class="card-c">
+              <div class="c-input" role="textbox" tabindex="0" aria-label="Message" style="min-height: 76px">Say what you want done…</div>
+              <div class="c-row">
+                <button class="icon-btn" aria-label="Attach"><i data-m="plus"></i></button>
+                <button class="c-sel"><i data-m="shield"></i>auto-accept edits<i data-m="chev-down" class="caret"></i></button>
+                <button class="c-sel" style="min-width: 84px"><i data-m="gauge"></i>High<i data-m="chev-down" class="caret"></i></button>
+                <button class="c-pill"><i data-b="anthropic"></i>Claude Code<span class="acct">·</span>Opus 5.5</button>
+                <span class="c-spacer"></span>
+                <button class="icon-btn" aria-label="Voice"><i data-m="mic"></i></button>
+                <button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button>
+              </div>
+            </div>
+            <div class="lip">
+              <i data-m="worktree"></i><span>New worktree</span>
+              <span class="c-rule"></span>
+              <i data-m="branch"></i><span>from <span class="mono">main</span></span>
+              <span class="c-spacer"></span>
+              <i data-m="machine"></i><span>studio-mac</span><span class="faint">5 of 6</span>
+            </div>
+          </div>
+
+          <div class="starts">
+            <div class="label">Start from what came in</div>
+            <div class="start-grid">
+              <button class="start"><i data-m="decision" class="now"></i><span><b>Fix:</b> Checkout fails for EU cards with 3-D Secure</span><small>Intake · urgent · 08:52</small></button>
+              <button class="start"><i data-b="stripe"></i><span><b>Investigate:</b> Stripe webhook retries rising</span><small>Intake · today</small></button>
+              <button class="start"><i data-b="intercom"></i><span><b>Research:</b> Add iDEAL as a payment method</span><small>Intake · 5 requests</small></button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

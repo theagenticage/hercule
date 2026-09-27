@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait1.4| wait2.3| wait4.2| wait2.1| empty6" data-favicon-center="9">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(9) Intake · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="intake" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="bar">
+          <h1>Intake</h1>
+          <span class="when row" style="gap: 7px; margin-left: 6px">
+            <span data-halo="ink41 empty79" data-size="14" data-still aria-label="41 of 120 minutes to the next triage"></span>
+            Last triage 09:00 · 42s · next 11:00
+          </span>
+          <span class="right">
+            <span class="tabs" role="tablist" aria-label="Scale preview">
+              <a href="intake.html" class="x10">Today</a><a href="intake.html" class="x1" aria-selected="true">Today</a>
+              <a href="intake.html?state=10x" class="x1">At 10x</a><a href="intake.html?state=10x" class="x10" aria-selected="true">At 10x</a>
+            </span>
+            <button class="btn sm"><i data-icon="refresh" style="width: 13px; height: 13px"></i>Triage now</button>
+          </span>
+        </header>
+
+        <div class="w-intake">
+          <!-- ============================================================ the glance band, with what came in folded into it -->
+          <section class="w-band">
+            <div class="x1">
+              <span data-halo="wait1.4| wait2.3| wait4.2| wait2.1|" data-span="0.42" data-track data-notch="0" data-center="9" data-label="to decide" data-size="168"></span>
+            </div>
+            <div class="x10">
+              <span data-halo="wait3.4| wait11.3| wait26.2| wait20.1|" data-span="0.62" data-track data-notch="0" data-center="60" data-label="to decide" data-size="168"></span>
+            </div>
+            <div>
+              <div class="x1">
+                <div class="stats">
+                  <div class="stat burn"><b>1</b><span><i data-mark="wait"></i>burning</span></div>
+                  <div class="stat"><b>6</b><span>proposals</span></div>
+                  <div class="stat"><b>2</b><span>need a call</span></div>
+                  <div class="stat"><b>3</b><span>FYI</span></div>
+                  <div class="stat quiet"><b>198</b><span>handled quietly</span></div>
+                </div>
+                <div class="receipt"><span><b>212 events</b> →</span> <span>6 proposals</span> · <span>1 attached</span> · <span>2 offers</span> · <span>3 FYI</span> · <span>2 unsure</span> · <span>198 no action</span></div>
+              </div>
+              <div class="x10">
+                <div class="stats">
+                  <div class="stat burn"><b>3</b><span><i data-mark="wait"></i>burning</span></div>
+                  <div class="stat"><b>41</b><span>proposals</span></div>
+                  <div class="stat"><b>7</b><span>need a call</span></div>
+                  <div class="stat"><b>26</b><span>FYI</span></div>
+                  <div class="stat quiet"><b>2,025</b><span>handled quietly</span></div>
+                </div>
+                <div class="receipt"><span><b>2,120 events</b> →</span> <span>41 proposals</span> · <span>9 attached</span> · <span>12 offers</span> · <span>26 FYI</span> · <span>7 unsure</span> · <span>2,025 no action</span></div>
+              </div>
+            </div>
+            <div class="w-came">
+              <h3>What came in <span class="faint">since yesterday 18:20</span><span class="day x1">2,418 in 24h</span><span class="day x10">31,000 a day</span></h3>
+              <div class="x1"><span data-ticks="wait1.4 wait5.3 wait2.3 wait2.3 idle1.2 idle3.2 idle198.1" data-width="340" data-height="22" role="img" aria-label="212 events: 12 needed you, 200 were handled quietly"></span></div>
+              <div class="x10"><span data-ticks="wait1.4 wait5.3 idle4.2 idle202.1" data-width="340" data-height="22" role="img" aria-label="2,120 events, a tick per 10"></span></div>
+              <div class="w-conns">
+                <span><i data-brand="sentry"></i><b class="x1">131</b><b class="x10">1,310</b></span>
+                <span><i data-brand="github"></i><b class="x1">38</b><b class="x10">380</b></span>
+                <span><i data-brand="gmail"></i><b class="x1">17</b><b class="x10">170</b></span>
+                <span><i data-brand="stripe"></i><b class="x1">12</b><b class="x10">120</b></span>
+                <span><i data-brand="intercom"></i><b class="x1">9</b><b class="x10">90</b></span>
+                <span><i data-brand="posthog"></i><b class="x1">3</b><b class="x10">30</b></span>
+                <span><i data-brand="grafana"></i><b class="x1">2</b><b class="x10">20</b></span>
+              </div>
+            </div>
+          </section>
+
+          <div class="topic-row">
+            <div class="tabs x1" role="tablist" aria-label="Topics">
+              <button aria-selected="true">All <span class="n">9</span></button>
+              <button>Checkout <span class="n">2</span></button>
+              <button>Infrastructure <span class="n">2</span></button>
+              <button>Customers <span class="n">3</span></button>
+              <button>Releases <span class="n">2</span></button>
+            </div>
+            <div class="tabs x10" role="tablist" aria-label="Topics">
+              <button aria-selected="true">All <span class="n">60</span></button>
+              <button>Checkout <span class="n">18</span></button>
+              <button>Infrastructure <span class="n">14</span></button>
+              <button>Customers <span class="n">19</span></button>
+              <button>Releases <span class="n">9</span></button>
+            </div>
+            <span class="right"><button class="btn sm ghost"><i data-icon="sliders" style="width: 13px; height: 13px"></i>Manage topics</button></span>
+          </div>
+
+          <!-- ============================================================ today's tiers -->
+          <div class="x1">
+            <div class="tier-head"><i class="sw"></i>Now <span class="n">1</span><span class="rule"></span><a class="deep" href="decision.html"><i data-icon="link"></i>Open as a page</a></div>
+            <article class="lead-card w-lead">
+              <div class="l">
+                <div class="head">
+                  <i data-mark="pri4"></i><span class="kind">Proposal</span><span>Checkout</span><span>·</span><span>webshop</span><span>·</span><span>first seen 08:52</span>
+                  <span class="right chip wait"><i data-mark="wait"></i>urgent · 4 sources</span>
+                </div>
+                <h2>Checkout fails for EU cards with 3-D Secure</h2>
+                <p class="gist">
+                  Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+                  <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+                </p>
+                <div class="made-label">Made from</div>
+                <div class="made">
+                  <div><span><i data-brand="sentry"></i></span><span class="src">Sentry · webshop-prod</span><span class="what mono">PaymentError: authentication_required</span><span class="fig">412 events · 188 users</span></div>
+                  <div><span><i data-brand="gmail"></i></span><span class="src">Gmail · rogier@personal</span><span class="what" title="Card declined at checkout · Can't pay with my Rabobank card · Payment keeps failing">“Card declined at checkout” and 2 more like it</span><span class="fig">3 emails</span></div>
+                  <div><span><i data-brand="posthog"></i></span><span class="src">PostHog · webshop</span><span class="what">Checkout conversion since 14:10 yesterday, EU only</span><span class="fig" style="color: var(--fail-ink)">-18%</span></div>
+                  <div><span><i data-brand="github"></i></span><span class="src">GitHub · rogier/webshop</span><span class="what">Deploy #1289 “Upgrade Stripe SDK to v14”</span><span class="fig">14:02 yesterday</span></div>
+                </div>
+              </div>
+              <div class="r">
+                <div class="made-label">Answer</div>
+                <div class="ledger">
+                  <button><span class="btn wait">Start “Fix bug”</span><span><span class="d">Starts Fix bug on webshop in a new worktree<small>Claude Code · Opus 5.5 · studio-mac</small></span><span class="k">⌘⏎</span></span></button>
+                  <button><span class="btn">Accept</span><span><span class="d">Adds it to the backlog as a Task</span></span></button>
+                  <button><span class="btn">Dismiss</span><span><span class="d">Closes the Proposal</span></span></button>
+                </div>
+                <div class="note"><i data-mark="offer"></i>I can also draft a reply to the 3 customers once the fix ships.<button class="btn sm ghost">Yes, after the fix</button></div>
+              </div>
+            </article>
+
+            <div class="tier-head"><i class="sw l3"></i>Needs a call <span class="n">2</span><span class="rule"></span></div>
+            <div class="item">
+              <span class="lead"><i data-mark="wait"></i></span>
+              <span class="title">App is slow on Android</span>
+              <span class="side-actions"><button class="btn sm">webshop</button><button class="btn sm">payments-api</button><button class="btn sm">Both</button><button class="btn sm ghost">Not work</button></span>
+              <span class="meta"><i data-brand="intercom"></i>Intercom · support<span class="sep">·</span>7 conversations since Sunday</span>
+              <span class="why"><b>Unsure</b> · “I can't tell which project this belongs to.”</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="held"></i></span>
+              <span class="title">Breaker tripped: “Label new issues” held 34 events</span>
+              <span class="side-actions"><button class="btn sm">Keep held</button><button class="btn sm">Release all 34</button><button class="btn sm">Raise bound to 50/h</button></span>
+              <span class="meta"><i data-brand="github"></i>GitHub · rogier<span class="sep">·</span>Spawn Bound 20/h tripped at 08:14 after a bot opened 34 issues</span>
+            </div>
+
+            <div class="tier-head"><i class="sw l2"></i>Today <span class="n">4</span><span class="rule"></span></div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri3"></i></span>
+              <span class="title">Nightly backup job timing out on ops-db</span>
+              <span class="side-actions"><button class="btn sm">Start “Investigate”</button><button class="icon-btn" title="More answers"><i data-icon="more"></i></button></span>
+              <span class="meta"><i data-brand="grafana"></i>Grafana · ops + Cron<span class="sep">·</span>Infrastructure<span class="sep">·</span>ops<span class="sep">·</span>“3 nights in a row; the job hits its 2h limit at 04:00.”</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="offer"></i></span>
+              <span class="title">Draft a reply to Marta at Brightline</span>
+              <span class="side-actions"><button class="btn sm">Draft reply</button><button class="btn sm ghost">Not now</button></span>
+              <span class="meta"><i data-brand="gmail"></i>Gmail · Customers<span class="sep">·</span>“Asks for invoice INV-2291 in the company name, not hers.”</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri2"></i></span>
+              <span class="title">Stripe webhook retries rising</span>
+              <span class="side-actions"><button class="btn sm">Start “Investigate”</button><button class="icon-btn" title="More answers"><i data-icon="more"></i></button></span>
+              <span class="meta"><i data-brand="stripe"></i>Stripe · live + Sentry<span class="sep">·</span>Checkout<span class="sep">·</span>payments-api</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="offer"></i></span>
+              <span class="title">Merge 4 dependency bumps</span>
+              <span class="side-actions"><button class="btn sm">Merge all 4</button><button class="btn sm ghost">Review first</button></span>
+              <span class="meta"><i data-brand="github"></i>GitHub · rogier<span class="sep">·</span>Releases<span class="sep">·</span>“All green, patch versions only.”</span>
+            </div>
+
+            <div class="tier-head"><i class="sw l1"></i>When you can <span class="n">2</span><span class="rule"></span></div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri1"></i></span>
+              <span class="title">SSL certificate for status.acme.dev expires in 12 days</span>
+              <span class="side-actions"><button class="btn sm">Start “Fix bug”</button><button class="icon-btn" title="More answers"><i data-icon="more"></i></button></span>
+              <span class="meta"><i data-brand="cron"></i>Cron · schedules<span class="sep">·</span>Infrastructure<span class="sep">·</span>ops</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri1"></i></span>
+              <span class="title">Add iDEAL as a payment method</span>
+              <span class="side-actions"><button class="btn sm">Accept</button><button class="icon-btn" title="More answers"><i data-icon="more"></i></button></span>
+              <span class="meta"><i data-brand="intercom"></i>Intercom · support · 5 requests<span class="sep">·</span>Customers<span class="sep">·</span>webshop</span>
+            </div>
+
+            <div class="tier-head"><i class="sw idle"></i>Attached <span class="n">1</span><span class="rule"></span></div>
+            <div class="fyi-row"><i data-mark="attached"></i><span>2 new Sentry events attached to the Task <b>Cart total rounding on discounts</b></span><span class="src"><i data-brand="sentry"></i>Sentry · webshop-prod</span></div>
+
+            <div class="tier-head"><i class="sw idle"></i>FYI <span class="n">3</span><span class="rule"></span></div>
+            <div class="fyi-row"><i data-mark="fyi"></i><span>Release <b>v2.14.0</b> of payments-api was published</span><span class="src"><i data-brand="github"></i>GitHub</span></div>
+            <div class="fyi-row"><i data-mark="fyi"></i><span>Sign-ups up <b>+9%</b> week over week</span><span class="src"><i data-brand="posthog"></i>PostHog</span></div>
+            <div class="fyi-row"><i data-mark="fyi"></i><span>Payout of <b>€18,240</b> arrives Thursday</span><span class="src"><i data-brand="stripe"></i>Stripe</span></div>
+          </div>
+
+          <!-- ============================================================ at 10x: the same page, aggregated -->
+          <div class="x10">
+            <div class="tier-head"><i class="sw"></i>Now <span class="n">3</span><span class="rule"></span></div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri4"></i></span>
+              <span class="title">Checkout fails for EU cards with 3-D Secure</span>
+              <span class="side-actions"><button class="btn sm wait">Start “Fix bug”</button><button class="btn sm">Open</button></span>
+              <span class="meta"><i data-brand="sentry"></i>made from 41 events in 4 sources<span class="sep">·</span>Checkout<span class="sep">·</span>webshop</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri4"></i></span>
+              <span class="title">Nightly backup job timing out on ops-db and ops-db-2</span>
+              <span class="side-actions"><button class="btn sm wait">Start “Investigate”</button><button class="btn sm">Open</button></span>
+              <span class="meta"><i data-brand="grafana"></i>made from 18 events in 2 sources<span class="sep">·</span>Infrastructure<span class="sep">·</span>ops</span>
+            </div>
+            <div class="item">
+              <span class="lead"><i data-mark="pri4"></i></span>
+              <span class="title">Ship release v2.15 blocked by a failing contract test</span>
+              <span class="side-actions"><button class="btn sm wait">Start “Fix bug”</button><button class="btn sm">Open</button></span>
+              <span class="meta"><i data-brand="github"></i>made from 6 events<span class="sep">·</span>Releases<span class="sep">·</span>payments-api</span>
+            </div>
+
+            <div class="tier-head"><i class="sw l2"></i>By topic <span class="n">57 more, grouped</span><span class="rule"></span></div>
+            <div class="cluster">
+              <span data-halo="wait1.4 wait3.3 wait8.2 wait6.1" data-size="46" data-notch="0" data-center="18"></span>
+              <span class="t">Checkout <span class="faint">18 to decide · 1 burning</span></span>
+              <span class="acts"><button class="btn sm">Accept 6 low as Tasks</button><button class="btn sm ghost">Open 18</button></span>
+              <span class="m"><i data-brand="sentry"></i><i data-brand="stripe"></i><i data-brand="posthog"></i>mostly Sentry and Stripe · 9 share one root cause</span>
+            </div>
+            <div class="cluster">
+              <span data-halo="wait1.4 wait2.3 wait6.2 wait5.1" data-size="46" data-notch="0" data-center="14"></span>
+              <span class="t">Infrastructure <span class="faint">14 to decide · 1 burning</span></span>
+              <span class="acts"><button class="btn sm">Investigate 3 as one</button><button class="btn sm ghost">Open 14</button></span>
+              <span class="m"><i data-brand="grafana"></i><i data-brand="cron"></i>Grafana and Cron · 5 certificates expire this month</span>
+            </div>
+            <div class="cluster">
+              <span data-halo="wait4.3 wait9.2 wait6.1" data-size="46" data-center="19"></span>
+              <span class="t">Customers <span class="faint">19 to decide</span></span>
+              <span class="acts"><button class="btn sm">Draft 8 replies</button><button class="btn sm ghost">Open 19</button></span>
+              <span class="m"><i data-brand="gmail"></i><i data-brand="intercom"></i>Gmail and Intercom · 8 ask about invoices</span>
+            </div>
+            <div class="cluster">
+              <span data-halo="wait1.4 wait2.3 wait3.2 wait3.1" data-size="46" data-notch="0" data-center="9"></span>
+              <span class="t">Releases <span class="faint">9 to decide · 1 burning</span></span>
+              <span class="acts"><button class="btn sm">Merge 12 green bumps</button><button class="btn sm ghost">Open 9</button></span>
+              <span class="m"><i data-brand="github"></i>GitHub · 3 repositories</span>
+            </div>
+
+            <div class="tier-head"><i class="sw idle"></i>FYI and attached <span class="n">35</span><span class="rule"></span></div>
+            <div class="fyi-row"><i data-mark="fyi"></i><span><b>26</b> FYI and <b>9</b> events attached to existing Tasks, summed up in Ada's 12:00 digest</span><span class="src"><i data-mark="assistant"></i>Ada</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

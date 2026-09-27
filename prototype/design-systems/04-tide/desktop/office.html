@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Check-in · Office · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .bar-title { align-items: center; gap: 14px; }
+      .view-seg > button { padding: 0 10px 0 8px; }
+      .view-seg .m { width: 14px; height: 14px; }
+
+      .body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+      .stage { position: absolute; inset: 0; }
+      .scene { position: absolute; inset: 0; display: block; }
+      .tags { position: absolute; inset: 0; pointer-events: none; }
+      .tags > * { position: absolute; pointer-events: auto; }
+      :root:not([data-state="swarm"]) .swarm, :root[data-state="swarm"] .calm { display: none !important; }
+
+      /* ---------------------------------------------------------------- the room */
+      .fl { fill: var(--floor); }
+      .plank { fill: none; stroke: var(--line-soft); stroke-width: 1; }
+      .slab.front { fill: var(--wood-dark); }
+      .slab.side { fill: color-mix(in oklch, var(--wood-dark) 78%, black); }
+      .slab.top { fill: var(--floor); }
+      .wall-r { fill: color-mix(in oklch, var(--raised) 55%, var(--surface)); }
+      .wall-l { fill: color-mix(in oklch, var(--surface) 70%, var(--sunken)); }
+      .wall-cap { fill: var(--wood); }
+      .wall-end { fill: var(--wood-dark); }
+      .skirt { fill: color-mix(in oklch, var(--wood-dark) 70%, transparent); }
+      .win-frame { fill: var(--wood); }
+      .win-sky { fill: url(#sky); }
+      .win-bar { fill: var(--wood); }
+      .sun { fill: color-mix(in oklch, var(--sky-b) 35%, white); }
+      .cloud { fill: white; opacity: 0.55; }
+      .beam { fill: color-mix(in oklch, var(--sky-b) 70%, white); opacity: 0.32; }
+      :root[data-theme="dark"] .beam, :root[data-theme="kelp"] .beam, :root[data-theme="driftwood"] .beam, :root[data-theme="low-tide"] .beam { opacity: 0.1; }
+      .zone { fill: color-mix(in oklch, var(--ink) 3.5%, transparent); stroke: var(--line); stroke-dasharray: 5 4; }
+      .zone.is-full { stroke: color-mix(in oklch, var(--ink) 40%, transparent); stroke-dasharray: none; }
+      .rug { fill: var(--future-wash); stroke: color-mix(in oklch, var(--future) 45%, transparent); }
+
+      /* Furniture. */
+      .desk.top { fill: var(--wood); }
+      .desk.front { fill: var(--wood-dark); }
+      .desk.side { fill: color-mix(in oklch, var(--wood-dark) 80%, black); }
+      .chair.top { fill: var(--pebble-shade); }
+      .chair.front { fill: color-mix(in oklch, var(--pebble-shade) 80%, black); }
+      .chair.side { fill: color-mix(in oklch, var(--pebble-shade) 68%, black); }
+      .lid { fill: color-mix(in oklch, var(--pebble-shade) 75%, var(--ink)); }
+      .lid.work { fill: var(--live); }
+      .lid.wait { fill: var(--now); }
+      .lid.asleep { fill: color-mix(in oklch, var(--wood-dark) 50%, black); }
+      .lid-base { fill: color-mix(in oklch, var(--pebble-shade) 60%, var(--ink)); }
+      .lid-m { fill: none; stroke: var(--pebble); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; overflow: hidden; }
+      .lid-m .dot { fill: var(--pebble); stroke: none; }
+      .lid-m.work, .lid-m.wait { stroke: var(--on-now); }
+      .lid-m.wait .dot { fill: var(--on-now); }
+      .lid-m .wv { animation: tide-wave 1.8s linear infinite; }
+      .free-desk { fill: none; stroke: color-mix(in oklch, var(--ink) 28%, transparent); stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .leader { fill: none; stroke: var(--now); stroke-width: 1.5; }
+      .leader-foot { fill: var(--now); stroke: var(--bg); stroke-width: 1.5; }
+      @media (prefers-reduced-motion: reduce) { .lid-m .wv { animation: none; } }
+      @media (prefers-reduced-transparency: reduce) {
+        .tag, .ask, .o-10x { backdrop-filter: none; background: var(--raised); }
+      }
+      .pot.top { fill: color-mix(in oklch, var(--wood-dark) 60%, black); }
+      .pot.front { fill: var(--now); opacity: 0.55; }
+      .pot.side { fill: var(--now); opacity: 0.7; }
+      .leaf { fill: none; stroke: var(--ok); stroke-width: 3; stroke-linecap: round; }
+
+      /* Agents: pebbles. The scarf is the project's lane color; the face and the lid carry state. */
+      .peb { fill: url(#peb); stroke: color-mix(in oklch, var(--pebble-eye) 22%, transparent); stroke-width: 1; }
+      .peb-shadow { fill: oklch(20% 0.03 80 / 0.16); }
+      .eye { fill: var(--pebble-eye); }
+      .eye-line { fill: none; stroke: var(--pebble-eye); stroke-width: 1.6; stroke-linecap: round; }
+      .scarf { fill: none; stroke: var(--lane); stroke-width: 4; }
+      .antenna { fill: none; stroke: var(--pebble-shade); stroke-width: 1.6; stroke-linecap: round; }
+      .antenna-tip { fill: var(--pebble-shade); }
+      .antenna-tip.work { fill: var(--live); }
+      .glow { opacity: 0.9; }
+      .dark-pool { fill: url(#pool); }
+      .zz { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
+
+      /* The clock on the wall: the coral minute hand is Now, the sea-glass arc runs to the next triage. */
+      .clock-face { fill: var(--raised); stroke: var(--wood-dark); stroke-width: 0.16; }
+      .clock-tick { stroke: var(--muted); stroke-width: 0.07; stroke-linecap: round; }
+      .clock-arc { fill: none; stroke: var(--future); stroke-width: 0.16; stroke-dasharray: 0.24 0.12; }
+      .clock-next { fill: var(--raised); stroke: var(--future-ink); stroke-width: 0.1; }
+      .clock-hour { stroke: var(--ink); stroke-width: 0.15; stroke-linecap: round; }
+      .clock-min { stroke: var(--now); stroke-width: 0.1; stroke-linecap: round; }
+      .clock-pin { fill: var(--now); }
+
+      /* Campus (10x): each runner is a room; pins rise where a session waits on Rogier. */
+      .c-floor.top { fill: var(--floor); }
+      .c-floor.front { fill: var(--wood-dark); }
+      .c-floor.side { fill: color-mix(in oklch, var(--wood-dark) 80%, black); }
+      .c-floor.is-full.top { fill: color-mix(in oklch, var(--floor) 88%, var(--ink)); }
+      .c-seat { fill: none; stroke: var(--line); stroke-width: 1; }
+      .c-ring { fill: var(--live-wash); stroke: var(--live); stroke-width: 1; }
+      .c-pin { stroke: var(--now); stroke-width: 1.5; }
+      .c-pin-head { fill: var(--now); }
+
+      /* ---------------------------------------------------------------- tags over the scene */
+      .tag {
+        display: flex; align-items: center; gap: 6px;
+        height: 24px; padding: 0 9px 0 7px; border-radius: var(--r-pill);
+        transform: translate(-15px, -100%);
+        font-size: 11.5px; font-weight: var(--w-emph); white-space: nowrap;
+        background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        box-shadow: var(--shadow-2), 0 0 0 1px var(--line-soft);
+      }
+      .tag .m { width: 14px; height: 14px; }
+      .tag .t-mono { font-size: 10px; font-weight: 400; }
+      .tag.is-centered { transform: translate(-50%, 0); }
+      .tag.pin { width: 22px; height: 22px; padding: 0; justify-content: center; transform: translate(-50%, -50%); }
+      .tag.pin .m { width: 13px; height: 13px; }
+      .tag.is-asleep { color: var(--muted); }
+      .ask {
+        width: 204px; padding: 9px 10px 10px 11px; border-radius: 13px;
+        background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        box-shadow: var(--shadow-3), 0 0 0 1.5px var(--now);
+      }
+      .ask-h { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: var(--w-strong); white-space: nowrap; }
+      .ask-h .m { color: var(--now); flex: none; }
+      .ask-q { margin: 3px 0 8px 22px; font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+      .ask-q code { font-size: 10.5px; }
+      .ask-a { display: flex; gap: 4px; margin-left: 22px; }
+      .ask-a .btn { height: 24px; padding: 0 9px; font-size: 11.5px; }
+      .rlabel {
+        display: flex; align-items: center; gap: 7px; transform: translate(-50%, -50%);
+        height: 24px; padding: 0 10px 0 8px; border-radius: 7px;
+        font-size: 11.5px; font-weight: var(--w-emph); white-space: nowrap;
+        background: color-mix(in oklch, var(--floor) 60%, transparent);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .rlabel .m { width: 14px; height: 14px; color: var(--muted); }
+      .rlabel .t-mono { font-size: 10.5px; }
+      .rlabel.is-full { box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--ink) 55%, transparent); }
+      /* A runner's name printed on the front face of its room's slab. */
+      .rname {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        transform: matrix(0.866, 0.5, 0, 1, 0, 0); transform-origin: 0 0;
+        font-size: 11.5px; font-weight: var(--w-strong); white-space: nowrap; color: var(--ink);
+      }
+      .rname .t-mono { font-size: 10px; color: var(--ink); opacity: 0.75; }
+
+      /* ---------------------------------------------------------------- corners */
+      .o-now { position: absolute; left: 28px; top: 18px; }
+      .o-now .headline { gap: 20px; }
+      .o-now .hn:first-child .num { font-size: var(--fs-num-xl); }
+      .o-sub { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+      .o-10x {
+        position: absolute; right: 24px; top: 18px; width: 262px; padding: 12px 14px 14px;
+        border-radius: var(--r-lg); background: var(--glass); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        box-shadow: var(--shadow-2), 0 0 0 1px var(--line-soft);
+      }
+      .o-10x-head { display: flex; align-items: baseline; justify-content: space-between; }
+      .o-10x .campus-mini { display: block; margin: 8px auto 6px; }
+      .o-10x p { font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; margin-bottom: 10px; }
+      .o-10x p b { color: var(--now-ink); font-weight: var(--w-emph); }
+      .o-10x .btn kbd { margin-right: -4px; }
+      .o-next { position: absolute; right: 30px; bottom: 22px; width: 232px; }
+      .nx { list-style: none; margin: 8px 0 0; padding: 0; position: relative; }
+      .nx::before { content: ""; position: absolute; left: 44.5px; top: 10px; bottom: 10px; border-left: 1.5px dashed var(--future); }
+      .nx li { position: relative; display: grid; grid-template-columns: 38px 16px 1fr auto; align-items: center; column-gap: 8px; height: 26px; font-size: var(--fs-sm); }
+      .nx time { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+      .nx .m { width: 14px; height: 14px; color: var(--future-ink); background: var(--bg); border-radius: 50%; }
+      .nx .t-mono { font-size: 10px; }
+      .nx li.is-now time, .nx li.is-now span { color: var(--now-ink); font-weight: var(--w-emph); }
+      .nx li.is-now .now-dot { width: 9px; height: 9px; margin-left: 3px; border-radius: 50%; background: var(--now); box-shadow: 0 0 0 3px var(--bg); }
+      .o-legend { position: absolute; left: 28px; bottom: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; width: 380px; font-size: var(--fs-xs); color: var(--muted); }
+      .o-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+      .o-legend .m { width: 14px; height: 14px; }
+      .scarf-key { display: inline-flex; gap: 2px; }
+      .scarf-key i { width: 12px; height: 4px; border-radius: 2px; background: var(--lane); }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="hercule" data-active="checkin"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title">
+          <h1 class="page-title">Check-in</h1>
+          <div class="seg view-seg" role="tablist" aria-label="Show sessions as">
+            <button role="tab" aria-selected="false"><i data-m="list"></i>List</button>
+            <button role="tab" aria-selected="true"><i data-m="office"></i>Office</button>
+          </div>
+        </div>
+        <div class="bar-center" data-tideline="day" data-w="300"></div>
+        <div class="bar-end">
+          <button class="search-btn"><i data-m="search"></i>Search<kbd>⌘K</kbd></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <!-- The scene is drawn by the script at the end of this page, from one isometric projection,
+             so the tags placed over it line up with the agents they belong to. -->
+        <div class="stage" role="img" aria-label="The office at 09:41. Three runner rooms: studio-mac 5 of 6 desks, build-box-1 8 of 8 at cap, build-box-2 3 of 8. Three agents wait on you: Fix 3-D Secure checkout, Migrate ops dashboards, Ship release v2.15. Ada works, Milo is idle, Juno is asleep.">
+          <svg class="scene" aria-hidden="true"></svg>
+          <div class="tags"></div>
+        </div>
+
+        <section class="o-now calm" aria-label="Sessions right now">
+          <div class="headline">
+            <div class="hn"><span class="num">23</span><span class="hn-l">live sessions</span></div>
+            <div class="hn is-live"><span class="num">8</span><span class="hn-l"><i data-m="working" class="xs"></i>working</span></div>
+            <div class="hn is-now"><span class="num">3</span><span class="hn-l"><i data-m="decision" class="xs"></i>waiting on you</span></div>
+            <div class="hn is-past"><span class="num">12</span><span class="hn-l"><i data-m="idle" class="xs"></i>idle</span></div>
+          </div>
+          <div class="o-sub"><button class="btn btn-sm btn-now">Answer 3 in a row</button></div>
+        </section>
+        <section class="o-now swarm" aria-label="Sessions right now">
+          <div class="headline">
+            <div class="hn"><span class="num">140</span><span class="hn-l">live sessions</span></div>
+            <div class="hn is-live"><span class="num">48</span><span class="hn-l"><i data-m="working" class="xs"></i>working</span></div>
+            <div class="hn is-now"><span class="num">11</span><span class="hn-l"><i data-m="decision" class="xs"></i>waiting on you</span></div>
+            <div class="hn is-past"><span class="num">81</span><span class="hn-l"><i data-m="idle" class="xs"></i>idle</span></div>
+          </div>
+          <div class="o-sub"><button class="btn btn-sm btn-now">Answer 11 in a row</button><span class="t-mono">9 runners · 3 at cap</span></div>
+        </section>
+
+        <section class="o-10x calm" aria-label="The office at ten times the load">
+          <div class="o-10x-head"><span class="label">At 10x</span><span class="t-mono">140 sessions · 9 runners</span></div>
+          <svg class="campus-mini" aria-hidden="true"></svg>
+          <p>Zoomed out, each runner is one room. Only the <b>11 waiting on you</b> stand up.</p>
+          <a class="btn btn-sm" href="?state=swarm">Zoom out<kbd>⌘ -</kbd></a>
+        </section>
+
+        <section class="o-next" aria-label="What comes next">
+          <div class="label">Next</div>
+          <ol class="nx">
+            <li class="is-now"><time>09:41</time><i class="now-dot" aria-hidden="true"></i><span>now</span></li>
+            <li><time>10:00</time><i data-m="heartbeat"></i><span>Ada's heartbeat</span><span class="t-mono">19m</span></li>
+            <li><time>11:00</time><i data-m="triage"></i><span>Triage</span><span class="t-mono">1h 19m</span></li>
+            <li><time>04:00</time><i data-m="clock"></i><span>Nightly backup</span><span class="t-mono">tomorrow</span></li>
+          </ol>
+        </section>
+
+        <section class="o-legend" aria-label="What the office shows">
+          <span><i data-m="working" class="live"></i>working</span>
+          <span><i data-m="decision" class="now"></i>waiting on you</span>
+          <span><i data-m="idle" class="faint"></i>idle</span>
+          <span><i data-m="paused"></i>paused</span>
+          <span><i data-m="asleep"></i>asleep</span>
+          <span><span class="scarf-key" aria-hidden="true"><i class="lane-webshop"></i><i class="lane-payments"></i><i class="lane-ops"></i></span>scarf = project</span>
+          <span class="calm"><svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M1 6L8 2 15 6 8 10Z" fill="none" stroke="currentColor" stroke-dasharray="2.5 2"/></svg>free desk</span>
+          <span class="swarm"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 13V4" stroke="var(--now)" stroke-width="1.5"/><circle cx="7" cy="3.5" r="2.5" fill="var(--now)"/></svg>a pin waits on you</span>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      // Draws the office after tide.js has expanded the page's marks (DOMContentLoaded fires after
+      // deferred scripts), so window.Tide is ready and the tags can reuse its mark family.
+      document.addEventListener("DOMContentLoaded", function () {
+        "use strict";
+        var swarm = document.documentElement.dataset.state === "swarm";
+        var stage = document.querySelector(".stage");
+        var svg = stage.querySelector(".scene");
+        var tags = stage.querySelector(".tags");
+        var W = stage.clientWidth;
+        var H = stage.clientHeight;
+        var C = Math.cos(Math.PI / 6);
+        var S = 0.5;
+
+        // ------------------------------------------------------------ isometric helpers
+        // Grid units: gx runs down to the right, gy down to the left, gz up. P maps them to pixels.
+        function projector(u, ox, oy) {
+          var P = function (gx, gy, gz) {
+            return [ox + (gx - gy) * C * u, oy + (gx + gy) * S * u - (gz || 0) * u];
+          };
+          P.u = u; P.ox = ox; P.oy = oy;
+          return P;
+        }
+        function n1(v) { return v.toFixed(1); }
+        function n3(v) { return v.toFixed(3); }
+        function poly(P, pts, cls) {
+          return '<path class="' + cls + '" d="M' + pts.map(function (p) {
+            var q = P(p[0], p[1], p[2]);
+            return n1(q[0]) + " " + n1(q[1]);
+          }).join("L") + 'Z"/>';
+        }
+        // A box from (x, y, z) with size (w, d, h): its top, its front (facing +gy) and its side (facing +gx).
+        function box(P, x, y, z, w, d, h, cls) {
+          return poly(P, [[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]], cls + " top") +
+            poly(P, [[x, y + d, z + h], [x + w, y + d, z + h], [x + w, y + d, z], [x, y + d, z]], cls + " front") +
+            poly(P, [[x + w, y, z + h], [x + w, y + d, z + h], [x + w, y + d, z], [x + w, y, z]], cls + " side");
+        }
+        // Matrices that lay a flat drawing onto a plane of the room.
+        function floorMatrix(P) { return "matrix(" + [C * P.u, S * P.u, -C * P.u, S * P.u, P.ox, P.oy].map(n3).join(" ") + ")"; }
+        function wallRMatrix(P) { return "matrix(" + [C * P.u, S * P.u, 0, P.u, P.ox, P.oy].map(n3).join(" ") + ")"; }
+        function wallLMatrix(P, ry) { var o = P(0, ry, 0); return "matrix(" + [C * P.u, -S * P.u, 0, P.u, o[0], o[1]].map(n3).join(" ") + ")"; }
+
+        var DEFS =
+          '<defs>' +
+          '<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--sky-a)"/><stop offset="1" style="stop-color:var(--sky-b)"/></linearGradient>' +
+          '<radialGradient id="peb" cx="0.36" cy="0.3" r="0.8"><stop offset="0.35" style="stop-color:var(--pebble)"/><stop offset="1" style="stop-color:var(--pebble-shade)"/></radialGradient>' +
+          '<radialGradient id="g-work"><stop offset="0" style="stop-color:var(--live);stop-opacity:0.34"/><stop offset="1" style="stop-color:var(--live);stop-opacity:0"/></radialGradient>' +
+          '<radialGradient id="g-wait"><stop offset="0" style="stop-color:var(--now);stop-opacity:0.42"/><stop offset="1" style="stop-color:var(--now);stop-opacity:0"/></radialGradient>' +
+          '<radialGradient id="pool"><stop offset="0.45" style="stop-color:oklch(24% 0.04 265);stop-opacity:0.34"/><stop offset="1" style="stop-color:oklch(22% 0.03 160);stop-opacity:0"/></radialGradient>' +
+          '</defs>';
+
+        // ------------------------------------------------------------ an agent
+        // A pebble with a face, seated at grid point (gx, gy) on a stool of height z.
+        // state: work | wait | idle | paused | asleep. lane: the project's lane, or null for an assistant.
+        function pebble(P, gx, gy, z, state, lane, scale) {
+          var k = (scale || 1) * P.u / 26;
+          var b = P(gx, gy, z);
+          var rx = 12.5 * k, ry = 19 * k;
+          var cx = b[0], cy = b[1] - ry;
+          if (state === "wait") cy -= 3 * k;
+          var s = '<ellipse class="peb-shadow" cx="' + n1(cx) + '" cy="' + n1(b[1] + 1) + '" rx="' + n1(rx * 1.05) + '" ry="' + n1(rx * 0.45) + '"/>';
+          if (!lane) {
+            s += '<path class="antenna" d="M' + n1(cx + 3 * k) + " " + n1(cy - ry + 1) + "q" + n1(2 * k) + " " + n1(-6 * k) + " " + n1(5 * k) + " " + n1(-8 * k) + '"/>';
+            s += '<circle class="antenna-tip ' + state + '" cx="' + n1(cx + 8 * k) + '" cy="' + n1(cy - ry - 7 * k) + '" r="' + n1(2.6 * k) + '"/>';
+          }
+          s += '<ellipse class="peb" cx="' + n1(cx) + '" cy="' + n1(cy) + '" rx="' + n1(rx) + '" ry="' + n1(ry) + '"/>';
+          if (lane) {
+            s += '<path class="scarf lane-' + lane + '" style="stroke:var(--lane)" d="M' + n1(cx - rx * 0.93) + " " + n1(cy + 4 * k) + "Q" + n1(cx) + " " + n1(cy + 11 * k) + " " + n1(cx + rx * 0.93) + " " + n1(cy + 4 * k) + '"/>';
+          }
+          // Eyes: down at the laptop while working, up at you while waiting, relaxed when idle, shut asleep.
+          var ex = cx - 1.5 * k, gap = 4.6 * k;
+          if (state === "work") {
+            s += eye(ex - gap, cy - 4 * k, 1.7 * k, 2 * k) + eye(ex + gap, cy - 4 * k, 1.7 * k, 2 * k);
+          } else if (state === "wait") {
+            s += eye(ex - gap, cy - 8 * k, 2.1 * k, 2.6 * k) + eye(ex + gap, cy - 8 * k, 2.1 * k, 2.6 * k);
+          } else if (state === "asleep") {
+            s += '<path class="eye-line" d="M' + n1(ex - gap - 2 * k) + " " + n1(cy - 6 * k) + "q" + n1(2 * k) + " " + n1(2 * k) + " " + n1(4 * k) + ' 0M' + n1(ex + gap - 2 * k) + " " + n1(cy - 6 * k) + "q" + n1(2 * k) + " " + n1(2 * k) + " " + n1(4 * k) + ' 0"/>';
+          } else {
+            s += '<path class="eye-line" d="M' + n1(ex - gap - 1.8 * k) + " " + n1(cy - 6 * k) + "h" + n1(3.6 * k) + "M" + n1(ex + gap - 1.8 * k) + " " + n1(cy - 6 * k) + "h" + n1(3.6 * k) + '"/>';
+          }
+          return { svg: s, head: [cx, cy - ry - (lane ? 0 : 9 * k)] };
+        }
+        function eye(x, y, rx, ry) {
+          return '<ellipse class="eye" cx="' + n1(x) + '" cy="' + n1(y) + '" rx="' + n1(rx) + '" ry="' + n1(ry) + '"/>';
+        }
+
+        // Marks drawn on the back of a laptop lid, so every agent shows its state as a shape, not only a color.
+        var LID_MARK = {
+          work: '<path class="wv" d="M-8 8.6q2-3.6 4 0t4 0t4 0t4 0t4 0t4 0t4 0t4 0"/>',
+          wait: '<path d="M6.1 6.2a1.9 1.9 0 1 1 2.7 1.75c-.6.28-.8.7-.8 1.25v.3"/><circle class="dot" cx="8" cy="12" r="1.05"/>',
+          idle: '<circle cx="8" cy="8" r="4.4"/>',
+          paused: '<path d="M6 4.8v6.4M10 4.8v6.4"/>',
+          asleep: '<path d="M11.8 9.9A4.6 4.6 0 1 1 6.8 3.7a3.6 3.6 0 0 0 5 6.2z"/>',
+        };
+
+        // A desk with its stool, its agent and a laptop. The lid's color and mark show the agent's state.
+        // With no agent, the desk is only a dashed outline on the floor: a free place on that runner.
+        var DW = 2.0, DD = 1.15, DH = 0.9;
+        function desk(P, x, y, agent) {
+          if (!agent) {
+            var f = poly(P, [[x, y - 1.0, 0], [x + DW, y - 1.0, 0], [x + DW, y + DD, 0], [x, y + DD, 0]], "free-desk");
+            return { svg: f, head: null };
+          }
+          var s = "";
+          var ax = x + 0.6, ay = y - 0.45;
+          s += box(P, ax - 0.4, ay - 0.58, 0.42, 0.8, 0.13, 0.7, "chair");
+          s += box(P, ax - 0.4, ay - 0.4, 0, 0.8, 0.8, 0.42, "chair");
+          var p = pebble(P, ax, ay, 0.42, agent.s, agent.lane);
+          s += p.svg;
+          s += box(P, x, y, 0, DW, DD, DH, "desk");
+          var l0 = x + 1.0, l1 = x + 1.85, ly = y + 0.55;
+          s += poly(P, [[l0, y + 0.2, DH + 0.02], [l1, y + 0.2, DH + 0.02], [l1, ly + 0.1, DH + 0.02], [l0, ly + 0.1, DH + 0.02]], "lid-base");
+          s += poly(P, [[l0, ly + 0.1, DH], [l1, ly + 0.1, DH], [l1, ly, DH + 0.66], [l0, ly, DH + 0.66]], "lid " + agent.s);
+          var c = P((l0 + l1) / 2, ly + 0.05, DH + 0.33);
+          var k = (0.44 * P.u) / 16;
+          s += '<g transform="translate(' + n1(c[0]) + " " + n1(c[1]) + ") matrix(" + n3(C * k) + " " + n3(S * k) + " 0 " + n3(k) + ' 0 0)"><svg class="lid-m ' + agent.s + '" x="-8" y="-8" width="16" height="16" viewBox="0 0 16 16">' + LID_MARK[agent.s] + "</svg></g>";
+          return { svg: s, head: p.head };
+        }
+        function floorGlow(P, gx, gy, state) {
+          if (state === "asleep") return '<ellipse class="dark-pool" cx="' + n3(gx) + '" cy="' + n3(gy) + '" rx="2.2" ry="1.8" transform="' + floorMatrix(P) + '"/>';
+          var id = state === "wait" ? "g-wait" : state === "work" ? "g-work" : null;
+          if (!id) return "";
+          return '<ellipse class="glow" fill="url(#' + id + ')" cx="' + n3(gx) + '" cy="' + n3(gy) + '" rx="1.9" ry="1.5" transform="' + floorMatrix(P) + '"/>';
+        }
+
+        // ------------------------------------------------------------ tags
+        function place(el, xy) {
+          el.style.left = n1(xy[0]) + "px";
+          el.style.top = n1(xy[1]) + "px";
+          tags.appendChild(el);
+          return el;
+        }
+        function tagHtml(cls, html) {
+          var el = document.createElement("div");
+          el.className = cls;
+          el.innerHTML = html;
+          return el;
+        }
+        var MARK = { work: '<i data-m="working" class="live"></i>', wait: '<i data-m="decision" class="now"></i>', idle: '<i data-m="idle" class="faint"></i>', paused: '<i data-m="paused" class="muted"></i>', asleep: '<i data-m="asleep" class="muted"></i>' };
+
+        // ------------------------------------------------------------ the office at 09:41
+        // Sessions per runner follow the fixture: studio-mac 5 of 6, build-box-1 8 of 8, build-box-2 3 of 8.
+        // The assistants sit apart, by the windows; their Conversations are sessions too, but not at a runner's desk.
+        var RUNNERS = [
+          { runner: "studio-mac", x: 2.0, y: 10.2, cols: 3, desks: [
+            { s: "work", lane: "webshop" }, { s: "idle", lane: "payments" }, { s: "idle", lane: "ops" },
+            { s: "wait", lane: "webshop", ask: "fix3ds" }, null, { s: "wait", lane: "ops", ask: "grafana" }] },
+          { runner: "build-box-1", x: 12.0, y: 2.6, cols: 4, labelAt: 0.72, desks: [
+            { s: "work", lane: "ops", pill: "backup" }, { s: "work", lane: "webshop", pill: "cart" }, { s: "paused", lane: "webshop", pill: "label" }, { s: "work", lane: "payments", pill: "webhook" },
+            { s: "work", lane: "webshop" }, { s: "idle", lane: "webshop" }, { s: "work", lane: "payments" }, { s: "idle", lane: "ops" }] },
+          { runner: "build-box-2", x: 12.0, y: 10.2, cols: 4, desks: [
+            { s: "idle", lane: "payments" }, { s: "work", lane: "ops" }, null, null,
+            null, null, null, { s: "wait", lane: "payments", ask: "release" }] },
+        ];
+        var ASSISTANTS = [
+          { name: "Ada", s: "work", note: "4 conversations" },
+          { name: "Milo", s: "idle", note: "3 conversations" },
+          { name: "Juno", s: "asleep", note: "asleep" },
+        ];
+        // The waiting agents sit at the front edge of their runner, and their questions hang outside the room
+        // on a coral leader, so no card hides a desk. at is the card's top-left corner relative to the agent's
+        // head; the leader joins the card's top edge or its left edge.
+        var ASK_W = 204;
+        var ASKS = {
+          fix3ds: { title: "Fix 3-D Secure checkout", q: "Run <code>git push -u origin fix/3ds-eu-cards</code>?", a: ["Allow once", "Deny"], at: [-300, 100], join: "top" },
+          grafana: { title: "Migrate ops dashboards", q: "Keep the old Grafana folder?", a: ["Keep", "Delete"], at: [-188, 158], join: "top" },
+          release: { title: "Ship release v2.15", q: "Publish payments-api 2.15.0 to npm?", a: ["Allow once", "Deny"], at: [250, -52], join: "left" },
+        };
+        function askJoint(ask, hx, hy) {
+          var left = hx + ask.at[0], top = hy + ask.at[1];
+          if (ask.join === "left") return [left, top + 26];
+          return [Math.min(Math.max(hx, left + 28), left + ASK_W - 28), top];
+        }
+        var PILLS = {
+          backup: { title: "Investigate backup timeouts", t: "6m" },
+          cart: { title: "Refactor cart totals", t: "22m" },
+          label: { title: "Label new issues", t: "bound tripped" },
+          webhook: { title: "Webhook retry backoff", t: "3m" },
+        };
+
+        function drawOffice() {
+          var RX = 22, RY = 16, WALL = 6.2, T = 0.35, SLAB = 0.6;
+          var u = 24;
+          var ox = W / 2 - ((RX - RY) * C * u) / 2;
+          var oy = H / 2 + 14 + (WALL * u - (RX + RY) * S * u - SLAB * u) / 2;
+          var P = projector(u, ox, oy);
+          var s = DEFS;
+
+          // Slab, floor and planks.
+          s += box(P, -T, -T, -SLAB, RX + T, RY + T, SLAB, "slab");
+          s += poly(P, [[-T, -T, 0], [RX, -T, 0], [RX, RY, 0], [-T, RY, 0]], "fl");
+          var planks = "";
+          for (var gy = 1.4; gy < RY; gy += 1.4) {
+            var a = P(0, gy, 0), b = P(RX, gy, 0);
+            planks += "M" + n1(a[0]) + " " + n1(a[1]) + "L" + n1(b[0]) + " " + n1(b[1]);
+          }
+          s += '<path class="plank" d="' + planks + '"/>';
+
+          // Walls: windows on the back-right wall, the clock on the back-left wall.
+          s += poly(P, [[0, 0, 0], [RX, 0, 0], [RX, 0, WALL], [0, 0, WALL]], "wall-r");
+          s += poly(P, [[0, 0, 0], [0, RY, 0], [0, RY, WALL], [0, 0, WALL]], "wall-l");
+          s += poly(P, [[0, 0, 0], [RX, 0, 0], [RX, 0, 0.26], [0, 0, 0.26]], "skirt");
+          s += poly(P, [[0, 0, 0], [0, RY, 0], [0, RY, 0.26], [0, 0, 0.26]], "skirt");
+          s += poly(P, [[-T, -T, WALL], [RX, -T, WALL], [RX, 0, WALL], [0, 0, WALL], [0, RY, WALL], [-T, RY, WALL]], "wall-cap");
+          s += poly(P, [[RX, -T, 0], [RX, 0, 0], [RX, 0, WALL], [RX, -T, WALL]], "wall-end");
+          s += poly(P, [[-T, RY, 0], [0, RY, 0], [0, RY, WALL], [-T, RY, WALL]], "wall-end");
+
+          // The windows show the sky at 09:41: a morning sun low in the first pane, a few clouds.
+          var WINS = [[1.8, 4.8], [6.6, 9.6], [11.4, 14.4], [16.2, 19.2]];
+          var w = '<g transform="' + wallRMatrix(P) + '">';
+          WINS.forEach(function (x) {
+            w += '<rect class="win-frame" x="' + (x[0] - 0.18) + '" y="-5.58" width="' + (x[1] - x[0] + 0.36) + '" height="3.56" rx="0.12"/>';
+            w += '<rect class="win-sky" x="' + x[0] + '" y="-5.4" width="' + (x[1] - x[0]) + '" height="3.2"/>';
+          });
+          w += '<circle class="sun" cx="3.7" cy="-3.0" r="0.58"/>';
+          w += '<ellipse class="cloud" cx="7.9" cy="-4.7" rx="0.85" ry="0.26"/><ellipse class="cloud" cx="8.8" cy="-4.46" rx="0.55" ry="0.2"/><ellipse class="cloud" cx="13.5" cy="-3.8" rx="0.7" ry="0.22"/>';
+          WINS.forEach(function (x) {
+            var m = (x[0] + x[1]) / 2;
+            w += '<rect class="win-bar" x="' + (m - 0.06) + '" y="-5.4" width="0.12" height="3.2"/><rect class="win-bar" x="' + x[0] + '" y="-3.86" width="' + (x[1] - x[0]) + '" height="0.12"/>';
+          });
+          w += "</g>";
+          s += w;
+          WINS.forEach(function (x) {
+            s += poly(P, [[x[0] + 0.4, 0.15, 0], [x[1] + 0.4, 0.15, 0], [x[1] + 2.0, 4.2, 0], [x[0] + 2.0, 4.2, 0]], "beam");
+          });
+
+          // The wall clock: a 12-hour dial. The coral minute hand is Now; the dashed sea-glass arc runs to 11:00.
+          var CK = { at: 5.2, z: 3.8, r: 1.6 };
+          var cx = RY - CK.at, cy = -CK.z, r = CK.r;
+          var c = '<g transform="' + wallLMatrix(P, RY) + '">';
+          c += '<circle class="clock-face" cx="' + cx + '" cy="' + cy + '" r="' + r + '"/>';
+          for (var h = 0; h < 12; h++) {
+            var ang = (h / 12) * Math.PI * 2 - Math.PI / 2;
+            var r1 = r * (h % 3 === 0 ? 0.58 : 0.66), r2 = r * 0.74;
+            c += '<path class="clock-tick" d="M' + n3(cx + r1 * Math.cos(ang)) + " " + n3(cy + r1 * Math.sin(ang)) + "L" + n3(cx + r2 * Math.cos(ang)) + " " + n3(cy + r2 * Math.sin(ang)) + '"/>';
+          }
+          var aHour = ((9 + 41 / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+          var aNext = (11 / 12) * Math.PI * 2 - Math.PI / 2;
+          var aMin = (41 / 60) * Math.PI * 2 - Math.PI / 2;
+          var ra = r * 0.85;
+          c += '<path class="clock-arc" d="M' + n3(cx + ra * Math.cos(aHour)) + " " + n3(cy + ra * Math.sin(aHour)) + "A" + ra + " " + ra + " 0 0 1 " + n3(cx + ra * Math.cos(aNext)) + " " + n3(cy + ra * Math.sin(aNext)) + '"/>';
+          c += '<circle class="clock-next" cx="' + n3(cx + ra * Math.cos(aNext)) + '" cy="' + n3(cy + ra * Math.sin(aNext)) + '" r="0.2"/>';
+          c += '<path class="clock-hour" d="M' + cx + " " + cy + "L" + n3(cx + r * 0.42 * Math.cos(aHour)) + " " + n3(cy + r * 0.42 * Math.sin(aHour)) + '"/>';
+          c += '<path class="clock-min" d="M' + cx + " " + cy + "L" + n3(cx + r * 0.78 * Math.cos(aMin)) + " " + n3(cy + r * 0.78 * Math.sin(aMin)) + '"/>';
+          c += '<circle class="clock-pin" cx="' + cx + '" cy="' + cy + '" r="0.12"/>';
+          c += "</g>";
+          s += c;
+
+          // Runner floors, the assistants' rug, and the glow under each agent.
+          var items = [], glows = "", zones = [];
+          var PX = 2.4, PY = 2.9;
+          RUNNERS.forEach(function (rn) {
+            var rows = Math.ceil(rn.desks.length / rn.cols);
+            var x0 = rn.x - 0.45, y0 = rn.y - 1.35;
+            var x1 = rn.x + (rn.cols - 1) * PX + DW + 0.45, y1 = rn.y + (rows - 1) * PY + DD + 0.4;
+            var full = rn.desks.every(Boolean);
+            s += poly(P, [[x0, y0, 0], [x1, y0, 0], [x1, y1, 0], [x0, y1, 0]], "zone" + (full ? " is-full" : ""));
+            zones.push({ rn: rn, full: full, x0: x0, y0: y0, x1: x1, y1: y1 });
+            rn.desks.forEach(function (ag, i) {
+              var dx = rn.x + (i % rn.cols) * PX, dy = rn.y + Math.floor(i / rn.cols) * PY;
+              if (ag) glows += floorGlow(P, dx + 0.9, dy + 0.3, ag.s);
+              items.push({ depth: dx + dy, x: dx, y: dy, agent: ag });
+            });
+          });
+          s += poly(P, [[1.3, 1.0, 0], [9.7, 1.0, 0], [9.7, 4.3, 0], [1.3, 4.3, 0]], "rug");
+          ASSISTANTS.forEach(function (as, i) {
+            var dx = 2.0 + i * 2.6, dy = 2.4;
+            glows += floorGlow(P, dx + 0.9, dy + 0.3, as.s);
+            items.push({ depth: dx + dy, x: dx, y: dy, agent: { s: as.s, lane: null, assistant: as } });
+          });
+          s += glows;
+
+          // Two plants: one in the front-left corner, one between the windows.
+          function plant(gx, gy) {
+            var out = box(P, gx, gy, 0, 0.75, 0.75, 0.65, "pot");
+            var t = P(gx + 0.37, gy + 0.37, 0.65);
+            var d = "";
+            [[-9, -22], [-3, -30], [4, -27], [10, -19], [0, -18]].forEach(function (l) {
+              d += "M" + n1(t[0]) + " " + n1(t[1]) + "q" + n1(l[0] * 0.2) + " " + n1(l[1] * 0.6) + " " + l[0] + " " + l[1];
+            });
+            return out + '<path class="leaf" d="' + d + '"/>';
+          }
+          items.push({ depth: 0.5 + 14.8, svg: plant(0.5, 14.8) });
+          items.push({ depth: 10.4 + 0.4, svg: plant(10.4, 0.4) });
+
+          // Painter's order: back to front, so nearer desks cover the ones behind them.
+          items.sort(function (p, q) { return p.depth - q.depth; });
+          var seated = [];
+          items.forEach(function (it) {
+            if (it.svg) { s += it.svg; return; }
+            var d = desk(P, it.x, it.y, it.agent);
+            s += d.svg;
+            if (d.head) seated.push({ agent: it.agent, head: d.head });
+          });
+
+          // Leaders go on top of the furniture, so each question is traced to the agent that asks it.
+          seated.forEach(function (st) {
+            var ask = st.agent.ask && ASKS[st.agent.ask];
+            if (!ask) return;
+            var hx = st.head[0], hy = st.head[1] + 4;
+            var j = askJoint(ask, hx, hy);
+            s += '<path class="leader" d="M' + n1(hx) + " " + n1(hy) + "L" + n1(j[0]) + " " + n1(j[1]) + '"/><circle class="leader-foot" cx="' + n1(hx) + '" cy="' + n1(hy) + '" r="3.5"/>';
+          });
+          svg.innerHTML = s;
+
+          // Tags over the scene.
+          seated.forEach(function (st) {
+            var ag = st.agent, hx = st.head[0], hy = st.head[1] - 6;
+            if (ag.assistant) {
+              place(tagHtml("tag" + (ag.s === "asleep" ? " is-asleep" : ""), MARK[ag.s] + "<span>" + ag.assistant.name + '</span><span class="t-mono">' + ag.assistant.note + "</span>"), [hx, hy]);
+            } else if (ag.ask) {
+              var ask = ASKS[ag.ask];
+              var el = tagHtml("ask", '<div class="ask-h">' + MARK.wait + "<span>" + ask.title + '</span></div><p class="ask-q">' + ask.q + '</p><div class="ask-a"><button class="btn btn-ink">' + ask.a[0] + '</button><button class="btn btn-ghost">' + ask.a[1] + "</button></div>");
+              place(el, [st.head[0] + ask.at[0], st.head[1] + 4 + ask.at[1]]);
+            } else if (ag.pill) {
+              var pl = PILLS[ag.pill];
+              place(tagHtml("tag", MARK[ag.s] + "<span>" + pl.title + '</span><span class="t-mono">' + pl.t + "</span>"), [hx, hy]);
+            }
+          });
+
+          // Each runner's name sits on the floor in front of its desks, with one cell per desk.
+          zones.forEach(function (z) {
+            var used = z.rn.desks.filter(Boolean).length, all = z.rn.desks.length;
+            place(tagHtml("rlabel" + (z.full ? " is-full" : ""), '<i data-m="machine"></i><span>' + z.rn.runner + '</span><span class="t-mono">' + used + " of " + all + (z.full ? " · at cap" : "") + "</span>"), P(z.x0 + (z.x1 - z.x0) * (z.rn.labelAt || 0.5), z.y1 + 0.75, 0));
+          });
+          place(tagHtml("rlabel", '<i data-m="heartbeat"></i><span>Assistants</span><span class="t-mono">7 Conversations</span>'), P(5.5, 5.1, 0));
+          var under = P(0, CK.at, CK.z - CK.r - 0.3);
+          place(tagHtml("tag is-centered", '<i data-m="triage" class="future"></i><span>next triage</span><span class="t-mono">11:00</span>'), [under[0], under[1] + 4]);
+        }
+
+        // ------------------------------------------------------------ the campus at 10x
+        var CAMPUS = [
+          { name: "studio-mac", n: 18, cap: 20, work: 7, wait: 2 },
+          { name: "build-box-1", n: 16, cap: 16, work: 6, wait: 1 },
+          { name: "build-box-2", n: 16, cap: 20, work: 5, wait: 0 },
+          { name: "build-box-3", n: 14, cap: 16, work: 6, wait: 3 },
+          { name: "build-box-4", n: 16, cap: 16, work: 6, wait: 1 },
+          { name: "build-box-5", n: 12, cap: 16, work: 4, wait: 0 },
+          { name: "build-box-6", n: 14, cap: 20, work: 5, wait: 2 },
+          { name: "gpu-box", n: 12, cap: 12, work: 4, wait: 1 },
+          { name: "mac-mini-ci", n: 22, cap: 24, work: 5, wait: 1 },
+        ];
+        var CELL = 1.15, COLS = 6, ROOM_W = COLS * CELL + 0.7, ROOM_D = 4 * CELL + 0.7, GAP = 1.9;
+        var CAMPUS_W = 3 * ROOM_W + 2 * GAP, CAMPUS_D = 3 * ROOM_D + 2 * GAP, PIN = 3.4;
+        // Spreads a room's states over its seats in a fixed shuffled order, so pins are not all in one corner.
+        function seatStates(room, idx) {
+          var out = [];
+          for (var i = 0; i < room.cap; i++) out.push(i < room.wait ? "wait" : i < room.wait + room.work ? "work" : i < room.n ? "idle" : null);
+          var seed = 7 + idx * 13;
+          for (var j = out.length - 1; j > 0; j--) {
+            seed = (seed * 9301 + 49297) % 233280;
+            var r = Math.floor((seed / 233280) * (j + 1));
+            var tmp = out[j]; out[j] = out[r]; out[r] = tmp;
+          }
+          return out;
+        }
+        // Draws the nine rooms with projector P and returns the pin heads and each room's front face.
+        // In detail, each room stands on a thicker slab whose front face carries the runner's name.
+        function campus(P, detail) {
+          var SLAB_C = detail ? 0.85 : 0.35;
+          var s = DEFS, pins = [], labels = [];
+          var items = [];
+          CAMPUS.forEach(function (room, idx) {
+            var rx = (idx % 3) * (ROOM_W + GAP), ry = Math.floor(idx / 3) * (ROOM_D + GAP);
+            var full = room.n === room.cap;
+            s += box(P, rx, ry, -SLAB_C, ROOM_W, ROOM_D, SLAB_C, "c-floor" + (full ? " is-full" : ""));
+            labels.push({ room: room, at: P(rx, ry + ROOM_D, 0), w: ROOM_W * P.u, h: SLAB_C * P.u, full: full });
+            seatStates(room, idx).forEach(function (st, i) {
+              var gx = rx + 0.35 + (i % COLS) * CELL + CELL / 2, gy = ry + 0.35 + Math.floor(i / COLS) * CELL + CELL / 2;
+              items.push({ depth: gx + gy, gx: gx, gy: gy, st: st });
+            });
+          });
+          items.sort(function (a, b) { return a.depth - b.depth; });
+          items.forEach(function (it) {
+            if (!it.st) {
+              s += '<ellipse class="c-seat" cx="' + n3(it.gx) + '" cy="' + n3(it.gy) + '" rx="0.3" ry="0.3" transform="' + floorMatrix(P) + '" vector-effect="non-scaling-stroke"/>';
+              return;
+            }
+            if (it.st === "work") s += '<ellipse class="c-ring" cx="' + n3(it.gx) + '" cy="' + n3(it.gy) + '" rx="0.5" ry="0.5" transform="' + floorMatrix(P) + '" vector-effect="non-scaling-stroke"/>';
+            var b = P(it.gx, it.gy, 0);
+            var k = P.u / 26;
+            if (detail) {
+              s += pebble(P, it.gx, it.gy, 0, it.st === "wait" ? "wait" : it.st, "none-lane", 0.42).svg.replace(/<path class="scarf[^>]*>/, "");
+            } else {
+              s += '<ellipse class="peb" cx="' + n1(b[0]) + '" cy="' + n1(b[1] - 7 * k) + '" rx="' + n1(4.8 * k) + '" ry="' + n1(7 * k) + '"/>';
+            }
+            if (it.st === "wait") {
+              var tip = P(it.gx, it.gy, PIN);
+              s += '<path class="c-pin" d="M' + n1(b[0]) + " " + n1(b[1] - 10 * k) + "V" + n1(tip[1]) + '"/>';
+              pins.push(tip);
+            }
+          });
+          pins.forEach(function (t) {
+            s += '<circle class="c-pin-head" cx="' + n1(t[0]) + '" cy="' + n1(t[1]) + '" r="' + (detail ? 0 : Math.max(2.4, P.u * 0.35)).toFixed(1) + '"/>';
+          });
+          return { svg: s, pins: pins, labels: labels };
+        }
+        function fitCampus(width, height, pad) {
+          var u = Math.min((width - 2 * pad) / ((CAMPUS_W + CAMPUS_D) * C), (height - 2 * pad) / ((CAMPUS_W + CAMPUS_D) * S + PIN + 0.85));
+          var ox = width / 2 - ((CAMPUS_W - CAMPUS_D) * C * u) / 2;
+          var up = PIN * u, down = (CAMPUS_W + CAMPUS_D) * S * u + 0.85 * u;
+          var oy = height / 2 - (down - up) / 2;
+          return projector(u, ox, oy);
+        }
+
+        if (swarm) {
+          var P = fitCampus(W, H - 40, 70);
+          var c = campus(P, true);
+          svg.innerHTML = c.svg;
+          c.pins.forEach(function (t) {
+            place(tagHtml("tag pin", MARK.wait), t);
+          });
+          c.labels.forEach(function (l) {
+            var plate = tagHtml("rname" + (l.full ? " is-full" : ""), "<span>" + l.room.name + '</span><span class="t-mono">' + l.room.n + " of " + l.room.cap + (l.full ? " · at cap" : "") + "</span>");
+            plate.style.width = n1(l.w) + "px";
+            plate.style.height = n1(l.h) + "px";
+            place(plate, l.at);
+          });
+        } else {
+          drawOffice();
+          var mini = document.querySelector(".campus-mini");
+          var mw = 234, mh = 124;
+          mini.setAttribute("width", mw);
+          mini.setAttribute("height", mh);
+          mini.setAttribute("viewBox", "0 0 " + mw + " " + mh);
+          mini.innerHTML = campus(fitCampus(mw, mh, 4), false).svg;
+        }
+        svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+        svg.setAttribute("width", W);
+        svg.setAttribute("height", H);
+        window.Tide.expandMarks(stage);
+      });
+    </script>
+  </body>
+</html>

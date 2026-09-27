@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>(3) Intake · Hercule</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2327241f%22%2F%3E%3Crect%20x%3D%228.6%22%20y%3D%2213.7%22%20width%3D%2214.8%22%20height%3D%224.6%22%20rx%3D%222.3%22%20fill%3D%22%23a786f9%22%2F%3E%3Crect%20x%3D%226.2%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%23fd923e%22%2F%3E%3Crect%20x%3D%2220.6%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%2355d180%22%2F%3E%3Ccircle%20cx%3D%2224%22%20cy%3D%228%22%20r%3D%227.6%22%20fill%3D%22%23fdfdfb%22%20stroke%3D%22%2327241f%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(18.6%202.6)%20scale(0.9)%22%20fill%3D%22none%22%20stroke%3D%22%231d1a17%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3.9%204.2a2.15%202.15%200%201%201%203.05%201.95c-.62.33-.95.75-.95%201.4v.25%22%20stroke-width%3D%221.6%22%2F%3E%3Cpath%20d%3D%22M6%2010.1h.01%22%20stroke-width%3D%221.9%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"><link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.imain { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.icol { width: 800px; margin: 0 auto; padding: 20px 0 40px; }
+.topline { display: flex; align-items: flex-end; gap: 24px; }
+.rcpt { margin-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line-soft); }
+.rcpt-h { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-meta); margin-bottom: 8px; }
+.rcpt-h b { font-weight: var(--w-strong); }
+.rcpt-h span { color: var(--muted); }
+.rstack { display: flex; gap: 2px; height: 10px; }
+.rstack i { border-radius: 3px; background: var(--p); min-width: 4px; }
+.rstack i.mix { background: var(--spectrum); }
+.rstack i.none { background: color-mix(in oklab, var(--ink) 18%, transparent); }
+.lgs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 9px; font-size: var(--t-meta); color: var(--muted); }
+.lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lg .sw { width: 8px; height: 8px; border-radius: 50%; }
+.lg .brand { width: 12px; height: 12px; }
+.lg b { color: var(--ink); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
+.rline { margin-top: 10px; font-family: var(--font-mono); font-stretch: var(--mono-stretch); font-size: 11px; color: var(--muted); letter-spacing: -0.01em; }
+.rline b { color: var(--ink); font-weight: 560; }
+.tail { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+.tail .fyi .sw { margin: 4px 0 0 auto; }
+.tail .fyi span:not(.sw) { flex: 1; }
+.made { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+.made > div:nth-child(3) { box-shadow: none; padding-left: 0; }
+.wlist .nav .mini { margin-right: 2px; }
+.wlist .nav .sw.lg2 { width: 12px; height: 12px; border-radius: 4px; }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web" data-space="all">
+  <div class="strip" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+  <nav class="wrail" aria-label="Spaces">
+    <a class="wr-logo" title="Hercule"><svg><use href="#logo"/></svg></a>
+    <a class="wr-sp" title="All projects"><span class="sw all"></span></a>
+    <a class="wr-sp" title="webshop · 1 needs you"><span class="sw p-webshop"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="payments-api · 1 needs you"><span class="sw p-payments"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="ops · 1 needs you"><span class="sw p-ops"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <span class="wr-div"></span>
+    <a class="wr-nav on" title="Intake"><svg class="i18" aria-hidden="true"><use href="#i-sun-rise"/></svg><span>Intake</span><span class="wr-n">9</span></a>
+    <a class="wr-nav" title="Tasks"><svg class="i18" aria-hidden="true"><use href="#i-layers"/></svg><span>Tasks</span></a>
+    <a class="wr-nav" title="Runs"><svg class="i18" aria-hidden="true"><use href="#i-play"/></svg><span>Runs</span></a>
+    <a class="wr-nav" title="Fleet"><svg class="i18" aria-hidden="true"><use href="#i-cube"/></svg><span>Fleet</span></a>
+    <span class="wr-div"></span>
+    <a class="wr-av" title="Ada · working"><span class="av">A</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span></a>
+    <a class="wr-av" title="Milo · idle"><span class="av">M</span></a>
+    <a class="wr-av" title="Juno · asleep"><span class="av off">J</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg></span></a>
+    <span class="grow"></span>
+    <a class="wr-nav bare" title="Notifications"><svg class="i18" aria-hidden="true"><use href="#i-bell"/></svg><span class="wr-n">5</span></a>
+    <a class="wr-nav bare" title="Settings"><svg class="i18" aria-hidden="true"><use href="#i-gear"/></svg></a>
+    <a class="wr-me" title="Rogier">R</a>
+  </nav>
+  <aside class="wlist">
+    <div class="space-head"><span class="sw xl all"></span><div class="grow"><div class="name">Intake</div><div class="sub">9 to look at · all projects</div></div></div>
+    <div class="cmd"><svg class="i16" aria-hidden="true"><use href="#i-search"/></svg><span class="grow">Search Intake</span><span class="kbd">/</span></div>
+    <div class="side-scroll">
+      <div class="group">
+        <div class="group-h"><span class="grow">Topics</span></div>
+        <a class="nav on"><svg class="i16" aria-hidden="true"><use href="#i-list"/></svg><span class="grow">All</span><span class="count">9</span></a>
+        <a class="nav"><span class="mini"><span class="sw  p-webshop"></span><span class="sw  p-payments"></span></span><span class="grow">Checkout</span><span class="count">3</span></a>
+        <a class="nav"><span class="mini"><span class="sw  p-ops"></span></span><span class="grow">Infrastructure</span><span class="count">2</span></a>
+        <a class="nav"><span class="mini"><span class="sw  none"></span></span><span class="grow">Customers</span><span class="count">2</span></a>
+        <a class="nav"><span class="mini"><span class="sw  p-webshop"></span><span class="sw  p-payments"></span></span><span class="grow">Releases</span><span class="count">2</span></a>
+        <a class="more" style="padding-left:8px"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg>Manage topics</a>
+      </div>
+      <div class="group">
+        <div class="group-h"><span class="grow">Projects</span></div>
+        <a class="nav"><span class="sw lg2 p-webshop"></span><span class="grow">webshop</span><span class="count">3</span></a>
+        <a class="nav"><span class="sw lg2 p-payments"></span><span class="grow">payments-api</span><span class="count">1</span></a>
+        <a class="nav"><span class="sw lg2 p-ops"></span><span class="grow">ops</span><span class="count">2</span></a>
+        <a class="nav"><span class="sw lg2 mix-wp"></span><span class="grow">webshop + payments-api</span><span class="count">1</span></a>
+        <a class="nav"><span class="sw lg2 none"></span><span class="grow">no project yet</span><span class="count">2</span></a>
+      </div>
+    </div>
+    <div class="wl-foot"><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div></div>
+  </aside>
+  <main class="panel">
+    <header class="bar">
+      <h1>Intake</h1>
+      <span class="meta"><svg class="i14" aria-hidden="true"><use href="#i-clock"/></svg>Triage <b>09:00</b> · took 42s · next 11:00</span>
+      <span class="grow"></span>
+      <div class="seg-ctl"><button aria-pressed="true"><svg class="i14" aria-hidden="true"><use href="#i-list"/></svg>Lanes</button><button aria-pressed="false"><svg class="i14" aria-hidden="true"><use href="#i-grid"/></svg>Projects</button></div>
+      <button class="btn sm"><svg class="i14" aria-hidden="true"><use href="#i-refresh"/></svg>Triage now</button>
+    </header>
+    <div class="imain">
+      <div class="icol">
+        <div class="headline">
+          <div class="h"><b>1</b><span><span class="prio" data-n="4" title="priority urgent"><i></i><i></i><i></i><i></i></span>burning</span></div>
+          <div class="h"><b>6</b><span><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>proposals</span></div>
+          <div class="h"><b>2</b><span><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg>need a call</span></div>
+          <div class="h"><b>3</b><span><svg class="i" aria-hidden="true"><use href="#m-fyi"/></svg>FYI</span></div>
+          <div class="h quiet"><b>198</b><span>handled quietly</span></div>
+        </div>
+        <div class="rcpt">
+          <div class="rcpt-h"><b>What came in</b><b style="font-weight:var(--w-medium)">212</b><span>since yesterday 18:20</span></div>
+          <div class="rstack" role="img" aria-label="212 events by connection">
+            <i class="p-webshop" style="flex:131" title="Sentry · webshop-prod · 131"></i><i class="mix" style="flex:38" title="GitHub · rogier · 38"></i><i class="none" style="flex:17" title="Gmail · rogier@personal · 17"></i><i class="p-payments" style="flex:12" title="Stripe · live · 12"></i><i class="none" style="flex:9" title="Intercom · support · 9"></i><i class="p-webshop" style="flex:3" title="PostHog · webshop · 3"></i><i class="p-ops" style="flex:2" title="Grafana · ops · 2"></i>
+          </div>
+          <div class="lgs">
+            <span class="lg"><span class="sw  p-webshop"></span><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg>Sentry<b>131</b></span><span class="lg"><span class="sw  all"></span><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>GitHub<b>38</b></span><span class="lg"><span class="sw  none"></span><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg>Gmail<b>17</b></span><span class="lg"><span class="sw  p-payments"></span><svg class="brand" aria-hidden="true"><use href="#b-stripe"/></svg>Stripe<b>12</b></span><span class="lg"><span class="sw  none"></span><svg class="brand" aria-hidden="true"><use href="#b-intercom"/></svg>Intercom<b>9</b></span><span class="lg"><span class="sw  p-webshop"></span><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg>PostHog<b>3</b></span><span class="lg"><span class="sw  p-ops"></span><svg class="brand" aria-hidden="true"><use href="#b-grafana"/></svg>Grafana<b>2</b></span>
+          </div>
+          <div class="rline"><b>212 events</b> → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · <b>198 no action</b></div>
+        </div>
+        <div class="lane">Now<span class="n">1</span></div>
+        <article class="lead p-webshop">
+          <div class="kicker"><span class="k"><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>Proposal</span><span class="sep">·</span>Checkout<span class="sep">·</span><span class="prio" data-n="4" title="priority urgent"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="sep">·</span><span>first seen 08:52</span><span class="grow"></span><span class="pchip"><span class="sw"></span>webshop</span></div>
+          <h2>Checkout fails for EU cards with 3-D Secure</h2>
+          <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+          <div class="made">
+            <div><span class="src"><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg>Sentry · webshop-prod</span><span class="num">412 <small>events · 188 users</small></span><span class="what mono">PaymentError: authentication_required</span></div>
+            <div><span class="src"><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg>Gmail · rogier@personal</span><span class="num">3 <small>customer emails</small></span><span class="what">"Card declined at checkout"</span></div>
+            <div><span class="src"><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg>PostHog · webshop</span><span class="num">-18% <small>conversion</small></span><span class="what">EU only, since 14:10 yesterday</span></div>
+            <div><span class="src"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>GitHub · rogier</span><span class="num">#1289 <small>deploy</small></span><span class="what">Stripe SDK v14, 14:02 yesterday</span></div>
+          </div>
+          <div class="hledger">
+            <button><span class="l">Dismiss<span class="kbd">D</span></span><span class="d">Closes the Proposal</span></button>
+            <button><span class="l">Accept<span class="kbd">A</span></span><span class="d">Adds it to the backlog as a Task</span></button>
+            <button class="go"><span class="l"><svg class="i14" aria-hidden="true"><use href="#i-play"/></svg>Start "Fix bug"<span class="kbd">⏎</span></span><span class="d">Starts Fix bug on webshop in a new worktree · Opus 5.5 · studio-mac</span></button>
+          </div>
+          <div class="aside-note"><svg class="i" aria-hidden="true"><use href="#m-offer"/></svg>I can also draft a reply to the 3 customers once the fix ships.<span class="grow"></span><button class="btn ghost sm">Yes, after the fix</button></div>
+        </article>
+        <div class="lane">Needs a call<span class="n">2</span><span class="note">triage could not decide</span></div>
+        <div class="irow">
+            <span class="spine none"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-unsure"/></svg></span>
+            <div class="body"><div class="t">Which project is "App is slow on Android"?</div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-intercom"/></svg>Intercom · support<span class="sep">·</span>7 conversations since Sunday<span class="sep">·</span>I can't tell which project this belongs to.</div></div>
+            <span class="acts"><span class="faint" style="font-size:12px">unsure</span></span>
+            <div class="choices"><button class="choice p-webshop"><span class="sw  p-webshop"></span>webshop</button><button class="choice p-payments"><span class="sw  p-payments"></span>payments-api</button><button class="choice both"><span class="sw  mix-wp"></span>Both</button><button class="choice"><span class="sw  none"></span>Not work <small>closes it</small></button></div>
+          </div>
+          <div class="irow p-webshop">
+            <span class="spine"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-breaker"/></svg></span>
+            <div class="body"><div class="t">"Label new issues" held 34 events</div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>GitHub · rogier<span class="sep">·</span>Spawn Bound 20 per hour tripped at 08:14 after a bot opened 34 issues</div></div>
+            <span class="acts"><span class="faint" style="font-size:12px">breaker</span></span>
+            <div class="choices"><button class="choice">Keep held</button><button class="choice">Release all 34 <small>starts 34 runs</small></button><button class="choice p-webshop"><span class="sw  p-webshop"></span>Raise bound to 50/h</button></div>
+          </div>
+        <div class="lane">Today<span class="n">4</span></div>
+        <div class="irow p-ops">
+            <span class="spine"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-proposal"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">Nightly backup job timing out on ops-db</span><span class="prio" data-n="3" title="priority high"><i></i><i></i><i></i><i></i></span></div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-grafana"/></svg><svg class="i14 faint" aria-hidden="true"><use href="#i-cron"/></svg>Grafana · ops + Cron<span class="sep">·</span>3 nights in a row; the job hits its 2h limit at 04:00</div></div>
+            <span class="acts"><button class="btn sm ghost">Dismiss</button><button class="btn sm">Accept</button><button class="btn sm go"><svg class="i14" aria-hidden="true"><use href="#i-play"/></svg>Investigate</button></span>
+          </div>
+          <div class="irow">
+            <span class="spine none"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-offer"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">Draft a reply to Marta at Brightline</span></div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg>Gmail<span class="sep">·</span>Asks for invoice INV-2291 in the company name, not hers.</div></div>
+            <span class="acts"><button class="btn sm ghost">Not now</button><button class="btn sm ink">Draft reply</button></span>
+          </div>
+          <div class="irow p-payments hover">
+            <span class="spine"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-proposal"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">Stripe webhook retries rising</span><span class="prio" data-n="2" title="priority medium"><i></i><i></i><i></i><i></i></span></div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-stripe"/></svg><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg>Stripe · live + Sentry<span class="sep">·</span>payments-api</div></div>
+            <span class="acts"><button class="btn sm ghost">Dismiss</button><button class="btn sm">Accept</button><button class="btn sm go"><svg class="i14" aria-hidden="true"><use href="#i-play"/></svg>Investigate</button></span>
+            <div class="desc"><svg class="i14 faint" aria-hidden="true"><use href="#i-arrow-right"/></svg><b>Investigate</b> starts on payments-api in a new worktree · Codex · gpt-5.4 · build-box-2</div>
+          </div>
+          <div class="irow">
+            <span class="spine mix"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-offer"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">Merge 4 dependency bumps</span></div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>GitHub · rogier<span class="sep">·</span>All green, patch versions only<span class="sep">·</span>webshop 2 · payments-api 2</div></div>
+            <span class="acts"><button class="btn sm ghost">Review first</button><button class="btn sm mixgo">Merge all 4</button></span>
+          </div>
+        <div class="lane">When you can<span class="n">2</span></div>
+        <div class="irow p-ops dim">
+            <span class="spine"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-proposal"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">SSL certificate for status.acme.dev expires in 12 days</span><span class="prio" data-n="1" title="priority low"><i></i><i></i><i></i><i></i></span></div><div class="m"><svg class="i14 faint" aria-hidden="true"><use href="#i-cron"/></svg>Cron · schedules<span class="sep">·</span>ops</div></div>
+            <span class="acts"><button class="btn sm ghost">Dismiss</button><button class="btn sm go"><svg class="i14" aria-hidden="true"><use href="#i-play"/></svg>Fix bug</button></span>
+          </div>
+          <div class="irow p-webshop dim">
+            <span class="spine"></span><span class="mk"><svg class="i16" aria-hidden="true"><use href="#m-proposal"/></svg></span>
+            <div class="body"><div class="t"><span class="ell">Add iDEAL as a payment method</span><span class="prio" data-n="1" title="priority low"><i></i><i></i><i></i><i></i></span></div><div class="m"><svg class="brand" aria-hidden="true"><use href="#b-intercom"/></svg>Intercom · support<span class="sep">·</span>5 requests</div></div>
+            <span class="acts"><button class="btn sm ghost">Dismiss</button><button class="btn sm go">Accept</button></span>
+          </div>
+        <div class="tail">
+          <div>
+            <div class="rail-h">Attached<span class="n">1</span></div>
+            <div class="fyi p-webshop"><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg><span>2 new Sentry events joined the Task <b>Cart total rounding on discounts</b></span><span class="sw  p-webshop"></span></div>
+          </div>
+          <div>
+            <div class="rail-h">FYI<span class="n">3</span></div>
+            <div class="fyi"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg><span>Release <b>v2.14.0</b> of payments-api was published</span><span class="sw  p-payments"></span></div>
+            <div class="fyi"><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg><span>Sign-ups up <b>+9%</b> week over week</span><span class="sw  p-webshop"></span></div>
+            <div class="fyi"><svg class="brand" aria-hidden="true"><use href="#b-stripe"/></svg><span>Payout of <b>€18,240</b> arrives Thursday</span><span class="sw  p-payments"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

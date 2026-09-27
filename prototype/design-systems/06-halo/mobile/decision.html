@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Checkout fails for EU cards · Intake · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <!-- A focused page: one Proposal, answered with one thumb. The tab bar steps aside until it is answered. -->
+    <div class="phone">
+      <div class="status" data-status></div>
+
+      <header class="md-top">
+        <a class="icon-btn m-ib" href="intake.html" title="Back to Intake"><i data-icon="close"></i></a>
+        <span class="md-pos">
+          <span data-halo="wait1.4| wait2.3| wait4.2| wait2.1|" data-notch="0" data-size="24" data-still aria-hidden="true"></span>
+          <span><b>1</b> of 9 to decide</span>
+        </span>
+        <button class="md-skip">Later</button>
+      </header>
+
+      <!-- The stack: this Proposal on top, dragged right toward Start; the next one waits beneath it. -->
+      <div class="md-stack">
+        <div class="md-card md-next" aria-hidden="true">
+          <div class="head"><i data-mark="wait"></i><b>Needs a call</b><span class="t">08:31</span></div>
+          <div class="title">App is slow on Android</div>
+        </div>
+        <article class="md-card md-top-card" aria-label="Proposal">
+          <span class="md-stamp"><i data-icon="right"></i>Start “Fix bug”</span>
+          <div class="head"><i data-mark="pri4"></i><b>Proposal</b><span>Checkout · webshop</span><span class="t">08:52</span></div>
+          <h1 class="title">Checkout fails for EU cards with 3&#8209;D Secure</h1>
+          <p class="gist">
+            Since deploy #1289 the new Stripe SDK returns <code>requires_action</code>, and checkout treats it as a failure.
+          </p>
+
+          <div class="d-chart md-chart" aria-label="Payment errors per hour since yesterday 14:00">
+            <div class="d-pins">
+              <span class="pin lead" style="--x: 0.002"><i data-brand="github"></i>#1289 · 14:02</span>
+              <span class="pin seen" style="--x: 0.943"><i data-mark="proposal"></i>08:52</span>
+            </div>
+            <div class="d-bars">
+              <i style="--h: 18"></i><i style="--h: 32"></i><i style="--h: 35"></i><i style="--h: 38"></i><i style="--h: 41"></i>
+              <i style="--h: 44"></i><i style="--h: 39"></i><i style="--h: 30"></i><i style="--h: 18"></i><i style="--h: 9"></i>
+              <i style="--h: 4"></i><i style="--h: 2"></i><i style="--h: 1"></i><i style="--h: 1"></i><i style="--h: 2"></i>
+              <i style="--h: 5"></i><i style="--h: 11"></i><i style="--h: 22"></i><i style="--h: 33"></i><i class="now" style="--h: 27"></i>
+            </div>
+            <div class="d-axis"><span>14:00</span><span>22:00</span><span>06:00</span><span>now</span></div>
+          </div>
+
+          <div class="md-label">Made from 4 sources</div>
+          <div class="md-srcs">
+            <div><i data-brand="sentry"></i><span>Sentry<small>PaymentError · 188 users</small></span><b>412 events</b></div>
+            <div><i data-brand="gmail"></i><span>Gmail<small>“Card declined at checkout”</small></span><b>3 emails</b></div>
+            <div><i data-brand="posthog"></i><span>PostHog<small>checkout conversion, EU</small></span><b class="down">-18%</b></div>
+            <div><i data-brand="github"></i><span>GitHub<small>“Upgrade Stripe SDK to v14”</small></span><b>#1289</b></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="md-hint">
+        <span><i data-icon="left"></i>Dismiss</span>
+        <span class="haptic">haptic · tick at the line</span>
+        <span>Start<i data-icon="right"></i></span>
+      </div>
+
+      <!-- The thumb zone: the same three answers as rows, for when a swipe is not wanted. -->
+      <section class="md-answers" aria-label="Answer">
+        <button class="md-start">
+          <span class="l">Start “Fix bug”</span>
+          <span class="d">new worktree · Opus 5.5 · studio-mac</span>
+        </button>
+        <div class="md-pair">
+          <button><span class="l">Accept</span><span class="d">as a Task</span></button>
+          <button><span class="l">Dismiss</span><span class="d">close it</span></button>
+        </div>
+      </section>
+
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

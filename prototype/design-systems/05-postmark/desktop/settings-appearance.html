@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .themes {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 14px;
+        padding: 4px 0 18px;
+      }
+      .tcard {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        text-align: left;
+      }
+      /* A theme preview: a small window drawn in that theme's own tokens. */
+      .tp {
+        position: relative;
+        height: 112px;
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        border-radius: 10px;
+        overflow: hidden;
+        color: var(--ink);
+        background: var(--bg);
+        box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+        transition:
+          transform var(--m-slide) var(--ease-paper),
+          box-shadow var(--m-slide) var(--ease-paper);
+      }
+      .tcard:hover .tp {
+        transform: translateY(-2px);
+      }
+      .tcard.is-on .tp {
+        box-shadow:
+          0 0 0 2px var(--bg),
+          0 0 0 4px var(--violet);
+      }
+      .tp-side {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 9px 7px;
+        background:
+          radial-gradient(120% 60% at 0% 0%, var(--wall-a), transparent 70%),
+          radial-gradient(90% 70% at 0% 100%, var(--wall-b), transparent 70%), var(--surface);
+        box-shadow: inset -1px 0 0 var(--line-soft);
+      }
+      .tp-side i {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .tp-side i:first-child {
+        width: 70%;
+        background: var(--violet);
+      }
+      .tp-main {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+      }
+      .tp-env {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 8px 9px;
+        border-radius: 6px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+      }
+      .tp-env .post {
+        position: absolute;
+        top: 6px;
+        right: 7px;
+      }
+      .tp-env .rs {
+        align-self: flex-start;
+        font-size: 8px;
+        padding: 2px 4px 1px;
+      }
+      .tp-env b {
+        display: block;
+        height: 5px;
+        width: 76%;
+        border-radius: 3px;
+        background: var(--ink);
+        opacity: 0.8;
+      }
+      .tp-env b + b {
+        width: 52%;
+        opacity: 0.3;
+      }
+      .tp-inks {
+        display: flex;
+        gap: 4px;
+      }
+      .tp-inks i {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+      .tname {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tname b {
+        font-size: 13px;
+        font-weight: 620;
+      }
+      .tname small {
+        margin-left: auto;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .tcard.is-on .radio {
+        box-shadow: inset 0 0 0 5px var(--violet);
+      }
+      .follow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0 14px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .follow b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .ctl {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .ctl .hint {
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .accents {
+        display: flex;
+        gap: 10px;
+      }
+      .accent {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 11px 0 7px;
+        border-radius: var(--r-pill);
+        font-size: var(--t-ui);
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .accent i {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--c);
+      }
+      .accent.is-on {
+        color: var(--ink);
+        font-weight: 600;
+        background: var(--raised);
+        box-shadow:
+          inset 0 0 0 1.5px var(--c),
+          var(--card-shadow);
+      }
+      /* The ink rack: what each ink means, so the choice is made knowing the doctrine. */
+      .rack {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+        margin-top: 12px;
+      }
+      .size-demo {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .marks-demo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 12px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+        font-size: 13px;
+        width: max-content;
+      }
+      .marks-demo .stamp-cluster {
+        margin-left: 6px;
+      }
+      .marks-demo .rs {
+        font-size: 9.5px;
+        margin-left: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="hercule" data-active="settings"></aside>
+      <main class="main">
+        <div class="chrome ruled">
+          <span class="crumb">Settings /</span>
+          <h1>Appearance</h1>
+        </div>
+        <div class="settings">
+          <nav data-kit="setnav" data-active="appearance"></nav>
+          <div class="set-body">
+            <div class="set-inner">
+              <div class="set-intro">
+                <h3 class="label">Theme</h3>
+              </div>
+              <div class="themes">
+                <button class="tcard" data-pick="manila">
+                  <div class="tp theme-manila">
+                    <div class="tp-side"><i></i><i></i><i></i><i></i></div>
+                    <div class="tp-main">
+                      <div class="tp-env"><span class="post" data-src="sentry"></span><span class="rs rs--red rs--solid">Urgent</span><b></b><b></b></div>
+                      <div class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i><i style="background: var(--carbon)"></i></div>
+                    </div>
+                  </div>
+                  <span class="tname"><span class="radio"></span><b>Manila</b><small>light</small></span>
+                </button>
+                <button class="tcard" data-pick="newsprint">
+                  <div class="tp theme-newsprint">
+                    <div class="tp-side"><i></i><i></i><i></i><i></i></div>
+                    <div class="tp-main">
+                      <div class="tp-env"><span class="post" data-src="gmail"></span><span class="rs rs--ochre">Unsure</span><b></b><b></b></div>
+                      <div class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i><i style="background: var(--carbon)"></i></div>
+                    </div>
+                  </div>
+                  <span class="tname"><span class="radio"></span><b>Newsprint</b><small>light</small></span>
+                </button>
+                <button class="tcard" data-pick="carbon">
+                  <div class="tp theme-carbon">
+                    <div class="tp-side"><i></i><i></i><i></i><i></i></div>
+                    <div class="tp-main">
+                      <div class="tp-env"><span class="post" data-src="github"></span><span class="rs rs--violet">Offer</span><b></b><b></b></div>
+                      <div class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i><i style="background: var(--carbon)"></i></div>
+                    </div>
+                  </div>
+                  <span class="tname"><span class="radio"></span><b>Carbon</b><small>dark</small></span>
+                </button>
+                <button class="tcard" data-pick="oxide">
+                  <div class="tp theme-oxide">
+                    <div class="tp-side"><i></i><i></i><i></i><i></i></div>
+                    <div class="tp-main">
+                      <div class="tp-env"><span class="post" data-src="stripe"></span><span class="rs rs--green">→ Proposal</span><b></b><b></b></div>
+                      <div class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i><i style="background: var(--carbon)"></i></div>
+                    </div>
+                  </div>
+                  <span class="tname"><span class="radio"></span><b>Oxide</b><small>dark</small></span>
+                </button>
+                <button class="tcard" data-pick="bottle">
+                  <div class="tp theme-bottle">
+                    <div class="tp-side"><i></i><i></i><i></i><i></i></div>
+                    <div class="tp-main">
+                      <div class="tp-env"><span class="post" data-src="grafana"></span><span class="rs">FYI</span><b></b><b></b></div>
+                      <div class="tp-inks"><i style="background: var(--violet)"></i><i style="background: var(--ochre)"></i><i style="background: var(--green)"></i><i style="background: var(--red)"></i><i style="background: var(--carbon)"></i></div>
+                    </div>
+                  </div>
+                  <span class="tname"><span class="radio"></span><b>Bottle</b><small>dark</small></span>
+                </button>
+              </div>
+              <div class="follow">
+                <span class="toggle is-on"></span>
+                <span>Follow macOS: <b>Manila</b> by day, <b>Carbon</b> by night</span>
+              </div>
+
+              <div class="set-row">
+                <div>
+                  <h3>Hercule's ink</h3>
+                  <p>The colour of Hercule's own hand. The other inks each mean one verdict, so they are not for choosing.</p>
+                </div>
+                <div>
+                  <div class="accents">
+                    <button class="accent is-on" style="--c: oklch(52% 0.2 296)"><i></i>Violet</button>
+                    <button class="accent" style="--c: oklch(52% 0.19 268)"><i></i>Indigo</button>
+                    <button class="accent" style="--c: oklch(55% 0.2 338)"><i></i>Magenta</button>
+                  </div>
+                  <div class="rack">
+                    <span class="rs rs--violet tilt-a"><i data-m="working" class="sm"></i>Working</span>
+                    <span class="rs rs--ochre tilt-b"><i data-m="decision" class="sm"></i>Your call</span>
+                    <span class="rs rs--green tilt-c"><i data-m="done" class="sm"></i>Became work</span>
+                    <span class="rs rs--red tilt-d"><i data-m="burning" class="sm"></i>Act now</span>
+                    <span class="rs tilt-a"><i data-m="idle" class="sm"></i>Nothing to do</span>
+                  </div>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <h3>Density</h3>
+                  <p>Compact fits about a third more rows on Intake.</p>
+                </div>
+                <div class="ctl">
+                  <div class="seg"><button class="is-on">Comfortable</button><button>Compact</button></div>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <h3>Text size</h3>
+                  <p>Transcripts and rows. Titles stay put.</p>
+                </div>
+                <div class="ctl">
+                  <div class="seg"><button>Small</button><button class="is-on">Default</button><button>Large</button></div>
+                  <span class="size-demo"><span style="font-size: 12px">Aa</span><span style="font-size: 13.5px; font-weight: 600">Aa</span><span style="font-size: 15px">Aa</span></span>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <h3>Motion and glass</h3>
+                  <p>Follows the system setting unless you choose here.</p>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 12px">
+                  <div class="ctl"><span class="toggle"></span><span>Reduce motion</span><span class="hint">Stamps land without the thunk</span></div>
+                  <div class="ctl"><span class="toggle"></span><span>Reduce transparency</span><span class="hint">Glass turns to solid paper</span></div>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <h3>Marks</h3>
+                  <p>Show a postage stamp for each source on rows.</p>
+                </div>
+                <div>
+                  <div class="ctl"><span class="toggle is-on"></span><span>Source stamps on rows</span></div>
+                  <div class="marks-demo">
+                    <i data-m="burning" class="s-fail"></i>
+                    <span>Checkout fails for EU cards with 3-D Secure</span>
+                    <span class="stamp-cluster"><span class="post" data-src="sentry"></span><span class="post" data-src="gmail"></span><span class="post" data-src="posthog"></span><span class="post" data-src="github"></span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // Picking a theme card applies it to the whole page at once, the way the real setting would.
+      document.addEventListener("DOMContentLoaded", () => {
+        const aliases = { light: "manila", dark: "carbon" };
+        const cards = document.querySelectorAll("[data-pick]");
+        const mark = () => {
+          const t = document.documentElement.dataset.theme || "light";
+          cards.forEach((c) => c.classList.toggle("is-on", c.dataset.pick === (aliases[t] || t)));
+        };
+        cards.forEach((c) => c.addEventListener("click", () => ((document.documentElement.dataset.theme = c.dataset.pick), mark())));
+        mark();
+      });
+    </script>
+  </body>
+</html>

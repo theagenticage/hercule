@@ -1,0 +1,1479 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/1 -> #51
+  Question: the app shell. Spec 14 pins Sessions as home, a t3-code-like first minute and the screen
+  inventory, but not the frame the screens sit in:
+    1. what the sidebar is - a threads/projects list (t3-code mode) vs the orchestration nav
+       (Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections, Notifications, Settings),
+       when each shows, how the user moves between them without "management chrome" bolted on;
+    2. where the Marks legend toggle and pulse-style ambient signals live in that frame;
+    3. how the empty states of Sessions, Intake and Notifications carry first-run guidance
+       (provider login, connect GitHub / Gmail, connect a chat channel) without a checklist page.
+
+  Shells, switchable via ?variant=A|B|C (same screens, same data, only the frame changes):
+    A Nav    - one orchestration sidebar always; threads are a list column inside Sessions.
+               REJECTED in round 1 (kept switchable as the record).
+    B Modes  - the sidebar has two faces behind a segmented switch: Threads (t3-code list: create,
+               projects, threads, assistants) and Hydra (the orchestration nav). The face follows
+               the screen; the needs-you count leaks into the Hydra segment so it never hides.
+    C Stack  - one sidebar, two regions. ?stack=bottom|top|split (key s): Hydra group below the
+               threads (round 1), above them (Codex order), or split - the five work items above,
+               the four infrastructure items at the foot beside Marks.
+  Round 2 (reaction to round 1):
+    - thread rows: ?rows=plain|meta|rich (key r) - one line; a second faint mono line (checkout ·
+      model); active threads as a small card (state line, title, branch/PR, provider), settled plain.
+    - new thread is one step: Create new thread opens the thread surface in new-thread mode; the
+      first message starts it. The composer holds the whole configuration: a config strip
+      (workspace · checkout · branch · runner · profile) that turns read-only once started, and the
+      control row (model · effort · access mode) that stays live.
+    - thread surface rebuilt in the Codex / t3-code shape: centered column, timestamp, user messages
+      right-aligned bubbles, agent prose full width, "Worked for" dividers, changed-files cards, the
+      approval ledger inline, composer floating at the bottom.
+    - All sessions is a full overview page: Active / Waiting on you / Idle / Settled with a project
+      filter; workflow-started sessions behind a fold.
+  Round 3 (reaction to round 2):
+    - C Stack defaults to ?stack=compact: only Intake / Check-in / Notifications as rows above the
+      threads, the other six screens as one quiet text line at the foot. top/bottom/split stay.
+    - chat input variants ?input=hydra|t3|codex (key i): the round-2 strip+row; a t3-code lookalike
+      (one card, options inside, checkout lip under it); a Codex lookalike (config tabs above,
+      + and access mode left, model pill and round send right).
+    - new-thread layout ?hero=bottom|center (key h).
+    - permission requests dock onto the input (same place always), in every input variant.
+    - "Worked for Xs ›" collapses the tool calls (click expands); the live one shimmers.
+  Round 4 (reaction to round 3: model, reasoning strength and runner selectors were missing):
+    - every selector on the input opens a menu (one popover, anchored above the control, the same in
+      all three input variants): runner (the placement pick: each machine's state, capacity and the
+      provider logins it holds; a machine without the current login is dimmed with the reason), model
+      (grouped per provider instance = one login, identity and plan under the heading; models not logged
+      in on the picked runner are dimmed; Custom model… at the foot; switching runner shows "probing …"
+      while that machine's snapshot refreshes), access mode (auto dimmed on pi with its fallback),
+      permission profile.
+    - reasoning strength: ?effort=own|nested (key e) - its own selector in the control row (default),
+      or a segmented row inside the model menu (the Codex shape), the model label then carrying it.
+      Context window and fast mode sit in the model menu's options block either way; pi shows thinking
+      off/on instead of effort - the well-known option ids of spec 06 differ per provider.
+    - picks live in memory: new-thread picks start the thread with them; on a started thread runner,
+      profile and (since the resolution) access mode are locked, model / reasoning stay live.
+  Round 5 (reaction to round 4):
+    - t3 input variant: the model selector is a clone of t3-code's - a rail (favorites star, one logo per
+      provider), a search field, rows with the display name and a provider line, ⌘n badges, stars to
+      favorite; the bar shows a logo pill, "Medium · 200k" and a sparkle access mode. Exact on purpose;
+      it breaks the color doctrine (brand orange, yellow stars, blue focus rule) and says so.
+    - hydra / codex model menu: instance headers are rows of the same grid as the models, so the header
+      of the expanded group aligns with the collapsed ones and always shows the account; ?logos=1
+      (key o) puts monochrome provider marks on the headers and on the composer's model label.
+    - new input variant ?input=codexlip: the Codex card (+, access mode, model pill, a voice button,
+      round send) with the small setup bar tucked under it like t3 (workspace · checkout · branch left,
+      runner · profile right).
+    - workspace, checkout and branch open menus too (repos grouped per project with whether the picked
+      runner has a clone; primary checkout vs new worktree with the in-use worktrees listed; a new
+      run branch or an existing one). Fresh data offers No workspace / adopt a folder / add a repo.
+  Converged (verdict of 2026-09-01, the defaults of this file): shell B Modes; rows=meta (plain stays as
+    a setting); input=codexlip; effort=nested; logos off; pulse at the sidebar foot, collapsed to one
+    summary line that expands on click. Everything else stays switchable as the record: A Nav and C Stack
+    (?variant, ?stack), rows=plain|rich, input=hydra|t3|codex, ?effort=own, ?logos=1, ?pulse=top|none.
+  Ambient signals (pulse): ?pulse=top|foot|none (key p). Default: A top bar, B/C sidebar foot.
+  Data: ?data=busy|fresh (key d). fresh = first run; ?li=1 = a provider login has happened (key l).
+  Keys: ← → shell · s stack (C) · r rows · i input · h hero · m mode (B) · d data · l login · p pulse · t theme · ? Marks · Esc.
+  Marks are the pinned family (#35); everything in the pinned design language (#33).
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hydra app shell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg:      oklch(94.5% 0.0156 265);
+    --surface: oklch(96.7% 0.0125 265);
+    --raised:  oklch(100% 0.0078 265);
+    --ink:     oklch(23% 0.0100 265);
+    --muted:   oklch(48% 0.0156 265);
+    --faint:   oklch(66% 0.0156 265);
+    --line:      oklch(23% 0.0100 265 / 0.10);
+    --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f;
+    --attn-soft: rgba(138,97,22,0.09);
+    --p-hydra: #7d7ab0; --p-ops: #a67f92;
+    --sans: "Onest", -apple-system, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --w-emph: 500; --w-urgent: 600;
+    --side-w: 236px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:      oklch(20%   0.0288 265);
+      --surface: oklch(22.2% 0.0288 265);
+      --raised:  oklch(25.5% 0.0259 265);
+      --ink:     oklch(90% 0.0080 265);
+      --muted:   oklch(68% 0.0288 265);
+      --faint:   oklch(50% 0.0288 265);
+      --line:      oklch(90% 0.0288 265 / 0.10);
+      --line-soft: oklch(90% 0.0288 265 / 0.06);
+      --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+      --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+      --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+      --attn-soft: rgba(208,161,71,0.12);
+      --p-hydra: #9490c9; --p-ops: #bd93a8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:      oklch(20%   0.0288 265);
+    --surface: oklch(22.2% 0.0288 265);
+    --raised:  oklch(25.5% 0.0259 265);
+    --ink:     oklch(90% 0.0080 265);
+    --muted:   oklch(68% 0.0288 265);
+    --faint:   oklch(50% 0.0288 265);
+    --line:      oklch(90% 0.0288 265 / 0.10);
+    --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8;
+    --attn-soft: rgba(208,161,71,0.12);
+    --p-hydra: #9490c9; --p-ops: #bd93a8;
+  }
+
+  /* ============ base ============ */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  button { font: inherit; }
+  b { font-weight: var(--w-emph); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .app { display: flex; min-height: 100vh; }
+  .lane-label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; color: var(--faint); font-weight: var(--w-emph); display: flex; align-items: baseline; gap: 8px; }
+  .lane-label .n { font-family: var(--mono); letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .lane-label .r { margin-left: auto; letter-spacing: 0; text-transform: none; font-weight: 400; font-family: var(--mono); font-size: 10.5px; }
+  .pdot { width: 7px; height: 7px; border-radius: 2px; display: inline-block; flex: none; vertical-align: 0; }
+  .pdot.hydra { background: var(--p-hydra); } .pdot.ops { background: var(--p-ops); } .pdot.none { background: var(--line); }
+
+  /* ============ marks (pinned family, #35) ============ */
+  .markcell { width: 16px; flex: none; display: inline-flex; justify-content: center; align-items: center; font-size: 12px; }
+  .ent { display: inline-flex; width: 14px; justify-content: center; align-items: center; flex: none; vertical-align: -2px; color: var(--faint); }
+  svg.bs { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  svg.bs.q { stroke-width: 1.35; }
+  .okg { color: var(--ok); } .failg { color: var(--fail); } .cang { color: var(--faint); } .attn { color: var(--attn); } .livec { color: var(--live); }
+  .eq { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; width: 11px; flex: none; }
+  .eq i { width: 2px; border-radius: 1px; background: var(--live); height: 4px; animation: eqs 1.9s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: 0.35s; } .eq i:nth-child(3) { animation-delay: 0.7s; }
+  @keyframes eqs { 0%, 100% { height: 3px; } 50% { height: 7px; } }
+  .livedot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 2.4s ease-in-out infinite; display: inline-block; }
+  .attndot { width: 6px; height: 6px; border-radius: 50%; background: var(--attn); flex: none; animation: pulse 2.4s ease-in-out infinite; display: inline-block; }
+  .idledot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; display: inline-block; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) {
+    .eq i, .livedot, .attndot { animation: none !important; }
+    .eq i:nth-child(1) { height: 4px; } .eq i:nth-child(2) { height: 8px; } .eq i:nth-child(3) { height: 5px; }
+  }
+  .pri { display: inline-flex; align-items: center; flex: none; }
+  .pri .bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 9px; }
+  .pri .bars i { width: 2.5px; border-radius: 1px; background: var(--line); }
+  .pri .bars i:nth-child(1) { height: 3.5px; } .pri .bars i:nth-child(2) { height: 6px; } .pri .bars i:nth-child(3) { height: 9px; }
+  .pri[data-pri="low"]    .bars i:nth-child(1) { background: var(--faint); }
+  .pri[data-pri="normal"] .bars i:nth-child(-n+2) { background: var(--muted); }
+  .pri[data-pri="high"]   .bars i { background: var(--muted); }
+  .pri[data-pri="urgent"] .bars i { background: var(--ink); }
+  .age { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .age[data-age="recent"] { color: var(--muted); } .age[data-age="stale"] { color: var(--ink); } .age[data-age="old"] { color: var(--attn); font-weight: 500; }
+  .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .state.live { color: var(--live); } .state.fail { color: var(--fail); } .state.attn { color: var(--attn); }
+  .qbtn { font-family: var(--sans); font-size: 12.5px; line-height: 1; font-weight: var(--w-emph); border: 0; background: none; color: var(--muted); padding: 6px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  .qbtn:hover { background: var(--line-soft); color: var(--ink); }
+  .qbtn.first { color: var(--ink); }
+  .qbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; }
+
+  /* ============ the shell ============ */
+  .side { width: var(--side-w); flex: none; background: var(--surface); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; padding: 14px 10px 12px; position: sticky; top: 0; height: 100vh; }
+  .logo { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 14px; }
+  .logo b { font-size: 15px; letter-spacing: 0.01em; }
+  .logo span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a { display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; }
+  .nav a .ni { width: 14px; display: inline-flex; justify-content: center; align-items: center; flex: none; color: var(--faint); }
+  .nav a .ni:empty { display: none; }
+  .nav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
+  .nav a.on .ni { color: var(--ink); }
+  .nav a:not(.on):hover { background: var(--line-soft); }
+  .nav a:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .nav .count { font-family: var(--mono); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; margin-left: auto; }
+  .nav .count.attn { color: var(--attn); }
+  .nav .sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+  .sidefoot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 10px; }
+  .side .glabel { padding: 0 10px; margin: 6px 0 4px; }
+  .side .glabel a { text-decoration: none; cursor: pointer; }
+  .side .glabel a:hover { color: var(--muted); }
+  /* thread list (t3-code face) */
+  .newbtn { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); color: var(--ink); font-size: 13px; font-weight: var(--w-emph); cursor: pointer; box-shadow: var(--card-shadow); text-align: left; width: 100%; }
+  .newbtn:hover { box-shadow: var(--lift-shadow); }
+  .newbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .newbtn .plus { font-family: var(--mono); color: var(--faint); font-size: 13px; }
+  .tlist { display: flex; flex-direction: column; gap: 1px; }
+  .trow { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 8px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; cursor: pointer; }
+  .trow .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trow.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
+  .trow:not(.on):hover { background: var(--line-soft); }
+  .trow.dim { opacity: 0.66; }
+  .trow .markcell { width: 14px; }
+  /* rows=meta: a second faint mono line */
+  .trow2 { display: flex; flex-direction: column; gap: 0; padding: 4px 10px 5px 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+  .trow2 .l1 { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .trow2 .l1 .markcell { width: 14px; }
+  .trow2 .l1 .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trow2 .l2 { padding-left: 22px; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+  .trow2.on { background: var(--line-soft); color: var(--ink); } .trow2.on .l1 { font-weight: var(--w-emph); }
+  .trow2:not(.on):hover { background: var(--line-soft); }
+  .trow2.dim { opacity: 0.66; }
+  /* rows=rich: active threads as a small card */
+  .tcard { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--card-shadow); padding: 7px 10px 8px; margin: 2px 0 5px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+  .tcard:hover { box-shadow: var(--lift-shadow); }
+  .tcard.on { border-color: var(--faint); }
+  .tcard .st { font-size: 11px; display: flex; align-items: center; gap: 6px; }
+  .tcard .st .age { margin-left: auto; }
+  .tcard .tt { font-size: 13px; color: var(--ink); font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tcard .mm { font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side .ghead { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 10px 0 3px; font-size: 12px; color: var(--muted); font-weight: var(--w-emph); }
+  .side .ghead:first-child { margin-top: 0; }
+  .side .ghead .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; }
+  .side .empty { padding: 4px 10px; font-size: 12px; color: var(--faint); }
+  .side .more { display: block; padding: 3px 10px; font-size: 12px; color: var(--faint); text-decoration: none; cursor: pointer; border-radius: 6px; }
+  .side .more:hover { color: var(--muted); background: var(--line-soft); }
+  .scrollreg { overflow: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
+  /* segmented switch (B) */
+  .seg { display: flex; padding: 2px; border-radius: 7px; background: var(--line-soft); margin: 0 0 12px; }
+  .seg button { flex: 1; border: 0; background: none; border-radius: 5px; padding: 4px 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; display: inline-flex; justify-content: center; align-items: center; gap: 6px; }
+  .seg button.on { background: var(--raised); color: var(--ink); font-weight: var(--w-emph); box-shadow: var(--card-shadow); }
+  .seg button:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .seg .count { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .seg .count.attn { color: var(--attn); }
+  /* pulse block / line */
+  .pulse { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  .pulse .pl { display: flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pulse .pl b { color: var(--ink); }
+  .pulse .pl .w { color: var(--attn); }
+  .side .pulse { padding: 0 10px 6px; }
+  .pulse.foot { gap: 3px; padding: 0 0 4px; }
+  .pulse .psum { border: 0; background: none; font: inherit; color: var(--muted); text-align: left; padding: 4px 10px; border-radius: 6px; cursor: pointer; width: 100%; }
+  .pulse .psum:hover, .pulse .psum[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .pulse .psum .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .pulse .psum .chev { color: var(--faint); font-size: 12px; transition: transform .15s; }
+  .pulse .psum[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .pulse .pl.sub { padding: 1px 10px 1px 10px; }
+  .topbar .pulse { flex-direction: row; gap: 16px; margin-left: auto; align-self: center; flex: none; }
+  /* legend */
+  .lgbtn { font-family: var(--sans); font-size: 13px; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; line-height: 1; width: 100%; text-align: left; }
+  .lgbtn:hover, .lgbtn[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .lgbtn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .lgbtn kbd { font-family: var(--mono); font-size: 10px; color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; line-height: 1.5; margin-left: auto; }
+  .legend { position: fixed; z-index: 30; width: 236px; left: calc(var(--side-w) + 8px); bottom: 48px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: none; flex-direction: column; gap: 2px; }
+  .legend.open { display: flex; }
+  .legend .lane-label { margin-bottom: 4px; }
+  .legend .lgroup { margin-top: 8px; }
+  .legend .lrow { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); padding: 2.5px 0; }
+  .legend .lrow .markcell { justify-content: flex-start; }
+  .legend .note { font-size: 11px; color: var(--faint); margin-top: 8px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+  /* main */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: baseline; gap: 14px; padding: 22px 32px 0; }
+  .topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.015em; font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 44%; }
+  .topbar h1 .pj { color: var(--muted); font-weight: 400; }
+  .topbar h1 .sl { color: var(--faint); font-weight: 400; margin: 0 8px; }
+  .topbar .when { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .topbar .crumb { color: var(--faint); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .topbar .crumb b { color: var(--muted); }
+  .topbar .acts { margin-left: auto; display: flex; gap: 2px; align-self: center; flex: none; }
+  .topbar .acts .plus { color: var(--ok); font-family: var(--mono); font-weight: 400; } .topbar .acts .minus { color: var(--fail); font-family: var(--mono); font-weight: 400; }
+  #stage { padding: 16px 32px 110px; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .headline { font-size: 15px; color: var(--muted); margin: 0 0 22px; }
+  .headline b { color: var(--ink); }
+  .lane { margin-bottom: 28px; }
+  .lane > .lane-label { margin-bottom: 10px; }
+  .group { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 4px 6px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; font-size: 13.5px; }
+  .row:hover { background: var(--line-soft); }
+  .row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .t small { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .row .t small .mono { font-size: 11px; }
+  .row .sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .row.dim { opacity: 0.66; }
+  .row .qbtn { padding: 4px 8px; margin: -2px 0; }
+  .digest { color: var(--muted); font-size: 12.5px; opacity: 0.82; }
+  .digest a { color: var(--muted); cursor: pointer; }
+  .divider { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 11px; font-family: var(--mono); margin: 10px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  /* decision card + ledger (pinned by #20/#50) */
+  .dcard { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 14px 18px 8px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+  .dcard .qline { display: flex; align-items: center; gap: 10px; }
+  .dcard .q { font-size: 15px; font-weight: var(--w-emph); letter-spacing: -0.008em; }
+  .dcard .qline .age { margin-left: auto; }
+  .dcard .fields { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; font-size: 12.5px; }
+  .dcard .fl { text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); padding-top: 2px; }
+  .dcard .fv { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dcard .fv b { color: var(--ink); }
+  .ledger { display: flex; flex-direction: column; margin: 2px -10px 0; }
+  .ledger button { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 1px 12px; align-items: baseline; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .ledger button:hover { background: var(--line-soft); }
+  .ledger button:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .ledger .lb { font-size: 13px; font-weight: var(--w-emph); color: var(--muted); }
+  .ledger button.first .lb { color: var(--ink); }
+  .ledger .ds { font-size: 12px; color: var(--muted); }
+  .ledger .ds b { color: var(--ink); }
+  .ledger .dd { grid-column: 2; font-size: 11.5px; color: var(--faint); }
+  .focusnav { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; padding-top: 8px; }
+  .focusnav .ct { font-family: var(--mono); font-size: 11px; }
+  .focusnav .qbtn { padding: 4px 8px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 44px; align-items: start; max-width: 1100px; }
+  .rail { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 20px; }
+  .rail .pulse { gap: 4px; }
+  .rail .lane-label { margin-bottom: 6px; }
+  /* tabs (intake topics, sessions project filter) */
+  .tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+  .tabs a { padding: 6px 10px; font-size: 13px; color: var(--muted); text-decoration: none; border-bottom: 1.5px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: var(--w-emph); }
+  .tabs .r { margin-left: auto; }
+  .lead { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 14px 18px 10px; max-width: 640px; display: flex; flex-direction: column; gap: 8px; }
+  .lead .tt { font-size: 15px; font-weight: var(--w-emph); display: flex; align-items: center; gap: 10px; }
+  .lead .made { font-size: 12px; color: var(--muted); }
+  .lead .gist { font-size: 13px; color: var(--muted); max-width: 60ch; }
+  /* empty states (question 3) */
+  .empty-state { max-width: 560px; margin-top: 4vh; display: flex; flex-direction: column; gap: 14px; }
+  .empty-state h2 { font-size: 17px; font-weight: var(--w-emph); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  .empty-state p { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 52ch; }
+  .empty-state .fine { font-size: 12px; color: var(--faint); max-width: 56ch; }
+  .empty-state .fine a { color: var(--muted); cursor: pointer; }
+  .empty-state .acts { display: flex; gap: 2px; margin-left: -9px; flex-wrap: wrap; }
+  .offer { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 4px 6px; max-width: 560px; }
+  .offer .row .t b { display: block; }
+  .offer .row .t small { margin: 0; display: block; }
+  .form { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 14px 18px 12px; max-width: 520px; display: flex; flex-direction: column; gap: 8px; }
+  .form .fr { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 13px; }
+  .form .fl { text-transform: uppercase; letter-spacing: 0.09em; font-size: 10px; color: var(--faint); font-weight: var(--w-emph); }
+  .form .fv { color: var(--ink); }
+  .form .acts { display: flex; gap: 2px; margin-left: -9px; padding-top: 6px; }
+  .form .fine { font-size: 12px; color: var(--faint); }
+  .code { display: flex; align-items: center; gap: 8px; }
+  .code input { font: 13px var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--surface); color: var(--ink); width: 240px; }
+  /* sessions: split (A, rejected) */
+  .sess-split { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 22px; flex: 1; min-height: 0; align-items: stretch; }
+  .sess-split > div:last-child { display: flex; flex-direction: column; min-height: 0; }
+  .listcol { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; align-self: start; position: sticky; top: 16px; max-height: calc(100vh - 100px); overflow: auto; }
+  .listcol .newbtn { margin: 0 4px 8px; width: auto; }
+  .listcol .ghead { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin: 8px 0 2px; font-size: 12px; color: var(--muted); font-weight: var(--w-emph); }
+  .listcol .ghead .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; }
+  /* ============ the thread surface (round 2: Codex / t3-code shape) ============ */
+  .thread { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tcol { width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; padding: 6px 0 26px; }
+  .stamp { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .umsg { align-self: flex-end; max-width: 78%; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px 14px 4px 14px; padding: 9px 14px; font-size: 14px; color: var(--ink); }
+  .worked { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--faint); cursor: pointer; }
+  .worked::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .amsg { font-size: 14px; line-height: 1.55; color: var(--ink); max-width: 70ch; }
+  .amsg p { margin: 0 0 8px; } .amsg p:last-child { margin-bottom: 0; }
+  .amsg ul { margin: 0 0 8px; padding-left: 20px; } .amsg li { margin: 2px 0; }
+  .chcard { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); background: var(--surface); }
+  .chcard b { color: var(--ink); } .chcard .plus { color: var(--ok); font-family: var(--mono); } .chcard .minus { color: var(--fail); font-family: var(--mono); }
+  .chcard .qbtn { margin-left: auto; }
+  .livemsg { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .newhero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding-bottom: 8vh; }
+  .newhero h2 { font-size: 22px; font-weight: var(--w-emph); letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+  .newhero h2 .ws { border-bottom: 1px dotted var(--faint); }
+  .newhero p { color: var(--muted); margin: 0; font-size: 13.5px; max-width: 52ch; }
+  /* composer with its config strip: the thread's configuration lives where you type */
+  .compwrap { width: 100%; max-width: 800px; margin: auto auto 0; display: flex; flex-direction: column; }
+  .strip { display: flex; align-items: center; gap: 1px; padding: 5px 8px 10px; margin-bottom: -6px; background: var(--surface); border: 1px solid var(--line-soft); border-bottom: 0; border-radius: 10px 10px 0 0; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .sel { border: 0; background: none; color: var(--muted); padding: 3px 7px; border-radius: 5px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; font-family: var(--sans); white-space: nowrap; }
+  .sel:hover { background: var(--line-soft); color: var(--ink); }
+  .sel .k { color: var(--faint); }
+  .sel::after { content: "▾"; color: var(--faint); font-size: 9px; }
+  .sel.ro { cursor: default; } .sel.ro::after { content: none; } .sel.ro:hover { background: none; color: var(--muted); }
+  .sel.ro .v { color: var(--muted); }
+  .sepv { width: 1px; height: 12px; background: var(--line); margin: 0 3px; flex: none; }
+  .composer { border: 1px solid var(--line); border-radius: 12px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .composer textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 44px; width: 100%; }
+  .composer .ctl { display: flex; align-items: center; gap: 1px; font-size: 12px; color: var(--faint); }
+  .composer .ctl .send { margin-left: auto; }
+  .composer .ctl .send .qbtn { padding: 5px 10px; }
+  /* round 4: the selectors open menus - one popover, anchored above the control it belongs to */
+  .sel[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .c-cx .mpill[aria-expanded="true"] { border-color: var(--faint); }
+  .pop { position: fixed; z-index: 35; width: 320px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 6px; display: none; flex-direction: column; font-size: 12.5px; }
+  .pop.open { display: flex; }
+  .pop .ph { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px 5px; }
+  .pop .ph .r { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+  .pop .pi { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); text-align: left; border: 0; background: none; font: inherit; width: 100%; }
+  .pop .pi:hover { background: var(--line-soft); color: var(--ink); }
+  .pop .pi.on { color: var(--ink); font-weight: var(--w-emph); }
+  .pop .pi .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; justify-self: center; }
+  .pop .pi.on .dot { background: var(--ink); }
+  .pop .pi .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi .n .mono { font-size: 11.5px; }
+  .pop .pi .st { font-size: 11px; white-space: nowrap; font-weight: 400; }
+  .pop .pi .s { grid-column: 2 / 4; font-size: 11px; color: var(--faint); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi.dim { opacity: 0.55; cursor: default; } .pop .pi.dim:hover { background: none; color: var(--muted); }
+  .pop .pg { margin-top: 6px; padding: 7px 8px 3px; display: flex; align-items: baseline; gap: 8px; border-top: 1px solid var(--line-soft); }
+  .pop .ph + .pg { border-top: 0; margin-top: 0; padding-top: 2px; }
+  .pop .pg b { font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .pop .pg small { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pg .st { margin-left: auto; font-size: 11px; color: var(--faint); white-space: nowrap; }
+  .pop .pg .st a { color: var(--muted); cursor: pointer; }
+  .pop .pg.custom { align-items: center; gap: 6px; }
+  .pop .pi:has(.cust) { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 8px; }
+  .pop .pi.grp { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 8px; }
+  .pop .pi.grp b { color: var(--muted); } .pop .pi.grp:hover b { color: var(--ink); }
+  .pop .pi.grp small { font-size: 11px; color: var(--faint); font-weight: 400; }
+  .pop .pi.grp .n { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .pop .pi.grp .n b { flex: none; }
+  .pop .pi.grp .n small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pop .pi.grp .st a { color: var(--muted); cursor: pointer; }
+  .pop .cin { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface); color: var(--ink); flex: 1; min-width: 0; }
+  .pop .opts { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 8px 8px 4px; display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 10px; align-items: center; }
+  .pop .opts .ol { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: var(--w-emph); }
+  .segq { display: inline-flex; gap: 1px; flex-wrap: wrap; }
+  .segq button { border: 0; background: none; font: inherit; font-size: 12px; color: var(--muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .segq button:hover { background: var(--line-soft); color: var(--ink); }
+  .segq button.on { color: var(--ink); font-weight: var(--w-emph); background: var(--line-soft); }
+  .pop .foot { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .pop .foot a { color: var(--muted); cursor: pointer; }
+  /* round 5: provider marks (monochrome, currentColor - the t3 clone is the one place they carry brand color) */
+  .plogo { width: 12px; height: 12px; display: inline-block; vertical-align: -2px; margin-right: 5px; flex: none; }
+  .plogo.pil { font-family: var(--mono); font-size: 12px; line-height: 12px; text-align: center; vertical-align: -1px; }
+  .pop .pi.grp.open { cursor: default; } .pop .pi.grp.open:hover { background: none; }
+  .pop .pi.grp.open b { color: var(--ink); }
+  .pop .ph + .pi.grp { border-top: 0; margin-top: 0; padding-top: 5px; }
+  /* the t3-code selector clone */
+  .pop.t3 { padding: 0; width: 420px; }
+  .t3pop { display: flex; min-height: 0; }
+  .t3rail { width: 46px; flex: none; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 6px; }
+  .t3rail button { width: 34px; height: 34px; border: 0; background: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--ink); cursor: pointer; position: relative; }
+  .t3rail button svg { width: 20px; height: 20px; }
+  .t3rail button:hover { background: var(--line-soft); }
+  .t3rail button.on::before { content: ""; position: absolute; left: -6px; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: #2f5bea; }
+  .t3rail .sep { width: 26px; height: 1px; background: var(--line); margin: 4px 0; }
+  .claude { color: #d97757; }
+  .t3main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .t3search { display: flex; align-items: center; gap: 8px; margin: 10px 12px 0; padding: 4px 4px 8px; border-bottom: 2px solid #2f5bea; color: var(--faint); }
+  .t3search svg { width: 18px; height: 18px; flex: none; }
+  .t3search input { border: 0; background: none; font: 14.5px var(--sans); color: var(--ink); outline: none; flex: 1; min-width: 0; }
+  .t3list { padding: 8px; overflow: auto; }
+  .t3row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto auto; gap: 2px 10px; padding: 9px 12px; border-radius: 9px; cursor: pointer; align-items: center; }
+  .t3row.on, .t3row:hover { background: var(--line-soft); }
+  .t3row.dim { opacity: 0.55; }
+  .t3row .nm { font-size: 14.5px; color: var(--ink); }
+  .t3row .pv { grid-row: 2; display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t3row .pv .plogo { width: 14px; height: 14px; margin: 0; }
+  .t3row .kbd { grid-row: 1 / 3; font: 11.5px var(--mono); color: var(--muted); background: var(--line-soft); border-radius: 999px; padding: 3px 9px; }
+  .t3row .star { grid-row: 1 / 3; border: 0; background: none; color: var(--line); cursor: pointer; display: flex; padding: 4px; }
+  .t3row .star svg { width: 17px; height: 17px; }
+  .t3row .star.on { color: #e9b400; }
+  .t3empty { padding: 16px 12px; color: var(--faint); font-size: 13px; }
+  .c-t3 .row3 .sel.pill { background: var(--line-soft); border-radius: 8px; padding: 6px 10px; font-size: 13.5px; }
+  .c-t3 .row3 .sel.pill .plogo { width: 16px; height: 16px; }
+  .c-t3 .row3 .sel .spark { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; color: var(--muted); }
+  /* codexlip: the codex card, the setup bar under it, a voice button */
+  .compwrap.docked .c-cx.solo { border-radius: 0 0 14px 14px; }
+  .micb { width: 28px; height: 28px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .micb:hover { background: var(--line-soft); color: var(--ink); }
+  .micb svg { width: 16px; height: 16px; }
+  /* worked-for lines with collapsible tool calls; the live one shimmers */
+  .worked .wt { flex: none; }
+  .worked .chev { flex: none; display: inline-block; transition: transform .15s; margin-left: -6px; }
+  .worked[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .worked.live .wt { background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.4s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -20% 0; } }
+  @media (prefers-reduced-motion: reduce) { .worked.live .wt { animation: none; background: none; color: var(--live); } }
+  .tools { display: none; flex-direction: column; gap: 3px; padding: 4px 0 2px 14px; border-left: 1px solid var(--line); margin: -10px 0 0 5px; }
+  .tools.open { display: flex; }
+  .tools .tc { display: flex; gap: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); align-items: baseline; }
+  .tools .tc .verb { color: var(--faint); width: 40px; flex: none; }
+  .tools .tc .res { color: var(--faint); margin-left: auto; white-space: nowrap; }
+  .tools .tc.now .verb { color: var(--live); }
+  .tools .tc.now .res { color: var(--live); }
+  /* docked request: attached to the input, same place always */
+  .dock { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--raised); padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
+  .dock .qline { display: flex; align-items: center; gap: 10px; }
+  .dock .q { font-size: 14px; font-weight: var(--w-emph); }
+  .dock .qline .age { margin-left: auto; }
+  .dock .ledger { margin: 0 -10px; }
+  .dock .ledger button { padding: 5px 10px; }
+  .compwrap.docked .strip { border-radius: 0; }
+  .compwrap.docked .c-t3 { border-radius: 0 0 14px 14px; }
+  .compwrap.docked .c-cx-tabs { border-radius: 0; margin-left: 0; margin-right: 0; }
+  /* input variant: t3-code lookalike */
+  .c-t3 { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+  .c-t3 textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 48px; width: 100%; }
+  .c-t3 .row3 { display: flex; align-items: center; gap: 2px; font-size: 12.5px; }
+  .c-t3 .row3 .sel { font-size: 12.5px; color: var(--ink); }
+  .c-t3 .row3 .sel .k { color: var(--faint); }
+  .c-t3 .row3 .right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+  .sendc { width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; }
+  .sendc:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .lip { margin: -8px 14px 0; padding: 13px 12px 5px; border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface); display: flex; gap: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+  .lip .right { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; }
+  /* input variant: Codex lookalike */
+  .c-cx-tabs { display: flex; gap: 2px; padding: 6px 8px; margin: 0 14px -8px; background: var(--surface); border: 1px solid var(--line-soft); border-bottom: 0; border-radius: 10px 10px 0 0; font-size: 12px; color: var(--muted); padding-bottom: 12px; flex-wrap: wrap; }
+  .c-cx { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+  .c-cx textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; min-height: 48px; width: 100%; }
+  .c-cx .row3 { display: flex; align-items: center; gap: 6px; }
+  .c-cx .plusb { width: 26px; height: 26px; border-radius: 7px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); font-size: 17px; cursor: pointer; }
+  .c-cx .plusb:hover { background: var(--line-soft); color: var(--ink); }
+  .c-cx .mpill { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12px; color: var(--ink); background: var(--surface); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .c-cx .mpill .k { color: var(--faint); }
+  .c-cx .mpill::after { content: "▾"; color: var(--faint); font-size: 9px; }
+  /* new-thread layout: center */
+  .thread.center { justify-content: center; }
+  .thread.center .newhero { flex: none; padding: 0 0 22px; }
+  .thread.center .compwrap { margin: 0 auto; }
+  .thread.center .midpad { flex: 1; }
+  /* compact stack: the six other screens as one quiet line at the foot */
+  .minilinks { padding: 0 10px 8px; font-size: 12px; color: var(--faint); line-height: 1.8; display: flex; flex-wrap: wrap; gap: 0 4px; }
+  .minilinks a { cursor: pointer; text-decoration: none; color: var(--muted); }
+  .minilinks a:hover { color: var(--ink); }
+  .minilinks a.on { color: var(--ink); font-weight: var(--w-emph); }
+  /* settings sub-nav */
+  .subnav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  .subnav a { text-decoration: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
+  .subnav a.on { background: var(--line-soft); color: var(--ink); font-weight: var(--w-emph); }
+  .addspot { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; color: var(--muted); font-size: 13px; max-width: 640px; display: flex; flex-direction: column; gap: 4px; }
+  .addspot code { font-size: 11.5px; }
+  /* switcher (not part of the design) + badge */
+  .sw { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #17161a; color: #fff; border-radius: 999px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); z-index: 50; font-family: var(--mono); }
+  .sw .label { font-size: 12px; font-weight: 500; padding: 0 8px; min-width: 150px; text-align: center; }
+  .sw button { background: none; border: 0; color: #fff; cursor: pointer; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .sw button:hover { background: rgba(255,255,255,0.14); }
+  .sw button:focus-visible { outline: 2px solid #9a94e8; outline-offset: 1px; }
+  .sw .ds { font-size: 11px; color: #c9c6d0; white-space: nowrap; }
+  .proto-badge { position: fixed; right: 14px; bottom: 14px; max-width: 250px; z-index: 40; border: 1px dashed var(--attn); color: var(--attn); background: var(--attn-soft); border-radius: 8px; padding: 6px 9px; font-family: var(--mono); font-size: 10px; line-height: 1.5; }
+</style>
+
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main class="main">
+    <div class="topbar" id="topbar"></div>
+    <div id="stage"></div>
+  </main>
+</div>
+<div class="legend" id="legend" role="dialog" aria-label="Marks legend"></div>
+<div class="pop" id="pop" role="dialog"></div>
+<div class="proto-badge">PROTOTYPE · throwaway · hydra#51 · converged<br>&larr; &rarr; shell · s stack · r rows · i input · e effort · o logos · h hero · m mode · d data · l login · p pulse · t theme · ? marks</div>
+<div class="sw">
+  <button id="prev" aria-label="Previous shell">&larr;</button>
+  <span class="label" id="swlabel"></span>
+  <button id="next" aria-label="Next shell">&rarr;</button>
+  <button id="sbtn" class="ds"></button>
+  <button id="rbtn" class="ds"></button>
+  <button id="ibtn" class="ds"></button>
+  <button id="ebtn" class="ds"></button>
+  <button id="obtn" class="ds"></button>
+  <button id="hbtn" class="ds"></button>
+  <button id="mbtn" class="ds"></button>
+  <button id="dbtn" class="ds"></button>
+  <button id="lbtn" class="ds"></button>
+  <button id="pbtn" class="ds"></button>
+  <button id="theme" aria-label="Toggle theme">◐</button>
+</div>
+
+<script>
+/* ============ url state ============ */
+const VARIANTS = [
+  { key: "A", name: "Nav · rejected r1", blurb: "one orchestration sidebar; threads are a list column inside Sessions" },
+  { key: "B", name: "Modes", blurb: "sidebar switches between a Threads face and a Hydra face" },
+  { key: "C", name: "Stack", blurb: "threads and the orchestration group in one sidebar" },
+];
+function params() { return new URLSearchParams(location.search); }
+function get(k) { return params().get(k); }
+function setParams(obj) { const p = params(); for (const [k, v] of Object.entries(obj)) { if (v === null || v === undefined || v === false) p.delete(k); else p.set(k, v); } try { history.replaceState(null, "", "?" + p.toString()); } catch (e) {} render(); }
+function vIndex() { const k = (get("variant") || "B").toUpperCase(); const i = VARIANTS.findIndex((v) => v.key === k); return i === -1 ? 1 : i; }
+function V() { return VARIANTS[vIndex()].key; }
+function fresh() { return get("data") === "fresh"; }
+function loggedIn() { return get("li") === "1"; }
+function screen() { const s = get("screen") || "sessions"; return SCREENS.includes(s) ? s : "sessions"; }
+function threadId() { return get("thread"); }
+function pulsePlace() { const p = get("pulse"); if (["top", "foot", "none"].includes(p)) return p; return V() === "A" ? "top" : "foot"; }
+function mode() { const m = get("mode"); if (m === "threads" || m === "hydra") return m; return screen() === "sessions" ? "threads" : "hydra"; }
+const STACKS = ["compact", "top", "bottom", "split"];
+function stack() { const s = get("stack"); return STACKS.includes(s) ? s : "compact"; }
+const INPUTS = ["hydra", "t3", "codex", "codexlip"];
+function input() { const i = get("input"); return INPUTS.includes(i) ? i : "codexlip"; }
+function hero() { return get("hero") === "center" ? "center" : "bottom"; }
+function effortPlace() { return get("effort") === "own" ? "own" : "nested"; }
+function logos() { return get("logos") === "1"; }
+const ROWS = ["plain", "meta", "rich"];
+function rows() { const r = get("rows"); return ROWS.includes(r) ? r : "meta"; }
+const SCREENS = ["sessions", "intake", "checkin", "tasks", "runs", "workflows", "fleet", "connections", "notifications", "settings"];
+const TITLES = { sessions: "Sessions", intake: "Intake", checkin: "Check-in", tasks: "Tasks", runs: "Runs", workflows: "Workflows", fleet: "Fleet", connections: "Connections", notifications: "Notifications", settings: "Settings" };
+
+/* ============ marks (pinned family) ============ */
+const BS = {
+  task:     '<rect x="1.75" y="1.75" width="8.5" height="8.5" rx="2.25"/>',
+  run:      '<path d="M3.25 2.4v7.2a.55.55 0 0 0 .83.47l5.9-3.6a.55.55 0 0 0 0-.94l-5.9-3.6a.55.55 0 0 0-.83.47z"/>',
+  workflow: '<circle cx="2.6" cy="6" r="1.35"/><circle cx="9.4" cy="2.6" r="1.35"/><circle cx="9.4" cy="9.4" r="1.35"/><path d="M3.9 6h2.4l2.1-2.5M6.3 6l2.1 2.5"/>',
+  session:  '<path d="M3.25 1.75h5.5A1.75 1.75 0 0 1 10.5 3.5v2.75A1.75 1.75 0 0 1 8.75 8H5.6L3.4 10.2V8h-.15A1.75 1.75 0 0 1 1.5 6.25V3.5a1.75 1.75 0 0 1 1.75-1.75z"/>',
+  paused:   '<path d="M4 2.5v7M8 2.5v7"/>',
+  question: '<path d="M3.9 4.3a2.1 2.1 0 1 1 3 1.9c-.6.35-.9.75-.9 1.4v.2"/><path d="M6 10.2h.01"/>',
+  queued:   '<circle cx="6" cy="6" r="3.4"/>',
+  done:     '<path d="m2.4 6.4 2.5 2.5 4.8-5.3"/>',
+  failed:   '<path d="m3 3 6 6M9 3l-6 6"/>',
+  cancelled:'<path d="M2.75 6h6.5"/>',
+};
+const bs = (m, cls = "") => `<svg class="bs ${cls}" viewBox="0 0 12 12" aria-hidden="true">${m}</svg>`;
+const M = {
+  working:   () => '<span class="eq" title="agent working"><i></i><i></i><i></i></span>',
+  decision:  () => `<span class="attn" title="decision wanted">${bs(BS.question, "q")}</span>`,
+  queued:    () => `<span class="cang" title="queued">${bs(BS.queued)}</span>`,
+  paused:    () => `<span class="attn" title="paused">${bs(BS.paused)}</span>`,
+  done:      () => `<span class="okg" title="done">${bs(BS.done)}</span>`,
+  failed:    () => `<span class="failg" title="failed">${bs(BS.failed)}</span>`,
+  cancelled: () => `<span class="cang" title="cancelled">${bs(BS.cancelled)}</span>`,
+  idle:      () => '<span class="idledot" title="idle"></span>',
+  none:      () => "",
+};
+const mark = (k) => `<span class="markcell">${(M[k] || M.none)()}</span>`;
+const ent = (k) => `<span class="ent">${bs(BS[k])}</span>`;
+const pri = (p) => `<span class="pri" data-pri="${p}" title="priority ${p}"><span class="bars"><i></i><i></i><i></i></span></span>`;
+const age = (t, b = "") => `<span class="age" data-age="${b}">${t}</span>`;
+const STATE_WORD = { working: ["working", "live"], decision: ["decision wanted", "attn"], idle: ["idle", ""], done: ["done", ""], failed: ["failed", "fail"], queued: ["queued", ""] };
+
+/* ============ data ============ */
+const BUSY = {
+  projects: [
+    { key: "hydra", name: "hydra", threads: [
+      { id: "a1f3c9e2", title: "Fix flaky webhook tests", state: "working", age: "12m", ws: "main checkout", branch: "main", provider: "Claude Code", model: "claude-sonnet-5", changes: "+48 −12", files: 3 },
+      { id: "b7d02e41", title: "Runner drain command", state: "decision", age: "4m", ws: "worktree", branch: "hydra/run-3f1", provider: "Claude Code", model: "claude-sonnet-5", runner: "hetzner-01", changes: "+210 −8", files: 6 },
+      { id: "c9e8a110", title: "Tidy the promotion runbook", state: "idle", age: "2h", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5" },
+      { id: "d4b1f77a", title: "Bun compile: notarization spike", state: "done", age: "yesterday", ws: "worktree", branch: "spike/bun-notarize", pr: "#98", provider: "Claude Code", model: "claude-opus-5", runner: "macstudio-01", changes: "+48 −12", files: 3 },
+    ] },
+    { key: "ops", name: "ops", threads: [
+      { id: "e2c7d905", title: "Rotate the Hetzner backups key", state: "idle", age: "3d", ws: "main checkout", branch: "main", provider: "Codex", model: "gpt-5.6", runner: "hetzner-02" },
+      { id: "f0a3b6c8", title: "Why is the tailnet cert renewal failing", state: "failed", age: "5d", ws: "no workspace", branch: "", provider: "Claude Code", model: "claude-sonnet-5", runner: "macstudio-02" },
+    ] },
+  ],
+  assistants: [
+    { name: "Hydra", live: false, where: "web chat", id: "as-hydra" },
+    { name: "Hera", live: true, where: "active in #ops", id: "as-hera" },
+    { name: "Iris", live: false, where: "idle · Slack DM", id: "as-iris" },
+  ],
+  fromWorkflows: [
+    { id: "9c1e2f30", title: "PR review (auto) · PR #94 · step 2/4", state: "working", age: "3m", project: "hydra" },
+    { id: "8b0d1e2f", title: "Triage · 09:00 batch", state: "done", age: "5h", project: "" },
+  ],
+  counts: { intake: 7, checkin: 2, notifications: 5 },
+  pulseLine: "<b>6 runners</b> · <span class='w'>1 at cap</span> · Hera active",
+  pulse: [
+    { dot: "live", html: "<b>6 runners</b> · 11 sessions" },
+    { dot: "live", html: "<b>Hera</b> active in #ops" },
+    { dot: "", html: "<b>hetzner-01</b> at cap <span class='w'>· queue 2</span>" },
+    { dot: "", html: "212 events today → <b>18 tasks</b>" },
+  ],
+};
+const FRESH = {
+  projects: [], assistants: [{ name: "Hydra", live: false, where: "web chat", id: "as-hydra" }], fromWorkflows: [],
+  counts: { intake: 0, checkin: 0, notifications: 0 },
+  pulseLine: "<b>1 runner</b> · this machine",
+  pulse: [{ dot: "live", html: "<b>1 runner</b> · this machine" }],
+};
+/* threads started in this page (in memory, no persistence - reload forgets them) */
+const STARTED = [];
+function data() { return fresh() ? FRESH : BUSY; }
+function projectsWithStarted() {
+  const d = data(); const mine = STARTED.filter((t) => t.freshData === fresh());
+  if (!mine.length) return d.projects;
+  if (d.projects.length) return d.projects.map((p, i) => i === 0 ? { ...p, threads: [...mine, ...p.threads] } : p);
+  return [{ key: "none", name: "No project", threads: mine }];
+}
+function allThreads() { return projectsWithStarted().flatMap((p) => p.threads.map((t) => ({ ...t, project: p.key === "none" ? "" : p.key }))); }
+function findThread(id) { return allThreads().find((t) => t.id === id); }
+
+/* ============ round 4: what the composer's selectors choose from ============ */
+// One Capability Snapshot per (instance x runner), spec 06 §3: a runner's logins say which instances can
+// place there, the instance's catalog says which models, the model says which options. All static here.
+const CLAUDE_MODELS = [
+  { id: "claude-fable-5-1", effort: ["low", "medium", "high", "max"], ctx: ["200k", "1M"] },
+  { id: "claude-opus-5", effort: ["low", "medium", "high", "max"], ctx: ["200k", "1M"], fast: true },
+  { id: "claude-sonnet-5", effort: ["low", "medium", "high"], ctx: ["200k", "1M"] },
+  { id: "claude-haiku-4-5", effort: ["low", "medium", "high"], ctx: ["200k"] },
+];
+const CODEX_MODELS = [
+  { id: "gpt-5.6", effort: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-5.6-codex", effort: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-5.5-codex-mini", effort: ["medium", "high"] },
+];
+const INSTANCES_BUSY = [
+  { id: "cc-personal", provider: "Claude Code", name: "personal", who: "rogier@… · Max plan", models: CLAUDE_MODELS },
+  { id: "cc-work", provider: "Claude Code", name: "work", who: "rogier@acme… · Team", models: CLAUDE_MODELS },
+  { id: "codex", provider: "Codex", name: "", who: "ChatGPT Plus", models: CODEX_MODELS },
+  { id: "pi-zai", provider: "pi", name: "zai", who: "API key", noAuto: true, models: [{ id: "glm-5", thinking: ["off", "on"] }, { id: "glm-4.7", thinking: ["off", "on"] }] },
+];
+const INSTANCES_FRESH = [
+  { id: "cc-personal", provider: "Claude Code", name: "", who: "rogier@… · Max plan", models: CLAUDE_MODELS },
+  { id: "codex", provider: "Codex", name: "", who: "on this machine", models: CODEX_MODELS },
+];
+const RUNNERS_BUSY = [
+  { id: "laptop", local: true, os: "macOS", cap: "1/2", note: "this machine · reserved", st: "online", tone: "live", logins: ["cc-personal", "cc-work", "codex", "pi-zai"] },
+  { id: "macstudio-01", os: "macOS", cap: "3/4", note: "default", st: "online", tone: "live", logins: ["cc-personal", "codex"] },
+  { id: "hetzner-01", os: "linux", cap: "4/4", note: "queue 2", st: "at cap · would queue", tone: "attn", logins: ["cc-personal"] },
+  { id: "hetzner-02", os: "linux", cap: "1/6", note: "", st: "online", tone: "live", logins: ["codex", "pi-zai"] },
+  { id: "macstudio-02", os: "macOS", cap: "1/4", note: "", st: "draining", tone: "", off: "draining · takes no new sessions", logins: ["cc-personal", "codex"] },
+  { id: "pi-lab", os: "linux", cap: "0/2", note: "", st: "unreachable 2d", tone: "fail", off: "unreachable · a thread would wait for it", logins: ["pi-zai"] },
+];
+function runners() { return fresh() ? [{ id: "local", local: true, label: "this machine", os: "macOS", cap: "0/4", note: "", st: "online", tone: "live", logins: loggedIn() ? ["cc-personal"] : [] }] : RUNNERS_BUSY; }
+function instances() { return fresh() ? INSTANCES_FRESH : INSTANCES_BUSY; }
+function inst(id) { return instances().find((i) => i.id === id) || instances()[0]; }
+const instLabel = (i) => i.provider + (i.name ? ` · ${i.name}` : "");
+const instParen = (i) => i.provider + (i.name ? ` (${i.name})` : "");
+const REPOS_BUSY = [
+  { id: "hydra", project: "hydra", name: "hydra", primary: "main", branches: ["main", "spec/v1"], on: ["laptop", "macstudio-01", "hetzner-01"], used: [["hydra/run-3f1", "Runner drain command"], ["spike/bun-notarize", "Bun compile: notarization spike"]] },
+  { id: "agentick-web", project: "hydra", name: "agentick-web", primary: "main", branches: ["main"], on: ["laptop", "macstudio-01"], used: [] },
+  { id: "ops-infra", project: "ops", name: "ops-infra", primary: "master", branches: ["master", "hetzner-migration"], on: ["laptop", "hetzner-02"], used: [] },
+];
+function repos() { return fresh() ? [] : REPOS_BUSY; }
+function repoOf(c) { return repos().find((r) => r.id === c.repo) || null; }
+const DISPLAY = { "claude-fable-5-1": "Claude Fable 5.1", "claude-opus-5": "Claude Opus 5", "claude-sonnet-5": "Claude Sonnet 5", "claude-haiku-4-5": "Claude Haiku 4.5", "gpt-5.6": "GPT-5.6", "gpt-5.6-codex": "GPT-5.6-Codex", "gpt-5.5-codex-mini": "GPT-5.5-Codex-Mini", "glm-5": "GLM-5", "glm-4.7": "GLM-4.7" };
+const displayName = (id) => DISPLAY[id] || id;
+/* provider marks: a starburst for Claude, the OpenAI knot, a pi glyph. Monochrome except in the t3 clone. */
+const STARBURST = (() => { let d = ""; for (let i = 0; i < 12; i++) { const a = (i * Math.PI) / 6, L = i % 2 ? 7.2 : 10.2; d += `M${(12 + Math.cos(a) * 3.2).toFixed(2)} ${(12 + Math.sin(a) * 3.2).toFixed(2)}L${(12 + Math.cos(a) * L).toFixed(2)} ${(12 + Math.sin(a) * L).toFixed(2)}`; } return d; })();
+const PMARK = {
+  "Claude Code": `<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true"><path d="${STARBURST}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+  Codex: '<svg class="plogo" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>',
+  pi: '<span class="plogo pil" aria-hidden="true">π</span>',
+};
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8z"/></svg>';
+const MAG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>';
+const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8zM18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9z"/></svg>';
+const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>';
+const BRANCH = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:11px;height:11px;vertical-align:-1px;margin-right:4px"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7.2v9.6M18 10.2c0 4-12 2.6-12 6.6"/></svg>';
+/* the t3 clone's own state: which rail item filters the list, the search text, the favorites */
+const T3 = { rail: "fav", q: "" };
+const FAV = new Set(["cc-personal/claude-fable-5-1", "cc-personal/claude-opus-5", "cc-personal/claude-sonnet-5", "codex/gpt-5.6", "codex/gpt-5.6-codex"]);
+/* what the composer has picked. New-thread mode edits PICK; a started thread edits LIVE[id] (the locked
+   fields never get there). In memory only. */
+const PICK = { repo: "hydra", checkout: "worktree", branch: "new", runner: "laptop", instance: "cc-personal", model: "claude-sonnet-5", effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" };
+const LIVE = {};
+let PROBING = null;
+function cfg(t) {
+  if (!t) return PICK;
+  const i = instances().find((x) => x.provider === t.provider) || instances()[0];
+  return Object.assign({ runner: t.runner || "laptop", instance: i.id, model: t.model, effort: "medium", thinking: "off", ctx: "200k", fast: "off", access: "approval-required", profile: "unrestricted" }, LIVE[t.id] || {});
+}
+function setCfg(t, patch) { if (t) LIVE[t.id] = Object.assign({}, LIVE[t.id] || {}, patch); else Object.assign(PICK, patch); }
+function modelOf(c) { return inst(c.instance).models.find((m) => m.id === c.model) || { id: c.model, custom: true }; }
+function runnerOf(c) { return runners().find((r) => r.id === c.runner) || runners()[0]; }
+function reasoningOf(c) { const m = modelOf(c); if (m.thinking) return ["thinking", c.thinking]; if (m.effort) return ["reasoning", c.effort]; return null; }
+function runnerLabel(c) { const r = runnerOf(c); return r.local ? `local · ${r.label || r.id}` : r.id; }
+function modelLabel(c) {
+  const i = inst(c.instance);
+  let v = `${logos() ? PMARK[i.provider] : ""}${instLabel(i)} · ${c.model}`;
+  const r = reasoningOf(c);
+  if (effortPlace() === "nested" && r) v += ` · ${r[0] === "thinking" ? `thinking ${r[1]}` : r[1]}`;
+  if (PROBING) v += ` <span class="k">· probing ${PROBING}…</span>`;
+  return v;
+}
+function reasoningSel(c) { const r = reasoningOf(c); if (effortPlace() !== "own" || !r) return ""; return sel(r[0], r[1], false, "effort"); }
+
+/* the one popover behind the composer's selectors */
+let POP = null; let CUSTOM = false;
+function curThread() { const id = threadId(); return id && id !== "new" ? findThread(id) : null; }
+function popHtml(kind, t) {
+  const c = cfg(t); const r = runnerOf(c); const i = inst(c.instance); const m = modelOf(c);
+  const row = (on, dim, pick, val, name, st = "", sub = "") => `<button class="pi ${on ? "on" : ""} ${dim ? "dim" : ""}" ${dim ? "" : `data-pick="${pick}" data-val="${val}"`}><span class="dot"></span><span class="n">${name}</span><span class="st">${st}</span>${sub ? `<span class="s">${sub}</span>` : ""}</button>`;
+  if (kind === "runner") {
+    const rows = runners().map((x) => {
+      const off = x.off || (x.logins.includes(i.id) ? "" : `no ${instParen(i)} login here`);
+      const byProv = {}; x.logins.forEach((id) => { const q = inst(id); (byProv[q.provider] = byProv[q.provider] || []).push(q.name); });
+      const there = Object.entries(byProv).map(([pv, ns]) => pv + (ns.filter(Boolean).length > 1 ? ` (${ns.join(", ")})` : "")).join(" · ") || "no provider logged in";
+      return row(x.id === r.id, !!off, "runner", x.id, x.local ? `local · ${x.label || x.id}` : x.id, `<span class="state ${x.tone}">${x.st}</span> <span class="mono" style="color:var(--faint)">${x.cap}</span>`, [x.note, off || there].filter(Boolean).join(" · "));
+    }).join("");
+    return `<div class="ph"><span class="lane-label">Runner</span><span class="r">locks when the thread starts</span></div>${rows}<div class="foot">The thread runs where you say; nothing moves it later. <a data-go="fleet" style="white-space:nowrap">Add machine →</a></div>`;
+  }
+  if (kind === "model" && input() === "t3") return t3ModelPop(c, r);
+  if (kind === "workspace") {
+    const pj = {}; repos().forEach((x) => (pj[x.project] = pj[x.project] || []).push(x));
+    let h = `<div class="ph"><span class="lane-label">Workspace</span><span class="r">locks when the thread starts</span></div>`;
+    for (const [name, list] of Object.entries(pj)) {
+      h += `<div class="pg"><span class="pdot ${name}"></span><b>${name}</b></div>`;
+      h += list.map((x) => { const cl = x.on.includes(r.id); return row(c.repo === x.id, false, "repo", x.id, x.name, "", cl ? `primary on ${x.primary}${x.used.length ? ` · ${x.used.length} worktree${x.used.length > 1 ? "s" : ""} in use` : ""}` : `not cloned on ${r.local ? "this machine" : r.id} · clones on first use`); }).join("");
+    }
+    h += row(!c.repo, false, "repo", "none", "No workspace", "", "the agent works without a checkout");
+    h += `<div class="foot"><a data-noop="1">Adopt a folder on this machine…</a> · <a data-go="connections">Add a repo →</a></div>`;
+    return h;
+  }
+  if (kind === "checkout") {
+    const rp = repoOf(c); if (!rp) return "";
+    let h = `<div class="ph"><span class="lane-label">Checkout</span><span class="r">${rp.name} on ${r.local ? "this machine" : r.id}</span></div>`;
+    h += row(c.checkout === "primary", false, "checkout", "primary", "primary checkout", `<span style="color:var(--faint)" class="mono">${rp.primary}</span>`, "the clone itself, on whatever branch it has checked out");
+    h += row(c.checkout === "worktree", false, "checkout", "worktree", "new worktree", "", `a fresh worktree of ${rp.name}, removed when the thread is deleted`);
+    h += rp.used.map(([b, who]) => row(false, true, "", "", `<span class="mono">${b}</span>`, "", `worktree in use by <b>${who}</b>`)).join("");
+    return h;
+  }
+  if (kind === "branch") {
+    const rp = repoOf(c); if (!rp) return "";
+    let h = `<div class="ph"><span class="lane-label">Branch</span><span class="r">${c.checkout === "primary" ? "the primary checkout switches to it" : "for the new worktree"}</span></div>`;
+    if (c.checkout !== "primary") h += row(c.branch === "new", false, "branch", "new", `new branch <span class="mono" style="color:var(--faint)">${rp.name}/run-…</span>`, "", `from ${rp.primary}, named after the thread's id`);
+    h += rp.branches.map((b) => row(c.branch === b, false, "branch", b, `<span class="mono">${b}</span>`, b === rp.primary ? `<span style="color:var(--faint)">default</span>` : "")).join("");
+    return h;
+  }
+  if (kind === "model") {
+    let h = `<div class="ph"><span class="lane-label">Model</span><span class="r">${PROBING ? `probing ${PROBING}…` : `on ${r.local ? "this machine" : r.id} · probed 2h ago`}</span></div>`;
+    for (const x of instances()) {
+      const here = r.logins.includes(x.id);
+      const why = here ? "" : (fresh() ? `found, not logged in · <a data-login="${x.provider}">Log in</a>` : `not logged in on ${r.id}`);
+      const open = x.id === i.id; const mark = logos() ? PMARK[x.provider] : "";
+      h += `<button class="pi grp ${open ? "open" : ""} ${here ? "" : "dim"}" ${here && !open ? `data-pick="instance" data-val="${x.id}"` : ""}><span class="dot"></span><span class="n">${mark}<b>${instLabel(x)}</b> <small>${x.who}</small></span><span class="st"><span style="color:var(--faint)">${why || `${x.models.length} models ${open ? "⌄" : "›"}`}</span></span></button>`;
+      if (open) h += x.models.map((mm) => row(c.model === mm.id, !here, "model", `${x.id}/${mm.id}`, `<span class="mono">${mm.id}</span>`)).join("");
+    }
+    h += CUSTOM ? `<div class="pg custom"><input id="custom" class="cin" placeholder="model slug, as the harness names it" aria-label="custom model"><button class="qbtn first" data-pick="custom-go">Use</button></div>`
+                : row(m.custom, false, "custom", "", `<span style="color:var(--faint)" class="cust">${m.custom ? `<span class="mono">${m.id}</span> · custom` : "Custom model…"}</span>`);
+    const opts = optionRows(c, m, effortPlace() === "nested");
+    if (opts) h += `<div class="opts">${opts}</div>`;
+    return h;
+  }
+  if (kind === "effort") {
+    if (!reasoningOf(c)) return "";
+    const vals = m.thinking || m.effort; const key = m.thinking ? "thinking" : "effort";
+    const desc = { minimal: "almost none", low: "quick and cheap", medium: "the default", high: "thinks longer", xhigh: "longest · hard problems", max: "everything the model has", off: "answers directly", on: "reasons before answering" };
+    const extra = input() === "t3" ? optionRows(c, m, false) : "";
+    return `<div class="ph"><span class="lane-label">${key === "thinking" ? "Thinking" : "Reasoning"}</span><span class="r">per model · ${m.id}</span></div>` + vals.map((v) => row(c[key] === v, false, key, v, v, `<span style="color:var(--faint)">${desc[v] || ""}</span>`)).join("") + (extra ? `<div class="opts">${extra}</div>` : "");
+  }
+  if (kind === "access") {
+    const modes = [["approval-required", "asks for every side-effecting action"], ["auto-accept-edits", "edits files freely, asks for the rest"], ["auto", "a harness-side reviewer judges routine actions"], ["full-access", "allows everything"]];
+    return `<div class="ph"><span class="lane-label">Access mode</span><span class="r">applies from the next turn</span></div>` + modes.map(([v, d]) => { const un = v === "auto" && i.noAuto; return row(c.access === v, un, "access", v, v, "", un ? `unsupported on ${i.provider} · falls back to auto-accept-edits` : d); }).join("");
+  }
+  if (kind === "profile") {
+    const ps = [["unrestricted", "everything you can do"], ["worker", "acts inside its task: tasks, notifications, subscriptions"], ["assistant", "reads and proposes; spawns and steers sessions"]];
+    return `<div class="ph"><span class="lane-label">Permission profile</span><span class="r">what it may do through Hydra</span></div>` + ps.map(([v, d]) => row(c.profile === v, false, "profile", v, v, "", d)).join("");
+  }
+  return "";
+}
+function t3ModelPop(c, r) {
+  const pairs = []; instances().forEach((x) => x.models.forEach((m) => pairs.push({ key: `${x.id}/${m.id}`, inst: x, m, here: r.logins.includes(x.id) })));
+  let list = T3.rail === "fav" ? [...FAV].map((k) => pairs.find((p) => p.key === k)).filter(Boolean) : pairs.filter((p) => p.inst.provider === T3.rail);
+  if (T3.q) list = list.filter((p) => `${displayName(p.m.id)} ${instLabel(p.inst)}`.toLowerCase().includes(T3.q.toLowerCase()));
+  const provs = [...new Set(instances().map((x) => x.provider))];
+  const rail = `<div class="t3rail"><button class="${T3.rail === "fav" ? "on" : ""}" data-pick="t3rail" data-val="fav" aria-label="Favorites">${STAR}</button><div class="sep"></div>${provs.map((pv) => `<button class="${T3.rail === pv ? "on" : ""} ${pv === "Claude Code" ? "claude" : ""}" data-pick="t3rail" data-val="${pv}" aria-label="${pv}">${PMARK[pv]}</button>`).join("")}</div>`;
+  const rows = list.map((p, idx) => `<div class="t3row ${c.instance === p.inst.id && c.model === p.m.id ? "on" : ""} ${p.here ? "" : "dim"}" data-pick="model" data-val="${p.key}"><span class="nm">${displayName(p.m.id)}</span><span class="pv ${p.inst.provider === "Claude Code" ? "claude" : ""}">${PMARK[p.inst.provider]}<span style="color:var(--muted)">${instLabel(p.inst)}${p.here ? "" : ` · not logged in on ${r.local ? "this machine" : r.id}`}</span></span>${idx < 9 ? `<span class="kbd">⌘${idx + 1}</span>` : "<span></span>"}<button class="star ${FAV.has(p.key) ? "on" : ""}" data-pick="fav" data-val="${p.key}" aria-label="favorite">${STAR}</button></div>`).join("");
+  return `<div class="t3pop">${rail}<div class="t3main"><div class="t3search">${MAG}<input id="t3q" placeholder="Search models..." value="${esc(T3.q)}" aria-label="Search models"></div><div class="t3list">${rows || '<div class="t3empty">No models match</div>'}</div></div></div>`;
+}
+function optionRows(c, m, withReasoning) {
+  const seg = (key, vals, cur) => `<span class="segq">${vals.map((v) => `<button class="${v === cur ? "on" : ""}" data-pick="${key}" data-val="${v}">${v}</button>`).join("")}</span>`;
+  let h = "";
+  if (withReasoning && m.effort) h += `<span class="ol">reasoning</span>${seg("effort", m.effort, c.effort)}`;
+  if (withReasoning && m.thinking) h += `<span class="ol">thinking</span>${seg("thinking", m.thinking, c.thinking)}`;
+  if (m.ctx && m.ctx.length > 1) h += `<span class="ol">context</span>${seg("ctx", m.ctx, c.ctx)}`;
+  if (m.fast) h += `<span class="ol">fast mode</span>${seg("fast", ["off", "on"], c.fast)}`;
+  return h;
+}
+function openPop(kind) { POP = POP && POP.kind === kind ? null : { kind }; CUSTOM = false; render(); }
+function closePop() { if (POP) { POP = null; CUSTOM = false; render(); } }
+function placePop() {
+  const pop = document.getElementById("pop");
+  const anchor = POP && document.querySelector(`[data-pop="${POP.kind}"]`);
+  if (!anchor) { pop.classList.remove("open"); POP = null; return; }
+  const t3 = POP.kind === "model" && input() === "t3";
+  pop.innerHTML = popHtml(POP.kind, curThread()); pop.className = `pop open ${t3 ? "t3" : ""}`; anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(); pop.style.width = t3 ? "" : (POP.kind === "runner" || POP.kind === "workspace" || POP.kind === "checkout" ? "400px" : POP.kind === "model" ? "360px" : "320px"); pop.style.maxHeight = `${a.top - 16}px`; const w = pop.offsetWidth;
+  pop.style.left = `${Math.max(8, Math.min(a.left, innerWidth - w - 8))}px`; pop.style.bottom = `${innerHeight - a.top + 6}px`;
+  const ci = document.getElementById("custom") || document.getElementById("t3q"); if (ci) { ci.focus(); ci.setSelectionRange(ci.value.length, ci.value.length); }
+}
+function pick(key, val) {
+  const t = curThread();
+  if (key === "runner") { setCfg(t, { runner: val }); PROBING = val; POP = null; setTimeout(() => { PROBING = null; render(); }, 1100); return render(); }
+  if (key === "model" || key === "instance") {
+    const c = cfg(t);
+    const [ins, mid] = key === "model" ? val.split("/") : [val, (inst(val).models.find((x) => x.id === c.model) || inst(val).models[0]).id];
+    const nm = inst(ins).models.find((x) => x.id === mid) || {}; const p = { instance: ins, model: mid };
+    if (nm.effort && !nm.effort.includes(c.effort)) p.effort = nm.effort.includes("medium") ? "medium" : nm.effort[0];
+    if (nm.ctx && !nm.ctx.includes(c.ctx)) p.ctx = nm.ctx[0];
+    setCfg(t, p); if (key === "model" && (effortPlace() !== "nested" || input() === "t3")) POP = null; return render();
+  }
+  if (key === "repo") { setCfg(t, { repo: val === "none" ? null : val, checkout: "worktree", branch: "new" }); POP = null; return render(); }
+  if (key === "checkout") { const rp = repoOf(cfg(t)); setCfg(t, { checkout: val, branch: val === "primary" ? rp.primary : "new" }); POP = null; return render(); }
+  if (key === "branch") { setCfg(t, { branch: val }); POP = null; return render(); }
+  if (key === "fav") { FAV.has(val) ? FAV.delete(val) : FAV.add(val); return render(); }
+  if (key === "t3rail") { T3.rail = val; T3.q = ""; return render(); }
+  if (key === "custom") { CUSTOM = true; return render(); }
+  if (key === "custom-go") { const v = (document.getElementById("custom") || {}).value; if (v && v.trim()) setCfg(t, { model: v.trim() }); CUSTOM = false; POP = null; return render(); }
+  setCfg(t, { [key]: val });
+  if (key === "access" || key === "profile" || (POP && POP.kind === "effort" && input() !== "t3")) POP = null;
+  render();
+}
+/* what is typed survives the re-renders the menus cause */
+const DRAFTS = {};
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/* ============ shell pieces ============ */
+const NAV_ALL = [["sessions", "session"], ["intake"], ["checkin"], ["tasks", "task"], ["runs", "run"], ["workflows", "workflow"], "sep", ["fleet"], ["connections"], ["notifications"], ["settings"]];
+const NAV_ORCH = NAV_ALL.filter((n) => n === "sep" || n[0] !== "sessions");
+const NAV_WORK = [["intake"], ["checkin"], ["tasks", "task"], ["runs", "run"], ["workflows", "workflow"]];
+const NAV_INFRA = [["fleet"], ["connections"], ["notifications"], ["settings"]];
+function navHtml(items) {
+  const d = data(); const s = screen();
+  return `<nav class="nav">${items.map((n) => {
+    if (n === "sep") return '<div class="sep"></div>';
+    const [key, glyph] = n; const c = d.counts[key];
+    const count = c ? `<span class="count${key === "checkin" ? " attn" : ""}">${c}</span>` : "";
+    return `<a data-go="${key}" class="${s === key ? "on" : ""}"><span class="ni">${glyph ? bs(BS[glyph]) : ""}</span>${TITLES[key]}${count}</a>`;
+  }).join("")}</nav>`;
+}
+function threadMeta(t) { return [t.ws === "worktree" ? t.branch : t.ws, t.pr, t.model].filter(Boolean).join(" · "); }
+function threadRow(t) {
+  const on = threadId() === t.id && screen() === "sessions"; const dim = t.state === "done" || t.state === "failed";
+  const r = rows();
+  if (r === "meta") {
+    return `<a class="trow2 ${on ? "on" : ""} ${dim ? "dim" : ""}" data-thread="${t.id}"><span class="l1">${mark(t.state)}<span class="t">${t.title}</span>${age(t.age)}</span><span class="l2">${threadMeta(t)}</span></a>`;
+  }
+  if (r === "rich" && (t.state === "working" || t.state === "decision")) {
+    const [w, tone] = STATE_WORD[t.state];
+    return `<a class="tcard ${on ? "on" : ""}" data-thread="${t.id}"><span class="st">${mark(t.state)}<span class="state ${tone}" style="font-size:11px">${w}</span>${age(t.age)}</span><span class="tt">${t.title}</span><span class="mm">${[t.ws === "worktree" ? t.branch : t.ws, t.pr, t.provider].filter(Boolean).join(" · ")}</span></a>`;
+  }
+  return `<a class="trow ${on ? "on" : ""} ${dim ? "dim" : ""}" data-thread="${t.id}">${mark(t.state)}<span class="t">${t.title}</span>${age(t.age)}</a>`;
+}
+function assistantRow(a) {
+  const on = threadId() === a.id && screen() === "sessions";
+  return `<a class="trow ${on ? "on" : ""}" data-thread="${a.id}"><span class="markcell">${a.live ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}</span><span class="t">${a.name} <span style="color:var(--faint);font-weight:400"> · ${a.where}</span></span></a>`;
+}
+function newThreadBtn() {
+  if (fresh() && !loggedIn()) return "";
+  return `<button class="newbtn" data-thread="new"><span class="plus">+</span>Create new thread</button>`;
+}
+function threadListHtml({ limit = 99, morelink = true } = {}) {
+  const d = data(); const projects = projectsWithStarted();
+  let h = "";
+  if (!projects.length) h += `<div class="empty">${fresh() && !loggedIn() ? "No threads yet · log in to a provider first" : "No threads yet"}</div>`;
+  for (const p of projects) {
+    h += `<div class="ghead"><span class="pdot ${p.key}"></span>${p.name}<span class="r">${p.threads.length}</span></div><div class="tlist">${p.threads.slice(0, limit).map((t) => threadRow(t)).join("")}</div>`;
+    if (p.threads.length > limit) h += `<a class="more" data-go="sessions" data-all="1">${p.threads.length - limit} more…</a>`;
+  }
+  h += `<div class="ghead">Assistants</div><div class="tlist">${d.assistants.map(assistantRow).join("")}</div>`;
+  if (morelink) h += `<a class="more" data-go="sessions" data-all="1" style="margin-top:8px">All sessions →</a>`;
+  return h;
+}
+function pulseHtml(limit = 99) {
+  return `<div class="pulse">${data().pulse.slice(0, limit).map((p) => `<span class="pl">${p.dot === "live" ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}<span>${p.html}</span></span>`).join("")}</div>`;
+}
+function legendBtn() { return `<button class="lgbtn" id="lgtoggle" aria-expanded="false" aria-controls="legend"><span class="markcell" style="width:auto">${bs(BS.queued)}</span>Marks <kbd>?</kbd></button>`; }
+/* the foot pulse: one summary line; click expands it to the full block (in memory, closed by default) */
+let PULSE_OPEN = false;
+function footPulseHtml() {
+  const d = data();
+  return `<div class="pulse foot"><button class="pl psum" data-pulse="1" aria-expanded="${PULSE_OPEN}"><span class="livedot"></span><span class="txt">${d.pulseLine}</span><span class="chev">›</span></button>${PULSE_OPEN ? d.pulse.slice(1).map((p) => `<span class="pl sub">${p.dot === "live" ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}<span>${p.html}</span></span>`).join("") : ""}</div>`;
+}
+function footHtml(extra = "") { return `<div class="sidefoot">${extra}${pulsePlace() === "foot" ? footPulseHtml() : ""}${legendBtn()}</div>`; }
+const LOGO = `<div class="logo"><b>Hydra</b><span>rogier</span></div>`;
+const SESS_LABEL = `<div class="lane-label glabel">Sessions <a class="r" data-go="sessions" data-all="1">all →</a></div>`;
+
+function sideA() { return `${LOGO}${navHtml(NAV_ALL)}${footHtml()}`; }
+function sideB() {
+  const m = mode(); const c = data().counts.checkin;
+  const seg = `<div class="seg" role="tablist">
+    <button role="tab" class="${m === "threads" ? "on" : ""}" data-mode="threads">Threads</button>
+    <button role="tab" class="${m === "hydra" ? "on" : ""}" data-mode="hydra">Hydra${c ? `<span class="count attn">${c}</span>` : ""}</button></div>`;
+  const body = m === "threads" ? `${newThreadBtn()}<div class="scrollreg">${threadListHtml()}</div>` : navHtml(NAV_ORCH);
+  return `${LOGO}${seg}${body}${footHtml()}`;
+}
+function sideC() {
+  const s = stack();
+  const sess = `${SESS_LABEL}${newThreadBtn()}<div class="scrollreg">${threadListHtml({ limit: 3, morelink: false })}</div>`;
+  const sep = `<div class="nav"><div class="sep"></div></div>`;
+  if (s === "top") return `${LOGO}<div class="lane-label glabel" style="margin-top:0">Hydra</div>${navHtml(NAV_ORCH)}${sep}${sess}${footHtml()}`;
+  if (s === "compact") {
+    const rest = ["tasks", "runs", "workflows", "fleet", "connections", "settings"];
+    const mini = `<div class="minilinks">${rest.map((k, i) => `${i ? "<span>·</span>" : ""}<a data-go="${k}" class="${screen() === k ? "on" : ""}">${TITLES[k]}</a>`).join("")}</div>`;
+    return `${LOGO}${navHtml([["intake"], ["checkin"], ["notifications"]])}${sep}${sess}${footHtml(mini)}`;
+  }
+  if (s === "split") return `${LOGO}${navHtml(NAV_WORK)}${sep}${sess}${footHtml(navHtml(NAV_INFRA) + sep)}`;
+  return `${LOGO}${sess}${sep}<div class="lane-label glabel">Hydra</div>${navHtml(NAV_ORCH)}${footHtml()}`;
+}
+function renderSide() {
+  const sideEl = document.getElementById("side");
+  sideEl.innerHTML = { A: sideA, B: sideB, C: sideC }[V()]();
+  sideEl.querySelectorAll(".glabel").forEach((g) => { if (V() === "C" && stack() === "top" && g.textContent.trim().startsWith("Sessions")) g.style.marginTop = "0"; });
+}
+
+/* ============ topbar ============ */
+function renderTop() {
+  const s = screen(); const id = threadId(); const t = id && findThread(id);
+  let h;
+  if (s === "sessions" && id === "new") {
+    const pj = fresh() ? "" : "hydra";
+    h = `<h1>${pj ? `<span class="pj">${pj}</span><span class="sl">/</span>` : ""}New thread</h1>`;
+  } else if (s === "sessions" && t) {
+    h = `<h1>${t.project ? `<span class="pj">${t.project}</span><span class="sl">/</span>` : ""}${t.title}</h1><span class="crumb">thread · <span class="mono">${t.id}</span></span>`;
+    if (t.changes) h += `<span class="acts"><button class="qbtn">Changes <span class="plus">${t.changes.split(" ")[0]}</span> <span class="minus">${t.changes.split(" ")[1]}</span></button>${t.pr ? `<button class="qbtn">PR ${t.pr}</button>` : `<button class="qbtn">Commit</button>`}</span>`;
+  } else if (s === "sessions" && id && id.startsWith("as-")) {
+    const a = data().assistants.find((x) => x.id === id);
+    h = `<h1>${a ? a.name : "Assistant"}</h1><span class="crumb">assistant · web chat · <b>${a ? a.where : ""}</b></span>`;
+  } else {
+    h = `<h1>${TITLES[s]}</h1><span class="when">${s === "intake" ? "since Sunday 22:10" : "Monday 09:14"}</span>`;
+  }
+  if (pulsePlace() === "top") h += pulseHtml(2);
+  document.getElementById("topbar").innerHTML = h;
+}
+
+/* ============ screens ============ */
+function emptyState(h2, p, acts, fine) {
+  return `<div class="empty-state"><h2>${h2}</h2>${p ? `<p>${p}</p>` : ""}${acts || ""}${fine ? `<div class="fine">${fine}</div>` : ""}</div>`;
+}
+function offerRows(rowsList) {
+  return `<div class="offer">${rowsList.map((r) => `<div class="row"><span class="t"><b>${r.name}</b><small>${r.sub}</small></span><button class="qbtn first" data-noop="1">${r.act}</button></div>`).join("")}</div>`;
+}
+
+/* --- Sessions: first run --- */
+function loginGuidance() {
+  const step = get("login");
+  if (step) {
+    return emptyState(`Log in to ${step}`, `Hydra started ${step === "Claude Code" ? "<code>claude</code>" : "<code>codex</code>"} on this machine in its own home. Open the link it printed, sign in, and paste the code it gives you.`,
+      `<div class="form" style="max-width:460px"><div class="fr"><span class="fl">Open</span><span class="fv mono" style="font-size:12.5px">${step === "Claude Code" ? "https://claude.ai/oauth/authorize?…" : "https://auth.openai.com/device · code <b>HZQK-4PLM</b>"}</span></div>
+       <div class="fr"><span class="fl">Paste code</span><span class="fv code"><input placeholder="paste here" aria-label="paste code"><button class="qbtn first" data-login-done="1">Done</button></span></div>
+       <div class="acts"><button class="qbtn" data-login="">Back</button></div></div>`,
+      `This login belongs to Hydra on this machine only. The <code>claude</code> in your terminal keeps its own.`);
+  }
+  return emptyState("Claude Code and Codex were found on this machine.",
+    "Log in to use them in Hydra. Each login takes about twenty seconds; Hydra keeps its own login, separate from the one in your terminal.",
+    `<div class="acts"><button class="qbtn first" data-login="Claude Code">Log in to Claude Code</button><button class="qbtn" data-login="Codex">Log in to Codex</button></div>`,
+    `pi was not found on this machine. Other machines join from <a data-go="fleet">Fleet</a>.`);
+}
+function readyGuidance() {
+  return emptyState("Claude Code is ready.",
+    "Create a thread to work on this machine. The defaults come from Settings › Threads; the composer shows them and anything you change there applies to that thread only.",
+    `<div class="acts"><button class="qbtn first" data-thread="new">Create new thread</button></div>`,
+    `Codex was found but is not logged in · <a data-login="Codex">Log in to Codex</a>. Your assistant <b>Hydra</b> is in the Assistants list; it works through Hydra rather than in a workspace.`);
+}
+
+/* --- Sessions: the thread surface --- */
+function sel(k, v, ro = false, pop = "") { return `<button class="sel ${ro ? "ro" : ""}" ${ro ? 'title="fixed once the thread has started"' : (pop ? `data-pop="${pop}"` : "")}>${k ? `<span class="k">${k}</span>` : ""}<span class="v">${v}</span></button>`; }
+/* the setup selectors: workspace · checkout · branch · runner · profile. Locked (no menu) once the thread
+   has started; live in new-thread mode, reading PICK. */
+function setupSels(t, keyed = true) {
+  const ro = !!t; const c = cfg(t); const k = (x) => (keyed ? x : "");
+  let ws, co, br;
+  if (t) { ws = t.ws === "no workspace" ? "No workspace" : `${t.project || "hydra"} · ${t.ws}`; co = t.ws === "worktree" ? "new worktree" : t.ws === "main checkout" ? "primary checkout" : null; br = t.branch || null; }
+  else { const rp = repoOf(c); ws = rp ? (rp.project === rp.name ? rp.name : `${rp.project} · ${rp.name}`) : "No workspace"; co = rp ? (c.checkout === "primary" ? "primary checkout" : "new worktree") : null; br = rp ? (c.branch === "new" ? `${rp.name}/run-…` : c.branch) : null; }
+  return {
+    ro,
+    wsSel: sel(k("workspace"), ws, ro, "workspace"),
+    coSel: co ? sel(k("checkout"), co, ro, "checkout") : "",
+    brSel: br ? sel("", `<span class="mono" style="font-size:11px">${BRANCH}${br}</span>`, ro, "branch") : "",
+    runnerSel: sel(k("runner"), runnerLabel(c), ro, "runner"),
+    profileSel: sel(k("profile"), c.profile, ro, "profile"),
+  };
+}
+const SEPV = '<span class="sepv"></span>';
+function strip(t) {
+  const p = setupSels(t);
+  return `<div class="strip">${[p.wsSel, p.coSel, p.brSel, p.runnerSel, p.profileSel].filter(Boolean).join(SEPV)}</div>`;
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+function composer(t, placeholder = "Reply…", dock = "") {
+  const c = cfg(t);
+  const send = t ? "reply" : "start"; const sendLabel = t ? "Send ⏎" : "Start thread ⏎";
+  const kind = input();
+  const ta = `<textarea id="compose" placeholder="${placeholder}" rows="2">${esc(DRAFTS[t ? t.id : "new"] || "")}</textarea>`;
+  const modelSel = sel("", modelLabel(c), false, "model");
+  const rs = reasoningSel(c); const rsSep = rs ? `${SEPV}${rs}` : "";
+  const accessSel = sel("", c.access, !!t, "access");  // access mode locks at start: the adapter has no mode switch (spec 06)
+  const sendc = `<button class="sendc" data-send="${send}" aria-label="${sendLabel}">↑</button>`;
+  let body;
+  if (kind === "t3") {
+    const p = setupSels(t, false);
+    const i = inst(c.instance); const r = reasoningOf(c);
+    const pill = `<button class="sel pill" data-pop="model"><span class="${i.provider === "Claude Code" ? "claude" : ""}">${PMARK[i.provider]}</span><span class="v">${displayName(c.model)}</span></button>`;
+    const eff = r ? sel("", `${r[0] === "thinking" ? "Thinking " : ""}${cap(r[1])}${modelOf(c).ctx ? ` · ${c.ctx}` : ""}`, false, "effort") : "";
+    const acc = t ? `<button class="sel ro" title="fixed once the thread has started"><span class="v">${SPARK}${c.access}</span></button>` : `<button class="sel" data-pop="access"><span class="v">${SPARK}${c.access}</span></button>`;
+    body = `<div class="c-t3">${ta}
+      <div class="row3">${pill}${SEPV}${eff}${eff ? SEPV : ""}${acc}
+        <span class="right"><button class="qbtn" style="padding:4px 6px">Attach</button>${sendc}</span></div></div>
+      <div class="lip">${[p.wsSel, p.coSel].filter(Boolean).join(SEPV)}<span class="right">${[p.brSel, p.runnerSel].filter(Boolean).join(SEPV)}</span></div>`;
+  } else if (kind === "codex" || kind === "codexlip") {
+    const p = setupSels(t, kind === "codex");
+    const r = reasoningOf(c); const i = inst(c.instance);
+    const pill = `<button class="mpill" data-pop="model"${rs ? ' style="margin-left:0"' : ""}>${logos() ? PMARK[i.provider] : ""}<span class="k">${instLabel(i)}</span>${c.model}${effortPlace() === "nested" && r ? ` · ${r[1]}` : ""}${PROBING ? ` <span class="k">· probing…</span>` : ""}</button>`;
+    const rowHtml = `<div class="row3"><button class="plusb" aria-label="Attach">+</button>${accessSel}${rs ? `<span style="margin-left:auto"></span>${rs}` : ""}${pill}${kind === "codexlip" ? `<button class="micb" aria-label="Voice">${MIC}</button>` : ""}${sendc}</div>`;
+    if (kind === "codex") body = `<div class="c-cx-tabs">${[p.wsSel, p.coSel, p.brSel, p.runnerSel, p.profileSel].filter(Boolean).join("")}</div><div class="c-cx">${ta}${rowHtml}</div>`;
+    else body = `<div class="c-cx solo">${ta}${rowHtml}</div><div class="lip">${[p.wsSel, p.coSel, p.brSel].filter(Boolean).join(SEPV)}<span class="right">${[p.runnerSel, p.profileSel].filter(Boolean).join(SEPV)}</span></div>`;
+  } else {
+    body = `${strip(t)}<div class="composer">${ta}
+      <div class="ctl">${modelSel}${rsSep}${SEPV}${accessSel}<span class="send"><button class="qbtn first" data-send="${send}">${sendLabel}</button></span></div></div>`;
+  }
+  return `<div class="compwrap ${dock ? "docked" : ""}">${dock}${body}</div>`;
+}
+const umsg = (s) => `<div class="umsg">${s}</div>`;
+const tc = (verb, what, res = "", now = false) => `<div class="tc ${now ? "now" : ""}"><span class="verb">${verb}</span><span>${what}</span><span class="res">${res}</span></div>`;
+const worked = (s, tools = [], live = false) => `<div class="worked ${live ? "live" : ""}" data-toggle="tools" aria-expanded="false"><span class="wt">${live ? "Working for" : "Worked for"} ${s}</span><span class="chev">›</span></div><div class="tools">${tools.join("")}</div>`;
+const amsg = (s) => `<div class="amsg">${s}</div>`;
+const chcard = (n, ch) => `<div class="chcard"><b>${n} changed files</b><span class="plus">${ch.split(" ")[0]}</span><span class="minus">${ch.split(" ")[1]}</span><span>· Show files</span><button class="qbtn">Open diff</button></div>`;
+function transcript(t) {
+  const T = {
+    working: `<div class="stamp">Mon 1 Sep · 09:02</div>
+      ${umsg("The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions.")}
+      ${worked("31s", [tc("read", "src/webhooks/retry.ts", "212 lines"), tc("read", "test/webhooks/retry.test.ts", "140 lines"), tc("grep", "advanceTimers · test/", "3 hits"), tc("bash", "pnpm test --filter webhook", "2 failed, 14 passed")])}
+      ${amsg(`<p>Two of the three failures are the same race: the retry scheduler fires before the fake clock advances, so the first attempt lands a tick early and the assertion on attempt count sees two.</p><p>The third failure is unrelated: <code>test/webhooks/retry.test.ts</code> reuses a port across cases. Fixing the race first; the port reuse is a one-liner after.</p>`)}
+      ${chcard(3, "+48 −12")}
+      ${worked("12m", [tc("edit", "src/webhooks/retry.ts", "+31 −9"), tc("edit", "src/webhooks/scheduler.ts", "+12 −3"), tc("bash", "pnpm test --filter webhook", "running", true)], true)}`,
+    decision: `<div class="stamp">Mon 1 Sep · 09:10</div>
+      ${umsg("Add a <code>hydra runner drain</code> command that stops new placements and waits for sessions to finish.")}
+      ${worked("1m 13s", [tc("read", "src/cli/runner.ts", "88 lines"), tc("edit", "src/cli/runner.ts", "+64 −2"), tc("edit", "src/controller/placement.ts", "+38 −6"), tc("edit", "src/controller/runners.ts", "+41 −0"), tc("bash", "pnpm build", "ok · 4.1s")])}
+      ${amsg(`<p>Command wired: <code>hydra runner drain &lt;name&gt;</code> flips the runner to <b>draining</b>, placement skips it, and the CLI waits on the session count with a <code>--timeout</code>.</p><p>To check it end to end I want to run the integration suite for the runner package.</p>`)}
+      ${chcard(6, "+210 −8")}`,
+    idle: `<div class="stamp">Mon 1 Sep · 07:40</div>
+      ${umsg("Read docs/spec/15 and tell me where the promotion runbook is unclear.")}
+      ${worked("48s", [tc("read", "docs/spec/15-packaging-and-operations.md", "612 lines"), tc("grep", "promotion · docs/spec", "17 hits")])}
+      ${amsg(`<p>Three places:</p><ul><li>the bundle-file fallback never says who verifies the signature;</li><li>§7 assumes the old controller is reachable for the freeze;</li><li>the restore runbook mixes backup and promotion vocabulary.</li></ul><p>Want me to draft the fixes?</p>`)}`,
+    done: `<div class="stamp">Sun 31 Aug · 14:02</div>
+      ${umsg("Spike: does a Bun-compiled hydra binary pass macOS notarization?")}
+      ${worked("11m 4s", [tc("bash", "bun build --compile …", "ok · 38s"), tc("bash", "codesign --options runtime …", "ok"), tc("bash", "xcrun notarytool submit …", "Accepted · 6m"), tc("edit", "research/bun-compile.md", "+48 −12"), tc("bash", "gh pr create", "#98")])}
+      ${amsg(`<p>Yes, with a stapled ticket after <code>codesign --options runtime</code>; the embedded claude binary must be signed first, or Gatekeeper rejects the bundle on first launch.</p><p>Notes in <code>research/bun-compile.md</code>, pushed as PR #98.</p>`)}
+      ${chcard(3, "+48 −12")}
+      <div class="livemsg">${M.done()}<span class="state">done yesterday 14:18 · PR #98 open</span></div>`,
+    failed: `<div class="stamp">Wed 27 Aug · 23:10</div>
+      ${umsg("The tailnet cert renewal fails nightly. Find the cause.")}
+      ${worked("2m 40s", [tc("bash", "tailscale cert --help", "ok"), tc("bash", "journalctl -u tailscaled …", "interrupted")])}
+      <div class="livemsg">${M.failed()}<span class="state fail">failed 5d ago · runner <b>macstudio-02</b> went offline mid-turn</span><button class="qbtn" style="margin-left:6px">Resume</button></div>`,
+  };
+  return T[t.state] || T.idle;
+}
+function startedTranscript(t) {
+  return `<div class="stamp">Mon 1 Sep · 09:14</div>${umsg(t.first)}${worked("4s", [tc("read", "AGENTS.md", "ok"), tc("grep", "runner list · src/cli", "running", true)], true)}`;
+}
+const APPROVAL = () => `<div class="dock"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
+    <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button>
+    <button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button>
+    <button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>`;
+function threadPane(t) {
+  return `<div class="thread"><div class="tcol">${t.first ? startedTranscript(t) : transcript(t)}</div>${composer(t, "Reply…", t.state === "decision" ? APPROVAL() : "")}</div>`;
+}
+function newThreadPane() {
+  const pj = fresh() ? "" : "hydra";
+  const heroHtml = `<div class="newhero"><h2>${pj ? `What should the agent do in <span class="ws">${pj}</span>?` : "What should the agent do?"}</h2>
+    <p>${fresh() ? "No workspace yet. Adopt a folder on this machine from the input's setup, or work without one." : "The input carries the thread's setup; it locks when you send the first message."}</p></div>`;
+  if (hero() === "center") return `<div class="thread center"><div class="midpad"></div>${heroHtml}${composer(null, "Say what you want done…")}<div class="midpad"></div></div>`;
+  return `<div class="thread">${heroHtml}${composer(null, "Say what you want done…")}</div>`;
+}
+function assistantPane(a) {
+  return `<div class="thread"><div class="tcol"><div class="stamp">Mon 1 Sep · 09:12</div>
+    ${umsg("What did Hera do in #ops this morning?")}
+    ${amsg("Hera answered two questions about the backup schedule and started a run for the Hetzner key rotation. Nothing is waiting on you from that.")}
+    ${umsg("Remind me at 16:00 to check the rotation run.")}
+    ${amsg("Set: a reminder at 16:00 today, delivered here.")}
+  </div><div class="compwrap"><div class="composer"><textarea placeholder="Message ${a.name}…" rows="2"></textarea><div class="ctl"><span class="state" style="font-size:12px;color:var(--faint)">assistant · ${a.where}</span><span class="send"><button class="qbtn first">Send ⏎</button></span></div></div></div></div>`;
+}
+
+/* --- Sessions: the overview page (All sessions) --- */
+function sessionsListPage() {
+  const d = data();
+  if (fresh() && !allThreads().length) return loggedIn() ? readyGuidance() : loginGuidance();
+  const pf = get("pj") || "all";
+  const th = allThreads().filter((t) => pf === "all" || t.project === pf);
+  const by = (st) => th.filter((t) => st.includes(t.state));
+  const srowT = (t) => {
+    const [w, tone] = STATE_WORD[t.state];
+    const dim = t.state === "done" || t.state === "failed";
+    return `<div class="row ${dim ? "dim" : ""}" data-thread="${t.id}" style="cursor:pointer">${mark(t.state)}<span class="t">${t.title}<small>${[t.project, t.ws === "worktree" ? `<span class="mono">${t.branch}</span>` : t.ws, t.pr, t.provider].filter(Boolean).join(" · ")}</small></span><span class="state ${tone}">${t.state === "working" ? "running " + t.age : w}</span>${age(t.age)}</div>`;
+  };
+  const lane = (label, list, extra = "") => list.length ? `<div class="lane"><div class="lane-label">${label} <span class="n">${list.length}</span>${extra}</div><div class="group">${list.map(srowT).join("")}</div></div>` : "";
+  const active = by(["working"]), waiting = by(["decision"]), idle = by(["idle", "queued"]), settled = by(["done", "failed", "cancelled"]);
+  const projects = [["all", "All"], ...data().projects.map((p) => [p.key, p.name])];
+  const wf = get("wf") === "1";
+  return `<p class="headline"><b>${active.length} running</b> · ${waiting.length} waiting on you · ${idle.length} idle · ${settled.length} settled this week</p>
+    <div class="tabs">${projects.map(([k, n]) => `<a class="${pf === k ? "on" : ""}" data-pj="${k}">${k !== "all" ? `<span class="pdot ${k}"></span>` : ""}${n}</a>`).join("")}<a class="r" style="color:var(--faint)" data-thread="new">Create new thread</a></div>
+    ${lane("Waiting on you", waiting)}${lane("Running", active)}${lane("Idle", idle, '<span class="r">resumes on your next message</span>')}
+    <div class="lane"><div class="lane-label">Assistants</div><div class="group">${d.assistants.map((a) => `<div class="row" data-thread="${a.id}" style="cursor:pointer"><span class="markcell">${a.live ? '<span class="livedot"></span>' : '<span class="idledot"></span>'}</span><span class="t">${a.name}<small>${a.where}</small></span></div>`).join("")}</div></div>
+    ${lane("Settled", settled)}
+    <div class="digest">${d.fromWorkflows.length ? `Sessions started by workflows are not threads: <a data-wf="${wf ? "0" : "1"}">${wf ? "hide them" : `show ${d.fromWorkflows.length} (1 running · 14 today)`}</a>` : "No workflow has started a session yet."}</div>
+    ${wf ? `<div class="lane" style="margin-top:12px"><div class="lane-label">From workflows</div><div class="group">${d.fromWorkflows.map((t) => `<div class="row ${t.state === "done" ? "dim" : ""}">${mark(t.state)}<span class="t">${t.title}<small>session${t.project ? " · " + t.project : ""}</small></span>${age(t.age)}</div>`).join("")}</div></div>` : ""}`;
+}
+function sessionsScreen() {
+  const id = threadId();
+  const t = id && findThread(id);
+  const a = id && data().assistants.find((x) => x.id === id);
+  const paneFor = () => {
+    if (id === "new") return newThreadPane();
+    if (t) return threadPane(t);
+    if (a) return assistantPane(a);
+    return null;
+  };
+  if (V() === "A") {
+    const d = data();
+    const listcol = `<div class="listcol">${newThreadBtn()}${threadListHtml({ morelink: false })}
+      ${d.fromWorkflows.length ? `<div class="ghead">From workflows<span class="r">${d.fromWorkflows.length}</span></div><div class="tlist">${d.fromWorkflows.map((t) => threadRow(t)).join("")}</div>` : ""}</div>`;
+    let pane = paneFor();
+    if (!pane) pane = fresh() ? (loggedIn() ? readyGuidance() : loginGuidance()) : `<div class="empty-state" style="margin-top:2vh"><h2>Pick a thread, or start one.</h2></div>`;
+    return `<div class="sess-split">${listcol}<div>${pane}</div></div>`;
+  }
+  return paneFor() || sessionsListPage();
+}
+
+/* --- Intake --- */
+function intakeScreen() {
+  if (fresh()) return emptyState("Nothing has come in yet.",
+    "Intake is your morning brief: what your connections brought in since you last checked, and what triage made of it. Connect something for it to read.",
+    offerRows([
+      { name: "GitHub", sub: "issues, pull requests and mentions across the repos you watch · paste a token", act: "Connect" },
+      { name: "Gmail", sub: "one mailbox, read every 30 seconds · Google sign-in", act: "Connect" },
+    ]),
+    `Each connection files into a topic you pick at setup - Code, Business, Personal, Ops or your own. Triage then runs every two hours between 07:00 and 23:00 and proposes work here; you accept, start or dismiss it.`);
+  return `<p class="headline"><b>1 burning</b> · 6 proposals from 212 events · 2 need a call · 3 FYI · 198 handled quietly</p>
+    <div class="tabs"><a class="on">All</a><a><span class="attndot"></span>Code</a><a>Business</a><a>Personal</a><a>Ops</a><a class="r" style="color:var(--faint)">Manage topics</a></div>
+    <div class="lane"><div class="lane-label"><span class="attndot"></span>Now</div>
+      <div class="lead"><div class="tt">Webhook retries failing since 02:10 ${age("7h", "old")}</div>
+        <div class="made">made from · Sentry <span class="mono" style="font-size:11px">sentry/hydra</span> · GitHub <span class="mono" style="font-size:11px">github/rogier</span></div>
+        <div class="gist">412 retry failures in seven hours, all from the same customer endpoint. Issue #131 from Friday describes the same timeout; the thread <b>Fix flaky webhook tests</b> is touching the same file right now.</div>
+        <div class="ledger" style="margin-top:0"><button class="first"><span class="lb">Accept</span><span class="ds">creates task <b>Webhook retries failing</b> · high · Code</span></button><button><span class="lb">Start Bugfix</span><span class="ds">creates the task and runs <b>Bugfix</b> on it, workspace <b>hydra</b></span></button><button><span class="lb">Dismiss</span><span class="ds">cancels the proposal, keeps the events</span></button></div></div></div>
+    <div class="lane"><div class="lane-label">Today <span class="n">3</span></div><div class="group">
+      ${irow("Dependabot: bump undici (security)", "high", "GitHub", "→ Start Dependency bump", "3h", "stale")}
+      ${irow("Reply to the Hetzner invoice question", "normal", "Gmail", "→ task · Business", "5h", "stale")}
+      ${irow("Review PR #96: runner heartbeat backoff", "normal", "GitHub", "→ Start PR review", "20m", "recent")}
+    </div></div>
+    <div class="lane"><div class="lane-label">Needs a call <span class="n">2</span> <span class="r">triage could not decide</span></div><div class="group">
+      ${irow("Issue #128 might duplicate #131", "normal", "GitHub", "unsure · attach or new task?", "2h", "stale")}
+      ${irow("Email triage: breaker tripped · 14 events held", "normal", "Gmail", "resume trigger?", "41m", "recent")}
+    </div></div>
+    <div class="digest">212 events → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action · last triage 09:00 · <a>What came in →</a></div>`;
+}
+function irow(t, p, sys, next, a, b) { return `<div class="row">${pri(p)}<span class="t">${t}<small>${sys}</small></span><span class="sub">${next}</span>${age(a, b)}</div>`; }
+
+/* --- Check-in --- */
+function checkinScreen() {
+  if (fresh()) return emptyState("Nothing in motion yet.",
+    "Check-in is where you see what happened since you last looked: decisions waiting on you, work in progress, and what finished. Start a thread or let a workflow run and it fills in.",
+    null, `The shipped <b>Triage</b> workflow is waiting for a connection. Everything else on this screen comes from threads and workflows you start.`);
+  return `<p class="headline"><b>2 decisions wait</b> · 3 strands in motion · 6 outcomes today</p>
+    <div class="layout"><div>
+      <div class="lane"><div class="lane-label">Needs you <span class="n">2</span></div>
+        <div class="dcard"><div class="qline">${mark("decision")}<span class="q">Run <code>pnpm test --filter runner</code>?</span>${age("4m")}</div>
+          <div class="fields"><span class="fl">From</span><span class="fv">${ent("session")} <b>Runner drain command</b> · thread · hydra</span><span class="fl">Why</span><span class="fv">integration suite before the command lands</span><span class="fl">Agent</span><span class="fv">${ent("session")} Claude Code · sonnet-5 · approval-required</span></div>
+          <div class="ledger"><button class="first"><span class="lb">Allow</span><span class="ds">runs the command once in <b>worktree hydra/run-3f1</b></span></button><button><span class="lb">Allow always</span><span class="ds">adds <b>pnpm test</b> to this thread's allowed commands</span></button><button><span class="lb">Deny</span><span class="ds">the agent continues without running it</span></button></div></div>
+        <div class="focusnav"><button class="qbtn">←</button><span class="ct">1 of 2</span><button class="qbtn">→</button><span>next: <b style="color:var(--muted)">Merge PR #94?</b></span></div></div>
+      <div class="lane"><div class="lane-label">In motion</div><div class="group">
+        ${srow("working", "Fix flaky webhook tests", "task · in-progress · hydra", "running 12m", "live", "12m")}
+        ${srow("working", "PR review (auto)", "workflow · 2 running · 9 runs today", "step 2/4", "live", "3m")}
+        ${srow("queued", "Rotate the Hetzner backups key", "task · open · ops", "queued on hetzner-01", "", "1h", "recent")}
+      </div></div>
+      <div class="lane"><div class="lane-label">Routine</div><div class="group">
+        ${srow("paused", "Email triage", "workflow · gmail/personal", "paused · 14 events held", "attn", "41m", "recent")}
+        ${srow("done", "Triage", "workflow · every 2h", "ran 09:00 · 6 proposals", "", "14m")}
+      </div></div>
+      <div class="lane"><div class="lane-label">Outcomes today</div><div class="digest">✓ 5 · ✕ 1 · Review PR #90 approved 14:18 · Bun compile spike done · Dependency bumps (agentick-web) failed: lockfile conflict · …3 more</div></div>
+    </div>
+    <div class="rail">
+      <div><div class="lane-label">Fleet</div>${pulseHtml()}</div>
+      <div><div class="lane-label">Intake</div><div class="pulse"><span class="pl"><span class="idledot"></span><span>212 events → <b>6 proposals</b> · 1 burning</span></span></div></div>
+    </div></div>`;
+}
+function srow(m, t, sub, st, tone, a, b = "") { return `<div class="row">${mark(m)}<span class="t">${t}<small>${sub}</small></span><span class="state ${tone}">${st}</span>${age(a, b)}</div>`; }
+
+/* --- Notifications --- */
+function notificationsScreen() {
+  if (fresh()) return emptyState("Decisions and outcomes will land here.",
+    "Everything Hydra asks you or reports shows on this screen. To hear it away from the browser, connect a chat channel; your assistant Hydra answers there too.",
+    offerRows([
+      { name: "Discord", sub: "a bot in your server · decisions as buttons, Hydra in any channel or DM", act: "Connect" },
+      { name: "Slack", sub: "a bot in your workspace · decisions as buttons, Hydra in threads and DMs", act: "Connect" },
+    ]),
+    `Setup ends with a pairing code you DM to the bot - that makes you its owner, the one who can answer. Nothing is muted yet; mutes per producer live here once there is something to mute.`);
+  return `<div class="group">
+      ${nrow("decision", "Run <code>pnpm test --filter runner</code>?", "Runner drain command · thread", "4m", "", `<button class="qbtn first">Allow</button><button class="qbtn">Deny</button>`)}
+      ${nrow("decision", "Merge PR #94?", "PR review (auto) · run 3f1", "22m", "recent", `<button class="qbtn first">Merge</button><button class="qbtn">Hold</button>`)}
+      ${nrow("paused", "Email triage paused: 14 runs in an hour", "spawn bound · gmail/personal", "41m", "recent", `<button class="qbtn first">Resume</button>`)}
+      ${nrow("failed", "Dependency bumps (agentick-web) failed", "lockfile conflict · run 8e2", "3h", "stale", `<button class="qbtn first">Re-run</button>`)}
+      ${nrow("none", "Triage: 6 proposals, 2 need a call", "Triage · 09:00 batch", "14m", "", `<button class="qbtn first">Open Intake</button>`)}
+    </div>
+    <div class="divider">new above · last checked Sunday 22:10</div>
+    <div class="group" style="opacity:0.82">
+      ${nrow("done", "Review PR #90: approved", "decided in Discord by you", "yesterday", "")}
+      ${nrow("done", "Permission granted: gh pr merge for Hera", "added to profile assistant", "yesterday", "")}
+      ${nrow("cancelled", "Token refresh needed for gmail/work", "withdrawn: token refreshed", "2d", "")}
+    </div>`;
+}
+function nrow(m, t, sub, a, b, acts = "") { return `<div class="row">${mark(m)}<span class="t">${t}<small>${sub}</small></span>${acts}${age(a, b)}</div>`; }
+
+/* --- the rest: stubs, enough to judge the frame --- */
+function tasksScreen() {
+  if (fresh()) return emptyState("No tasks yet.", "Triage proposes tasks from what comes in; you can also add one by hand. Tasks are intent - a run or a thread does the work.", `<div class="acts"><button class="qbtn first">New task</button></div>`);
+  return `<div class="lane"><div class="lane-label">Open <span class="n">14</span></div><div class="group">
+    ${trow("urgent", "Webhook retries failing", "in-progress · hydra · bug, webhooks", "2h", "stale")}
+    ${trow("high", "Bump undici (security)", "open · hydra · deps", "3h", "stale")}
+    ${trow("normal", "Runner drain command", "in-progress · hydra", "1d", "")}
+    ${trow("normal", "Reply to the Hetzner invoice question", "open · ops · business", "5h", "stale")}
+    ${trow("low", "Tidy the promotion runbook", "open · hydra · docs", "3d", "")}
+  </div></div><div class="digest">…9 more · done this week 11 · <a>Filter</a> · <a>Search</a></div>`;
+}
+function trow(p, t, sub, a, b) { return `<div class="row ${p === "low" ? "dim" : ""}">${pri(p)}<span class="t">${t}<small>${sub}</small></span>${age(a, b)}</div>`; }
+function runsScreen() {
+  if (fresh()) return emptyState("No runs yet.", "A run is one execution of a workflow. They appear here when a trigger fires or you start one by hand.");
+  return `<div class="group">
+    ${srow("working", "PR review (auto) · PR #94", "step 2 of 4 · macstudio-01", "running 3m", "live", "3m")}
+    ${srow("working", "PR review (auto) · PR #96", "step 1 of 4 · hetzner-01", "running 1m", "live", "1m")}
+    ${srow("queued", "Key rotation · manual", "waiting for hetzner-01", "queued", "", "1h", "recent")}
+    ${srow("done", "Triage · 09:00", "1 step · local", "done 09:04", "", "5h")}
+    ${srow("failed", "Dependency bumps (agentick-web)", "step 3 of 3 · macstudio-01", "failed 06:40", "fail", "3h", "stale")}
+  </div>`;
+}
+function workflowsScreen() {
+  const shipped = srow("paused", "Triage", "shipped · every 2h between 07:00 and 23:00", fresh() ? "waiting for a connection" : "active", "", fresh() ? "" : "14m");
+  if (fresh()) return `<div class="group">${shipped}</div><div class="digest" style="margin-top:14px">Workflows are stored recipes written as YAML. <a>New workflow</a></div>`;
+  return `<div class="group">
+    ${srow("working", "PR review (auto)", "github · pr.opened, 3 repos", "2 running · 9 today", "live", "3m")}
+    ${srow("done", "Triage", "shipped · every 2h", "active · ran 09:00", "", "14m")}
+    ${srow("paused", "Email triage", "gmail/personal · message.received", "paused by breaker · 14 held", "attn", "41m", "recent")}
+    ${srow("done", "Standup summary", "cron 08:30", "active · posted to #ops", "", "6h")}
+    ${srow("failed", "Dependency bumps", "cron weekly", "last run failed", "fail", "3h", "stale")}
+  </div><div class="digest" style="margin-top:14px"><a>New workflow</a></div>`;
+}
+function fleetScreen() {
+  const add = `<div class="addspot"><b>Add machine</b><span>Run this on the machine, then log in to its providers here.</span><code>curl -fsSL https://hydra.local:4937/join | sh -s -- --token hj_7Kq…c2 <span style="color:var(--faint)">· valid 1h</span></code></div>`;
+  if (fresh()) return `<div class="lane"><div class="lane-label">Runners <span class="n">1</span></div><div class="group">
+    ${srow("none", "this machine", "macOS · 4 sessions max · git, gh", "online", "live", "")}
+    <div class="row" style="padding-left:36px;font-size:12.5px;color:var(--muted)"><span class="t">Claude Code ${loggedIn() ? "· logged in" : "· found, not logged in"}<small>Codex · found, not logged in · pi · not installed</small></span>${loggedIn() ? "" : '<button class="qbtn first" data-login="Claude Code">Log in</button>'}</div>
+  </div></div>${add}`;
+  return `<div class="lane"><div class="lane-label">Runners <span class="n">6</span></div><div class="group">
+    ${srow("none", "macstudio-01", "macOS · 3/4 sessions · default", "online", "live", "")}
+    ${srow("none", "hetzner-01", "linux · 4/4 sessions · queue 2", "online · at cap", "attn", "")}
+    ${srow("none", "macstudio-02", "macOS · 1/4 · draining", "draining", "", "")}
+    ${srow("none", "laptop", "macOS · 1/2 · this machine · reserved", "online", "live", "")}
+    ${srow("none", "hetzner-02", "linux · 1/6", "online", "live", "")}
+    ${srow("failed", "pi-lab", "linux · 0/2", "unreachable 2d", "fail", "")}
+  </div></div>${add}`;
+}
+function connectionsScreen() {
+  if (fresh()) return emptyState("Nothing connected yet.", "Connections are the accounts Hydra reads and speaks through. Events come from GitHub and Gmail; chat comes from Discord and Slack.",
+    offerRows([{ name: "GitHub", sub: "paste a token · files into a topic", act: "Connect" }, { name: "Gmail", sub: "Google sign-in · files into a topic", act: "Connect" }, { name: "Discord", sub: "a bot in your server", act: "Connect" }, { name: "Slack", sub: "a bot in your workspace", act: "Connect" }]));
+  return `<div class="group">
+    ${srow("none", "github/rogier", "GitHub · 5 repos watched · Code", "polling 60s", "", "")}
+    ${srow("none", "gmail/personal", "Gmail · Personal · breaker tripped", "14 events held", "attn", "")}
+    ${srow("none", "gmail/work", "Gmail · Business", "polling 30s", "", "")}
+    ${srow("none", "discord/agentick", "Discord · notifications → #hydra · Hera bound to #ops", "connected", "live", "")}
+    ${srow("none", "slack/rogier-co", "Slack · Iris bound to DMs", "connected", "live", "")}
+  </div><div class="digest" style="margin-top:14px"><a>Add connection</a></div>`;
+}
+function settingsScreen() {
+  const pages = ["Profile", "Threads", "Assistants", "Identities", "Permission profiles", "Secrets", "Bounds", "Plugins", "System"];
+  return `<div class="subnav">${pages.map((p, i) => `<a class="${i === 1 ? "on" : ""}">${p}</a>`).join("")}</div>
+    <div class="form" style="box-shadow:var(--card-shadow)"><div class="lane-label">Threads · defaults for new threads</div>
+      <div class="fr"><span class="fl">Provider</span><span class="fv">${sel("", "Claude Code")}</span></div>
+      <div class="fr"><span class="fl">Model</span><span class="fv">${sel("", "claude-sonnet-5")} ${sel("effort", "medium")}</span></div>
+      <div class="fr"><span class="fl">Access</span><span class="fv">${sel("", "approval-required")}</span></div>
+      <div class="fr"><span class="fl">Profile</span><span class="fv">${sel("", "unrestricted")}</span></div>
+      <div class="fine">Shown in every new thread's composer; changes made there never come back here.</div></div>
+    <div class="form" style="box-shadow:var(--card-shadow);margin-top:14px"><div class="lane-label">Threads · display</div>
+      <div class="fr"><span class="fl">Sidebar rows</span><span class="fv">${sel("", rows() === "plain" ? "plain · title and age" : "meta · a second line with checkout, PR and model")}</span></div>
+      <div class="fine">A display preference for this browser session; key <kbd style="font-family:var(--mono)">r</kbd> flips it here.</div></div>`;
+}
+const SCREEN_FN = { sessions: sessionsScreen, intake: intakeScreen, checkin: checkinScreen, tasks: tasksScreen, runs: runsScreen, workflows: workflowsScreen, fleet: fleetScreen, connections: connectionsScreen, notifications: notificationsScreen, settings: settingsScreen };
+
+/* ============ legend ============ */
+function legendHtml() {
+  const row = (m, t) => `<div class="lrow"><span class="markcell">${m}</span><span>${t}</span></div>`;
+  return `<div class="lane-label">Marks</div>
+    ${row(M.working(), "agent working")}${row(M.decision(), "decision wanted")}${row(M.queued(), "queued")}${row(M.paused(), "paused")}${row(M.done(), "done")}${row(M.failed(), "failed")}${row(M.cancelled(), "cancelled")}
+    <div class="lgroup lane-label">Things</div>${row(ent("task"), "task")}${row(ent("run"), "run")}${row(ent("session"), "session")}${row(ent("workflow"), "workflow")}
+    <div class="lgroup lane-label">Scales</div>${row(pri("high"), "priority fills up")}${row(age("7h", "old"), "waiting darkens, then warms")}${row('<span class="livedot"></span>', "live now")}
+    <div class="note">Toggle with <kbd style="font-family:var(--mono)">?</kbd> · Esc closes</div>`;
+}
+function toggleLegend(force) {
+  const lg = document.getElementById("legend"); const open = force === undefined ? !lg.classList.contains("open") : force;
+  lg.classList.toggle("open", open); const b = document.getElementById("lgtoggle"); if (b) b.setAttribute("aria-expanded", String(open));
+}
+
+/* ============ render ============ */
+function render() {
+  const v = VARIANTS[vIndex()];
+  document.body.dataset.variant = v.key;
+  renderSide(); renderTop();
+  document.getElementById("stage").innerHTML = SCREEN_FN[screen()]();
+  document.getElementById("legend").innerHTML = legendHtml();
+  document.getElementById("swlabel").textContent = `${v.key} (${v.name})`;
+  document.getElementById("dbtn").textContent = fresh() ? "data: fresh" : "data: busy";
+  document.getElementById("lbtn").textContent = loggedIn() ? "login: yes" : "login: no";
+  document.getElementById("pbtn").textContent = `pulse: ${pulsePlace()}`;
+  document.getElementById("rbtn").textContent = `rows: ${rows()}`;
+  document.getElementById("ibtn").textContent = `input: ${input()}`;
+  document.getElementById("ebtn").textContent = `effort: ${effortPlace()}`;
+  document.getElementById("obtn").textContent = `logos: ${logos() ? "on" : "off"}`;
+  const hb = document.getElementById("hbtn"); hb.style.display = threadId() === "new" ? "" : "none"; hb.textContent = `hero: ${hero()}`;
+  const sb = document.getElementById("sbtn"); sb.style.display = v.key === "C" ? "" : "none"; sb.textContent = `stack: ${stack()}`;
+  const mb = document.getElementById("mbtn"); mb.style.display = v.key === "B" ? "" : "none"; mb.textContent = `mode: ${mode()}`;
+  const lg = document.getElementById("legend"); const b = document.getElementById("lgtoggle"); if (b) b.setAttribute("aria-expanded", String(lg.classList.contains("open")));
+  const ta = document.getElementById("compose"); if (ta && threadId() === "new") ta.focus();
+  placePop();
+}
+function go(screenKey, extra = {}) { setParams({ screen: screenKey, thread: null, login: null, mode: null, pj: null, wf: null, ...extra }); }
+function cycle(d) { const i = (vIndex() + d + VARIANTS.length) % VARIANTS.length; setParams({ variant: VARIANTS[i].key }); }
+function toggleTheme() { const r = document.documentElement; const dark = r.dataset.theme === "dark" || (!r.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches); r.dataset.theme = dark ? "light" : "dark"; }
+function cyclePulse() { const o = ["top", "foot", "none"]; setParams({ pulse: o[(o.indexOf(pulsePlace()) + 1) % 3] }); }
+function cycleStack() { setParams({ stack: STACKS[(STACKS.indexOf(stack()) + 1) % STACKS.length] }); }
+function cycleRows() { setParams({ rows: ROWS[(ROWS.indexOf(rows()) + 1) % ROWS.length] }); }
+function cycleInput() { setParams({ input: INPUTS[(INPUTS.indexOf(input()) + 1) % INPUTS.length] }); }
+function toggleHero() { setParams({ hero: hero() === "center" ? null : "center" }); }
+function toggleLogos() { setParams({ logos: logos() ? null : "1" }); }
+function toggleEffort() { setParams({ effort: effortPlace() === "own" ? null : "own" }); }
+function startThread() {
+  const ta = document.getElementById("compose"); const text = (ta && ta.value.trim()) || "Add a --json flag to hydra runner list so scripts can read it.";
+  const id = "c0ffee" + String(STARTED.length + 10);
+  const c = cfg(null);
+  const rp = repoOf(c);
+  STARTED.unshift({ id, title: text.length > 42 ? text.slice(0, 40).replace(/\s+\S*$/, "") + "…" : text, first: text, state: "working", age: "now", ws: !rp ? "no workspace" : c.checkout === "primary" ? "main checkout" : "worktree", branch: !rp ? "" : c.branch === "new" ? `${rp.name}/run-${id.slice(-3)}` : c.branch, provider: inst(c.instance).provider, model: c.model, runner: runnerOf(c).id, freshData: fresh() });
+  LIVE[id] = { instance: c.instance, effort: c.effort, thinking: c.thinking, ctx: c.ctx, fast: c.fast, access: c.access, profile: c.profile };
+  delete DRAFTS.new; POP = null;
+  setParams({ thread: id });
+}
+
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-go],[data-thread],[data-login],[data-login-done],[data-send],[data-mode],[data-pj],[data-wf],[data-toggle],[data-pop],[data-pick],[data-pulse],#lgtoggle,[data-noop]");
+  if (!el) { if (!e.target.closest("#legend")) toggleLegend(false); if (!e.target.closest("#pop")) closePop(); return; }
+  e.preventDefault();
+  if (el.dataset.pulse) { PULSE_OPEN = !PULSE_OPEN; return render(); }
+  if (el.dataset.pop) return openPop(el.dataset.pop);
+  if (el.dataset.pick) return pick(el.dataset.pick, el.dataset.val);
+  if (el.id === "lgtoggle") return toggleLegend();
+  if (el.dataset.toggle) { const open = el.getAttribute("aria-expanded") !== "true"; el.setAttribute("aria-expanded", String(open)); el.nextElementSibling.classList.toggle("open", open); return; }
+  if (el.dataset.go) return go(el.dataset.go, el.dataset.all ? { mode: V() === "B" ? "threads" : null } : {});
+  if (el.dataset.thread) return setParams({ screen: "sessions", thread: el.dataset.thread, login: null, mode: null });
+  if (el.dataset.login !== undefined) return setParams({ screen: "sessions", thread: null, login: el.dataset.login || null, mode: null });
+  if (el.dataset.loginDone) return setParams({ li: "1", login: null });
+  if (el.dataset.send === "start") return startThread();
+  if (el.dataset.send === "reply") { const ta = document.getElementById("compose"); if (ta) ta.value = ""; delete DRAFTS[threadId()]; return; }
+  if (el.dataset.mode) return setParams({ mode: el.dataset.mode });
+  if (el.dataset.pj) return setParams({ pj: el.dataset.pj === "all" ? null : el.dataset.pj });
+  if (el.dataset.wf !== undefined) return setParams({ wf: el.dataset.wf === "1" ? "1" : null });
+});
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+document.getElementById("dbtn").onclick = () => setParams({ data: fresh() ? null : "fresh", thread: null, login: null, pj: null });
+document.getElementById("lbtn").onclick = () => setParams({ li: loggedIn() ? null : "1", login: null });
+document.getElementById("pbtn").onclick = cyclePulse;
+document.getElementById("sbtn").onclick = cycleStack;
+document.getElementById("rbtn").onclick = cycleRows;
+document.getElementById("ibtn").onclick = cycleInput;
+document.getElementById("ebtn").onclick = toggleEffort;
+document.getElementById("obtn").onclick = toggleLogos;
+document.getElementById("hbtn").onclick = toggleHero;
+document.getElementById("mbtn").onclick = () => setParams({ mode: mode() === "threads" ? "hydra" : "threads" });
+document.getElementById("theme").onclick = toggleTheme;
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" && e.key === "Enter" && !e.shiftKey && e.target.id === "compose") { e.preventDefault(); if (threadId() === "new") startThread(); else { e.target.value = ""; delete DRAFTS[threadId()]; } return; }
+  if (e.target.id === "custom" && e.key === "Enter") { e.preventDefault(); return pick("custom-go"); }
+  if (e.key === "Escape" && POP) { e.target.blur && e.target.blur(); return closePop(); }
+  if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") cycle(-1); else if (e.key === "ArrowRight") cycle(1);
+  else if (e.key === "d") document.getElementById("dbtn").click();
+  else if (e.key === "l") document.getElementById("lbtn").click();
+  else if (e.key === "p") cyclePulse();
+  else if (e.key === "s" && V() === "C") cycleStack();
+  else if (e.key === "r") cycleRows();
+  else if (e.key === "i") cycleInput();
+  else if (e.key === "e") toggleEffort();
+  else if (e.key === "o") toggleLogos();
+  else if (e.key === "h" && threadId() === "new") toggleHero();
+  else if (e.key === "m" && V() === "B") document.getElementById("mbtn").click();
+  else if (e.key === "t") toggleTheme();
+  else if (e.key === "?") toggleLegend();
+  else if (e.key === "Escape") toggleLegend(false);
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "compose") DRAFTS[threadId() === "new" ? "new" : threadId()] = e.target.value;
+  if (e.target.id === "t3q") { T3.q = e.target.value; placePop(); }
+});
+render();
+</script>

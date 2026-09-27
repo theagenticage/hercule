@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="win">
+      <div class="field">
+        <i class="calm" style="--x: 64%; --y: 30%; --w: 1100px; --h: 620px; --o: 0.8"></i>
+        <i class="wait" style="--x: 42%; --y: 102%; --w: 820px; --h: 380px; --o: 0.75"></i>
+        <i class="own" style="--x: 100%; --y: 0%; --w: 700px; --h: 420px; --o: 0.6"></i>
+        <i class="wait" style="--x: 3%; --y: 8%; --w: 360px; --o: 0.45"></i>
+      </div>
+
+      <aside class="side glass">
+        <div class="side-top">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <button class="icon-btn" title="Hide sidebar"><svg class="i"><use href="#m-sidebar" /></svg></button>
+        </div>
+        <a class="back-row">
+          <svg class="i s14"><use href="#m-chev-l" /></svg>Back to threads
+          <span class="count wait num">3</span>
+        </a>
+        <button class="search-row">
+          <svg class="i s14"><use href="#m-search" /></svg>
+          <span class="grow">Search settings</span>
+          <span class="kbd">⌘K</span>
+        </button>
+
+        <div class="side-scroll">
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-user" /></svg>Profile</a>
+            <a class="nav-item"><svg class="i"><use href="#m-sun" /></svg>Appearance</a>
+            <a class="nav-item"><svg class="i"><use href="#m-session" /></svg>Threads</a>
+            <a class="nav-item"><svg class="i"><use href="#m-assistant" /></svg>Assistants<span class="count">3</span></a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item" aria-current="page"><svg class="i"><use href="#m-connections" /></svg>Connections<span class="count wait">1</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-cpu" /></svg>Providers</a>
+            <a class="nav-item"><svg class="i"><use href="#m-machine" /></svg>Machines<span class="count">3</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-id" /></svg>Identities</a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-shield" /></svg>Permission profiles</a>
+            <a class="nav-item"><svg class="i"><use href="#m-key" /></svg>Secrets</a>
+            <a class="nav-item"><svg class="i"><use href="#m-gauge" /></svg>Bounds</a>
+            <a class="nav-item"><svg class="i"><use href="#m-puzzle" /></svg>Plugins</a>
+            <a class="nav-item"><svg class="i"><use href="#m-sliders" /></svg>System</a>
+          </nav>
+        </div>
+
+        <div class="side-foot">
+          <div class="me-row">
+            <span class="av me">R</span><span class="grow">Rogier</span>
+            <span class="faint num set-ver">v1.0.4</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings</span><span class="crumb slash">/</span>
+          <h1 class="title">Connections</h1>
+          <span class="spacer"></span>
+          <button class="btn sm"><svg class="i s14"><use href="#m-plus" /></svg>Add connection</button>
+        </header>
+
+        <div class="set-scroll">
+          <div class="set-col conn-col">
+            <div class="flow">
+              <div class="flow-n">
+                <b class="num">2,418</b>
+                <span>events in 24h</span>
+                <span class="flow-since"><b class="num">212</b> since you looked · yesterday 18:20</span>
+              </div>
+              <div class="flow-chart">
+                <span class="spark big" aria-label="Events per hour, all connections"><i style="--h: 25%"></i><i style="--h: 23%"></i><i style="--h: 30%"></i><i style="--h: 76%"></i><i style="--h: 88%"></i><i style="--h: 94%"></i><i style="--h: 100%"></i><i style="--h: 66%"></i><i style="--h: 66%"></i><i style="--h: 12%"></i><i style="--h: 10%"></i><i style="--h: 8%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 4%"></i><i style="--h: 5%"></i><i style="--h: 8%"></i><b class="seen-mark" style="--at: 34.7%"><span>you looked 18:20</span></b></span>
+                <span class="flow-axis"><span>10:00</span><span>16:00</span><span>22:00</span><span>04:00</span><span>now</span></span>
+              </div>
+            </div>
+
+            <section>
+              <div class="sec-h">Event sources<span class="aside">8 · each event lands in its default Topic</span></div>
+              <div class="pane glass conn-pane">
+                <div class="conn-head">
+                  <span></span><span>Connection</span><span>Default Topic</span><span>Last 24h</span><span class="r">Events</span><span>Health</span><span></span>
+                </div>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-github" /></svg>
+                  <span class="conn-name"><b>GitHub</b><span>rogier</span></span>
+                  <span class="tag">Releases</span>
+                  <span class="spark" aria-label="312 events in the last 24 hours"><i style="--h: 55%"></i><i style="--h: 44%"></i><i style="--h: 59%"></i><i style="--h: 73%"></i><i style="--h: 85%"></i><i style="--h: 94%"></i><i style="--h: 100%"></i><i style="--h: 61%"></i><i style="--h: 61%"></i><i style="--h: 17%"></i><i style="--h: 14%"></i><i style="--h: 11%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 12%"></i></span>
+                  <span class="num conn-n">312</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-gmail" /></svg>
+                  <span class="conn-name"><b>Gmail</b><span>rogier@personal</span></span>
+                  <span class="tag">Customers</span>
+                  <span class="spark" aria-label="188 events in the last 24 hours"><i style="--h: 39%"></i><i style="--h: 55%"></i><i style="--h: 71%"></i><i style="--h: 87%"></i><i style="--h: 100%"></i><i style="--h: 66%"></i><i style="--h: 72%"></i><i style="--h: 75%"></i><i style="--h: 73%"></i><i style="--h: 16%"></i><i style="--h: 8%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 7%"></i></span>
+                  <span class="num conn-n">188</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-sentry" /></svg>
+                  <span class="conn-name"><b>Sentry</b><span>webshop-prod</span></span>
+                  <span class="tag">Checkout</span>
+                  <span class="spark" aria-label="1,406 events in the last 24 hours"><i style="--h: 9%"></i><i style="--h: 7%"></i><i style="--h: 9%"></i><i style="--h: 73%"></i><i style="--h: 85%"></i><i style="--h: 94%"></i><i style="--h: 100%"></i><i style="--h: 61%"></i><i style="--h: 61%"></i><i style="--h: 10%"></i><i style="--h: 8%"></i><i style="--h: 7%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 7%"></i></span>
+                  <span class="num conn-n">1,406</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-posthog" /></svg>
+                  <span class="conn-name"><b>PostHog</b><span>webshop</span></span>
+                  <span class="tag">Checkout</span>
+                  <span class="spark" aria-label="96 events in the last 24 hours"><i style="--h: 53%"></i><i style="--h: 74%"></i><i style="--h: 94%"></i><i style="--h: 68%"></i><i style="--h: 81%"></i><i style="--h: 91%"></i><i style="--h: 98%"></i><i style="--h: 100%"></i><i style="--h: 97%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i></span>
+                  <span class="num conn-n">96</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-intercom" /></svg>
+                  <span class="conn-name"><b>Intercom</b><span>support</span></span>
+                  <span class="tag">Customers</span>
+                  <span class="spark" aria-label="61 events in the last 24 hours"><i style="--h: 39%"></i><i style="--h: 55%"></i><i style="--h: 71%"></i><i style="--h: 87%"></i><i style="--h: 100%"></i><i style="--h: 65%"></i><i style="--h: 72%"></i><i style="--h: 75%"></i><i style="--h: 73%"></i><i style="--h: 25%"></i><i style="--h: 21%"></i><i style="--h: 10%"></i><i style="--h: 7%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 11%"></i></span>
+                  <span class="num conn-n">61</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-grafana" /></svg>
+                  <span class="conn-name"><b>Grafana</b><span>ops</span></span>
+                  <span class="tag">Infrastructure</span>
+                  <span class="spark" aria-label="44 events in the last 24 hours"><i style="--h: 82%"></i><i style="--h: 90%"></i><i style="--h: 97%"></i><i style="--h: 63%"></i><i style="--h: 70%"></i><i style="--h: 78%"></i><i style="--h: 85%"></i><i style="--h: 92%"></i><i style="--h: 100%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 14%"></i><i style="--h: 7%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i></span>
+                  <span class="num conn-n">44</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="brand"><use href="#b-stripe" /></svg>
+                  <span class="conn-name"><b>Stripe</b><span>live</span></span>
+                  <span class="tag">Checkout</span>
+                  <span class="spark" aria-label="209 events in the last 24 hours"><i style="--h: 55%"></i><i style="--h: 44%"></i><i style="--h: 59%"></i><i style="--h: 73%"></i><i style="--h: 85%"></i><i style="--h: 94%"></i><i style="--h: 100%"></i><i style="--h: 61%"></i><i style="--h: 61%"></i><i style="--h: 7%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i><i style="--h: 6%"></i></span>
+                  <span class="num conn-n">209</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="conn-row">
+                  <svg class="i"><use href="#m-clock" /></svg>
+                  <span class="conn-name"><b>Cron</b><span>schedules</span></span>
+                  <span class="faint none">no Topic</span>
+                  <span class="spark" aria-label="102 events in the last 24 hours"><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i><i style="--h: 100%"></i><i style="--h: 80%"></i><i style="--h: 80%"></i></span>
+                  <span class="num conn-n">102</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+              </div>
+            </section>
+
+            <section>
+              <div class="sec-h">Channels<span class="aside">where Assistants talk with you</span></div>
+              <div class="pane glass conn-pane">
+                <a class="chan-row">
+                  <svg class="brand"><use href="#b-slack" /></svg>
+                  <span class="conn-name"><b>Slack</b><span>acme-hq</span></span>
+                  <span class="bound"><span class="avs"><span class="av xs work">A</span><span class="av xs idle">M</span></span>Ada in DM · Milo in #ops</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="chan-row glow">
+                  <svg class="brand"><use href="#b-discord" /></svg>
+                  <span class="conn-name"><b>Discord</b><span>community</span></span>
+                  <span class="bound"><span class="av xs sleep">J</span>Juno in #support</span>
+                  <span class="st wait"><svg class="i"><use href="#m-refresh" /></svg>reconnecting<span class="since">since 09:12</span></span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+                <a class="chan-row">
+                  <svg class="i"><use href="#m-globe" /></svg>
+                  <span class="conn-name"><b>Web chat</b><span>built in</span></span>
+                  <span class="bound"><span class="avs"><span class="av xs work">A</span><span class="av xs idle">M</span><span class="av xs sleep">J</span></span>all Assistants</span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>healthy</span>
+                  <svg class="i s14 faint"><use href="#m-chev-r" /></svg>
+                </a>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

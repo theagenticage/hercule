@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='w' x1='0' x2='1'%3E%3Cstop offset='0' stop-color='#5fe0b4'/%3E%3Cstop offset='.55' stop-color='#5cc8e6'/%3E%3Cstop offset='1' stop-color='#b48cf5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='#241a33'/%3E%3Crect x='6.5' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Crect x='20' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Cpath d='M12 18.2c1.4-3.2 2.8-3.2 4-1.3s2.6 1.9 4-1.3' fill='none' stroke='url%28#w%29' stroke-width='2.8' stroke-linecap='round'/%3E%3Ccircle cx='26' cy='6' r='5.2' fill='#f4b43c' stroke='#241a33' stroke-width='1.6'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="win web">
+      <div class="field">
+        <i class="own" style="--x: 78%; --y: 6%; --w: 1000px; --h: 560px; --o: 0.8"></i>
+        <i class="calm" style="--x: 40%; --y: 104%; --w: 1000px; --h: 520px; --o: 0.7"></i>
+        <i class="wait" style="--x: 3%; --y: 8%; --w: 360px; --o: 0.45"></i>
+        <i class="webshop" style="--x: 104%; --y: 70%; --w: 620px; --o: 0.5"></i>
+      </div>
+
+      <aside class="wrail glass" aria-label="Hercule">
+        <a class="wr-logo" title="Hercule"><svg><use href="#logo" /></svg></a>
+        <a class="wr-item" title="Threads · 2 waiting on you"><svg class="i"><use href="#m-session" /></svg>Threads<i class="orb wait"></i></a>
+        <a class="wr-item" title="Intake · 9, 1 burning"><svg class="i"><use href="#m-intake" /></svg>Intake<b class="wr-n burn"><span class="not-swarm">9</span><span class="only-swarm">74</span></b></a>
+        <a class="wr-item" title="Check-in · 3 waiting on you"><svg class="i"><use href="#m-checkin" /></svg>Check-in<b class="wr-n wait"><span class="not-swarm">3</span><span class="only-swarm">9</span></b></a>
+        <a class="wr-item"><svg class="i"><use href="#m-tasks" /></svg>Tasks</a>
+        <a class="wr-item"><svg class="i"><use href="#m-run" /></svg>Runs</a>
+        <a class="wr-item"><svg class="i"><use href="#m-workflow" /></svg>Workflows</a>
+        <span class="wr-sep"></span>
+        <a class="wr-item"><svg class="i"><use href="#m-fleet" /></svg>Fleet</a>
+        <a class="wr-item" title="Connections · Discord reconnecting"><svg class="i"><use href="#m-connections" /></svg>Connections<i class="orb wait"></i></a>
+
+        <div class="wr-avs" aria-label="Assistants">
+          <span class="av work" title="Ada · working">A<span class="badge"><svg class="i"><use href="#m-working" /></svg></span></span>
+          <span class="av idle" title="Milo · idle">M</span>
+          <span class="av sleep" title="Juno · asleep">J<span class="badge"><svg class="i"><use href="#m-asleep" /></svg></span></span>
+        </div>
+        <span class="wr-sep"></span>
+        <div class="wr-foot">
+          <a class="wr-item" aria-current="page"><svg class="i"><use href="#m-settings" /></svg>Settings</a>
+          <span class="av me" title="Rogier">R</span>
+        </div>
+      </aside>
+
+      <main class="main split">
+        <nav class="web-subnav" aria-label="Settings">
+          <div class="sub-h">Settings</div>
+          <button class="search-row">
+            <svg class="i s14"><use href="#m-search" /></svg>
+            <span class="grow">Search settings</span>
+            <span class="kbd">⌘K</span>
+          </button>
+          <div class="side-scroll">
+            <nav class="nav set-nav">
+              <a class="nav-item"><svg class="i"><use href="#m-user" /></svg>Profile</a>
+              <a class="nav-item"><svg class="i"><use href="#m-sun" /></svg>Appearance</a>
+              <a class="nav-item"><svg class="i"><use href="#m-session" /></svg>Threads</a>
+              <a class="nav-item"><svg class="i"><use href="#m-assistant" /></svg>Assistants<span class="count">3</span></a>
+            </nav>
+            <nav class="nav set-nav">
+              <a class="nav-item"><svg class="i"><use href="#m-connections" /></svg>Connections<span class="count wait">1</span></a>
+              <a class="nav-item" aria-current="page"><svg class="i"><use href="#m-cpu" /></svg>Providers</a>
+              <a class="nav-item"><svg class="i"><use href="#m-machine" /></svg>Machines<span class="count">3</span></a>
+              <a class="nav-item"><svg class="i"><use href="#m-id" /></svg>Identities</a>
+            </nav>
+            <nav class="nav set-nav">
+              <a class="nav-item"><svg class="i"><use href="#m-shield" /></svg>Permission profiles</a>
+              <a class="nav-item"><svg class="i"><use href="#m-key" /></svg>Secrets</a>
+              <a class="nav-item"><svg class="i"><use href="#m-gauge" /></svg>Bounds</a>
+              <a class="nav-item"><svg class="i"><use href="#m-puzzle" /></svg>Plugins</a>
+              <a class="nav-item"><svg class="i"><use href="#m-sliders" /></svg>System</a>
+            </nav>
+          </div>
+        </nav>
+
+        <div class="pane-main">
+          <header class="bar">
+            <h1 class="title">Providers</h1>
+            <span class="bar-meta">3 provider instances · the defaults a new thread starts with</span>
+            <span class="spacer"></span>
+            <button class="btn sm quiet copy-link" title="Copy link to Providers"><svg class="i s14"><use href="#m-link" /></svg>Copy link</button>
+            <button class="btn sm"><svg class="i s14"><use href="#m-plus" /></svg>Add provider</button>
+          </header>
+          <div class="set-scroll">
+            <div class="set-col prov-col">
+              <section class="prov glass">
+                <header class="prov-head">
+                  <span class="prov-tile"><svg class="brand"><use href="#b-claude" /></svg></span>
+                  <span class="prov-name">Claude Code<span>Anthropic · rogier@personal</span></span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>signed in</span>
+                  <span class="prov-use"><b>61%</b><span class="meter" role="img" aria-label="61% of the 5-hour window used"><i style="--v: 61%"></i></span><span>resets 11:00</span><small>of the 5-hour window</small></span>
+                  <button class="icon-btn" title="More"><svg class="i"><use href="#m-more" /></svg></button>
+                </header>
+                <div class="prov-grid">
+                  <div><span class="prov-k">Models</span><span class="mchip default">Opus 5.5<em>default</em></span><span class="mchip">Sonnet 5</span><span class="mchip">Haiku 4.5</span></div>
+                  <div><span class="prov-k">Default effort</span><div class="seg"><button>Low</button><button>Medium</button><button aria-pressed="true">High</button></div></div>
+                  <div><span class="prov-k">Default access mode</span><span class="ladder" aria-hidden="true"><i class="on" title="Approval required"></i><i class="on" title="Auto-accept edits"></i><i title="Auto"></i><i title="Full access"></i></span><span class="mode">Auto-accept edits</span></div>
+                  <div><span class="prov-k">Installed on</span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>studio-mac<span class="ver">2.1.270</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>build-box-1<span class="ver">2.1.270</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>build-box-2<span class="ver">2.1.270</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span></div>
+                </div>
+              </section>
+              <section class="prov glass">
+                <header class="prov-head">
+                  <span class="prov-tile"><svg class="brand"><use href="#b-openai" /></svg></span>
+                  <span class="prov-name">Codex<span>OpenAI · work</span></span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>signed in</span>
+                  <span class="prov-use"><b>34%</b><span class="meter" role="img" aria-label="34% of the 5-hour window used"><i style="--v: 34%"></i></span><span>resets 12:30</span><small>of the 5-hour window</small></span>
+                  <button class="icon-btn" title="More"><svg class="i"><use href="#m-more" /></svg></button>
+                </header>
+                <div class="prov-grid">
+                  <div><span class="prov-k">Models</span><span class="mchip default">gpt-5.4<em>default</em></span><span class="mchip">gpt-5.4-mini</span></div>
+                  <div><span class="prov-k">Default effort</span><div class="seg"><button>Low</button><button aria-pressed="true">Medium</button><button>High</button></div></div>
+                  <div><span class="prov-k">Default access mode</span><span class="ladder" aria-hidden="true"><i class="on" title="Approval required"></i><i class="on" title="Auto-accept edits"></i><i class="on" title="Auto"></i><i title="Full access"></i></span><span class="mode">Auto</span></div>
+                  <div><span class="prov-k">Installed on</span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>build-box-1<span class="ver">0.121.0</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>build-box-2<span class="ver">0.121.0</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span><span class="mrow absent"><svg class="i"><use href="#m-machine" /></svg>studio-mac<span class="ver">not installed</span><a class="add">Install</a></span></div>
+                </div>
+              </section>
+              <section class="prov glass">
+                <header class="prov-head">
+                  <span class="prov-tile"><span class="pi">π</span></span>
+                  <span class="prov-name">pi<span>local · llama.cpp</span></span>
+                  <span class="st ok"><svg class="i"><use href="#m-done" /></svg>ready</span>
+                  <span class="prov-use local"><svg class="i s14"><use href="#m-cpu" /></svg>Local · no usage limit</span>
+                  <button class="icon-btn" title="More"><svg class="i"><use href="#m-more" /></svg></button>
+                </header>
+                <div class="prov-grid">
+                  <div><span class="prov-k">Models</span><span class="mchip default">qwen3-coder 30b<em>default</em></span></div>
+                  <div><span class="prov-k">Default effort</span><span class="none">None · this model has no effort levels</span></div>
+                  <div><span class="prov-k">Default access mode</span><span class="ladder" aria-hidden="true"><i class="on" title="Approval required"></i><i class="on" title="Auto-accept edits"></i><i class="on lacks" title="Auto"></i><i title="Full access"></i></span><span class="mode">Auto</span><span class="mode-note"><svg class="i"><use href="#m-notice" /></svg>pi has no Auto mode. Its threads run as Auto-accept edits.</span></div>
+                  <div><span class="prov-k">Installed on</span><span class="mrow"><svg class="i"><use href="#m-machine" /></svg>studio-mac<span class="ver">0.85.1</span><svg class="i ok" aria-label="installed"><use href="#m-done" /></svg></span></div>
+                </div>
+              </section>
+              <p class="prov-legend"><span class="ladder" aria-hidden="true"><i class="on" title="Approval required"></i><i class="on" title="Auto-accept edits"></i><i title="Auto"></i><i title="Full access"></i></span>Access modes, left to right: Approval required · Auto-accept edits · Auto · Full access. A hatched step is one the provider does not have.</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

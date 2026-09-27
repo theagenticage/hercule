@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="win">
+      <div class="field">
+        <i class="own" style="--x: 78%; --y: 6%; --w: 1000px; --h: 560px; --o: 0.8"></i>
+        <i class="calm" style="--x: 40%; --y: 104%; --w: 1000px; --h: 520px; --o: 0.7"></i>
+        <i class="wait" style="--x: 3%; --y: 8%; --w: 360px; --o: 0.45"></i>
+        <i class="webshop" style="--x: 104%; --y: 70%; --w: 620px; --o: 0.5"></i>
+      </div>
+
+      <aside class="side glass">
+        <div class="side-top">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <button class="icon-btn" title="Hide sidebar"><svg class="i"><use href="#m-sidebar" /></svg></button>
+        </div>
+        <a class="back-row">
+          <svg class="i s14"><use href="#m-chev-l" /></svg>Back to threads
+          <span class="count wait num">3</span>
+        </a>
+        <button class="search-row">
+          <svg class="i s14"><use href="#m-search" /></svg>
+          <span class="grow">Search settings</span>
+          <span class="kbd">⌘K</span>
+        </button>
+
+        <div class="side-scroll">
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-user" /></svg>Profile</a>
+            <a class="nav-item" aria-current="page"><svg class="i"><use href="#m-sun" /></svg>Appearance</a>
+            <a class="nav-item"><svg class="i"><use href="#m-session" /></svg>Threads</a>
+            <a class="nav-item"><svg class="i"><use href="#m-assistant" /></svg>Assistants<span class="count">3</span></a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-connections" /></svg>Connections<span class="count wait">1</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-cpu" /></svg>Providers</a>
+            <a class="nav-item"><svg class="i"><use href="#m-machine" /></svg>Machines<span class="count">3</span></a>
+            <a class="nav-item"><svg class="i"><use href="#m-id" /></svg>Identities</a>
+          </nav>
+          <nav class="nav set-nav">
+            <a class="nav-item"><svg class="i"><use href="#m-shield" /></svg>Permission profiles</a>
+            <a class="nav-item"><svg class="i"><use href="#m-key" /></svg>Secrets</a>
+            <a class="nav-item"><svg class="i"><use href="#m-gauge" /></svg>Bounds</a>
+            <a class="nav-item"><svg class="i"><use href="#m-puzzle" /></svg>Plugins</a>
+            <a class="nav-item"><svg class="i"><use href="#m-sliders" /></svg>System</a>
+          </nav>
+        </div>
+
+        <div class="side-foot">
+          <div class="me-row">
+            <span class="av me">R</span><span class="grow">Rogier</span>
+            <span class="faint num set-ver">v1.0.4</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings</span><span class="crumb slash">/</span>
+          <h1 class="title">Appearance</h1>
+        </header>
+
+        <div class="set-scroll">
+          <div class="set-col">
+            <section>
+              <div class="sec-h">
+                Theme
+                <label class="aside inline-tog"><span class="faint">Dawn by day, Dusk by night</span>Follow system<span class="tog" role="switch" aria-checked="false"></span></label>
+              </div>
+              <div class="themes" role="radiogroup" aria-label="Theme">
+                <button class="theme-card glass-thin" data-for="dawn" role="radio">
+                  <span class="preview" data-theme="dawn" aria-hidden="true">
+                    <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 150px; --h: 110px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 130px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 90px"></i></span>
+                    <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+                    <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+                    <span class="p-comp"></span>
+                  </span>
+                  <span class="tc-name">Dawn<svg class="i s12"><use href="#m-sun" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+                  <span class="tc-d">Pearl, lilac sheen</span>
+                </button>
+                <button class="theme-card glass-thin" data-for="mist" role="radio">
+                  <span class="preview" data-theme="mist" aria-hidden="true">
+                    <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 150px; --h: 110px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 130px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 90px"></i></span>
+                    <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+                    <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+                    <span class="p-comp"></span>
+                  </span>
+                  <span class="tc-name">Mist<svg class="i s12"><use href="#m-sun" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+                  <span class="tc-d">Sage-grey morning</span>
+                </button>
+                <button class="theme-card glass-thin" data-for="dusk" role="radio">
+                  <span class="preview" data-theme="dusk" aria-hidden="true">
+                    <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 150px; --h: 110px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 130px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 90px"></i></span>
+                    <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+                    <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+                    <span class="p-comp"></span>
+                  </span>
+                  <span class="tc-name">Dusk<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+                  <span class="tc-d">Plum-violet night</span>
+                </button>
+                <button class="theme-card glass-thin" data-for="boreal" role="radio">
+                  <span class="preview" data-theme="boreal" aria-hidden="true">
+                    <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 150px; --h: 110px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 130px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 90px"></i></span>
+                    <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+                    <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+                    <span class="p-comp"></span>
+                  </span>
+                  <span class="tc-name">Boreal<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+                  <span class="tc-d">Green-black sky</span>
+                </button>
+                <button class="theme-card glass-thin" data-for="ember" role="radio">
+                  <span class="preview" data-theme="ember" aria-hidden="true">
+                    <span class="field"><i class="own" style="--x: 80%; --y: 0%; --w: 150px; --h: 110px"></i><i class="calm" style="--x: 12%; --y: 100%; --w: 130px"></i><i class="wait" style="--x: 100%; --y: 72%; --w: 90px"></i></span>
+                    <span class="p-side"><i class="on"></i><i></i><i></i><i></i></span>
+                    <span class="p-card"><i></i><i></i><b class="p-pill"></b></span>
+                    <span class="p-comp"></span>
+                  </span>
+                  <span class="tc-name">Ember<svg class="i s12"><use href="#m-moon" /></svg><span class="tc-check"><svg class="i"><use href="#m-done" /></svg></span></span>
+                  <span class="tc-d">Warm cocoa</span>
+                </button>
+              </div>
+            </section>
+
+            <section>
+              <div class="sec-h">Light and glass</div>
+              <div class="pane glass">
+                <div class="srow">
+                  <div><div class="l">Living light</div><div class="d">The colored light behind the glass. Still keeps it, without the drift.</div></div>
+                  <div class="v">
+                    <div class="seg"><button aria-pressed="true">Living</button><button>Still</button><button>Off</button></div>
+                  </div>
+                </div>
+                <div class="srow">
+                  <div><div class="l">Project tints</div><div class="d">The light a project casts while you are inside it.</div></div>
+                  <div class="v tints">
+                    <button class="proj webshop">webshop</button>
+                    <button class="proj payments">payments-api</button>
+                    <button class="proj ops">ops</button>
+                  </div>
+                </div>
+                <div class="srow">
+                  <div><div class="l">Reduce transparency</div><div class="d">Solid panes and dimmer light. On whenever your Mac asks for it.</div></div>
+                  <div class="v"><span class="tog" role="switch" aria-checked="false"></span></div>
+                </div>
+                <div class="srow">
+                  <div><div class="l">Reduce motion</div><div class="d">No drift, no composer shrink. State still shows in light and words.</div></div>
+                  <div class="v"><span class="tog" role="switch" aria-checked="false"></span></div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="sec-h">Reading</div>
+              <div class="pane glass">
+                <div class="srow">
+                  <div><div class="l">Density</div><div class="d">Compact fits about a third more rows in Intake and the sidebar.</div></div>
+                  <div class="v">
+                    <div class="seg"><button aria-pressed="true">Comfortable</button><button>Compact</button></div>
+                  </div>
+                </div>
+                <div class="srow">
+                  <div><div class="l">Text size</div><div class="d">Transcripts, rows and the composer. Titles follow.</div></div>
+                  <div class="v">
+                    <div class="seg sizes"><button style="--a: 11px">A<span>13</span></button><button aria-pressed="true" style="--a: 13px">A<span>14</span></button><button style="--a: 15px">A<span>15</span></button></div>
+                  </div>
+                </div>
+                <div class="srow">
+                  <div><div class="l">Source marks</div><div class="d">Show where an event came from on rows and chips.</div></div>
+                  <div class="v">
+                    <span class="mark-sample" aria-hidden="true"><svg class="brand"><use href="#b-github" /></svg><svg class="brand"><use href="#b-sentry" /></svg><svg class="brand"><use href="#b-stripe" /></svg></span>
+                    <span class="tog" role="switch" aria-checked="true"></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // Clicking a theme card switches the page to that theme, so every theme can be tried in place.
+      document.querySelectorAll(".theme-card").forEach(function (card) {
+        card.addEventListener("click", function () {
+          document.documentElement.dataset.theme = card.dataset.for;
+        });
+      });
+    </script>
+  </body>
+</html>

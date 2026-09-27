@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>New thread in webshop · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="status" data-status></div>
+
+      <header class="m-bar">
+        <a class="m-text-btn" href="session-active.html">Cancel</a>
+        <b>New thread</b>
+        <span class="chip line">Draft</span>
+      </header>
+
+      <div class="m-body ms-body">
+        <div class="ms-projects" role="radiogroup" aria-label="Project">
+          <button role="radio" aria-checked="true">
+            <span data-halo="slot1 wait1 work1 pause1" data-size="64" data-center="+"
+              aria-label="webshop: 1 waiting on you, 1 working, 1 paused; the dashed slot is the thread you are about to start"></span>
+            <b>webshop</b><span class="n"><em>1 waits</em> · 3</span>
+          </button>
+          <button role="radio" aria-checked="false">
+            <span data-halo="wait1 work1 idle1" data-size="64" data-center="3" aria-label="payments-api: 1 waiting on you, 1 working, 1 idle"></span>
+            <b>payments-api</b><span class="n"><em>1 waits</em> · 3</span>
+          </button>
+          <button role="radio" aria-checked="false">
+            <span data-halo="wait1 work1" data-size="64" data-center="2" aria-label="ops: 1 waiting on you, 1 working"></span>
+            <b>ops</b><span class="n"><em>1 waits</em> · 2</span>
+          </button>
+        </div>
+
+        <h1 class="ms-q">What should the agent do in webshop?</h1>
+        <p class="ms-sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+        <div class="ms-label">Or start from</div>
+        <div class="ms-starts">
+          <a href="decision.html"><i data-mark="pri4"></i><span>Fix: Checkout fails for EU cards</span><span class="w">Intake</span></a>
+          <a href="intake.html"><i data-mark="pri1"></i><span>Add iDEAL as a payment method</span><span class="w">Intake</span></a>
+          <a href="#"><i data-mark="task"></i><span>Cart total rounding on discounts</span><span class="w">Task</span></a>
+        </div>
+      </div>
+
+      <!-- Voice first: the thumb lands on the mic. Typing is one tap away, and where the thread runs sits right above it. -->
+      <section class="mv" aria-label="New message">
+        <div class="mv-where">
+          <button class="mv-pick"><i data-icon="worktree"></i>New worktree<i data-icon="down" class="v"></i></button>
+          <button class="mv-pick mono"><i data-icon="branch"></i>from main<i data-icon="down" class="v"></i></button>
+          <button class="mv-pick"><i data-icon="machine"></i>studio-mac<i data-icon="down" class="v"></i></button>
+        </div>
+        <div class="mv-who">
+          <i data-brand="claude"></i>Claude Code · Opus 5.5 · High<span class="dotsep">·</span><i data-icon="edit"></i>Auto-accept edits<i data-icon="down" class="v"></i>
+        </div>
+        <div class="mv-main">
+          <button class="mv-side" title="Attach"><i data-icon="plus"></i></button>
+          <button class="mv-mic" title="Hold to talk">
+            <span class="ring" aria-hidden="true"></span>
+            <i data-icon="mic"></i>
+          </button>
+          <button class="mv-side mv-type" title="Type instead">Aa</button>
+        </div>
+        <div class="mv-hint"><span><b>Hold to talk</b> · release to send</span><span class="haptic">haptic · light tap on hold, success on send</span></div>
+      </section>
+
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

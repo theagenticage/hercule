@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Connections · Settings · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-side="settings" data-current="connections"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1>Connections</h1>
+          <span class="when">11</span>
+          <span class="right"><button class="btn sm"><i data-icon="plus" style="width: 12px; height: 12px"></i>Add connection</button></span>
+        </header>
+
+        <div class="set-pane">
+          <div class="set-col" style="max-width: 1060px">
+            <div class="vol">
+              <span data-halo="ink35 idle8 ink5 idle5 ink2 idle2 ink2 idle1" data-size="164" data-merge data-center="2,418" data-label="events · 24h"
+                aria-label="2,418 events in the last 24 hours. Sentry 58%, GitHub 13%, Stripe 9%, Gmail 8%, the other four 12%"></span>
+              <div class="share">
+                <span><i data-brand="sentry"></i>Sentry</span><b>58%</b>
+                <span><i data-brand="github"></i>GitHub</span><b>13%</b>
+                <span><i data-brand="stripe"></i>Stripe</span><b>9%</b>
+                <span><i data-brand="gmail"></i>Gmail</span><b>8%</b>
+                <span><i data-mark="event"></i>4 more</span><b>12%</b>
+              </div>
+              <div class="stats" style="margin-left: auto">
+                <div class="stat"><b>8</b><span>event sources</span></div>
+                <div class="stat"><b>3</b><span>channels</span></div>
+                <div class="stat" style="color: var(--fail-ink)"><b>1</b><span style="color: var(--fail-ink)"><i data-mark="fail"></i>reconnecting</span></div>
+              </div>
+            </div>
+
+            <div class="crow-head"><b>Channels <span class="faint" style="font-weight: 400">3</span></b><span class="binds">Assistants bound</span><span>Health</span></div>
+              <div class="crow broken"><i data-brand="discord"></i><span class="nm"><b>Discord · community</b><span>channel · Juno can't be reached here</span></span><span class="binds"><span class="bind"><span class="face asleep">J</span><b>Juno</b>#support</span><button class="btn sm">Retry now</button></span><span class="health"><i data-mark="fail"></i>reconnecting since 09:12</span></div>
+              <div class="crow"><i data-brand="slack"></i><span class="nm"><b>Slack · acme-hq</b><span>channel · 2 bindings</span></span><span class="binds"><span class="bind"><span class="face working">A</span><b>Ada</b>DM with Rogier</span><span class="bind"><span class="face idle">M</span><b>Milo</b>#ops</span></span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="webchat"></i><span class="nm"><b>Web chat</b><span>channel · built in</span></span><span class="binds"><span class="bind"><span class="face working">A</span><b>Ada</b>always</span></span><span class="health"><i data-mark="done"></i>healthy</span></div>
+
+            <div class="crow-head"><b>Event sources <span class="faint" style="font-weight: 400">8</span></b><span>Default Topic</span><span>Last 24 h · 10:00 to now</span><span class="r">events</span><span>Health</span></div>
+              <div class="crow"><i data-brand="sentry"></i><span class="nm"><b>Sentry · webshop-prod</b><span>event source · errors and issues</span></span><button class="sel topic-pick" style="color: var(--ink)">Checkout<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.4 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.4 fyi1.4 fyi1.4" data-width="176" data-height="20" role="img" aria-label="1,406 events over the last 24 hours, by hour"></span><span class="n">1,406</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="github"></i><span class="nm"><b>GitHub · rogier</b><span>event source · 3 repositories</span></span><button class="sel topic-pick" style="color: var(--ink)">Releases<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.2 fyi1.4 fyi1.2" data-width="176" data-height="20" role="img" aria-label="312 events over the last 24 hours, by hour"></span><span class="n">312</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="stripe"></i><span class="nm"><b>Stripe · live</b><span>event source · payments and payouts</span></span><button class="sel topic-pick" style="color: var(--ink)">Checkout<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.3" data-width="176" data-height="20" role="img" aria-label="209 events over the last 24 hours, by hour"></span><span class="n">209</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="gmail"></i><span class="nm"><b>Gmail · rogier@personal</b><span>event source · mail</span></span><button class="sel topic-pick" style="color: var(--ink)">Customers<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.3 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.2 fyi1.2 fyi1.3" data-width="176" data-height="20" role="img" aria-label="188 events over the last 24 hours, by hour"></span><span class="n">188</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="cron"></i><span class="nm"><b>Cron · schedules</b><span>event source · 6 schedules</span></span><span class="faint topic-pick">no default</span><span data-ticks="fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2" data-width="176" data-height="20" role="img" aria-label="102 events over the last 24 hours, by hour"></span><span class="n">102</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="posthog"></i><span class="nm"><b>PostHog · webshop</b><span>event source · product analytics</span></span><button class="sel topic-pick" style="color: var(--ink)">Checkout<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.2 fyi1.2" data-width="176" data-height="20" role="img" aria-label="96 events over the last 24 hours, by hour"></span><span class="n">96</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="intercom"></i><span class="nm"><b>Intercom · support</b><span>event source · conversations</span></span><button class="sel topic-pick" style="color: var(--ink)">Customers<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.2 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.2" data-width="176" data-height="20" role="img" aria-label="61 events over the last 24 hours, by hour"></span><span class="n">61</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+              <div class="crow"><i data-brand="grafana"></i><span class="nm"><b>Grafana · ops</b><span>event source · alerts</span></span><button class="sel topic-pick" style="color: var(--ink)">Infrastructure<i data-icon="down" class="v"></i></button><span data-ticks="fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.3 fyi1.1 fyi1.1 fyi1.1 fyi1.1 fyi1.1" data-width="176" data-height="20" role="img" aria-label="44 events over the last 24 hours, by hour"></span><span class="n">44</span><span class="health"><i data-mark="done"></i>healthy</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Console app icon: one keycap on the Phosphor ground. The legend is the Hercule
+       mark, two bars and the magenta block cursor between them. The strip at the
+       bottom is the status line: the mode chip and a fleet meter. Fixed colors,
+       because an app icon does not follow the app's theme. -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17231d"/>
+      <stop offset="1" stop-color="#060e0a"/>
+    </linearGradient>
+    <linearGradient id="cap-top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d3c34"/>
+      <stop offset="1" stop-color="#1f2c26"/>
+    </linearGradient>
+    <linearGradient id="cap-side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#111c17"/>
+      <stop offset="1" stop-color="#030705"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fd55c4" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#fd55c4" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="squircle"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#ground)"/>
+    <!-- A faint scanline texture: every fourth line, barely there. -->
+    <g stroke="#dfeee1" stroke-opacity="0.025" stroke-width="2">
+      <path d="M100 140H924M100 180H924M100 220H924M100 260H924M100 300H924M100 340H924M100 380H924M100 420H924M100 460H924M100 500H924M100 540H924M100 580H924M100 620H924M100 660H924M100 700H924M100 740H924M100 780H924"/>
+    </g>
+    <ellipse cx="512" cy="470" rx="300" ry="260" fill="url(#glow)"/>
+    <!-- The keycap: a dark skirt, then the lit top face. -->
+    <rect x="252" y="214" width="520" height="520" rx="92" fill="url(#cap-side)" stroke="#25332c" stroke-width="4"/>
+    <rect x="282" y="228" width="460" height="440" rx="70" fill="url(#cap-top)"/>
+    <rect x="282" y="228" width="460" height="440" rx="70" fill="none" stroke="#dfeee1" stroke-opacity="0.09" stroke-width="3"/>
+    <!-- The legend: the Hercule mark. -->
+    <rect x="382" y="309" width="61" height="277" rx="4" fill="#dfeee1"/>
+    <rect x="581" y="309" width="61" height="277" rx="4" fill="#dfeee1"/>
+    <rect x="464" y="387" width="96" height="121" rx="3" fill="#fd55c4"/>
+    <!-- The status line: the mode chip, then one fleet meter. -->
+    <rect x="100" y="820" width="824" height="104" fill="#030705"/>
+    <rect x="100" y="820" width="824" height="3" fill="#25332c"/>
+    <rect x="100" y="823" width="190" height="101" fill="#fd55c4"/>
+    <g>
+      <rect x="352" y="852" width="30" height="40" rx="5" fill="#f7d13f"/>
+      <rect x="392" y="852" width="30" height="40" rx="5" fill="#57e3df"/>
+      <rect x="432" y="852" width="30" height="40" rx="5" fill="#57e3df"/>
+      <rect x="472" y="852" width="30" height="40" rx="5" fill="#57e3df"/>
+      <rect x="512" y="852" width="30" height="40" rx="5" fill="#57e3df" fill-opacity="0.45"/>
+      <rect x="552" y="852" width="30" height="40" rx="5" fill="none" stroke="#25332c" stroke-width="4"/>
+    </g>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="none" stroke="#dfeee1" stroke-opacity="0.08" stroke-width="3"/>
+</svg>

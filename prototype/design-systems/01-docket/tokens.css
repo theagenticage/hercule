@@ -1,0 +1,371 @@
+/* Docket - tokens.
+   The unit of the interface is a decision. Every theme is a set of custom properties on
+   [data-theme="..."]; the same selector works on any element, so a theme preview is just an
+   element with its own data-theme.
+
+   Color doctrine - three families, never mixed:
+   1. Verdict  what an answer does, and how things ended.
+               --go (green)      start, allow, accept, done
+               --hold (amber)    later, waiting on you, paused
+               --nogo (vermilion) dismiss, deny, failed
+   2. Kind     what sort of decision a card is. Only ever on the card's corner tab and its tick.
+               --k-proposal (violet) --k-offer (teal) --k-request (magenta)
+               --k-breaker (solid ink) --k-unsure (dashed ink: triage could not decide)
+   3. Ink      everything else is ink on paper. One ink accent, --accent (cobalt), marks focus,
+               selection and "working" - the ink that is moving.
+   Sources (GitHub, Sentry...) are provenance, not decisions: their marks stay monochrome.
+   Projects get a quiet, low-chroma swatch so they never compete with a verdict. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/geist-latin-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/geist-latin-ext-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/geist-mono-latin-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/geist-mono-symbols2-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+  unicode-range: U+2000-2001, U+2004-2008, U+200A, U+23B8-23BD, U+2500-259F, U+25A0-25FF,
+    U+2600-26FF, U+2700-27BF;
+}
+
+/* ---------- Constants: the same in every theme ---------- */
+:root {
+  /* Type. Geist for everything; Geist Mono only for code, commands, branches and paths. */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-micro: 11px;
+  --fs-small: 12px;
+  --fs-ui: 13px;
+  --fs-body: 14px;
+  --fs-read: 15px; /* transcripts and conversations */
+  --fs-lead: 16px;
+  --fs-title: 20px; /* the largest words on any screen */
+  /* Numerals may be large: size hierarchy comes from numbers, not from headings. */
+  --fs-num-s: 24px;
+  --fs-num-m: 34px;
+  --fs-num-l: 52px;
+  --fs-num-xl: 88px;
+  --lh-tight: 1.15;
+  --lh-ui: 1.35;
+  --lh-read: 1.6;
+  --track-title: -0.014em;
+  --track-num: -0.035em;
+
+  /* Space: a 4px base; layouts snap to 8. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* Shape: crisp, small radii. Glass surfaces are rounder so they read as floating. */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+  --hair: 1px;
+  --rule: 2px; /* the verdict rule on top of an answer */
+
+  /* Motion: decisive. Cards fly toward their verdict in 180ms, no bounce. */
+  --t-fast: 120ms;
+  --t-fly: 180ms;
+  --t-glass: 260ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.9, 0.4);
+  --fly-go: translate(120%, -4%) rotate(6deg);
+  --fly-nogo: translate(-120%, -4%) rotate(-6deg);
+  --fly-later: translate(0, 110%);
+
+  /* Glass */
+  --glass-blur: 22px;
+  --glass-sat: 160%;
+
+  /* Macos traffic lights stay the platform's colors in every theme. */
+  --tl-close: #ff5f57;
+  --tl-min: #febc2e;
+  --tl-zoom: #28c840;
+}
+
+/* ---------- Paper - light, flagship. Warm white stock, black ink. ---------- */
+:root,
+[data-theme="paper"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(95.4% 0.007 85);
+  --surface: oklch(97.4% 0.005 85);
+  --raised: oklch(99.5% 0.002 85);
+  --ink: oklch(19% 0.012 60);
+  --muted: oklch(44% 0.012 60);
+  --faint: oklch(59% 0.01 60);
+  --line: oklch(85.5% 0.008 70);
+  --line-soft: oklch(90.5% 0.006 70);
+  --sel: oklch(19% 0.012 60 / 0.065);
+
+  --go: oklch(52% 0.15 150);
+  --go-text: oklch(45% 0.13 150);
+  --hold: oklch(76% 0.155 74);
+  --hold-text: oklch(52% 0.12 65);
+  --nogo: oklch(57% 0.2 33);
+  --nogo-text: oklch(52% 0.19 33);
+  --on-verdict: oklch(99% 0.005 85);
+  --accent: oklch(48% 0.2 263);
+  --on-accent: #fff;
+
+  --k-proposal: oklch(50% 0.2 298);
+  --k-offer: oklch(54% 0.1 195);
+  --k-request: oklch(55% 0.21 352);
+  --k-breaker: var(--ink);
+  --k-unsure: var(--muted);
+  --on-kind: oklch(99% 0.005 85);
+
+  --p-webshop: oklch(62% 0.08 245);
+  --p-payments: oklch(62% 0.08 170);
+  --p-ops: oklch(62% 0.07 55);
+
+  --shadow-a: oklch(30% 0.02 60 / 0.07);
+  --shadow-b: oklch(30% 0.02 60 / 0.16);
+  --window-ground: oklch(88% 0.012 80);
+  --wall-1: oklch(88% 0.05 150);
+  --wall-2: oklch(90% 0.06 74);
+  --wall-3: oklch(86% 0.06 298);
+}
+
+/* ---------- Bond - light, cool neutral. Bond paper under daylight. ---------- */
+[data-theme="bond"] {
+  color-scheme: light;
+  --bg: oklch(95.2% 0.004 250);
+  --surface: oklch(97.4% 0.003 250);
+  --raised: oklch(99.7% 0.001 250);
+  --ink: oklch(20% 0.01 262);
+  --muted: oklch(45% 0.01 262);
+  --faint: oklch(59.5% 0.01 262);
+  --line: oklch(86% 0.006 250);
+  --line-soft: oklch(91% 0.004 250);
+  --sel: oklch(20% 0.01 262 / 0.065);
+
+  --go: oklch(51% 0.14 155);
+  --go-text: oklch(45% 0.13 155);
+  --hold: oklch(76% 0.15 76);
+  --hold-text: oklch(51% 0.12 66);
+  --nogo: oklch(56% 0.21 30);
+  --nogo-text: oklch(51% 0.2 30);
+  --on-verdict: #fff;
+  --accent: oklch(47% 0.19 263);
+  --on-accent: #fff;
+
+  --k-proposal: oklch(49% 0.2 300);
+  --k-offer: oklch(52% 0.1 200);
+  --k-request: oklch(54% 0.21 355);
+  --k-breaker: var(--ink);
+  --k-unsure: var(--muted);
+  --on-kind: #fff;
+
+  --p-webshop: oklch(60% 0.08 245);
+  --p-payments: oklch(60% 0.08 170);
+  --p-ops: oklch(60% 0.07 55);
+
+  --shadow-a: oklch(25% 0.02 262 / 0.07);
+  --shadow-b: oklch(25% 0.02 262 / 0.16);
+  --window-ground: oklch(87% 0.008 250);
+  --wall-1: oklch(88% 0.04 200);
+  --wall-2: oklch(92% 0.03 90);
+  --wall-3: oklch(87% 0.05 300);
+}
+
+/* ---------- Graphite - dark, flagship. Near-achromatic (chroma <= 0.005). ---------- */
+[data-theme="graphite"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(17.2% 0.003 80);
+  --surface: oklch(20.2% 0.003 80);
+  --raised: oklch(23.6% 0.004 80);
+  --ink: oklch(95.5% 0.004 85);
+  --muted: oklch(75% 0.005 85);
+  --faint: oklch(60% 0.005 85);
+  --line: oklch(31% 0.004 80);
+  --line-soft: oklch(26% 0.004 80);
+  --sel: oklch(95% 0.004 85 / 0.075);
+
+  --go: oklch(70% 0.16 150);
+  --go-text: oklch(76% 0.15 150);
+  --hold: oklch(80% 0.15 78);
+  --hold-text: oklch(83% 0.13 80);
+  --nogo: oklch(66% 0.19 33);
+  --nogo-text: oklch(73% 0.16 35);
+  --on-verdict: oklch(17% 0.01 80);
+  --accent: oklch(71% 0.14 263);
+  --on-accent: oklch(17% 0.01 80);
+
+  --k-proposal: oklch(68% 0.17 298);
+  --k-offer: oklch(73% 0.1 195);
+  --k-request: oklch(70% 0.18 352);
+  --k-breaker: var(--ink);
+  --k-unsure: var(--muted);
+  --on-kind: oklch(17% 0.01 80);
+
+  --p-webshop: oklch(68% 0.07 245);
+  --p-payments: oklch(68% 0.07 170);
+  --p-ops: oklch(68% 0.06 55);
+
+  --shadow-a: oklch(0% 0 0 / 0.3);
+  --shadow-b: oklch(0% 0 0 / 0.5);
+  --window-ground: oklch(12% 0.003 80);
+  --wall-1: oklch(30% 0.05 150);
+  --wall-2: oklch(30% 0.04 74);
+  --wall-3: oklch(28% 0.06 298);
+}
+
+/* ---------- Oxblood - dark. Deep red-brown ground, cream ink. ---------- */
+[data-theme="oxblood"] {
+  color-scheme: dark;
+  --bg: oklch(18.6% 0.03 27);
+  --surface: oklch(21.8% 0.034 27);
+  --raised: oklch(25.4% 0.037 27);
+  --ink: oklch(94.5% 0.018 70);
+  --muted: oklch(77% 0.03 55);
+  --faint: oklch(63% 0.035 45);
+  --line: oklch(33% 0.04 27);
+  --line-soft: oklch(28% 0.036 27);
+  --sel: oklch(94% 0.02 60 / 0.08);
+
+  --go: oklch(73% 0.15 148);
+  --go-text: oklch(78% 0.14 148);
+  --hold: oklch(82% 0.14 80);
+  --hold-text: oklch(85% 0.12 82);
+  --nogo: oklch(70% 0.18 38);
+  --nogo-text: oklch(76% 0.15 40);
+  --on-verdict: oklch(19% 0.03 27);
+  --accent: oklch(79% 0.1 240);
+  --on-accent: oklch(19% 0.03 27);
+
+  --k-proposal: oklch(73% 0.14 300);
+  --k-offer: oklch(77% 0.09 190);
+  --k-request: oklch(75% 0.16 350);
+  --k-breaker: var(--ink);
+  --k-unsure: var(--muted);
+  --on-kind: oklch(19% 0.03 27);
+
+  --p-webshop: oklch(70% 0.06 245);
+  --p-payments: oklch(70% 0.06 170);
+  --p-ops: oklch(72% 0.06 60);
+
+  --shadow-a: oklch(8% 0.03 27 / 0.35);
+  --shadow-b: oklch(8% 0.03 27 / 0.55);
+  --window-ground: oklch(13% 0.025 27);
+  --wall-1: oklch(32% 0.06 30);
+  --wall-2: oklch(34% 0.05 70);
+  --wall-3: oklch(28% 0.05 350);
+}
+
+/* ---------- Moss - dark. Green-black ground, lichen ink. ---------- */
+[data-theme="moss"] {
+  color-scheme: dark;
+  --bg: oklch(18% 0.018 158);
+  --surface: oklch(21.2% 0.02 158);
+  --raised: oklch(24.8% 0.022 158);
+  --ink: oklch(94.5% 0.014 120);
+  --muted: oklch(77% 0.02 135);
+  --faint: oklch(62% 0.024 145);
+  --line: oklch(32% 0.022 158);
+  --line-soft: oklch(27% 0.02 158);
+  --sel: oklch(94% 0.02 120 / 0.075);
+
+  --go: oklch(78% 0.17 140);
+  --go-text: oklch(82% 0.16 138);
+  --hold: oklch(82% 0.15 82);
+  --hold-text: oklch(85% 0.13 84);
+  --nogo: oklch(69% 0.18 35);
+  --nogo-text: oklch(75% 0.15 37);
+  --on-verdict: oklch(18% 0.02 158);
+  --accent: oklch(78% 0.11 250);
+  --on-accent: oklch(18% 0.02 158);
+
+  --k-proposal: oklch(72% 0.15 305);
+  --k-offer: oklch(78% 0.09 200);
+  --k-request: oklch(73% 0.17 355);
+  --k-breaker: var(--ink);
+  --k-unsure: var(--muted);
+  --on-kind: oklch(18% 0.02 158);
+
+  --p-webshop: oklch(70% 0.06 245);
+  --p-payments: oklch(72% 0.06 185);
+  --p-ops: oklch(72% 0.06 60);
+
+  --shadow-a: oklch(6% 0.02 158 / 0.35);
+  --shadow-b: oklch(6% 0.02 158 / 0.55);
+  --window-ground: oklch(12.5% 0.016 158);
+  --wall-1: oklch(34% 0.07 150);
+  --wall-2: oklch(30% 0.04 100);
+  --wall-3: oklch(28% 0.05 200);
+}
+
+/* ---------- Derived tokens. Declared on every themed element so a preview re-derives them. ---------- */
+:root,
+[data-theme] {
+  /* Today's names, kept so adoption is a swap. */
+  --attn: var(--hold-text);
+  --fail: var(--nogo-text);
+  --live: var(--accent);
+  --ok: var(--go-text);
+  /* Amber is light in every theme, so text on it is always dark. */
+  --on-hold: oklch(23% 0.04 62);
+
+  --glass: color-mix(in oklab, var(--raised) 74%, transparent);
+  --glass-thin: color-mix(in oklab, var(--raised) 52%, transparent);
+  --glass-side: color-mix(in oklab, var(--surface) 70%, transparent);
+  --glass-edge: color-mix(in oklab, var(--ink) 11%, transparent);
+
+  --tint-go: color-mix(in oklab, var(--go) 12%, transparent);
+  --tint-hold: color-mix(in oklab, var(--hold) 16%, transparent);
+  --tint-nogo: color-mix(in oklab, var(--nogo) 11%, transparent);
+  --tint-accent: color-mix(in oklab, var(--accent) 12%, transparent);
+
+  --shadow-1: 0 1px 1px var(--shadow-a), 0 3px 10px -4px var(--shadow-a);
+  --shadow-2: 0 1px 2px var(--shadow-a), 0 10px 28px -10px var(--shadow-b);
+  --shadow-3: 0 2px 6px var(--shadow-a), 0 26px 60px -18px var(--shadow-b);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme] {
+    --glass: var(--raised);
+    --glass-thin: var(--raised);
+    --glass-side: var(--surface);
+    --glass-blur: 0px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-fly: 0ms;
+    --t-glass: 0ms;
+  }
+}

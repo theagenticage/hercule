@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Intake · 1 burning · Hercule</title>
+    <style>
+      /* In a browser Intake becomes a reader: the list on the left, the open item on the right, j and k to move. */
+      .reader {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 412px minmax(0, 1fr);
+      }
+      .pane {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--bg);
+        box-shadow: 1px 0 0 var(--line-soft);
+      }
+      .pane-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px 12px 20px;
+      }
+      .pane-top .title {
+        font-size: var(--t-16);
+      }
+      .pane-top .seg {
+        margin-left: auto;
+      }
+      .receipt {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px 10px 20px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .receipt b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .receipt .fail-ink {
+        color: var(--fail-ink);
+      }
+      .receipt .you-ink {
+        color: var(--you-ink);
+      }
+      .items {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0 10px 16px;
+        scrollbar-width: thin;
+      }
+      .lane {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 16px 10px 6px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .lane span {
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+      .item {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr) auto;
+        gap: 2px 10px;
+        align-items: center;
+        padding: 8px 10px;
+        border-radius: var(--r-md);
+      }
+      .item:hover {
+        background: var(--hover);
+      }
+      .item.is-on {
+        background: var(--raised);
+        box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-soft);
+      }
+      .item .mk {
+        grid-row: span 2;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: var(--sunken);
+      }
+      .item.is-on .mk {
+        background: var(--fail-tint);
+      }
+      .item b {
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .item small {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .item .k {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .item .k--fail {
+        color: var(--fail-ink);
+      }
+      .fyi-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+
+      /* The open item. */
+      .open {
+        min-height: 0;
+        overflow: auto;
+        scrollbar-width: thin;
+      }
+      .open-in {
+        width: min(760px, 100% - 64px);
+        margin: 0 auto;
+        padding: 26px 0 48px;
+      }
+      .open-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .open h1 {
+        margin: 12px 0 8px;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .gist {
+        margin: 0 0 20px;
+        font-size: var(--t-14);
+        line-height: 1.6;
+      }
+      .made {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 22px;
+      }
+      .fact {
+        display: grid;
+        gap: 4px;
+        align-content: start;
+        padding: 11px 12px 12px;
+        border-radius: var(--r-md);
+        background: var(--bg);
+        min-width: 0;
+      }
+      .fact-src {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .fact-num {
+        font-size: var(--t-18);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .fact-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.35;
+      }
+      .ask {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 8px;
+        font-size: var(--t-14);
+        font-weight: var(--w-bold);
+      }
+      .ask .spacer + span {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-regular);
+      }
+      .open .ans {
+        grid-template-columns: 170px 1fr auto;
+      }
+      .offer-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 14px 0 0;
+        padding-top: 14px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .plan {
+        margin-top: 26px;
+      }
+      .plan-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .plan-h b {
+        color: var(--who-ink);
+        font-size: var(--t-14);
+      }
+      .plan-h span {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .steps li {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+        padding: 10px 12px 12px;
+        border-radius: var(--r-md);
+        background: var(--who-tint);
+        font-size: var(--t-12);
+        line-height: 1.4;
+      }
+      .steps li b {
+        color: var(--who-ink);
+        font-family: var(--font-mono);
+        font-size: var(--t-11);
+      }
+      .steps code {
+        font-size: 11px;
+      }
+      .keys {
+        display: flex;
+        gap: 14px;
+        margin-top: 28px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .keys span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="intake"></header>
+      <div class="reader">
+        <section class="pane">
+          <div class="pane-top">
+            <h1 class="title">Intake</h1>
+            <span class="field field--select" style="height: 30px">All Topics</span>
+            <button class="btn btn--sm" style="margin-left: auto" title="Triage sorted at 09:00 in 42s; next at 11:00"><i data-face="Triage" data-pose="idle" data-size="20"></i>Triage now</button>
+          </div>
+          <div class="receipt"><b class="fail-ink">1 burning</b>·<b class="you-ink">6 proposals</b>·<b class="you-ink">2 calls</b>·<span>198 handled quietly</span></div>
+          <div class="items">
+            <div class="lane">Now <span>1</span></div>
+            <a class="item is-on" href="decision.html"><span class="mk"><i data-brand="sentry" data-size="15"></i></span><b>Checkout fails for EU cards with 3-D Secure</b><span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span><small><span class="k k--fail">Urgent</span> · webshop · 4 sources</small></a>
+
+            <div class="lane">Needs a call <span>2</span></div>
+            <a class="item" href="#"><span class="mk"><i data-brand="intercom" data-size="15"></i></span><b>App is slow on Android</b><span></span><small><span class="k">Unsure</span> · which project is it?</small></a>
+            <a class="item" href="#"><span class="mk"><i data-face="Label new issues" data-pose="paused" data-size="26"></i></span><b>Label new issues held 34 events</b><span></span><small><span class="k">Breaker tripped</span> · 20 per hour at 08:14</small></a>
+
+            <div class="lane">Today <span>4</span></div>
+            <a class="item" href="#"><span class="mk"><i data-brand="grafana" data-size="14"></i></span><b>Nightly backup job timing out on ops-db</b><span class="bars" data-p="3"><i></i><i></i><i></i><i></i></span><small>Proposal · ops · 3 nights in a row</small></a>
+            <a class="item" href="#"><span class="mk"><i data-brand="gmail" data-size="15"></i></span><b>Draft a reply to Marta at Brightline</b><span></span><small>Offer · invoice INV-2291 in the company name</small></a>
+            <a class="item" href="#"><span class="mk"><i data-brand="stripe" data-size="14"></i></span><b>Stripe webhook retries rising</b><span class="bars" data-p="2"><i></i><i></i><i></i><i></i></span><small>Proposal · payments-api · up 4x since Sunday</small></a>
+            <a class="item" href="#"><span class="mk"><i data-brand="github" data-size="15"></i></span><b>Merge 4 dependency bumps</b><span></span><small>Offer · webshop · all green, patch versions</small></a>
+
+            <div class="lane">When you can <span>2</span></div>
+            <a class="item" href="#"><span class="mk"><i data-i="clock" data-size="15"></i></span><b>SSL certificate for status.acme.dev expires in 12 days</b><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><small>Proposal · ops · Cron</small></a>
+            <a class="item" href="#"><span class="mk"><i data-brand="intercom" data-size="15"></i></span><b>Add iDEAL as a payment method</b><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><small>Proposal · webshop · 5 requests</small></a>
+
+            <div class="lane">FYI <span>3</span></div>
+            <div class="fyi-line"><i data-brand="github" data-size="14"></i>v2.14.0 published · sign-ups +9% · €18,240 payout</div>
+          </div>
+        </section>
+
+        <article class="open">
+          <div class="open-in">
+            <div class="open-top">
+              <span class="chip chip--fail">Urgent</span>
+              <span class="proj proj--webshop">webshop</span>
+              <span>· Checkout · first seen 08:52</span>
+              <span class="spacer"></span>
+              <a class="btn btn--ghost btn--sm" href="decision.html">Open as a page<i data-i="external" data-size="13"></i></a>
+            </div>
+            <h1>Checkout fails for EU cards with 3-D Secure</h1>
+            <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+            <div class="made" aria-label="Made from">
+              <div class="fact"><span class="fact-src"><i data-brand="sentry" data-size="12"></i>Sentry</span><span class="fact-num">412</span><span class="fact-line">events · 188 users</span></div>
+              <div class="fact"><span class="fact-src"><i data-brand="gmail" data-size="12"></i>Gmail</span><span class="fact-num">3</span><span class="fact-line">customer emails</span></div>
+              <div class="fact"><span class="fact-src"><i data-brand="posthog" data-size="12"></i>PostHog</span><span class="fact-num fail-ink">-18%</span><span class="fact-line">EU conversion since 14:10</span></div>
+              <div class="fact"><span class="fact-src"><i data-brand="github" data-size="12"></i>GitHub</span><span class="fact-num">#1289</span><span class="fact-line">"Upgrade Stripe SDK to v14"</span></div>
+            </div>
+
+            <div class="ask"><i data-face="Triage" data-pose="idle" data-size="24"></i>What should happen?<span class="spacer"></span><span>Triage suggests Fix bug</span></div>
+            <div class="ledger">
+              <button class="ans"><span class="btn btn--who btn--sm" style="--hue: var(--hue-iris)"><i data-face="Fix bug" data-pose="idle" data-size="20"></i>Start "Fix bug"</span><span class="ans-desc">Starts Fix bug on webshop in a new worktree <span class="faint">· Opus 5.5 · studio-mac</span></span><kbd>↩</kbd></button>
+              <button class="ans"><span class="btn btn--sm">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans"><span class="btn btn--sm">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd>D</kbd></button>
+            </div>
+            <div class="offer-note"><i data-face="Triage" data-pose="idle" data-size="20"></i>I can also draft a reply to the 3 customers once the fix ships.<span class="spacer"></span><button class="btn btn--ghost btn--sm">Yes, after the fix</button></div>
+
+            <div class="plan who" style="--hue: var(--hue-iris)">
+              <div class="plan-h"><i data-face="Fix bug" data-pose="idle" data-size="28"></i><b>If you start Fix bug</b><span>its plan is frozen when the Run starts</span></div>
+              <ol class="steps">
+                <li><b>1</b><span>Writes a failing test for 3-D Secure</span></li>
+                <li><b>2</b><span>Finds the cause and fixes it</span></li>
+                <li><b>3</b><span>Runs <code>pnpm test checkout</code></span></li>
+                <li><b>4</b><span><strong class="you-ink">Asks you</strong> before it pushes</span></li>
+              </ol>
+            </div>
+
+            <div class="keys"><span><kbd>j</kbd><kbd>k</kbd>next and previous</span><span><kbd>↩</kbd>take the first answer</span><span><kbd>/</kbd>search Intake</span></div>
+          </div>
+        </article>
+      </div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

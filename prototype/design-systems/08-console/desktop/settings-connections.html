@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Settings · Connections · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .cx-pane { flex: 1 1 0; }
+  .cx-head { display: flex; align-items: baseline; gap: 12px; padding: 16px 20px 10px 20px; }
+  .cx-head b { font-size: 15px; font-weight: var(--w-strong); }
+  .cx-head span { font: 450 11.5px / 1 var(--font-mono); color: var(--faint); }
+  .cx-head .tone-ok { color: var(--ok); }
+  .cx-head .tone-attn { color: var(--attn); }
+  .cx-cols, .cx { display: grid; grid-template-columns: 16px minmax(0, 1fr) 116px 178px 44px 100px; column-gap: 12px; align-items: center; padding: 0 20px; }
+  .cx-cols { height: 26px; font: 450 10.5px / 1 var(--font-mono); color: var(--faint); border-bottom: 1px solid var(--line-soft); }
+  .cx-cols .r { text-align: right; }
+  .cx { height: 42px; font-size: 13px; border-top: 1px solid var(--line-soft); }
+  .cx:first-of-type, .tier + .cx { border-top: 0; }
+  .cx .brand, .cx > .mk { width: 14px; height: 14px; color: var(--ink); }
+  .cx .nm { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink); font-weight: var(--w-emph); white-space: nowrap; line-height: 1.1; }
+  .cx .nm small { font: 450 11px / 1 var(--font-mono); color: var(--faint); font-weight: 450; overflow: hidden; text-overflow: ellipsis; }
+  .cx .heat i { width: 6px; height: 14px; }
+  .cx .cnt { font: 450 12px / 1 var(--font-mono); color: var(--ink); text-align: right; }
+  .cx .hl { display: inline-flex; align-items: center; gap: 6px; justify-self: end; font: 450 11.5px / 1 var(--font-mono); }
+  .cx .hl .mk { width: 11px; height: 11px; }
+  .cx .hl.ok { color: var(--ok); }
+  .cx .hl.attn { color: var(--attn); }
+  .cx .hl.quiet { color: var(--faint); }
+  .cx .bound { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  .cx .bound .avatar { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
+  .cx .bound .avatar:last-of-type { margin-right: 4px; }
+  .cx .note { font: 450 11px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .cx-pane .tier { padding-left: 20px; }
+  .sum { display: flex; gap: 18px; padding: 14px 20px; border-top: 1px solid var(--line-soft); font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .sum b { color: var(--ink); font-weight: 500; }
+
+  .det-pane { flex: 0 0 332px; }
+  .det { padding: 16px 18px 24px; }
+  .det-id { display: flex; align-items: center; gap: 10px; }
+  .det-id .brand { width: 22px; height: 22px; color: var(--ink); }
+  .det-id b { display: block; font-size: 15px; font-weight: var(--w-strong); }
+  .det-id small { font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .alert { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; margin: 16px 0 0; padding: 11px 12px; border-radius: 8px; background: var(--attn-soft); font-size: 13px; line-height: 1.45; }
+  .alert .mk { width: 12px; height: 12px; margin-top: 3px; color: var(--attn); }
+  .alert b { font-weight: var(--w-emph); }
+  .alert small { display: block; margin-top: 3px; font: 450 11px / 1.4 var(--font-mono); color: var(--muted); }
+  .det .acts { display: flex; gap: 6px; margin: 12px 0 0; }
+  .h24 { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+  .h24 i { height: 14px; border-radius: 2px; }
+  .h24 i.ok { background: color-mix(in oklab, var(--ok) 55%, transparent); }
+  .h24 i.attn { background: var(--attn); box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--accent); }
+  .h24-axis { display: flex; justify-content: space-between; margin-top: 5px; font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+  .det .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .det .kv > dt { font: 450 11px / 1.9 var(--font-mono); color: var(--faint); padding: 7px 0; }
+  .det .kv > dd { font-size: 12.5px; padding: 7px 0; display: flex; align-items: center; gap: 6px; }
+  .det .kv .avatar { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
+  .det .kv .faint { font: 450 11px / 1 var(--font-mono); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="hercule" data-active="settings"></nav>
+
+  <main class="main">
+    <section class="pane set-pane">
+      <header class="pane-head"><span class="pane-num">1</span><span class="pane-title">Settings</span><span class="pane-actions"><span class="hint"><kbd>⌘</kbd><kbd>,</kbd></span></span></header>
+      <div class="pane-body" data-settings-nav data-active="connections"></div>
+    </section>
+
+    <section class="pane cx-pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">2</span><span class="pane-title">Connections</span><span class="pane-sub">where events come from and where assistants talk</span>
+        <span class="pane-actions"><button class="act" type="button"><svg class="mk"><use href="#c-plus"/></svg>Add connection<kbd>a</kbd></button></span>
+      </header>
+      <div class="pane-body" data-list>
+        <div class="cx-head"><b>11 connections</b><span>2,418 events in 24 h · 212 since yesterday 18:20</span></div>
+        <div class="cx-cols"><span></span><span>connection</span><span>default Topic</span><span>last 24 h, by hour</span><span class="r">events</span><span class="r">health</span></div>
+        <div class="tier">Event sources <span class="n">8</span><span class="why">all healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-github"/></svg><span class="nm">GitHub<small>rogier</small></span><span class="topic">Releases</span><span class="heat"><i class="h3"></i><i class="h1"></i><i class="h2"></i><i class="h2"></i><i class="h3"></i><i class="h2"></i><i class="h2"></i><i class="h2"></i><i class="h1"></i><i class="h2"></i><i class="h2"></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i></i><i></i><i></i><i></i><i class="h1"></i><i></i><i></i><i class="h1"></i><i class="h3"></i><i class="h3"></i></span><span class="cnt">312</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-gmail"/></svg><span class="nm">Gmail<small>rogier@personal</small></span><span class="topic">Customers</span><span class="heat"><i class="h3"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i><i class="h1"></i><i class="h3"></i><i class="h1"></i><i class="h2"></i><i class="h1"></i><i></i><i></i><i></i><i></i><i class="h1"></i><i></i><i></i><i class="h2"></i><i class="h2"></i><i class="h1"></i></span><span class="cnt">188</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-sentry"/></svg><span class="nm">Sentry<small>webshop-prod</small></span><span class="topic">Checkout</span><span class="heat"><i class="h1"></i><i class="h2"></i><i class="h2"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="f3"></i><i class="f3"></i><i class="f3"></i><i class="f2"></i><i class="f2"></i><i class="f2"></i><i class="f2"></i><i class="f1"></i><i class="f1"></i><i class="f1"></i><i class="f1"></i><i class="f1"></i><i class="f1"></i><i class="f2"></i><i class="f2"></i><i class="f3"></i></span><span class="cnt">1,406</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-posthog"/></svg><span class="nm">PostHog<small>webshop</small></span><span class="topic">Checkout</span><span class="heat"><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h1"></i><i class="h2"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h1"></i><i class="h2"></i><i class="h2"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i></span><span class="cnt">96</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-intercom"/></svg><span class="nm">Intercom<small>support</small></span><span class="topic">Customers</span><span class="heat"><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i></i><i></i><i></i><i class="h1"></i><i></i><i></i><i class="h3"></i><i class="h1"></i><i class="h2"></i></span><span class="cnt">61</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-grafana"/></svg><span class="nm">Grafana<small>ops</small></span><span class="topic">Infrastructure</span><span class="heat"><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i></i><i class="h1"></i><i class="h1"></i><i></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i></span><span class="cnt">44</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-stripe"/></svg><span class="nm">Stripe<small>live</small></span><span class="topic">Checkout</span><span class="heat"><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h3"></i><i class="h3"></i><i class="h3"></i><i class="h1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i class="h1"></i></span><span class="cnt">209</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx" data-row><svg class="mk"><use href="#g-reminder"/></svg><span class="nm">Cron<small>schedules</small></span><span class="faint">none</span><span class="heat"><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i><i class="h1"></i></span><span class="cnt">102</span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+        <div class="tier attn">Channels <span class="n">3</span><span class="why">1 reconnecting</span></div>
+          <div class="cx" data-row><svg class="brand"><use href="#b-slack"/></svg><span class="nm">Slack<small>acme-hq</small></span><span class="bound"><span class="avatar ada">A</span><span class="avatar milo">M</span>Ada, Milo</span><span class="note">DM with Rogier · #ops</span><span class="cnt"></span><span class="hl ok"><svg class="mk"><use href="#m-done"/></svg>healthy</span></div>
+          <div class="cx is-cursor" data-row><svg class="brand"><use href="#b-discord"/></svg><span class="nm">Discord<small>community</small></span><span class="bound"><span class="avatar juno">J</span>Juno</span><span class="note">#support</span><span class="cnt"></span><span class="hl attn"><svg class="mk"><use href="#m-urgent"/></svg>reconnecting</span></div>
+          <div class="cx" data-row><svg class="mk"><use href="#g-web"/></svg><span class="nm">Web chat<small>built in</small></span><span class="bound"><span class="avatar ada">A</span>Ada</span><span class="note">always on</span><span class="cnt"></span><span class="hl quiet"><svg class="mk"><use href="#m-done"/></svg>built in</span></div>
+      </div>
+    </section>
+
+    <section class="pane det-pane">
+      <header class="pane-head"><span class="pane-num">3</span><span class="pane-title">Discord</span><span class="pane-sub">channel</span></header>
+      <div class="pane-body">
+        <div class="det">
+          <div class="det-id"><svg class="brand"><use href="#b-discord"/></svg><div><b>Discord · community</b><small>channel · bot in 1 server</small></div></div>
+
+          <div class="alert"><svg class="mk"><use href="#m-urgent"/></svg><div><b>Reconnecting since 09:12.</b> Juno listens on #support. Until Discord is back, she can't be reached there.<small>29 min · retrying on its own</small></div></div>
+          <div class="acts">
+            <button class="act is-primary" type="button"><kbd>r</kbd>Reconnect now</button>
+            <button class="act is-line" type="button"><kbd>l</kbd>View log</button>
+          </div>
+
+          <div class="sec">Health <span class="n">last 24 h</span></div>
+          <div class="h24"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="attn"></i></div>
+          <div class="h24-axis"><span>yesterday 10:00</span><span>now</span></div>
+
+          <div class="sec">Bound to <span class="n">1 assistant</span></div>
+          <dl class="kv">
+            <dt>assistant</dt><dd><span class="avatar juno">J</span>Juno <span class="faint">support · asleep</span></dd>
+            <dt>listens in</dt><dd>#support</dd>
+            <dt>replies</dt><dd>as Juno, in the thread</dd>
+          </dl>
+
+          <div class="sec">Setup</div>
+          <dl class="kv">
+            <dt>server</dt><dd>community</dd>
+            <dt>token</dt><dd><span class="faint">Secrets · discord-bot</span></dd>
+            <dt>added</dt><dd>12 Aug 2026</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="NAV" data-context="Connections · Discord" data-keys="j k:move|r:reconnect|l:log|a:add|esc:back"></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,294 @@
+/* PROTOTYPE - Halo design tokens.
+ *
+ * Color doctrine: color = state. Nothing else gets a hue.
+ *   --work   green  an agent is moving (working, streaming, running)
+ *   --wait   sodium your move: something waits on you, and the controls that answer it
+ *   --fail   red    something broke (failed, can't be reached)
+ *   --idle   grey   at rest (idle, queued, asleep, done, handled quietly)
+ * Projects, sources and people are words and monochrome marks, never hues. When you see color,
+ * something is happening; the brighter and thicker it is, the more it needs you.
+ *
+ * Every state also has a shape (see halo.js): thickness says how much a segment needs you
+ * (thin = at rest, full = moving, raised = your move), and hollow, broken and dotted
+ * patterns cover paused, failed and asleep. Color is never the only signal.
+ *
+ * Today's names are kept where the meaning holds (--bg --surface --raised --ink --muted --faint
+ * --line --line-soft --attn --fail --live --ok), so adopting this file is a swap.
+ */
+
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/outfit-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/geist-mono-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+
+:root {
+  /* Type. Outfit's round geometry matches the circles; numerals carry the hierarchy. */
+  --font: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
+  --t-micro: 10.5px;
+  --t-xs: 11.5px;
+  --t-sm: 12.5px;
+  --t-base: 13.5px;
+  --t-md: 14.5px;
+  --t-lg: 17px;
+  --t-xl: 20px; /* the largest heading anywhere; size comes from numerals, not titles */
+  --n-sm: 20px;
+  --n-md: 30px;
+  --n-lg: 46px;
+  --n-xl: 76px;
+
+  /* Space: a 4px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Shape: circles and arcs, so corners are generous and controls are pills. */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* Motion: segments sweep in, the notch breathes, working segments shimmer. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 380ms;
+  --dur-sweep: 900ms;
+  --dur-breath: 2.4s;
+  --dur-shimmer: 2.8s;
+
+  --glass-blur: blur(22px) saturate(170%);
+}
+
+/* ---------- Daylight - light, flagship. Neutral white; state colors at full voltage. ---------- */
+:root,
+[data-theme="daylight"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(96.6% 0.002 95);
+  --surface: oklch(98.4% 0.0015 95);
+  --raised: oklch(100% 0 0);
+  --sunken: oklch(94% 0.0025 95);
+  --ink: oklch(21% 0.004 95);
+  --muted: oklch(46% 0.005 95);
+  --faint: oklch(53.5% 0.005 95);
+  --line: oklch(21% 0.004 95 / 0.11);
+  --line-soft: oklch(21% 0.004 95 / 0.06);
+  --line-strong: oklch(21% 0.004 95 / 0.2);
+
+  --work: oklch(66% 0.19 144);
+  --work-ink: oklch(50% 0.14 145);
+  --work-soft: oklch(66% 0.19 144 / 0.13);
+  --wait: oklch(68.5% 0.175 50);
+  --wait-ink: oklch(54% 0.155 44);
+  --wait-soft: oklch(68.5% 0.175 50 / 0.12);
+  --on-wait: oklch(20% 0.03 50);
+  --fail: oklch(58% 0.21 27);
+  --fail-ink: oklch(53% 0.2 27);
+  --fail-soft: oklch(58% 0.21 27 / 0.1);
+  --idle: oklch(21% 0.004 95 / 0.24);
+  --idle-soft: oklch(21% 0.004 95 / 0.07);
+  --notch: oklch(68.5% 0.19 50);
+  --glow-work: none;
+  --glow-wait: none;
+  --on-fail: oklch(99% 0 0);
+
+  --glass: oklch(100% 0 0 / 0.66);
+  --glass-strong: oklch(100% 0 0 / 0.84);
+  --glass-line: oklch(21% 0.004 95 / 0.1);
+  --scrim: oklch(21% 0.004 95 / 0.18);
+  --shadow-1: 0 1px 0 oklch(21% 0.004 95 / 0.04), 0 1px 3px oklch(21% 0.004 95 / 0.06);
+  --shadow-2: 0 1px 2px oklch(21% 0.004 95 / 0.06), 0 10px 30px -8px oklch(21% 0.004 95 / 0.16);
+  --shadow-3: 0 2px 6px oklch(21% 0.004 95 / 0.06), 0 30px 70px -20px oklch(21% 0.004 95 / 0.3);
+  --window-wall: oklch(88% 0.004 95);
+}
+
+/* ---------- Porcelain - light, warm white. ---------- */
+[data-theme="porcelain"] {
+  color-scheme: light;
+  --bg: oklch(95.4% 0.009 80);
+  --surface: oklch(97.5% 0.007 80);
+  --raised: oklch(99.4% 0.004 80);
+  --sunken: oklch(92.8% 0.011 80);
+  --ink: oklch(24% 0.014 60);
+  --muted: oklch(46% 0.016 65);
+  --faint: oklch(53.5% 0.015 65);
+  --line: oklch(24% 0.014 60 / 0.12);
+  --line-soft: oklch(24% 0.014 60 / 0.065);
+  --line-strong: oklch(24% 0.014 60 / 0.22);
+
+  --work: oklch(64% 0.16 152);
+  --work-ink: oklch(49% 0.12 152);
+  --work-soft: oklch(64% 0.16 152 / 0.13);
+  --wait: oklch(67% 0.17 46);
+  --wait-ink: oklch(53% 0.15 40);
+  --wait-soft: oklch(67% 0.17 46 / 0.12);
+  --on-wait: oklch(22% 0.03 50);
+  --fail: oklch(58% 0.2 25);
+  --fail-ink: oklch(52% 0.19 25);
+  --fail-soft: oklch(58% 0.2 25 / 0.1);
+  --idle: oklch(24% 0.014 60 / 0.25);
+  --idle-soft: oklch(24% 0.014 60 / 0.075);
+  --notch: oklch(67% 0.18 46);
+  --glow-work: none;
+  --glow-wait: none;
+  --on-fail: oklch(99% 0 0);
+
+  --glass: oklch(99.4% 0.004 80 / 0.66);
+  --glass-strong: oklch(99.4% 0.004 80 / 0.84);
+  --glass-line: oklch(24% 0.014 60 / 0.1);
+  --scrim: oklch(24% 0.014 60 / 0.18);
+  --shadow-1: 0 1px 0 oklch(24% 0.014 60 / 0.04), 0 1px 3px oklch(24% 0.014 60 / 0.07);
+  --shadow-2: 0 1px 2px oklch(24% 0.014 60 / 0.06), 0 10px 30px -8px oklch(24% 0.014 60 / 0.18);
+  --shadow-3: 0 2px 6px oklch(24% 0.014 60 / 0.06), 0 30px 70px -20px oklch(24% 0.014 60 / 0.32);
+  --window-wall: oklch(87% 0.014 75);
+}
+
+/* ---------- Eclipse - dark, flagship. True neutral black-grey (chroma 0.002), backlit states. ---------- */
+[data-theme="eclipse"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(17% 0.002 95);
+  --surface: oklch(20.5% 0.002 95);
+  --raised: oklch(24.5% 0.0025 95);
+  --sunken: oklch(14.5% 0.002 95);
+  --ink: oklch(94.5% 0.003 95);
+  --muted: oklch(74% 0.004 95);
+  --faint: oklch(63% 0.004 95);
+  --line: oklch(100% 0 0 / 0.09);
+  --line-soft: oklch(100% 0 0 / 0.05);
+  --line-strong: oklch(100% 0 0 / 0.17);
+
+  --work: oklch(88% 0.2 142);
+  --work-ink: oklch(86% 0.18 142);
+  --work-soft: oklch(88% 0.2 142 / 0.12);
+  --wait: oklch(77% 0.16 58);
+  --wait-ink: oklch(80% 0.14 62);
+  --wait-soft: oklch(77% 0.16 58 / 0.13);
+  --on-wait: oklch(20% 0.03 50);
+  --fail: oklch(68% 0.19 25);
+  --fail-ink: oklch(73% 0.16 25);
+  --fail-soft: oklch(68% 0.19 25 / 0.13);
+  --idle: oklch(100% 0 0 / 0.24);
+  --idle-soft: oklch(100% 0 0 / 0.07);
+  --notch: oklch(80% 0.17 60);
+  --glow-work: drop-shadow(0 0 5px color-mix(in oklch, var(--work) 55%, transparent));
+  --glow-wait: drop-shadow(0 0 7px color-mix(in oklch, var(--wait) 60%, transparent));
+  --on-fail: oklch(18% 0.02 25);
+
+  --glass: oklch(24.5% 0.0025 95 / 0.62);
+  --glass-strong: oklch(24.5% 0.0025 95 / 0.84);
+  --glass-line: oklch(100% 0 0 / 0.1);
+  --scrim: oklch(0% 0 0 / 0.42);
+  --shadow-1: 0 1px 0 oklch(0% 0 0 / 0.3), 0 1px 3px oklch(0% 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.4), 0 12px 32px -8px oklch(0% 0 0 / 0.6);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.4), 0 30px 80px -20px oklch(0% 0 0 / 0.75);
+  --window-wall: oklch(11% 0.002 95);
+}
+
+/* ---------- Umber - dark, warm. A brown-black ground, like a darkroom lit by sodium. ---------- */
+[data-theme="umber"] {
+  color-scheme: dark;
+  --bg: oklch(18.5% 0.012 60);
+  --surface: oklch(22% 0.013 60);
+  --raised: oklch(26% 0.014 60);
+  --sunken: oklch(16% 0.011 60);
+  --ink: oklch(93% 0.014 80);
+  --muted: oklch(74% 0.02 70);
+  --faint: oklch(63% 0.02 70);
+  --line: oklch(93% 0.03 80 / 0.1);
+  --line-soft: oklch(93% 0.03 80 / 0.055);
+  --line-strong: oklch(93% 0.03 80 / 0.18);
+
+  --work: oklch(86% 0.18 150);
+  --work-ink: oklch(84% 0.16 150);
+  --work-soft: oklch(86% 0.18 150 / 0.12);
+  --wait: oklch(78% 0.16 62);
+  --wait-ink: oklch(80% 0.14 64);
+  --wait-soft: oklch(78% 0.16 62 / 0.13);
+  --on-wait: oklch(21% 0.03 55);
+  --fail: oklch(69% 0.19 27);
+  --fail-ink: oklch(73% 0.16 27);
+  --fail-soft: oklch(69% 0.19 27 / 0.13);
+  --idle: oklch(93% 0.03 80 / 0.24);
+  --idle-soft: oklch(93% 0.03 80 / 0.07);
+  --notch: oklch(81% 0.17 64);
+  --glow-work: drop-shadow(0 0 5px color-mix(in oklch, var(--work) 55%, transparent));
+  --glow-wait: drop-shadow(0 0 7px color-mix(in oklch, var(--wait) 60%, transparent));
+  --on-fail: oklch(18% 0.02 25);
+
+  --glass: oklch(26% 0.014 60 / 0.62);
+  --glass-strong: oklch(26% 0.014 60 / 0.85);
+  --glass-line: oklch(93% 0.03 80 / 0.1);
+  --scrim: oklch(8% 0.01 60 / 0.45);
+  --shadow-1: 0 1px 0 oklch(0% 0 0 / 0.3), 0 1px 3px oklch(0% 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.4), 0 12px 32px -8px oklch(0% 0 0 / 0.6);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.4), 0 30px 80px -20px oklch(0% 0 0 / 0.75);
+  --window-wall: oklch(12% 0.01 60);
+}
+
+/* ---------- Orchid - dark, violet-black (hue 325, far from navy). ---------- */
+[data-theme="orchid"] {
+  color-scheme: dark;
+  --bg: oklch(17.5% 0.02 325);
+  --surface: oklch(21% 0.022 325);
+  --raised: oklch(25% 0.024 325);
+  --sunken: oklch(15% 0.018 325);
+  --ink: oklch(94.5% 0.012 325);
+  --muted: oklch(75% 0.03 325);
+  --faint: oklch(64% 0.03 325);
+  --line: oklch(94.5% 0.04 325 / 0.1);
+  --line-soft: oklch(94.5% 0.04 325 / 0.055);
+  --line-strong: oklch(94.5% 0.04 325 / 0.18);
+
+  --work: oklch(88% 0.19 150);
+  --work-ink: oklch(86% 0.17 150);
+  --work-soft: oklch(88% 0.19 150 / 0.12);
+  --wait: oklch(78% 0.15 60);
+  --wait-ink: oklch(80% 0.13 62);
+  --wait-soft: oklch(78% 0.15 60 / 0.13);
+  --on-wait: oklch(20% 0.03 50);
+  --fail: oklch(69% 0.19 20);
+  --fail-ink: oklch(74% 0.15 18);
+  --fail-soft: oklch(69% 0.19 20 / 0.14);
+  --idle: oklch(94.5% 0.04 325 / 0.25);
+  --idle-soft: oklch(94.5% 0.04 325 / 0.07);
+  --notch: oklch(81% 0.16 62);
+  --glow-work: drop-shadow(0 0 5px color-mix(in oklch, var(--work) 55%, transparent));
+  --glow-wait: drop-shadow(0 0 7px color-mix(in oklch, var(--wait) 60%, transparent));
+  --on-fail: oklch(18% 0.02 25);
+
+  --glass: oklch(25% 0.024 325 / 0.62);
+  --glass-strong: oklch(25% 0.024 325 / 0.85);
+  --glass-line: oklch(94.5% 0.04 325 / 0.1);
+  --scrim: oklch(8% 0.02 325 / 0.45);
+  --shadow-1: 0 1px 0 oklch(0% 0 0 / 0.3), 0 1px 3px oklch(0% 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.4), 0 12px 32px -8px oklch(0% 0 0 / 0.6);
+  --shadow-3: 0 2px 6px oklch(0% 0 0 / 0.4), 0 30px 80px -20px oklch(0% 0 0 / 0.75);
+  --window-wall: oklch(11% 0.018 325);
+}
+
+/* Today's names, mapped onto the doctrine so existing components keep working. */
+:root,
+[data-theme] {
+  --attn: var(--wait-ink);
+  --live: var(--work-ink);
+  --ok: var(--ink);
+  --accent: var(--wait);
+}

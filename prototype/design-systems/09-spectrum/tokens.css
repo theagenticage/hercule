@@ -1,0 +1,352 @@
+/* Spectrum - tokens.
+ *
+ * Doctrine, in four lines:
+ * 1. Color means project. Every hue on screen answers "which project is this?". Nothing else
+ *    gets a hue: not sources, not state, not priority.
+ * 2. Where you are tints the chrome. A project space paints the window frame, sidebar and focus
+ *    in its hue. "All projects" is the one place that shows the full spectrum.
+ * 3. Gradients only mean "mixed": a Proposal that spans two projects, Intake across all of them.
+ * 4. State is shape and luminance. A mark says the state; brightness says how alive it is;
+ *    "needs you" is the loudest luminance on screen (solid ink), never a color.
+ *
+ * Themes: prism (light, flagship, alias "light"), pastel (light), obsidian (dark, flagship, alias
+ * "dark"), mulberry (dark, red-violet), moss (dark, green-black). Each retunes the project hues so
+ * they stay vivid, distinct from the ground, and readable as text.
+ */
+
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("fonts/instrument-sans-latin-wdth-wght.woff2") format("woff2");
+  font-weight: 400 700;
+  font-stretch: 75% 100%;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("fonts/instrument-sans-latin-ext-wght.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+1EF2-1EFF,
+    U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Martian Mono";
+  src: url("fonts/martian-mono-latin-wdth-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-display: block;
+}
+
+/* ---------- Theme-independent scales ---------- */
+:root {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Martian Mono is wide; UI runs it condensed so a branch name sits beside sans text. */
+  --mono-stretch: 82%;
+
+  /* Type: 11 fine print, 12 meta, 13 UI, 14.5 prose, 16 section, 20 page title (the cap on desktop). */
+  --t-fine: 11px;
+  --t-meta: 12px;
+  --t-ui: 13px;
+  --t-prose: 14.5px;
+  --t-section: 16px;
+  --t-title: 20px;
+  --t-mobile-title: 28px;
+  --w-regular: 420;
+  --w-medium: 530;
+  --w-strong: 620;
+
+  /* Spacing on a 4px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Shape: soft rectangles; pills only for things you can press that carry state. */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 13px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  /* Motion. The hue cross-fade is the signature move: the chrome takes on a space in 240ms. */
+  --d-fast: 120ms;
+  --d-base: 180ms;
+  --d-hue: 240ms;
+  --d-glass: 280ms;
+  --d-flow: 2400ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --glass-blur: 22px;
+
+  /* How much of the space hue the chrome takes. Themes retune it. */
+  --tint: 9%;
+  --canvas-tint: 2.5%;
+}
+
+/* ---------- Prism: light, white ground, full-strength hues (flagship) ---------- */
+:root,
+[data-theme="prism"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(0.993 0.002 90);
+  --surface: oklch(0.968 0.003 80);
+  --raised: oklch(0.998 0.001 90);
+  --sunken: oklch(0.955 0.003 80);
+  --ink: oklch(0.22 0.008 70);
+  --muted: oklch(0.47 0.008 70);
+  --faint: oklch(0.575 0.006 70);
+  --line: oklch(0.895 0.004 70);
+  --line-soft: oklch(0.935 0.003 70);
+
+  /* "Needs you" is solid ink, the loudest luminance there is. */
+  --attn: var(--ink);
+  --on-attn: var(--bg);
+  /* Failure is shape: a cross and a hatch drawn in ink. It never borrows a project's hue. */
+  --fail: oklch(0.3 0.008 70);
+  --hatch: oklch(0.22 0.008 70 / 0.22);
+  /* Live rides on the project hue inside a space (see [data-space] below); done recedes to muted. */
+  --live: var(--ink);
+  --ok: var(--muted);
+
+  /* Projects: fill (bands, swatches, primary buttons), ink (text), on (text on the fill). */
+  --p-webshop: oklch(0.72 0.185 50);
+  --p-webshop-ink: oklch(0.53 0.155 45);
+  --p-webshop-on: oklch(0.2 0.04 45);
+  --p-payments: oklch(0.555 0.225 292);
+  --p-payments-ink: oklch(0.5 0.22 292);
+  --p-payments-on: oklch(0.99 0.01 292);
+  --p-ops: oklch(0.7 0.165 152);
+  --p-ops-ink: oklch(0.5 0.125 152);
+  --p-ops-on: oklch(0.2 0.04 152);
+  /* No project yet: an absence of hue, drawn as a dashed outline. */
+  --p-none: oklch(0.8 0.004 70);
+
+  --tint: 15%;
+  --canvas-tint: 2%;
+  --glass: oklch(0.995 0.002 90 / 0.72);
+  --glass-thin: oklch(0.995 0.002 90 / 0.42);
+  --glass-line: oklch(0.2 0.01 70 / 0.1);
+  --scrim: oklch(0.2 0.01 70 / 0.18);
+  --sh-1: 0 1px 1px oklch(0.2 0.02 70 / 0.05), 0 1px 3px oklch(0.2 0.02 70 / 0.06);
+  --sh-2: 0 1px 2px oklch(0.2 0.02 70 / 0.06), 0 6px 18px -6px oklch(0.2 0.02 70 / 0.16);
+  --sh-3: 0 2px 4px oklch(0.2 0.02 70 / 0.06), 0 22px 48px -14px oklch(0.2 0.02 70 / 0.3);
+  --panel-line: oklch(0.2 0.01 70 / 0.09);
+}
+
+/* ---------- Pastel: light, cream ground, soft hues, stronger tints ---------- */
+[data-theme="pastel"] {
+  color-scheme: light;
+  --bg: oklch(0.978 0.006 80);
+  --surface: oklch(0.955 0.009 78);
+  --raised: oklch(0.992 0.004 80);
+  --sunken: oklch(0.94 0.01 78);
+  --ink: oklch(0.26 0.02 55);
+  --muted: oklch(0.48 0.02 55);
+  --faint: oklch(0.57 0.015 60);
+  --line: oklch(0.88 0.012 70);
+  --line-soft: oklch(0.925 0.01 70);
+  --attn: var(--ink);
+  --on-attn: var(--bg);
+  --fail: oklch(0.32 0.02 55);
+  --hatch: oklch(0.26 0.02 55 / 0.22);
+  --live: var(--ink);
+  --ok: var(--muted);
+
+  --p-webshop: oklch(0.83 0.105 55);
+  --p-webshop-ink: oklch(0.52 0.13 45);
+  --p-webshop-on: oklch(0.26 0.05 45);
+  --p-payments: oklch(0.79 0.105 295);
+  --p-payments-ink: oklch(0.5 0.17 292);
+  --p-payments-on: oklch(0.26 0.06 292);
+  --p-ops: oklch(0.84 0.1 160);
+  --p-ops-ink: oklch(0.49 0.1 160);
+  --p-ops-on: oklch(0.26 0.05 160);
+  --p-none: oklch(0.8 0.01 70);
+
+  --tint: 22%;
+  --canvas-tint: 5%;
+  --glass: oklch(0.985 0.006 80 / 0.7);
+  --glass-thin: oklch(0.985 0.006 80 / 0.42);
+  --glass-line: oklch(0.26 0.02 55 / 0.1);
+  --scrim: oklch(0.26 0.02 55 / 0.16);
+  --sh-1: 0 1px 1px oklch(0.3 0.03 55 / 0.05), 0 1px 3px oklch(0.3 0.03 55 / 0.06);
+  --sh-2: 0 1px 2px oklch(0.3 0.03 55 / 0.06), 0 6px 18px -6px oklch(0.3 0.03 55 / 0.16);
+  --sh-3: 0 2px 4px oklch(0.3 0.03 55 / 0.06), 0 22px 48px -14px oklch(0.3 0.03 55 / 0.28);
+  --panel-line: oklch(0.26 0.02 55 / 0.1);
+}
+
+/* ---------- Obsidian: dark, neutral black, bright hues (flagship) ---------- */
+[data-theme="obsidian"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(0.175 0 0);
+  --surface: oklch(0.2 0 0);
+  --raised: oklch(0.235 0 0);
+  --sunken: oklch(0.155 0 0);
+  --ink: oklch(0.95 0 0);
+  --muted: oklch(0.75 0 0);
+  --faint: oklch(0.62 0 0);
+  --line: oklch(0.3 0 0);
+  --line-soft: oklch(0.255 0 0);
+  --attn: var(--ink);
+  --on-attn: var(--bg);
+  --fail: oklch(0.9 0 0);
+  --hatch: oklch(0.95 0 0 / 0.26);
+  --live: var(--ink);
+  --ok: var(--muted);
+
+  --p-webshop: oklch(0.76 0.16 55);
+  --p-webshop-ink: oklch(0.8 0.13 58);
+  --p-webshop-on: oklch(0.2 0.04 55);
+  --p-payments: oklch(0.7 0.165 295);
+  --p-payments-ink: oklch(0.77 0.13 295);
+  --p-payments-on: oklch(0.18 0.04 295);
+  --p-ops: oklch(0.77 0.16 152);
+  --p-ops-ink: oklch(0.81 0.13 152);
+  --p-ops-on: oklch(0.2 0.04 152);
+  --p-none: oklch(0.45 0 0);
+
+  --tint: 14%;
+  --canvas-tint: 2%;
+  --glass: oklch(0.21 0 0 / 0.7);
+  --glass-thin: oklch(0.21 0 0 / 0.4);
+  --glass-line: oklch(1 0 0 / 0.09);
+  --scrim: oklch(0 0 0 / 0.4);
+  --sh-1: 0 1px 1px oklch(0 0 0 / 0.3), 0 1px 3px oklch(0 0 0 / 0.25);
+  --sh-2: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 22px -6px oklch(0 0 0 / 0.5);
+  --sh-3: 0 2px 4px oklch(0 0 0 / 0.35), 0 24px 56px -12px oklch(0 0 0 / 0.65);
+  --panel-line: oklch(1 0 0 / 0.07);
+}
+
+/* ---------- Mulberry: dark, red-violet ground ---------- */
+[data-theme="mulberry"] {
+  color-scheme: dark;
+  --bg: oklch(0.19 0.03 348);
+  --surface: oklch(0.22 0.034 348);
+  --raised: oklch(0.255 0.036 348);
+  --sunken: oklch(0.17 0.028 348);
+  --ink: oklch(0.95 0.012 348);
+  --muted: oklch(0.77 0.03 348);
+  --faint: oklch(0.64 0.03 348);
+  --line: oklch(0.32 0.036 348);
+  --line-soft: oklch(0.27 0.034 348);
+  --attn: var(--ink);
+  --on-attn: var(--bg);
+  --fail: oklch(0.9 0.012 348);
+  --hatch: oklch(0.95 0.012 348 / 0.26);
+  --live: var(--ink);
+  --ok: var(--muted);
+
+  /* Payments shifts cooler (lilac) so it never melts into the red-violet ground. */
+  --p-webshop: oklch(0.78 0.14 52);
+  --p-webshop-ink: oklch(0.82 0.12 55);
+  --p-webshop-on: oklch(0.21 0.04 52);
+  --p-payments: oklch(0.76 0.135 302);
+  --p-payments-ink: oklch(0.8 0.11 302);
+  --p-payments-on: oklch(0.2 0.05 302);
+  --p-ops: oklch(0.8 0.13 168);
+  --p-ops-ink: oklch(0.84 0.11 168);
+  --p-ops-on: oklch(0.2 0.04 168);
+  --p-none: oklch(0.47 0.03 348);
+
+  --tint: 10%;
+  --canvas-tint: 2%;
+  --glass: oklch(0.23 0.034 348 / 0.7);
+  --glass-thin: oklch(0.23 0.034 348 / 0.4);
+  --glass-line: oklch(0.95 0.02 348 / 0.1);
+  --scrim: oklch(0.08 0.02 348 / 0.45);
+  --sh-1: 0 1px 1px oklch(0.08 0.03 348 / 0.4), 0 1px 3px oklch(0.08 0.03 348 / 0.3);
+  --sh-2: 0 1px 2px oklch(0.08 0.03 348 / 0.4), 0 8px 22px -6px oklch(0.08 0.03 348 / 0.55);
+  --sh-3: 0 2px 4px oklch(0.08 0.03 348 / 0.4), 0 24px 56px -12px oklch(0.06 0.03 348 / 0.7);
+  --panel-line: oklch(0.95 0.02 348 / 0.08);
+}
+
+/* ---------- Moss: dark, green-black ground ---------- */
+[data-theme="moss"] {
+  color-scheme: dark;
+  --bg: oklch(0.19 0.018 150);
+  --surface: oklch(0.22 0.02 150);
+  --raised: oklch(0.255 0.022 150);
+  --sunken: oklch(0.17 0.016 150);
+  --ink: oklch(0.95 0.012 140);
+  --muted: oklch(0.77 0.022 145);
+  --faint: oklch(0.64 0.02 145);
+  --line: oklch(0.32 0.022 150);
+  --line-soft: oklch(0.27 0.02 150);
+  --attn: var(--ink);
+  --on-attn: var(--bg);
+  --fail: oklch(0.9 0.012 140);
+  --hatch: oklch(0.95 0.012 140 / 0.26);
+  --live: var(--ink);
+  --ok: var(--muted);
+
+  /* Ops moves to lime so the project stays distinct from the green ground. */
+  --p-webshop: oklch(0.8 0.145 65);
+  --p-webshop-ink: oklch(0.84 0.12 68);
+  --p-webshop-on: oklch(0.21 0.04 65);
+  --p-payments: oklch(0.75 0.14 310);
+  --p-payments-ink: oklch(0.8 0.11 310);
+  --p-payments-on: oklch(0.2 0.05 310);
+  --p-ops: oklch(0.85 0.165 128);
+  --p-ops-ink: oklch(0.87 0.15 128);
+  --p-ops-on: oklch(0.21 0.05 128);
+  --p-none: oklch(0.47 0.02 150);
+
+  --tint: 10%;
+  --canvas-tint: 2%;
+  --glass: oklch(0.23 0.02 150 / 0.7);
+  --glass-thin: oklch(0.23 0.02 150 / 0.4);
+  --glass-line: oklch(0.95 0.02 140 / 0.1);
+  --scrim: oklch(0.08 0.02 150 / 0.45);
+  --sh-1: 0 1px 1px oklch(0.06 0.02 150 / 0.4), 0 1px 3px oklch(0.06 0.02 150 / 0.3);
+  --sh-2: 0 1px 2px oklch(0.06 0.02 150 / 0.4), 0 8px 22px -6px oklch(0.06 0.02 150 / 0.55);
+  --sh-3: 0 2px 4px oklch(0.06 0.02 150 / 0.4), 0 24px 56px -12px oklch(0.05 0.02 150 / 0.7);
+  --panel-line: oklch(0.95 0.02 140 / 0.08);
+}
+
+/* ---------- Derived: the spectrum and the spaces ----------
+ * The spectrum is the three project hues in order. It is the only gradient in the system and it
+ * always means "more than one project".
+ */
+:root,
+[data-theme] {
+  --spectrum: linear-gradient(90deg in oklch, var(--p-webshop), var(--p-payments), var(--p-ops));
+  --spectrum-v: linear-gradient(180deg in oklch, var(--p-webshop), var(--p-payments), var(--p-ops));
+  --spectrum-conic: conic-gradient(from 200deg in oklch, var(--p-webshop), var(--p-payments), var(--p-ops), var(--p-webshop));
+}
+
+/* A space sets --space (fill), --space-ink (text) and --space-on (text on the fill). Every
+ * tinted surface is derived from these three, so switching a space is one attribute change. */
+[data-space="webshop"] { --space: var(--p-webshop); --space-ink: var(--p-webshop-ink); --space-on: var(--p-webshop-on); }
+[data-space="payments-api"] { --space: var(--p-payments); --space-ink: var(--p-payments-ink); --space-on: var(--p-payments-on); }
+[data-space="ops"] { --space: var(--p-ops); --space-ink: var(--p-ops-ink); --space-on: var(--p-ops-on); }
+[data-space="all"] { --space: var(--ink); --space-ink: var(--ink); --space-on: var(--bg); }
+[data-space] {
+  --accent: var(--space);
+  --live: var(--space);
+  --chrome: color-mix(in oklab, var(--space) var(--tint), var(--surface));
+  --canvas: color-mix(in oklab, var(--space) var(--canvas-tint), var(--bg));
+  --space-soft: color-mix(in oklab, var(--space) 16%, transparent);
+  --space-line: color-mix(in oklab, var(--space) 34%, var(--line));
+}
+[data-space="all"] {
+  --chrome: var(--surface);
+  --canvas: var(--bg);
+  --space-soft: color-mix(in oklab, var(--ink) 7%, transparent);
+  --space-line: var(--line);
+}
+
+/* A project marker sets --p for one item: a row, a chip, a band segment. */
+.p-webshop { --p: var(--p-webshop); --p-ink: var(--p-webshop-ink); --p-on: var(--p-webshop-on); }
+.p-payments { --p: var(--p-payments); --p-ink: var(--p-payments-ink); --p-on: var(--p-payments-on); }
+.p-ops { --p: var(--p-ops); --p-ink: var(--p-ops-ink); --p-on: var(--p-ops-on); }
+.p-none { --p: var(--p-none); --p-ink: var(--muted); --p-on: var(--ink); }

@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Office · All sessions · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-side="threads" data-current="sessions"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1>All sessions</h1>
+          <span class="when x1">23 live · 3 runners</span>
+          <span class="when x10">140 live · 9 runners</span>
+          <span class="seg o-view" data-seg style="margin-left: 14px" aria-label="View">
+            <button aria-pressed="false" data-view="list"><i data-icon="list" style="width: 13px; height: 13px"></i>List</button>
+            <button aria-pressed="true" data-view="office"><i data-icon="office" style="width: 13px; height: 13px"></i>Office</button>
+          </span>
+          <span class="right">
+            <span class="tabs" role="tablist" aria-label="Scale preview">
+              <a href="office.html" class="x10">Today</a><a href="office.html" class="x1" aria-selected="true">Today</a>
+              <a href="office.html?state=10x" class="x1">At 10x</a><a href="office.html?state=10x" class="x10" aria-selected="true">At 10x</a>
+            </span>
+          </span>
+        </header>
+
+        <div class="office" data-office>
+          <section class="o-stage" aria-label="The office: one desk per session, grouped by runner, under a ring light whose segments are the sessions">
+            <div class="o-scene" data-scene></div>
+            <div class="o-list" data-list></div>
+            <div class="o-legend">
+              <span><i data-mark="work"></i>working <b class="x1">8</b><b class="x10">61</b></span>
+              <span class="wait"><i data-mark="wait"></i>waiting on you <b class="x1">3</b><b class="x10">14</b></span>
+              <span class="x10"><i data-mark="fail"></i>failed <b>2</b></span>
+              <span><i data-mark="pause"></i>paused <b class="x1">1</b><b class="x10">4</b></span>
+              <span><i data-mark="idle"></i>idle <b class="x1">4</b><b class="x10">21</b></span>
+              <span><i data-mark="asleep"></i>asleep <b class="x1">7</b><b class="x10">38</b></span>
+              <span><i class="o-free"></i>free desk <b class="x1">6</b><b class="x10">24</b></span>
+            </div>
+          </section>
+
+          <aside class="o-detail">
+            <div class="x1">
+              <div class="o-sel">
+                <span class="chip wait-chip"><i data-mark="wait"></i>waiting on you · 39m</span>
+                <h2>Fix 3-D Secure checkout for EU cards</h2>
+                <div class="o-meta">webshop · Thread · studio-mac<br />Claude Code · Opus 5.5 · auto-accept edits</div>
+                <div class="o-ask">Run this command?<code>git push -u origin fix/3ds-eu-cards</code></div>
+                <div class="o-acts">
+                  <button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button>
+                  <a class="btn sm ghost" href="session-active.html">Open<i data-icon="right" style="width: 11px; height: 11px"></i></a>
+                </div>
+              </div>
+
+              <h3>Also waiting on you <span class="faint">2</span></h3>
+              <div class="o-q">
+                <i data-mark="wait"></i>
+                <span><b>Ship release v2.15</b><span class="a">Publish payments-api 2.15.0 to npm?</span></span>
+                <span class="o-acts"><button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button></span>
+              </div>
+              <div class="o-q">
+                <i data-mark="wait"></i>
+                <span><b>Migrate ops dashboards</b><span class="a">Keep the old Grafana folder?</span></span>
+                <span class="o-acts"><button class="btn sm wait">Keep</button><button class="btn sm">Delete</button></span>
+              </div>
+
+              <h3>Runners <span class="faint">3</span></h3>
+              <div class="o-runners">
+                <div><span data-halo="wait2 work1 idle2 empty1" data-size="58" data-notch="0" data-center="5" aria-label="studio-mac: 5 of 6 desks taken"></span><b>studio-mac</b><span>5 of 6</span></div>
+                <div><span data-halo="work6 pause1 idle1" data-size="58" data-center="8" aria-label="build-box-1: 8 of 8 desks taken, at cap"></span><b>build-box-1</b><span>8 of 8</span><span class="cap">at cap</span></div>
+                <div><span data-halo="wait1 work1 idle1 empty5" data-size="58" data-notch="0" data-center="3" aria-label="build-box-2: 3 of 8 desks taken"></span><b>build-box-2</b><span>3 of 8</span></div>
+              </div>
+            </div>
+
+            <div class="x10">
+              <div class="o-sel">
+                <span class="chip wait-chip"><i data-mark="wait"></i>14 waiting on you · oldest 52m</span>
+                <h2>Answer them in order</h2>
+                <div class="o-meta">Hercule lines up the fourteen asks, the oldest first. Nothing else needs you: 61 sessions are working and 2 failed runs have retries queued.</div>
+                <div class="o-acts"><button class="btn sm wait">Start with the oldest</button><button class="btn sm">Open the failed 2</button></div>
+              </div>
+
+              <h3>Waiting, by kind</h3>
+              <div class="o-kinds">
+                <div><b>8</b><span>approvals</span></div>
+                <div><b>4</b><span>questions</span></div>
+                <div><b>2</b><span>permission requests</span></div>
+              </div>
+
+              <h3>Runners <span class="faint">9 · 102 of 126 desks</span></h3>
+              <div class="o-runners ten">
+                <div><span data-halo="wait3 work2 idle1" data-size="46" data-notch="0" data-center="6"></span><b>studio-mac</b><span>6 of 6</span></div>
+                <div><span data-halo="wait2 work11 pause1 idle2" data-size="46" data-notch="0" data-center="16"></span><b>build-box-1</b><span>16 of 16</span></div>
+                <div><span data-halo="wait1 work9 fail1 idle3 empty2" data-size="46" data-notch="0" data-center="14"></span><b>build-box-2</b><span>14 of 16</span></div>
+                <div><span data-halo="wait2 work10 pause1 idle3" data-size="46" data-notch="0" data-center="16"></span><b>build-box-3</b><span>16 of 16</span></div>
+                <div><span data-halo="wait1 work8 idle3 empty4" data-size="46" data-notch="0" data-center="12"></span><b>build-box-4</b><span>12 of 16</span></div>
+                <div><span data-halo="wait1 work6 idle1" data-size="46" data-notch="0" data-center="8"></span><b>gpu-box</b><span>8 of 8</span></div>
+                <div><span data-halo="wait2 work7 pause1 idle2 empty4" data-size="46" data-notch="0" data-center="12"></span><b>cloud-1</b><span>12 of 16</span></div>
+                <div><span data-halo="wait1 work5 fail1 pause1 idle2 empty6" data-size="46" data-notch="0" data-center="10"></span><b>cloud-2</b><span>10 of 16</span></div>
+                <div><span data-halo="wait1 work3 idle4 empty8" data-size="46" data-notch="0" data-center="8"></span><b>cloud-3</b><span>8 of 16</span></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      /* PROTOTYPE - the office: the halo, in 3D. Every live session is a desk in one ring, grouped
+       * by runner; a ring light hangs over the desks and each of its segments lights the desk below
+       * it in that session's state color. Sessions unloaded from their runner rest in the lounge in
+       * the middle. The scene is plain SVG in a fixed oblique projection, so it renders the same in
+       * every browser, and the same data drives the List view. */
+      (function () {
+        var TEN = document.documentElement.dataset.state === "10x";
+        var LIST = document.documentElement.dataset.state === "list";
+
+        // Today: 23 live sessions. 16 sit at a desk on a runner, 7 are asleep (unloaded).
+        var TODAY = [
+          { runner: "studio-mac", cap: 6, label: "studio-mac", desks: [
+            { t: "Milo", k: "Assistant", s: "idle", d: "Slack #ops", face: "M" },
+            { t: "Fix 3-D Secure checkout for EU cards", short: "Fix 3-D Secure checkout", k: "Thread · webshop", s: "wait", d: "git push?", age: "39m", sel: true },
+            { t: "Ada", k: "Assistant", s: "work", d: "heartbeat · replying to you", face: "A" },
+            { t: "Rotate staging secrets", k: "Thread · ops", s: "idle", age: "2h" },
+            { t: "Migrate ops dashboards", short: "Migrate ops dashboards", k: "Thread · ops", s: "wait", d: "Keep the old Grafana folder?", age: "14m" },
+            null ] },
+          { runner: "build-box-1", cap: 8, label: "build-box-1", atCap: true, desks: [
+            { t: "Investigate backup timeouts", k: "Run · Investigate · ops", s: "work", age: "6m" },
+            { t: "Refactor cart totals", k: "Thread · webshop", s: "work", age: "22m" },
+            { t: "Label new issues", k: "Run · webshop", s: "pause", d: "bound tripped" },
+            { t: "Webhook retry backoff", k: "Run · Fix bug · payments-api", s: "work", age: "3m" },
+            { t: "Draft reply to Jonas @ Kiteworks", k: "Run · Draft reply", s: "work", age: "1m" },
+            { t: "Bump Node to 24 in CI", k: "Thread · payments-api", s: "idle", age: "3h" },
+            { t: "Sentry WEBSHOP-4F2", k: "Run · Fix bug · webshop", s: "work", age: "15m" },
+            { t: "Slow product search", k: "Run · Investigate · webshop", s: "work", age: "11m" } ] },
+          { runner: "build-box-2", cap: 8, label: "build-box-2", desks: [
+            { t: "Ship release v2.15", short: "Ship release v2.15", k: "Run · Ship release · payments-api", s: "wait", d: "Publish to npm?", age: "8m" },
+            { t: "Payout rounding", k: "Run · Fix bug · payments-api", s: "work", age: "5m" },
+            { t: "Add iDEAL research", k: "Thread · payments-api", s: "idle", age: "1h" },
+            null, null, null, null, null ] },
+        ];
+        var LOUNGE = [
+          { t: "Juno", k: "Assistant · support", s: "asleep", face: "J" },
+          { t: "Checkout copy for DE", k: "Thread · webshop", s: "asleep", age: "1d" },
+          { t: "Refund flow audit", k: "Thread · payments-api", s: "asleep", age: "2d" },
+          { t: "Cert inventory", k: "Thread · ops", s: "asleep", age: "1d" },
+          { t: "Invoice PDF fonts", k: "Thread · webshop", s: "asleep", age: "3d" },
+          { t: "Kiteworks rate limits", k: "Thread · payments-api", s: "asleep", age: "1d" },
+          { t: "Dependabot batch", k: "Thread · webshop", s: "asleep", age: "2d" },
+        ];
+
+        // At 10x: 140 live sessions. 102 at desks on 9 runners, 38 asleep.
+        function fill(spec) {
+          var out = [];
+          spec.split(" ").forEach(function (tok) {
+            var m = tok.match(/^([a-z]+)(\d+)$/);
+            for (var i = 0; i < Number(m[2]); i++) out.push(m[1] === "free" ? null : { s: m[1] });
+          });
+          return out;
+        }
+        var SWARM = [
+          { label: "studio-mac", desks: fill("work1 wait1 idle1 wait1 work1 wait1") },
+          { label: "build-box-1", atCap: true, desks: fill("work4 wait1 work3 pause1 work2 idle2 wait1 work2") },
+          { label: "build-box-2", desks: fill("work3 wait1 work3 fail1 work3 idle3 free2") },
+          { label: "build-box-3", atCap: true, desks: fill("work5 wait1 work3 pause1 idle3 wait1 work2") },
+          { label: "build-box-4", desks: fill("work4 wait1 work4 idle3 free4") },
+          { label: "gpu-box", atCap: true, desks: fill("work3 wait1 work3 idle1") },
+          { label: "cloud-1", desks: fill("work3 wait1 work4 pause1 wait1 idle2 free4") },
+          { label: "cloud-2", desks: fill("work2 fail1 work3 wait1 pause1 idle2 free6") },
+          { label: "cloud-3", desks: fill("work3 wait1 idle4 free8") },
+        ];
+        SWARM[0].desks[1] = { s: "wait", t: "Fix 3-D Secure checkout for EU cards", short: "Fix 3-D Secure checkout", d: "git push?", sel: true };
+
+        var runners = TEN ? SWARM : TODAY;
+
+        // The projection: a camera south of the room, looking down. A circle on the floor
+        // becomes an ellipse K times as tall as it is wide.
+        var W = 860, H = 790, CX = 430, CY = 486, K = 0.44;
+        var R = 300, Z = 336, RF = 382;
+        function P(x, y, z) {
+          return [CX + x, CY + y * K - (z || 0)];
+        }
+        function pt(p) {
+          return Math.round(p[0] * 10) / 10 + " " + Math.round(p[1] * 10) / 10;
+        }
+        function poly(points, cls, extra) {
+          return '<path class="' + cls + '" d="M' + points.map(pt).join("L") + 'Z"' + (extra || "") + "/>";
+        }
+        function ellipse(x, y, z, rx, cls, extra) {
+          var c = P(x, y, z);
+          return '<ellipse class="' + cls + '" cx="' + c[0].toFixed(1) + '" cy="' + c[1].toFixed(1) + '" rx="' + rx.toFixed(1) + '" ry="' + (rx * K).toFixed(1) + '"' + (extra || "") + "/>";
+        }
+        function esc(s) {
+          return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        }
+
+        // Lay the desks out around the ring: one slot per desk, a wider gap between runners.
+        var GAP = 1.3;
+        var slots = runners.reduce(function (n, r) { return n + r.desks.length + GAP; }, 0);
+        var step = (Math.PI * 2) / slots;
+        var start = Math.PI / 2 - (runners[0].desks.length / 2) * step; // the first runner faces the camera
+        var desks = [];
+        var a = start;
+        runners.forEach(function (r) {
+          r.a0 = a;
+          r.desks.forEach(function (d) {
+            desks.push({ a: a + step / 2, d: d, runner: r });
+            a += step;
+          });
+          r.a1 = a;
+          a += GAP * step;
+        });
+
+        var dw = TEN ? 10.5 : 46, dd = TEN ? 17 : 26, dh = TEN ? 6 : 14;
+
+        function deskShapes(item) {
+          var d = item.d, th = item.a;
+          var t = [-Math.sin(th), Math.cos(th)], n = [Math.cos(th), Math.sin(th)];
+          var c = [R * n[0], R * n[1]];
+          function corner(u, v, z) {
+            return P(c[0] + t[0] * u + n[0] * v, c[1] + t[1] * u + n[1] * v, z);
+          }
+          var hw = dw / 2, hd = dd / 2;
+          var out = [];
+          var free = !d;
+          // Side faces that turn toward the camera, darker on the right, like light from the left.
+          [[t, hw], [[-t[0], -t[1]], -hw], [n, hd], [[-n[0], -n[1]], -hd]].forEach(function (f) {
+            var nv = f[0];
+            if (nv[1] <= 0.02) return;
+            var cls = "o-desk-side " + (nv[0] > 0.25 ? "r" : "l") + (free ? " free" : "");
+            var pts;
+            if (nv === t || (nv[0] === -t[0] && nv[1] === -t[1])) {
+              var u = f[1];
+              pts = [corner(u, -hd, 0), corner(u, hd, 0), corner(u, hd, dh), corner(u, -hd, dh)];
+            } else {
+              var v = f[1];
+              pts = [corner(-hw, v, 0), corner(hw, v, 0), corner(hw, v, dh), corner(-hw, v, dh)];
+            }
+            out.push(poly(pts, cls));
+          });
+          var topCls = "o-desk-top" + (free ? " free" : "") + (TEN && d ? " s-" + d.s : "");
+          out.push(poly([corner(-hw, -hd, dh), corner(hw, -hd, dh), corner(hw, hd, dh), corner(-hw, hd, dh)], topCls));
+          if (!TEN && d) {
+            // The laptop: a base on the desk and a screen at its outer edge, lit in the session's state.
+            out.push(poly([corner(-10, 0, dh), corner(10, 0, dh), corner(10, 8, dh), corner(-10, 8, dh)], "o-lap-base"));
+            var facing = n[1] < 0; // the screen faces the agent, who sits on the inner side
+            out.push(poly([corner(-10, 8, dh), corner(10, 8, dh), corner(10, 9.5, dh + 12), corner(-10, 9.5, dh + 12)], facing ? "o-screen s-" + d.s : "o-lid"));
+            if (!facing) out.push('<path class="o-lid-glow s-' + d.s + '" d="M' + pt(corner(-9, 9.5, dh + 12)) + "L" + pt(corner(9, 9.5, dh + 12)) + '"/>');
+          }
+          return { y: c[1], svg: out.join("") };
+        }
+
+        function pawn(x, y, s, face, scale, tip) {
+          scale = scale || 1;
+          var b = P(x, y, 0);
+          var bw = 9 * scale, tw = 6.5 * scale, bh = 21 * scale, hr = 7.2 * scale;
+          var head = P(x, y, 29 * scale);
+          var body =
+            "M" + (b[0] - bw).toFixed(1) + " " + b[1].toFixed(1) +
+            "C" + (b[0] - bw).toFixed(1) + " " + (b[1] - bh * 0.7).toFixed(1) + " " + (b[0] - tw).toFixed(1) + " " + (b[1] - bh).toFixed(1) + " " + b[0].toFixed(1) + " " + (b[1] - bh).toFixed(1) +
+            "C" + (b[0] + tw).toFixed(1) + " " + (b[1] - bh).toFixed(1) + " " + (b[0] + bw).toFixed(1) + " " + (b[1] - bh * 0.7).toFixed(1) + " " + (b[0] + bw).toFixed(1) + " " + b[1].toFixed(1) +
+            "A" + bw.toFixed(1) + " " + (bw * K).toFixed(1) + " 0 0 1 " + (b[0] - bw).toFixed(1) + " " + b[1].toFixed(1) + "Z";
+          var g = '<g class="o-pawn s-' + s + '">' + (tip ? "<title>" + esc(tip) + "</title>" : "") +
+            ellipse(x, y, 0, bw + 2, "o-shadow") +
+            '<path class="o-body" d="' + body + '"/>' +
+            '<circle class="o-head" cx="' + head[0].toFixed(1) + '" cy="' + head[1].toFixed(1) + '" r="' + hr.toFixed(1) + '"/>' +
+            (face ? '<text class="o-face" x="' + head[0].toFixed(1) + '" y="' + (head[1] + 3.3 * scale).toFixed(1) + '" font-size="' + (9 * scale).toFixed(1) + '">' + face + "</text>" : "") +
+            ellipse(x, y, 44 * scale, 9.5 * scale, "o-halo s-" + s);
+          if (s === "wait") {
+            var nt = P(x, y, 58 * scale);
+            g += '<rect class="o-notch" x="' + (nt[0] - 2.6 * scale).toFixed(1) + '" y="' + (nt[1] - 9 * scale).toFixed(1) + '" width="' + (5.2 * scale).toFixed(1) + '" height="' + (9 * scale).toFixed(1) + '" rx="' + (2.6 * scale).toFixed(1) + '"/>';
+          }
+          return g + "</g>";
+        }
+
+        var floor = [], pools = [], objects = [], beams = [], light = [], lines = [], tags = [];
+
+        // The platform, its aisles, and a faint floor band per runner.
+        floor.push(ellipse(0, 0, -16, RF, "o-plinth"));
+        floor.push('<rect class="o-plinth" x="' + (CX - RF) + '" y="' + CY + '" width="' + RF * 2 + '" height="' + 16 + '" transform="translate(0 -16)"/>');
+        floor.push(ellipse(0, 0, 0, RF, "o-floor"));
+        runners.forEach(function (r) {
+          var pts = [], i, n = 24;
+          for (i = 0; i <= n; i++) {
+            var aa = r.a0 + ((r.a1 - r.a0) * i) / n;
+            pts.push(P((R + 44) * Math.cos(aa), (R + 44) * Math.sin(aa)));
+          }
+          for (i = n; i >= 0; i--) {
+            var ab = r.a0 + ((r.a1 - r.a0) * i) / n;
+            pts.push(P((R - 44) * Math.cos(ab), (R - 44) * Math.sin(ab)));
+          }
+          floor.push(poly(pts, "o-zone"));
+        });
+        floor.push(ellipse(0, 0, 0, 118, "o-rug"));
+        floor.push(ellipse(0, 0, 0, 96, "o-rug-line"));
+
+        desks.forEach(function (item) {
+          var d = item.d, th = item.a;
+          var shapes = deskShapes(item);
+          objects.push({ y: shapes.y, svg: shapes.svg });
+          if (!d) return;
+          var ir = R - dd / 2 - (TEN ? 7 : 12);
+          var px = ir * Math.cos(th), py = ir * Math.sin(th);
+          var tip = d.t ? d.t + (d.k ? " · " + d.k : "") + " · " + ({ wait: "waiting on you", work: "working", idle: "idle", pause: "paused", fail: "failed" }[d.s]) + (d.d ? " · " + d.d : "") : null;
+          if (!TEN || d.s === "wait" || d.s === "fail") {
+            objects.push({ y: py + 0.01, svg: pawn(px, py, d.s, d.face, TEN ? 0.62 : 1, tip) });
+          }
+          if (d.s === "wait") {
+            pools.push(ellipse(R * Math.cos(th), R * Math.sin(th), 0, TEN ? 22 : 46, "o-pool"));
+            // Fourteen beams would turn the room into a cage; at 10x the pools and lamps are enough.
+            if (!TEN) {
+              var top = P(R * Math.cos(th), R * Math.sin(th), Z - 6), bot = P(R * Math.cos(th), R * Math.sin(th), 0);
+              beams.push('<path class="o-beam" d="M' + (top[0] - 2.5) + " " + top[1] + "L" + (top[0] + 2.5) + " " + top[1] + "L" + (bot[0] + 11) + " " + bot[1] + "L" + (bot[0] - 11) + " " + bot[1] + 'Z"/>');
+            }
+          }
+          if (d.sel) pools.push(ellipse(R * Math.cos(th), R * Math.sin(th), 0, TEN ? 18 : 40, "o-sel-ring"));
+          // The ring light's segment over this desk.
+          var a0 = th - step / 2 + step * 0.12, a1 = th + step / 2 - step * 0.12;
+          var seg = [], j;
+          for (j = 0; j <= 6; j++) {
+            var aj = a0 + ((a1 - a0) * j) / 6;
+            seg.push(P(R * Math.cos(aj), R * Math.sin(aj), Z - 5));
+          }
+          light.push('<path class="o-lamp s-' + d.s + '" d="M' + seg.map(pt).join("L") + '"/>');
+        });
+        LOUNGE.length &&
+          !TEN &&
+          LOUNGE.forEach(function (l, i) {
+            var la = Math.PI / 2 + (i - (LOUNGE.length - 1) / 2) * 0.62 + Math.PI;
+            var lx = 58 * Math.cos(la), ly = 58 * Math.sin(la);
+            objects.push({ y: ly, svg: pawn(lx, ly, "asleep", l.face, 0.78, l.t + " · " + l.k + " · asleep" + (l.age ? " · " + l.age : "")) });
+          });
+        if (TEN) {
+          // 38 asleep: too many to seat, so the lounge shows them as a count.
+          var ring = [];
+          for (var q = 0; q < 38; q++) {
+            var qa = (q / 38) * Math.PI * 2;
+            var qr = q % 2 ? 66 : 80;
+            ring.push(ellipse(qr * Math.cos(qa), qr * Math.sin(qa), 0, 3.2, "o-sleeper"));
+          }
+          floor.push(ring.join(""));
+        }
+
+        // The ring light: a housing, and one lamp per desk underneath it.
+        var housing = [];
+        for (var h = 0; h <= 96; h++) {
+          var ha = (h / 96) * Math.PI * 2;
+          housing.push(P(R * Math.cos(ha), R * Math.sin(ha), Z));
+        }
+        var cables = [Math.PI * 0.5, Math.PI * 1.17, Math.PI * 1.83].map(function (ca) {
+          var p0 = P(R * Math.cos(ca), R * Math.sin(ca), Z);
+          return '<path class="o-cable" d="M' + pt(p0) + "L" + p0[0].toFixed(1) + ' 0"/>';
+        });
+
+        objects.sort(function (m, n) { return m.y - n.y; });
+
+        // Runner name plates at the edge of the platform, and tags for the sessions waiting on you.
+        runners.forEach(function (r) {
+          var mid = (r.a0 + r.a1) / 2;
+          var rr = TEN ? RF + 26 : RF + 30;
+          var p = P(rr * Math.cos(mid), rr * Math.sin(mid), 0);
+          if (Math.sin(mid) > 0.9) p = [CX, CY + RF * K + 34];
+          var taken = r.desks.filter(Boolean).length;
+          tags.push(
+            '<div class="o-runner-tag' + (r.atCap ? " cap" : "") + '" style="left:' + p[0].toFixed(0) + "px;top:" + p[1].toFixed(0) + 'px">' +
+              "<b>" + r.label + "</b><span>" + taken + (TEN ? "/" : " of ") + r.desks.length + (r.atCap && !TEN ? " · at cap" : "") + "</span></div>"
+          );
+        });
+        desks.forEach(function (item) {
+          var d = item.d;
+          if (!d || d.s !== "wait" || !d.short) return;
+          var th = item.a;
+          var ir = R - dd / 2 - (TEN ? 7 : 12);
+          var left = Math.cos(th) < 0;
+          var tx, ty, cls;
+          if (Math.sin(th) > 0) {
+            // A desk at the front: the tag hangs below the platform.
+            var foot = P(R * Math.cos(th), R * Math.sin(th), 0);
+            ty = CY + RF * K + 44;
+            tx = foot[0] + (left ? -30 : 30);
+            cls = "down";
+            lines.push('<path class="o-lead" d="M' + foot[0].toFixed(1) + " " + (foot[1] + dd * K + 4).toFixed(1) + "V" + ty.toFixed(1) + "H" + tx.toFixed(1) + '"/>');
+          } else {
+            // A desk at the back: the tag floats in the open space inside the ring light.
+            var anchor = P(ir * Math.cos(th), ir * Math.sin(th), (TEN ? 0.62 : 1) * 68);
+            tx = anchor[0] + (left ? 18 : -18);
+            ty = anchor[1] - 64;
+            cls = "up";
+            lines.push('<path class="o-lead" d="M' + anchor[0].toFixed(1) + " " + anchor[1].toFixed(1) + "V" + ty.toFixed(1) + '"/>');
+          }
+          var side = left ? "right:" + (W - tx).toFixed(0) : "left:" + tx.toFixed(0);
+          tags.push(
+            '<a class="o-tag ' + cls + (d.sel ? " is-sel" : "") + '" href="' + (d.sel ? "session-active.html" : "#") + '" style="' + side + "px;top:" + ty.toFixed(0) + 'px">' +
+              '<i data-mark="wait"></i><span><b>' + esc(d.short) + "</b><span>" + esc(d.d) + "</span></span></a>"
+          );
+        });
+        if (!TEN) {
+          var lp = P(0, 0, 0);
+          tags.push('<div class="o-lounge-tag" style="left:' + lp[0] + "px;top:" + (lp[1] + 118 * K + 8).toFixed(0) + 'px"><i data-mark="asleep"></i>asleep 7</div>');
+        } else {
+          var lq = P(0, 0, 0);
+          tags.push('<div class="o-lounge-num" style="left:' + lq[0] + "px;top:" + lq[1] + 'px"><b>38</b><span><i data-mark="asleep"></i>asleep</span></div>');
+        }
+
+        var svg =
+          '<svg class="o-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H + '" aria-hidden="true">' +
+          '<defs><filter id="o-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>' +
+          '<radialGradient id="o-pool-g"><stop offset="0" stop-color="var(--wait)" stop-opacity=".42"/><stop offset="1" stop-color="var(--wait)" stop-opacity="0"/></radialGradient>' +
+          '<linearGradient id="o-beam-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--wait)" stop-opacity=".05"/><stop offset=".85" stop-color="var(--wait)" stop-opacity=".13"/><stop offset="1" stop-color="var(--wait)" stop-opacity=".04"/></linearGradient></defs>' +
+          cables.join("") +
+          floor.join("") + pools.join("") + lines.join("") +
+          objects.map(function (o) { return o.svg; }).join("") +
+          beams.join("") +
+          '<path class="o-housing" d="M' + housing.map(pt).join("L") + 'Z"/>' +
+          '<g class="o-lamps-glow" filter="url(#o-glow)">' + light.join("") + "</g>" +
+          '<g class="o-lamps">' + light.join("") + "</g>" +
+          "</svg>";
+
+        var scene = document.querySelector("[data-scene]");
+        scene.style.width = W + "px";
+        scene.style.height = H + "px";
+        scene.innerHTML = svg + tags.join("");
+
+        // The List view: the same sessions as rows, waiting on you first.
+        var order = { wait: 0, fail: 1, work: 2, pause: 3, idle: 4, asleep: 5 };
+        var words = { wait: "Waiting on you", fail: "Failed", work: "Working", pause: "Paused", idle: "Idle", asleep: "Asleep" };
+        var rows = [];
+        TODAY.forEach(function (r) {
+          r.desks.forEach(function (d) {
+            if (d) rows.push({ d: d, where: r.label });
+          });
+        });
+        LOUNGE.forEach(function (d) {
+          rows.push({ d: d, where: "unloaded" });
+        });
+        rows.sort(function (m, n) { return order[m.d.s] - order[n.d.s]; });
+        var html = "", last = null;
+        rows.forEach(function (row) {
+          var d = row.d;
+          if (d.s !== last) {
+            var count = rows.filter(function (x) { return x.d.s === d.s; }).length;
+            html += '<div class="tier-head">' + words[d.s] + ' <span class="n">' + count + '</span><span class="rule"></span></div>';
+            last = d.s;
+          }
+          html +=
+            '<div class="o-row s-' + d.s + '"><i data-mark="' + d.s + '"></i><b>' + esc(d.t) + "</b><span>" + esc(d.k || "") + "</span><span>" + esc(d.d || "") + '</span><span class="mono">' + row.where + '</span><span class="mono">' + (d.age || "") + "</span></div>";
+        });
+        document.querySelector("[data-list]").innerHTML = html;
+
+        var office = document.querySelector("[data-office]");
+        function show(view) {
+          office.classList.toggle("is-list", view === "list");
+          document.querySelectorAll("[data-view]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === view));
+          });
+        }
+        document.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-view]");
+          if (b) show(b.getAttribute("data-view"));
+        });
+        if (LIST) show("list");
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Appearance · Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="settings" data-active="Appearance"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i data-i="brush" class="t-glyph"></i>
+      <h1>Appearance</h1><span class="crumb">Settings</span>
+      <div class="tools">
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada</span><kbd class="kbd">&#8997;Space</kbd></label>
+      </div>
+    </header>
+
+    <section class="pane">
+      <div class="scroll">
+        <div class="set set-wide">
+          <section class="sec">
+            <div class="sec-h"><h2>Theme</h2><small>five themes; the dark ones are warm, never blue</small>
+              <span class="end seg"><button>Light</button><button>Dark</button><button class="is-on"><i data-i="sun"></i>Match system</button></span>
+            </div>
+            <div class="themes">
+              <button class="theme is-on" data-set-theme="linen">
+                <span class="tp" data-theme="linen" aria-hidden="true">
+                  <span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span>
+                  <span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span>
+                </span>
+                <span class="theme-l"><b>Linen</b><small>light · by day</small></span>
+              </button>
+              <button class="theme" data-set-theme="porcelain">
+                <span class="tp" data-theme="porcelain" aria-hidden="true">
+                  <span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span>
+                  <span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span>
+                </span>
+                <span class="theme-l"><b>Porcelain</b><small>light · cooler, quieter</small></span>
+              </button>
+              <button class="theme" data-set-theme="espresso">
+                <span class="tp" data-theme="espresso" aria-hidden="true">
+                  <span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span>
+                  <span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span>
+                </span>
+                <span class="theme-l"><b>Espresso</b><small>dark · by night</small></span>
+              </button>
+              <button class="theme" data-set-theme="velvet">
+                <span class="tp" data-theme="velvet" aria-hidden="true">
+                  <span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span>
+                  <span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span>
+                </span>
+                <span class="theme-l"><b>Velvet</b><small>dark · plum</small></span>
+              </button>
+              <button class="theme" data-set-theme="charcoal">
+                <span class="tp" data-theme="charcoal" aria-hidden="true">
+                  <span class="tp-side"><i class="orb" data-v="ada" data-p="idle" style="--size:9px"></i><em></em><em></em><em class="is-q"></em><em></em></span>
+                  <span class="tp-main"><span class="tp-say"><i class="orb" data-v="ada" data-p="idle" style="--size:8px"></i>Morning Rogier.</span><span class="tp-card"><em></em><em></em><b>Start “Fix bug”</b></span><span class="tp-comp"></span></span>
+                </span>
+                <span class="theme-l"><b>Charcoal</b><small>dark · neutral</small></span>
+              </button>
+            </div>
+            <p class="set-note"><i data-i="moon"></i><span>Matching the system: <b>Linen</b> by day, <b>Espresso</b> by night. Pick a theme above to change either.</span></p>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Ada's color</h2><small>her voice, her orb, and every “needs you” mark; only colors no project or state uses</small></div>
+            <div class="voices">
+              <button class="vc is-on" data-set-accent="persimmon"><i class="orb" data-p="idle" style="--size:26px; --v: oklch(62% 0.165 48)"></i><span>Persimmon</span></button>
+              <button class="vc" data-set-accent="cobalt"><i class="orb" data-p="idle" style="--size:26px; --v: oklch(55% 0.16 262)"></i><span>Cobalt</span></button>
+              <button class="vc" data-set-accent="graphite"><i class="orb" data-p="idle" style="--size:26px; --v: oklch(36% 0.012 60)"></i><span>Graphite</span></button>
+              <span class="vc-others"><span>Other assistants keep their own voices</span><span class="vc-o"><i class="orb" data-v="milo" data-p="idle" style="--size:14px"></i>Milo</span><span class="vc-o"><i class="orb" data-v="juno" data-p="asleep" style="--size:14px"></i>Juno</span></span>
+            </div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Layout and text</h2></div>
+            <div class="frow"><span class="frow-l">Density<small>how tall rows are in lists and the sidebar</small></span><span class="frow-v"></span><span class="seg"><button class="is-on">Comfortable</button><button>Compact</button></span></div>
+            <div class="frow"><span class="frow-l">Text size<small>the sans and Ada's serif move together</small></span><span class="frow-v"></span><span class="seg"><button><span style="font-size:11px">A</span>Small</button><button class="is-on"><span style="font-size:13px">A</span>Default</button><button><span style="font-size:15px">A</span>Large</button></span></div>
+            <div class="frow"><span class="frow-l">Reduce motion<small>the orb stops breathing; Ada's text arrives at once</small></span><span class="frow-v"></span><span class="toggle"></span></div>
+            <div class="frow"><span class="frow-l">Reduce transparency<small>the composer, sidebar and sheets turn solid</small></span><span class="frow-v"></span><span class="toggle"></span></div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Marks</h2></div>
+            <div class="frow"><span class="frow-l">Source marks on rows<small>show where a Proposal came from</small></span><span class="frow-v"></span><span class="toggle is-on" id="marks-toggle"></span></div>
+            <div class="mk-preview">
+              <div class="crow"><i data-m="q"></i><span class="crow-t">Nightly backup job timing out on ops-db<small><span class="proj"><i class="room" data-p="ops"></i>ops</span><span class="dot-sep"></span>3 nights in a row</small></span><span class="crow-marks"><i data-b="grafana"></i><i data-b="cron"></i></span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span><span class="crow-age">04:12</span></div>
+              <div class="crow"><i data-m="q"></i><span class="crow-t">Stripe webhook retries rising<small><span class="proj"><i class="room" data-p="payments-api"></i>payments-api</span><span class="dot-sep"></span>since v2.14.0</small></span><span class="crow-marks"><i data-b="stripe"></i><i data-b="sentry"></i></span><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span><span class="crow-age">07:48</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

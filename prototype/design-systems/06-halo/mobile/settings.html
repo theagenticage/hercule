@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone has-sheet">
+      <div class="status" data-status></div>
+
+      <div class="m-body">
+        <header class="m-head"><h1>Settings</h1></header>
+
+        <div class="mset-me">
+          <span class="avatar">R</span>
+          <span><b>Rogier</b><small>hercule.home.arpa · controller up 12 days</small></span>
+          <i data-icon="right" class="chev"></i>
+        </div>
+
+        <!-- The 13 settings domains, grouped the way the desktop sidebar groups them. -->
+        <div class="mset-group">
+          <a href="#"><span class="tile"><i data-icon="palette"></i></span>Appearance<span class="v m-theme-name"></span><i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="threads"></i></span>Threads<i data-icon="right" class="chev"></i></a>
+          <a href="assistant.html"><span class="tile"><i data-mark="assistant" class="ic"></i></span>Assistants<span class="v">3</span><i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="plug"></i></span>Connections<span class="v">7 · all healthy</span><i data-icon="right" class="chev"></i></a>
+        </div>
+        <div class="mset-group">
+          <a href="#"><span class="tile"><i data-icon="cpu"></i></span>Providers<span class="v">3</span><i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="server"></i></span>Machines<span class="v"><span data-halo="work5 idle1" data-size="14" data-still aria-hidden="true"></span>3</span><i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="key"></i></span>Identities<i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="shield"></i></span>Permission profiles<i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="lock"></i></span>Secrets<i data-icon="right" class="chev"></i></a>
+        </div>
+        <div class="mset-group">
+          <a href="#"><span class="tile"><i data-icon="gauge"></i></span>Bounds<i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="puzzle"></i></span>Plugins<i data-icon="right" class="chev"></i></a>
+          <a href="#"><span class="tile"><i data-icon="sliders"></i></span>System<i data-icon="right" class="chev"></i></a>
+        </div>
+      </div>
+
+      <nav class="tabbar" data-current="settings" aria-label="Hercule"></nav>
+
+      <!-- Appearance opens as a bottom sheet over the list, not a new page: pick, see it, swipe down. -->
+      <div class="scrim"></div>
+      <section class="sheet mset-sheet" aria-label="Appearance">
+        <div class="grabber"></div>
+        <header><b>Appearance</b><button class="icon-btn m-ib" title="Close"><i data-icon="close"></i></button></header>
+
+        <div class="mset-themes" role="radiogroup" aria-label="Theme">
+          <button data-set-theme="daylight" aria-pressed="false"><span class="disc" data-theme="daylight"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="44" data-still></span></span>Daylight</button>
+          <button data-set-theme="porcelain" aria-pressed="false"><span class="disc" data-theme="porcelain"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="44" data-still></span></span>Porcelain</button>
+          <button data-set-theme="eclipse" aria-pressed="false"><span class="disc" data-theme="eclipse"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="44" data-still></span></span>Eclipse</button>
+          <button data-set-theme="umber" aria-pressed="false"><span class="disc" data-theme="umber"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="44" data-still></span></span>Umber</button>
+          <button data-set-theme="orchid" aria-pressed="false"><span class="disc" data-theme="orchid"><span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="44" data-still></span></span>Orchid</button>
+        </div>
+
+        <div class="mset-rows">
+          <div class="r"><span>Follow iOS<small>Daylight by day, Eclipse by night</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Follow iOS"></button></div>
+          <div class="r"><span>Text size</span><span class="seg" data-seg><button aria-pressed="false" style="font-size: 12px">Aa</button><button aria-pressed="true" style="font-size: 14px">Aa</button><button aria-pressed="false" style="font-size: 16px">Aa</button></span></div>
+          <div class="r"><span>Haptics<small>A tick when you answer or an agent asks</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Haptics"></button></div>
+          <div class="r"><span>Reduce motion<small>Halos stop sweeping · follows iOS</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce motion"></button></div>
+          <div class="r"><span>Reduce transparency<small>The composer and sheets turn solid · follows iOS</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce transparency"></button></div>
+        </div>
+      </section>
+
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

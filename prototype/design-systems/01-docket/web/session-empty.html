@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(12) New thread in webshop · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 7.5C4 6.12 5.12 5 6.5 5h6.2c.9 0 1.6.5 2 1.2l.8 1.3H25.5C26.88 7.5 28 8.62 28 10v15.5c0 1.38-1.12 2.5-2.5 2.5h-19A2.5 2.5 0 0 1 4 25.5z' fill='%231f1b16'/%3E%3Cpath d='M11 12.6v10.6M21 12.6v10.6' stroke='%23f4f1ea' stroke-width='3.1'/%3E%3Cpath d='M12.3 17.9h7.4' stroke='%2322a55a' stroke-width='3.1'/%3E%3Ccircle cx='26' cy='7' r='5.5' fill='%23f0a020' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .tchrome { padding: 0 14px 0 22px; border-bottom: 1px solid var(--line-soft); height: 48px; }
+  .tchrome .crumb { font-size: var(--fs-body); }
+  .ttab { height: 28px; font-size: var(--fs-ui); }
+  .wside .pgroup:first-child { margin-top: 0; }
+  .draft { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .draft-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; width: 100%; max-width: 780px; margin: 0 auto; padding: 0 28px 24px; }
+  .ask-h { font-size: var(--fs-title); font-weight: 600; letter-spacing: var(--track-title); }
+  .ask-h u { text-decoration: none; box-shadow: inset 0 -3px 0 var(--p-webshop); }
+  .where { margin-top: 8px; font-size: var(--fs-body); color: var(--muted); }
+  .starts { margin-top: 44px; }
+  .starts .label { margin-bottom: 28px; }
+  .start-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .scard { position: relative; text-align: left; background: var(--raised); border: 1px solid var(--line); border-radius: 2px var(--r-md) var(--r-md) var(--r-md); box-shadow: var(--shadow-1); padding: 14px 14px 12px; display: flex; flex-direction: column; gap: 10px; min-height: 118px; transition: transform var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out); }
+  .scard:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+  .scard .ktab { height: 20px; font-size: 11px; }
+  .scard .t { font-size: var(--fs-body); font-weight: 600; line-height: 1.35; }
+  .scard .foot { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); color: var(--muted); }
+  .scard .foot .key { margin-left: auto; }
+  .scard .foot .b { width: 12px; height: 12px; }
+  .share { margin-top: 26px; display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); color: var(--faint); }
+  .share .i { width: 13px; height: 13px; }
+  .share .mono { color: var(--muted); }
+  .draft .composer { position: static; padding: 0 28px 18px; }
+  .draft .composer-inner { max-width: 724px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web">
+  <header class="whead">
+    <a class="logo"><svg><use href="#logo"/></svg>Hercule</a>
+    <nav class="wnav">
+      <a>Intake <span class="dot-count">12</span></a>
+      <a aria-current="page">Threads <span class="count">4</span></a>
+      <a>Assistants <span class="count">3</span></a>
+      <a>Check-in <span class="count">3</span></a>
+      <a>Tasks <span class="count">18</span></a>
+      <a>Runs <span class="count">4</span></a>
+      <a>Workflows</a>
+      <a>Fleet</a>
+    </nav>
+    <div class="tools">
+      <div class="wsearch"><svg class="i i--s"><use href="#i-search"/></svg>Search or jump to<span class="key key--s">⌘K</span></div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 3 wait</span></div>
+      <button class="iconbtn" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
+      <span class="avatar">R</span>
+    </div>
+  </header>
+
+  <div class="wbody">
+    <aside class="wside" aria-label="Threads">
+      <a class="newrow"><svg class="i i--s"><use href="#i-edit"/></svg>New thread<span class="key key--s">C</span></a>
+      <div class="side-scroll">
+        <div class="pgroup"><span class="proj proj--webshop">webshop</span><span class="count">2</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="tlist"><a class="trow" aria-current="page"><svg class="m faint"><use href="#m-queued"/></svg><span class="t">New thread</span><span class="age">draft</span></a></div>
+        <div class="wsl">fix/3ds-eu-cards · studio-mac</div>
+        <div class="tlist">
+          <a class="trow"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Fix 3-D Secure checkout for EU cards</span><span class="age hold">32s</span><span class="sub">Opus 5.5 · +48 -12</span></a>
+          <a class="trow"><span class="eq"><i></i><i></i><i></i></span><span class="t">Refactor cart totals</span><span class="age">22m</span><span class="sub">Sonnet 5</span></a>
+        </div>
+        <div class="pgroup"><span class="proj proj--payments">payments-api</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="wsl">hercule/run-7c2 · build-box-2</div>
+        <div class="tlist">
+          <a class="trow"><svg class="m faint"><use href="#m-idle"/></svg><span class="t">Add iDEAL research</span><span class="age">1h</span><span class="sub">gpt-5.4</span></a>
+        </div>
+        <div class="pgroup"><span class="proj proj--ops">ops</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="wsl">ops · studio-mac</div>
+        <div class="tlist">
+          <a class="trow"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Migrate ops dashboards</span><span class="age hold">11m</span><span class="sub">qwen3-coder</span></a>
+        </div>
+        <a class="all-sessions"><svg class="m"><use href="#m-session"/></svg>All sessions<span class="count">23</span><svg class="i i--s faint"><use href="#i-chev-r"/></svg></a>
+      </div>
+    </aside>
+
+    <main class="wmain">
+      <header class="tchrome">
+        <span class="crumb">webshop /</span>
+        <span class="ttab" aria-current="page"><svg class="m faint"><use href="#m-queued"/></svg>New thread</span>
+      </header>
+
+      <div class="draft">
+        <div class="draft-body">
+          <h1 class="ask-h">What should the agent do in <u>webshop</u>?</h1>
+          <p class="where">It gets its own worktree of webshop, on a new branch from main.</p>
+
+          <div class="starts">
+            <div class="label">Start from your docket <span class="num">3 for webshop</span></div>
+            <div class="start-cards">
+              <button class="scard kind-proposal">
+                <span class="ktab"><svg class="m"><use href="#m-task"/></svg>Proposal</span>
+                <span class="t">Fix: Checkout fails for EU cards with 3-D Secure</span>
+                <span class="foot"><span class="prio" data-p="4"><i></i><i></i><i></i><i></i></span><svg class="b"><use href="#b-sentry"/></svg>412<span class="key key--s">1</span></span>
+              </button>
+              <button class="scard kind-proposal">
+                <span class="ktab"><svg class="m"><use href="#m-task"/></svg>Proposal</span>
+                <span class="t">Add iDEAL as a payment method</span>
+                <span class="foot"><span class="prio" data-p="1"><i></i><i></i><i></i><i></i></span><svg class="b"><use href="#b-intercom"/></svg>5 requests<span class="key key--s">2</span></span>
+              </button>
+              <button class="scard kind-unsure">
+                <span class="ktab">Unsure</span>
+                <span class="t">Investigate: App is slow on Android</span>
+                <span class="foot"><svg class="b"><use href="#b-intercom"/></svg>7 conversations<span class="key key--s">3</span></span>
+              </button>
+            </div>
+          </div>
+          <p class="share"><svg class="i"><use href="#i-link"/></svg>Every thread gets its own link once it starts, like <span class="mono">/t/webshop/fix-3ds-eu-cards</span></p>
+        </div>
+
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="cm-card">
+              <textarea class="cm-text" placeholder="Say what you want done…" aria-label="Message" autofocus></textarea>
+              <div class="cm-row">
+                <button class="cm-pick" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+                <button class="cm-pick"><svg class="i i--s"><use href="#i-hand"/></svg>Auto-accept edits<svg class="i chev"><use href="#i-chev-d"/></svg></button>
+                <span class="grow"></span>
+                <button class="cm-pick">high<svg class="i chev"><use href="#i-chev-d"/></svg></button>
+                <button class="pill"><svg class="b"><use href="#b-claude"/></svg>Opus 5.5</button>
+                <button class="cm-pick" aria-label="Voice"><svg class="i"><use href="#i-mic"/></svg></button>
+                <button class="cm-send" aria-label="Start thread" style="opacity:.35"><svg class="i"><use href="#i-send"/></svg></button>
+              </div>
+            </div>
+            <div class="lip">
+              <span><svg class="i"><use href="#i-worktree"/></svg>New worktree<svg class="i chev" style="width:11px;height:11px"><use href="#i-chev-d"/></svg></span>
+              <span><svg class="i"><use href="#i-branch"/></svg>from <span class="mono">main</span><svg class="i chev" style="width:11px;height:11px"><use href="#i-chev-d"/></svg></span>
+              <span class="end"><svg class="i"><use href="#i-machine"/></svg>studio-mac<svg class="i chev" style="width:11px;height:11px"><use href="#i-chev-d"/></svg></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

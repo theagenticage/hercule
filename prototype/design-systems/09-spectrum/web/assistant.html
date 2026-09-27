@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ada · Hercule</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2327241f%22%2F%3E%3Crect%20x%3D%228.6%22%20y%3D%2213.7%22%20width%3D%2214.8%22%20height%3D%224.6%22%20rx%3D%222.3%22%20fill%3D%22%23a786f9%22%2F%3E%3Crect%20x%3D%226.2%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%23fd923e%22%2F%3E%3Crect%20x%3D%2220.6%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%2355d180%22%2F%3E%3C%2Fsvg%3E"><link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.arow { display: flex; gap: 11px; align-items: flex-start; padding: 10px 10px 11px; border-radius: 12px; color: var(--ink); }
+.arow + .arow { margin-top: 2px; }
+.arow:hover { background: color-mix(in oklab, var(--ink) 4%, transparent); }
+.arow.on { background: var(--raised); box-shadow: var(--sh-1); }
+.arow .av { margin-top: 1px; }
+.a-b { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.a-t { display: flex; align-items: baseline; gap: 7px; font-size: var(--t-ui); font-weight: var(--w-strong); }
+.a-role { font-size: var(--t-fine); font-weight: var(--w-regular); color: var(--muted); }
+.a-m { display: flex; align-items: center; gap: 5px; font-size: var(--t-fine); color: var(--muted); white-space: nowrap; }
+.a-m .st { font-size: var(--t-fine); }
+.a-m .brand, .a-m .i { width: 12px; height: 12px; }
+.a-m .sep { color: var(--faint); }
+.a-m .unr { display: inline-flex; margin-left: 2px; color: var(--ink); }
+.wlist .add { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; font-size: var(--t-meta); color: var(--muted); }
+.who-h { display: flex; align-items: center; gap: 10px; }
+.who-h .sub { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+.who-h .sub .brand { width: 12px; height: 12px; }
+.facts { display: flex; align-items: stretch; height: 46px; margin: 0 16px; border-bottom: 1px solid var(--line-soft); }
+.fact { display: flex; align-items: center; gap: 9px; padding: 0 18px; font-size: var(--t-meta); color: var(--muted); white-space: nowrap; }
+.fact:first-child { padding-left: 4px; }
+.fact + .fact { box-shadow: -1px 0 0 var(--line-soft); }
+.fact b { color: var(--ink); font-weight: var(--w-medium); }
+.fact .i { color: var(--ink); }
+.fact .brand { width: 13px; height: 13px; }
+.fact .hbm { display: flex; gap: 3px; align-items: center; }
+.fact .hbm i { width: 7px; height: 7px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 12%, transparent); }
+.fact .hbm i.q { background: none; box-shadow: inset 0 0 0 1.2px var(--faint); }
+.fact .hbm i.s { background: var(--spectrum-v); }
+.fact .hbm i.n { background: none; box-shadow: inset 0 0 0 1.2px var(--ink); }
+.fact .meter { width: 54px; margin: 0; }
+.wa { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.wa .thread { position: relative; flex: 1; min-height: 0; }
+.wa .transcript { padding-top: 18px; padding-bottom: 176px; }
+.wa .tcol { width: 680px; gap: 16px; }
+.wa .composer-stack { width: 700px; }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web" data-space="all">
+  <div class="strip" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+  <nav class="wrail" aria-label="Spaces">
+    <a class="wr-logo" title="Hercule"><svg><use href="#logo"/></svg></a>
+    <a class="wr-sp" title="All projects"><span class="sw all"></span></a>
+    <a class="wr-sp" title="webshop · 1 needs you"><span class="sw p-webshop"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="payments-api · 1 needs you"><span class="sw p-payments"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="ops · 1 needs you"><span class="sw p-ops"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <span class="wr-div"></span>
+    <a class="wr-nav" title="Intake"><svg class="i18" aria-hidden="true"><use href="#i-sun-rise"/></svg><span>Intake</span><span class="wr-n">9</span></a>
+    <a class="wr-nav" title="Tasks"><svg class="i18" aria-hidden="true"><use href="#i-layers"/></svg><span>Tasks</span></a>
+    <a class="wr-nav" title="Runs"><svg class="i18" aria-hidden="true"><use href="#i-play"/></svg><span>Runs</span></a>
+    <a class="wr-nav" title="Fleet"><svg class="i18" aria-hidden="true"><use href="#i-cube"/></svg><span>Fleet</span></a>
+    <span class="wr-div"></span>
+    <a class="wr-av on" title="Ada · working"><span class="av">A</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span></a>
+    <a class="wr-av" title="Milo · idle"><span class="av">M</span></a>
+    <a class="wr-av" title="Juno · asleep"><span class="av off">J</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg></span></a>
+    <span class="grow"></span>
+    <a class="wr-nav bare" title="Notifications"><svg class="i18" aria-hidden="true"><use href="#i-bell"/></svg><span class="wr-n">5</span></a>
+    <a class="wr-nav bare" title="Settings"><svg class="i18" aria-hidden="true"><use href="#i-gear"/></svg></a>
+    <a class="wr-me" title="Rogier">R</a>
+  </nav>
+  <aside class="wlist">
+    <div class="space-head"><span class="sw xl all"></span><div class="grow"><div class="name">Assistants</div><div class="sub">3 · 1 working</div></div></div>
+    <div class="side-scroll">
+      <a class="arow on">
+          <span class="av">A</span>
+          <span class="a-b"><span class="a-t">Ada<span class="a-role">personal</span></span><span class="a-m"><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>working</span><span class="sep">·</span><svg class="i" aria-hidden="true"><use href="#i-webchat"/></svg>Web chat · <svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg>DM</span></span>
+        </a>
+      <a class="arow">
+          <span class="av">M</span>
+          <span class="a-b"><span class="a-t">Milo<span class="a-role">ops</span></span><span class="a-m"><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>idle</span><span class="sep">·</span><svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg>#ops</span></span>
+        </a>
+      <a class="arow">
+          <span class="av off">J</span>
+          <span class="a-b"><span class="a-t">Juno<span class="a-role">support</span></span><span class="a-m"><span class="st "><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg>asleep</span><span class="sep">·</span><svg class="brand" aria-hidden="true"><use href="#b-discord"/></svg>#support<span class="unr" title="Discord is reconnecting"><svg class="i" aria-hidden="true"><use href="#m-unreachable"/></svg></span></span></span>
+        </a>
+      <a class="add"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg>New assistant</a>
+    </div>
+    <div class="wl-foot"><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div></div>
+  </aside>
+  <main class="panel">
+    <header class="bar">
+      <div class="who-h"><span class="av">A</span><h1>Ada</h1><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>working</span><span class="sub">personal assistant · <svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg>Claude Code · Sonnet 5</span></div>
+      <span class="grow"></span>
+      <button class="btn sm ghost"><svg class="i14" aria-hidden="true"><use href="#i-copy"/></svg>Copy link</button>
+      <button class="btn sm ghost"><svg class="i14" aria-hidden="true"><use href="#i-gear"/></svg>Settings</button>
+    </header>
+    <div class="facts">
+      <a class="fact" title="Heartbeat every hour, 07:00 to 23:00, into Web chat"><svg class="i14" aria-hidden="true"><use href="#m-heartbeat"/></svg><span class="hbm" aria-label="07 and 08 quiet, 09 spoke, next at 10"><i class="q"></i><i class="q"></i><i class="s"></i><i class="n"></i><i></i><i></i></span>next <b>10:00</b></a>
+      <a class="fact"><svg class="i14" aria-hidden="true"><use href="#m-reminder"/></svg><b>3</b> reminders · next Thu 16:00</a>
+      <a class="fact"><svg class="i14" aria-hidden="true"><use href="#i-book"/></svg>Memory <b>7</b> topics<span class="meter" title="Core note 1,284 of 4,000"><i style="width:32%"></i></span></a>
+      <a class="fact"><svg class="i14" aria-hidden="true"><use href="#i-webchat"/></svg>Web chat<span class="faint">+</span><svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg>Slack DM</a>
+    </div>
+    <div class="wa">
+      <div class="thread">
+        <div class="transcript">
+          <div class="tcol">
+            <div class="notice"><span class="nk"><svg class="i" aria-hidden="true"><use href="#m-cancelled"/></svg></span><span class="grow"><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span><span class="faint">yesterday 22:14</span><button class="btn sm">Retry</button></div>
+          <div class="day">Today</div>
+          <div class="quiet"><svg class="i14" aria-hidden="true"><use href="#m-heartbeat"/></svg><span>2 quiet check-ins</span><span class="ticks"><i></i><i></i></span><span class="faint">07:00 · 08:00 · nothing worth saying</span><svg class="i14 faint" aria-hidden="true"><use href="#i-chev-right"/></svg></div>
+          <div class="msg">
+            <span class="av">A</span>
+            <div class="msg-h"><b>Ada</b><svg class="i" aria-hidden="true"><use href="#m-heartbeat"/></svg>heartbeat · 09:00</div>
+            <div>
+              <div class="prose"><p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy in <span class="pref p-webshop"><span class="sw"></span>webshop</span>. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p></div>
+              <a class="link-row p-webshop"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="grow">Fix 3-D Secure checkout for EU cards</span><span class="m">waiting on you · git push</span><svg class="i14 faint" aria-hidden="true"><use href="#i-arrow-right"/></svg></a>
+            </div>
+          </div>
+          <div class="who">Rogier · 09:20</div>
+          <div class="bubble me">Remind me Friday to renew the SSL cert for ops.</div>
+          <div class="msg">
+            <span class="av">A</span>
+            <div class="msg-h"><b>Ada</b>09:20</div>
+            <div>
+              <div class="prose"><p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for <span class="pref p-ops"><span class="sw"></span>ops</span>.</p></div>
+              <span class="remcard"><svg class="i16" aria-hidden="true"><use href="#m-reminder"/></svg><span>Renew the SSL cert for ops</span><span class="when">Fri 2 Oct · 09:00</span><span class="sw  p-ops"></span><button class="btn ghost sm">Edit</button></span>
+            </div>
+          </div>
+          <div class="who">Rogier · 09:38</div>
+          <div class="bubble me">What's the status of the backup job?</div>
+          <div class="msg">
+            <span class="av">A</span>
+            <div class="msg-h"><b>Ada</b><span class="st work" style="color:var(--ink)"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>working</span></div>
+            <div class="prose"><p>Milo started an investigation at 09:35 on build-box-1 in <span class="pref p-ops"><span class="sw"></span>ops</span>. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret"></span></p></div>
+          </div>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer-stack">
+            <div class="composer">
+              <textarea rows="1" placeholder="Message Ada…" aria-label="Message Ada"></textarea>
+              <div class="c-row">
+                <button class="iconbtn" title="Attach"><svg class="i16" aria-hidden="true"><use href="#i-plus"/></svg></button>
+                <span class="grow spacer"></span>
+                <button class="iconbtn voice" title="Dictate"><svg class="i16" aria-hidden="true"><use href="#i-mic"/></svg></button>
+                <button class="send" title="Send ⏎"><svg class="i16" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
+              </div>
+            </div>
+            <div class="lip"><svg class="i14" aria-hidden="true"><use href="#i-webchat"/></svg><span>Web chat</span><span class="sep">·</span><span>replies when her turn ends</span><span class="grow"></span><span>Ada is working · your message waits for her turn</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+const t = document.querySelector(".transcript"); t.scrollTop = t.scrollHeight;
+</script>
+</body>
+</html>

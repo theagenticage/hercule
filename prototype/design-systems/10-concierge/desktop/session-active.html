@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Fix 3-D Secure checkout for EU cards · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="thread"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i data-m="session" class="t-glyph" style="color:var(--project-webshop)"></i>
+      <h1>Fix 3-D Secure checkout for EU cards</h1>
+      <span class="state-pill is-attn"><i data-m="q"></i>waiting on you</span>
+      <div class="tools">
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada about this thread</span><kbd class="kbd">&#8997;Space</kbd></label>
+        <button class="iconbtn" aria-label="Pop out"><i data-i="out"></i></button>
+        <button class="iconbtn" aria-label="More"><i data-i="more"></i></button>
+      </div>
+    </header>
+    <div class="subbar">
+      <span class="proj"><i class="room"></i>webshop</span>
+      <span>Thread · started 09:02</span>
+      <a class="sublink" href="intake.html"><i data-m="q"></i>from Proposal “Checkout fails for EU cards with 3-D Secure”</a>
+      <span class="end">sibling in this worktree: <a class="sublink" href="#">Refactor cart totals</a></span>
+    </div>
+
+    <section class="pane">
+      <div class="scroll" data-glass="#composer">
+        <div class="thread">
+          <div class="ts">09:02</div>
+          <div class="me"><div><div class="me-bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div></div></div>
+
+          <button class="worked"><i data-i="right"></i><b>Worked for 2m 14s</b>read 6 files · ran 1 command</button>
+          <div class="prose">
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show “Card declined” instead of opening the 3-D Secure modal.</p>
+          </div>
+          <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+          <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+          <button class="worked"><i data-i="right"></i><b>Worked for 4m 51s</b>edited 3 files · ran 4 commands</button>
+
+          <div class="files">
+            <div class="files-head"><i data-i="diff"></i><span class="grow">3 changed files</span><span class="plus">+48</span><span class="minus">&minus;12</span><span class="files-act"><button class="btn btn-sm btn-quiet">Show files</button><button class="btn btn-sm">Open diff</button></span></div>
+            <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">&minus;9</span></div>
+            <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">&minus;0</span></div>
+            <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">&minus;3</span></div>
+            <div class="files-foot"><i data-m="done"></i><b>24 passed</b><code>pnpm test checkout</code><span class="grow"></span><span class="faint">09:39</span></div>
+          </div>
+
+          <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer" id="composer">
+          <div class="compact-pill"><i data-m="q"></i><b>git push</b>is waiting on you<button class="btn btn-sm btn-accent">Allow once</button></div>
+          <div class="dock">
+            <div class="dock-head"><i data-m="q"></i><span class="grow">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span><small>Request · 09:39</small></div>
+            <div class="ledger">
+              <button class="ans is-primary"><span class="ans-label">Allow once</span><span class="ans-desc">Runs this push; asks again next time</span><kbd class="kbd">&#8629;</kbd></button>
+              <button class="ans"><span class="ans-label">Always allow git push</span><span class="ans-desc">Adds a Grant for <b>git push</b> to this Thread</span><kbd class="kbd">2</kbd></button>
+              <button class="ans"><span class="ans-label">Deny</span><span class="ans-desc">Refuses the push; the agent is told why</span><kbd class="kbd">3</kbd></button>
+            </div>
+          </div>
+          <div class="queued"><i data-m="queued"></i><span class="q-text">Also check the Apple Pay path</span><span>queued · runs next</span><span class="grow"></span><button class="btn btn-sm btn-quiet">Steer</button><button class="btn btn-sm btn-quiet">Cancel</button></div>
+          <div class="cbox">
+            <div class="cbox-main"><div class="cbox-input">Queued until the turn finishes…</div></div>
+            <div class="cbox-row">
+              <button class="sel" aria-label="Attach"><i data-i="plus"></i></button>
+              <button class="sel"><i data-i="shield"></i>auto-accept edits<i data-i="down"></i></button>
+              <button class="sel"><i data-i="sliders"></i>High<i data-i="down"></i></button>
+              <span class="grow"></span>
+              <button class="sel"><i data-b="claude"></i>Opus 5.5<i data-i="down"></i></button>
+              <span class="sep"></span>
+              <button class="sel" aria-label="Voice"><i data-i="mic"></i></button>
+              <button class="stopbtn"><i data-i="stop"></i>Stop</button>
+              <button class="send" aria-label="Send"><i data-i="send"></i></button>
+            </div>
+          </div>
+          <div class="lip">
+            <span><i data-i="folder"></i>webshop · worktree</span>
+            <span><i data-i="branch"></i><span class="mono">fix/3ds-eu-cards</span></span>
+            <span><i data-i="machine"></i>studio-mac</span>
+            <span class="end">Claude Code · rogier@personal</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

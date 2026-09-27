@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>At a glance · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="gl">
+  <!-- the macOS menu bar: another app is in front; Ada's orb sits among the menu bar extras -->
+  <header class="gl-mbar">
+    <b>Editor</b><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span>
+    <span class="end">
+      <span class="gl-extra is-open" id="extra"><i class="orb" data-v="ada" data-p="working" style="--size:13px"></i>3</span>
+      <i data-i="cron"></i>
+      <i data-i="lock"></i>
+      <i data-i="bolt"></i>
+      <svg width="17" height="12" viewBox="0 0 16 11" aria-hidden="true"><path d="M8 2.2c2.3 0 4.4.9 6 2.4l1.1-1.2A10.3 10.3 0 0 0 8 .6 10.3 10.3 0 0 0 .9 3.4L2 4.6a8.6 8.6 0 0 1 6-2.4zm0 3.3c1.4 0 2.6.5 3.6 1.4l1.1-1.2A6.9 6.9 0 0 0 8 3.9a6.9 6.9 0 0 0-4.7 1.8l1.1 1.2c1-.9 2.2-1.4 3.6-1.4zm0 3.2c.5 0 1 .2 1.3.5L8 10.6 6.7 9.2c.3-.3.8-.5 1.3-.5z" fill="currentColor"/></svg>
+      <svg width="26" height="12" viewBox="0 0 27 12" aria-hidden="true"><rect x=".5" y=".5" width="22" height="11" rx="3.4" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="15" height="8" rx="2" fill="currentColor"/><path d="M24.5 4v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2z" fill="currentColor" opacity=".45"/></svg>
+      <i data-i="search"></i>
+      <i data-i="sliders"></i>
+      <span class="gl-clock">Tue 29 Sep 09:41</span>
+    </span>
+  </header>
+
+  <!-- the other app: Rogier's editor, open on the file the agent is fixing -->
+  <div class="gl-app" aria-hidden="true">
+    <div class="gl-app-bar"><span class="traffic"><i></i><i></i><i></i></span><b>payment.ts</b><span>payment.test.ts</span><span>3ds-modal.tsx</span><span class="grow"></span><span class="mono">webshop · fix/3ds-eu-cards</span></div>
+    <div class="gl-tree">
+      <span><i data-i="folder"></i>webshop</span>
+      <span class="in"><i data-i="folder"></i>src</span>
+      <span class="in" style="padding-left:38px"><i data-i="folder"></i>cart</span>
+      <span class="in" style="padding-left:38px"><i data-i="folder"></i>checkout</span>
+      <span class="in is-on" style="padding-left:54px"><i data-i="file"></i>payment.ts</span>
+      <span class="in" style="padding-left:54px"><i data-i="file"></i>payment.test.ts</span>
+      <span class="in" style="padding-left:54px"><i data-i="file"></i>3ds-modal.tsx</span>
+      <span class="in" style="padding-left:54px"><i data-i="file"></i>order.ts</span>
+      <span class="in" style="padding-left:38px"><i data-i="folder"></i>lib</span>
+      <span class="in"><i data-i="file"></i>package.json</span>
+    </div>
+    <div class="gl-code"><div><span class="k">import type</span> { PaymentResult, PaymentError } <span class="k">from</span> <span class="s">"./types"</span>;</div><div><span class="k">import</span> { openThreeDSModal } <span class="k">from</span> <span class="s">"./3ds-modal"</span>;</div><div><span class="k">import</span> { confirmOrder, showDeclined } <span class="k">from</span> <span class="s">"./order"</span>;</div><div> </div><div><span class="c">// Stripe SDK v14 returns requires_action for cards that need 3-D Secure.</span></div><div><span class="k">export async function</span> <span class="f">handlePaymentResult</span>(result: PaymentResult) {</div><div>  <span class="k">if</span> (result.status === <span class="s">"succeeded"</span>) {</div><div>    <span class="k">return</span> <span class="f">confirmOrder</span>(result.orderId);</div><div>  }</div><div class="is-hl">  <span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {</div><div class="is-hl">    <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);</div><div class="is-hl">  }</div><div>  <span class="k">return</span> <span class="f">showDeclined</span>(result.error);</div><div>}</div><div> </div><div><span class="k">export function</span> <span class="f">isRetryable</span>(error: PaymentError) {</div><div>  <span class="k">return</span> error.code === <span class="s">"rate_limit"</span> || error.code === <span class="s">"api_connection"</span>;</div><div>}</div><div> </div><div><span class="k">export function</span> <span class="f">formatAmount</span>(cents: number, currency = <span class="s">"EUR"</span>) {</div><div>  <span class="k">return new</span> Intl.<span class="f">NumberFormat</span>(<span class="s">"nl-NL"</span>, { style: <span class="s">"currency"</span>, currency })</div><div>    .<span class="f">format</span>(cents / 100);</div><div>}</div><div> </div><div><span class="k">export function</span> <span class="f">paymentLabel</span>(result: PaymentResult) {</div><div>  <span class="k">switch</span> (result.status) {</div><div>    <span class="k">case</span> <span class="s">"succeeded"</span>: <span class="k">return</span> <span class="s">"Paid"</span>;</div><div>    <span class="k">case</span> <span class="s">"requires_action"</span>: <span class="k">return</span> <span class="s">"Confirm with your bank"</span>;</div><div>    <span class="k">default</span>: <span class="k">return</span> <span class="s">"Card declined"</span>;</div><div>  }</div><div>}</div></div>
+  </div>
+
+  <!-- 1 · the global-hotkey panel: answer what waits without leaving the editor -->
+  <section class="gl-quick" style="left:100px; top:176px; width:560px" aria-label="Ask Ada">
+    <div class="gl-qin"><i class="orb" data-v="ada" data-p="working" style="--size:22px"></i><span class="grow">Ask Ada, or answer what waits</span><kbd class="kbd">esc</kbd></div>
+    <div class="gl-qbody">
+      <div class="gl-qhead"><span class="kind"><i data-m="q"></i>Request</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Fix 3-D Secure checkout for EU cards</span><span class="grow"></span><span class="num faint">1 of 3</span></div>
+      <div class="gl-qt">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+      <div class="gl-qctx"><span><i data-i="diff"></i>3 files <span class="plus">+48</span> <span class="minus">&minus;12</span></span><span><i data-m="done" class="c-ok"></i>24 passed</span><span><i data-i="machine"></i>studio-mac</span><span><i data-b="claude"></i>Opus 5.5</span></div>
+    </div>
+    <div class="ledger">
+      <button class="ans is-primary"><span class="ans-label">Allow once</span><span class="ans-desc">Runs this push; asks again next time</span><kbd class="kbd">&#8629;</kbd></button>
+      <button class="ans"><span class="ans-label">Always allow git push</span><span class="ans-desc">Adds a Grant for <b>git push</b> to this Thread</span><kbd class="kbd">2</kbd></button>
+      <button class="ans"><span class="ans-label">Deny</span><span class="ans-desc">Refuses the push; the agent is told why</span><kbd class="kbd">3</kbd></button>
+    </div>
+    <div class="gl-qfoot"><kbd class="kbd">tab</kbd>next<i data-m="q"></i><b>Publish payments-api 2.15.0 to npm?</b><span class="grow"></span><kbd class="kbd">&#8984;&#8629;</kbd>open in Hercule</div>
+  </section>
+
+  <!-- 2 · the menu bar extra: Ada's orb opens the Fleet at a glance -->
+  <section class="gl-pop" id="pop" style="left:705px; top:36px" aria-label="Hercule menu">
+    <div class="gl-pop-h"><i class="orb" data-v="ada" data-p="working" style="--size:26px"></i><span class="grow"><b>Ada</b><small>working · heartbeat 09:00</small></span><kbd class="kbd">&#8997;Space</kbd></div>
+    <p class="voice gl-say">Three things wait on you. The push unblocks the checkout fix.</p>
+    <div class="gl-sh"><i data-m="q" class="c-attn"></i>Waiting on you<em class="c-attn">3</em></div>
+    <div class="gl-q">
+      <div class="gl-q-t">Run <code>git push</code> to fix/3ds-eu-cards?</div>
+      <div class="gl-q-s"><i class="room"></i>Fix 3-D Secure checkout</div>
+      <div class="gl-q-a"><button class="btn">Deny</button><button class="btn btn-accent">Allow once</button></div>
+    </div>
+    <div class="gl-q">
+      <div class="gl-q-t">Publish payments-api 2.15.0 to npm?</div>
+      <div class="gl-q-s"><i class="room" data-p="payments-api"></i>Ship release v2.15</div>
+      <div class="gl-q-a"><button class="btn">Deny</button><button class="btn btn-accent">Allow once</button></div>
+    </div>
+    <div class="gl-q">
+      <div class="gl-q-t">Keep the old Grafana folder?</div>
+      <div class="gl-q-s"><i class="room" data-p="ops"></i>Migrate ops dashboards</div>
+      <div class="gl-q-a"><button class="btn">Delete it</button><button class="btn">Keep it</button></div>
+    </div>
+    <div class="gl-sh"><i data-m="working"></i>Working<em>8</em></div>
+    <div class="gl-w"><i data-m="session" style="color:var(--project-webshop)"></i><span>Refactor cart totals</span><em>22m</em></div>
+    <div class="gl-w"><i data-m="run" style="color:var(--project-ops)"></i><span>Investigate backup timeouts</span><em>6m</em></div>
+    <div class="gl-w"><i data-m="run" style="color:var(--project-payments-api)"></i><span>Webhook retry backoff</span><em>3m</em></div>
+    <div class="gl-w is-more"><span></span><span>5 more working</span><em></em></div>
+    <div class="gl-sh"><i data-i="machine" style="width:12px;height:12px"></i>Fleet<span class="end">16 of 22 desks</span></div>
+    <div class="gl-fl"><span class="mono">studio-mac</span><span class="meter"><i style="--v:83%"></i></span><em>5 of 6</em></div>
+    <div class="gl-fl is-full"><span class="mono">build-box-1</span><span class="meter"><i style="--v:100%"></i></span><em>8 of 8 · at cap</em></div>
+    <div class="gl-fl"><span class="mono">build-box-2</span><span class="meter"><i style="--v:37.5%"></i></span><em>3 of 8</em></div>
+    <div class="gl-pop-f"><a href="assistant.html"><i data-logo style="width:16px;height:16px"></i>Open Hercule</a><kbd class="kbd">&#8984;0</kbd><a class="end" href="intake.html"><i data-i="tray" style="width:14px;height:14px"></i>Intake<em class="count count-attn">8</em></a></div>
+  </section>
+
+  <!-- 3 · native notifications, each carrying its bound actions -->
+  <div class="gl-notes">
+    <div class="gl-note">
+      <span class="appicon"><i data-logo></i></span>
+      <div>
+        <div class="gl-note-h"><b>Fix 3-D Secure checkout</b><em>now</em></div>
+        <div class="gl-note-s">Request · webshop</div>
+        <div class="gl-note-t">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+      </div>
+      <div class="gl-note-a"><button>Deny</button><button class="is-primary">Allow once</button></div>
+    </div>
+    <div class="gl-note">
+      <span class="appicon"><i data-logo></i></span>
+      <div>
+        <div class="gl-note-h"><b>Ada</b><em>09:00</em></div>
+        <div class="gl-note-t voice">Morning Rogier. One urgent thing: EU card payments fail since yesterday's deploy.</div>
+      </div>
+      <div class="gl-note-r">Reply to Ada<span class="send is-off"><i data-i="send"></i></span></div>
+    </div>
+    <div class="gl-note is-stack">
+      <span class="appicon"><i data-logo></i></span>
+      <div>
+        <div class="gl-note-h"><b>Ship release v2.15</b><em>09:36</em></div>
+        <div class="gl-note-t">Publish payments-api 2.15.0 to npm?</div>
+        <div class="gl-more">2 more from Hercule</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4 · a thread popped out into its own window -->
+  <section class="gl-win" style="right:14px; top:432px; height:360px" aria-label="Refactor cart totals">
+    <div class="gl-win-bar"><span class="traffic"><i></i><i></i><i></i></span><i data-m="session" style="color:var(--project-webshop)"></i><b>Refactor cart totals</b><span class="grow"></span><span class="state-pill is-live"><i data-m="working"></i>22m</span></div>
+    <div class="gl-win-body">
+      <div class="me"><div class="me-bubble" style="font-size:13px;padding:7px 12px">Round discounts once, on the cart total, not per line. Tests first.</div></div>
+      <button class="worked"><i data-i="right"></i><b>Worked for 18m</b>edited 9 files</button>
+      <p>Discounts now round once, in <code>cartTotal()</code>, instead of on every line. Two call sites left.</p>
+      <div class="files">
+        <div class="files-row"><i data-i="file"></i><span class="grow">src/cart/total.ts</span><span class="plus">+34</span><span class="minus">&minus;21</span></div>
+        <div class="files-row"><i data-i="file"></i><span class="grow">src/cart/total.test.ts</span><span class="plus">+52</span><span class="minus">&minus;0</span></div>
+      </div>
+      <p class="faint" style="display:flex;align-items:center;gap:8px;font-size:12px"><i data-m="working" class="c-live"></i>Editing <code>src/cart/summary.tsx</code></p>
+    </div>
+    <div class="gl-win-comp"><span class="grow">Message this thread…</span><i data-i="mic" style="color:var(--muted)"></i><span class="send is-off"><i data-i="send"></i></span></div>
+  </section>
+
+  <!-- 5 · the Dock: the badge counts what waits on you -->
+  <nav class="gl-dock" aria-label="Dock">
+    <span class="gl-dapp" style="--g: oklch(62% 0.1 240)"><i data-i="folder"></i></span>
+    <span class="gl-dapp is-run" style="--g: oklch(42% 0.03 260)"><i data-i="file"></i></span>
+    <span class="gl-dapp is-run" style="--g: oklch(30% 0.01 260)"><span class="gl-term">&gt;_</span></span>
+    <span class="gl-dapp is-run" style="--g: oklch(64% 0.09 215)"><i data-i="globe"></i></span>
+    <span class="gl-dapp" style="--g: oklch(66% 0.08 250)"><i data-i="clock"></i></span>
+    <span class="gl-dapp is-run" style="--g: oklch(58% 0.12 300)"><i data-b="slack"></i></span>
+    <span class="gl-dsep"></span>
+    <span class="appicon" style="position:relative"><i data-logo></i><em class="gl-badge">3</em></span>
+  </nav>
+
+  <span class="gl-anno" style="left:100px; top:140px"><i>1</i>&#8997;Space from any app: answer what waits, one key each</span>
+  <span class="gl-anno" id="anno-pop" style="left:705px; top:0"><i>2</i>Menu bar: Ada's orb, and the Fleet at a glance</span>
+  <span class="gl-anno" id="anno-notes" style="right:14px; top:0"><i>3</i>Notifications carry the bound actions</span>
+  <span class="gl-anno" style="right:14px; top:800px"><i>4</i>Any thread pops out into its own window</span>
+  <span class="gl-anno" id="anno-dock" style="left:0; top:792px"><i>5</i>Dock badge: waiting on you</span>
+</div>
+<script>
+  // Lines the popover's caret up under Ada's orb, and sets each annotation just below its surface.
+  // Text widths in the menu bar depend on the loaded fonts, so this runs again once they are ready.
+  document.addEventListener("DOMContentLoaded", function () {
+    function place() {
+      var extra = document.getElementById("extra").getBoundingClientRect();
+      var pop = document.getElementById("pop");
+      var orbX = extra.left + 7 + 6.5;
+      pop.style.left = Math.round(orbX + 25 - pop.offsetWidth) + "px";
+      var popBox = pop.getBoundingClientRect();
+      var ap = document.getElementById("anno-pop");
+      ap.style.left = popBox.left + "px";
+      ap.style.top = Math.round(popBox.bottom + 10) + "px";
+      var notes = document.querySelector(".gl-notes").getBoundingClientRect();
+      document.getElementById("anno-notes").style.top = Math.round(notes.bottom + 8) + "px";
+      var icon = document.querySelector(".gl-dock .appicon").getBoundingClientRect();
+      var ad = document.getElementById("anno-dock");
+      ad.style.left = Math.round(icon.left + icon.width / 2 - ad.offsetWidth / 2) + "px";
+      ad.style.top = Math.round(icon.top - 40) + "px";
+    }
+    place();
+    if (document.fonts) document.fonts.ready.then(place);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intake · Hercule</title>
+<style>
+  .counter { flex: none; display: flex; align-items: center; gap: 12px; padding: 2px 20px 0; }
+  .counter .big { font-size: var(--fs-num-m); }
+  .counter .of { display: flex; flex-direction: column; gap: 3px; }
+  .counter .of b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .counter .of span { font-size: var(--fs-small); color: var(--muted); }
+  .counter .rail { margin-left: auto; }
+  .counter .rail i { width: 5px; height: 16px; }
+  .counter .rail i.now { width: 6px; height: 24px; }
+  .quietline { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; font-size: var(--fs-small); color: var(--faint); }
+  .quietline b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .quietline .m { color: var(--go-text); }
+
+  .deck { flex: 1; min-height: 0; position: relative; padding: 50px 16px 0; }
+  .stack > .behind:nth-of-type(1) .ktab { left: 128px; }
+  .stack > .behind:nth-of-type(2) .ktab { left: 212px; }
+  /* Mid-swipe: the card leans right, toward Start, and the stamp fades in past the threshold. */
+  .deck .card { transform: translate(22px, 4px) rotate(2deg); transform-origin: 50% 110%; box-shadow: var(--shadow-3), 0 0 0 1.5px color-mix(in oklab, var(--go) 60%, transparent); }
+  .swipe-stamp { position: absolute; z-index: 3; top: 9px; right: 34px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 9px; border: 2px solid var(--go); border-radius: 7px; color: var(--go-text); background: color-mix(in oklab, var(--raised) 88%, var(--go)); font-size: 15px; font-weight: 700; transform: rotate(-7deg); }
+  .swipe-stamp .i { width: 15px; height: 15px; stroke-width: 2; }
+  .ch { padding: 16px 16px 14px; }
+  .meta { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--muted); }
+  .card h2 { font-size: 19px; line-height: 1.25; margin-top: 12px; padding-right: 40px; }
+  .gist { margin-top: 7px; padding-right: 16px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .gist code { color: var(--ink); }
+  .madefrom { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+  .madefrom > div { padding: 10px 14px 11px; gap: 5px; }
+  .madefrom > div:nth-child(odd) { border-left: 0; }
+  .madefrom > div:nth-child(n + 3) { border-top: 1px solid var(--line-soft); }
+  .madefrom .val { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .madefrom .num { font-size: 22px; }
+  .madefrom .cap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .with { display: flex; align-items: center; gap: 7px; padding: 10px 16px 11px; border-top: 1px solid var(--line-soft); font-size: var(--fs-small); color: var(--muted); }
+  .with .b { width: 13px; height: 13px; color: var(--ink); }
+  .with b { color: var(--ink); font-weight: 600; }
+
+  .hint { flex: none; display: flex; align-items: center; gap: 16px; padding: 0 22px 12px; font-size: var(--fs-small); color: var(--faint); }
+  .hint span { display: inline-flex; align-items: center; gap: 5px; }
+  .hint .i { width: 13px; height: 13px; }
+  .hint .on { color: var(--go-text); font-weight: 600; }
+  .hint .haptic { margin-left: auto; }
+  .mverbs { padding-bottom: 14px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="island"></span><span class="sys"><svg class="sig"><use href="#sb-signal"/></svg><svg class="wifi"><use href="#sb-wifi"/></svg><svg class="bat"><use href="#sb-battery"/></svg></span></div>
+
+  <header class="mhead">
+    <h1>Intake</h1>
+    <div class="tools">
+      <button class="mbtn" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+      <button class="mbtn" aria-label="List view"><svg class="i"><use href="#i-list"/></svg></button>
+    </div>
+  </header>
+
+  <div class="counter">
+    <span class="num big">1</span>
+    <div class="of"><b>of 12</b><span>on your docket</span></div>
+    <div class="rail" aria-label="12 cards, none answered yet">
+      <i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i>
+    </div>
+  </div>
+  <p class="quietline"><svg class="m"><use href="#m-done"/></svg><span><b>212</b> events since 18:20 · <b>198</b> handled quietly</span></p>
+
+  <div class="deck">
+    <div class="stack">
+      <div class="behind kind-request"><span class="ktab">Request</span></div>
+      <div class="behind kind-request"><span class="ktab">Request</span></div>
+      <article class="card kind-proposal">
+        <span class="ktab"><svg class="m"><use href="#m-task"/></svg>Proposal</span>
+        <span class="swipe-stamp" aria-hidden="true"><svg class="i"><use href="#i-play"/></svg>Start</span>
+        <div class="ch">
+          <div class="meta">
+            <span class="row" style="gap:6px"><span class="prio" data-p="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+            <span class="proj proj--webshop">webshop</span>
+          </div>
+          <h2>Checkout fails for EU cards with 3-D Secure</h2>
+          <p class="gist">Since deploy #1289, the Stripe SDK returns <code>requires_action</code> and checkout treats it as a failure.</p>
+        </div>
+        <div class="madefrom">
+          <div><span class="src"><svg class="b"><use href="#b-sentry"/></svg>Sentry</span><span class="val"><span class="num">412</span><span class="cap">events · 188 users</span></span></div>
+          <div><span class="src"><svg class="b"><use href="#b-posthog"/></svg>PostHog</span><span class="val"><span class="num nogo">-18%</span><span class="cap">EU checkout</span></span></div>
+          <div><span class="src"><svg class="b"><use href="#b-gmail"/></svg>Gmail</span><span class="val"><span class="num">3</span><span class="cap">customer emails</span></span></div>
+          <div><span class="src"><svg class="b"><use href="#b-github"/></svg>GitHub</span><span class="val"><span class="num">#1289</span><span class="cap">yesterday</span></span></div>
+        </div>
+        <div class="with"><svg class="b"><use href="#b-claude"/></svg><span><b>Opus 5.5</b> · studio-mac · new worktree</span></div>
+      </article>
+    </div>
+  </div>
+
+  <div class="hint" aria-hidden="true">
+    <span><svg class="i"><use href="#i-arrow-l"/></svg>Dismiss</span>
+    <span><svg class="i"><use href="#i-arrow-d"/></svg>Later</span>
+    <span class="haptic"><svg class="i"><use href="#i-wave"/></svg>tick at the line</span>
+    <span class="on">Start<svg class="i"><use href="#i-arrow-r"/></svg></span>
+  </div>
+
+  <div class="mverbs">
+    <div class="row">
+      <button class="mverb mverb--nogo"><svg class="i"><use href="#i-x"/></svg>Dismiss</button>
+      <button class="mverb mverb--hold"><svg class="i"><use href="#i-arrow-d"/></svg>Later</button>
+      <button class="mverb mverb--go"><svg class="i"><use href="#i-check"/></svg>Accept</button>
+    </div>
+    <button class="mverb mverb--go is-primary"><svg class="i"><use href="#i-play"/></svg>Start "Fix bug"</button>
+  </div>
+
+  <nav class="tabbar" aria-label="Sections">
+    <a aria-current="page"><svg class="i"><use href="#i-docket"/></svg>Intake<span class="badge">12</span></a>
+    <a><svg class="i"><use href="#i-threads"/></svg>Threads<span class="badge">2</span></a>
+    <a><svg class="i"><use href="#i-assistant"/></svg>Assistants</a>
+    <a><svg class="i"><use href="#i-gear"/></svg>Settings</a>
+  </nav>
+  <div class="homebar"></div>
+</div>
+</body>
+</html>

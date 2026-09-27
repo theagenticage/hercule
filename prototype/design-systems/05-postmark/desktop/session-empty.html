@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>New thread · webshop · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .chrome .crumb {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 14px;
+      }
+      .chrome .crumb .tag {
+        width: 14px;
+        height: 14px;
+      }
+      .chrome .draft {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .draft-stage {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0 24px 40px;
+      }
+      .draft-stage .label-tag {
+        margin-bottom: 18px;
+      }
+      .draft-stage h2 {
+        font-size: var(--t-title);
+        font-weight: 640;
+        letter-spacing: -0.01em;
+      }
+      .draft-stage .line {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13.5px;
+      }
+      .draft-stage .composer {
+        margin-top: 26px;
+      }
+      .starts {
+        width: 768px;
+        margin-top: 22px;
+      }
+      .starts .label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .starts .label .perf {
+        flex: 1;
+      }
+      .start-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .start {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-height: 84px;
+        padding: 12px 56px 12px 14px;
+        border-radius: 10px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+        text-align: left;
+        transition:
+          transform var(--m-slide) var(--ease-paper),
+          box-shadow var(--m-slide) var(--ease-paper);
+      }
+      .start:hover {
+        transform: translateY(-2px) rotate(-0.4deg);
+        box-shadow: var(--lift-shadow);
+      }
+      .start .post {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        transform: rotate(3deg);
+      }
+      .start .verb {
+        font: 640 10.5px / 1 var(--narrow);
+        letter-spacing: var(--track-stamp);
+        text-transform: uppercase;
+        color: var(--violet);
+      }
+      .start .t {
+        font-size: 13.5px;
+        font-weight: 580;
+        line-height: 1.35;
+      }
+      .start small {
+        margin-top: auto;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      /* The project's sorting tag, drawn large: a luggage label with its punched hole. */
+      .label-tag {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 34px;
+        padding: 0 16px 0 30px;
+        color: var(--on-ink);
+        font: 680 14px / 1 var(--narrow);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--proj-webshop);
+        clip-path: polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 0 50%);
+        border-radius: 4px;
+        transform: rotate(-3deg);
+        filter: drop-shadow(0 2px 3px oklch(30% 0.05 60 / 0.2));
+      }
+      .label-tag::before {
+        content: "";
+        position: absolute;
+        left: 13px;
+        top: 50%;
+        width: 8px;
+        height: 8px;
+        margin-top: -4px;
+        border-radius: 50%;
+        background: var(--bg);
+      }
+      .send-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 8px 0 13px;
+        border-radius: var(--r-pill);
+        background: var(--violet);
+        color: var(--on-ink);
+        font-size: var(--t-ui);
+        font-weight: 600;
+      }
+      .send-label kbd {
+        color: var(--on-ink);
+        background: oklch(100% 0 0 / 0.16);
+        box-shadow: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="threads" data-active="new"></aside>
+      <main class="main">
+        <div class="chrome">
+          <span class="crumb"><i class="tag" data-p="webshop"></i>webshop /</span>
+          <span class="draft">New thread</span>
+        </div>
+        <div class="draft-stage">
+          <span class="label-tag">webshop</span>
+          <h2>What should the agent do in webshop?</h2>
+          <p class="line">It gets its own worktree of webshop, on a new branch from main.</p>
+
+          <div class="composer">
+            <div class="c-card">
+              <textarea class="c-input" rows="2" placeholder="Say what you want done…" autofocus></textarea>
+              <div class="c-row">
+                <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
+                <button class="sel"><svg class="mk"><use href="#shield" /></svg>Auto-accept edits<svg class="mk"><use href="#chev-down" /></svg></button>
+                <span class="c-spacer"></span>
+                <button class="sel opts">High<svg class="mk"><use href="#chev-down" /></svg></button>
+                <button class="pill"><svg class="mk"><use href="#b-claude" /></svg>Opus 5.5</button>
+                <button class="c-voice" aria-label="Voice"><svg class="mk"><use href="#mic" /></svg></button>
+                <button class="send-label">Start thread<kbd>⏎</kbd></button>
+              </div>
+            </div>
+            <div class="lip">
+              <button class="sel"><svg class="mk"><use href="#worktree" /></svg>New worktree<svg class="mk"><use href="#chev-down" /></svg></button>
+              <span class="rule"></span>
+              <button class="sel"><svg class="mk"><use href="#branch" /></svg><span class="mono">from main</span><svg class="mk"><use href="#chev-down" /></svg></button>
+              <button class="sel right"><svg class="mk"><use href="#machine" /></svg>studio-mac<svg class="mk"><use href="#chev-down" /></svg></button>
+            </div>
+          </div>
+
+          <div class="starts">
+            <div class="label">From Intake <span class="perf"></span></div>
+            <div class="start-grid">
+              <button class="start">
+                <span class="post post--sm" data-src="sentry"></span>
+                <span class="verb">Fix</span>
+                <span class="t">Checkout fails for EU cards</span>
+                <small>Urgent · 412 events</small>
+              </button>
+              <button class="start">
+                <span class="post post--sm" data-src="sentry"></span>
+                <span class="verb">Pick up</span>
+                <span class="t">Cart total rounding on discounts</span>
+                <small>Task · 2 new events attached</small>
+              </button>
+              <button class="start">
+                <span class="post post--sm" data-src="intercom"></span>
+                <span class="verb">Build</span>
+                <span class="t">Add iDEAL as a payment method</span>
+                <small>5 customers asked</small>
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

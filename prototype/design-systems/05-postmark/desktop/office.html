@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Sessions · Office · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .chrome .tally-line {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-left: 6px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .chrome .tally-line span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .chrome .tally-line b {
+        color: var(--ink);
+        font: 700 13px var(--narrow);
+      }
+      .chrome .seg {
+        margin-left: auto;
+      }
+      .chrome .seg button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .chrome .seg .mk {
+        width: 14px;
+        height: 14px;
+      }
+      .chrome .chrome-actions {
+        margin-left: 4px;
+      }
+
+      /* ---------- The scene ---------- */
+      .office {
+        --wall: color-mix(in oklch, var(--sunk) 75%, var(--surface));
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(60% 55% at 42% 52%, color-mix(in oklch, var(--violet) 8%, transparent), transparent 72%),
+          var(--bg);
+      }
+      .office > svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .scene polygon {
+        stroke: color-mix(in oklch, var(--ink) 14%, transparent);
+        stroke-width: 0.7;
+        stroke-linejoin: round;
+      }
+      /* A box paints its top in --c and darkens the two side faces, so one colour makes a solid. */
+      .scene .ft {
+        fill: var(--c);
+      }
+      .scene .fl {
+        fill: color-mix(in oklch, var(--c), #000 8%);
+      }
+      .scene .fr {
+        fill: color-mix(in oklch, var(--c), #000 17%);
+      }
+      .m-floor {
+        --c: var(--surface);
+      }
+      .m-wall {
+        --c: var(--wall);
+      }
+      .m-desk {
+        --c: var(--raised);
+      }
+      .m-belt {
+        --c: color-mix(in oklch, var(--carbon) 60%, var(--bg));
+      }
+      .m-env {
+        --c: var(--stamp-paper);
+      }
+      .m-cab {
+        --c: color-mix(in oklch, var(--ochre) 20%, var(--raised));
+      }
+      .m-desk.at-cap .ft {
+        fill: color-mix(in oklch, var(--ochre) 14%, var(--raised));
+      }
+      .m-counter {
+        --c: color-mix(in oklch, var(--violet) 18%, var(--raised));
+      }
+      .m-base {
+        --c: color-mix(in oklch, var(--ink) 18%, var(--raised));
+      }
+      .floor-grid line {
+        stroke: color-mix(in oklch, var(--ink) 6%, transparent);
+        stroke-width: 0.7;
+      }
+      .mat {
+        fill: color-mix(in oklch, var(--ink) 3%, transparent);
+        stroke: color-mix(in oklch, var(--ink) 22%, transparent);
+        stroke-width: 1;
+        stroke-dasharray: 5 4;
+      }
+      .mat.at-cap {
+        fill: color-mix(in oklch, var(--ochre) 8%, transparent);
+        stroke: var(--attn);
+      }
+      .free {
+        fill: none;
+        stroke: color-mix(in oklch, var(--ink) 30%, transparent);
+        stroke-width: 1;
+        stroke-dasharray: 3 3;
+      }
+      .paint {
+        font-family: var(--narrow);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        fill: color-mix(in oklch, var(--ink) 50%, transparent);
+      }
+      .paint .n {
+        fill: color-mix(in oklch, var(--ink) 72%, transparent);
+      }
+      .paint.sign {
+        fill: color-mix(in oklch, var(--ink) 78%, transparent);
+        letter-spacing: 0.04em;
+      }
+      .paint.cap,
+      .paint.cap .n {
+        fill: var(--ochre-text);
+      }
+      .lid-working {
+        fill: var(--violet);
+      }
+      .lid-waiting {
+        fill: var(--ochre);
+      }
+      .lid-idle,
+      .lid-paused {
+        fill: color-mix(in oklch, var(--carbon) 40%, var(--raised));
+      }
+      .scene .sticker {
+        stroke: none;
+      }
+      .body,
+      .head {
+        fill: var(--raised);
+        stroke: var(--st);
+        stroke-width: 1.6;
+      }
+      .eye {
+        fill: var(--ink);
+      }
+      .eye-shut {
+        fill: none;
+        stroke: var(--ink);
+        stroke-width: 1.3;
+        stroke-linecap: round;
+      }
+      .who {
+        --st: color-mix(in oklch, var(--ink) 38%, transparent);
+      }
+      .who.working {
+        --st: var(--violet);
+      }
+      .who.waiting {
+        --st: var(--attn);
+      }
+      .who.asleep {
+        opacity: 0.6;
+      }
+      .ring {
+        fill: none;
+        stroke: var(--violet);
+        stroke-width: 1.5;
+        stroke-dasharray: 3 3;
+        opacity: 0.7;
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: spin 8s linear infinite;
+      }
+      .shadow {
+        fill: color-mix(in oklch, var(--ink) 12%, transparent);
+      }
+      .flag-pole {
+        stroke: color-mix(in oklch, var(--ink) 60%, transparent);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+      }
+      .flag {
+        fill: var(--attn);
+        transform-box: fill-box;
+        transform-origin: 0% 50%;
+        animation: flutter 2.4s ease-in-out infinite;
+      }
+      .flag-q {
+        fill: var(--on-ink);
+        font: 800 10px var(--narrow);
+      }
+      @keyframes flutter {
+        50% {
+          transform: skewY(-5deg) scaleX(0.94);
+        }
+      }
+      .st-stamp rect {
+        fill: var(--raised);
+        stroke: var(--sc);
+        stroke-width: 1.4;
+      }
+      .st-stamp use {
+        color: var(--sc);
+      }
+      .st-working {
+        --sc: var(--violet);
+      }
+      .st-paused {
+        --sc: var(--attn);
+      }
+      .st-idle {
+        --sc: color-mix(in oklch, var(--ink) 50%, transparent);
+      }
+      .slot {
+        fill: color-mix(in oklch, var(--ink) 70%, transparent);
+      }
+      /* The perforated edge of a postage stamp: round dots in the wall's colour bite into the paper. */
+      .stamp-paper {
+        fill: var(--stamp-paper);
+        stroke: color-mix(in oklch, var(--wall), #000 8%);
+        stroke-width: 0.07;
+        stroke-dasharray: 0 0.13;
+        stroke-linecap: round;
+      }
+      .stamp-den {
+        font: 700 0.26px var(--narrow);
+        fill: #fff;
+      }
+      .recess {
+        fill: color-mix(in oklch, var(--ink) 50%, var(--sunk));
+      }
+      .letter {
+        fill: var(--stamp-paper);
+        stroke: color-mix(in oklch, var(--ink) 25%, transparent);
+        stroke-width: 0.012;
+      }
+      /* The triage postmark: when triage last ran, how long it took, when it runs next. */
+      .pm-ring,
+      .pm-wave {
+        fill: none;
+        stroke: var(--violet);
+        stroke-width: 0.045;
+      }
+      .pm-ring.thin {
+        stroke-width: 0.02;
+      }
+      .pm-t {
+        font-family: var(--narrow);
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-anchor: middle;
+        fill: var(--violet);
+      }
+      .cub-n {
+        font: 800 0.44px var(--narrow);
+      }
+      .cub-name {
+        font: 700 0.2px var(--narrow);
+        letter-spacing: 0.04em;
+        fill: color-mix(in oklch, var(--ink) 66%, transparent);
+      }
+      .plate {
+        fill: var(--raised);
+        stroke: color-mix(in oklch, var(--ink) 18%, transparent);
+        stroke-width: 0.02;
+      }
+      .plate-t {
+        font: 800 0.27px var(--narrow);
+        letter-spacing: 0.08em;
+        fill: var(--ink);
+      }
+      .bubble-bg {
+        fill: var(--raised);
+        stroke: var(--violet);
+        stroke-width: 1.2;
+      }
+      .bubble-dots circle {
+        fill: var(--violet);
+      }
+      .clock-face {
+        fill: var(--raised);
+        stroke: color-mix(in oklch, var(--ink) 40%, transparent);
+        stroke-width: 0.06;
+      }
+      .clock-hand {
+        stroke: var(--ink);
+        stroke-width: 0.07;
+        stroke-linecap: round;
+      }
+      .zz {
+        font: 700 11px var(--narrow);
+        fill: var(--faint);
+      }
+
+      /* ---------- Labels over the scene ---------- */
+      .labels {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .o-chip {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 22px;
+        padding: 0 8px 0 5px;
+        border-radius: 6px;
+        font-size: 11.5px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: var(--ink);
+        background: color-mix(in oklch, var(--raised) 90%, transparent);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        box-shadow: inset 0 0 0 1px var(--line), var(--lift-shadow);
+      }
+      .o-chip small {
+        font: 500 11px var(--mono);
+        color: var(--faint);
+      }
+      .o-chip.ask {
+        height: auto;
+        padding: 6px 10px 7px 7px;
+        align-items: flex-start;
+        font-size: 12px;
+        box-shadow: inset 0 0 0 1.5px var(--attn), var(--lift-shadow);
+      }
+      .o-chip.ask > div {
+        display: grid;
+        gap: 2px;
+      }
+      .o-chip.ask small {
+        font: 500 11.5px var(--sans);
+        color: var(--muted);
+      }
+      .o-chip.ask small code {
+        font: 500 11px var(--mono);
+        color: var(--ink);
+      }
+      .o-chip .seal {
+        width: 18px;
+        height: 18px;
+        font-size: 9.5px;
+      }
+      .o-chip.asst small {
+        font-family: var(--sans);
+      }
+
+      .o-chip.to-right {
+        transform: translate(-14px, -100%);
+      }
+      .o-chip.to-left {
+        transform: translate(calc(-100% + 14px), -100%);
+      }
+      /* The hovered desk: its card names the session and shows what it runs on. */
+      .hover-ring {
+        fill: color-mix(in oklch, var(--violet) 10%, transparent);
+        stroke: var(--violet);
+        stroke-width: 1.5;
+      }
+      .o-card {
+        position: absolute;
+        display: grid;
+        gap: 4px;
+        width: 236px;
+        padding: 10px 12px 10px;
+        border-radius: 10px;
+        font-size: 12px;
+        color: var(--muted);
+        background: var(--glass);
+        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: var(--glass-blur);
+        box-shadow: inset 0 0 0 1px var(--line), var(--float-shadow);
+      }
+      .o-card-t {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 2px;
+        font-size: 13px;
+        font-weight: 620;
+        color: var(--ink);
+      }
+      .o-card-m {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 1px;
+      }
+      .o-card-m .tag {
+        width: 13px;
+        height: 13px;
+      }
+      .o-card-k {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 4px;
+        padding-top: 7px;
+        font-size: 11.5px;
+        color: var(--faint);
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .o-card-k .kbd + .kbd {
+        margin-left: 8px;
+      }
+      .cursor {
+        position: absolute;
+        width: 16px;
+        height: 20px;
+        fill: #111;
+        stroke: #fff;
+        stroke-width: 1.2;
+        stroke-linejoin: round;
+        filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3));
+      }
+      .legend {
+        position: absolute;
+        left: 24px;
+        bottom: 22px;
+        display: grid;
+        gap: 7px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .legend .label {
+        margin-bottom: 2px;
+      }
+      .legend span {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .legend svg {
+        width: 20px;
+        height: 16px;
+        flex: none;
+      }
+
+      /* ---------- At 10x ---------- */
+      .tenx {
+        position: absolute;
+        right: 18px;
+        top: 16px;
+        width: 318px;
+        padding: 13px 16px 14px;
+        border-radius: 14px;
+        background: var(--glass);
+        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: var(--glass-blur);
+        box-shadow: inset 0 0 0 1px var(--line), var(--float-shadow);
+      }
+      .tenx-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tenx-head .num {
+        font: 700 var(--t-num) / 1 var(--narrow);
+      }
+      .tenx-head .sub {
+        font-size: 12px;
+        line-height: 1.3;
+        color: var(--muted);
+      }
+      .tenx-head .rs {
+        margin-left: auto;
+      }
+      .tenx svg {
+        display: block;
+        width: 286px;
+        height: 150px;
+        margin: 8px 0 6px;
+      }
+      .tenx-foot {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .tenx-foot .seals {
+        display: flex;
+        gap: 4px;
+      }
+      .tenx-foot .seal.more {
+        font-size: 9.5px;
+        letter-spacing: -0.02em;
+      }
+      .tenx p {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.45;
+        text-wrap: pretty;
+      }
+      .tenx p b {
+        color: var(--ink);
+      }
+      .tk {
+        --c: var(--violet);
+      }
+      .tw {
+        --c: var(--ochre);
+      }
+      .ti {
+        --c: color-mix(in oklch, var(--carbon) 35%, var(--raised));
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flag,
+        .ring {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="threads" data-active="sessions"></aside>
+      <main class="main">
+        <header class="chrome">
+          <h1>Sessions</h1>
+          <div class="tally-line">
+            <span><b>16</b> on 3 runners</span>
+            <span><i data-m="working" class="s-live sm"></i><b>7</b> working</span>
+            <span><i data-m="decision" class="s-attn sm"></i><b>3</b> waiting on you</span>
+            <span><i data-m="paused" class="s-attn sm"></i><b>1</b> paused</span>
+            <span><i data-m="idle" class="s-faint sm"></i><b>5</b> idle</span>
+          </div>
+          <div class="seg" role="tablist" aria-label="View">
+            <button role="tab" aria-selected="false"><svg class="mk"><use href="#threads" /></svg>List</button>
+            <button role="tab" aria-selected="true" class="is-on"><svg class="mk"><use href="#fleet" /></svg>Office</button>
+          </div>
+          <div class="chrome-actions">
+            <button class="icon-btn" aria-label="Filter"><svg class="mk"><use href="#filter" /></svg></button>
+          </div>
+        </header>
+        <div class="office">
+          <svg class="scene" id="scene" viewBox="0 0 1184 848" role="img" aria-label="The office. Three runners are rooms of desks, the mail wall shows what came in, the Intake pigeonholes hold what triage filed, and the assistants stand at the counter."></svg>
+          <div class="labels" id="labels"></div>
+
+          <div class="legend" aria-label="How to read the office">
+            <div class="label">How to read it</div>
+            <span><svg viewBox="0 0 20 16"><line class="flag-pole" x1="5" y1="15" x2="5" y2="2" /><rect x="5" y="2" width="11" height="8" rx="1" fill="var(--attn)" /></svg>Flag up · waiting on you</span>
+            <span><svg viewBox="0 0 20 16"><rect x="3" y="2" width="14" height="10" rx="1.5" class="lid-working" /></svg>Lid lit violet · working</span>
+            <span><svg viewBox="0 0 20 16"><rect x="3" y="2" width="14" height="10" rx="1.5" class="lid-idle" /></svg>Lid dark · idle or paused</span>
+            <span><svg viewBox="0 0 20 16"><path d="M10 3 18 8l-8 5-8-5z" class="free" /></svg>Free slot on the runner</span>
+          </div>
+
+          <section class="tenx" aria-label="The office at 10 times today's load">
+            <div class="tenx-head">
+              <span class="num">140</span><span class="sub">sessions on 9 runners<br />31,000 events a day</span>
+              <span class="rs rs--violet tilt-b">At 10x</span>
+            </div>
+            <svg id="tenx" viewBox="0 0 286 150" aria-hidden="true"></svg>
+            <div class="tenx-foot">
+              <span class="seals"><span class="seal is-working">A</span><span class="seal">M</span><span class="seal is-asleep">J</span><span class="seal more">+1</span></span>
+              4 assistants · 60 proposals
+            </div>
+            <p>Rooms fold into blocks and desks into bricks. Only the flags stay tall, so <b>11 flags up</b> still find you among 140.</p>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      // Draws the office as an isometric SVG from the fixture sessions. World units are desk
+      // cells: x runs along the back wall (down-right on screen), y along the left wall
+      // (down-left), z up.
+      (() => {
+        const S = 39;
+        const C = Math.cos(Math.PI / 6);
+        const ORIGIN = [398, 166];
+        const ROOM = { w: 18, d: 11.4, wall: 3.4 };
+        const point = (x, y, z = 0) => [ORIGIN[0] + (x - y) * C * S, ORIGIN[1] + (x + y) * 0.5 * S - z * S];
+        const points = (list) => list.map((p) => point(...p).map((n) => n.toFixed(1)).join(",")).join(" ");
+        const quad = (list, cls, fill = "") => `<polygon class="${cls}" points="${points(list)}"${fill ? ` fill="${fill}"` : ""}/>`;
+
+        // Returns a box from (x, y, z) spanning w by d by h, drawn as the three faces the viewer sees.
+        const box = (x, y, z, w, d, h, cls) =>
+          `<g class="${cls}">` +
+          quad([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + h], [x, y + d, z + h]], "fl") +
+          quad([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]], "fr") +
+          quad([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]], "ft") +
+          "</g>";
+
+        // SVG transforms that lay flat content onto a plane, one local unit per world unit.
+        // Local y grows downwards, so content above the floor has negative y.
+        const [ax, ay] = [C * S, 0.5 * S];
+        const onBackWall = (y) => { const [e, f] = point(0, y, 0); return `matrix(${ax} ${ay} 0 ${S} ${e} ${f})`; };
+        const onLeftWall = (x) => { const [e, f] = point(x, ROOM.d, 0); return `matrix(${ax} ${-ay} 0 ${S} ${e} ${f})`; };
+
+        const parts = [];
+        const labels = [];
+        const label = (x, y, z, html, cls = "") => {
+          const [sx, sy] = point(x, y, z);
+          labels.push(`<div class="o-chip ${cls}" style="left:${sx.toFixed(0)}px;top:${sy.toFixed(0)}px">${html}</div>`);
+        };
+
+        // ---- Floor and walls ----
+        parts.push(box(-0.3, -0.3, -0.45, ROOM.w + 0.3, ROOM.d + 0.3, 0.45, "m-floor"));
+        let grid = '<g class="floor-grid">';
+        for (let x = 1; x < ROOM.w; x++) grid += `<line x1="${point(x, 0)[0]}" y1="${point(x, 0)[1]}" x2="${point(x, ROOM.d)[0]}" y2="${point(x, ROOM.d)[1]}"/>`;
+        for (let y = 1; y < ROOM.d; y++) grid += `<line x1="${point(0, y)[0]}" y1="${point(0, y)[1]}" x2="${point(ROOM.w, y)[0]}" y2="${point(ROOM.w, y)[1]}"/>`;
+        parts.push(grid + "</g>");
+        parts.push(box(-0.3, -0.3, 0, ROOM.w + 0.3, 0.3, ROOM.wall, "m-wall"));
+        parts.push(box(-0.3, 0, 0, 0.3, ROOM.d, ROOM.wall, "m-wall"));
+
+        // ---- The mail wall: one slot per Connection, stamped with its colour and its count since 18:20 ----
+        const sources = [
+          ["sentry", 131], ["github", 38], ["gmail", 17], ["stripe", 12],
+          ["intercom", 9], ["posthog", 3], ["grafana", 2], ["cron", 0],
+        ];
+        let wall = `<g transform="${onBackWall(0)}">`;
+        wall += `<text class="paint" font-size=".3" x="1.3" y="-2.95">WHAT CAME IN <tspan class="n">· 212 SINCE 18:20</tspan></text>`;
+        sources.forEach(([src, n], i) => {
+          const x = 1.3 + i * 1.02;
+          wall += `<rect class="stamp-paper" x="${x}" y="-2.72" width=".8" height=".98"/>`;
+          wall += `<rect x="${x + 0.08}" y="-2.64" width=".64" height=".82" fill="var(--src-${src})"/>`;
+          wall += `<use href="#b-${src}" x="${x + 0.19}" y="-2.54" width=".42" height=".42" color="#fff"/>`;
+          if (n) wall += `<text class="stamp-den" x="${x + 0.4}" y="-1.9" text-anchor="middle">${n}</text>`;
+          wall += `<rect class="slot" x="${x}" y="-1.58" width=".8" height=".09" rx=".03"/>`;
+        });
+        // The wall clock shows the fixture's "now", 09:41.
+        wall += `<g transform="translate(10.15 -2.3)"><circle class="clock-face" r=".48"/>`;
+        wall += `<line class="clock-hand" x1="0" y1="0" x2="0" y2="-.36" transform="rotate(246)"/><line class="clock-hand" x1="0" y1="0" x2="0" y2="-.25" transform="rotate(290)"/></g>`;
+        wall += "</g>";
+        parts.push(wall);
+
+        // ---- Conveyor under the slots, carrying letters to the triage desk in the corner ----
+        parts.push(box(1.7, 0.3, 0, 8.1, 0.6, 0.38, "m-belt"));
+        [["sentry", 2.1], ["gmail", 3.4], ["sentry", 4.6], ["github", 5.9], ["stripe", 7.2], ["intercom", 8.5]].forEach(([src, x]) => {
+          parts.push(box(x, 0.39, 0.38, 0.6, 0.42, 0.05, "m-env"));
+          parts.push(quad([[x + 0.42, 0.44, 0.431], [x + 0.54, 0.44, 0.431], [x + 0.54, 0.58, 0.431], [x + 0.42, 0.58, 0.431]], "sticker", `var(--src-${src})`));
+        });
+        parts.push(box(0.35, 0.3, 0, 1.35, 1.9, 0.55, "m-desk"));
+        parts.push(box(0.55, 0.55, 0.55, 0.5, 0.55, 0.32, "m-counter"));
+        // The triage postmark on the wall above the desk: when it last ran, how long it took, when it runs next.
+        let corner = `<g transform="${onLeftWall(0)} translate(${ROOM.d - 1.95} -2.2)">`;
+        corner += `<circle class="pm-ring" r=".8"/><circle class="pm-ring thin" r=".66"/>`;
+        corner += `<text class="pm-t" y="-.3" font-size=".14">TRIAGE · 42S</text>`;
+        corner += `<text class="pm-t" y=".12" font-size=".34">09:00</text>`;
+        corner += `<text class="pm-t" y=".4" font-size=".14">NEXT 11:00</text>`;
+        corner += `<path class="pm-wave" d="M.92 -.28 q.16 -.12 .32 0 t.32 0 M.92 0 q.16 -.12 .32 0 t.32 0 M.92 .28 q.16 -.12 .32 0 t.32 0"/>`;
+        parts.push(corner + "</g>");
+
+        // ---- Intake pigeonholes on the left wall, one per section, letters filed by triage ----
+        const cubbies = [
+          ["NOW", 1, "var(--red)"],
+          ["NEEDS A CALL", 2, "var(--ochre-text)"],
+          ["TODAY", 4, "var(--violet)"],
+          ["WHEN YOU CAN", 2, "var(--violet)"],
+          ["FYI", 3, "var(--carbon)"],
+        ];
+        const cabinet = { y: 3.2, d: 7.3 };
+        parts.push(box(0, cabinet.y, 0, 0.7, cabinet.d, 2.35, "m-cab"));
+        let cab = `<g transform="${onLeftWall(0.7)}">`;
+        const u0 = ROOM.d - cabinet.y - cabinet.d;
+        cubbies.forEach(([name, n, ink], i) => {
+          const u = u0 + 0.12 + (cubbies.length - 1 - i) * 1.44;
+          cab += `<rect class="recess" x="${u + 0.06}" y="-2.14" width="1.26" height="1.04" rx=".04"/>`;
+          for (let k = 0; k < n; k++) cab += `<rect class="letter" x="${u + 0.14}" y="${-1.24 - k * 0.15}" width="1.1" height=".12"/>`;
+          cab += `<rect x="${u + 1.1}" y="${-1.24 - (n - 1) * 0.15}" width=".12" height=".12" fill="${ink}"/>`;
+          cab += `<text class="cub-n" x="${u + 0.1}" y="-.66" fill="${ink}">${n}</text>`;
+          // Long section names break onto a second line so they stay inside their own cubby.
+          const words = name.split(" ");
+          const lines = words.length > 2 ? [words.slice(0, 2).join(" "), words.slice(2).join(" ")] : [name];
+          lines.forEach((line, k) => (cab += `<text class="cub-name" x="${u + 0.1}" y="${-0.42 + k * 0.23}">${line}</text>`));
+        });
+        parts.push(cab + "</g>");
+        let intake = `<g transform="${onLeftWall(0)}">`;
+        intake += `<text class="paint" font-size=".3" x="${u0 + 0.1}" y="-2.75">INTAKE <tspan class="n">· 6 PROPOSALS · 198 NO ACTION</tspan></text>`;
+        parts.push(intake + "</g>");
+
+        // ---- Runners as bays of desks. A null desk is a free slot. ----
+        // Only what needs Rogier carries a label; every other desk shows its state by its lid and
+        // its stamp, and names itself on hover (the hovered desk shows how).
+        const bays = [
+          {
+            runner: "studio-mac", y: 2.9, cols: 3, cap: 6,
+            desks: [
+              { s: "waiting", title: "Fix 3-D Secure checkout", ask: "Run <code>git push</code>?", p: "webshop" },
+              null,
+              { s: "working" },
+              { s: "working", p: "webshop" },
+              { s: "waiting", title: "Migrate ops dashboards", ask: "Keep the old Grafana folder?", p: "ops" },
+              { s: "idle" },
+            ],
+          },
+          {
+            runner: "build-box-1", y: 5.75, cols: 4, cap: 8,
+            desks: [
+              { s: "working" },
+              { s: "working", p: "payments" },
+              { s: "working" },
+              { s: "paused", p: "webshop", title: "Label new issues", meta: "bound tripped" },
+              { s: "working", p: "webshop" },
+              { s: "idle" },
+              { s: "idle" },
+              { s: "working", p: "ops", hover: true },
+            ],
+          },
+          {
+            runner: "build-box-2", y: 8.6, cols: 4, cap: 8,
+            desks: [
+              null,
+              { s: "waiting", title: "Ship release v2.15", ask: "Publish to npm?", p: "payments" },
+              { s: "idle", p: "payments" },
+              { s: "idle" },
+              null,
+              null,
+              null,
+              null,
+            ],
+          },
+        ];
+        const BAY = { x: 3.5, pitch: 3.3, depth: 2.6, row: 1.3 };
+        const marks = { working: "working", idle: "idle", paused: "paused" };
+
+        // Returns a seated figure: body and head in screen space, outlined in its state's colour.
+        const figure = (x, y, state, eyes = "open") => {
+          const [bx, by] = point(x, y, 0);
+          let g = `<g class="who ${state}"><ellipse class="shadow" cx="${bx}" cy="${by}" rx="14" ry="5.5"/>`;
+          g += `<rect class="body" x="${bx - 11}" y="${by - 36}" width="22" height="34" rx="11"/>`;
+          if (state === "working") g += `<circle class="ring" cx="${bx}" cy="${by - 45}" r="14.5"/>`;
+          g += `<circle class="head" cx="${bx}" cy="${by - 45}" r="10.5"/>`;
+          if (eyes === "shut") {
+            g += `<path class="eye-shut" d="M${bx - 6} ${by - 44} q2 2 4 0 M${bx + 2} ${by - 44} q2 2 4 0"/>`;
+          } else {
+            const dy = state === "working" ? 2 : state === "waiting" ? -2 : 0;
+            g += `<circle class="eye" cx="${bx - 3.6}" cy="${by - 45 + dy}" r="1.5"/><circle class="eye" cx="${bx + 3.6}" cy="${by - 45 + dy}" r="1.5"/>`;
+          }
+          return g + "</g>";
+        };
+
+        // Returns the mailbox flag that stands up on a desk while its session waits on Rogier.
+        const flag = (x, y, z) => {
+          const [px, py] = point(x, y, z);
+          return (
+            `<g><line class="flag-pole" x1="${px}" y1="${py}" x2="${px}" y2="${py - 48}"/>` +
+            `<g transform="translate(${px} ${py - 48})"><rect class="flag" x="0" y="0" width="22" height="15" rx="1.5"/>` +
+            `<text class="flag-q" x="11" y="11.4" text-anchor="middle">?</text></g></g>`
+          );
+        };
+
+        // Returns the small rubber stamp that floats beside a figure's head and shows its state.
+        const stateStamp = (x, y, state) => {
+          const [px, py] = point(x, y, 0);
+          return (
+            `<g class="st-stamp st-${state}" transform="translate(${px + 18} ${py - 62}) rotate(-7)">` +
+            `<rect x="-8.5" y="-8.5" width="17" height="17" rx="3"/><use href="#${marks[state]}" x="-6.5" y="-6.5" width="13" height="13"/></g>`
+          );
+        };
+
+        bays.forEach((bay) => {
+          const width = bay.cols * BAY.pitch - 0.2;
+          const x0 = BAY.x - 0.55;
+          const used = bay.desks.filter(Boolean).length;
+          const atCap = used === bay.cap;
+          parts.push(`<polygon class="mat${atCap ? " at-cap" : ""}" points="${points([[x0, bay.y, 0], [x0 + width, bay.y, 0], [x0 + width, bay.y + BAY.depth, 0], [x0, bay.y + BAY.depth, 0]])}"/>`);
+          // The runner's name is painted on the floor beside its bay, reading along the bay's side.
+          const [ex, ey] = point(x0 - 0.35, bay.y + BAY.depth - 0.1, 0);
+          let sign = `<g transform="matrix(${ax} ${-ay} ${ax} ${ay} ${ex} ${ey})">`;
+          sign += `<use href="#machine" x="0" y="-.62" width=".36" height=".36" color="var(--muted)"/>`;
+          sign += `<text class="paint" font-size=".3" x=".48" y="-.34">${bay.runner.toUpperCase()}</text>`;
+          sign += `<text class="paint${atCap ? " cap" : ""}" font-size=".24" x=".48" y="-.02"><tspan class="n">${used} OF ${bay.cap}</tspan>${atCap ? " · AT CAP" : ""}</text>`;
+          parts.push(sign + "</g>");
+
+          for (let i = 0; i < bay.cap; i++) {
+            const dx = BAY.x + (i % bay.cols) * BAY.pitch;
+            const dy = bay.y + 0.75 + Math.floor(i / bay.cols) * BAY.row;
+            const desk = bay.desks[i];
+            if (!desk) {
+              parts.push(`<polygon class="free" points="${points([[dx, dy, 0], [dx + 1.4, dy, 0], [dx + 1.4, dy + 0.7, 0], [dx, dy + 0.7, 0]])}"/>`);
+              continue;
+            }
+            const fx = dx + 0.7;
+            const fy = dy - 0.3;
+            let g = "";
+            if (desk.hover) g += `<polygon class="hover-ring" points="${points([[dx - 0.3, dy - 0.75, 0], [dx + 1.7, dy - 0.75, 0], [dx + 1.7, dy + 0.95, 0], [dx - 0.3, dy + 0.95, 0]])}"/>`;
+            g += figure(fx, fy, desk.s);
+            g += box(dx, dy, 0, 1.4, 0.7, 0.5, "m-desk");
+            // The laptop: keyboard towards the figure, the lid on the far side lit in the session's state.
+            g += box(dx + 0.38, dy + 0.12, 0.5, 0.64, 0.38, 0.035, "m-base");
+            g += quad([[dx + 0.38, dy + 0.5, 0.535], [dx + 1.02, dy + 0.5, 0.535], [dx + 1.02, dy + 0.5, 0.95], [dx + 0.38, dy + 0.5, 0.95]], `lid-${desk.s}`);
+            if (desk.p) g += quad([[dx + 0.62, dy + 0.5, 0.66], [dx + 0.78, dy + 0.5, 0.66], [dx + 0.78, dy + 0.5, 0.82], [dx + 0.62, dy + 0.5, 0.82]], "sticker", `var(--proj-${desk.p})`);
+            if (desk.s === "waiting") g += flag(dx + 1.25, dy + 0.12, 0.5);
+            else g += stateStamp(fx, fy, desk.s);
+            parts.push(g);
+
+            // Chips hang to the right of their flag or figure, over the aisle, so they never cover
+            // a head in the row behind. Ship release sits in the front bay and hangs left instead.
+            const side = desk.p === "payments" && desk.ask ? "to-left" : "to-right";
+            if (desk.ask) {
+              label(dx + 1.25, dy + 0.12, 2.2, `<i data-m="decision" class="s-attn"></i><div><span>${desk.title}</span><small>${desk.ask}</small></div>`, `ask ${side}`);
+            } else if (desk.title) {
+              label(fx, fy, 2.15, `<i data-m="${marks[desk.s]}" class="s-attn"></i><div><span>${desk.title}</span><small>${desk.meta}</small></div>`, "ask to-right");
+            } else if (desk.hover) {
+              const [sx, sy] = point(fx, fy, 0.9);
+              labels.push(
+                `<div class="o-card" style="left:${(sx + 34).toFixed(0)}px;top:${(sy - 6).toFixed(0)}px">` +
+                  `<div class="o-card-t"><i data-m="working" class="s-live"></i>Investigate backup timeouts</div>` +
+                  `<div class="o-card-m"><i class="tag" data-p="ops"></i>ops · Run · Investigate</div>` +
+                  `<div class="o-card-m">Codex · gpt-5.4 · working 6m</div>` +
+                  `<div class="o-card-k"><span class="kbd">⏎</span> open<span class="kbd">Space</span> peek</div>` +
+                  `</div>` +
+                  `<svg class="cursor" style="left:${(sx + 12).toFixed(0)}px;top:${(sy - 16).toFixed(0)}px" viewBox="0 0 16 20"><path d="M1.5 1.5v14.2l3.9-3.6 2.5 5.9 2.6-1.1-2.5-5.8h5.4z"/></svg>`,
+              );
+            }
+          }
+        });
+
+        // ---- The assistants' counter, against the back wall on the right ----
+        const assistants = [
+          { name: "Ada", x: 13.2, state: "working", seal: "is-working", line: "working · web chat" },
+          { name: "Milo", x: 14.75, state: "idle", seal: "", line: "idle · Slack #ops" },
+          { name: "Juno", x: 16.3, state: "asleep", seal: "is-asleep", line: "asleep · Discord" },
+        ];
+        assistants.forEach((a) => {
+          parts.push(figure(a.x + 0.6, 0.8, a.state, a.state === "asleep" ? "shut" : "open"));
+          const [hx, hy] = point(a.x + 0.6, 0.8, 0);
+          if (a.state === "working") {
+            parts.push(
+              `<g transform="translate(${hx - 46} ${hy - 70})"><rect class="bubble-bg" x="0" y="0" width="30" height="16" rx="8"/>` +
+                `<g class="bubble-dots"><circle cx="9" cy="8" r="1.8"/><circle cx="15" cy="8" r="1.8"/><circle cx="21" cy="8" r="1.8"/></g></g>`,
+            );
+          }
+          if (a.state === "asleep") parts.push(`<text class="zz" x="${hx + 12}" y="${hy - 58}">z</text><text class="zz" x="${hx + 19}" y="${hy - 67}" font-size="9">z</text>`);
+        });
+        parts.push(box(12.8, 1.25, 0, 4.9, 0.7, 0.85, "m-counter"));
+        let plates = `<g transform="${onBackWall(1.95)}">`;
+        assistants.forEach((a) => {
+          plates += `<rect class="plate" x="${a.x}" y="-.64" width="1.25" height=".38" rx=".04"/>`;
+          plates += `<text class="plate-t" x="${a.x + 0.625}" y="-.36" text-anchor="middle">${a.name.toUpperCase()}</text>`;
+        });
+        parts.push(plates + "</g>");
+        assistants.forEach((a) => label(a.x + 0.6, 0.8, 2.5, `<span class="seal ${a.seal}">${a.name[0]}</span>${a.name}<small>${a.line}</small>`, "asst"));
+
+        document.getElementById("scene").innerHTML = parts.join("");
+        document.getElementById("labels").innerHTML = labels.join("");
+
+        // ---- At 10x: nine runners as blocks, every session a brick, the waiting ones flagged ----
+        const T = 8.6;
+        const TO = [143, 30];
+        const tp = (x, y, z = 0) => [TO[0] + (x - y) * C * T, TO[1] + (x + y) * 0.5 * T - z * T];
+        const tpts = (list) => list.map((p) => tp(...p).map((n) => n.toFixed(1)).join(",")).join(" ");
+        const tbox = (x, y, z, w, d, h, cls) =>
+          `<g class="${cls}"><polygon class="fl" points="${tpts([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + h], [x, y + d, z + h]])}"/>` +
+          `<polygon class="fr" points="${tpts([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]])}"/>` +
+          `<polygon class="ft" points="${tpts([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]])}"/></g>`;
+        const loads = [16, 16, 16, 15, 16, 16, 15, 14, 16];
+        const waiting = [[0, 3], [1, 9], [2, 1], [2, 12], [3, 6], [4, 14], [5, 2], [6, 8], [7, 5], [8, 11], [8, 0]];
+        const idleEvery = [3, 2, 3, 2, 2, 3, 2, 3, 2];
+        let blocks = "";
+        let flags = "";
+        for (let r = 0; r < 9; r++) {
+          const bx = (r % 3) * 5.4;
+          const by = Math.floor(r / 3) * 5.4;
+          blocks += tbox(bx, by, 0, 4.4, 4.4, 0.35, "m-floor");
+          for (let k = 0; k < 16; k++) {
+            const cx = bx + 0.3 + (k % 4) * 1.02;
+            const cy = by + 0.3 + Math.floor(k / 4) * 1.02;
+            if (k >= loads[r]) {
+              blocks += `<polygon class="free" points="${tpts([[cx, cy, 0.35], [cx + 0.7, cy, 0.35], [cx + 0.7, cy + 0.7, 0.35], [cx, cy + 0.7, 0.35]])}"/>`;
+              continue;
+            }
+            const isWaiting = waiting.some(([wr, wk]) => wr === r && wk === k);
+            const isIdle = !isWaiting && k % idleEvery[r] === 0;
+            blocks += tbox(cx, cy, 0.35, 0.7, 0.7, isIdle ? 0.3 : 0.6, isWaiting ? "tw" : isIdle ? "ti" : "tk");
+            if (isWaiting) {
+              const [px, py] = tp(cx + 0.35, cy + 0.35, 0.95);
+              flags += `<line class="flag-pole" x1="${px}" y1="${py}" x2="${px}" y2="${py - 26}" stroke-width="1.2"/><rect x="${px}" y="${py - 26}" width="9" height="7" rx="1" fill="var(--attn)"/>`;
+            }
+          }
+        }
+        document.getElementById("tenx").innerHTML = `<g class="scene">${blocks}${flags}</g>`;
+      })();
+    </script>
+  </body>
+</html>

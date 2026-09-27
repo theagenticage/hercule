@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>(3) Checkout fails for EU cards · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='38%25' cy='32%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23f7cfa2'/%3E%3Cstop offset='.55' stop-color='%23d66931'/%3E%3Cstop offset='1' stop-color='%238c3714'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='14' cy='13.5' r='9.5' fill='url%28%23g%29'/%3E%3Cellipse cx='11' cy='10' rx='3' ry='1.9' fill='%23fff' opacity='.55' transform='rotate%28-30 11 10%29'/%3E%3Cpath d='M3.5 28.5h21' stroke='%233b2a1f' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='24.5' cy='8' r='7.5' fill='%23c24e1c' stroke='%23fff' stroke-width='1.6'/%3E%3Ctext x='24.5' y='11.6' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='10.5' text-anchor='middle' fill='%23fff'%3E3%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="web">
+  <header class="wbar" data-web="intake"></header>
+  <div class="wbody">
+    <main class="dp">
+      <div class="dp-in">
+        <div class="dp-arrive">
+          <i data-b="slack"></i><span><b>Ada</b> sent you this in Slack · acme-hq · 09:00</span>
+          <a class="end" href="intake.html"><i data-i="left"></i>Back to Intake</a>
+        </div>
+
+        <!-- ============ the evidence ============ -->
+        <div class="dp-main">
+          <div class="wd-head">
+            <div class="dc-head"><i data-m="q" class="c-attn"></i><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Checkout</span><span class="dot-sep"></span><span>first seen 08:52</span></div>
+          </div>
+          <h1 class="wd-title">Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="wd-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+          <div class="wd-figs">
+            <div class="wd-fig"><b class="c-fail">&minus;18%</b><span>EU checkout conversion</span></div>
+            <div class="wd-fig"><b>412</b><span>payment errors</span></div>
+            <div class="wd-fig"><b>188</b><span>customers hit it</span></div>
+            <div class="wd-fig"><b>3</b><span>customer emails</span></div>
+          </div>
+
+          <figure class="chart">
+            <figcaption class="chart-h">EU checkout conversion<small><i></i>EU</small><small><i class="row"></i>rest of the world</small><span class="end">last 48 hours · PostHog</span></figcaption>
+            <div class="chart-plot">
+              <svg viewBox="0 0 640 150" preserveAspectRatio="none" aria-hidden="true">
+                <g stroke="var(--line-soft)" stroke-width="1" vector-effect="non-scaling-stroke">
+                  <line x1="0" x2="640" y1="37.5" y2="37.5" vector-effect="non-scaling-stroke"/>
+                  <line x1="0" x2="640" y1="75" y2="75" vector-effect="non-scaling-stroke"/>
+                  <line x1="0" x2="640" y1="112.5" y2="112.5" vector-effect="non-scaling-stroke"/>
+                </g>
+                <rect x="378" y="0" width="262" height="150" fill="var(--fail)" opacity="0.06"/>
+                <line x1="378" x2="378" y1="0" y2="150" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+                <path d="M0.0,72.6 L6.7,72.3 L13.3,69.2 L20.0,67.3 L26.7,67.1 L33.3,69.0 L40.0,62.9 L46.7,66.9 L53.3,61.1 L60.0,65.0 L66.7,67.5 L73.3,65.6 L80.0,67.0 L86.7,62.0 L93.3,64.1 L100.0,66.1 L106.7,69.0 L113.3,68.6 L120.0,67.7 L126.7,67.3 L133.3,70.3 L140.0,68.2 L146.7,70.1 L153.3,68.8 L160.0,74.1 L166.7,76.3 L173.3,72.4 L180.0,75.2 L186.7,74.6 L193.3,76.0 L200.0,78.6 L206.7,76.9 L213.3,78.4 L220.0,74.9 L226.7,77.2 L233.3,76.9 L240.0,74.6 L246.7,79.7 L253.3,76.5 L260.0,77.6 L266.7,79.6 L273.3,74.1 L280.0,77.3 L286.7,71.8 L293.3,74.1 L300.0,69.9 L306.7,69.1 L313.3,71.5 L320.0,67.1 L326.7,71.7 L333.3,70.2 L340.0,67.5 L346.7,68.4 L353.3,66.5 L360.0,64.8 L366.7,63.4 L373.3,63.6 L380.0,67.6 L386.7,62.0 L393.3,61.8 L400.0,64.9 L406.7,63.4 L413.3,68.0 L420.0,67.7 L426.7,69.1 L433.3,69.0 L440.0,68.2 L446.7,65.1 L453.3,71.4 L460.0,70.9 L466.7,73.5 L473.3,67.9 L480.0,72.6 L486.7,76.4 L493.3,76.1 L500.0,77.7 L506.7,72.5 L513.3,79.2 L520.0,80.7 L526.7,74.1 L533.3,76.6 L540.0,79.3 L546.7,76.4 L553.3,76.3 L560.0,80.4 L566.7,74.5 L573.3,75.5 L580.0,75.5 L586.7,76.6 L593.3,79.6 L600.0,77.0 L606.7,73.1 L613.3,74.1 L620.0,69.1 L626.7,72.9 L633.3,73.0 L640.0,72.2" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
+                <path d="M0.0,52.8 L6.7,48.2 L13.3,48.3 L20.0,52.3 L26.7,51.5 L33.3,50.4 L40.0,45.9 L46.7,48.5 L53.3,42.7 L60.0,42.9 L66.7,38.5 L73.3,39.7 L80.0,47.4 L86.7,45.9 L93.3,47.7 L100.0,43.5 L106.7,45.1 L113.3,51.1 L120.0,45.5 L126.7,50.3 L133.3,49.9 L140.0,47.5 L146.7,54.4 L153.3,52.7 L160.0,51.7 L166.7,50.2 L173.3,57.2 L180.0,61.0 L186.7,63.1 L193.3,56.4 L200.0,55.9 L206.7,58.4 L213.3,60.1 L220.0,57.7 L226.7,61.7 L233.3,66.1 L240.0,59.8 L246.7,57.7 L253.3,61.8 L260.0,65.1 L266.7,62.9 L273.3,63.2 L280.0,61.5 L286.7,57.8 L293.3,60.0 L300.0,53.9 L306.7,49.9 L313.3,54.4 L320.0,52.4 L326.7,45.0 L333.3,52.1 L340.0,50.4 L346.7,45.8 L353.3,51.1 L360.0,46.5 L366.7,39.7 L373.3,43.9 L380.0,75.0" fill="none" stroke="var(--ink)" stroke-width="1.75" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+                <path d="M380.0,75.0 L386.7,86.1 L393.3,86.4 L400.0,91.5 L406.7,94.8 L413.3,95.6 L420.0,94.5 L426.7,93.7 L433.3,97.9 L440.0,97.6 L446.7,99.2 L453.3,93.9 L460.0,98.6 L466.7,98.3 L473.3,94.2 L480.0,99.1 L486.7,104.0 L493.3,102.2 L500.0,97.9 L506.7,107.2 L513.3,102.5 L520.0,103.0 L526.7,103.6 L533.3,100.5 L540.0,107.0 L546.7,108.2 L553.3,104.3 L560.0,106.4 L566.7,101.1 L573.3,100.3 L580.0,100.2 L586.7,105.9 L593.3,103.9 L600.0,106.6 L606.7,103.3 L613.3,95.1 L620.0,94.4 L626.7,93.3 L633.3,100.1 L640.0,99.4" fill="none" stroke="var(--fail)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="chart-y" style="top:25%">3.5%</span>
+              <span class="chart-y" style="top:50%">3.0%</span>
+              <span class="chart-y" style="top:75%">2.5%</span>
+              <span class="chart-mark" style="left:59.06%">deploy #1289 · 14:02</span>
+              <span class="chart-note" style="left:4%;top:18%;color:var(--muted)">3.3% before</span>
+              <span class="chart-note c-fail" style="left:80%;top:76%">2.7% since</span>
+            </div>
+            <div class="chart-x"><span style="left:4.8%">Sun 12:00</span><span style="left:29.8%">Mon 00:00</span><span style="left:54.8%">Mon 12:00</span><span style="left:79.8%">Tue 00:00</span><span style="left:100%">now</span></div>
+          </figure>
+
+          <h2 class="wd-h">Made from<small>4 sources · 548 events</small></h2>
+          <div class="src"><i data-b="sentry"></i><div><b>Sentry · webshop-prod</b><p><code>PaymentError: authentication_required</code> · <strong>412</strong> events · <strong>188</strong> users</p></div><span class="when">since 14:06 yesterday</span></div>
+          <div class="src"><i data-b="gmail"></i><div><b>Gmail · rogier@personal</b><p>3 customer emails</p><ul><li>Card declined at checkout</li><li>Can't pay with my Rabobank card</li><li>Payment keeps failing</li></ul></div><span class="when">08:12 to 08:47</span></div>
+          <div class="src"><i data-b="posthog"></i><div><b>PostHog · webshop</b><p>Checkout conversion <strong>&minus;18%</strong> since 14:10 yesterday, EU only</p></div><span class="when">08:52</span></div>
+          <div class="src"><i data-b="github"></i><div><b>GitHub · rogier/webshop</b><p>Deploy <strong>#1289</strong> · “Upgrade Stripe SDK to v14”</p></div><span class="when">14:02 yesterday</span></div>
+        </div>
+
+        <!-- ============ the answers ============ -->
+        <aside class="dp-side">
+          <article class="dcard">
+            <a class="dc-live" href="session-active.html"><i data-m="session" style="color:var(--project-webshop)"></i><span>A Thread is on it · <b class="c-attn">waiting on you</b></span><span class="dc-live-go">Open<i data-i="arrow"></i></span></a>
+            <div class="ledger">
+              <button class="ans is-primary"><span class="ans-label">Start “Fix bug”</span><span class="ans-desc">Starts <b>Fix bug</b> on <b>webshop</b> in a new worktree<span class="ans-fine">Claude Code · Opus 5.5 · studio-mac</span></span><kbd class="kbd">1</kbd></button>
+              <button class="ans"><span class="ans-label">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd class="kbd">2</kbd></button>
+              <button class="ans"><span class="ans-label">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd class="kbd">3</kbd></button>
+            </div>
+          </article>
+          <p class="aside-voice"><i class="orb" data-v="ada" data-p="idle" style="--size:14px"></i><span>I can also draft a reply to the 3 customers once the fix ships.</span></p>
+          <section class="dp-next">
+            <h4><i data-m="q"></i>2 more need a call<a href="intake.html">Open Intake</a></h4>
+            <a class="wi-row" href="#"><i data-m="q"></i><span><b>App is slow on Android</b><small><i data-b="intercom"></i>Intercom<span class="dot-sep"></span>7 conversations</small></span><span class="wi-end">Sun</span></a>
+            <a class="wi-row" href="#"><i data-m="held"></i><span><b>“Label new issues” held 34 events</b><small><i data-b="github"></i>breaker tripped</small></span><span class="wi-end">08:14</span></a>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Decide: Checkout fails for EU cards · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <!-- Where a link from Slack or email lands: one Proposal as a page. The Proposal is a
+         junction, and each answer is a track leaving it, drawn with the stops it would make. -->
+    <div class="dz">
+      <header class="dz-bar">
+        <a class="logo-row" href="intake.html"><span data-logo="20"></span><b>Hercule</b></a>
+        <span class="dz-crumb"><a href="intake.html">Intake</a> / Proposal</span>
+        <span class="grow"></span>
+        <span class="dz-from"><i data-brand="slack"></i>Opened from Ada's 09:00 message in Slack</span>
+        <span class="avatar">R</span>
+      </header>
+
+      <main class="dz-main">
+        <section class="dz-hero">
+          <div class="lead-top">
+            <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b class="fail">urgent</b></span>
+            <span>Checkout</span>
+            <span>webshop</span>
+            <span>first seen 08:52</span>
+          </div>
+          <h1>Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="dz-gist">
+            Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+            <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+          </p>
+        </section>
+
+        <section class="jn" aria-label="Made from four sources; three answers">
+          <svg class="jn-map" width="1152" height="330" viewBox="0 0 1152 330" aria-hidden="true">
+            <!-- The four sources run in and meet at the Proposal. -->
+            <g class="jn-in">
+              <path d="M0 38H340C386 38 380 125 420 125H436" style="--c: var(--ln-sentry)" />
+              <path d="M0 104H340C386 104 380 133 420 133H436" style="--c: var(--ln-gmail)" />
+              <path d="M0 170H340C386 170 380 141 420 141H436" style="--c: var(--ln-posthog)" />
+              <path d="M0 236H340C386 236 380 149 420 149H436" style="--c: var(--ln-github)" />
+            </g>
+            <!-- The three tracks out, one per answer. They split at the points just past the
+                 Proposal; the suggested track is drawn in ink, the others faint. -->
+            <path class="jn-out" d="M462 137C510 137 510 222 558 222H832" />
+            <path class="jn-out" d="M462 137C522 137 522 300 582 300H818" />
+            <rect class="jn-buffer" x="818" y="290" width="4" height="20" rx="2" />
+            <path class="jn-out jn-out--a" d="M446 137H832" />
+            <circle class="jn-stop jn-stop--a" cx="560" cy="137" r="6.5" />
+            <circle class="jn-stop jn-stop--a" cx="680" cy="137" r="6.5" />
+            <circle class="jn-stop jn-stop--a" cx="800" cy="137" r="6.5" />
+            <circle class="jn-stop" cx="680" cy="222" r="6" />
+            <!-- The Proposal is the junction. The amber ring means it waits on Rogier. -->
+            <rect class="jn-halo" x="415" y="106" width="40" height="62" rx="20" />
+            <rect class="jn-cap" x="424" y="115" width="22" height="44" rx="11" />
+          </svg>
+
+          <div class="jn-src" style="top: 13px">
+            <span class="jn-ev"><i data-brand="sentry"></i><b>Sentry</b><code>PaymentError: authentication_required</code></span>
+            <span class="n"><b>412</b> events · <b>188</b> users</span>
+          </div>
+          <div class="jn-src" style="top: 79px">
+            <span class="jn-ev"><i data-brand="gmail"></i><b>Gmail</b>"Card declined at checkout" and 2 more</span>
+            <span class="n"><b>3</b> customer emails</span>
+          </div>
+          <div class="jn-src" style="top: 145px">
+            <span class="jn-ev"><i data-brand="posthog"></i><b>PostHog</b>checkout conversion, EU only</span>
+            <span class="n"><b class="fail">-18%</b> since 14:10 yesterday</span>
+          </div>
+          <div class="jn-src" style="top: 211px">
+            <span class="jn-ev"><i data-brand="github"></i><b>GitHub</b>deploy #1289 "Upgrade Stripe SDK to v14"</span>
+            <span class="n">14:02 yesterday</span>
+          </div>
+
+          <div class="jn-stn" style="left: 560px; top: 137px"><b>Run</b><small>Fix bug</small></div>
+          <div class="jn-stn" style="left: 680px; top: 137px"><b>Thread</b><small>Opus 5.5 · studio-mac</small></div>
+          <div class="jn-stn" style="left: 800px; top: 137px"><b>Pull request</b><small>for review</small></div>
+          <div class="jn-stn jn-stn--faint" style="left: 680px; top: 222px"><b>Task</b><small>backlog</small></div>
+
+          <div class="jn-ask"><b>Choose a track</b><span class="attn"><i data-mk="wait" class="attn"></i>waiting on you</span></div>
+          <div class="jn-answers" role="group" aria-label="Answers">
+            <button class="jn-ans jn-ans--primary" style="top: 111px"><span><b>Start "Fix bug"</b><small>Starts Fix bug on webshop in a new worktree</small></span><kbd>&#9166;</kbd></button>
+            <button class="jn-ans" style="top: 196px"><span><b>Accept</b><small>Adds it to the backlog as a Task</small></span><kbd>A</kbd></button>
+            <button class="jn-ans" style="top: 274px"><span><b>Dismiss</b><small>Closes the Proposal</small></span><kbd>D</kbd></button>
+          </div>
+        </section>
+
+        <section class="dz-foot">
+          <div class="dz-note">
+            <i data-i="reply"></i>I can also draft a reply to the 3 customers once the fix ships.
+            <button class="btn btn--ghost btn--sm">Yes, after the fix</button>
+          </div>
+          <a class="dz-next" href="intake.html">
+            <span class="dz-next-strips"
+              ><i data-strip="intercom" data-end="wait" data-size="s"></i><i data-strip="github" data-end="held" data-size="s"></i><i data-strip="grafana cron" data-end="wait" data-size="s"></i
+            ></span>
+            <span>Also in Intake: <b>5</b> more Proposals · <b>2</b> need a call</span>
+            <span class="dz-go">Open Intake<i data-i="chev-r"></i></span>
+          </a>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) Intake · Hercule</title>
+<link rel="icon" href="../favicon.svg">
+<script src="../console.js" defer></script>
+<style>
+  .list-pane { flex: 1 1 0; }
+  .spark { display: block; width: 100%; height: 84px; margin-top: 4px; }
+  .spark rect { fill: var(--fail); }
+  .spark rect.z { fill: var(--line); }
+  .spark .deploy { stroke: var(--accent); stroke-width: 1.25; stroke-dasharray: 3 3; }
+  .spark text { font: 500 10px var(--font-mono); fill: var(--faint); }
+  .spark text.acc { fill: var(--accent); font-weight: 650; }
+  .ans small { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; }
+  .ans small .brand { width: 11px; height: 11px; color: var(--muted); }
+
+  /* At 1280 the Proposal pane is a fixed column, not half the screen. The list
+     keeps the width it needs for its answer keys, and the sources stack: who on
+     the first line, what they reported under it. */
+  .prop-pane { flex: 0 0 424px; }
+  .prop-pane .dossier { padding: 18px 20px 32px; }
+  .prop-pane .source-row { grid-template-columns: 18px minmax(0, 1fr) auto; grid-template-areas: "b who val" ". what what"; row-gap: 3px; }
+  .prop-pane .source-row .brand { grid-area: b; }
+  .prop-pane .source-row .who { grid-area: who; }
+  .prop-pane .source-row .val { grid-area: val; }
+  .prop-pane .source-row .what { grid-area: what; }
+  .prop-pane .ans { grid-template-columns: 22px 118px minmax(0, 1fr); }
+  .prop-pane .ans small { grid-column: 2 / -1; }
+  .prop-foot { flex: none; padding: 10px 20px 12px; border-top: 1px solid var(--line); background: var(--bg); }
+  .prop-foot .sec { margin: 0 0 6px; }
+
+  /* The link to this Proposal: what lands in Slack, email, or someone's clipboard. */
+  .deeplink { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 0 0 12px; border-bottom: 1px dashed var(--line); font: 450 11.5px / 1 var(--font-mono); color: var(--faint); }
+  .deeplink .mk { width: 11px; height: 11px; }
+  .deeplink .url { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deeplink .act { margin-left: auto; flex: none; }
+  .nav-tabs .tab.icon-only span { display: none; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="webapp">
+  <header class="webbar" data-webbar></header>
+  <nav class="side" data-side="hercule" data-active="intake"></nav>
+
+  <main class="main">
+    <!-- Pane 1: Intake -->
+    <section class="pane is-focus list-pane">
+      <header class="pane-head">
+        <span class="pane-num">1</span>
+        <span class="pane-title">Intake</span>
+        <span class="pane-sub">since yesterday 18:20</span>
+        <span class="pane-actions">
+          <span class="pane-sub">triage 09:00 · next 11:00</span>
+          <button class="act" type="button"><kbd>R</kbd>Run triage now</button>
+        </span>
+      </header>
+
+      <nav class="tabs nav-tabs" aria-label="Topics">
+        <a class="tab is-on" href="#"><span>All</span><span class="n">9</span></a>
+        <a class="tab" href="#"><span>Checkout</span><span class="n">3</span></a>
+        <a class="tab" href="#"><span>Infrastructure</span><span class="n">2</span></a>
+        <a class="tab" href="#"><span>Customers</span><span class="n">2</span></a>
+        <a class="tab" href="#"><span>Releases</span><span class="n">2</span></a>
+        <span class="tab tab-hint" style="margin-left:auto" title="Previous and next topic"><kbd>[</kbd><kbd>]</kbd></span>
+        <a class="tab icon-only" href="#" title="Manage topics"><svg class="mk"><use href="#g-topic"/></svg><span>Manage topics</span></a>
+      </nav>
+
+      <div class="pane-body" data-list>
+
+        <div class="headline">
+          <span class="hl fail"><svg class="mk"><use href="#m-urgent"/></svg><b>1</b>burning</span>
+          <span class="hl"><svg class="mk"><use href="#g-proposal"/></svg><b>6</b>proposals</span>
+          <span class="hl attn"><svg class="mk"><use href="#m-decision"/></svg><b>2</b>need a call</span>
+          <span class="hl"><svg class="mk"><use href="#m-fyi"/></svg><b>3</b>FYI</span>
+          <span class="hl quiet"><b>198</b>handled quietly</span>
+        </div>
+        <div class="receipt"><b>212 events</b><span class="to">→</span><span>6 proposals</span><span>1 attached</span><span>2 offers</span><span>3 FYI</span><span class="tone-attn">2 unsure</span><span>198 no action</span></div>
+        <div class="strip" aria-hidden="true">
+          <i class="fail" style="flex:1"></i><i class="ink" style="flex:5"></i><i class="muted" style="flex:1"></i><i class="ink" style="flex:2"></i><i class="live" style="flex:3"></i><i class="attn" style="flex:2"></i><i style="flex:198"></i>
+        </div>
+
+        <div class="tier fail">Now <span class="n">1</span></div>
+        <article class="item lead is-cursor" data-row>
+          <span class="gutter"><svg class="mk" style="width:10px;height:10px"><use href="#c-caret"/></svg></span>
+          <div>
+            <div class="item-title"><svg class="mk tone-fail"><use href="#m-urgent"/></svg><span>Checkout fails for EU cards with 3-D Secure</span></div>
+            <div class="item-meta">
+              <span class="proj webshop">webshop</span>
+              <span class="topic">Checkout</span>
+              <span>first seen 08:52</span>
+              <span class="tone-fail">412 errors · 188 users</span>
+            </div>
+            <p class="item-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+            <div class="made">
+              <span class="made-label">made from</span>
+              <span class="src"><svg class="brand"><use href="#b-sentry"/></svg><b>412</b> events</span>
+              <span class="src"><svg class="brand"><use href="#b-gmail"/></svg><b>3</b> emails</span>
+              <span class="src"><svg class="brand"><use href="#b-posthog"/></svg><b>−18%</b> conversion</span>
+              <span class="src"><svg class="brand"><use href="#b-github"/></svg>deploy <b>#1289</b></span>
+            </div>
+            <div class="item-answers chips">
+              <button class="chip is-primary" type="button"><kbd>s</kbd>Start "Fix bug"</button>
+              <button class="chip" type="button"><kbd>a</kbd>Accept</button>
+              <button class="chip is-quiet" type="button"><kbd>d</kbd>Dismiss</button>
+            </div>
+          </div>
+          <div class="item-right"><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span></div>
+        </article>
+
+        <div class="tier attn">Needs a call <span class="n">2</span><span class="why">triage could not decide these</span></div>
+        <article class="item" data-row>
+          <span class="gutter">1</span>
+          <div>
+            <div class="item-title"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>App is slow on Android</span></div>
+            <div class="item-meta">
+              <span class="src"><svg class="brand"><use href="#b-intercom"/></svg>support</span>
+              <span>7 conversations since Sunday</span>
+              <span class="stamp attn">unsure</span>
+            </div>
+            <p class="item-gist">I can't tell which project this belongs to.</p>
+            <div class="item-answers chips">
+              <button class="chip" type="button"><kbd>w</kbd><span class="proj webshop">webshop</span></button>
+              <button class="chip" type="button"><kbd>p</kbd><span class="proj payments-api">payments-api</span></button>
+              <button class="chip" type="button"><kbd>b</kbd>Both</button>
+              <button class="chip is-quiet" type="button"><kbd>n</kbd>Not work</button>
+            </div>
+          </div>
+          <div class="item-right"></div>
+        </article>
+        <article class="item" data-row>
+          <span class="gutter">2</span>
+          <div>
+            <div class="item-title"><svg class="mk tone-attn"><use href="#m-paused"/></svg><span>"Label new issues" tripped its bound · 34 events held</span></div>
+            <div class="item-meta">
+              <span class="src"><svg class="brand"><use href="#b-github"/></svg>rogier</span>
+              <span>Spawn Bound 20/hour · tripped 08:14</span>
+              <span class="stamp attn">held</span>
+            </div>
+            <p class="item-gist">A bot opened 34 issues in a few minutes. The runs it would have started are held until you decide.</p>
+            <div class="item-answers chips">
+              <button class="chip" type="button"><kbd>k</kbd>Keep held</button>
+              <button class="chip" type="button"><kbd>r</kbd>Release all 34</button>
+              <button class="chip" type="button"><kbd>b</kbd>Raise bound to 50/h</button>
+            </div>
+          </div>
+          <div class="item-right"></div>
+        </article>
+
+        <div class="tier">Today <span class="n">4</span></div>
+        <article class="item" data-row>
+          <span class="gutter">3</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Nightly backup job timing out on ops-db</span></div>
+            <div class="item-meta">
+              <span class="proj ops">ops</span><span class="topic">Infrastructure</span>
+              <span class="src"><svg class="brand"><use href="#b-grafana"/></svg>ops</span><span>+ Cron</span>
+            </div>
+            <p class="item-gist">3 nights in a row; the job hits its 2h limit at 04:00.</p>
+          </div>
+          <div class="item-right"><span class="next"><kbd>s</kbd>Start "Investigate"</span><span class="prio" data-level="3"><i></i><i></i><i></i><i></i></span></div>
+        </article>
+        <article class="item" data-row>
+          <span class="gutter">4</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-offer"/></svg><span>Draft a reply to Marta at Brightline</span></div>
+            <div class="item-meta">
+              <span class="src"><svg class="brand"><use href="#b-gmail"/></svg>rogier@personal</span><span class="topic">Customers</span><span class="stamp">offer</span>
+            </div>
+            <p class="item-gist">Asks for invoice INV-2291 in the company name, not hers.</p>
+          </div>
+          <div class="item-right"><span class="next"><kbd>n</kbd>Not now</span><span class="next"><kbd>r</kbd>Draft reply</span></div>
+        </article>
+        <article class="item" data-row>
+          <span class="gutter">5</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Stripe webhook retries rising</span></div>
+            <div class="item-meta">
+              <span class="proj payments-api">payments-api</span><span class="topic">Checkout</span>
+              <span class="src"><svg class="brand"><use href="#b-stripe"/></svg>live</span><span>+ Sentry</span>
+            </div>
+          </div>
+          <div class="item-right"><span class="next"><kbd>s</kbd>Start "Investigate"</span><span class="prio" data-level="2"><i></i><i></i><i></i><i></i></span></div>
+        </article>
+        <article class="item" data-row>
+          <span class="gutter">6</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-offer"/></svg><span>Merge 4 dependency bumps</span></div>
+            <div class="item-meta">
+              <span class="src"><svg class="brand"><use href="#b-github"/></svg>rogier</span><span class="topic">Releases</span><span class="tone-ok">all green · patch versions only</span>
+            </div>
+          </div>
+          <div class="item-right"><span class="next"><kbd>v</kbd>Review first</span><span class="next"><kbd>m</kbd>Merge all 4</span></div>
+        </article>
+
+        <div class="tier">When you can <span class="n">2</span></div>
+        <article class="item" data-row>
+          <span class="gutter">7</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-proposal"/></svg><span>SSL certificate for status.acme.dev expires in 12 days</span></div>
+            <div class="item-meta"><span class="proj ops">ops</span><span class="topic">Infrastructure</span><span class="src">Cron · schedules</span></div>
+          </div>
+          <div class="item-right"><span class="next"><kbd>s</kbd>Start "Fix bug"</span><span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span></div>
+        </article>
+        <article class="item" data-row>
+          <span class="gutter">8</span>
+          <div>
+            <div class="item-title"><svg class="mk"><use href="#g-proposal"/></svg><span>Add iDEAL as a payment method</span></div>
+            <div class="item-meta"><span class="proj webshop">webshop</span><span class="topic">Checkout</span><span class="src"><svg class="brand"><use href="#b-intercom"/></svg>support · 5 requests</span></div>
+          </div>
+          <div class="item-right"><span class="next"><kbd>a</kbd>Accept</span><span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span></div>
+        </article>
+
+        <div class="tier">Also <span class="why">no call needed</span></div>
+        <div class="fold"><span class="gutter"><svg class="mk" style="margin:0"><use href="#c-right"/></svg></span><span><svg class="mk tone-idle"><use href="#g-task"/></svg><b>1 attached</b> · 2 new Sentry events joined Task "Cart total rounding on discounts"</span><span class="end">known</span></div>
+        <div class="fold"><span class="gutter"><svg class="mk" style="margin:0"><use href="#c-right"/></svg></span><span><svg class="mk tone-idle"><use href="#m-fyi"/></svg><b>3 FYI</b> · payments-api v2.14.0 published · sign-ups +9% week over week · Stripe payout €18,240 Thursday</span><span class="end">FYI</span></div>
+
+        <div class="tier">What came in <span class="why">since yesterday 18:20 · one cell per hour</span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-sentry"/></svg>Sentry · webshop-prod</span><span class="cnt">131</span><span class="heat"><i class="f3"></i><i class="f2"></i><i class="f2"></i><i class="f1"></i><i class="f1"></i><i></i><i></i><i></i><i></i><i class="f1"></i><i class="f1"></i><i class="f2"></i><i class="f3"></i><i class="f3"></i><i class="f3"></i><i class="f2"></i></span><span class="out"><span class="stamp">→ proposal</span><span class="stamp quiet">1 attached</span></span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-github"/></svg>GitHub · rogier</span><span class="cnt">38</span><span class="heat"><i></i><i class="h1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h3"></i><i class="h1"></i><i></i></span><span class="out"><span class="stamp">→ offer</span><span class="stamp attn">34 held</span></span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-gmail"/></svg>Gmail · rogier@personal</span><span class="cnt">17</span><span class="heat"><i class="h1"></i><i class="h1"></i><i class="h1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i class="h2"></i><i class="h1"></i></span><span class="out"><span class="stamp">→ proposal</span><span class="stamp">→ offer</span></span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-stripe"/></svg>Stripe · live</span><span class="cnt">12</span><span class="heat"><i></i><i class="h1"></i><i></i><i></i><i class="h1"></i><i></i><i></i><i></i><i class="h1"></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i></i><i class="h1"></i><i></i></span><span class="out"><span class="stamp">→ proposal</span><span class="stamp quiet">FYI</span></span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-intercom"/></svg>Intercom · support</span><span class="cnt">9</span><span class="heat"><i class="h1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i class="h2"></i><i></i></span><span class="out"><span class="stamp attn">unsure</span><span class="stamp">→ proposal</span></span></div>
+        <div class="came"><span></span><span class="src"><svg class="brand"><use href="#b-posthog"/></svg>PostHog · webshop</span><span class="cnt">3</span><span class="heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h1"></i><i></i><i class="h1"></i><i></i></span><span class="out"><span class="stamp quiet">part of lead</span><span class="stamp quiet">FYI</span></span></div>
+        <div class="came" style="margin-bottom:24px"><span></span><span class="src"><svg class="brand"><use href="#b-grafana"/></svg>Grafana · ops</span><span class="cnt">2</span><span class="heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h1"></i><i class="h1"></i><i></i><i></i><i></i><i></i><i></i></span><span class="out"><span class="stamp">→ proposal</span></span></div>
+      </div>
+    </section>
+
+    <!-- Pane 2: the Proposal under the cursor -->
+    <section class="pane prop-pane">
+      <header class="pane-head">
+        <span class="pane-num">2</span>
+        <span class="pane-title">Proposal</span>
+        <span class="pane-actions">
+          <button class="act" type="button"><kbd>⇧ C</kbd>Copy link</button>
+          <button class="act" type="button"><kbd>⏎</kbd>Open</button>
+        </span>
+      </header>
+      <div class="pane-body">
+        <div class="dossier">
+          <div class="deeplink"><svg class="mk"><use href="#g-web"/></svg><span class="url">hercule.home.arpa/proposals/pr_7kq2</span></div>
+          <div class="kicker">
+            <span class="urgent"><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+            <span class="proj webshop">webshop</span>
+            <span class="topic">Checkout</span>
+            <span>first seen 08:52</span>
+          </div>
+          <h2>Checkout fails for EU cards with 3-D Secure</h2>
+          <p class="lede">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+          <div class="sec" style="margin-top:20px">Made from <span class="n">4 sources</span></div>
+          <div class="source-row"><svg class="brand"><use href="#b-sentry"/></svg><span class="who">Sentry · webshop-prod</span><span class="what"><code>PaymentError: authentication_required</code></span><span class="val tone-fail">412 · 188 users</span></div>
+          <div class="source-row"><svg class="brand"><use href="#b-gmail"/></svg><span class="who">Gmail · rogier@personal</span><span class="what">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span><span class="val">3 emails</span></div>
+          <div class="source-row"><svg class="brand"><use href="#b-posthog"/></svg><span class="who">PostHog · webshop</span><span class="what">Checkout conversion, EU only, since 14:10 yesterday</span><span class="val tone-fail">−18%</span></div>
+          <div class="source-row"><svg class="brand"><use href="#b-github"/></svg><span class="who">GitHub · rogier/webshop</span><span class="what">Deploy #1289 at 14:02 yesterday: "Upgrade Stripe SDK to v14"</span><span class="val tone-accent">#1289</span></div>
+
+          <div class="sec" style="margin-top:20px">Errors per hour <span class="n">since 10:00 yesterday</span></div>
+          <svg class="spark" viewBox="0 0 480 96" preserveAspectRatio="none" aria-label="Payment errors per hour, starting at deploy 1289">
+            <line class="deploy" x1="81" y1="4" x2="81" y2="80"/>
+            <text class="acc" x="86" y="12">#1289 14:02</text>
+            <rect class="z" x="3" y="76" width="14" height="2" rx="1"/><rect class="z" x="23" y="76" width="14" height="2" rx="1"/><rect class="z" x="43" y="76" width="14" height="2" rx="1"/><rect class="z" x="63" y="76" width="14" height="2" rx="1"/><rect x="83" y="67" width="14" height="11" rx="1"/><rect x="103" y="51" width="14" height="27" rx="1"/><rect x="123" y="42" width="14" height="36" rx="1"/><rect x="143" y="33" width="14" height="45" rx="1"/><rect x="163" y="39" width="14" height="39" rx="1"/><rect x="183" y="46" width="14" height="32" rx="1"/><rect x="203" y="33" width="14" height="45" rx="1"/><rect x="223" y="49" width="14" height="29" rx="1"/><rect x="243" y="60" width="14" height="18" rx="1"/><rect x="263" y="67" width="14" height="11" rx="1"/><rect x="283" y="73" width="14" height="5" rx="1"/><rect x="303" y="76" width="14" height="2" rx="1"/><rect x="323" y="77" width="14" height="1" rx="1"/><rect x="343" y="76" width="14" height="2" rx="1"/><rect x="363" y="74" width="14" height="4" rx="1"/><rect x="383" y="71" width="14" height="7" rx="1"/><rect x="403" y="60" width="14" height="18" rx="1"/><rect x="423" y="35" width="14" height="43" rx="1"/><rect x="443" y="16" width="14" height="62" rx="1"/><rect x="463" y="24" width="14" height="54" rx="1"/>
+            <text x="3" y="93">10:00</text><text x="183" y="93">19:00</text><text x="343" y="93">03:00</text><text x="446" y="93">09:00</text>
+          </svg>
+
+        </div>
+      </div>
+      <!-- The answer stays pinned under the evidence, so a short window never hides it. -->
+      <footer class="prop-foot">
+          <div class="sec">Answer <span class="n">what should happen?</span></div>
+          <div class="ledger">
+            <button class="ans is-primary" type="button"><kbd>s</kbd><b>Start "Fix bug"</b><span>In a new worktree of webshop</span><small><svg class="brand"><use href="#b-claude"/></svg> Claude Code · Opus 5.5 · studio-mac</small></button>
+            <button class="ans" type="button"><kbd>a</kbd><b>Accept</b><span>Adds it to the backlog as a Task</span></button>
+            <button class="ans" type="button"><kbd>d</kbd><b>Dismiss</b><span>Closes the Proposal</span></button>
+          </div>
+      </footer>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-compact data-mode="DECIDE" data-context="Now · Checkout fails for EU cards with 3-D Secure" data-keys="j k:move|s:start|a:accept|d:dismiss|⏎:open|⇧ C:copy link"></footer>
+</div>
+</body>
+</html>

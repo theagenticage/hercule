@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Office · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .office-pane { flex: 1 1 0; }
+  .scene { position: relative; flex: 1; min-height: 0; overflow: hidden;
+    background: radial-gradient(90% 70% at 50% 52%, color-mix(in oklab, var(--surface) 70%, transparent), transparent 75%), var(--bg-sunk); }
+  .scene > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* Voxels: one colour per box; the top is lit, the two sides step down. */
+  .vx .t { fill: var(--v); }
+  .vx .l { fill: color-mix(in oklab, var(--v) 80%, black); }
+  .vx .r { fill: color-mix(in oklab, var(--v) 64%, black); }
+  .vx.slab .t { stroke: var(--line); stroke-width: 1; }
+  .grid-line { stroke: var(--line-soft); stroke-width: 1; }
+  .screen { stroke: rgb(0 0 0 / 0.35); stroke-width: 0.5; }
+  .screen.working { fill: var(--live); }
+  .screen.waiting { fill: var(--attn); }
+  .screen.idle { fill: color-mix(in oklab, var(--idle) 30%, var(--bg-sunk)); }
+  .screen.off { fill: var(--bg-sunk); }
+  .led.working { fill: var(--live); } .led.waiting { fill: var(--attn); } .led.idle { fill: var(--idle); } .led.off { fill: var(--line); }
+  .code-line { stroke: color-mix(in oklab, var(--bg-sunk) 75%, transparent); stroke-width: 1.2; }
+  .glow { pointer-events: none; }
+  .flicker { animation: flicker 1.8s steps(2, jump-none) infinite; }
+  @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.74; } }
+  .bob { animation: bob 1.4s steps(2, jump-none) infinite; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @media (prefers-reduced-motion: reduce) { .flicker, .bob { animation: none; } }
+
+  .bubble rect, .bubble path { fill: var(--bg); stroke: var(--attn); stroke-width: 1.5; stroke-linejoin: round; }
+  .bubble use { color: var(--attn); }
+  .bubble.sleep rect, .bubble.sleep path { stroke: var(--line); }
+  .bubble.sleep use { color: var(--muted); }
+
+  .tag rect { fill: var(--raised); stroke: var(--line); stroke-width: 1; }
+  .tag text { font: 500 11px var(--font-mono); fill: var(--ink); }
+  .tag .m { fill: var(--faint); }
+  .tag .a { fill: var(--attn); }
+  .tag .l { fill: var(--live); }
+  .tag.name rect { fill: color-mix(in oklab, var(--bg) 88%, transparent); stroke: none; }
+  .tag.name text { font-size: 10.5px; }
+  .tag use.tone-live { color: var(--live); }
+  .tag use.tone-idle { color: var(--muted); }
+  .tag.you rect { fill: var(--accent); stroke: none; }
+  .tag.you text, .tag.you .m { fill: var(--on-accent); }
+  .cursor-floor { fill: color-mix(in oklab, var(--accent) 22%, transparent); stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+  .tag.cur rect { fill: var(--bg); stroke: var(--accent); stroke-width: 1.5; }
+  .tag.cur text { font: 560 12.5px var(--font-sans); }
+  .tag.cur .m { font: 450 11px var(--font-mono); }
+  .station { cursor: pointer; }
+  .eye { fill: color-mix(in oklab, var(--bg-sunk) 80%, black); }
+
+  .over { position: absolute; left: 18px; right: 18px; display: flex; align-items: center; gap: 12px; font: 450 11px / 1 var(--font-mono); color: var(--muted); pointer-events: none; }
+  .over.top { top: 16px; }
+  .over.top b { font: 600 13px / 1 var(--font-sans); color: var(--ink); }
+  .over .sep { color: var(--faint); }
+  .over.bottom { bottom: 14px; gap: 16px; }
+  .over.bottom span { display: inline-flex; align-items: center; gap: 6px; }
+  .over.bottom .scr { width: 12px; height: 9px; border-radius: 2px; }
+  .over.bottom .mk { width: 11px; height: 11px; }
+  .over.bottom .shirt { gap: 2px; }
+  .over.bottom .shirt i { width: 6px; height: 9px; border-radius: 1px; }
+
+  /* The detail pane: the session under the cursor, or the fleet at 10x. */
+  .det-pane { flex: 0 0 332px; }
+  .det { padding: 16px 18px 24px; }
+  .det h2 { font-size: 15px; line-height: 1.35; }
+  .det .state { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .det .ask { margin-top: 16px; padding: 12px 10px 12px 12px; border-radius: 8px; background: var(--attn-soft); }
+  .det .ask p { font-size: 13px; line-height: 1.45; }
+  .det .ask pre { margin: 8px 0 0; padding: 7px 9px; border-radius: 6px; background: var(--bg); font: 450 11px / 1.4 var(--font-mono); color: var(--ink); white-space: pre-wrap; }
+  .det .ask small { display: block; margin-top: 8px; font: 450 11px / 1.4 var(--font-mono); color: var(--muted); }
+  .det .ask .chips { margin-top: 10px; }
+  .det .kv { grid-template-columns: 76px minmax(0, 1fr); margin-top: 12px; }
+  .det .kv > dt { font: 450 11px / 18px var(--font-mono); color: var(--faint); padding: 7px 0; }
+  .det .kv > dd { font-size: 12.5px; line-height: 18px; padding: 7px 0; }
+  .det .acts { display: flex; gap: 6px; margin-top: 12px; }
+  .room-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 28px; font-size: 12.5px; }
+  .room-row + .room-row { border-top: 1px solid var(--line-soft); }
+  .room-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room-row .mk { width: 11px; height: 11px; }
+  .room-row small { font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .fleet-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 30px; gap: 10px; align-items: center; height: 25px; font: 450 11.5px / 1 var(--font-mono); color: var(--muted); }
+  .fleet-row.is-cur { color: var(--accent); }
+  .fleet-row .n { text-align: right; }
+  .fleet-row .n.cap { color: var(--attn); }
+  .fleet-row .cells { display: flex; gap: 2px; }
+  .fleet-row .cells i { width: 10px; height: 12px; border-radius: 2px; }
+  .cells .working { background: var(--live); } .cells .waiting { background: var(--attn); } .cells .idle { background: color-mix(in oklab, var(--idle) 60%, transparent); } .cells .off { box-shadow: inset 0 0 0 1px var(--line); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="threads" data-active="all"></nav>
+
+  <main class="main">
+    <section class="pane office-pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">1</span><span class="pane-title">All sessions</span><span class="pane-sub" id="pane-sub">23 live · by machine</span>
+        <span class="pane-actions">
+          <span class="seg-ctl" role="tablist" aria-label="View">
+            <button type="button" role="tab" aria-selected="false"><svg class="mk"><use href="#g-list"/></svg>List</button>
+            <button type="button" role="tab" aria-selected="true" class="is-on"><svg class="mk"><use href="#g-cube"/></svg>Office</button>
+          </span>
+          <span class="hint"><kbd>v</kbd></span>
+        </span>
+      </header>
+      <div class="scene" id="scene">
+        <svg id="office" role="img" aria-label="The office: one room per machine and one desk per session slot"></svg>
+        <div class="over top" id="summary"></div>
+        <div class="over bottom">
+          <span><i class="scr" style="background:var(--live)"></i>working</span>
+          <span><svg class="mk tone-attn"><use href="#m-decision"/></svg>waits on you</span>
+          <span><i class="scr" style="background:color-mix(in oklab, var(--idle) 30%, var(--bg-sunk));box-shadow:inset 0 0 0 1px var(--line)"></i>idle</span>
+          <span><svg class="mk tone-idle"><use href="#m-asleep"/></svg>asleep</span>
+          <span><span class="shirt" style="display:inline-flex"><i style="background:var(--project-webshop)"></i><i style="background:var(--project-payments-api)"></i><i style="background:var(--project-ops)"></i></span>shirt is the project</span>
+          <span class="sep" style="margin-left:auto">rack lights = the fleet meter</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane det-pane">
+      <header class="pane-head"><span class="pane-num">2</span><span class="pane-title" id="det-title">Thread</span><span class="pane-sub" id="det-sub"></span></header>
+      <div class="pane-body"><div class="det" id="detail"></div></div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="NAV" data-context="Office · studio-mac" data-keys="h j k l:move|⏎:open|y:allow once|v:list|esc:back"></footer>
+</div>
+
+<script>
+/*
+ * Draws the office: an isometric voxel room per machine with a desk per session
+ * slot, the assistants' lounge, and Rogier's desk. Everything uses the same colour
+ * rules as the rest of the system: a screen glows in its session's state colour,
+ * a yellow mark floats over anyone who waits on Rogier, and a shirt carries the
+ * project hue. `?state=10x` draws nine machines instead of three.
+ */
+(function () {
+  const X10 = document.documentElement.dataset.state === "10x";
+
+  // ------------------------------------------------------------------ data ---
+  const S = (title, project, state, more) => ({ title, project, state, ...more });
+  const ROOMS_NOW = [
+    { name: "studio-mac", slots: 6, cols: 3, at: [0, 0], note: "Rogier's desktop", sessions: [
+      S("Fix 3-D Secure checkout for EU cards", "webshop", "waiting", { kind: "Thread", why: "waits on you · git push", provider: "Claude Code · Opus 5.5", age: "39m",
+        ask: { text: "Run this command?", cmd: "git push -u origin fix/3ds-eu-cards", note: "Request · 09:39 · 3 files +48 -12", answers: [["y", "Allow once", true], ["a", "Always"], ["n", "Deny"]] } }),
+      S("Migrate ops dashboards", "ops", "waiting", { kind: "Thread", why: "waits on you · a question", provider: "pi · qwen3-coder", age: "48m",
+        ask: { text: "Keep the old Grafana folder?", note: "Question · 08:53", answers: [["1", "Keep", true], ["2", "Delete"]] } }),
+      S("Cart total rounding on discounts", "webshop", "working", { kind: "Thread", why: "working", provider: "Claude Code · Sonnet 5", age: "14m" }),
+      S("Sign-up funnel report", "webshop", "working", { kind: "Run · Investigate", why: "working", provider: "Claude Code · Haiku 4.5", age: "9m" }),
+      S("Release notes v2.14.0", "payments-api", "idle", { kind: "Thread", why: "idle", provider: "Claude Code · Sonnet 5", age: "2h" }),
+    ] },
+    { name: "build-box-1", slots: 8, cols: 4, at: [11.3, 0], cap: true, sessions: [
+      S("Investigate backup timeouts", "ops", "working", { kind: "Run · Investigate", why: "working", provider: "Codex · gpt-5.4", age: "6m" }),
+      S("Refactor cart totals", "webshop", "working", { kind: "Thread", why: "working", provider: "Claude Code · Sonnet 5", age: "22m" }),
+      S("Webhook retry backoff", "payments-api", "working", { kind: "Run · Fix bug", why: "working", provider: "Claude Code · Opus 5.5", age: "3m" }),
+      S("Stripe SDK v14 audit", "payments-api", "working", { kind: "Thread", why: "working", provider: "Codex · gpt-5.4", age: "31m" }),
+      S("Payout test flake", "payments-api", "working", { kind: "Run · Fix bug", why: "working", provider: "Claude Code · Sonnet 5", age: "12m" }),
+      S("Checkout copy for Germany", "webshop", "idle", { kind: "Thread", why: "idle", provider: "Claude Code · Haiku 4.5", age: "55m" }),
+      S("Payout reconciliation", "payments-api", "idle", { kind: "Thread", why: "idle", provider: "Codex · gpt-5.4", age: "40m" }),
+      S("Grafana alert rules", "ops", "idle", { kind: "Thread", why: "idle", provider: "pi · qwen3-coder", age: "1h" }),
+    ] },
+    { name: "build-box-2", slots: 8, cols: 4, at: [0, 7.7], sessions: [
+      S("Ship release v2.15", "payments-api", "waiting", { kind: "Run · Ship release", why: "waits on you · approval", provider: "Claude Code · Sonnet 5", age: "17m",
+        ask: { text: "Publish payments-api 2.15.0 to npm?", note: "Request · 09:31 · step 4 of 5", answers: [["y", "Allow once", true], ["n", "Deny"]] } }),
+      S("Cert renewal script", "ops", "working", { kind: "Thread", why: "working", provider: "Codex · gpt-5.4-mini", age: "8m" }),
+      S("Add iDEAL research", "payments-api", "idle", { kind: "Thread", why: "idle", provider: "Codex · gpt-5.4", age: "1h" }),
+    ] },
+  ];
+  // At 10x only the shape of each room matters: one letter per slot, as in the fleet meters.
+  const STATE_OF = { w: "working", a: "waiting", i: "idle" };
+  const PROJECTS = ["webshop", "payments-api", "ops"];
+  const ROOMS_10X = [
+    ["studio-mac", "aawwww"], ["build-box-1", "wwwwwiii"], ["build-box-2", "awwwwi.."],
+    ["build-box-3", "wwwwwwww"], ["build-box-4", "wwawwwi."], ["build-box-5", "wwwwii.."],
+    ["build-box-6", "awwwwwii"], ["ci-1", "wwwww..."], ["ci-2", "wwwwwwi."],
+  ].map(([name, cells], i) => ({
+    name, slots: cells.length, cols: cells.length / 2, cap: !cells.includes("."),
+    at: [(i % 3) * 14.4, Math.floor(i / 3) * 7.8],
+    sessions: [...cells].filter((c) => c !== ".").map((c, k) => S("", PROJECTS[(i * 2 + k) % 3], STATE_OF[c], {})),
+  }));
+  const ROOMS = X10 ? ROOMS_10X : ROOMS_NOW;
+  const ASSISTANTS = [
+    { name: "Ada", color: "var(--c13)", state: "working" },
+    { name: "Milo", color: "var(--c9)", state: "idle" },
+    { name: "Juno", color: "var(--c6)", state: "asleep" },
+  ].concat(X10 ? [{ name: "Vera", color: "var(--c11)", state: "idle" }] : []);
+  // Rogier's tray holds every open decision, not only those from sessions at desks.
+  const WAITING_TOTAL = X10 ? 11 : 3;
+  // Rogier's room holds the assistants' couch on the left and his own desk on the right.
+  const COUCH_W = 0.2 + ASSISTANTS.length * 1.8;
+  const HOME = { at: X10 ? [14.4, 23.4] : [14.3, 7.7], size: [COUCH_W + 6.2, 6.1] };
+
+  // Station footprint in world units, and a room's size from its grid.
+  const SX = 3.0, SY = 3.2;
+  const roomSize = (r) => [1.5 + r.cols * SX, 0.5 + Math.ceil(r.slots / r.cols) * SY];
+
+  // ------------------------------------------------------------- geometry ---
+  const scene = document.getElementById("scene");
+  const svg = document.getElementById("office");
+  const W = scene.clientWidth, H = scene.clientHeight;
+  // True isometric: the floor axes run at 30 degrees, so a unit of depth is 0.58 of a unit across.
+  const K = 0.58;
+  // Fit the unit to the pane from the corners of every floor, so the office always fills it.
+  const floors = ROOMS.map((r) => [...r.at, ...roomSize(r)]).concat([[...HOME.at, ...HOME.size]]);
+  let minD = Infinity, maxD = -Infinity, minS = Infinity, maxS = -Infinity;
+  for (const [x, y, w, d] of floors) {
+    minD = Math.min(minD, x - (y + d)); maxD = Math.max(maxD, x + w - y);
+    minS = Math.min(minS, x + y); maxS = Math.max(maxS, x + w + y + d);
+  }
+  const TOP = 56, BOTTOM = 44, LIFT = 3.4;
+  const U = Math.min((W - 48) / (maxD - minD), (H - TOP - BOTTOM) / ((maxS - minS) * K + LIFT));
+  const OX = W / 2 - ((minD + maxD) / 2) * U;
+  const OY = TOP + (H - TOP - BOTTOM - ((maxS - minS) * K + LIFT) * U) / 2 + LIFT * U - minS * K * U;
+
+  const P = (x, y, z) => [OX + (x - y) * U, OY + (x + y) * K * U - z * U];
+  const pts = (list) => list.map(([x, y, z]) => P(x, y, z).map((n) => n.toFixed(1)).join(",")).join(" ");
+  // Returns the three visible faces of a box as SVG, painted in one colour.
+  function box(x, y, z, w, d, h, color, cls = "") {
+    return `<g class="vx ${cls}" style="--v:${color}">
+      <polygon class="l" points="${pts([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + h], [x, y + d, z + h]])}"/>
+      <polygon class="r" points="${pts([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]])}"/>
+      <polygon class="t" points="${pts([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]])}"/></g>`;
+  }
+  // Returns a flat quad on the plane x = const, facing the viewer's right: a screen or a light.
+  const faceX = (x, y0, y1, z0, z1, cls) => `<polygon class="${cls}" points="${pts([[x, y0, z0], [x, y1, z0], [x, y1, z1], [x, y0, z1]])}"/>`;
+  // Returns a flat quad on the plane y = const, facing the viewer's left.
+  const faceY = (y, x0, x1, z0, z1, cls) => `<polygon class="${cls}" points="${pts([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]])}"/>`;
+  const line = (a, b, cls) => `<line class="${cls}" x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}"/>`;
+
+  const C = {
+    floor: "color-mix(in oklab, var(--surface) 55%, var(--raised))",
+    wall: "color-mix(in oklab, var(--raised) 85%, var(--ink))",
+    desk: "color-mix(in oklab, var(--c3) 20%, color-mix(in oklab, var(--raised) 80%, var(--ink)))",
+    crt: "color-mix(in oklab, var(--c7) 30%, var(--bg))",
+    skin: "color-mix(in oklab, var(--c3) 24%, var(--c7))",
+    hair: "color-mix(in oklab, var(--c8) 45%, black)",
+    chair: "color-mix(in oklab, var(--c8) 40%, var(--bg))",
+    rack: "color-mix(in oklab, var(--ink) 14%, var(--bg))",
+    rug: "color-mix(in oklab, var(--accent) 9%, var(--surface))",
+    couch: "color-mix(in oklab, var(--c4) 32%, var(--raised))",
+    leaf: "color-mix(in oklab, var(--c2) 60%, var(--bg))",
+    pot: "color-mix(in oklab, var(--c1) 30%, var(--raised))",
+  };
+  const SHIRT = { webshop: "var(--project-webshop)", "payments-api": "var(--project-payments-api)", ops: "var(--project-ops)" };
+
+  // ------------------------------------------------------------------ parts ---
+  // Returns a seated person facing the -x direction: body, arms, head and hair.
+  function person(x, y, z, shirt, arms = true) {
+    return box(x, y + 0.05, z, 0.6, 0.8, 0.72, shirt)
+      + (arms ? box(x - 0.34, y, z + 0.42, 0.42, 0.16, 0.16, shirt) + box(x - 0.34, y + 0.7, z + 0.42, 0.42, 0.16, 0.16, shirt) : "")
+      + box(x + 0.04, y + 0.12, z + 0.72, 0.54, 0.66, 0.54, C.skin)
+      + box(x + 0.1, y + 0.08, z + 1.22, 0.54, 0.74, 0.14, C.hair)
+      + box(x + 0.5, y + 0.08, z + 0.84, 0.14, 0.74, 0.4, C.hair);
+  }
+  // Returns a seated person facing the +y direction, toward the viewer: body, head, hair, and eyes when awake.
+  function lounger(x, y, z, shirt, awake) {
+    return box(x, y, z, 0.8, 0.6, 0.72, shirt)
+      + box(x + 0.07, y + 0.04, z + 0.72, 0.66, 0.54, 0.54, C.skin)
+      + box(x + 0.03, y, z + 1.22, 0.74, 0.6, 0.14, C.hair)
+      + box(x + 0.03, y, z + 0.9, 0.74, 0.14, 0.34, C.hair)
+      + (awake ? faceY(y + 0.58, x + 0.22, x + 0.32, z + 0.98, z + 1.1, "eye") + faceY(y + 0.58, x + 0.48, x + 0.58, z + 0.98, z + 1.1, "eye") : "");
+  }
+  // Returns a speech bubble holding one mark, floating at a world point.
+  function bubble(x, y, z, mark, cls = "") {
+    const [cx, cy] = P(x, y, z);
+    return `<g class="bubble ${cls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})"><g class="bob">
+      <path d="M-4 7 L0 12 L4 7"/><rect x="-10" y="-10" width="20" height="18" rx="4"/>
+      <use href="#${mark}" x="-6" y="-7" width="12" height="12"/></g></g>`;
+  }
+  const glow = (x, y, r, state) => {
+    const [gx, gy] = P(x, y, 0);
+    return `<ellipse class="glow" cx="${gx.toFixed(1)}" cy="${gy.toFixed(1)}" rx="${(r * U).toFixed(1)}" ry="${(r * K * U).toFixed(1)}" fill="url(#glow-${state})"/>`;
+  };
+  // Returns one desk: chair, desk, monitor and keyboard, and the person in it when the slot is taken.
+  function station(sx, sy, s) {
+    const state = s ? s.state : "off";
+    let g = state === "working" || state === "waiting" ? glow(sx + 1.5, sy + 1.6, 2.2, state) : "";
+    g += box(sx + 1.5, sy + 1.2, 0, 0.74, 0.9, 0.36, C.chair);
+    g += box(sx, sy + 0.4, 0, 1.15, 2.4, 0.72, C.desk);
+    g += box(sx + 0.12, sy + 0.95, 0.72, 0.5, 1.3, 0.95, C.crt);
+    g += `<g class="${state === "working" ? "flicker" : ""}">` + faceX(sx + 0.62, sy + 1.06, sy + 2.14, 0.84, 1.56, `screen ${state}`);
+    if (state === "working") {
+      [0.62, 0.84, 0.46].forEach((len, i) => {
+        const z = 1.42 - i * 0.18;
+        g += line(P(sx + 0.62, sy + 1.2, z), P(sx + 0.62, sy + 1.2 + len, z), "code-line");
+      });
+    }
+    g += `</g>` + box(sx + 0.74, sy + 1.2, 0.72, 0.28, 0.86, 0.05, C.crt);
+    if (s) {
+      g += person(sx + 1.6, sy + 1.2, 0.36, SHIRT[s.project]);
+      if (state === "waiting") g += bubble(sx + 1.9, sy + 1.6, 2.75, "m-decision");
+    }
+    return g;
+  }
+  // Returns a rack with one light per slot, the same cells in the same order as the fleet meter.
+  function rack(x, y, room) {
+    let g = box(x, y, 0, 0.8, 0.8, 2.4, C.rack);
+    for (let i = 0; i < room.slots; i++) {
+      const z = 2.18 - i * (1.95 / room.slots);
+      g += faceX(x + 0.8, y + 0.18, y + 0.62, z - 0.1, z, `led ${room.sessions[i] ? room.sessions[i].state : "off"}`);
+    }
+    return g;
+  }
+  // Returns a label in screen space above a world point, with an optional mark (id and colour class) before its text.
+  function tag(x, y, z, parts, cls = "", mark = null) {
+    const [cx, cy] = P(x, y, z);
+    const text = parts.map(([t, c]) => `<tspan class="${c || ""}">${t}</tspan>`).join("");
+    const pad = mark ? 22 : 7;
+    const w = parts.reduce((n, [t]) => n + t.length, 0) * 6.62 + pad + 7;
+    const icon = mark ? `<use class="${mark[1]}" href="#${mark[0]}" x="7" y="4" width="11" height="11"/>` : "";
+    // A label never leaves the pane, even when its point sits near the edge.
+    const tx = Math.max(8, Math.min(W - w - 8, cx - w / 2));
+    return `<g class="tag ${cls}" transform="translate(${tx.toFixed(1)},${(cy - 24).toFixed(1)})"><rect width="${w.toFixed(1)}" height="19" rx="4"/>${icon}<text x="${pad}" y="13.5">${text}</text></g>`;
+  }
+
+  // ----------------------------------------------------------------- scene ---
+  const floorsSvg = [], props = [], labels = [];
+  // Adds a room's floor slab (with a grid when asked) and its two low back walls.
+  function slab(x0, y0, w, d, grid) {
+    let g = box(x0, y0, -0.3, w, d, 0.3, C.floor, "slab");
+    if (grid) {
+      for (let gx = 1; gx < w; gx++) g += line(P(x0 + gx, y0, 0), P(x0 + gx, y0 + d, 0), "grid-line");
+      for (let gy = 1; gy < d; gy++) g += line(P(x0, y0 + gy, 0), P(x0 + w, y0 + gy, 0), "grid-line");
+    }
+    floorsSvg.push(g);
+    props.push({ key: x0 + y0 - 1, svg: box(x0, y0, 0, w, 0.18, 0.9, C.wall) + box(x0, y0, 0, 0.18, d, 0.9, C.wall) });
+  }
+
+  const stations = [];
+  ROOMS.forEach((room) => {
+    const [w, d] = roomSize(room), [x0, y0] = room.at;
+    slab(x0, y0, w, d, !X10);
+    // The rack stands by the room's front-left corner, where nothing in front hides it or its label.
+    const [rx, ry] = [x0 + 0.3, y0 + d - 1.1];
+    props.push({ key: rx + ry + 0.8, svg: rack(rx, ry, room) });
+    for (let i = 0; i < room.slots; i++) {
+      const sx = x0 + 1.5 + (i % room.cols) * SX, sy = y0 + 0.3 + Math.floor(i / room.cols) * SY;
+      const s = room.sessions[i];
+      if (s) stations.push({ sx, sy, s, room, desk: i + 1 });
+      const id = s ? ` data-station="${stations.length - 1}"` : "";
+      props.push({ key: sx + sy + 2, svg: `<g class="station"${id}>${station(sx, sy, s)}</g>` });
+    }
+    const parts = [[room.name + " "], [`${room.sessions.length}/${room.slots}`, room.cap ? "a" : "m"]];
+    if (room.cap) parts.push([" at cap", "a"]);
+    labels.push(tag(rx + 0.4, ry + 0.4, 2.95, parts));
+  });
+
+  // Rogier's room. On the left, the assistants on a couch along the back wall, with a low table and a plant.
+  {
+    const [lx, ly] = HOME.at, [lw, ld] = HOME.size;
+    slab(lx, ly, lw, ld, false);
+    floorsSvg.push(box(lx + 0.5, ly + 0.5, 0, COUCH_W + 0.4, ld - 1.0, 0.03, C.rug));
+    props.push({ key: lx + ly, svg: box(lx + 0.7, ly + 0.25, 0, COUCH_W, 0.35, 1.3, C.couch) + box(lx + 0.7, ly + 0.6, 0, COUCH_W, 1.0, 0.5, C.couch) });
+    props.push({ key: lx + ly + 5, svg: box(lx + 0.8, ly + 2.6, 0, 2.8, 1.0, 0.38, C.chair) });
+    const [ppx, ppy] = [lx + 0.9 + COUCH_W, ly + 0.5];
+    props.push({ key: ppx + ppy, svg: box(ppx, ppy, 0, 0.5, 0.5, 0.5, C.pot) + box(ppx - 0.12, ppy - 0.12, 0.5, 0.74, 0.74, 0.6, C.leaf) + box(ppx + 0.03, ppy + 0.03, 1.1, 0.44, 0.44, 0.44, C.leaf) });
+    ASSISTANTS.forEach((a, i) => {
+      const px = lx + 0.9 + i * 1.8, py = ly + 0.75;
+      let g = a.state === "working" ? glow(px + 0.4, py + 1.9, 1.5, "working") : "";
+      g += lounger(px, py, 0.5, a.color, a.state !== "asleep");
+      props.push({ key: px + py + 1, svg: g });
+      if (a.state === "working") {
+        // A laptop open on the table in front of her; the lid tilts back, so its light shows from above.
+        props.push({ key: lx + ly + 6, svg: box(px + 0.07, py + 1.95, 0.38, 0.66, 0.6, 0.05, C.crt)
+          + `<polygon class="screen working flicker" points="${pts([[px + 0.09, py + 2.55, 0.43], [px + 0.71, py + 2.55, 0.43], [px + 0.71, py + 2.8, 0.91], [px + 0.09, py + 2.8, 0.91]])}"/>` });
+      }
+      // Only the name and a state mark fit: the heads sit close, and a longer label would hide the next one.
+      const mark = { working: ["m-working", "tone-live"], idle: ["m-idle", "tone-idle"], asleep: ["m-asleep", "tone-idle"] }[a.state];
+      labels.push(tag(px + 0.4, py + 0.3, 2.1, [[a.name]], "name", mark));
+    });
+
+    // On the right, Rogier's desk: two screens, and a tray with one card per open decision.
+    const [dx, dy] = [lx + COUCH_W + 2.0, ly + 1.3];
+    floorsSvg.push(box(dx, dy, 0, 3.6, 4.4, 0.03, C.rug));
+    let g = box(dx + 2.1, dy + 1.35, 0, 0.8, 1.0, 0.38, C.chair);
+    g += box(dx + 0.5, dy + 0.3, 0, 1.3, 3.6, 0.76, C.desk);
+    g += box(dx + 0.6, dy + 0.6, 0.76, 0.5, 1.2, 1.0, C.crt) + faceX(dx + 1.1, dy + 0.7, dy + 1.7, 0.88, 1.64, "screen working");
+    g += box(dx + 0.6, dy + 2.0, 0.76, 0.5, 1.2, 1.0, C.crt) + faceX(dx + 1.1, dy + 2.1, dy + 3.1, 0.88, 1.64, "screen waiting");
+    for (let i = 0; i < Math.min(WAITING_TOTAL, 8); i++) g += box(dx + 1.25, dy + 3.25, 0.76 + i * 0.07, 0.45, 0.5, 0.05, "var(--attn)");
+    g += person(dx + 2.1, dy + 1.3, 0.38, "var(--accent)");
+    props.push({ key: dx + dy + 3, svg: g });
+    labels.push(tag(dx + 2.4, dy + 1.7, 2.9, [["You "], [`· ${WAITING_TOTAL} wait on you`, "m"]], "you"));
+  }
+
+  props.sort((a, b) => a.key - b.key);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<defs>
+      <radialGradient id="glow-working"><stop offset="0" style="stop-color:var(--live);stop-opacity:.32"/><stop offset="1" style="stop-color:var(--live);stop-opacity:0"/></radialGradient>
+      <radialGradient id="glow-waiting"><stop offset="0" style="stop-color:var(--attn);stop-opacity:.36"/><stop offset="1" style="stop-color:var(--attn);stop-opacity:0"/></radialGradient>
+    </defs>
+    ${floorsSvg.join("")}<g id="cursor-floor"></g>${props.map((p) => p.svg).join("")}
+    <g id="labels">${labels.join("")}</g><g id="cursor-tag"></g>`;
+
+  // ---------------------------------------------------------------- cursor ---
+  const taken = ROOMS.reduce((n, r) => n + r.sessions.length, 0);
+  const slots = ROOMS.reduce((n, r) => n + r.slots, 0);
+  document.getElementById("summary").innerHTML = `<b>${ROOMS.length} machines</b><span>${taken} of ${slots} desks taken</span><span class="sep">·</span><span>${ASSISTANTS.length} assistants in the lounge</span><span class="sep">·</span><span class="tone-attn">${WAITING_TOTAL} wait on you</span>`;
+  document.getElementById("pane-sub").textContent = X10 ? "140 live · by machine" : "23 live · by machine";
+
+  const detail = document.getElementById("detail");
+  const STAMP = { working: ["live", "m-working"], waiting: ["attn", "m-decision"], idle: ["quiet", "m-idle"] };
+  const TONE = { working: "tone-live", waiting: "tone-attn", idle: "tone-idle" };
+
+  function renderSessionDetail(st) {
+    const s = st.s, [tone] = STAMP[s.state];
+    document.getElementById("det-title").textContent = s.kind.startsWith("Run") ? "Run" : "Thread";
+    document.getElementById("det-sub").textContent = `${st.room.name} · desk ${st.desk}`;
+    const answers = s.ask ? s.ask.answers.map(([k, label, primary]) => `<button class="chip${primary ? " is-primary" : ""}" type="button"><kbd>${k}</kbd>${label}</button>`).join("") : "";
+    const neighbours = st.room.sessions.filter((o) => o !== s).map((o) =>
+      `<div class="room-row"><svg class="mk ${TONE[o.state]}"><use href="#${STAMP[o.state][1]}"/></svg><span>${o.title}</span><small>${o.age}</small></div>`).join("");
+    detail.innerHTML = `
+      <h2>${s.title}</h2>
+      <div class="state"><span class="stamp ${tone}">${s.why}</span><span class="proj ${s.project}">${s.project}</span></div>
+      ${s.ask ? `<div class="ask"><p>${s.ask.text}</p>${s.ask.cmd ? `<pre>${s.ask.cmd}</pre>` : ""}<small>${s.ask.note}</small><div class="chips">${answers}</div></div>` : ""}
+      <dl class="kv">
+        <dt>kind</dt><dd>${s.kind}</dd>
+        <dt>provider</dt><dd>${s.provider}</dd>
+        <dt>machine</dt><dd>${st.room.name}${st.room.note ? ` <span class="faint">· ${st.room.note}</span>` : ""}</dd>
+        <dt>${s.state === "idle" ? "idle for" : "running"}</dt><dd>${s.age}</dd>
+      </dl>
+      <div class="acts"><button class="act is-line" type="button"><kbd>⏎</kbd>Open</button><button class="act" type="button"><kbd>x</kbd>Stop</button></div>
+      <div class="sec" style="margin-top:22px">Also on ${st.room.name} <span class="n">${st.room.sessions.length - 1}</span></div>
+      ${neighbours}`;
+  }
+
+  function renderFleetDetail(room) {
+    document.getElementById("det-title").textContent = "Fleet";
+    document.getElementById("det-sub").textContent = `${ROOMS.length} machines`;
+    const rows = ROOMS.map((r) => `<div class="fleet-row${r === room ? " is-cur" : ""}"><span>${r.name}</span><span class="cells">${Array.from({ length: r.slots }, (_, i) => `<i class="${r.sessions[i] ? r.sessions[i].state : "off"}"></i>`).join("")}</span><span class="n${r.cap ? " cap" : ""}">${r.sessions.length}/${r.slots}</span></div>`).join("");
+    const waitingHere = room.sessions.filter((s) => s.state === "waiting").length;
+    detail.innerHTML = `
+      <h2>${room.name}</h2>
+      <div class="state">${room.cap ? `<span class="stamp attn">at cap · new sessions wait</span>` : `<span class="stamp quiet">${room.slots - room.sessions.length} desks free</span>`}${waitingHere ? `<span class="stamp attn">${waitingHere} waits on you</span>` : ""}</div>
+      <div class="sec" style="margin-top:20px">Desks by machine <span class="n">${taken} of ${slots}</span></div>
+      ${rows}
+      <div class="sec" style="margin-top:20px">Across the fleet</div>
+      <div class="room-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Working</span><small>51</small></div>
+      <div class="room-row"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Wait on you</span><small>11</small></div>
+      <div class="room-row"><svg class="mk tone-idle"><use href="#m-idle"/></svg><span>Idle</span><small>78</small></div>
+      <div class="acts"><button class="act is-line" type="button"><kbd>⏎</kbd>Open ${room.name}</button><button class="act" type="button"><kbd>g f</kbd>Fleet</button></div>`;
+  }
+
+  let cur = X10 ? 1 : 0;
+  function drawCursor() {
+    const floor = document.getElementById("cursor-floor"), ctag = document.getElementById("cursor-tag");
+    const status = document.querySelector(".status .seg-context");
+    if (X10) {
+      const room = ROOMS[cur], [w, d] = roomSize(room), [x0, y0] = room.at;
+      floor.innerHTML = `<polygon class="cursor-floor" points="${pts([[x0 - 0.25, y0 - 0.25, 0.01], [x0 + w + 0.25, y0 - 0.25, 0.01], [x0 + w + 0.25, y0 + d + 0.25, 0.01], [x0 - 0.25, y0 + d + 0.25, 0.01]])}"/>`;
+      renderFleetDetail(room);
+      if (status) status.textContent = `Office · ${room.name}`;
+      return;
+    }
+    const st = stations[cur];
+    floor.innerHTML = `<polygon class="cursor-floor" points="${pts([[st.sx - 0.3, st.sy + 0.2, 0.01], [st.sx + 2.65, st.sy + 0.2, 0.01], [st.sx + 2.65, st.sy + 3.05, 0.01], [st.sx - 0.3, st.sy + 3.05, 0.01]])}"/>`;
+    const [cx, cy] = P(st.sx + 1.9, st.sy + 1.6, 3.3);
+    const w = Math.max(st.s.title.length * 6.9, (st.room.name.length + 3 + st.s.why.length) * 6.62) + 22;
+    ctag.innerHTML = `<g class="tag cur" transform="translate(${(cx - w / 2).toFixed(1)},${(cy - 50).toFixed(1)})">
+      <rect width="${w.toFixed(1)}" height="40" rx="6"/><text x="11" y="17">${st.s.title}</text><text x="11" y="32"><tspan class="m">${st.room.name} · ${st.s.why}</tspan></text></g>`;
+    renderSessionDetail(st);
+    if (status) status.textContent = `Office · ${st.room.name}`;
+  }
+  // h and l walk the desks in order; j and k jump a row.
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const n = X10 ? ROOMS.length : stations.length, row = X10 ? 3 : 2;
+    const step = { l: 1, ArrowRight: 1, h: -1, ArrowLeft: -1, j: row, ArrowDown: row, k: -row, ArrowUp: -row }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    cur = (cur + step + n) % n;
+    drawCursor();
+  });
+  svg.addEventListener("click", (e) => {
+    const g = e.target.closest("[data-station]");
+    if (g) { cur = Number(g.dataset.station); drawCursor(); }
+  });
+  // console.js renders the status line after this script runs, so the first cursor waits for it.
+  window.addEventListener("DOMContentLoaded", drawCursor);
+})();
+</script>
+</body>
+</html>

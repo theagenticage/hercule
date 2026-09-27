@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>(!) Your call · Checkout fails for EU cards · Hercule</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%235b3fc4' stroke-width='3'/%3E%3Cpath fill='%235b3fc4' d='M10.5 9h3.2v5h4.6V9h3.2v14h-3.2v-5.8h-4.6V23h-3.2z'/%3E%3Ccircle cx='26' cy='6' r='5.5' fill='%23c8401f'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      /* A link from Slack or an email lands here: one letter on the desk, no app around it.
+         The tab title and the favicon carry the state while the tab sits in the background. */
+      body {
+        display: flex;
+        flex-direction: column;
+        background: var(--sunk);
+      }
+      .topbar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 56px;
+        padding: 0 24px;
+      }
+      .topbar .logo {
+        width: 30px;
+        height: 30px;
+        transform: rotate(-8deg);
+      }
+      .topbar .crumb {
+        margin-left: 10px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .topbar .crumb b {
+        font-weight: 560;
+        color: var(--ink);
+      }
+      .topbar .more {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-ui);
+      }
+      .avatar {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        font: 650 12px var(--sans);
+        color: var(--on-ink);
+        background: var(--ink);
+      }
+      .desk {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding-bottom: 40px;
+      }
+      .opened {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 12px 0 8px;
+        margin-bottom: 14px;
+        border-radius: var(--r-pill);
+        font-size: var(--t-sm);
+        color: var(--muted);
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .opened .mk {
+        width: 15px;
+        height: 15px;
+      }
+      /* The letter sits on a small pile: the edges under it are the rest of Intake. */
+      .pile {
+        position: relative;
+        width: 820px;
+      }
+      .pile .under {
+        position: absolute;
+        left: 14px;
+        right: 14px;
+        bottom: -7px;
+        height: 30px;
+        border-radius: 0 0 var(--r-lg) var(--r-lg);
+        background: var(--raised);
+        box-shadow: var(--card-shadow);
+        opacity: 0.85;
+      }
+      .pile .under + .under {
+        left: 30px;
+        right: 30px;
+        bottom: -14px;
+        opacity: 0.6;
+      }
+      .letter {
+        z-index: 1;
+      }
+      .letter .env-body {
+        padding: 22px 30px 20px;
+      }
+      .letter .corner {
+        top: 22px;
+        right: 26px;
+      }
+      .address {
+        display: grid;
+        grid-template-columns: 38px auto;
+        gap: 3px 10px;
+        margin-bottom: 18px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .address dt {
+        font: 640 10.5px / 18px var(--narrow);
+        letter-spacing: var(--track-stamp);
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .address dd b {
+        font-weight: 560;
+        color: var(--ink);
+      }
+      .kicker {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .letter .env-title {
+        font-size: var(--t-title);
+      }
+      .gist {
+        max-width: 640px;
+        margin: 8px 0 16px;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .gist code {
+        font-size: 12.5px;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: color-mix(in oklch, var(--ink) 6%, transparent);
+      }
+      .letter .made-from {
+        max-width: 700px;
+      }
+      .letter .perf {
+        margin: 16px 0 12px;
+      }
+      .thread-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 -10px 10px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: var(--t-ui);
+        background: var(--ochre-soft);
+      }
+      .thread-note .link {
+        margin-left: auto;
+      }
+      /* The answers are the reason the page exists, so they are larger than in Intake. */
+      .letter .ledger {
+        gap: 4px;
+      }
+      .letter .ans {
+        grid-template-columns: 28px 150px minmax(0, 1fr) auto;
+        min-height: 48px;
+        margin: 0 -10px;
+        padding: 8px 12px 8px 10px;
+      }
+      .letter .ans-key {
+        width: 28px;
+        height: 28px;
+      }
+      .letter .ans-key .mk {
+        width: 15px;
+        height: 15px;
+      }
+      .letter .ans b {
+        font-size: 14px;
+      }
+      .letter .ans .d {
+        font-size: var(--t-ui);
+      }
+      .after {
+        margin-top: 30px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .after b {
+        font-weight: 560;
+        color: var(--ink);
+      }
+      /* Answered: the letter is franked. The ledger gives way to a receipt of what happened. */
+      .frank {
+        display: none;
+        position: absolute;
+        left: 390px;
+        top: 34px;
+        z-index: 3;
+        pointer-events: none;
+      }
+      .frank .rs {
+        font-size: 22px;
+        padding: 8px 12px 6px;
+        border-width: 3px;
+        border-radius: 6px;
+        --tilt: -7deg;
+      }
+      .frank .rs .mk {
+        width: 20px;
+        height: 20px;
+      }
+      .done-line {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        min-height: 48px;
+        font-size: 14px;
+      }
+      .done-line .link {
+        margin-left: auto;
+      }
+      .letter.is-answered .frank {
+        display: block;
+      }
+      .letter.is-answered .frank .rs {
+        animation: land var(--m-thunk) var(--ease-thunk) both;
+      }
+      .letter.is-answered .ledger,
+      .letter.is-answered .thread-note {
+        display: none;
+      }
+      .letter.is-answered .done-line {
+        display: flex;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <svg class="logo"><use href="#logo" /></svg>
+      <span class="wordmark">Hercule</span>
+      <span class="crumb">Intake / <b>Proposal</b></span>
+      <a class="link more">5 more in Intake<svg class="mk"><use href="#arrow-right" /></svg></a>
+      <span class="avatar" title="Rogier">R</span>
+    </header>
+
+    <main class="desk">
+      <span class="opened"><svg class="mk"><use href="#b-slack" /></svg>Opened from Slack · #ops · 09:03</span>
+
+      <div class="pile">
+        <article class="env env--urgent letter" id="letter">
+          <div class="corner">
+            <div class="stamps">
+              <span class="post post--md" data-src="sentry" data-n="412"></span>
+              <span class="post post--md" data-src="gmail" data-n="3"></span>
+              <span class="post post--md" data-src="posthog" data-n="-18%"></span>
+              <span class="post post--md" data-src="github" data-n="#1289"></span>
+            </div>
+            <span data-postmark data-waves data-top="SORTED" data-mid="09:00" data-bot="CHECKOUT"></span>
+          </div>
+          <div class="frank"><span class="rs rs--violet" id="frank"><svg class="mk"><use href="#run" /></svg>Started 09:14</span></div>
+
+          <div class="env-body">
+            <dl class="address">
+              <dt>To</dt>
+              <dd><b>Rogier</b></dd>
+              <dt>From</dt>
+              <dd>Triage · 09:00 today</dd>
+              <dt>Re</dt>
+              <dd>webshop · Checkout</dd>
+            </dl>
+            <div class="kicker">
+              <span class="rs rs--red rs--solid tilt-a"><svg class="mk"><use href="#burning" /></svg>Urgent</span>
+              <span class="bars" data-n="4"><i></i><i></i><i></i><i></i></span>
+              <span class="proj"><i class="tag" data-p="webshop"></i>webshop</span>
+              <span class="sep">·</span><span class="mono faint">first seen 08:52</span>
+            </div>
+            <h1 class="env-title">Checkout fails for EU cards with 3-D Secure</h1>
+            <p class="gist">
+              Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+              <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+            </p>
+            <dl class="made-from">
+              <dt>Sentry</dt>
+              <dd><code>PaymentError: authentication_required</code> <span class="muted">· 412 events, 188 users</span></dd>
+              <dt>Gmail</dt>
+              <dd>3 customer emails <span class="muted">· "Can't pay with my Rabobank card"</span></dd>
+              <dt>PostHog</dt>
+              <dd>Checkout conversion -18% since 14:10 yesterday <span class="muted">· EU only</span></dd>
+              <dt>GitHub</dt>
+              <dd>Deploy #1289 at 14:02 yesterday <span class="muted">· "Upgrade Stripe SDK to v14"</span></dd>
+            </dl>
+            <div class="perf"></div>
+            <div class="thread-note">
+              <i data-m="decision" class="s-attn"></i>
+              <span>Your thread on this, started 09:02, is waiting on you: approve <code>git push</code></span>
+              <a class="link">Open thread<svg class="mk"><use href="#chev-right" /></svg></a>
+            </div>
+            <div class="ledger">
+              <button class="ans ans--no" data-answer="no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Dismiss</b><span class="d">Closes the Proposal</span><kbd>D</kbd></button>
+              <button class="ans ans--ok" data-answer="ok"><span class="ans-key"><svg class="mk"><use href="#task" /></svg></span><b>Accept</b><span class="d">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans ans--go is-primary" data-answer="go"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span><b>Start "Fix bug"</b><span class="d">Starts Fix bug on webshop in a new worktree <em>· Opus 5.5 · studio-mac</em></span><kbd>⏎</kbd></button>
+            </div>
+            <div class="done-line" id="done-line">
+              <i data-m="working" class="s-live"></i>
+              <span id="done-text">Fix bug is running on studio-mac · run #412</span>
+              <a class="link">Open run<svg class="mk"><use href="#chev-right" /></svg></a>
+            </div>
+          </div>
+        </article>
+        <span class="under"></span><span class="under"></span>
+      </div>
+
+      <p class="after">
+        <span>Next on the pile:</span>
+        <i data-m="decision" class="s-attn sm"></i><b>App is slow on Android</b><span>needs a call</span>
+        <span class="sep">·</span><a class="link">Open next<kbd>J</kbd></a>
+      </p>
+    </main>
+
+    <script>
+      // Answering franks the letter and updates the tab: the title and the favicon are what you
+      // see when this tab sits among twenty others.
+      const outcomes = {
+        no: { stamp: "rs--faint", icon: "x", label: "Dismissed 09:14", mark: "cancelled", cls: "s-muted", text: "Dismissed. The Proposal is closed.", title: "Dismissed" },
+        ok: { stamp: "rs--green", icon: "task", label: "Accepted 09:14", mark: "done", cls: "s-ok", text: "Accepted as a Task in the webshop backlog.", title: "Accepted" },
+        go: { stamp: "rs--violet", icon: "run", label: "Started 09:14", mark: "working", cls: "s-live", text: "Fix bug is running on studio-mac in a new worktree.", title: "Started" },
+      };
+      const plainIcon =
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%235b3fc4' stroke-width='3'/%3E%3Cpath fill='%235b3fc4' d='M10.5 9h3.2v5h4.6V9h3.2v14h-3.2v-5.8h-4.6V23h-3.2z'/%3E%3C/svg%3E";
+      function answer(kind) {
+        const o = outcomes[kind];
+        const letter = document.getElementById("letter");
+        const frank = document.getElementById("frank");
+        frank.className = "rs " + o.stamp;
+        frank.innerHTML = '<svg class="mk"><use href="#' + o.icon + '"/></svg>' + o.label;
+        const line = document.getElementById("done-line");
+        // Before kit.js has run (the answered state on load), kit.js draws the mark itself.
+        const mark = window.postmarkIcon ? window.postmarkIcon(o.mark) : "";
+        line.querySelector("i").outerHTML = '<i data-m="' + o.mark + '" class="' + o.cls + '">' + mark + "</i>";
+        document.getElementById("done-text").textContent = o.text;
+        letter.classList.add("is-answered");
+        document.title = o.title + " · Checkout fails for EU cards · Hercule";
+        document.querySelector("link[rel=icon]").href = plainIcon;
+      }
+      document.querySelectorAll(".letter .ans").forEach((button) =>
+        button.addEventListener("click", () => setTimeout(() => answer(button.dataset.answer), 160)),
+      );
+      if (document.documentElement.dataset.state === "answered") answer("go");
+    </script>
+  </body>
+</html>

@@ -9,3 +9,6 @@ apps/runner/src/providers/codex/generated/
 
 # Markdown is authored by hand; reformatting the spec would bury real diffs.
 **/*.md
+
+# Throwaway design prototypes on prototype/* branches: hand-written HTML, never shipped.
+prototype/

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Glance · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <!-- Hercule outside its own window: the menu bar extra, the quick panel on a global
+         hotkey, native notifications and the Dock. The wallpaper and the editor are
+         drawn here only as the desktop these surfaces sit on. -->
+    <div class="desk">
+      <svg class="wallpaper" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="wp-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" class="wp-sky-top" />
+            <stop offset="0.72" class="wp-sky-mid" />
+            <stop offset="1" class="wp-sky-low" />
+          </linearGradient>
+          <linearGradient id="wp-green" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" class="wp-c-green" stop-opacity="0" />
+            <stop offset="0.3" class="wp-c-green" stop-opacity="0.95" />
+            <stop offset="1" class="wp-c-green" stop-opacity="0" />
+          </linearGradient>
+          <linearGradient id="wp-violet" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" class="wp-c-violet" stop-opacity="0" />
+            <stop offset="0.35" class="wp-c-violet" stop-opacity="0.9" />
+            <stop offset="1" class="wp-c-violet" stop-opacity="0" />
+          </linearGradient>
+          <radialGradient id="wp-sun" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" class="wp-c-amber" stop-opacity="0.9" />
+            <stop offset="1" class="wp-c-amber" stop-opacity="0" />
+          </radialGradient>
+          <filter id="wp-soft" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="26" /></filter>
+        </defs>
+        <rect width="1440" height="900" fill="url(#wp-sky)" />
+        <ellipse cx="1080" cy="760" rx="520" ry="200" fill="url(#wp-sun)" />
+        <g filter="url(#wp-soft)">
+          <path fill="url(#wp-green)" d="M-80 640C200 540 420 660 700 580S1150 440 1520 540L1520 240C1250 190 1000 330 740 290S200 250 -80 380Z" />
+          <path fill="url(#wp-violet)" d="M560 740C800 650 1000 760 1220 650S1440 580 1540 610L1540 380C1380 350 1250 460 1080 430S760 460 560 560Z" />
+          <path fill="url(#wp-green)" d="M960 600C1100 530 1250 600 1380 530S1500 500 1540 510L1540 330C1440 320 1340 390 1230 365S1060 380 960 440Z" />
+        </g>
+        <path class="wp-hill-far" d="M0 742C150 704 260 716 400 690S640 648 780 676 1030 724 1180 700 1380 664 1440 672V900H0Z" />
+        <path class="wp-hill-near" d="M0 808C200 770 340 790 520 772S820 744 980 770 1260 808 1440 780V900H0Z" />
+      </svg>
+
+      <!-- The menu bar: another app in front, Hercule's extra among the status items. -->
+      <header class="menubar">
+        <b class="mb-app">Editor</b>
+        <span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span>
+        <span class="spacer"></span>
+
+        <div class="mb-item hercule open" aria-expanded="true" aria-label="Hercule, 3 waiting on you">
+          <svg class="mb-logo"><use href="#logo" /></svg><span class="mb-count num"><i class="orb wait"></i>3</span>
+
+          <!-- The menu bar extra: what waits, what works, and how full the runners are. -->
+          <div class="mbx pop">
+            <div class="mbx-head">
+              <span class="logo"><svg><use href="#logo" /></svg>Hercule</span>
+              <span class="grow"></span>
+              <span class="faint num">23 live</span>
+              <button class="icon-btn" title="Settings"><svg class="i s14"><use href="#m-settings" /></svg></button>
+            </div>
+            <div class="mbx-pulse">
+              <span class="pulse-bar" aria-hidden="true"><i style="--n: 8" class="work"></i><i style="--n: 3" class="wait"></i><i style="--n: 12" class="idle"></i></span>
+              <span><b class="num">8</b> working · <b class="num wait-n">3</b> waiting · <b class="num">12</b> idle</span>
+            </div>
+
+            <div class="mbx-label">Waiting on you<b class="num">3</b></div>
+            <div class="mbx-ask lit wait">
+              <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+              <div class="mbx-body">
+                <div class="mbx-t"><b>Fix 3-D Secure checkout</b><span class="proj webshop">webshop</span></div>
+                <p>Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+                <div class="answers"><button class="chip-ans no">Deny</button><button class="chip-ans go">Allow once</button></div>
+              </div>
+            </div>
+            <div class="mbx-ask">
+              <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+              <div class="mbx-body">
+                <div class="mbx-t"><b>Ship release v2.15</b><span class="proj payments">payments-api</span></div>
+                <p>Publish payments-api 2.15.0 to npm?</p>
+                <div class="answers"><button class="chip-ans no">Deny</button><button class="chip-ans">Allow once</button></div>
+              </div>
+            </div>
+            <div class="mbx-ask">
+              <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+              <div class="mbx-body">
+                <div class="mbx-t"><b>Migrate ops dashboards</b><span class="proj ops">ops</span></div>
+                <p>Keep the old Grafana folder?</p>
+                <div class="answers"><button class="chip-ans">Keep</button><button class="chip-ans">Delete</button></div>
+              </div>
+            </div>
+
+            <div class="mbx-label">Working<b class="num">8</b></div>
+            <a class="mbx-row"><svg class="i s14 live"><use href="#m-working" /></svg><span class="grow">Refactor cart totals</span><span class="faint">build-box-1</span><b class="num">22m</b></a>
+            <a class="mbx-row"><svg class="i s14 live"><use href="#m-working" /></svg><span class="grow">Investigate backup timeouts</span><span class="faint">build-box-1</span><b class="num">6m</b></a>
+            <a class="mbx-row"><svg class="i s14 live"><use href="#m-working" /></svg><span class="grow">Webhook retry backoff</span><span class="faint">build-box-1</span><b class="num">3m</b></a>
+            <a class="mbx-row more"><span class="grow">5 more, and Ada on her heartbeat</span><svg class="i s14"><use href="#m-chev-r" /></svg></a>
+
+            <div class="mbx-label">Runners</div>
+            <div class="mbx-run"><span>studio-mac</span><span class="meter"><i style="--v: 83.3%"></i></span><b class="num">5/6</b></div>
+            <div class="mbx-run full"><span>build-box-1</span><span class="meter"><i style="--v: 100%"></i></span><b class="num">8/8</b><em>at cap</em></div>
+            <div class="mbx-run"><span>build-box-2</span><span class="meter"><i style="--v: 37.5%"></i></span><b class="num">3/8</b></div>
+
+            <div class="mbx-foot">
+              <a class="menu-item"><svg class="i s14"><use href="#m-bolt" /></svg>Quick answer<span class="kbd">⌥ Space</span></a>
+              <a class="menu-item"><svg class="i s14"><use href="#m-popout" /></svg>Open Hercule</a>
+            </div>
+          </div>
+        </div>
+
+        <span class="mb-item"><svg class="i"><use href="#m-waveform" /></svg></span>
+        <span class="mb-item"><svg class="i"><use href="#m-key" /></svg></span>
+        <span class="mb-item"><svg class="i"><use href="#m-link" /></svg></span>
+        <span class="mb-item"><svg class="i"><use href="#m-cmd" /></svg></span>
+        <span class="mb-item"><svg class="i"><use href="#m-clock" /></svg></span>
+        <span class="mb-item"><svg class="i"><use href="#m-machine" /></svg></span>
+        <span class="mb-item">
+          <svg class="i" viewBox="0 0 16 16"><path d="M2.5 6.2h2.2L8 3.5v9L4.7 9.8H2.5z" /><path d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.4 3.9a5.8 5.8 0 0 1 0 8.2" /></svg>
+        </span>
+        <span class="mb-item mb-batt"><span class="num">84%</span><svg viewBox="0 0 26 13" aria-hidden="true"><rect x=".75" y=".75" width="21.5" height="11.5" rx="3.2" /><rect class="fill" x="2.6" y="2.6" width="15.6" height="7.8" rx="1.6" /><path class="cap" d="M24 4.6v3.8" /></svg></span>
+        <span class="mb-item">
+          <svg class="i" viewBox="0 0 16 16"><path d="M1.8 6.3a9 9 0 0 1 12.4 0M3.9 8.5a6 6 0 0 1 8.2 0M6 10.7a3 3 0 0 1 4 0" /><circle cx="8" cy="12.9" r=".9" fill="currentColor" stroke="none" /></svg>
+        </span>
+        <span class="mb-item"><svg class="i"><use href="#m-search" /></svg></span>
+        <span class="mb-item">
+          <svg class="i" viewBox="0 0 16 16"><rect x="1.8" y="3" width="12.4" height="4.4" rx="2.2" /><rect x="1.8" y="8.6" width="12.4" height="4.4" rx="2.2" /><circle cx="11.9" cy="5.2" r="1.1" fill="currentColor" /><circle cx="4.1" cy="10.8" r="1.1" fill="currentColor" /></svg>
+        </span>
+        <span class="mb-clock num">Tue 29 Sep 09:41</span>
+      </header>
+
+      <!-- Another app, drawn as a hint: an editor on webshop. -->
+      <div class="app-hint" aria-hidden="true">
+        <div class="ah-top">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <span class="ah-title">payment.ts - webshop</span>
+        </div>
+        <div class="ah-body">
+          <div class="ah-side">
+            <i style="--w: 46%"></i><i style="--w: 62%; --in: 12px"></i><i style="--w: 70%; --in: 24px" class="on"></i><i style="--w: 74%; --in: 24px"></i><i style="--w: 58%; --in: 24px"></i><i style="--w: 50%; --in: 12px"></i><i style="--w: 66%; --in: 12px"></i><i style="--w: 40%"></i><i style="--w: 54%"></i><i style="--w: 36%"></i>
+          </div>
+          <div class="ah-code">
+            <i style="--w: 38%" class="kw"></i><i style="--w: 52%" class="kw"></i><i style="--w: 0"></i><i style="--w: 64%" class="fn"></i><i style="--w: 48%; --in: 24px"></i><i style="--w: 71%; --in: 24px" class="str"></i><i style="--w: 44%; --in: 48px" class="kw"></i><i style="--w: 57%; --in: 72px"></i><i style="--w: 8%; --in: 48px"></i><i style="--w: 66%; --in: 24px" class="fn"></i><i style="--w: 50%; --in: 48px"></i><i style="--w: 6%; --in: 24px"></i><i style="--w: 4%"></i><i style="--w: 0"></i><i style="--w: 58%" class="fn"></i><i style="--w: 73%; --in: 24px" class="str"></i><i style="--w: 46%; --in: 24px"></i><i style="--w: 61%; --in: 48px" class="kw"></i><i style="--w: 39%; --in: 48px"></i><i style="--w: 6%; --in: 24px"></i><i style="--w: 4%"></i><i style="--w: 0"></i><i style="--w: 45%" class="kw"></i><i style="--w: 68%; --in: 24px"></i><i style="--w: 52%; --in: 24px" class="str"></i><i style="--w: 4%"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- The quick panel: Option-Space from any app answers what waits, without switching. -->
+      <div class="qp pop" role="dialog" aria-label="Quick answer">
+        <div class="qp-in">
+          <svg class="qp-logo"><use href="#logo" /></svg>
+          <span class="qp-ph">Answer, ask, or jump to…</span>
+          <span class="st wait"><svg class="i"><use href="#m-decision" /></svg>3 waiting</span>
+        </div>
+        <div class="qp-lead">
+          <div class="qp-head">
+            <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+            <b>Fix 3-D Secure checkout for EU cards</b>
+            <span class="proj webshop">webshop</span>
+            <span class="grow"></span>
+            <span class="faint">asked 09:39</span>
+          </div>
+          <div class="qp-q">Run this command?<code>git push -u origin fix/3ds-eu-cards</code></div>
+          <div class="ledger">
+            <button class="ans go"><b>Allow once</b><span>Pushes the branch this one time</span><span class="kbd">⏎</span></button>
+            <button class="ans"><b>Always allow git push</b><span>Adds a Grant for webshop</span><span class="kbd">2</span></button>
+            <button class="ans"><b>Deny</b><span>The branch stays local</span><span class="kbd">3</span></button>
+          </div>
+        </div>
+        <div class="qp-next">
+          <div class="qp-row">
+            <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+            <b>Ship release v2.15</b><span class="grow">Publish payments-api 2.15.0 to npm?</span><span class="kbd">↓</span>
+          </div>
+          <div class="qp-row">
+            <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+            <b>Migrate ops dashboards</b><span class="grow">Keep the old Grafana folder?</span>
+          </div>
+        </div>
+        <div class="qp-foot">
+          <span><span class="kbd">↑↓</span>move</span>
+          <span><span class="kbd">⏎</span>answer</span>
+          <span><span class="kbd">⌘⏎</span>open in Hercule</span>
+          <span><span class="kbd">esc</span>close</span>
+          <span class="grow"></span>
+          <span class="faint"><span class="kbd">⌥ Space</span>from any app</span>
+        </div>
+      </div>
+
+      <!-- Native notifications: each carries its answers as buttons. -->
+      <div class="ntfs">
+        <div class="ntf pop">
+          <span class="ntf-icon"><svg><use href="#app-icon" /></svg><span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span></span>
+          <div class="ntf-body">
+            <div class="ntf-t"><b>Fix 3-D Secure checkout</b><span class="faint">now</span></div>
+            <p>Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+          </div>
+          <div class="ntf-acts"><button>Deny</button><button class="go">Allow once</button></div>
+        </div>
+        <div class="ntf pop">
+          <span class="ntf-icon"><svg><use href="#app-icon" /></svg><span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span></span>
+          <div class="ntf-body">
+            <div class="ntf-t"><b>Migrate ops dashboards</b><span class="faint">4m ago</span></div>
+            <p>Keep the old Grafana folder?</p>
+          </div>
+          <div class="ntf-acts"><button>Keep</button><button>Delete</button></div>
+        </div>
+        <div class="ntf pop">
+          <span class="ntf-icon"><span class="av lg work">A</span><svg class="ntf-app"><use href="#app-icon" /></svg></span>
+          <div class="ntf-body">
+            <div class="ntf-t"><b>Ada</b><span class="faint">09:00</span></div>
+            <p>Morning Rogier. One urgent thing…</p>
+          </div>
+          <div class="ntf-acts"><button>Reply</button></div>
+        </div>
+      </div>
+
+      <!-- The Dock: the badge counts only what waits on you. -->
+      <div class="os-dock">
+        <span class="d-app finder"><svg class="i"><use href="#m-folder" /></svg></span>
+        <span class="d-app web run"><svg class="i"><use href="#m-globe" /></svg></span>
+        <span class="d-app cal"><small>TUE</small><b>29</b></span>
+        <span class="d-app term run"><svg class="i"><use href="#m-terminal" /></svg></span>
+        <span class="d-app editor run"><svg class="i"><use href="#m-file" /></svg></span>
+        <i class="d-sep"></i>
+        <span class="d-app hercule run">
+          <svg><use href="#app-icon" /></svg>
+          <b class="d-badge num">3</b>
+          <span class="d-tip pop">Hercule · 3 waiting on you</span>
+        </span>
+        <span class="d-app prefs"><svg class="i"><use href="#m-settings" /></svg></span>
+      </div>
+    </div>
+  </body>
+</html>

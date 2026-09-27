@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Fix 3-D Secure checkout · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="phone">
+  <nav class="m-nav">
+    <a class="m-back" href="intake.html"><i data-i="left"></i>Office</a>
+    <span class="m-nav-t"><b>Fix 3-D Secure checkout</b><small><span class="room"></span>webshop · studio-mac · Opus 5.5</small></span>
+    <span class="end"><span class="m-btn"><i data-i="more"></i></span></span>
+  </nav>
+
+  <div class="m-body" data-glass="#composer" data-scrolled-by="360">
+    <div class="mt">
+      <div class="ts">09:02</div>
+      <div class="me"><div><div class="me-bubble">Checkout fails for EU cards that need <span class="nw">3-D Secure</span> since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div></div></div>
+      <button class="worked"><i data-i="right"></i><b>Worked for 2m 14s</b>6 files · 1 command</button>
+      <div class="prose"><p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need <span class="nw">3-D Secure</span>. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show “Card declined” instead of opening the <span class="nw">3-D Secure</span> modal.</p></div>
+      <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+      <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+      <button class="worked"><i data-i="right"></i><b>Worked for 4m 51s</b>3 files · 4 commands</button>
+      <div class="files">
+        <div class="files-head"><i data-i="diff"></i><span class="grow">3 changed files</span><span class="plus">+48</span><span class="minus">&minus;12</span></div>
+        <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">&minus;9</span></div>
+        <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">&minus;0</span></div>
+        <div class="files-row"><i data-i="file"></i><span class="grow">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">&minus;3</span></div>
+        <div class="files-foot"><i data-m="done"></i><b>24 passed</b><code>pnpm test checkout</code><span class="grow"></span><span class="faint">09:39</span></div>
+      </div>
+      <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+    </div>
+  </div>
+
+  <!-- The composer is glass: while the transcript scrolls it shrinks to a pill that still carries the Request. -->
+  <div class="m-composer" id="composer">
+    <div class="compact-pill"><i data-m="q" class="c-attn"></i><b>git push</b>is waiting on you<button class="btn btn-sm btn-accent">Allow once</button></div>
+    <div class="dock">
+      <div class="dock-head"><i data-m="q"></i><span class="grow">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span></div>
+      <div class="m-ledger">
+        <button class="m-ans is-primary"><span><b>Allow once</b><span>Runs this push; asks again next time</span></span><span class="haptic"><i data-i="haptic"></i>success tap</span></button>
+        <button class="m-ans"><span><b>Always allow git push</b><span>Adds a Grant for <em>git push</em> to this Thread</span></span></button>
+        <button class="m-ans"><span><b>Deny</b><span>Refuses the push; the agent is told why</span></span></button>
+      </div>
+    </div>
+    <div class="queued"><i data-m="queued"></i><span class="q-text">Also check the Apple Pay path</span><span class="grow"></span><span>runs next</span></div>
+    <div class="cbox">
+      <div class="cbox-main"><div class="cbox-input">Queued until the turn finishes…</div></div>
+      <div class="cbox-row">
+        <button class="sel" aria-label="Attach"><i data-i="plus"></i></button>
+        <button class="sel"><i data-i="shield"></i>auto-accept edits</button>
+        <span class="grow"></span>
+        <button class="stopbtn"><i data-i="stop"></i>Stop</button>
+        <button class="mic-big" aria-label="Hold to talk"><i data-i="mic"></i></button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

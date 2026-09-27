@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280, height=800" />
+    <!-- The tab title is an ambient signal: the waiting count first, then what this tab is doing. -->
+    <title>(3) Waiting 28m · Fix 3-D Secure checkout for EU cards · Hercule</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .topbar { gap: 6px; }
+      .crumb { margin-right: 4px; }
+      .ttabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+      .top-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+      .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 296px; }
+      .body { position: relative; min-height: 0; }
+      .body::before {
+        content: ""; position: absolute; left: 0; right: 0; top: 0; height: 18px; z-index: 2; pointer-events: none;
+        background: linear-gradient(var(--bg), transparent);
+      }
+      .tx { --tx-pad: 352px; }
+      .composer-wrap { padding: 0 20px 16px; }
+    </style>
+  </head>
+  <body class="web">
+    <aside data-rail="threads"></aside>
+    <main class="main">
+      <header class="topbar">
+        <span class="crumb">webshop /</span>
+        <div class="ttabs" role="tablist" aria-label="Threads in this workspace">
+          <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix 3-D Secure checkout for EU cards</span></a>
+          <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
+        </div>
+        <div class="top-end">
+          <div data-tideline="session" data-w="120" role="img" aria-label="Started 09:02, worked until 09:13, waiting on you for 28 minutes, one message queued"></div>
+          <button class="btn btn-sm btn-ghost"><i data-m="copy" class="xs"></i>Copy link</button>
+          <button class="icon-btn" aria-label="More thread actions"><i data-m="more"></i></button>
+        </div>
+      </header>
+
+      <div class="split">
+        <div class="body">
+          <div class="tx" data-transcript data-scrolled-by="300">
+            <div class="tx-col">
+              <div class="tx-axis" aria-hidden="true"></div>
+              <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="decision.html">Checkout fails for EU cards with 3-D Secure</a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
+
+              <div class="tx-row is-you">
+                <time>09:02</time>
+                <p class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
+              </div>
+
+              <div class="tx-row worked">
+                <time></time>
+                <button class="worked-line"><span>Worked for <b>2m 14s</b></span><i data-m="chev-right"></i><span class="faint">read 6 files · ran 1 command</span></button>
+              </div>
+
+              <div class="tx-row">
+                <time>09:04</time>
+                <div class="prose">
+                  <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+                  <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</pre>
+                </div>
+              </div>
+
+              <div class="tx-row">
+                <time>09:05</time>
+                <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+              </div>
+
+              <div class="tx-row worked">
+                <time></time>
+                <div>
+                  <button class="worked-line is-open" aria-expanded="true"><span>Worked for <b>4m 51s</b></span><i data-m="chev-right"></i><span class="faint">edited 3 files · ran 1 command</span></button>
+                  <ol class="calls">
+                    <li><i data-m="file"></i><span>Edited</span><code>src/checkout/payment.test.ts</code><span class="add">+19</span><span></span><time>09:05</time></li>
+                    <li><i data-m="command"></i><span>Ran</span><code>pnpm test checkout</code><span class="fail-n">1 failed, as expected</span><span></span><time>09:06</time></li>
+                    <li><i data-m="file"></i><span>Edited</span><code>src/checkout/payment.ts</code><span><span class="add">+21</span> <span class="del">-9</span></span><span></span><time>09:08</time></li>
+                    <li><i data-m="file"></i><span>Edited</span><code>src/checkout/3ds-modal.tsx</code><span><span class="add">+8</span> <span class="del">-3</span></span><span></span><time>09:09</time></li>
+                  </ol>
+                </div>
+              </div>
+
+              <div class="tx-row">
+                <time>09:10</time>
+                <div class="files">
+                  <div class="files-head"><i data-m="diff"></i>3 changed files<span class="add">+48</span><span class="del">-12</span><span class="acts"><button class="btn btn-sm btn-ghost">Show files</button><button class="btn btn-sm">Open diff</button></span></div>
+                  <div class="file"><span><span class="dir">src/checkout/</span>payment.ts</span><span class="add">+21</span><span class="del">-9</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span></div>
+                  <div class="file"><span><span class="dir">src/checkout/</span>payment.test.ts</span><span class="add">+19</span><span class="del">-0</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span></div>
+                  <div class="file"><span><span class="dir">src/checkout/</span>3ds-modal.tsx</span><span class="add">+8</span><span class="del">-3</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span></div>
+                </div>
+              </div>
+
+              <div class="tx-row">
+                <time>09:12</time>
+                <div><span class="test-line"><i data-m="done"></i><b>24 passed</b><span class="mono">pnpm test checkout</span></span></div>
+              </div>
+
+              <div class="tx-row">
+                <time>09:13</time>
+                <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+              </div>
+
+              <div class="tx-row waiting">
+                <time>09:13</time>
+                <div class="wait-line"><i data-m="decision"></i>Waiting on you to allow <code>git push</code><span class="t-mono">for 28m</span></div>
+              </div>
+              <div class="tx-nowrow" aria-label="Now, 09:41"><span class="nowtab">09:41</span></div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer" data-composer>
+              <div class="queued">
+                <i data-m="queued"></i>
+                <span class="queued-text">Also check the Apple Pay path</span>
+                <span class="queued-when">queued · runs next</span>
+                <button class="c-sel">Steer</button>
+                <button class="c-sel">Cancel</button>
+              </div>
+
+              <div class="dock" role="group" aria-label="Request: run a command">
+                <i data-m="decision" class="now"></i>
+                <div class="dock-title">Run a command?<span class="t-mono">asked 09:13 · 28m ago</span></div>
+                <div class="dock-full">
+                  <code class="dock-subject">git push -u origin fix/3ds-eu-cards</code>
+                  <div class="ledger">
+                    <button class="ans is-go"><span class="ans-label">Allow once</span><span class="ans-say">Runs this push now; asks again next time</span><kbd><i data-m="return" class="xs"></i></kbd></button>
+                    <button class="ans"><span class="ans-label">Always allow git push</span><span class="ans-say">Stops asking about git push in this thread</span><kbd>⌥↩</kbd></button>
+                    <button class="ans"><span class="ans-label">Deny</span><span class="ans-say">Tells the agent no; the turn goes on without it</span><kbd>esc</kbd></button>
+                  </div>
+                </div>
+                <div class="dock-short"><code class="mono">git push -u origin fix/3ds-eu-cards</code><span class="c-spacer"></span><button class="btn btn-sm btn-ink">Allow once</button><button class="btn btn-sm btn-ghost">Deny</button></div>
+              </div>
+
+              <div class="card-c">
+                <div class="c-input" role="textbox" tabindex="0" aria-label="Reply">Reply…</div>
+                <div class="c-row">
+                  <button class="icon-btn" aria-label="Attach"><i data-m="plus"></i></button>
+                  <button class="c-sel c-hide-shrunk"><i data-m="shield"></i>auto-accept edits<i data-m="chev-down" class="caret"></i></button>
+                  <button class="c-sel c-hide-shrunk" style="min-width: 84px"><i data-m="gauge"></i>High<i data-m="chev-down" class="caret"></i></button>
+                  <button class="c-pill"><i data-b="anthropic"></i>Opus 5.5</button>
+                  <span class="c-spacer"></span>
+                  <button class="icon-btn c-hide-shrunk" aria-label="Voice"><i data-m="mic"></i></button>
+                  <button class="stop-btn"><i data-m="stop"></i>Stop</button>
+                  <button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button>
+                </div>
+              </div>
+
+              <div class="lip">
+                <i data-m="worktree"></i><span>worktree · 3ds-eu-cards</span>
+                <span class="c-rule"></span>
+                <i data-m="branch"></i><span class="mono">fix/3ds-eu-cards</span>
+                <span class="c-spacer"></span>
+                <i data-m="machine"></i><span>studio-mac</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- In a browser there is no menu bar to hold what waits elsewhere, so at 1280px and wider
+             the Now column docks here. Narrower, it folds into the rail's Check-in count. -->
+        <aside class="nowcol" aria-label="Now">
+          <div class="nc-head"><span class="nowtab nc-tab">09:41</span><span class="nc-day">Tue 29 Sep</span><button class="icon-btn sm" aria-label="Fold the Now column"><i data-m="sidebar"></i></button></div>
+
+          <section class="nc-sec">
+            <div class="label">Waiting on you<span class="n">3</span></div>
+            <a class="nc-row is-here" href="session-active.html" aria-current="page">
+              <i data-m="decision" class="now"></i>
+              <b>Fix 3-D Secure checkout</b>
+              <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
+              <small><span class="proj lane-webshop">webshop</span><span class="dotsep">·</span>git push<span class="nc-here">this thread</span></small>
+            </a>
+            <a class="nc-row">
+              <i data-m="decision" class="now"></i>
+              <b>Migrate ops dashboards</b>
+              <span class="wait"><span class="wbar"><i style="width: 57%"></i></span><span class="mono">17m</span></span>
+              <small><span class="proj lane-ops">ops</span><span class="dotsep">·</span>Keep the old Grafana folder?</small>
+            </a>
+            <a class="nc-row">
+              <i data-m="decision" class="now"></i>
+              <b>Ship release v2.15</b>
+              <span class="wait"><span class="wbar"><i style="width: 20%"></i></span><span class="mono">6m</span></span>
+              <small><span class="proj lane-payments">payments-api</span><span class="dotsep">·</span>npm publish</small>
+            </a>
+            <button class="btn btn-sm nc-next">Next waiting<kbd>J</kbd></button>
+          </section>
+
+          <!-- The workspace's sessions over this hour, one lane each, on the same axis as the
+               tideline: sea while a turn runs, coral while it waits on Rogier, hollow ahead. -->
+          <section class="nc-sec">
+            <div class="label">In webshop<span class="n">09:00 to 10:00</span></div>
+            <div class="hour" role="img" aria-label="This hour in webshop: Fix 3-D Secure worked until 09:13 and has waited since; Refactor cart totals has worked since 09:19; Label new issues is paused">
+              <span class="hour-now" style="left: 68.33%"></span>
+              <div class="hl">
+                <span class="hl-name"><i data-m="decision" class="now"></i>Fix 3-D Secure</span>
+                <span class="hl-track">
+                  <i class="hs-turn" style="left: 3.33%; width: 3.84%"></i>
+                  <i class="hs-turn" style="left: 8.33%; width: 8.17%"></i>
+                  <i class="hs-turn" style="left: 17%; width: 4.67%"></i>
+                  <i class="hs-wait" style="left: 21.67%; width: 46.66%"></i>
+                  <i class="hs-queued" style="left: 72%"></i>
+                </span>
+              </div>
+              <div class="hl">
+                <span class="hl-name"><i data-m="working" class="live"></i>Refactor cart totals</span>
+                <span class="hl-track"><i class="hs-turn is-live" style="left: 31.67%; width: 36.66%"></i></span>
+              </div>
+              <div class="hl">
+                <span class="hl-name"><i data-m="paused" class="muted"></i>Label new issues<em>paused, bound tripped</em></span>
+                <span class="hl-track"><i class="hs-paused" style="left: 0; width: 68.33%"></i></span>
+              </div>
+              <div class="hour-axis"><span style="left: 0">09:00</span><span style="left: 50%">09:30</span><span style="left: 100%">10:00</span></div>
+            </div>
+          </section>
+
+          <section class="nc-sec">
+            <div class="label">Next</div>
+            <div class="nc-next-row"><i data-m="heartbeat" class="future"></i><span>Ada's heartbeat</span><time>10:00</time></div>
+            <div class="nc-next-row"><i data-m="triage" class="future"></i><span>Triage pass</span><time>11:00</time></div>
+          </section>
+
+          <div class="nc-foot"><i data-m="working" class="live"></i><span><b>8</b> working · <b>12</b> idle</span><span class="nc-cap">build-box-1 at cap</span></div>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

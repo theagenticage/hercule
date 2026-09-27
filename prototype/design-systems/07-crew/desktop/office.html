@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Office · Hercule</title>
+    <script>
+      // The Office opens as the floor; ?state=list opens the roster instead.
+      document.documentElement.dataset.view = document.documentElement.dataset.state === "list" ? "list" : "office";
+    </script>
+    <style>
+      .sum {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .sum span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .sum b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+      }
+      .sum .sum-you,
+      .sum .sum-you b {
+        color: var(--you-ink);
+      }
+
+      /* ---------- the floor ---------- */
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        background: radial-gradient(60% 55% at 50% 52%, color-mix(in oklab, var(--room-sun) 22%, transparent), transparent 72%), var(--surface);
+      }
+      html[data-view="list"] .stage,
+      html[data-view="office"] .roster {
+        display: none;
+      }
+      [data-office] {
+        position: absolute;
+        inset: 0;
+        --badge-ring: var(--room-floor);
+        --room-pot: color-mix(in oklab, var(--room-wood) 55%, oklch(0.6 0.12 42));
+      }
+      .floor {
+        position: absolute;
+        inset: 0;
+      }
+      .bx .t {
+        fill: var(--c);
+      }
+      .bx .l {
+        fill: color-mix(in oklab, var(--c) 86%, var(--room-shade));
+      }
+      .bx .r {
+        fill: color-mix(in oklab, var(--c) 72%, var(--room-shade));
+      }
+      .bx polygon {
+        stroke: color-mix(in oklab, var(--c) 80%, var(--room-shade));
+        stroke-width: 0.5;
+        stroke-linejoin: round;
+      }
+      .slab polygon {
+        stroke: none;
+      }
+      .slab .l {
+        fill: color-mix(in oklab, var(--room-floor) 78%, var(--room-shade));
+      }
+      .slab .r {
+        fill: color-mix(in oklab, var(--room-floor) 64%, var(--room-shade));
+      }
+      .planks path {
+        stroke: color-mix(in oklab, var(--room-floor) 90%, var(--room-shade));
+        stroke-width: 1;
+      }
+      .ao {
+        fill: var(--room-shade);
+        opacity: 0.05;
+      }
+      .wall-in--b {
+        fill: var(--room-wall);
+      }
+      .wall-in--s {
+        fill: color-mix(in oklab, var(--room-wall) 93%, var(--room-shade));
+      }
+      .wall-top {
+        fill: color-mix(in oklab, var(--room-wall) 72%, var(--room-shade));
+      }
+      .wall-end {
+        fill: color-mix(in oklab, var(--room-wall) 82%, var(--room-shade));
+      }
+      .skirt {
+        fill: color-mix(in oklab, var(--room-wall) 86%, var(--room-shade));
+      }
+      .skirt--s {
+        fill: color-mix(in oklab, var(--room-wall) 80%, var(--room-shade));
+      }
+      .window {
+        fill: color-mix(in oklab, var(--room-sun) 80%, var(--room-wall));
+      }
+      .window-frame {
+        fill: none;
+        stroke: var(--room-desk);
+        stroke-width: 4;
+      }
+      .mullion {
+        stroke: var(--room-desk);
+        stroke-width: 2.5;
+      }
+      .sill {
+        fill: var(--room-desk);
+      }
+      .sun {
+        fill: var(--room-sun);
+        opacity: 0.6;
+      }
+      /* lit screens only light the room when the lights are low */
+      [data-theme="studio"] .glow,
+      [data-theme="light"] .glow,
+      [data-theme="sunroom"] .glow {
+        display: none;
+      }
+      .rug-edge {
+        fill: none;
+        stroke: color-mix(in oklab, var(--ink) 14%, transparent);
+        stroke-width: 1;
+        stroke-dasharray: 3 4;
+      }
+      .stencil {
+        font-family: var(--font-ui);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        fill: color-mix(in oklab, var(--ink) 34%, transparent);
+      }
+      .stencil--you {
+        fill: var(--you-ink);
+      }
+      .wall-word {
+        font-family: var(--font-ui);
+        font-weight: 760;
+        letter-spacing: -0.02em;
+        fill: color-mix(in oklab, var(--ink) 72%, transparent);
+      }
+      .clock {
+        fill: var(--room-desk);
+        stroke: var(--room-metal);
+        stroke-width: 2.5;
+      }
+      .hand {
+        stroke: var(--ink);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+      }
+      .hand--h {
+        stroke-width: 2.6;
+      }
+      .hand-dot {
+        fill: var(--you);
+      }
+      .board {
+        fill: var(--room-desk);
+        stroke: var(--room-metal);
+        stroke-width: 2;
+      }
+      .board-date {
+        font-family: var(--font-ui);
+        font-weight: 700;
+        fill: var(--muted);
+      }
+      .note {
+        fill: oklch(var(--char-l) calc(var(--char-c) * 0.7) var(--hue));
+      }
+      .rack--light .t,
+      .rack--light .l,
+      .rack--light .r {
+        stroke-width: 0.8;
+      }
+      .slot {
+        fill: oklch(0 0 0 / 0.2);
+      }
+      .rack--light .slot {
+        fill: oklch(0 0 0 / 0.07);
+      }
+      .slot--on {
+        fill: oklch(1 0 0 / 0.08);
+      }
+      .rack--light .slot--on {
+        fill: oklch(0 0 0 / 0.12);
+      }
+      .led {
+        fill: oklch(0.6 0 0 / 0.45);
+      }
+      .led--on {
+        fill: oklch(0.84 0.16 var(--hue));
+      }
+      .hole {
+        fill: color-mix(in oklab, var(--room-wood) 55%, var(--room-shade));
+      }
+      .env {
+        fill: var(--room-desk);
+        stroke: color-mix(in oklab, var(--room-desk) 70%, var(--room-shade));
+        stroke-width: 0.6;
+      }
+      .env--you {
+        fill: var(--you);
+      }
+      .leaf {
+        fill: var(--room-plant);
+      }
+      .leaf--1 {
+        fill: color-mix(in oklab, var(--room-plant) 82%, var(--room-shade));
+      }
+      .leaf--2 {
+        fill: color-mix(in oklab, var(--room-plant) 84%, white);
+      }
+      .shadow {
+        fill: var(--room-shade);
+        opacity: 0.14;
+      }
+      .glow {
+        fill: oklch(0.85 0.12 var(--hue) / 0.34);
+        filter: blur(10px);
+      }
+      .cushion {
+        fill: var(--room-fabric);
+      }
+      .cushion--side {
+        fill: color-mix(in oklab, var(--room-fabric) 72%, var(--room-shade));
+      }
+      .screen {
+        fill: var(--room-screen);
+        stroke: var(--room-metal);
+        stroke-width: 2;
+      }
+      .screen--lit {
+        fill: oklch(0.93 0.05 var(--hue));
+      }
+      .screen--away {
+        fill: color-mix(in oklab, var(--you) 22%, var(--room-screen));
+      }
+      .screen-dot {
+        fill: var(--you);
+      }
+      .code-line {
+        fill: oklch(0.62 0.15 var(--hue) / 0.75);
+      }
+      .lid {
+        fill: color-mix(in oklab, var(--room-metal) 88%, var(--room-shade));
+      }
+      .sticker {
+        fill: var(--you);
+      }
+      .bean {
+        fill: color-mix(in oklab, var(--room-fabric) 80%, var(--room-shade));
+      }
+      .bean--top {
+        fill: var(--room-fabric);
+      }
+
+      /* ---------- labels over the floor ---------- */
+      .tags {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .tag {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 2px 8px 3px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--raised) 88%, transparent);
+        box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-soft);
+        font-size: var(--t-11);
+        line-height: 1.35;
+        white-space: nowrap;
+        pointer-events: auto;
+      }
+      .tag b {
+        font-weight: var(--w-bold);
+      }
+      .tag span {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .tag--quiet {
+        opacity: 0.85;
+      }
+      .tag--rack span.cap {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .tag--you {
+        background: var(--you-tint);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+      }
+      /* a queued colleague's question, speaking up and to the right so no bubble covers a face */
+      .tag--ask {
+        transform: translate(-18px, -100%);
+        margin-top: -6px;
+        padding: 5px 11px;
+        border-radius: 12px 12px 12px 4px;
+        background: var(--raised);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--you);
+      }
+      .tag--ask::after {
+        content: "";
+        position: absolute;
+        left: 12px;
+        bottom: -5px;
+        width: 9px;
+        height: 9px;
+        background: inherit;
+        box-shadow: 1.5px 1.5px 0 0 var(--you);
+        transform: rotate(45deg);
+        border-radius: 0 0 2px 0;
+      }
+      .tag--ask.is-first {
+        background: var(--you);
+        color: var(--face-ink);
+        box-shadow: var(--shadow-2);
+      }
+      .tag--ask.is-first::after {
+        box-shadow: none;
+      }
+      .tag--wait {
+        min-width: 24px;
+        justify-content: center;
+        padding: 3px 7px;
+        color: var(--you-ink);
+      }
+      .tag--more {
+        background: var(--you);
+        color: var(--face-ink);
+        font-weight: var(--w-bold);
+      }
+
+      /* ---------- the answer card for the head of the queue ---------- */
+      .next {
+        position: absolute;
+        left: 22px;
+        bottom: 22px;
+        width: 364px;
+        padding: 14px 14px 12px;
+        border-radius: var(--r-xl);
+        background: var(--glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+        box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+      }
+      .next-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .next-h .who-text {
+        line-height: 1.3;
+      }
+      .next-h .who-name {
+        font-size: var(--t-13);
+      }
+      .next-h .who-state {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .next-h .proj {
+        font-size: var(--t-12);
+      }
+      .next-q {
+        margin: 10px 0 12px;
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .next-q code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--sunken);
+        font-size: 12px;
+      }
+      .next-a {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .next-of {
+        font-size: var(--t-11);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+
+      /* ---------- the roster ---------- */
+      .roster {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 272px;
+        overflow: hidden;
+      }
+      .roster-main {
+        overflow: auto;
+        padding: 22px 32px 40px 36px;
+      }
+      .lane + .lane {
+        margin-top: 26px;
+      }
+      .lane-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 6px;
+        padding-left: 4px;
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+      }
+      .lane-h .faint {
+        font-weight: var(--w-regular);
+        font-size: var(--t-12);
+      }
+      .r-row {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr) 112px 150px 44px 168px;
+        align-items: center;
+        gap: 14px;
+        min-height: 56px;
+        padding: 6px 10px 6px 4px;
+        border-radius: var(--r-lg);
+      }
+      .r-row + .r-row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .r-row:hover {
+        background: var(--hover);
+      }
+      .r-main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.35;
+      }
+      .r-main b {
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-line code {
+        font-size: 11.5px;
+      }
+      .r-ask {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .r-where {
+        display: flex;
+        flex-direction: column;
+        font-size: var(--t-12);
+        color: var(--muted);
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .r-where span:last-child {
+        color: var(--faint);
+      }
+      .r-time {
+        color: var(--faint);
+        font-size: var(--t-12);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .r-act {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      .r-fold {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 52px;
+        padding: 6px 10px 6px 6px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+      }
+      .r-fold .spacer {
+        flex: 1;
+      }
+      .rail {
+        padding: 22px 22px 22px 20px;
+        box-shadow: inset 1px 0 0 var(--line-soft);
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+        overflow: hidden;
+      }
+      .rail-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .m-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 10px;
+        align-items: center;
+        font-size: var(--t-12);
+      }
+      .m-row b {
+        font-weight: var(--w-medium);
+        font-size: var(--t-13);
+      }
+      .m-row .meter {
+        grid-column: 1 / -1;
+      }
+      .m-row .meter i {
+        background: var(--ink);
+        opacity: 0.7;
+      }
+      .p-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-12);
+        color: var(--muted);
+      }
+      .p-row .proj {
+        flex: 1;
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="office"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Office</h1>
+          <div class="seg" data-seg role="group" aria-label="View">
+            <button data-view="list" aria-pressed="false"><i data-i="list" data-size="14"></i>List</button>
+            <button data-view="office" aria-pressed="true"><i data-i="office" data-size="14"></i>Office</button>
+          </div>
+          <span class="spacer"></span>
+          <div class="sum">
+            <span><i data-face="Refactor cart totals" data-pose="working" data-size="20"></i><b data-swarm="52">8</b> working</span>
+            <span class="sum-you"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b data-swarm="10">3</b> waiting on you</span>
+            <span><i data-face="Add iDEAL research" data-pose="idle" data-size="20"></i><b data-swarm="78">12</b> idle</span>
+          </div>
+          <button class="btn btn--sm"><i data-i="plus" data-size="14"></i>New thread</button>
+        </header>
+
+        <div class="stage">
+          <div data-office></div>
+          <div class="next" role="dialog" aria-label="First in your queue">
+            <div class="next-h">
+              <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="34"></i>
+              <span class="who-text"><span class="who-name">Fix 3-D Secure checkout for EU cards</span><span class="who-state"><span class="proj proj--webshop">webshop</span><span>waiting 10m</span></span></span>
+              <span class="next-of">1 of <span data-swarm="10">3</span></span>
+            </div>
+            <div class="next-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+            <div class="next-a">
+              <span class="btn btn--you btn--sm">Allow once</span>
+              <span class="btn btn--sm">Deny</span>
+              <span class="spacer"></span>
+              <a class="btn btn--ghost btn--sm" href="session-active.html">Open thread<i data-i="arrow" data-size="13"></i></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="roster">
+          <div class="roster-main">
+            <section class="lane">
+              <h2 class="lane-h">Waiting on you <b class="count count--you">3</b><span class="faint">oldest 10m</span></h2>
+              <div class="r-row">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Fix 3-D Secure checkout for EU cards</b><span class="r-line r-ask">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>studio-mac</span></span>
+                <span class="r-time">10m</span>
+                <div class="r-act"><span class="btn btn--you btn--sm">Allow once</span><span class="btn btn--sm">Deny</span></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Migrate ops dashboards</b><span class="r-line r-ask">Keep the old Grafana folder?</span></div>
+                <span class="proj proj--ops">ops</span>
+                <span class="r-where"><span>Thread · pi</span><span>studio-mac</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"><span class="btn btn--you btn--sm">Keep</span><span class="btn btn--sm">Delete</span></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ship release" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Ship release v2.15</b><span class="r-line r-ask">Publish payments-api 2.15.0 to npm?</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Run · Ship release</span><span>build-box-2</span></span>
+                <span class="r-time">2m</span>
+                <div class="r-act"><span class="btn btn--you btn--sm">Allow once</span><span class="btn btn--sm">Deny</span></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Working <b class="count">8</b></h2>
+              <div class="r-row">
+                <i data-face="Refactor cart totals" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Refactor cart totals</b><span class="r-line">Running <code>pnpm test cart</code></span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">22m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Investigate" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Investigate backup timeouts</b><span class="r-line">Reading the <code>pg_dump</code> logs on ops-db</span></div>
+                <span class="proj proj--ops">ops</span>
+                <span class="r-where"><span>Run · Investigate</span><span>build-box-1</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Fix bug" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Webhook retry backoff</b><span class="r-line">Step 2 of 4 · Write the fix</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Run · Fix bug</span><span>build-box-1</span></span>
+                <span class="r-time">3m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ada" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Ada</b><span class="r-line">Answering your backup question in Web chat</span></div>
+                <span class="r-where" style="grid-column: span 1"><span>Assistant</span></span>
+                <span class="r-where"><span>Claude Code · Sonnet 5</span><span>heartbeat 09:00</span></span>
+                <span class="r-time">now</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-fold">
+                <span class="stack"><i data-face="Write checkout e2e tests" data-pose="working" data-size="30"></i><i data-face="Payout email copy" data-pose="working" data-size="30"></i><i data-face="Rotate B2 backup keys" data-pose="working" data-size="30"></i><i data-face="Update status page copy" data-pose="working" data-size="30"></i></span>
+                <span><b style="color: var(--ink)">4 more</b> · checkout e2e tests, payout email copy, B2 backup keys, status page copy</span>
+                <span class="spacer"></span>
+                <button class="btn btn--ghost btn--sm">Show all<i data-i="chev-d" data-size="13"></i></button>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Idle <b class="count">12</b></h2>
+              <div class="r-row">
+                <i data-face="Label new issues" data-pose="paused" data-size="38"></i>
+                <div class="r-main"><b>Label new issues</b><span class="r-line">Paused: the Spawn Bound (20 per hour) tripped at 08:14</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Run · Label new issues</span><span>build-box-1</span></span>
+                <span class="r-time">1h 27m</span>
+                <div class="r-act"><a class="btn btn--sm" href="intake.html">See in Intake</a></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Add iDEAL research" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Add iDEAL research</b><span class="r-line">Finished its turn: "Three ways to add iDEAL, compared."</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Thread · Codex</span><span>build-box-2</span></span>
+                <span class="r-time">1h</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Juno" data-pose="asleep" data-size="38"></i>
+                <div class="r-main"><b>Juno</b><span class="r-line">Asleep. Discord #support is reconnecting since 09:12</span></div>
+                <span class="r-where"><span>Assistant</span></span>
+                <span class="r-where"><span>Claude Code · Haiku 4.5</span><span>idle unload</span></span>
+                <span class="r-time"></span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-fold">
+                <span class="stack"><i data-face="Milo" data-pose="idle" data-size="30"></i><i data-face="Invoice PDF layout" data-pose="idle" data-size="30"></i><i data-face="Grafana alert tuning" data-pose="idle" data-size="30"></i><i data-face="Sign-up funnel notes" data-pose="idle" data-size="30"></i><span class="stack-more">+5</span></span>
+                <span><b style="color: var(--ink)">9 more</b> · Milo and 8 threads, quiet for over an hour</span>
+                <span class="spacer"></span>
+                <button class="btn btn--ghost btn--sm">Show all<i data-i="chev-d" data-size="13"></i></button>
+              </div>
+            </section>
+          </div>
+
+          <aside class="rail">
+            <section>
+              <h2 class="section-h">Machines</h2>
+              <div class="rail-list">
+                <div class="m-row"><b>studio-mac</b><span class="muted">5 of 6</span><span class="meter"><i style="width: 83%"></i></span></div>
+                <div class="m-row"><b>build-box-1</b><span><b style="font-size: 12px">8 of 8</b> <span class="muted">· at cap</span></span><span class="meter"><i style="width: 100%"></i></span></div>
+                <div class="m-row"><b>build-box-2</b><span class="muted">3 of 8</span><span class="meter"><i style="width: 37.5%"></i></span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Projects</h2>
+              <div class="rail-list">
+                <div class="p-row"><span class="proj proj--webshop">webshop</span><span>6 live</span></div>
+                <div class="p-row"><span class="proj proj--payments">payments-api</span><span>5 live</span></div>
+                <div class="p-row"><span class="proj proj--ops">ops</span><span>4 live</span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Poses</h2>
+              <div class="rail-list">
+                <div class="p-row"><i data-face="Refactor cart totals" data-pose="working" data-size="24"></i>Working: eyes down, typing</div>
+                <div class="p-row"><i data-face="Ship release" data-pose="waiting" data-size="24"></i>Waiting on you: hand up</div>
+                <div class="p-row"><i data-face="Add iDEAL research" data-pose="idle" data-size="24"></i>Idle: looking up</div>
+                <div class="p-row"><i data-face="Juno" data-pose="asleep" data-size="24"></i>Asleep: unloaded until needed</div>
+                <div class="p-row"><i data-face="Label new issues" data-pose="paused" data-size="24"></i>Paused: held by a bound</div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+    <script src="../office.js"></script>
+  </body>
+</html>

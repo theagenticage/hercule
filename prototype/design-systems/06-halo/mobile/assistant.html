@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="status" data-status></div>
+
+      <header class="ma-head">
+        <div class="ma-switch" role="tablist" aria-label="Assistants">
+          <button role="tab" aria-selected="true"><span class="face sm working">A</span>Ada</button>
+          <button role="tab"><span class="face sm idle">M</span>Milo</button>
+          <button role="tab"><span class="face sm asleep">J</span>Juno</button>
+        </div>
+        <!-- Ada's day as a clock: midnight at the top, one tick per hourly heartbeat. Tapping it opens her memory and reminders. -->
+        <button class="ma-beat" title="Heartbeat: next at 10:00. Opens Ada's memory and reminders">
+          <span data-halo="asleep7 idle2 ink1 slot1 empty13" data-size="40" data-still aria-hidden="true"></span>
+          <span><b>10:00</b><small>next</small></span>
+        </button>
+      </header>
+      <div class="ma-sub">
+        <span class="presence working"><i data-mark="work"></i>replying to you</span>
+        <span class="faint">·</span><i data-brand="webchat"></i><span>Web chat</span><span class="faint">·</span><i data-brand="slack"></i><span>Slack DM</span>
+      </div>
+
+      <div class="transcript m-tr" data-transcript>
+        <div class="mt-col ma-col">
+          <div class="stamp">Yesterday · 22:13</div>
+          <div class="msg-me"><div>Summarize this week's Postgres newsletter for me.</div></div>
+          <div class="notice-line">
+            <i data-mark="notice"></i>
+            <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span>
+          </div>
+
+          <div class="stamp">Today</div>
+          <div class="worked quiet"><i data-mark="heartbeat"></i>2 quiet check-ins <span class="tally">07:00 · 08:00</span></div>
+
+          <div class="said"><span class="face sm working">A</span><b>Ada</b><i data-mark="heartbeat"></i><span class="faint">heartbeat · 09:00</span></div>
+          <div class="msg-agent">
+            <p>
+              Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You
+              started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can
+              draft that.
+            </p>
+            <div class="refs">
+              <a class="ref wait" href="session-active.html"><i data-mark="wait"></i>Fix 3-D Secure checkout<span class="state">waiting on you</span></a>
+              <button class="ref"><i data-mark="offer"></i>Draft the reply to Marta</button>
+            </div>
+          </div>
+
+          <div class="stamp">09:20</div>
+          <div class="msg-me"><div>Remind me Friday to renew the SSL cert for ops.</div></div>
+          <div class="said"><span class="face sm working">A</span><b>Ada</b><span class="faint">09:20</span></div>
+          <div class="msg-agent">
+            <p>Done. Reminder set for Friday 2 October, 09:00.</p>
+            <div class="remind">
+              <span class="day"><small>Fri</small><b>2</b></span>
+              <span class="t">Renew the SSL cert for ops</span>
+              <span class="w">09:00 · here and in Slack</span>
+              <span class="acts"><button class="btn sm ghost">Edit</button></span>
+            </div>
+          </div>
+
+          <div class="stamp">09:38</div>
+          <div class="msg-me"><div>What's the status of the backup job?</div></div>
+          <div class="said"><span class="face sm working">A</span><b>Ada</b><span class="faint">replying · 3m</span></div>
+          <div class="msg-agent">
+            <p>
+              Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since
+              the table <code>events</code> passed 40 GB…<span class="caret" aria-label="Ada is still writing"></span>
+            </p>
+            <div class="refs">
+              <a class="ref" href="#"><i data-mark="work"></i>Investigate backup timeouts<span class="faint">Milo · 6m</span></a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mc ma-comp" data-composer>
+        <div class="mc-card">
+          <button class="mc-plus" title="Attach"><i data-icon="plus"></i></button>
+          <textarea placeholder="Message Ada…" aria-label="Message Ada"></textarea>
+          <button class="mc-stop" title="Stop Ada's turn"><i data-icon="stop"></i></button>
+          <button class="mc-mic" title="Hold to talk"><i data-icon="mic"></i></button>
+        </div>
+      </div>
+
+      <nav class="tabbar" data-current="assistants" aria-label="Hercule"></nav>
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

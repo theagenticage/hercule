@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Connections · Settings · Hercule</title>
+<style>
+  .sum { flex: none; display: flex; align-items: flex-end; gap: 44px; padding: 26px 40px 22px; border-bottom: 1px solid var(--line-soft); }
+  .sum .n { display: flex; flex-direction: column; gap: 4px; }
+  .sum .num { font-size: var(--fs-num-m); font-weight: 600; letter-spacing: var(--track-num); line-height: 1; }
+  .sum .l { font-size: var(--fs-small); color: var(--muted); }
+  .sum .n.hold .num { color: var(--hold-text); }
+  .sum .end { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); color: var(--faint); }
+  .ctable { flex: 1; min-height: 0; overflow: auto; padding: 8px 40px 32px; }
+  .chead, .crow { display: grid; grid-template-columns: 18px minmax(0, 1fr) 150px 220px 200px 28px; align-items: center; column-gap: 16px; }
+  .chead { height: 44px; padding-top: 14px; font-size: var(--fs-small); color: var(--faint); font-weight: 500; }
+  .chead b { grid-column: 1 / 3; color: var(--ink); font-weight: 600; font-size: var(--fs-ui); display: flex; gap: 8px; align-items: baseline; }
+  .chead b .faint { font-weight: 450; }
+  .crow { height: 44px; border-top: 1px solid var(--line-soft); font-size: var(--fs-ui); }
+  .crow .b, .crow > .i { width: 15px; height: 15px; color: var(--ink); }
+  .crow .nm { font-weight: 550; white-space: nowrap; }
+  .crow .nm .faint { font-weight: 400; }
+  .crow .chip { height: 22px; }
+  .vol { display: flex; align-items: center; gap: 12px; }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; width: 142px; }
+  .spark i { flex: 1; background: color-mix(in oklab, var(--ink) 38%, transparent); border-radius: 1px; }
+  .spark i:last-child { background: var(--ink); }
+  .vol .num { width: 44px; text-align: right; font-weight: 550; }
+  .crow.is-hold { background: linear-gradient(90deg, var(--tint-hold), transparent 70%); box-shadow: inset 2px 0 0 var(--hold); margin: 0 -12px; padding: 0 12px; border-radius: 0; }
+  .crow .st { font-size: var(--fs-small); font-weight: 550; }
+  .spin { animation: spin 1.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  .consequence { display: flex; align-items: center; gap: 8px; height: 40px; padding-left: 34px; font-size: var(--fs-small); color: var(--muted); }
+  .consequence .btn { margin-left: auto; margin-right: 44px; }
+  .chead .c-vol { display: flex; justify-content: space-between; width: 142px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <aside class="side">
+    <div class="side-top">
+      <div class="tl"><i></i><i></i><i></i></div>
+      <button class="iconbtn" aria-label="Hide sidebar"><svg class="i"><use href="#i-sidebar"/></svg></button>
+      <button class="iconbtn" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+    <a class="newrow back"><svg class="i i--s"><use href="#i-arrow-l"/></svg>Settings<span class="key key--s">esc</span></a>
+    <nav class="nav side-scroll">
+      <a data-k="profile"><svg class="i i--s"><use href="#i-user"/></svg>Profile</a>
+      <a data-k="appearance"><svg class="i i--s"><use href="#i-palette"/></svg>Appearance</a>
+      <a data-k="threads"><svg class="i i--s"><use href="#i-chat"/></svg>Threads</a>
+      <a data-k="assistants"><svg class="i i--s"><use href="#i-assistant"/></svg>Assistants<span class="count">3</span></a>
+      <a data-k="connections" aria-current="page"><svg class="i i--s"><use href="#i-globe"/></svg>Connections<span class="count count--hold">1</span></a>
+      <a data-k="providers"><svg class="i i--s"><use href="#i-sparkle"/></svg>Providers<span class="count">3</span></a>
+      <a data-k="machines"><svg class="i i--s"><use href="#i-server"/></svg>Machines<span class="count">3</span></a>
+      <div class="gap"></div>
+      <a data-k="identities"><svg class="i i--s"><use href="#i-key"/></svg>Identities</a>
+      <a data-k="profiles"><svg class="i i--s"><use href="#i-shield"/></svg>Permission profiles</a>
+      <a data-k="secrets"><svg class="i i--s"><use href="#i-lock"/></svg>Secrets</a>
+      <a data-k="bounds"><svg class="i i--s"><use href="#i-gauge"/></svg>Bounds</a>
+      <a data-k="plugins"><svg class="i i--s"><use href="#i-plug"/></svg>Plugins</a>
+      <a data-k="system"><svg class="i i--s"><use href="#i-cube"/></svg>System</a>
+    </nav>
+    <div class="side-foot">
+      <div class="side-docket">
+        <div class="row1"><b>12</b> on your docket <span class="key key--s">⌥</span><span class="key key--s">Space</span></div>
+        <div class="rail rail--s">
+          <i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i>
+        </div>
+      </div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 8 working · 3 wait</span><svg class="i"><use href="#i-chev-r"/></svg></div>
+      <div class="me"><span class="avatar">R</span>Rogier</div>
+    </div>
+  </aside>
+
+
+  <main class="win-main">
+    <header class="topbar">
+      <h1>Connections</h1>
+      <div class="tools">
+        <button class="pillbtn"><svg class="i"><use href="#i-list"/></svg>Manage topics</button>
+        <button class="pillbtn"><svg class="i"><use href="#i-plus"/></svg>Add connection</button>
+      </div>
+    </header>
+
+    <div class="sum">
+      <div class="n"><span class="num">2,418</span><span class="l">events in 24h</span></div>
+      <div class="n"><span class="num">212</span><span class="l">since you checked · 18:20</span></div>
+      <div class="n"><span class="num">11</span><span class="l">connections</span></div>
+      <div class="n hold"><span class="num">1</span><span class="l">reconnecting</span></div>
+      <div class="end"><svg class="i i--s"><use href="#i-clock"/></svg>Bars are hours, 10:00 yesterday to now</div>
+    </div>
+
+    <div class="ctable">
+      <div class="chead"><b>Event sources <span class="faint">8</span></b><span>Default Topic</span><span class="c-vol"><span>24h</span></span><span>Health</span><span></span></div>
+          <div class="crow"><svg class="b"><use href="#b-github"/></svg><span class="nm">GitHub <span class="faint">· rogier</span></span><span><span class="chip">Releases</span></span><span class="vol"><span class="spark"><i style="height:17.9px"></i><i style="height:16.6px"></i><i style="height:20.4px"></i><i style="height:16.0px"></i><i style="height:19.5px"></i><i style="height:18.2px"></i><i style="height:15.8px"></i><i style="height:19.3px"></i><i style="height:15.7px"></i><i style="height:18.7px"></i><i style="height:8.9px"></i><i style="height:9.0px"></i><i style="height:10.4px"></i><i style="height:12.2px"></i><i style="height:5.2px"></i><i style="height:5.5px"></i><i style="height:6.5px"></i><i style="height:7.3px"></i><i style="height:6.3px"></i><i style="height:5.9px"></i><i style="height:7.3px"></i><i style="height:5.0px"></i><i style="height:22.0px"></i><i style="height:17.6px"></i></span><span class="num">312</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for GitHub"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-gmail"/></svg><span class="nm">Gmail <span class="faint">· rogier@personal</span></span><span><span class="chip">Customers</span></span><span class="vol"><span class="spark"><i style="height:16.4px"></i><i style="height:16.2px"></i><i style="height:17.7px"></i><i style="height:21.5px"></i><i style="height:16.7px"></i><i style="height:19.8px"></i><i style="height:20.2px"></i><i style="height:18.2px"></i><i style="height:19.5px"></i><i style="height:15.8px"></i><i style="height:8.8px"></i><i style="height:9.5px"></i><i style="height:11.5px"></i><i style="height:10.4px"></i><i style="height:5.7px"></i><i style="height:6.3px"></i><i style="height:6.0px"></i><i style="height:5.6px"></i><i style="height:6.8px"></i><i style="height:6.6px"></i><i style="height:5.5px"></i><i style="height:6.3px"></i><i style="height:19.3px"></i><i style="height:22.0px"></i></span><span class="num">188</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Gmail"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-sentry"/></svg><span class="nm">Sentry <span class="faint">· webshop-prod</span></span><span><span class="chip">Checkout</span></span><span class="vol"><span class="spark"><i style="height:1.9px"></i><i style="height:1.6px"></i><i style="height:2.0px"></i><i style="height:1.5px"></i><i style="height:1.6px"></i><i style="height:1.9px"></i><i style="height:17.5px"></i><i style="height:20.3px"></i><i style="height:16.6px"></i><i style="height:21.7px"></i><i style="height:14.3px"></i><i style="height:13.3px"></i><i style="height:14.8px"></i><i style="height:11.9px"></i><i style="height:9.5px"></i><i style="height:9.2px"></i><i style="height:9.1px"></i><i style="height:8.7px"></i><i style="height:10.0px"></i><i style="height:10.4px"></i><i style="height:8.7px"></i><i style="height:9.4px"></i><i style="height:16.8px"></i><i style="height:22.0px"></i></span><span class="num">1,406</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Sentry"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-posthog"/></svg><span class="nm">PostHog <span class="faint">· webshop</span></span><span><span class="chip">Checkout</span></span><span class="vol"><span class="spark"><i style="height:19.5px"></i><i style="height:22.0px"></i><i style="height:20.7px"></i><i style="height:16.8px"></i><i style="height:17.5px"></i><i style="height:19.6px"></i><i style="height:14.9px"></i><i style="height:18.1px"></i><i style="height:15.9px"></i><i style="height:15.6px"></i><i style="height:8.5px"></i><i style="height:11.4px"></i><i style="height:8.8px"></i><i style="height:9.3px"></i><i style="height:5.6px"></i><i style="height:6.8px"></i><i style="height:4.9px"></i><i style="height:5.8px"></i><i style="height:6.0px"></i><i style="height:6.8px"></i><i style="height:6.6px"></i><i style="height:6.7px"></i><i style="height:16.7px"></i><i style="height:17.8px"></i></span><span class="num">96</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for PostHog"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-intercom"/></svg><span class="nm">Intercom <span class="faint">· support</span></span><span><span class="chip">Customers</span></span><span class="vol"><span class="spark"><i style="height:17.5px"></i><i style="height:21.5px"></i><i style="height:22.0px"></i><i style="height:16.0px"></i><i style="height:16.2px"></i><i style="height:16.6px"></i><i style="height:16.6px"></i><i style="height:18.5px"></i><i style="height:19.3px"></i><i style="height:16.8px"></i><i style="height:8.3px"></i><i style="height:10.1px"></i><i style="height:9.9px"></i><i style="height:10.7px"></i><i style="height:7.0px"></i><i style="height:6.4px"></i><i style="height:6.0px"></i><i style="height:6.2px"></i><i style="height:6.4px"></i><i style="height:4.9px"></i><i style="height:6.9px"></i><i style="height:6.6px"></i><i style="height:21.4px"></i><i style="height:20.8px"></i></span><span class="num">61</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Intercom"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-grafana"/></svg><span class="nm">Grafana <span class="faint">· ops</span></span><span><span class="chip">Infrastructure</span></span><span class="vol"><span class="spark"><i style="height:4.5px"></i><i style="height:4.5px"></i><i style="height:3.9px"></i><i style="height:4.9px"></i><i style="height:3.9px"></i><i style="height:3.9px"></i><i style="height:4.1px"></i><i style="height:4.1px"></i><i style="height:4.4px"></i><i style="height:3.8px"></i><i style="height:3.7px"></i><i style="height:4.0px"></i><i style="height:3.9px"></i><i style="height:4.4px"></i><i style="height:3.8px"></i><i style="height:5.4px"></i><i style="height:4.9px"></i><i style="height:4.0px"></i><i style="height:21.1px"></i><i style="height:22.0px"></i><i style="height:4.4px"></i><i style="height:4.0px"></i><i style="height:5.3px"></i><i style="height:5.6px"></i></span><span class="num">44</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Grafana"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="b"><use href="#b-stripe"/></svg><span class="nm">Stripe <span class="faint">· live</span></span><span><span class="chip">Checkout</span></span><span class="vol"><span class="spark"><i style="height:18.4px"></i><i style="height:18.5px"></i><i style="height:15.6px"></i><i style="height:15.7px"></i><i style="height:17.5px"></i><i style="height:16.9px"></i><i style="height:21.1px"></i><i style="height:16.1px"></i><i style="height:15.1px"></i><i style="height:22.0px"></i><i style="height:10.6px"></i><i style="height:9.0px"></i><i style="height:10.6px"></i><i style="height:8.5px"></i><i style="height:6.0px"></i><i style="height:7.1px"></i><i style="height:6.8px"></i><i style="height:6.4px"></i><i style="height:5.4px"></i><i style="height:5.6px"></i><i style="height:5.2px"></i><i style="height:6.6px"></i><i style="height:18.9px"></i><i style="height:20.7px"></i></span><span class="num">209</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Stripe"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow"><svg class="i"><use href="#i-clock"/></svg><span class="nm">Cron <span class="faint">· schedules</span></span><span><span class="faint">No default</span></span><span class="vol"><span class="spark"><i style="height:6.1px"></i><i style="height:5.8px"></i><i style="height:20.9px"></i><i style="height:7.8px"></i><i style="height:7.4px"></i><i style="height:7.3px"></i><i style="height:7.3px"></i><i style="height:7.1px"></i><i style="height:16.6px"></i><i style="height:6.6px"></i><i style="height:6.1px"></i><i style="height:5.3px"></i><i style="height:5.3px"></i><i style="height:5.9px"></i><i style="height:16.8px"></i><i style="height:7.0px"></i><i style="height:7.7px"></i><i style="height:6.4px"></i><i style="height:21.9px"></i><i style="height:7.8px"></i><i style="height:22.0px"></i><i style="height:6.2px"></i><i style="height:5.8px"></i><i style="height:5.8px"></i></span><span class="num">102</span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More for Cron"><svg class="i"><use href="#i-more"/></svg></button></div>
+      <div class="chead"><b>Channels <span class="faint">3</span></b><span>Assistants</span><span></span><span></span><span></span></div>
+          <div class="crow crow--chan"><svg class="b"><use href="#b-slack"/></svg><span class="nm">Slack <span class="faint">· acme-hq</span></span><span><span class="muted">Ada, Milo</span></span><span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="crow crow--chan is-hold"><svg class="b"><use href="#b-discord"/></svg><span class="nm">Discord <span class="faint">· community</span></span><span><span class="muted">Juno</span></span><span></span><span class="st st--hold"><svg class="i i--s spin"><use href="#i-refresh"/></svg>reconnecting since 09:12</span><button class="iconbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button></div>
+          <div class="consequence"><svg class="m hold"><use href="#m-asleep"/></svg>Juno can't be reached on #support until Discord reconnects.<button class="btn btn--s"><svg class="i i--s"><use href="#i-refresh"/></svg>Retry now</button></div>
+          <div class="crow crow--chan"><svg class="i"><use href="#i-globe"/></svg><span class="nm">Web chat <span class="faint">· built in</span></span><span><span class="muted">Ada</span></span><span></span><span class="st st--go"><svg class="m"><use href="#m-done"/></svg>healthy</span><button class="iconbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

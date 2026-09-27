@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Proposal · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="field">
+        <i class="burn" style="--x: 50%; --y: 0%; --w: 620px; --h: 420px; --o: 0.9"></i>
+        <i class="burn" style="--x: 0%; --y: 60%; --w: 360px; --o: 0.5"></i>
+        <i class="own" style="--x: 100%; --y: 96%; --w: 420px; --o: 0.55"></i>
+      </div>
+      <div class="statusbar"><span class="sb-time">9:41</span><span class="icons"><svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg><svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M1.3 4.3a10 10 0 0 1 13.4 0"/><path d="M3.9 7.1a6.2 6.2 0 0 1 8.2 0"/><circle cx="8" cy="10.2" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="27" height="13" viewBox="0 0 27 13" aria-hidden="true"><rect x="0.5" y="0.5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="16" height="9" rx="2.4" fill="currentColor"/><path d="M25 4.3v4.4a2.3 2.3 0 0 0 0-4.4z" fill="currentColor" opacity="0.45"/></svg></span></div>
+      <div class="island"></div>
+      <div class="ph-under glass" aria-hidden="true"></div>
+
+      <section class="sheet ph-sheet full glass-strong lit burn" aria-label="Proposal">
+        <div class="grabber"></div>
+        <div class="ph-sheet-top">
+          <span class="ph-pager" aria-label="Proposal 1 of 6"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="num">1 of 6 in Intake</span>
+          <span class="spacer grow"></span>
+          <button class="ph-btn glass-thin" title="Close"><svg class="i"><use href="#m-close" /></svg></button>
+        </div>
+        <header class="lead-top">
+          <span class="st burn"><svg class="i"><use href="#m-burning" /></svg>Burning</span>
+          <span class="faint">Proposal</span>
+          <span class="spacer grow"></span>
+          <span class="faint">first seen 08:52</span>
+        </header>
+        <h1 class="lead-title">Checkout fails for EU cards with 3-D Secure</h1>
+        <div class="lead-meta">
+          <span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span>Urgent</span>
+          <span class="dot-sep"></span><span>Checkout</span>
+          <span class="dot-sep"></span><span class="proj webshop">webshop</span>
+        </div>
+        <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+        <div class="ph-made" aria-label="Made from 4 sources">
+          <div>
+            <span class="tile"><svg class="brand"><use href="#b-sentry" /></svg></span>
+            <span class="what">Sentry · 188 users<span class="mono">PaymentError: authentication_required</span></span>
+            <b>412</b>
+          </div>
+          <div>
+            <span class="tile"><svg class="brand"><use href="#b-gmail" /></svg></span>
+            <span class="what">Gmail · customers<span>"Card declined at checkout" and 2 more</span></span>
+            <b>3</b>
+          </div>
+          <div>
+            <span class="tile"><svg class="brand"><use href="#b-posthog" /></svg></span>
+            <span class="what">PostHog · conversion, EU only<span>since 14:10 yesterday</span></span>
+            <b style="color: var(--fail)">−18%</b>
+          </div>
+          <div>
+            <span class="tile"><svg class="brand"><use href="#b-github" /></svg></span>
+            <span class="what">GitHub · deploy<span>Upgrade Stripe SDK to v14 · 14:02 yesterday</span></span>
+            <b>#1289</b>
+          </div>
+        </div>
+
+        <p class="offer-note ph-offer">
+          <svg class="i s14"><use href="#m-offer" /></svg>
+          <span class="grow">I can also draft a reply to the 3 customers once the fix ships.</span>
+          <button class="chip-ans suggest">After the fix</button>
+        </p>
+
+        <div class="ph-ledger">
+          <div class="ph-plan"><svg class="brand"><use href="#b-claude" /></svg>Opus 5.5 · studio-mac · new worktree · Auto-accept edits</div>
+          <button class="ph-ans go"><b>Start "Fix bug"</b><span>Starts Fix bug on webshop in a new worktree</span><svg class="i"><use href="#m-arrow-r" /></svg></button>
+          <div class="pair">
+            <button class="ph-ans"><b>Accept</b><span>Adds a Task</span></button>
+            <button class="ph-ans"><b>Dismiss</b><span>Closes the Proposal</span></button>
+          </div>
+        </div>
+      </section>
+      <span class="haptic ph-note" style="right: 22px; top: 612px; --px: calc(100% - 32px); --py: calc(100% + 57px)"><svg class="i"><use href="#m-haptic" /></svg>success on answer · the next Proposal slides in</span>
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

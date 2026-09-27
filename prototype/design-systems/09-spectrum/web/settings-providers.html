@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Providers · Settings · Hercule</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2327241f%22%2F%3E%3Crect%20x%3D%228.6%22%20y%3D%2213.7%22%20width%3D%2214.8%22%20height%3D%224.6%22%20rx%3D%222.3%22%20fill%3D%22%23a786f9%22%2F%3E%3Crect%20x%3D%226.2%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%23fd923e%22%2F%3E%3Crect%20x%3D%2220.6%22%20y%3D%225.6%22%20width%3D%225.2%22%20height%3D%2220.8%22%20rx%3D%222.6%22%20fill%3D%22%2355d180%22%2F%3E%3Ccircle%20cx%3D%2224%22%20cy%3D%228%22%20r%3D%227.6%22%20fill%3D%22%23fdfdfb%22%20stroke%3D%22%2327241f%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(18.6%202.6)%20scale(0.9)%22%20fill%3D%22none%22%20stroke%3D%22%231d1a17%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3.9%204.2a2.15%202.15%200%201%201%203.05%201.95c-.62.33-.95.75-.95%201.4v.25%22%20stroke-width%3D%221.6%22%2F%3E%3Cpath%20d%3D%22M6%2010.1h.01%22%20stroke-width%3D%221.9%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"><link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.pset { width: 920px; margin: 0 auto; padding: 8px 0 28px; }
+.prov { padding: 18px 0 18px; }
+.prov + .prov { border-top: 1px solid var(--line-soft); }
+.pv-h { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.pv-mark { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--sh-1); flex: none; }
+.pv-mark .brand { width: 18px; height: 18px; color: var(--ink); }
+.pv-h h2 { font-size: var(--t-section); font-weight: var(--w-strong); letter-spacing: -0.01em; line-height: 1.2; }
+.pv-sub { display: flex; align-items: center; gap: 6px; font-size: var(--t-meta); color: var(--muted); margin-top: 2px; }
+.pv-sub .sep { color: var(--faint); }
+.pv-sub .st .i { color: var(--ink); }
+.use { display: grid; grid-template-columns: auto 150px; column-gap: 12px; row-gap: 5px; align-items: center; font-size: var(--t-meta); color: var(--muted); }
+.use b { color: var(--ink); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; }
+.use .meter { grid-column: 2; }
+.use .r { grid-column: 2; font-size: var(--t-fine); color: var(--faint); }
+.use.none { display: block; text-align: right; font-size: var(--t-fine); color: var(--faint); }
+.pv-grid { display: grid; grid-template-columns: 84px minmax(0, 1fr) 84px minmax(0, 1.1fr); column-gap: 14px; row-gap: 10px; align-items: center; padding-left: 50px; }
+.pv-grid .k { font-size: var(--t-meta); color: var(--muted); }
+.pv-grid .v { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.pv-grid .v.wide { grid-column: 2 / -1; }
+.pv-grid .tag { height: 24px; padding: 0 9px; font-size: var(--t-meta); color: var(--ink); }
+.pv-grid .tag.def { background: var(--ink); color: var(--bg); font-weight: var(--w-medium); gap: 6px; }
+.pv-grid .tag.def small { font-size: 10.5px; opacity: .7; font-weight: var(--w-regular); }
+.pv-grid .seg-ctl button { height: 24px; font-size: var(--t-meta); padding: 0 9px; }
+.pv-grid .seg-ctl button.na { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line); }
+.fb { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; font-size: var(--t-fine); color: var(--muted); }
+.mch { display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 8px 0 6px; border-radius: var(--r-sm); font-size: var(--t-meta); background: color-mix(in oklab, var(--ink) 6%, transparent); }
+.mch .i { color: var(--ink); }
+.mch.no { color: var(--faint); background: none; box-shadow: inset 0 0 0 1px var(--line-soft); padding-left: 9px; text-decoration: line-through; text-decoration-color: var(--line); }
+.lv { display: flex; gap: 2px; }
+.set-mark { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; background: var(--ink); color: var(--bg); }
+.lv i { width: 7px; height: 16px; border-radius: 2px; background: var(--p); }
+.lv i.mixed { background: var(--spectrum-v); }
+.pv-grid .n { font-size: var(--t-meta); color: var(--muted); margin-left: 4px; }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web" data-space="all">
+  <div class="strip" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+  <nav class="wrail" aria-label="Spaces">
+    <a class="wr-logo" title="Hercule"><svg><use href="#logo"/></svg></a>
+    <a class="wr-sp" title="All projects"><span class="sw all"></span></a>
+    <a class="wr-sp" title="webshop · 1 needs you"><span class="sw p-webshop"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="payments-api · 1 needs you"><span class="sw p-payments"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="ops · 1 needs you"><span class="sw p-ops"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <span class="wr-div"></span>
+    <a class="wr-nav" title="Intake"><svg class="i18" aria-hidden="true"><use href="#i-sun-rise"/></svg><span>Intake</span><span class="wr-n">9</span></a>
+    <a class="wr-nav" title="Tasks"><svg class="i18" aria-hidden="true"><use href="#i-layers"/></svg><span>Tasks</span></a>
+    <a class="wr-nav" title="Runs"><svg class="i18" aria-hidden="true"><use href="#i-play"/></svg><span>Runs</span></a>
+    <a class="wr-nav" title="Fleet"><svg class="i18" aria-hidden="true"><use href="#i-cube"/></svg><span>Fleet</span></a>
+    <span class="wr-div"></span>
+    <a class="wr-av" title="Ada · working"><span class="av">A</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span></a>
+    <a class="wr-av" title="Milo · idle"><span class="av">M</span></a>
+    <a class="wr-av" title="Juno · asleep"><span class="av off">J</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg></span></a>
+    <span class="grow"></span>
+    <a class="wr-nav bare" title="Notifications"><svg class="i18" aria-hidden="true"><use href="#i-bell"/></svg><span class="wr-n">5</span></a>
+    <a class="wr-nav bare on" title="Settings"><svg class="i18" aria-hidden="true"><use href="#i-gear"/></svg></a>
+    <a class="wr-me" title="Rogier">R</a>
+  </nav>
+  <aside class="wlist">
+    <div class="space-head"><span class="set-mark"><svg class="i16" aria-hidden="true"><use href="#i-gear"/></svg></span><div class="grow"><div class="name">Settings</div><div class="sub">controller · studio-mac</div></div></div>
+    <div class="cmd"><svg class="i16" aria-hidden="true"><use href="#i-search"/></svg><span class="grow">Search settings</span><span class="kbd">/</span></div>
+    <div class="side-scroll">
+      <div class="group"><div class="group-h"><span class="grow">You</span></div><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-user"/></svg><span class="grow">Profile</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-palette"/></svg><span class="grow">Appearance</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-chat"/></svg><span class="grow">Threads</span></a></div>
+      <div class="group"><div class="group-h"><span class="grow">Agents</span></div><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-users"/></svg><span class="grow">Assistants</span><span class="count">3</span></a><a class="nav on"><svg class="i16" aria-hidden="true"><use href="#i-sparkle"/></svg><span class="grow">Providers</span><span class="count">3</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-machine"/></svg><span class="grow">Machines</span><span class="count">3</span></a></div>
+      <div class="group"><div class="group-h"><span class="grow">Access</span></div><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-plug"/></svg><span class="grow">Connections</span><span class="count">11</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-key"/></svg><span class="grow">Identities</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-shield"/></svg><span class="grow">Permission profiles</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-lock"/></svg><span class="grow">Secrets</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-gauge"/></svg><span class="grow">Bounds</span></a></div>
+      <div class="group"><div class="group-h"><span class="grow">Instance</span></div><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-layers"/></svg><span class="grow">Plugins</span></a><a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-server"/></svg><span class="grow">System</span></a></div>
+    </div>
+    <div class="wl-foot"><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div></div>
+  </aside>
+  <main class="panel">
+    <header class="bar"><span class="crumb">Settings /</span><span class="title">Providers</span><span class="meta">3 providers · on 3 machines</span><span class="grow"></span><button class="btn sm"><svg class="i14" aria-hidden="true"><use href="#i-plus"/></svg>Add provider</button></header>
+    <div class="set">
+      <div class="pset">
+        <section class="prov">
+        <div class="pv-h">
+          <span class="pv-mark"><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg></span>
+          <div class="grow"><h2>Claude Code</h2><div class="pv-sub">Anthropic · rogier@personal<span class="sep">·</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg>healthy</span></div></div>
+          <div class="use"><span><b>61%</b> of the 5-hour window</span><span class="meter"><i style="width:61%"></i></span><span class="r">resets 11:00</span></div>
+        </div>
+        <div class="pv-grid">
+          <span class="k">Models</span><div class="v"><span class="tag def">Opus 5.5<small>default</small></span><span class="tag line">Sonnet 5</span><span class="tag line">Haiku 4.5</span></div>
+          <span class="k">Live now</span><div class="v"><span class="lv" role="img" aria-label="7 webshop, 4 payments, 2 ops, 2 mixed"><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-payments"></i><i class="p-payments"></i><i class="p-payments"></i><i class="p-payments"></i><i class="p-ops"></i><i class="p-ops"></i><i class="mixed"></i><i class="mixed"></i></span><span class="n">15 sessions</span></div>
+          <span class="k">Effort</span><div class="v"><div class="seg-ctl"><button aria-pressed="false">low</button><button aria-pressed="false">medium</button><button aria-pressed="true">high</button></div></div>
+          <span class="k">Installed on</span><div class="v"><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>studio-mac</span><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>build-box-1</span><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>build-box-2</span></div>
+          <span class="k">Access mode</span><div class="v wide"><div class="seg-ctl"><button aria-pressed="false">approval-required</button><button aria-pressed="true">auto-accept-edits</button><button aria-pressed="false">auto</button><button aria-pressed="false">full-access</button></div></div>
+        </div>
+      </section>
+        <section class="prov">
+        <div class="pv-h">
+          <span class="pv-mark"><svg class="brand" aria-hidden="true"><use href="#b-openai"/></svg></span>
+          <div class="grow"><h2>Codex</h2><div class="pv-sub">OpenAI · work<span class="sep">·</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg>healthy</span></div></div>
+          <div class="use"><span><b>24%</b> of the weekly limit</span><span class="meter"><i style="width:24%"></i></span><span class="r">resets Mon 5 Oct</span></div>
+        </div>
+        <div class="pv-grid">
+          <span class="k">Models</span><div class="v"><span class="tag def">gpt-5.4<small>default</small></span><span class="tag line">gpt-5.4-mini</span></div>
+          <span class="k">Live now</span><div class="v"><span class="lv" role="img" aria-label="3 webshop, 2 payments, 1 ops"><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-webshop"></i><i class="p-payments"></i><i class="p-payments"></i><i class="p-ops"></i></span><span class="n">6 sessions</span></div>
+          <span class="k">Effort</span><div class="v"><div class="seg-ctl"><button aria-pressed="false">low</button><button aria-pressed="true">medium</button><button aria-pressed="false">high</button></div></div>
+          <span class="k">Installed on</span><div class="v"><span class="mch no">studio-mac</span><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>build-box-1</span><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>build-box-2</span></div>
+          <span class="k">Access mode</span><div class="v wide"><div class="seg-ctl"><button aria-pressed="false">approval-required</button><button aria-pressed="true">auto-accept-edits</button><button aria-pressed="false">auto</button><button aria-pressed="false">full-access</button></div></div>
+        </div>
+      </section>
+        <section class="prov">
+        <div class="pv-h">
+          <span class="pv-mark"><svg class="brand" aria-hidden="true"><use href="#b-pi"/></svg></span>
+          <div class="grow"><h2>pi</h2><div class="pv-sub">local · qwen3-coder 30b via llama.cpp<span class="sep">·</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-done"/></svg>healthy</span></div></div>
+          <div class="use none">runs on studio-mac · no usage limits</div>
+        </div>
+        <div class="pv-grid">
+          <span class="k">Models</span><div class="v"><span class="tag def">qwen3-coder 30b<small>default</small></span></div>
+          <span class="k">Live now</span><div class="v"><span class="lv" role="img" aria-label="2 ops"><i class="p-ops"></i><i class="p-ops"></i></span><span class="n">2 sessions</span></div>
+          <span class="k">Thinking</span><div class="v"><div class="seg-ctl"><button aria-pressed="true">off</button><button aria-pressed="false">on</button></div></div>
+          <span class="k">Installed on</span><div class="v"><span class="mch"><svg class="i14" aria-hidden="true"><use href="#i-check"/></svg>studio-mac</span><span class="mch no">build-box-1</span><span class="mch no">build-box-2</span></div>
+          <span class="k">Access mode</span><div class="v wide"><div class="seg-ctl"><button aria-pressed="true">approval-required</button><button aria-pressed="false">auto-accept-edits</button><button aria-pressed="false" class="na" title="Not supported here">auto</button><button aria-pressed="false">full-access</button></div><span class="fb"><svg class="i14" aria-hidden="true"><use href="#i-arrow-right"/></svg>auto runs as auto-accept-edits on pi</span></div>
+        </div>
+      </section>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

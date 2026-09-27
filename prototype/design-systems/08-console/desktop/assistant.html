@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Ada · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .conv-pane { flex: 1.45 1 0; }
+  .conv-pane .thread-col { padding: 16px 28px calc(var(--dock-h, 180px) + 20px); }
+  .conv-pane .msg-user { margin-bottom: 20px; }
+  .conv-pane .msg-agent { margin-bottom: 18px; }
+  .conv-pane .composer-input { min-height: 44px; }
+  .who { display: inline-flex; align-items: center; gap: 8px; margin-left: 6px; }
+  .who .avatar { width: 20px; height: 20px; border-radius: 5px; font-size: 10.5px; }
+  .who b { font-size: 14px; font-weight: var(--w-strong); }
+  .presence { display: inline-flex; align-items: center; gap: 6px; font: 450 11.5px / 1 var(--font-mono); color: var(--live); margin-left: 6px; }
+  .chrome-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .chan { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--line-soft); font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .chan .brand, .chan .mk { width: 11px; height: 11px; }
+
+  .day { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; font: 500 11px / 1 var(--font-mono); color: var(--faint); }
+  .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  .notice { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: start; margin: 0 0 18px; padding: 10px 12px; border-radius: 8px; background: var(--attn-soft); font-size: 13px; color: var(--ink); }
+  .notice .mk { color: var(--attn); margin-top: 3px; }
+  .notice small { display: block; margin-top: 2px; font: 450 11px / 1.4 var(--font-mono); color: var(--muted); }
+  .notice .act { height: 24px; }
+  .quiet-fold { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; font: 450 11.5px / 1 var(--font-mono); color: var(--faint); }
+  .quiet-fold .mk { width: 10px; height: 10px; }
+  .quiet-fold b { color: var(--muted); font-weight: 560; }
+  .quiet-fold::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  .ada-meta .avatar { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
+  .ada-meta .hb { display: inline-flex; align-items: center; gap: 5px; color: var(--live); }
+  .reminder { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-sunk); font-size: 13px; }
+  .reminder .mk { color: var(--accent); }
+  .reminder small { display: block; font: 450 11px / 1.4 var(--font-mono); color: var(--faint); }
+  .reminder .acts { display: flex; gap: 2px; }
+  .streaming .cursor { background: var(--live); width: 0.5em; }
+  .streaming-tag { display: inline-flex; align-items: center; gap: 6px; color: var(--live); }
+
+  /* Inspector */
+  .insp { padding: 16px 18px 32px; }
+  .insp .sec:first-child { margin-top: 0; }
+  .hb-strip { display: grid; grid-template-columns: repeat(17, 1fr); gap: 3px; margin-top: 4px; }
+  .hb-strip i { height: 18px; border-radius: 3px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+  .hb-strip i.q { background: color-mix(in oklab, var(--idle) 45%, transparent); box-shadow: none; }
+  .hb-strip i.s { background: var(--live); box-shadow: none; }
+  .hb-strip i.now { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .hb-axis { display: flex; justify-content: space-between; margin-top: 5px; font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+  .hb-legend { display: flex; gap: 14px; margin-top: 8px; font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .hb-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); row-gap: 7px; column-gap: 12px; font-size: 12.5px; }
+  .facts dt { font: 450 11px / 1.6 var(--font-mono); color: var(--faint); }
+  .facts dd { margin: 0; color: var(--ink); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .facts .brand { width: 12px; height: 12px; color: var(--ink); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="threads" data-active="ada"></nav>
+
+  <main class="main">
+    <!-- Pane 1: Ada's Conversation -->
+    <section class="pane is-focus conv-pane">
+      <header class="thread-chrome">
+        <span class="pane-num">1</span>
+        <span class="who"><span class="avatar ada">A</span><b>Ada</b></span>
+        <span class="presence"><svg class="mk"><use href="#m-working"/></svg>working</span>
+        <span class="chrome-right">
+          <span class="chan"><svg class="mk"><use href="#g-web"/></svg>Web chat</span>
+          <span class="chan"><svg class="brand"><use href="#b-slack"/></svg>Slack DM</span>
+        </span>
+      </header>
+
+      <div class="transcript" data-composer="#composer" data-scrolled-to=".msg-agent">
+        <div class="thread-col">
+          <div class="notice">
+            <svg class="mk"><use href="#g-notice"/></svg>
+            <div>Ada was interrupted: her turn failed: provider timeout after 120s.<br>Your last message was kept.<small>Notice · yesterday 22:14 · from Hercule, not from Ada</small></div>
+            <button class="act" type="button"><kbd>r</kbd>Retry</button>
+          </div>
+
+          <div class="quiet-fold"><svg class="mk"><use href="#c-right"/></svg><span><b>Today</b> · 2 quiet check-ins at 07:00 and 08:00 · nothing worth saying</span></div>
+
+          <div class="msg-agent">
+            <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada<span class="hb"><svg class="mk" style="width:10px;height:10px"><use href="#g-heartbeat"/></svg>heartbeat</span>09:00</div>
+            <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name. I can draft that.</p>
+          </div>
+
+          <div class="msg-user">
+            <div class="msg-meta">Rogier · 09:20</div>
+            <div class="bubble">Remind me Friday to renew the SSL cert for ops.</div>
+          </div>
+
+          <div class="msg-agent">
+            <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada · 09:20</div>
+            <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+            <div class="reminder">
+              <svg class="mk"><use href="#g-reminder"/></svg>
+              <div>Renew the SSL cert for ops<small>Reminder · Fri 2 Oct · 09:00 · to Web chat</small></div>
+              <div class="acts"><button class="act" type="button">Edit</button><button class="act" type="button">Cancel</button></div>
+            </div>
+          </div>
+
+          <div class="msg-user">
+            <div class="msg-meta">Rogier · 09:38</div>
+            <div class="bubble">What's the status of the backup job?</div>
+          </div>
+
+          <div class="msg-agent streaming">
+            <div class="msg-meta ada-meta"><span class="avatar ada">A</span>Ada · 09:38<span class="streaming-tag"><svg class="mk" style="width:10px;height:10px"><use href="#m-working"/></svg>writing</span></div>
+            <p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="cursor"></span></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-dock" id="composer">
+        <div class="composer-card card-glass">
+          <div class="composer-input"><span class="ph">Message Ada. She answers when her turn ends</span></div>
+          <div class="composer-row">
+            <button class="c-btn" type="button" title="Attach"><svg class="mk"><use href="#c-plus"/></svg></button>
+            <button class="c-sel" type="button"><span class="lbl">reply</span>turn-end<svg class="mk"><use href="#c-down"/></svg></button>
+            <span class="c-spacer"></span>
+            <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Sonnet 5</span>
+            <button class="stop" type="button"><svg class="mk"><use href="#c-stop"/></svg>Stop <kbd>⌘</kbd><kbd>.</kbd></button>
+            <button class="send" type="button" disabled title="Send"><svg class="mk"><use href="#c-send"/></svg></button>
+          </div>
+        </div>
+        <div class="composer-lip">
+          <span class="br"><svg class="mk"><use href="#g-web"/></svg>Web chat</span>
+          <span class="rule"></span>
+          <span>full access</span>
+          <span class="rule"></span>
+          <span>context 38%</span>
+          <span class="right faint">starts fresh at 70% or 04:00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pane 2: what Ada is and what she holds -->
+    <section class="pane">
+      <header class="pane-head">
+        <span class="pane-num">2</span>
+        <span class="pane-title">Ada</span>
+        <span class="pane-sub">personal assistant</span>
+        <span class="pane-actions"><button class="act" type="button"><kbd>e</kbd>Edit</button></span>
+      </header>
+      <div class="pane-body">
+        <div class="insp">
+          <dl class="facts">
+            <dt>runs on</dt><dd><svg class="brand"><use href="#b-claude"/></svg>Claude Code · Sonnet 5</dd>
+            <dt>access</dt><dd>full access <span class="faint mono" style="font-size:11px">· no edit tool</span></dd>
+            <dt>channels</dt><dd><span class="chan"><svg class="mk"><use href="#g-web"/></svg>Web chat</span><span class="chan"><svg class="brand"><use href="#b-slack"/></svg>acme-hq · DM</span></dd>
+          </dl>
+
+          <div class="sec">Heartbeat <span class="n">every hour · 07:00-23:00 · to Web chat</span></div>
+          <div class="hb-strip" aria-label="Heartbeats today"><i class="q"></i><i class="q"></i><i class="s now"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="hb-axis"><span>07</span><span>11</span><span>15</span><span>19</span><span>23</span></div>
+          <div class="hb-legend"><span><i style="background:var(--live)"></i>spoke</span><span><i style="background:color-mix(in oklab, var(--idle) 45%, transparent)"></i>quiet</span><span><i style="box-shadow:inset 0 0 0 1px var(--line)"></i>next at 10:00</span></div>
+
+          <div class="sec">Memory <span class="n">core note and 7 of 24 topics</span></div>
+          <div class="core">
+            <span>Core note</span><span class="mono faint" style="font-size:11px">1,284 of 4,000</span>
+            <div class="bar"><i style="width:32%"></i></div>
+            <q>"Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays…"</q>
+          </div>
+          <div style="margin-top:10px">
+            <div class="topic-row"><span class="mem-topic">work-style</span><span class="gist">Prefers short answers; decides fast</span><span class="bar"><i style="width:10%"></i></span><span class="kb">1.2k</span></div>
+            <div class="topic-row"><span class="mem-topic">webshop</span><span class="gist">Stripe checkout, EU customers mostly NL/DE</span><span class="bar"><i style="width:28%"></i></span><span class="kb">3.4k</span></div>
+            <div class="topic-row"><span class="mem-topic">payments-api</span><span class="gist">Owns webhooks + payouts; publish via npm</span><span class="bar"><i style="width:18%"></i></span><span class="kb">2.1k</span></div>
+            <div class="topic-row"><span class="mem-topic">ops</span><span class="gist">Backups nightly 04:00 to B2</span><span class="bar"><i style="width:15%"></i></span><span class="kb">1.8k</span></div>
+            <div class="topic-row"><span class="mem-topic">customers</span><span class="gist">Marta @ Brightline, Jonas @ Kiteworks</span><span class="bar"><i style="width:23%"></i></span><span class="kb">2.7k</span></div>
+            <div class="topic-row"><span class="mem-topic">family</span><span class="gist">School run Tue/Thu; no meetings before 09:30</span><span class="bar"><i style="width:5%"></i></span><span class="kb">0.6k</span></div>
+            <div class="topic-row"><span class="mem-topic">reading</span><span class="gist">Weekly Rust + Postgres summaries</span><span class="bar"><i style="width:8%"></i></span><span class="kb">0.9k</span></div>
+          </div>
+
+          <div class="sec">Reminders <span class="n">3</span></div>
+          <div class="rem-row soon"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Thu 1 Oct 16:00</span><span>Call the accountant</span></div>
+          <div class="rem-row"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Fri 2 Oct 09:00</span><span>Renew the SSL cert for ops</span></div>
+          <div class="rem-row"><svg class="mk"><use href="#g-reminder"/></svg><span class="when">Mondays 08:30</span><span>Weekly revenue summary</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="NAV" data-context="Ada · writing" data-keys="i:type|⌘ .:stop|g m:memory|g r:reminders|2:inspector"></footer>
+</div>
+</body>
+</html>

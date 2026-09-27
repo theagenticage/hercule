@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Fix 3-D Secure checkout for EU cards · Hercule</title>
+<style>
+  .thread .col { padding-top: 18px; padding-bottom: 372px; }
+  .opener { display: flex; align-items: center; gap: 10px; }
+  .opener .stamp { margin-right: 2px; }
+  .worked .tail { color: var(--faint); }
+  .files-head .num { font-size: var(--fs-ui); }
+  .files-row .path { color: var(--ink); }
+  .files-foot .mono { color: var(--muted); font-size: 11.5px; }
+  .agent-end { display: flex; align-items: center; gap: 8px; margin-top: 18px; font-size: var(--fs-small); color: var(--hold-text); font-weight: 560; }
+  .dock-q .ask { grid-row: 1 / 3; align-self: start; margin-top: 2px; }
+  .cm-row .grow { flex: 1; }
+  .ph { color: var(--faint); font-size: var(--fs-read); padding-left: 6px; }
+  .tcalls { margin: -10px 0 20px 5px; padding-left: 16px; border-left: 1px solid var(--line-soft); display: grid; gap: 1px; font-size: 12px; }
+  .tcalls div { display: flex; align-items: center; gap: 10px; height: 22px; color: var(--faint); }
+  .tcalls .v { width: 30px; color: var(--muted); font-weight: 500; }
+  .tcalls .mono { color: var(--ink); font-size: 12px; }
+  .tcalls .x { font-size: var(--fs-small); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <aside class="side">
+    <div class="side-top">
+      <div class="tl"><i></i><i></i><i></i></div>
+      <button class="iconbtn" aria-label="Hide sidebar"><svg class="i"><use href="#i-sidebar"/></svg></button>
+      <button class="iconbtn" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+    <div class="face"><button aria-pressed="true">Threads</button><button aria-pressed="false">Hercule <span class="dot-count">12</span></button></div>
+    <a class="newrow"><svg class="i i--s"><use href="#i-edit"/></svg>New thread<span class="key key--s">⌘N</span></a>
+    <div class="side-scroll">
+      <div class="pgroup"><span class="proj proj--webshop">webshop</span><span class="count">2</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+      <div class="wsl">fix/3ds-eu-cards · studio-mac</div>
+      <div class="tlist">
+        <a class="trow" aria-current="page"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Fix 3-D Secure checkout for EU cards</span><span class="age hold">32s</span><span class="sub">Opus 5.5 · +48 -12</span></a>
+        <a class="trow"><span class="eq"><i></i><i></i><i></i></span><span class="t">Refactor cart totals</span><span class="age">22m</span><span class="sub">Sonnet 5</span></a>
+      </div>
+      <div class="pgroup"><span class="proj proj--payments">payments-api</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+      <div class="wsl">hercule/run-7c2 · build-box-2</div>
+      <div class="tlist">
+        <a class="trow"><svg class="m faint"><use href="#m-idle"/></svg><span class="t">Add iDEAL research</span><span class="age">1h</span><span class="sub">gpt-5.4</span></a>
+      </div>
+      <div class="pgroup"><span class="proj proj--ops">ops</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+      <div class="wsl">ops · studio-mac</div>
+      <div class="tlist">
+        <a class="trow"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Migrate ops dashboards</span><span class="age hold">11m</span><span class="sub">qwen3-coder</span></a>
+      </div>
+      <div class="nav-group">Assistants</div>
+      <div class="tlist">
+        <a class="trow"><span class="eq"><i></i><i></i><i></i></span><span class="t">Ada</span><span class="age">Web chat</span></a>
+        <a class="trow"><svg class="m faint"><use href="#m-idle"/></svg><span class="t">Milo</span><span class="age">#ops</span></a>
+        <a class="trow"><svg class="m faint"><use href="#m-asleep"/></svg><span class="t muted">Juno</span><span class="age">asleep</span></a>
+      </div>
+      <a class="all-sessions"><svg class="m"><use href="#m-session"/></svg>All sessions<span class="count">23</span><svg class="i i--s faint"><use href="#i-chev-r"/></svg></a>
+    </div>
+    <div class="side-foot">
+      <div class="side-docket">
+        <div class="row1"><b>12</b> on your docket <span class="key key--s">⌥</span><span class="key key--s">Space</span></div>
+        <div class="rail rail--s">
+          <i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i>
+        </div>
+      </div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 8 working · 3 wait</span><svg class="i"><use href="#i-chev-r"/></svg></div>
+      <div class="me"><span class="avatar">R</span>Rogier</div>
+    </div>
+  </aside>
+
+  <main class="win-main">
+    <header class="tchrome">
+      <span class="crumb">webshop /</span>
+      <a class="ttab" aria-current="page"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Fix 3-D Secure checkout for EU cards</a>
+      <a class="ttab"><span class="eq"><i></i><i></i><i></i></span>Refactor cart totals</a>
+      <div class="tools">
+        <button class="pillbtn"><svg class="i"><use href="#i-plus"/></svg>New thread here</button>
+        <button class="iconbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button>
+      </div>
+    </header>
+
+    <div class="thread" id="thread">
+      <div class="col">
+        <div class="opener">
+          <span class="stamp">Tue 09:02</span>
+          <span class="origin kind-proposal">from <a class="mini"><svg class="m"><use href="#m-task"/></svg>Checkout fails for EU cards with 3-D Secure<svg class="i"><use href="#i-arrow-r"/></svg></a></span>
+        </div>
+
+        <div class="bubble-row">
+          <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+        </div>
+
+        <div class="worked">Worked for 2m 14s <svg class="i"><use href="#i-chev-d"/></svg><span class="tail">read 6 files · ran 1 command</span></div>
+        <div class="tcalls">
+          <div><span class="v">Read</span><span class="mono">src/checkout/payment.ts</span></div>
+          <div><span class="v">Read</span><span class="mono">src/checkout/3ds-modal.tsx</span></div>
+          <div><span class="v">Read</span><span class="mono">src/checkout/Checkout.tsx</span></div>
+          <div><span class="v">Read</span><span class="mono">src/checkout/payment.test.ts</span></div>
+          <div><span class="v">Read</span><span class="mono">package.json</span><span class="x">stripe 13.11 → 14.2</span></div>
+          <div><span class="v">Read</span><span class="mono">node_modules/stripe/CHANGELOG.md</span><span class="x">v14.0.0</span></div>
+          <div><span class="v">Ran</span><span class="mono">git log -5 --oneline</span><span class="x">#1289 Upgrade Stripe SDK to v14</span></div>
+        </div>
+
+        <div class="prose">
+          <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+        </div>
+        <div class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+
+        <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+
+        <div class="worked">Worked for 4m 51s <svg class="i"><use href="#i-chev-r"/></svg><span class="tail">edited 3 files · ran 2 commands</span></div>
+
+        <div class="files">
+          <div class="files-head"><svg class="i i--s"><use href="#i-diff"/></svg>3 changed files <span class="plus num">+48</span><span class="minus num">-12</span>
+            <span class="actions"><button class="btn btn--ghost btn--s">Show files</button><button class="btn btn--s">Open diff</button></span></div>
+          <div class="files-row"><span class="path">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+          <div class="files-row"><span class="path">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+          <div class="files-row"><span class="path">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+          <div class="files-foot"><svg class="m go"><use href="#m-done"/></svg><span class="go">24 passed</span><span class="mono">pnpm test checkout</span></div>
+        </div>
+
+        <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        <div class="agent-end"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Waiting on you · 32s</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <div class="queued"><svg class="m hold"><use href="#m-queued"/></svg><span class="q">Also check the Apple Pay path</span><span class="stamp">queued · runs next</span>
+          <span class="end"><button class="btn btn--ghost btn--s"><svg class="i i--s"><use href="#i-steer"/></svg>Steer</button><button class="btn btn--ghost btn--s">Cancel</button></span></div>
+        <div class="dock kind-request">
+          <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+          <div class="dock-q">
+            <span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>
+            <span class="t">Run <code>git push</code>?</span>
+            <span class="who">Claude Code · 32s</span>
+            <span class="s">git push -u origin fix/3ds-eu-cards</span>
+            <span class="dock-keys"><span class="key key--s">D</span><span class="key key--s">A</span><span class="key key--s">Y</span></span>
+          </div>
+          <div class="verbs">
+            <button class="verb verb--nogo"><span class="key">D</span><span class="v">Deny</span><span class="d">The agent is told no and carries on</span></button>
+            <button class="verb verb--go"><span class="key">A</span><span class="v">Always allow git push</span><span class="d">Adds a Grant for this thread</span></button>
+            <button class="verb verb--go is-primary"><span class="key">Y</span><span class="v">Allow once</span><span class="d">Runs this one push</span></button>
+          </div>
+        </div>
+        <div class="cm-card">
+          <textarea class="cm-text" placeholder="Queued until the turn finishes…" aria-label="Message"></textarea>
+          <div class="cm-row">
+            <button class="cm-pick" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+            <span class="ph show-scrolled">Reply…</span>
+            <button class="cm-pick hide-scrolled"><svg class="i i--s"><use href="#i-lock"/></svg>Auto-accept edits</button>
+            <span class="grow"></span>
+            <button class="cm-pick hide-scrolled">high<svg class="i chev"><use href="#i-chev-d"/></svg></button>
+            <button class="pill"><svg class="b"><use href="#b-claude"/></svg>Opus 5.5</button>
+            <button class="cm-pick hide-scrolled" aria-label="Voice"><svg class="i"><use href="#i-mic"/></svg></button>
+            <button class="cm-stop"><svg class="i i--s"><use href="#i-stop"/></svg>Stop</button>
+            <button class="cm-send" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+          </div>
+        </div>
+        <div class="lip">
+          <span><svg class="i"><use href="#i-worktree"/></svg>fix/3ds-eu-cards</span>
+          <span><svg class="i"><use href="#i-branch"/></svg><span class="mono">fix/3ds-eu-cards</span> from main</span>
+          <span class="end"><svg class="i"><use href="#i-machine"/></svg>studio-mac</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+  // The composer shrinks and turns see-through while the transcript scrolls away from the end.
+  // It restores at the bottom or when it gets focus. ?state=scrolled holds the shrunk state.
+  (function () {
+    var root = document.documentElement;
+    var thread = document.getElementById("thread");
+    var forced = root.dataset.state === "scrolled";
+    thread.scrollTop = thread.scrollHeight - (forced ? thread.clientHeight + 335 : 0);
+    if (forced) return;
+    var restore = function () { delete root.dataset.state; };
+    thread.addEventListener("scroll", function () {
+      var fromEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      if (fromEnd < 24) restore(); else root.dataset.state = "scrolled";
+    }, { passive: true });
+    document.querySelector(".composer").addEventListener("focusin", restore);
+  })();
+</script>
+</body>
+</html>

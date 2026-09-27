@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Fix 3-D Secure checkout · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="status" data-status></div>
+
+      <header class="mt-head">
+        <a class="icon-btn m-ib" href="intake.html" title="Back"><i data-icon="back"></i></a>
+        <span class="mt-title">
+          <b>Fix 3-D Secure checkout for EU cards</b>
+          <span>webshop · <span class="mono">fix/3ds-eu-cards</span> · studio-mac</span>
+        </span>
+        <span class="chip wait mt-state"><i data-mark="wait"></i>2m</span>
+      </header>
+
+      <div class="transcript m-tr" data-transcript>
+        <div class="mt-col">
+          <div class="stamp">Today · 09:02</div>
+          <div class="from">
+            <a href="decision.html"><i data-mark="proposal"></i>From the Proposal “Checkout fails for EU cards”<i data-icon="right" style="width: 11px; height: 11px"></i></a>
+          </div>
+          <div class="msg-me">
+            <div>Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+          </div>
+          <div class="worked">Worked 2m 14s <span class="tally">6 reads · 1 command</span><i data-icon="right"></i></div>
+          <div class="msg-agent">
+            <p>
+              Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure.
+              <code>handlePaymentResult</code> only handles <code>succeeded</code>, so we show “Card declined” instead of opening the 3-D Secure modal.
+            </p>
+            <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> openThreeDSModal(result.clientSecret);
+}</pre>
+          </div>
+          <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+          <div class="worked">Worked 4m 51s <span class="tally">3 edits · 2 commands</span><i data-icon="right"></i></div>
+          <div class="files">
+            <div class="head">
+              <i data-icon="diff" style="color: var(--faint)"></i><b>3 changed files</b><span class="plus mono">+48</span><span class="minus mono">-12</span>
+              <span class="right"><button class="btn sm">Open diff</button></span>
+            </div>
+            <div class="f"><span class="grow">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+            <div class="f"><span class="grow">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+            <div class="f"><span class="grow">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+            <div class="foot"><i data-mark="done"></i><b style="color: var(--ink); font-weight: 560">24 passed</b><span class="mono faint">pnpm test checkout</span></div>
+          </div>
+          <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </div>
+
+      <!-- The answer lives where the thumb is. Scrolled up, all of it folds into one glass pill and a small ask above it. -->
+      <div class="mc" data-composer>
+        <div class="dock-mini">
+          <i data-mark="wait"></i><span class="mono">git push</span>
+          <button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button>
+        </div>
+        <section class="mc-ask" aria-label="Claude Code asks">
+          <div class="q"><i data-mark="wait"></i><b>Run this command?</b><span class="who">Claude Code · 2m ago</span></div>
+          <div class="subject">git push -u origin fix/3ds-eu-cards</div>
+          <button class="mc-allow"><span class="l">Allow once</span><span class="d">asks again next time</span></button>
+          <div class="mc-pair">
+            <button><span class="l">Always allow</span><span class="d">git push, this thread</span></button>
+            <button><span class="l">Deny</span><span class="d">keeps it local, stops</span></button>
+          </div>
+          <span class="haptic">haptic · warning pattern when it asks</span>
+        </section>
+        <div class="mc-queued"><i data-mark="queued"></i>Also check the Apple Pay path<span class="state">queued · runs next</span></div>
+        <div class="mc-card">
+          <button class="mc-plus" title="Attach"><i data-icon="plus"></i></button>
+          <textarea placeholder="Queued until the turn finishes…" aria-label="Message"></textarea>
+          <button class="mc-mic" title="Hold to talk"><i data-icon="mic"></i></button>
+        </div>
+      </div>
+
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

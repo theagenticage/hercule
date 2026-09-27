@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Ada · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<!-- Rogier holds the Ask button and answers Ada's Offer out loud. The Conversation stays readable above. -->
+<div class="phone" data-tab="ada" data-listening>
+  <header class="m-head">
+    <i class="orb" data-v="ada" data-p="working" style="--size:30px"></i>
+    <div><h1>Ada</h1><span class="sub c-live">working · answering you</span></div>
+    <span class="end"><span class="m-btn"><i data-i="more"></i></span></span>
+  </header>
+  <div class="ma-desk">
+    <span><i data-i="clock"></i>check-in <b>10:00</b></span>
+    <span><i data-m="reminder"></i>next <b>Thu 16:00</b></span>
+    <span class="end"><i class="orb" data-v="milo" data-p="idle" style="--size:10px"></i>Milo idle<i class="orb" data-v="juno" data-p="asleep" style="--size:10px"></i>Juno asleep</span>
+  </div>
+  <div class="m-body" data-start-at="#marta" data-start-offset="12">
+    <div class="ma">
+      <div class="quiet"><i class="orb" data-v="ada" data-p="idle" style="--size:10px"></i>2 quiet check-ins · 07:00 · 08:00</div>
+      <div class="say">
+        <i class="orb" data-v="ada" data-p="idle" style="--size:24px"></i>
+        <div class="say-body">
+          <div class="say-meta"><b>Ada</b><span>09:00 · heartbeat</span></div>
+          <p class="voice">Morning Rogier. One urgent thing: EU card payments that need <span class="nw">3-D Secure</span> have failed since yesterday's deploy.</p>
+          <article class="dcard is-lead">
+            <div class="dcard-body">
+              <div class="dc-head"><i data-m="q"></i><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span></div>
+              <h3 class="dc-title">Checkout fails for EU cards with <span class="nw">3-D Secure</span></h3>
+              <div class="from"><span class="c-fail"><b class="c-fail">&minus;18%</b> EU conversion</span><span><i data-b="sentry"></i><b>412</b> errors</span><span><i data-b="gmail"></i><b>3</b> emails</span></div>
+            </div>
+            <a class="dc-live" href="session-active.html"><i data-m="session" style="color:var(--project-webshop)"></i><span>Your Thread is <b class="c-attn">waiting on you</b></span><span class="dc-live-go">Open<i data-i="arrow"></i></span></a>
+            <div class="m-ledger">
+              <button class="m-ans is-primary"><span><b>Start “Fix bug”</b><span>Starts <em>Fix bug</em> on <em>webshop</em> in a new worktree</span></span></button>
+              <button class="m-ans"><span><b>Accept</b><span>Adds it to the backlog as a Task</span></span></button>
+              <button class="m-ans"><span><b>Dismiss</b><span>Closes the Proposal</span></span></button>
+            </div>
+          </article>
+          <p class="voice" id="marta">And Marta at Brightline wants invoice INV-2291 in the company name. I can draft that.</p>
+          <article class="dcard dc-offer">
+            <div class="dcard-body">
+              <div class="dc-head"><i data-m="offer"></i><span class="kind">Offer</span><span class="dot-sep"></span><span class="proj"><i data-b="gmail"></i>Gmail · Customers</span></div>
+              <h3 class="dc-title">Draft a reply to Marta at Brightline</h3>
+            </div>
+            <div class="m-ledger">
+              <button class="m-ans is-primary"><span><b>Draft reply</b><span>Starts <em>Draft reply</em> on her email · nothing is sent without you</span></span></button>
+              <button class="m-ans"><span><b>Not now</b><span>Leaves the Offer in Intake</span></span></button>
+            </div>
+          </article>
+          <p class="voice">Two calls only you can make. Everything else can wait.</p>
+          <a class="receipt" href="intake.html"><span class="rc"><b>2</b>calls</span><span class="rc"><b>4</b>proposals</span><span class="rc muted"><b>198</b>quiet</span><span class="receipt-go">Intake<i data-i="arrow"></i></span></a>
+        </div>
+      </div>
+
+      <div class="me"><div><div class="me-bubble">Remind me Friday to renew the SSL cert for ops.</div><div class="me-meta">09:20</div></div></div>
+      <div class="say">
+        <i class="orb" data-v="ada" data-p="idle" style="--size:24px"></i>
+        <div class="say-body">
+          <div class="say-meta"><b>Ada</b><span>09:20</span></div>
+          <p class="voice">Done. Reminder set for Friday 2 October, 09:00.</p>
+          <span class="reminder"><i data-m="reminder"></i><span><b>Renew the SSL cert for ops</b><br><small>Fri 2 Oct · 09:00 · to Web chat</small></span></span>
+        </div>
+      </div>
+
+      <div class="me"><div><div class="me-bubble">What's the status of the backup job?</div><div class="me-meta">09:38</div></div></div>
+      <div class="say">
+        <i class="orb" data-v="ada" data-p="working" style="--size:24px"></i>
+        <div class="say-body">
+          <div class="say-meta"><b>Ada</b><span>09:41 · answering</span></div>
+          <p class="voice"><span class="who">Milo</span> started an investigation at 09:35 on build-box-1. So far: <code>pg_dump</code> has been slower each night since <code>events</code> passed 40 GB<span class="caret"></span></p>
+          <a class="slink" href="#"><i data-m="working"></i><i class="room" data-p="ops"></i><b>Investigate backup timeouts</b><span>Run · build-box-1 · 6m</span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="m-listen" aria-label="Listening">
+    <div class="m-listen-h"><i class="orb" data-v="ada" data-p="working" style="--size:14px"></i><b>Listening</b><span>for Ada</span><span class="end">0:04</span></div>
+    <p>Yes, draft the reply to Marta. Company name on the <span class="ph-arriving">invoice.</span></p>
+    <div class="m-wave" aria-hidden="true"><i style="--h:0.25"></i><i style="--h:0.52"></i><i style="--h:0.86"></i><i style="--h:0.69"></i><i style="--h:0.82"></i><i style="--h:0.41"></i><i style="--h:0.36"></i><i style="--h:0.57"></i><i style="--h:0.88"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.39"></i><i style="--h:0.42"></i><i style="--h:0.76"></i><i style="--h:0.73"></i><i style="--h:0.89"></i><i style="--h:0.49"></i><i style="--h:0.30"></i><i style="--h:0.45"></i><i style="--h:0.84"></i><i style="--h:0.77"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.30"></i><i style="--h:0.63"></i><i style="--h:0.74"></i><i style="--h:0.92"></i><i style="--h:0.59"></i><i style="--h:0.46"></i><i style="--h:0.34"></i><i style="--h:0.75"></i><i style="--h:0.71"></i><i style="--h:0.89"></i><i style="--h:0.60"></i><i style="--h:0.34"></i><i style="--h:0.49"></i><i style="--h:0.71"></i><i style="--h:0.91"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.12"></i><i style="--h:0.12"></i></div>
+    <div class="m-listen-k"><span><i data-i="left"></i>slide to cancel</span><span><i data-i="up"></i>slide up to lock</span><span class="end">release to send</span></div>
+    <div class="m-listen-hap"><span class="haptic"><i data-i="haptic"></i>tick on press</span><span class="haptic"><i data-i="haptic"></i>tap on send</span><span class="haptic"><i data-i="haptic"></i>double buzz on cancel</span></div>
+  </section>
+</div>
+</body>
+</html>

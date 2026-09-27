@@ -1,0 +1,642 @@
+<!--
+  PROTOTYPE - throwaway. Ticket: https://github.com/rogierpennink/hydra/issues/160
+  Question: what makes the codexlip composer (spec 14 §The composer; prototype/app-shell.html at 96b3c40)
+  much friendlier for a human, on a draft thread and on an active one, inside docs/design-language.md?
+
+  Round 1 (61d5a8d) put three shapes side by side and the lip won. Round 2 (5ee4b5a) made the model menu
+  scale and the pill hold still. Round 3 (9d69d58) dropped the profile, put logos in the model menu and
+  made the tab strip appear only past one thread. All in git history; this file is round 4.
+
+  Round 4, from the reaction to round 3 (t3 code's shape, checked against spec 02):
+    - A thread starts from a project. "Create new thread" opens a project picker; a project's + in the
+      sidebar skips it. The project bounds everything below: its repos, its workspaces.
+    - The workspace is the first selector, not the repo. Its entries are t3 code's plus ours:
+        Current checkout   the repo's primary Workspace on the chosen machine (spec 02: kind primary,
+                           one standalone clone, shared; concurrent threads surfaced, not locked)
+        New workspace      an ephemeral Workspace: a fresh worktree of the repo on a new branch; in a
+                           project with several repos, a worktree of each, side by side (spec 02's
+                           multi-repo workspace). ?project=ops (key p) is such a project.
+        <existing ones>    the project's live ephemeral workspaces, on whichever machine; joining one
+                           sets branch and machine, because the workspace has them
+        None               a workspace-less thread: the agent works without a checkout
+    - The branch selector follows the workspace, as in t3 code: on the current checkout it is the
+      branch the checkout switches to (the one it is on marked "current", ones held by a workspace
+      dimmed); on a new workspace it is the BASE the new branch starts from (default the repo's default
+      branch; starts from origin/<base> when the remote has it, as t3 code does); on a joined workspace
+      it is gone, the workspace is named after it; on none it is gone.
+    - The sidebar groups threads by project, then by workspace. A project's header has + (a draft in
+      that project); a workspace group has + on hover (a draft joining that workspace); the thread's
+      top bar keeps "New thread in this workspace". Joining is a default, never a lock.
+    - The tab strip still appears only when the workspace holds more than one thread (?peers, key b),
+      and a primary workspace can hold several too.
+  States, via ?state= (key s cycles): draft · fresh (nothing logged in; Log in fills the draft) · sibling
+  (a draft opened from inside hydra/run-3f1) · idle · busy · decision · exited.
+  Keys: p project webshop|ops · b threads in run-3f1 1|2 · t theme. Send on a draft starts the thread here.
+
+  Round 4b - the thread's chrome. Reaction: the header was messy and the navigation should get out of the
+  way. Now one row, t3 code's and Codex's shape: project / title at the left, the actions at the right.
+  The thread id is gone. The tab strip is gone as a row: when the workspace holds more than one thread,
+  the title itself becomes the active tab and its siblings sit beside it in the same row; with one
+  thread the row is just the title. The workspace's name is not repeated in the header, the lip has it.
+  "New thread here" is an action at the right, not a + beside the tabs.
+  The sample project is now "webshop", so it no longer reads as the app's own name.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hydra composer prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: oklch(94.5% 0.0156 265); --surface: oklch(96.7% 0.0125 265); --raised: oklch(100% 0.0078 265);
+    --ink: oklch(23% 0.0100 265); --muted: oklch(48% 0.0156 265); --faint: oklch(66% 0.0156 265);
+    --line: oklch(23% 0.0100 265 / 0.10); --line-soft: oklch(23% 0.0100 265 / 0.055);
+    --card-shadow: 0 1px 2px rgba(23,26,33,0.05);
+    --lift-shadow: 0 1px 2px rgba(23,26,33,0.06), 0 4px 14px rgba(23,26,33,0.06);
+    --attn: #8a6116; --fail: #a34e46; --ok: #48745a; --live: #48717f; --attn-soft: rgba(138,97,22,0.09);
+    --p-hydra: #7d7ab0; --p-ops: #a67f92; --scrim: rgba(23,26,33,0.22);
+    --sans: "Onest", -apple-system, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --w-emph: 500; --w-urgent: 600; --side-w: 244px;
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(20% 0.0288 265); --surface: oklch(22.2% 0.0288 265); --raised: oklch(25.5% 0.0259 265);
+    --ink: oklch(90% 0.0080 265); --muted: oklch(68% 0.0288 265); --faint: oklch(50% 0.0288 265);
+    --line: oklch(90% 0.0288 265 / 0.10); --line-soft: oklch(90% 0.0288 265 / 0.06);
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    --lift-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.3);
+    --attn: #d0a147; --fail: #cf7b71; --ok: #7fae8e; --live: #7fa8b8; --attn-soft: rgba(208,161,71,0.12);
+    --p-hydra: #9490c9; --p-ops: #bd93a8; --scrim: rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; } html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; } button { font: inherit; } b { font-weight: var(--w-emph); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .state.live { color: var(--live); } .state.fail { color: var(--fail); } .state.attn { color: var(--attn); }
+  .lane-label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; color: var(--faint); font-weight: var(--w-emph); }
+  /* a provider's mark, in the current colour so it survives both themes */
+  .logo { display: inline-block; width: 13px; height: 13px; flex: none; background: currentColor; -webkit-mask: var(--m) center / contain no-repeat; mask: var(--m) center / contain no-repeat; vertical-align: -2px; }
+  .logo.txt { background: none; -webkit-mask: none; mask: none; font: 500 12px/13px var(--mono); text-align: center; }
+  .pdot { width: 6px; height: 6px; border-radius: 1.5px; background: var(--p-hydra); flex: none; } .pdot.ops { background: var(--p-ops); }
+
+  /* ---- shell: a static sidebar and top bar, so the composer is judged beside the app ---- */
+  .app { display: grid; grid-template-columns: var(--side-w) 1fr; height: 100vh; }
+  .side { background: var(--surface); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; overflow: auto; }
+  .side .brand { font-weight: var(--w-emph); padding: 4px 8px 10px; display: flex; gap: 8px; align-items: baseline; }
+  .side .brand small { font: 11px var(--mono); color: var(--faint); }
+  .side .seg { display: flex; padding: 2px; border-radius: 7px; background: var(--line-soft); margin: 0 0 10px; }
+  .side .seg span { flex: 1; text-align: center; padding: 4px; border-radius: 5px; font-size: 12.5px; color: var(--muted); }
+  .side .seg span.on { background: var(--raised); color: var(--ink); font-weight: var(--w-emph); box-shadow: var(--card-shadow); }
+  .side .new { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 7px 10px; font-weight: var(--w-emph); color: var(--ink); text-align: left; cursor: pointer; margin-bottom: 8px; box-shadow: var(--card-shadow); }
+  .side .pj { display: flex; align-items: center; gap: 7px; padding: 10px 4px 2px 8px; font-size: 12.5px; color: var(--ink); font-weight: var(--w-emph); }
+  .side .pj .cnt { font: 11px var(--mono); color: var(--faint); font-weight: 400; }
+  .side .plus { margin-left: auto; border: 0; background: none; color: var(--faint); cursor: pointer; width: 20px; height: 20px; border-radius: 5px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  .side .plus:hover { background: var(--line-soft); color: var(--ink); }
+  .side .grp { display: flex; align-items: center; gap: 4px; padding: 6px 4px 1px 8px; font: 11px var(--mono); color: var(--faint); }
+  .side .grp .gl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side .grp .plus { opacity: 0; } .side .grp:hover .plus { opacity: 1; }
+  .side .row { display: grid; grid-template-columns: 14px 1fr auto; gap: 0 6px; padding: 4px 8px 4px 14px; border-radius: 6px; color: var(--ink); cursor: pointer; }
+  .side .row.on { background: var(--line-soft); }
+  .side .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .side .row .age { font: 11px var(--mono); color: var(--faint); }
+  .side .row .m { grid-column: 2 / 4; font: 11px var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side .mk { font-size: 10px; color: var(--faint); text-align: center; } .side .mk.live { color: var(--live); } .side .mk.q { color: var(--attn); }
+  .side .foot { margin-top: auto; font-size: 12.5px; color: var(--muted); padding: 10px 8px 0; display: flex; flex-direction: column; gap: 6px; }
+  main { display: flex; flex-direction: column; min-height: 0; }
+  .top { display: flex; align-items: center; gap: 10px; padding: 12px 24px 8px; font-size: 16px; font-weight: var(--w-emph); }
+  .top .crumb { color: var(--faint); font-weight: 400; flex: none; }
+  .tbtn { border: 1px solid var(--line); background: var(--raised); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 400; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .tbtn:hover { color: var(--ink); background: var(--line-soft); }
+  .thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 24px 64px; overflow: hidden; }
+  .tcol { flex: 1; min-height: 0; overflow: auto; width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 0 18px; }
+  .hero { margin: auto 0; text-align: center; padding: 0 0 24px; }
+  .hero h2 { font-size: 22px; font-weight: var(--w-emph); margin: 0 0 6px; } .hero h2 u { text-decoration-color: var(--p-hydra); text-underline-offset: 4px; } .hero h2 u.ops { text-decoration-color: var(--p-ops); }
+  .hero p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .hero .why { color: var(--attn); font-weight: var(--w-emph); }
+  .hero button.link { color: var(--ink); font-weight: var(--w-emph); cursor: pointer; border: 0; background: none; padding: 0; font: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  .stamp { font: 11px var(--mono); color: var(--faint); } .stamp a { cursor: pointer; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+  .umsg { align-self: flex-end; max-width: 78%; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px 12px 4px 12px; padding: 8px 12px; white-space: pre-wrap; }
+  .amsg p { margin: 0 0 8px; } .amsg code { font: 12.5px var(--mono); }
+  .worked { display: flex; gap: 6px; align-items: center; font: 12px var(--mono); color: var(--faint); cursor: pointer; }
+  .worked.live .wt { background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.4s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -20% 0; } }
+  @media (prefers-reduced-motion: reduce) { .worked.live .wt { animation: none; background: none; color: var(--live); } }
+  /* the title row doubles as the tab strip once the workspace holds more than one thread */
+  .top .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .ttabs { display: inline-flex; gap: 2px; min-width: 0; margin: -4px 0; }
+  .top .ttab { border: 1px solid transparent; border-radius: 8px; padding: 3px 10px; font-size: 14px; font-weight: 400; color: var(--muted); cursor: pointer; background: none; display: inline-flex; gap: 7px; align-items: center; max-width: 260px; }
+  .top .ttab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .ttab:hover { color: var(--ink); background: var(--line-soft); }
+  .top .ttab.on { color: var(--ink); background: var(--raised); border-color: var(--line); font-weight: var(--w-emph); box-shadow: var(--card-shadow); }
+  .top .ttab .mk { font-size: 10px; color: var(--faint); } .top .ttab .mk.live { color: var(--live); } .top .ttab .mk.q { color: var(--attn); }
+  .top .actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+  .tbtn.icon { padding: 3px 9px; letter-spacing: 1px; }
+  /* the project picker: the one step before a draft */
+  .modal { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; }
+  .modal .box { width: 520px; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift-shadow); padding: 8px; }
+  .modal .mh { padding: 8px 10px 6px; display: flex; align-items: baseline; gap: 8px; } .modal .mh .r { margin-left: auto; font: 10.5px var(--mono); color: var(--faint); }
+  .modal .pr { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; color: var(--ink); font: inherit; }
+  .modal .pr:hover, .modal .pr.on { background: var(--line-soft); }
+  .modal .pr .n { font-weight: var(--w-emph); } .modal .pr .k { font: 11px var(--mono); color: var(--faint); }
+  .modal .pr .s { grid-column: 2 / 4; font-size: 11.5px; color: var(--faint); }
+  .modal .keys { padding: 8px 10px 4px; font-size: 11.5px; color: var(--faint); border-top: 1px solid var(--line-soft); margin-top: 6px; display: flex; gap: 14px; }
+  .modal .keys kbd { font: 10.5px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-right: 4px; color: var(--muted); }
+
+  /* ---- the composer ---- */
+  .compwrap { width: 100%; max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; }
+  .queued { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin: 0 14px 6px; border: 1px solid var(--line-soft); background: var(--surface); border-radius: 8px; font-size: 13px; }
+  .queued .qmark { color: var(--attn); font: 12px var(--mono); flex: none; }
+  .queued .qt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queued .qs { font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .dock { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--raised); padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 6px; }
+  .dock .q { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: var(--w-emph); }
+  .dock .q .qm { color: var(--attn); font-weight: var(--w-urgent); } .dock .q .age { margin-left: auto; font: 11px var(--mono); color: var(--faint); }
+  .dock .ledger { display: flex; flex-direction: column; margin: 0 -8px; }
+  .dock .ledger button { display: grid; grid-template-columns: 140px 1fr; gap: 12px; text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .dock .ledger button:hover { background: var(--line-soft); } .dock .ledger button b { color: var(--ink); }
+  .dock .ledger small { color: var(--faint); font-size: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--lift-shadow); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
+  .compwrap.docked .card { border-radius: 0 0 14px 14px; }
+  .card textarea { font: 14px/1.5 var(--sans); border: 0; background: none; color: var(--ink); resize: none; outline: none; width: 100%; min-height: 24px; max-height: calc(8 * 21px); padding: 0; display: block; overflow-y: auto; }
+  .card textarea::placeholder { color: var(--faint); } .card textarea:disabled { color: var(--faint); }
+  .row3 { display: flex; align-items: center; gap: 6px; }
+  .plusb, .micb { width: 26px; height: 26px; border-radius: 7px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; }
+  .plusb { font-size: 17px; } .micb { border-radius: 50%; width: 28px; height: 28px; } .micb svg { width: 16px; height: 16px; }
+  .plusb:hover, .micb:hover { background: var(--line-soft); color: var(--ink); }
+  .pend { font: 11px var(--mono); color: var(--attn); margin-left: 4px; }
+  .sel { border: 0; background: none; color: var(--muted); padding: 3px 7px; border-radius: 5px; cursor: pointer; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .sel:hover, .sel[aria-expanded="true"] { background: var(--line-soft); color: var(--ink); }
+  .sel .k { color: var(--faint); } .sel::after { content: "▾"; color: var(--faint); font-size: 10px; }
+  .sel.plain::after { content: none; }
+  .sel.ro { cursor: default; color: var(--muted); } .sel.ro::after { content: none; } .sel.ro:hover { background: none; color: var(--muted); }
+  .sel.osel { min-width: 84px; justify-content: space-between; margin-left: auto; color: var(--ink); }   /* fixed width: low, medium, high, xhigh, max, thinking on/off all fit, so the pill never moves */
+  .sepv { width: 1px; height: 12px; background: var(--line); margin: 0 3px; flex: none; }
+  .mpill { border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px 4px 9px; font-size: 12.5px; color: var(--ink); background: var(--surface); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+  .mpill.alone { margin-left: auto; }
+  .mpill .k { color: var(--faint); } .mpill::after { content: "▾"; color: var(--faint); font-size: 10px; }
+  .mpill .logo { opacity: 0.8; }
+  .mpill[aria-expanded="true"] { border-color: var(--faint); }
+  .sendc { width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; flex: none; }
+  .sendc:disabled { background: var(--line); color: var(--faint); cursor: not-allowed; }
+  .sendc:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+  .stopb { border: 1px solid var(--line); background: none; color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; font-weight: var(--w-emph); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .stopb:hover { background: var(--line-soft); } .stopb i { width: 8px; height: 8px; background: currentColor; border-radius: 1.5px; display: inline-block; }
+  .lip { margin: -8px 14px 0; padding: 13px 12px 5px; border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface); display: flex; gap: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+  .lip .right { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; }
+  /* the popover */
+  .pop { position: fixed; z-index: 35; width: 320px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift-shadow); padding: 6px; display: none; flex-direction: column; font-size: 12.5px; }
+  .pop.open { display: flex; }
+  .pop .ph { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px 5px; }
+  .pop .ph .r { margin-left: auto; font: 10.5px var(--mono); color: var(--faint); white-space: nowrap; }
+  .pop .cin { font: 12.5px var(--sans); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--surface); color: var(--ink); margin: 2px 2px 4px; outline: none; }
+  .pop .cin:focus { border-color: var(--live); } .pop .cin::placeholder { color: var(--faint); }
+  .pop .pi { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); text-align: left; border: 0; background: none; font: inherit; width: 100%; }
+  .pop .pi:hover { background: var(--line-soft); color: var(--ink); }
+  .pop .pi.on { color: var(--ink); font-weight: var(--w-emph); }
+  .pop .pi .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; justify-self: center; } .pop .pi.on .dot { background: var(--ink); }
+  .pop .pi .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi .n small { color: var(--faint); font-weight: 400; font-size: 11px; margin-left: 6px; }
+  .pop .pi .st { font-size: 11px; white-space: nowrap; font-weight: 400; color: var(--faint); }
+  .pop .pi .s { grid-column: 2 / 4; font-size: 11px; color: var(--faint); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop .pi.dim { opacity: 0.5; cursor: default; } .pop .pi.dim:hover { background: none; color: var(--muted); }
+  .pop .pi.soft { opacity: 1; } .pop .pi.soft .s { color: var(--attn); }
+  .pop .pi.more .n { color: var(--faint); }
+  /* model rows: the logo takes the marker column, the name is ink, the section header is one faint word */
+  .pop .pi.lg { grid-template-columns: 16px minmax(0, 1fr) auto; color: var(--ink); padding: 6px 8px; }
+  .pop .pi.lg .logo { justify-self: center; opacity: 0.85; } .pop .pi.lg.dim { color: var(--muted); }
+  .pop .pi.lg .st.on { color: var(--ink); }
+  .pop .pg { margin-top: 6px; padding: 8px 8px 3px; border-top: 1px solid var(--line-soft); display: flex; align-items: baseline; gap: 8px; }
+  .pop .cin + .pg, .pop .pg:first-child { border-top: 0; margin-top: 0; padding-top: 4px; }
+  .pop .pi.grp { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 6px 6px; padding-top: 9px; }
+  .pop .pi.grp .n { display: flex; gap: 6px; align-items: baseline; min-width: 0; } .pop .pi.grp .n b { flex: none; font-weight: 400; }
+  .pop .pi.grp .n small { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+  .pop .pi.grp .st a { color: var(--muted); cursor: pointer; pointer-events: auto; }
+  .pop .opts { margin-top: 2px; padding: 6px 8px 4px; display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 5px 10px; align-items: center; }
+  .pop .opts .ol { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: var(--w-emph); }
+  .segq { display: inline-flex; gap: 1px; flex-wrap: wrap; }
+  .segq button { border: 0; background: none; font: inherit; font-size: 12px; color: var(--muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .segq button:hover { background: var(--line-soft); color: var(--ink); } .segq button.on { color: var(--ink); font-weight: var(--w-emph); background: var(--line-soft); }
+  .pop .foot { border-top: 1px solid var(--line-soft); margin-top: 6px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .pop .foot a { color: var(--muted); cursor: pointer; }
+  /* the prototype's own bar: not part of the design */
+  #bar { position: fixed; left: calc(var(--side-w) + 40px); bottom: 14px; z-index: 50; background: #17191f; color: #e9eaf0; border-radius: 999px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; font: 12px var(--mono); box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
+  #bar button { border: 0; background: none; color: inherit; font: inherit; padding: 5px 9px; border-radius: 999px; cursor: pointer; } #bar button:hover { background: rgba(255,255,255,0.1); }
+  #note { position: fixed; right: 14px; bottom: 18px; z-index: 49; font: 10.5px var(--mono); color: var(--attn); background: var(--attn-soft); border: 1px dashed var(--attn); border-radius: 8px; padding: 4px 9px; white-space: nowrap; }
+  #note b { font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main>
+    <div class="top" id="top"></div>
+    <div class="thread" id="thread"></div>
+  </main>
+</div>
+<div class="pop" id="pop"></div>
+<div id="modal"></div>
+<div id="bar"></div>
+<div id="note"></div>
+<script>
+/* ============ url state ============ */
+const STATES = ["draft", "fresh", "sibling", "idle", "busy", "decision", "exited"];
+const params = () => new URLSearchParams(location.search);
+const stateKey = () => (STATES.includes(params().get("state")) ? params().get("state") : "draft");
+const peers = () => (params().get("peers") === "1" ? 1 : 2);
+const projectKey = () => (params().get("project") === "ops" ? "ops" : "webshop");
+function setParams(kv) { const p = params(); for (const [k, v] of Object.entries(kv)) p.set(k, v); history.replaceState(null, "", `?${p}`); boot(); }
+
+/* ============ data: catalogs, the way client-core would hand them over ============ */
+const ICONS = "https://unpkg.com/@lobehub/icons-static-svg@1.95.0/icons/";
+const logo = (slug) => slug ? `<i class="logo" style="--m:url(${ICONS}${slug}.svg)"></i>` : `<i class="logo txt">π</i>`;
+const E3 = ["low", "medium", "high"], E4 = ["low", "medium", "high", "max"], EX = ["low", "medium", "high", "xhigh"];
+const CLAUDE = [
+  { slug: "claude-sonnet-5", name: "Sonnet 5", effort: E3, fast: true, isDefault: true },
+  { slug: "claude-opus-5", name: "Opus 5", effort: E4, ctx: ["200k", "1M"] },
+  { slug: "claude-fable-5-1", name: "Fable 5.1", effort: E4, ctx: ["200k", "1M"] },
+  { slug: "claude-haiku-4-5", name: "Haiku 4.5", effort: E3 },
+  { slug: "claude-opus-4-8", name: "Opus 4.8", effort: E4, isLegacy: true },
+  { slug: "claude-fable-5", name: "Fable 5", effort: E4, isLegacy: true },
+  { slug: "claude-sonnet-4-6", name: "Sonnet 4.6", effort: E3, isLegacy: true },
+];
+const CODEX = [
+  { slug: "gpt-5.6", name: "GPT-5.6", effort: EX, isDefault: true },
+  { slug: "gpt-5.6-codex", name: "GPT-5.6 Codex", effort: EX },
+  { slug: "gpt-5.5-codex-mini", name: "GPT-5.5 Codex Mini", effort: ["medium", "high"] },
+  { slug: "gpt-5.5", name: "GPT-5.5", effort: EX, isLegacy: true },
+  { slug: "gpt-5.4", name: "GPT-5.4", effort: EX, isLegacy: true },
+];
+const PI_LOGO = { glm: "zai", deepseek: "deepseek", qwen3: "qwen", kimi: "moonshot", minimax: "minimax", llama: "meta", mistral: "mistral", gemma: "gemma" };
+const PI = ["glm-5", "glm-5-flash", "glm-4.7", "glm-4.7-flash", "glm-4.5-air", "deepseek-v4", "deepseek-r2", "qwen3-coder-480b", "qwen3-235b", "kimi-k2.5", "minimax-m2", "llama-4-maverick", "mistral-large-3", "gemma-4-27b"]
+  .map((slug, n) => ({ slug, name: slug.replace(/-/g, " ").replace(/^\w/, (ch) => ch.toUpperCase()).replace("Glm", "GLM").replace("Deepseek", "DeepSeek"), thinking: ["off", "on"], isDefault: n === 0, logo: PI_LOGO[slug.split("-")[0]] }));
+const INSTANCES_BUSY = [
+  { id: "cc-personal", provider: "Claude Code", logo: "anthropic", name: "personal", who: "rogier@… · Max plan", on: ["laptop", "macstudio-01", "hetzner-01"], models: CLAUDE },
+  { id: "cc-work", provider: "Claude Code", logo: "anthropic", name: "work", who: "rogier@acme… · Team", on: ["laptop"], models: CLAUDE },
+  { id: "codex", provider: "Codex", logo: "openai", name: "", who: "ChatGPT Plus", on: ["laptop", "macstudio-01"], models: CODEX },
+  { id: "pi-zai", provider: "pi", logo: null, name: "zai", who: "API key", on: ["laptop"], noAuto: true, models: PI },
+];
+const RUNNERS_BUSY = [
+  { id: "laptop", local: true, state: "online", tone: "live", cap: "1/2", note: "this machine · reserved" },
+  { id: "macstudio-01", state: "online", tone: "live", cap: "3/4", note: "default" },
+  { id: "hetzner-01", state: "at cap · would queue", tone: "attn", cap: "4/4", note: "" },
+  { id: "macstudio-02", state: "draining", tone: "", cap: "1/4", off: "draining · takes no new sessions" },
+  { id: "pi-lab", state: "unreachable 2d", tone: "fail", cap: "0/2", off: "unreachable · a thread would wait for it" },
+];
+/* projects and their repos: the project is picked first, so nothing outside it is on offer */
+const PROJECTS = { webshop: { repos: ["webshop"] }, ops: { repos: ["ops-infra", "ops-runbooks"] } };
+const REPOS_BUSY = [
+  { id: "webshop", primary: "main", current: "main", branches: ["main", "release/2.4", "feat/runner-drain"], on: ["laptop", "macstudio-01", "hetzner-01"] },
+  { id: "ops-infra", primary: "master", current: "hetzner-migration", branches: ["master", "hetzner-migration"], on: ["laptop"] },
+  { id: "ops-runbooks", primary: "main", current: "main", branches: ["main"], on: ["laptop"] },
+];
+const ACCESS = [
+  { mode: "approval-required", meaning: "asks before every side-effecting action" },
+  { mode: "auto-accept-edits", meaning: "allows file edits, asks for the rest" },
+  { mode: "auto", meaning: "a harness-side reviewer judges routine actions" },
+  { mode: "full-access", meaning: "allows everything" },
+];
+const AGES = { "Fix flaky webhook tests": "12m", "Write the retry runbook": "31m", "Runner drain command": "4m", "Bump the Bun pin": "1d", "Tidy the promotion runbook": "2h", "Rotate the Hetzner backups key": "3d" };
+const MARKS = { "Runner drain command": "q", "Bump the Bun pin": "done", "Rotate the Hetzner backups key": "done" };
+const NONE = { webshop: ["Tidy the promotion runbook"], ops: [] };   // workspace-less threads per project
+let FRESH_LOGIN = false;
+const catalogs = () => stateKey() === "fresh"
+  ? { instances: [{ id: "cc-personal", provider: "Claude Code", logo: "anthropic", name: "", who: "found on this machine", on: FRESH_LOGIN ? ["laptop"] : [], models: CLAUDE }],
+      runners: [{ id: "laptop", local: true, state: "online", tone: "live", cap: "0/4", note: "this machine" }], repos: [] }
+  : { instances: INSTANCES_BUSY, runners: RUNNERS_BUSY, repos: REPOS_BUSY };
+/* what the user picked most recently, across accounts; the menu shows these first */
+let RECENT = [["cc-personal", "claude-opus-5"], ["codex", "gpt-5.6"]];
+
+/* ============ the thread: draft or active ============ */
+/* a workspace (spec 02): primary = a repo's shared checkout on one machine; ephemeral = a worktree per repo on a new branch, named after it */
+let WS;
+const wsOf = (id) => WS.find((w) => w.id === id) || null;
+const DEFAULT_CONFIG = { instanceId: "cc-personal", model: "claude-sonnet-5", options: { effort: "medium", fast: false, thinking: "off", ctx: "200k" }, accessMode: "approval-required", runnerId: "laptop", workspace: "primary:webshop", branch: null };
+let thread, message, picks, open, transcript, FILTER = "", SHOW_LEGACY = {}, MODAL = false;
+function reset() {
+  const k = stateKey(); FRESH_LOGIN = false; picks = {}; open = null; message = ""; FILTER = ""; SHOW_LEGACY = {}; MODAL = false;
+  WS = [
+    { id: "hydra/run-3f1", project: "webshop", kind: "ephemeral", repos: ["webshop"], runnerId: "laptop", branch: "hydra/run-3f1", threads: peers() === 2 ? ["Fix flaky webhook tests", "Write the retry runbook"] : ["Fix flaky webhook tests"] },
+    { id: "hydra/run-8a0", project: "webshop", kind: "ephemeral", repos: ["webshop"], runnerId: "macstudio-01", branch: "hydra/run-8a0", threads: ["Runner drain command"] },
+    { id: "primary:webshop:laptop", project: "webshop", kind: "primary", repos: ["webshop"], runnerId: "laptop", branch: "main", threads: ["Bump the Bun pin"] },
+    { id: "hydra/run-c17", project: "ops", kind: "ephemeral", repos: ["ops-infra", "ops-runbooks"], runnerId: "laptop", branch: "hydra/run-c17", threads: ["Rotate the Hetzner backups key"] },
+  ];
+  if (k === "draft" || k === "fresh") thread = { kind: "draft", project: projectKey(), from: null };
+  else if (k === "sibling") thread = { kind: "draft", project: "webshop", from: "hydra/run-3f1" };
+  else thread = { kind: "active", session: { ...DEFAULT_CONFIG, project: "webshop", workspace: "hydra/run-3f1", status: k === "busy" || k === "decision" ? "busy" : k === "exited" ? "exited" : "idle", title: "Fix flaky webhook tests", startedAgo: "12m", queued: k === "busy" ? ["Also tell me the current date once you finish."] : [], decision: k === "decision" } };
+  transcript = thread.kind === "active" ? baseTranscript() : [];
+}
+const project = () => thread.kind === "active" ? thread.session.project : thread.project;
+const repoById = (id) => catalogs().repos.find((r) => r.id === id) || null;
+const projRepos = () => PROJECTS[project()].repos.map(repoById).filter(Boolean);
+/* effective config: defaults from the catalogs, overlaid with explicit picks - recomputed every render */
+function defaults() {
+  const c = catalogs(); const inst = c.instances.find((i) => i.on.length) || c.instances[0];
+  const runner = inst && c.runners.find((r) => inst.on.includes(r.id) && !r.off);
+  const model = inst ? (inst.models.find((m) => m.isDefault) || inst.models[0]).slug : null;
+  const rs = projRepos();
+  const workspace = thread.from ? `join:${thread.from}` : !rs.length ? "none" : rs.length > 1 ? "new" : `primary:${rs[0].id}`;
+  return { ...DEFAULT_CONFIG, instanceId: inst ? inst.id : null, runnerId: runner ? runner.id : null, model, workspace };
+}
+/* the workspace pick, read: primary:<repo> | new | join:<id> | none on a draft; the workspace id or null on a session */
+function wsPick(c) {
+  if (thread.kind === "active") { const w = c.workspace ? wsOf(c.workspace) : null; return w ? { kind: w.kind === "primary" ? "primary" : "join", ws: w, repo: repoById(w.repos[0]) } : { kind: "none" }; }
+  if (c.workspace === "new" || c.workspace === "none") return { kind: c.workspace };
+  if (c.workspace.startsWith("join:")) return { kind: "join", ws: wsOf(c.workspace.slice(5)) };
+  return { kind: "primary", repo: repoById(c.workspace.slice(8)) };
+}
+/* a joined workspace brings its branch and its machine; the composer does not ask again */
+function config() {
+  const c = thread.kind === "active" ? { ...thread.session, ...picks } : { ...defaults(), ...picks };
+  const p = wsPick(c);
+  return p.kind === "join" && p.ws ? { ...c, branch: p.ws.branch, runnerId: p.ws.runnerId } : c;
+}
+const active = () => thread.kind === "active";
+const LIVE = ["model", "options"];
+/* the branch the lip shows: on the current checkout the branch it is on, on a new workspace the base */
+function branchOf(c = config()) { const p = wsPick(c); if (p.kind === "primary") return c.branch || (p.repo ? p.repo.current : null); if (p.kind === "new") { const rs = projRepos(); return rs.length === 1 ? c.branch || rs[0].primary : null; } return null; }
+/* one lock reason per field, or null: the only place "started" and "joined a workspace" exist */
+function lockReason(field) {
+  if (active()) return LIVE.includes(field) ? null : "fixed once the thread started";
+  const p = wsPick(config());
+  if ((field === "branch" || field === "runnerId") && p.kind === "join") return `set by the workspace ${p.ws.id}`;
+  if (field === "branch" && p.kind === "new" && projRepos().length > 1) return "each repo starts from its default branch; a base per repo is not in v1";
+  return null;
+}
+const locked = (f) => lockReason(f) !== null;
+const inst = (c = config()) => catalogs().instances.find((i) => i.id === c.instanceId) || null;
+const modelOf = (c = config()) => { const i = inst(c); return i ? i.models.find((m) => m.slug === c.model) || null : null; };
+const runnerOf = (c = config()) => catalogs().runners.find((r) => r.id === c.runnerId) || null;
+const multiAccount = (i) => catalogs().instances.filter((x) => x.provider === i.provider).length > 1;
+const acct = (i) => i.provider + (i.name && multiAccount(i) ? ` · ${i.name}` : "");
+const mlogo = (g, m) => logo(m.logo || g.logo);
+function optionsLabel(c = config()) { const m = modelOf(c); if (!m) return null; const v = m.thinking ? `thinking ${c.options.thinking}` : m.effort ? c.options.effort : null; return v && m.fast && c.options.fast ? `${v} ⚡` : v; }
+/* the pill: the provider's logo, the account only when the provider has more than one, the model; never the harness */
+function pillHtml(c = config()) { const i = inst(c), m = modelOf(c); return `<button class="mpill ${optionsLabel(c) ? "" : "alone"}" data-pop="model" data-align="end" title="${active() ? "The model stays live; the account is fixed" : "Model and account"}">${i ? logo(i.logo) : ""}${i && multiAccount(i) ? `<span class="k">${i.name}</span>` : ""}${i ? (m ? m.name : c.model) : "No provider"}</button>`; }
+function runnerLabel(c = config()) { const r = runnerOf(c); return r ? (r.local ? `local · ${r.id}` : r.id) : "no machine"; }
+/* the workspace label in the lip and the sidebar */
+function wsLabel(c = config()) { const p = wsPick(c); if (p.kind === "none") return "None"; if (p.kind === "new") return "New workspace"; if (p.kind === "primary") return `Current checkout${projRepos().length > 1 ? ` of ${p.repo.id}` : ""}`; return `<span class="mono">${p.ws.id}</span>`; }
+function blocker() {
+  if (active()) return null;
+  const c = config(); const i = inst(c); const r = runnerOf(c);
+  if (!i) return { why: "No provider is set up.", action: null };
+  if (!i.on.length) return { why: `${i.provider} is on this machine but not logged in.`, action: { label: "Log in", go: "login" } };
+  if (!r) return { why: `No machine is logged in to ${acct(i)}.`, action: { label: "Pick a machine", go: "runner" } };
+  return null;
+}
+
+/* ============ picks ============ */
+function applyPick(pick) {
+  const c = config();
+  switch (pick.field) {
+    case "instance": { const i = catalogs().instances.find((x) => x.id === pick.id); const r = catalogs().runners.find((x) => i.on.includes(x.id) && !x.off); const m = i.models.find((x) => x.slug === pick.slug) || i.models.find((x) => x.isDefault) || i.models[0]; picks = { ...picks, instanceId: i.id, runnerId: locked("runnerId") ? c.runnerId : (r ? r.id : null), model: m.slug, options: { ...c.options, effort: m.effort ? (m.effort.includes(c.options.effort) ? c.options.effort : "medium") : c.options.effort } }; break; }
+    case "model": { if (pick.instanceId && pick.instanceId !== c.instanceId) return applyPick({ field: "instance", id: pick.instanceId, slug: pick.slug }); const m = inst().models.find((x) => x.slug === pick.slug); picks = { ...picks, model: m.slug, options: { ...c.options, effort: m.effort && !m.effort.includes(c.options.effort) ? "medium" : c.options.effort } }; break; }
+    case "option": picks = { ...picks, options: { ...c.options, [pick.id]: pick.value } }; break;
+    case "workspace": picks = { ...picks, workspace: pick.id, branch: null }; break;
+    default: picks = { ...picks, [pick.field]: pick.value };
+  }
+}
+
+/* ============ submission ============ */
+function submit() {
+  const text = message.trim(); if (!text || blocker()) return;
+  const c = config(); RECENT = [[c.instanceId, c.model], ...RECENT.filter(([g, s]) => !(g === c.instanceId && s === c.model))].slice(0, 3);
+  if (thread.kind === "draft") {
+    const title = text.split("\n")[0].slice(0, 48); const p = wsPick(c); let wsId = null;
+    if (p.kind === "primary") { wsId = `primary:${p.repo.id}:${c.runnerId}`; if (!wsOf(wsId)) WS.push({ id: wsId, project: project(), kind: "primary", repos: [p.repo.id], runnerId: c.runnerId, branch: branchOf(c), threads: [] }); }
+    else if (p.kind === "new") { wsId = "hydra/run-9c2"; WS.push({ id: wsId, project: project(), kind: "ephemeral", repos: projRepos().map((r) => r.id), runnerId: c.runnerId, branch: wsId, threads: [] }); }
+    else if (p.kind === "join") wsId = p.ws.id;
+    if (wsId) wsOf(wsId).threads.push(title);
+    thread = { kind: "active", session: { ...c, project: project(), workspace: wsId, status: "busy", title, startedAgo: "now", queued: [], decision: false } };
+    picks = {}; transcript = [{ kind: "stamp", t: "Thu 11 Sep · 11:52" }, { kind: "user", t: text }, { kind: "worked", live: true, t: "2s" }]; message = "";
+    setTimeout(() => { if (thread.kind === "active" && thread.session.status === "busy") { thread.session.status = "idle"; transcript[2] = { kind: "worked", t: "31s" }; transcript.push({ kind: "agent", t: "<p>Two of the three failures are one race: the retry scheduler fires before the fake clock advances. Fixing that first; the port reuse is a one-liner after.</p>" }); render(); } }, 2600);
+  } else {
+    const s = thread.session;
+    if (s.status === "busy") s.queued.push(text); else { transcript.push({ kind: "user", t: text }, { kind: "worked", live: true, t: "1s" }); s.status = "busy"; setTimeout(() => { s.status = "idle"; transcript[transcript.length - 1] = { kind: "worked", t: "8s" }; transcript.push({ kind: "agent", t: "<p>Done.</p>" }); render(); }, 2600); }
+    if (Object.keys(picks).length) { Object.assign(s, picks); picks = {}; }  // the picks ride the submission and land on the row
+    message = "";
+  }
+  render();
+}
+/* a draft in a project, or one joining a workspace: nothing locked, the workspace preselected */
+function openDraft(proj, from = null) { thread = { kind: "draft", project: proj, from }; picks = {}; message = ""; open = null; MODAL = false; transcript = []; render(); }
+
+/* ============ menus ============ */
+const row = (on, dim, data, name, st = "", sub = "", cls = "", lead = `<span class="dot"></span>`) => `<button class="pi ${on ? "on" : ""} ${dim ? "dim" : ""} ${cls}" ${dim ? "" : `data-pick='${JSON.stringify(data)}'`}>${lead}<span class="n">${name}</span><span class="st ${on ? "on" : ""}">${st}</span>${sub ? `<span class="s">${sub}</span>` : ""}</button>`;
+function optionsHtml(c, m) {
+  let h = `<div class="opts">`;
+  const seg = (id, values, labels = values) => `<span class="segq">${values.map((e, n) => `<button class="${String(c.options[id]) === String(e) ? "on" : ""}" data-pick='${JSON.stringify({ field: "option", id, value: e })}'>${labels[n]}</button>`).join("")}</span>`;
+  if (m.effort) h += `<span class="ol">reasoning</span>${seg("effort", m.effort)}`;
+  if (m.thinking) h += `<span class="ol">thinking</span>${seg("thinking", m.thinking)}`;
+  if (m.ctx) h += `<span class="ol">context</span>${seg("ctx", m.ctx)}`;
+  if (m.fast) h += `<span class="ol">fast mode</span>${seg("fast", [false, true], ["off", "on"])}`;
+  return h + `</div>`;
+}
+function modelMenuHtml() {
+  const c = config(), cat = catalogs(), i = inst(c), r = runnerOf(c);
+  const total = cat.instances.reduce((n, g) => n + g.models.length, 0);
+  const q = FILTER.trim().toLowerCase();
+  const match = (x) => !q || x.name.toLowerCase().includes(q) || x.slug.includes(q);
+  const dimOf = (g) => active() && i && g.id !== i.id ? "account fixed" : !g.on.length ? "not logged in" : !g.on.includes(c.runnerId) ? `not on ${r ? r.id : "this machine"}` : "";
+  const head = (label) => `<div class="pg"><span class="lane-label">${label}</span></div>`;
+  /* a model row: the logo, the name, the account beside it only in Recent and only when the provider has more than one */
+  const mrow = (g, x, named) => { const on = g.id === c.instanceId && x.slug === c.model, dim = dimOf(g); return row(on, !!dim, { field: "model", slug: x.slug, instanceId: g.id }, `${x.name}${named && multiAccount(g) ? `<small>${g.name}</small>` : ""}${x.isDefault && g.id === c.instanceId && !named ? `<small>default</small>` : ""}`, on ? "✓" : named && dim ? dim : "", "", "lg", mlogo(g, x)); };
+  let h = total > 8 ? `<input class="cin" id="mfilter" placeholder="Filter models…" value="${esc(FILTER)}">` : "";
+  if (!q && RECENT.length) {
+    const rows = RECENT.map(([gid, slug]) => { const g = cat.instances.find((x) => x.id === gid); const x = g && g.models.find((y) => y.slug === slug); return g && x ? mrow(g, x, true) : ""; }).join("");
+    if (rows) h += head("Recent") + rows;
+  }
+  for (const g of cat.instances) {
+    const cur = i && g.id === i.id; const dim = dimOf(g);
+    if (cur || q) {
+      const models = g.models.filter(match); if (q && !models.length) continue;
+      const legacy = models.filter((x) => x.isLegacy), main = models.filter((x) => !x.isLegacy);
+      h += head(multiAccount(g) ? g.name : g.provider);
+      if (!dim || cur) {
+        h += main.map((x) => mrow(g, x, false)).join("");
+        if (legacy.length) h += q || SHOW_LEGACY[g.id] ? legacy.map((x) => mrow(g, x, false)).join("") : `<button class="pi more lg" data-legacy="${g.id}"><span></span><span class="n">older models (${legacy.length}) ›</span></button>`;
+      } else h += `<button class="pi dim lg"><span></span><span class="n">${dim}</span><span class="st">${!active() && !g.on.length ? `<a data-go="login">Log in</a>` : ""}</span></button>`;
+    } else h += `<button class="pi lg grp ${dim ? "dim" : ""}" ${dim ? "" : `data-pick='${JSON.stringify({ field: "instance", id: g.id })}'`}>${logo(g.logo)}<span class="n"><b>${multiAccount(g) ? g.name : g.provider}</b><small>${g.who}</small></span><span class="st">${dim ? (!active() && !g.on.length ? `${dim} · <a data-go="login">Log in</a>` : dim) : `${g.models.length} models ›`}</span></button>`;
+  }
+  return h;
+}
+const quote = (list) => list.map((t) => `“${t}”`).join(", ");
+function menuHtml(kind) {
+  const c = config(), cat = catalogs(), r = runnerOf(c), i = inst(c), m = modelOf(c), p = wsPick(c), rs = projRepos(), multi = rs.length > 1;
+  const lockNote = active() ? "" : `<span class="r">locks when the thread starts</span>`;
+  if (kind === "model") return modelMenuHtml();
+  if (kind === "options") return `<div class="ph"><span class="lane-label">Model options</span><span class="r">${m ? m.name : ""}</span></div>` + (m ? optionsHtml(c, m) : "");
+  if (kind === "runner") {
+    const rp = p.kind === "primary" ? p.repo : null;
+    return `<div class="ph"><span class="lane-label">Machine</span>${lockNote}</div>` + cat.runners.map((x) => {
+      const off = x.off || (i && !i.on.includes(x.id) ? `not logged in to ${acct(i)}` : "") || (rp && !rp.on.includes(x.id) ? `${rp.id} is not cloned there · clones on first use` : "");
+      return row(x.id === c.runnerId, !!x.off, { field: "runnerId", value: x.id }, x.local ? `local · ${x.id}` : x.id, `<span class="state ${x.tone}">${x.state}</span> <span class="mono" style="color:var(--faint)">${x.cap}</span>`, [x.note, off].filter(Boolean).join(" · "));
+    }).join("") + `<div class="foot">The thread runs where you say; nothing moves it later. <a>Add machine →</a></div>`;
+  }
+  if (kind === "workspace") {
+    const primaryRow = (rp) => { const cloned = r && rp.on.includes(r.id); return row(p.kind === "primary" && p.repo === rp, false, { field: "workspace", id: `primary:${rp.id}` }, `Current checkout${multi ? ` of ${rp.id}` : ""}`, r ? r.id : "", cloned ? `on <span class="mono">${rp.current}</span> · you and the agent share the files` : `not cloned on ${r ? r.id : "this machine"} · clones on first use`); };
+    const newRow = rs.length ? row(p.kind === "new", false, { field: "workspace", id: "new" }, "New workspace", "", multi ? `a worktree of each repo, side by side, each on a new branch` : `a fresh worktree of ${rs[0].id} on a new branch`) : "";
+    const mine = WS.filter((w) => w.project === project() && w.kind === "ephemeral");
+    let h = `<div class="ph"><span class="lane-label">Workspace</span>${lockNote}</div>`;
+    h += multi ? newRow + rs.map(primaryRow).join("") : rs.map(primaryRow).join("") + newRow;
+    h += mine.map((w) => row(p.kind === "join" && p.ws === w, false, { field: "workspace", id: `join:${w.id}` }, `<span class="mono">${w.id}</span>`, w.runnerId, `${w.threads.length === 1 ? "1 thread" : `${w.threads.length} threads`} · ${quote(w.threads)}`)).join("");
+    h += row(p.kind === "none", false, { field: "workspace", id: "none" }, "None", "", "the agent works without a checkout");
+    return h + (rs.length ? "" : `<div class="foot"><a>Add a repo to ${project()} →</a> · <a>Adopt a folder on this machine…</a></div>`);
+  }
+  if (kind === "branch") {
+    const rp = p.kind === "primary" ? p.repo : rs[0]; const b = branchOf(c);
+    const held = (name) => { const w = WS.find((x) => x.kind === "ephemeral" && x.repos.includes(rp.id) && x.branch === name); return w ? `in workspace ${w.id}` : ""; };
+    if (p.kind === "primary") return `<div class="ph"><span class="lane-label">Branch</span><span class="r">the checkout switches to it</span></div>` + rp.branches.map((name) => row(b === name, !!held(name), { field: "branch", value: name }, `<span class="mono">${name}</span>`, name === rp.current ? "current" : "", held(name))).join("");
+    return `<div class="ph"><span class="lane-label">Base branch</span><span class="r">the new branch starts from it</span></div>` + rp.branches.map((name) => row(b === name, false, { field: "branch", value: name }, `<span class="mono">${name}</span>`, name === rp.primary ? "default" : name === rp.current ? "current" : "", "")).join("") + `<div class="foot">The new branch is <span class="mono">hydra/run-…</span>, named after the thread, and starts from <span class="mono">origin/${b}</span> when the remote has it.</div>`;
+  }
+  if (kind === "access") return ACCESS.map((a) => { const fb = a.mode === "auto" && i && i.noAuto; return row(a.mode === c.accessMode, false, { field: "accessMode", value: a.mode }, a.mode, "", fb ? `runs as auto-accept-edits on ${i.provider}` : a.meaning, fb ? "soft" : ""); }).join("");
+  return "";
+}
+function placePop() {
+  const pop = document.getElementById("pop"); const anchor = open && document.querySelector(`[data-pop="${open}"]`);
+  if (!anchor) { pop.classList.remove("open"); open = null; FILTER = ""; return; }
+  pop.innerHTML = menuHtml(open); pop.className = "pop open"; anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(); pop.style.width = open === "runner" || open === "workspace" ? "420px" : open === "model" ? "360px" : "320px"; pop.style.maxHeight = `${a.top - 16}px`;
+  const w = pop.offsetWidth;
+  /* right-hand controls anchor at their right edge, so a pill that grows or shrinks never moves its own menu */
+  const left = anchor.dataset.align === "end" ? a.right - w : a.left;
+  pop.style.left = `${Math.max(8, Math.min(left, innerWidth - w - 8))}px`; pop.style.bottom = `${innerHeight - a.top + 6}px`;
+  const f = document.getElementById("mfilter"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+}
+
+/* ============ the composer ============ */
+const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>';
+const BRANCH = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:11px;height:11px;vertical-align:-1px;margin-right:4px"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7.2v9.6M18 10.2c0 4-12 2.6-12 6.6"/></svg>';
+function sel(kind, value, key = "", field = kind, align = "") {
+  const why = lockReason(field);
+  return `<button class="sel ${why ? "ro" : ""}" ${why ? `title="${why}"` : `data-pop="${kind}"${align ? ` data-align="${align}"` : ""}`}>${key ? `<span class="k">${key}</span>` : ""}<span class="v">${value}</span></button>`;
+}
+function cardHtml() {
+  const c = config(), s = active() ? thread.session : null; const busy = s && s.status === "busy"; const exited = s && s.status === "exited"; const b = blocker();
+  const ol = optionsLabel(c);
+  const options = ol ? `<button class="sel osel" data-pop="options" data-align="end" title="Model options"><span class="v">${ol}</span></button>` : "";
+  const p = wsPick(c);
+  const placeholder = exited ? "This thread has exited. Start a new one to continue." : busy ? "Queued until the turn finishes…" : active() ? "Reply…" : p.kind === "join" ? `Say what this thread should do in ${p.ws.id}…` : "Say what you want done…";
+  const canSend = message.trim() && !b && !exited; const sendTip = active() ? "Send ⏎" : "Start thread ⏎";
+  const sendc = `<button class="sendc" data-send="1" ${canSend ? "" : "disabled"} aria-label="${sendTip}" title="${sendTip}">↑</button>`;
+  const stop = busy ? `<button class="stopb" data-stop="1" title="Stops the running turn; queued messages wait"><i></i>Stop</button>` : "";
+  const pending = active() && Object.keys(picks).length ? `<span class="pend">model change applies on send</span>` : "";
+  return `<div class="card"><textarea id="compose" rows="1" placeholder="${placeholder}" ${exited ? "disabled" : ""}>${esc(message)}</textarea>
+    <div class="row3"><button class="plusb" aria-label="Attach" title="Attach (not built)">+</button>${sel("access", c.accessMode, "", "accessMode")}${pending}${options}${pillHtml(c)}<button class="micb" aria-label="Voice" title="Dictate (not built)">${MIC}</button>${stop}${sendc}</div></div>`;
+}
+/* the lip: workspace · branch (the checkout's, or the base of a new one; gone when joined or none) · machine */
+function lipHtml() {
+  const c = config(), p = wsPick(c), b = branchOf(c), multiNew = p.kind === "new" && projRepos().length > 1;
+  const parts = [sel("workspace", wsLabel(c), "workspace", "workspace")];
+  if (p.kind === "primary" && b) parts.push(sel("branch", `<span class="mono" style="font-size:11px">${BRANCH}${b}</span>`, "", "branch"));
+  if (p.kind === "new" && (b || multiNew)) parts.push(sel("branch", multiNew ? projRepos().map((r) => r.primary).join(" · ") : `<span class="mono" style="font-size:11px">${b}</span>`, "from", "branch"));
+  return `<div class="lip">${parts.join('<span class="sepv"></span>')}<span class="right">${sel("runner", runnerLabel(c), "machine", "runnerId", "end")}</span></div>`;
+}
+function queuedHtml() { const s = active() ? thread.session : null; return s && s.queued.length ? s.queued.map((q) => `<div class="queued"><span class="qmark">○</span><span class="qt">${esc(q)}</span><span class="qs">queued · runs next</span><button class="sel plain" style="padding:2px 6px">Steer</button><button class="sel plain" style="padding:2px 6px">Cancel</button></div>`).join("") : ""; }
+function dockHtml() { const s = active() ? thread.session : null; return s && s.decision ? `<div class="dock"><div class="q"><span class="qm">?</span>Run <code class="mono">pnpm test --filter runner</code>?<span class="age">4m</span></div><div class="ledger"><button><b>Allow</b><small>runs the command once, in the workspace</small></button><button><b>Allow always</b><small>allows it for the rest of this thread</small></button><button><b>Deny</b><small>the agent hears no and continues</small></button></div></div>` : ""; }
+function composerHtml() { return `<div class="compwrap ${dockHtml() ? "docked" : ""}">${queuedHtml()}${dockHtml()}${cardHtml()}${lipHtml()}</div>`; }
+const wsTitle = (w) => w.kind === "primary" ? `${w.repos[0]} checkout · ${w.runnerId}` : w.id;
+const markOf = (t, s) => { const on = s && s.title === t; if (on && s.status === "busy") return ["▮▮▮", "live"]; if (on && s.status === "exited") return ["–", ""]; if (MARKS[t] === "q") return ["?", "q"]; if (MARKS[t] === "done") return ["✓", ""]; return ["○", ""]; };
+/* the title row: the thread's title, or the threads of its workspace as tabs once there is more than one (the draft being written counts) */
+function titleHtml() {
+  const s = active() ? thread.session : null; const p = wsPick(config()); const ws = s ? (s.workspace ? wsOf(s.workspace) : null) : p.kind === "join" ? p.ws : null;
+  const tabs = ws ? ws.threads.map((t) => { const [mk, cls] = markOf(t, s); return { title: t, on: s && s.title === t, mk, cls }; }) : [];
+  if (!s) tabs.push({ title: "New thread", on: true, mk: "·", cls: "" });
+  if (tabs.length < 2) return `<span class="title">${s ? esc(s.title) : "New thread"}</span>`;
+  return `<div class="ttabs">${tabs.map((t) => `<button class="ttab ${t.on ? "on" : ""}" title="${t.on ? "" : `Open “${esc(t.title)}”`}"><span class="mk ${t.cls}">${t.mk}</span><span>${esc(t.title)}</span></button>`).join("")}</div>`;
+}
+
+/* ============ page ============ */
+function baseTranscript() { return [{ kind: "stamp", t: "Thu 11 Sep · 09:02" }, { kind: "user", t: "The webhook retry tests fail about one run in five. Find out why and fix it without loosening the assertions." }, { kind: "worked", t: "31s" }, { kind: "agent", t: "<p>Two of the three failures are the same race: the retry scheduler fires before the fake clock advances, so the first attempt lands a tick early and the assertion on attempt count sees two.</p><p>The third failure is unrelated: <code>test/webhooks/retry.test.ts</code> reuses a port across cases. Fixing the race first; the port reuse is a one-liner after.</p>" }, { kind: "user", t: "Go ahead, race first." }, { kind: "worked", live: true, t: "12s" }]; }
+function transcriptHtml() {
+  const s = thread.session; const rows = transcript.map((r, idx) => {
+    if (r.kind === "stamp") return `<div class="stamp">${r.t}</div>`;
+    if (r.kind === "user") return `<div class="umsg">${esc(r.t)}</div>`;
+    if (r.kind === "agent") return `<div class="amsg">${r.t}</div>`;
+    const live = r.live && s.status === "busy" && idx === transcript.length - 1; return `<div class="worked ${live ? "live" : ""}"><span class="wt">${live ? "Working for" : "Worked for"} ${r.t}</span><span>›</span></div>`;
+  });
+  if (s.status === "exited") rows.push(`<div class="stamp">exited · the harness process ended 2h ago · <a data-go="new">Start a new thread from it</a></div>`);
+  return rows.join("");
+}
+function heroHtml() {
+  const b = blocker(); if (b) return `<div class="hero"><h2>What should the agent do?</h2><p><span class="why">Can't start yet.</span> ${b.why} ${b.action ? `<button class="link" data-go="${b.action.go}">${b.action.label}</button>` : ""}</p></div>`;
+  const c = config(), p = wsPick(c), rs = projRepos(), pj = project();
+  const u = (t) => `<u class="${pj}">${t}</u>`;
+  if (p.kind === "join") return `<div class="hero"><h2>What should the agent do in ${u(p.ws.id)}?</h2><p>It joins ${quote(p.ws.threads).replace(/, ([^,]*)$/, " and $1")} there: the agents see each other's edits, on one branch.</p></div>`;
+  const sub = p.kind === "primary" ? `It works in the checkout of ${p.repo.id} on ${runnerLabel(c)}, on <span class="mono">${branchOf(c)}</span>. You and the agent share the files.`
+    : p.kind === "new" ? (rs.length > 1 ? `It gets a worktree of each repo, side by side, each on a new branch from its default.` : `It gets its own worktree of ${rs[0].id}, on a new branch from <span class="mono">${branchOf(c)}</span>.`)
+    : "It works without a checkout.";
+  return `<div class="hero"><h2>What should the agent do in ${u(pj)}?</h2><p>${sub}</p></div>`;
+}
+function modalHtml() {
+  if (!MODAL) return "";
+  const rows = Object.entries(PROJECTS).map(([id, pr], n) => { const wss = WS.filter((w) => w.project === id); const threads = wss.reduce((k, w) => k + w.threads.length, 0) + NONE[id].length; return `<button class="pr ${id === project() ? "on" : ""}" data-project="${id}"><span class="pdot ${id}"></span><span class="n">${id}</span><span class="k">⌘${n + 1}</span><span class="s">${pr.repos.length === 1 ? `1 repo · ${pr.repos[0]}` : `${pr.repos.length} repos · ${pr.repos.join(", ")}`} · ${threads} threads · ${wss.filter((w) => w.kind === "ephemeral").length} workspaces</span></button>`; }).join("");
+  return `<div class="modal" data-close="1"><div class="box"><div class="mh"><span class="lane-label">New thread in</span><span class="r">the project bounds the repos and workspaces on offer</span></div>${rows}<div class="keys"><span><kbd>↑↓</kbd>Navigate</span><span><kbd>⏎</kbd>Select</span><span><kbd>Esc</kbd>Close</span></div></div></div>`;
+}
+function render() {
+  const s = active() ? thread.session : null; const c = config(), p = wsPick(c);
+  const sideRow = (t) => { const on = s && s.title === t; const [mk, cls] = markOf(t, s); return `<div class="row ${on ? "on" : ""}"><span class="mk ${cls}">${mk}</span><span class="t">${esc(t)}</span><span class="age">${on ? s.startedAgo : AGES[t] || "now"}</span><span class="m">${on && modelOf(s) ? modelOf(s).name : t === "Rotate the Hetzner backups key" ? "GPT-5.6" : "Sonnet 5"}</span></div>`; };
+  const draftRow = `<div class="row on"><span class="mk">·</span><span class="t" style="color:var(--muted)">New thread</span><span class="age">draft</span></div>`;
+  const groups = (id) => WS.filter((w) => w.project === id).map((w) => `<div class="grp"><span class="gl">${wsTitle(w)}</span>${w.kind === "ephemeral" ? `<button class="plus" data-join="${w.id}" title="New thread in ${w.id}">+</button>` : ""}</div>${w.threads.map(sideRow).join("")}${!s && p.kind === "join" && p.ws === w ? draftRow : ""}`).join("")
+    + (NONE[id].length ? `<div class="grp"><span class="gl">no workspace</span></div>${NONE[id].map(sideRow).join("")}` : "");
+  const projectHtml = (id) => `<div class="pj"><span class="pdot ${id}"></span>${id}<span class="cnt">${WS.filter((w) => w.project === id).reduce((k, w) => k + w.threads.length, 0) + NONE[id].length}</span><button class="plus" data-newin="${id}" title="New thread in ${id}">+</button></div>${!s && project() === id && p.kind !== "join" ? draftRow : ""}${groups(id)}`;
+  document.getElementById("side").innerHTML = `<div class="brand">Hydra <small>rogier</small></div><div class="seg"><span class="on">Threads</span><span>Hydra</span></div><button class="new" data-go="pick">+ Create new thread</button>
+    ${Object.keys(PROJECTS).map(projectHtml).join("")}
+    <div class="foot"><span>6 runners · 1 at cap</span><span>Marks <span class="mono" style="float:right;color:var(--faint)">?</span></span></div>`;
+  document.getElementById("top").innerHTML = `<span class="crumb">${project()} /</span>${titleHtml()}${s ? `<span class="actions">${s.workspace ? `<button class="tbtn" data-join="${s.workspace}" title="A draft in this workspace, beside this thread">+ New thread here</button>` : ""}<button class="tbtn icon" title="More (not built)">…</button></span>` : ""}`;
+  document.getElementById("thread").innerHTML = `<div class="tcol">${s ? transcriptHtml() : heroHtml()}</div>${composerHtml()}`;
+  document.getElementById("modal").innerHTML = modalHtml();
+  const ta = document.getElementById("compose"); if (ta) { grow(ta); if (!ta.disabled && document.activeElement !== ta && !open && !MODAL) ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  const tcol = document.querySelector(".tcol"); if (tcol && s) tcol.scrollTop = tcol.scrollHeight;
+  placePop();
+  document.getElementById("bar").innerHTML = `<button data-bar="state">state: ${stateKey()}</button><button data-bar="project">project: ${projectKey()}</button><button data-bar="peers">run-3f1: ${peers()}</button><button data-bar="theme" aria-label="Toggle theme">◐</button>`;
+  document.getElementById("note").innerHTML = `<b>PROTOTYPE</b> · #160 · round 4 · s state · p project · b threads · t theme`;
+}
+function grow(ta) { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 8 * 21)}px`; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+/* ============ events ============ */
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-pop],[data-pick],[data-go],[data-send],[data-stop],[data-bar],[data-legacy],[data-join],[data-newin],[data-project],[data-close]");
+  if (!el) { if (!e.target.closest("#pop")) { if (open) { open = null; render(); } } return; }
+  if (el.dataset.bar) {
+    if (el.dataset.bar === "state") return setParams({ state: STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length] });
+    if (el.dataset.bar === "project") return setParams({ project: projectKey() === "ops" ? "webshop" : "ops", state: "draft" });
+    if (el.dataset.bar === "peers") return setParams({ peers: peers() === 2 ? "1" : "2" });
+    if (el.dataset.bar === "theme") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; return; }
+  }
+  if (el.dataset.project) return openDraft(el.dataset.project);
+  if (el.dataset.close && e.target === el) { MODAL = false; return render(); }
+  if (el.dataset.newin) return openDraft(el.dataset.newin);
+  if (el.dataset.join) return openDraft(wsOf(el.dataset.join).project, el.dataset.join);
+  if (el.dataset.pop) { open = open === el.dataset.pop ? null : el.dataset.pop; FILTER = ""; return render(); }
+  if (el.dataset.legacy) { SHOW_LEGACY[el.dataset.legacy] = true; return render(); }
+  if (el.dataset.pick) { const pick = JSON.parse(el.dataset.pick); applyPick(pick); if (pick.field !== "option" && !(pick.field === "instance" && !pick.slug)) open = null; return render(); }
+  if (el.dataset.go === "login") { FRESH_LOGIN = true; catalogs().instances[0].on = ["laptop"]; open = null; return render(); }
+  if (el.dataset.go === "runner") { open = "runner"; return render(); }
+  if (el.dataset.go === "pick") { MODAL = true; open = null; return render(); }
+  if (el.dataset.go === "new") return openDraft(project());
+  if (el.dataset.send) return submit();
+  if (el.dataset.stop) { const s = thread.session; s.status = "idle"; transcript[transcript.length - 1] = { kind: "worked", t: "14s · stopped" }; return render(); }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "compose") { message = e.target.value; grow(e.target); const b = document.querySelector(".sendc"); if (b) b.disabled = !(message.trim() && !blocker()); }
+  if (e.target.id === "mfilter") { FILTER = e.target.value; placePop(); }
+});
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.matches("input,textarea,[contenteditable]");
+  if (e.key === "Escape") { if (MODAL) { MODAL = false; render(); } else if (open) { open = null; render(); } return; }
+  if (MODAL && e.key === "Enter") { e.preventDefault(); return openDraft(project()); }
+  if (typing) { if (e.target.id === "compose" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } return; }
+  if (e.key === "s") setParams({ state: STATES[(STATES.indexOf(stateKey()) + 1) % STATES.length] });
+  if (e.key === "p") setParams({ project: projectKey() === "ops" ? "webshop" : "ops", state: "draft" });
+  if (e.key === "b") setParams({ peers: peers() === 2 ? "1" : "2" });
+  if (e.key === "t") { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; }
+});
+window.addEventListener("resize", placePop);
+function boot() { reset(); render(); }
+if (params().get("theme") === "dark" || (!params().get("theme") && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
+boot();
+</script>
+</body>
+</html>

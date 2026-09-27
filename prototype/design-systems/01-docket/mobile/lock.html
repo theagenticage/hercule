@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lock screen · Hercule</title>
+<style>
+  /* The wallpaper: the docket fan, large and quiet, in the three kind colors. */
+  .wall { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(180deg, var(--bg) 20%, color-mix(in oklab, var(--k-proposal) 14%, var(--bg)) 100%); }
+  .wall i { position: absolute; left: 50%; top: 330px; width: 300px; height: 400px; margin-left: -150px; border-radius: 6px 44px 44px 44px; filter: blur(1px); }
+  .wall .f1 { background: color-mix(in oklab, var(--k-offer) 26%, var(--bg)); transform: translate(-70px, 40px) rotate(-16deg); }
+  .wall .f2 { background: color-mix(in oklab, var(--k-request) 24%, var(--bg)); transform: translate(60px, 10px) rotate(11deg); }
+  .wall .f3 { background: color-mix(in oklab, var(--k-proposal) 30%, var(--bg)); transform: translate(-4px, -30px) rotate(-3deg); }
+
+  .statusbar .left { width: 56px; }
+  .lockglyph { position: relative; z-index: 2; display: flex; justify-content: center; margin-top: 2px; color: var(--ink); }
+  .lockglyph .i { width: 17px; height: 17px; stroke-width: 1.7; }
+  .date { position: relative; z-index: 2; margin-top: 8px; text-align: center; font-size: 18px; font-weight: 560; color: var(--ink); opacity: 0.86; }
+  .clock { position: relative; z-index: 2; text-align: center; font-size: 96px; line-height: 1; font-weight: 640; letter-spacing: var(--track-num); font-variant-numeric: tabular-nums; color: var(--ink); margin-top: 2px; }
+
+  /* A lock-screen widget: today's docket as its rail. */
+  .widget { position: relative; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; font-size: 13px; font-weight: 560; color: var(--ink); }
+  .widget .rail i { width: 4px; height: 13px; }
+  .widget .rail i.now { height: 13px; width: 4px; }
+  .widget .muted { color: var(--muted); font-weight: 500; }
+
+  .stack-area { position: absolute; left: 12px; right: 12px; top: 262px; bottom: 118px; z-index: 3; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; }
+
+  /* A notification is a docket card: its kind stands on the top edge as the tab. */
+  .note { position: relative; border-radius: 2px 22px 22px 22px; padding: 11px 14px 12px; background: color-mix(in oklab, var(--raised) 86%, transparent); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)); box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow-2); }
+  .note.has-tab { margin-top: 22px; }
+  .note .ktab { left: 0; }
+  .note .h { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+  .note .h .appicon { width: 18px; height: 18px; filter: none; }
+  .note .h b { color: var(--ink); font-weight: 620; }
+  .note .h .w { margin-left: auto; color: var(--faint); }
+  .note .t { margin-top: 5px; font-size: 15px; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
+  .note .ev { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .note .ev .b { width: 12px; height: 12px; color: var(--ink); }
+  .note .ev .num { color: var(--ink); font-weight: 600; }
+  .acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
+  .acts button { height: 38px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 14.5px; font-weight: 620; background: color-mix(in oklab, var(--ink) 7%, transparent); }
+  .acts button .i { width: 15px; height: 15px; }
+  .acts .nogo { color: var(--nogo-text); }
+  .acts .go { background: var(--go); color: var(--on-verdict); }
+  .nw { white-space: nowrap; }
+
+  /* A collapsed group: the newest on top, the rest as edges below it. */
+  .group { position: relative; margin-bottom: 12px; }
+  .group .note { z-index: 2; }
+  .group .edge { position: absolute; left: 14px; right: 14px; height: 20px; border-radius: 0 0 18px 18px; background: color-mix(in oklab, var(--raised) 70%, transparent); box-shadow: inset 0 0 0 1px var(--glass-edge); }
+  .group .edge.e1 { bottom: -7px; z-index: 1; }
+  .group .edge.e2 { bottom: -13px; left: 26px; right: 26px; z-index: 0; opacity: 0.7; }
+  .note .kw { display: inline-flex; align-items: center; gap: 5px; color: var(--kc); font-weight: 620; }
+  .note .kw::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--kc); }
+  .note .more { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  /* The Live Activity: the working thread, now waiting on one answer. */
+  .live .h .appicon { width: 22px; height: 22px; }
+  .live .h b { font-size: 14.5px; }
+  .live .h .w { display: inline-flex; align-items: center; gap: 6px; color: var(--hold-text); font-weight: 620; font-variant-numeric: tabular-nums; }
+  .live .q { margin-top: 8px; font-size: 15px; font-weight: 600; }
+  .live .q code { font-size: 13px; }
+  .lprog { display: flex; align-items: center; gap: 10px; margin-top: 9px; font-size: 12px; color: var(--muted); }
+  .lprog .bar { flex: 1; display: flex; gap: 2px; height: 6px; }
+  .lprog .bar i { border-radius: 2px; background: var(--accent); opacity: 0.55; }
+  .lprog .bar i.wait { background: var(--hold); opacity: 1; }
+  .lprog .num { font-size: 12px; }
+  .live .haptic { position: absolute; right: 0; bottom: calc(100% + 4px); }
+
+  .corner { position: absolute; bottom: 40px; z-index: 3; width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); background: color-mix(in oklab, var(--raised) 70%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); box-shadow: inset 0 0 0 1px var(--glass-edge); }
+  .corner .i { width: 21px; height: 21px; }
+  .corner.l { left: 46px; }
+  .corner.r { right: 46px; }
+  @media (prefers-reduced-transparency: reduce) {
+    .note, .corner { background: var(--raised); }
+  }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="wall" aria-hidden="true"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div>
+  <div class="statusbar"><span class="left"></span><span class="island"></span><span class="sys"><svg class="sig"><use href="#sb-signal"/></svg><svg class="wifi"><use href="#sb-wifi"/></svg><svg class="bat"><use href="#sb-battery"/></svg></span></div>
+
+  <div class="lockglyph"><svg class="i"><use href="#i-lock"/></svg></div>
+  <p class="date">Tuesday 29 September</p>
+  <p class="clock">9:41</p>
+  <div class="widget">
+    <span class="rail" aria-hidden="true"><i class="kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i></span>
+    <span>12 on your docket <span class="muted">· 198 handled quietly</span></span>
+  </div>
+
+  <div class="stack-area">
+    <!-- A Proposal from triage, with its answers bound to the buttons. -->
+    <div class="note has-tab kind-proposal">
+      <span class="ktab"><svg class="m"><use href="#m-task"/></svg>Proposal</span>
+      <div class="h"><svg class="appicon"><use href="#appicon"/></svg><b>Hercule</b>· webshop<span class="w">08:52</span></div>
+      <div class="t">Checkout fails for EU cards with <span class="nw">3-D Secure</span></div>
+      <div class="ev"><svg class="b"><use href="#b-sentry"/></svg><span class="num">412</span> events · <svg class="b"><use href="#b-posthog"/></svg><span class="num">-18%</span> EU checkout</div>
+      <div class="acts">
+        <button class="nogo"><svg class="i"><use href="#i-x"/></svg>Dismiss</button>
+        <button class="go"><svg class="i"><use href="#i-play"/></svg>Start "Fix bug"</button>
+      </div>
+    </div>
+
+    <!-- Two more decisions, grouped: the newest on top. -->
+    <div class="group">
+      <div class="note kind-request">
+        <div class="h"><svg class="appicon"><use href="#appicon"/></svg><b>Hercule</b><span class="kw">Request</span><span class="w">9m</span></div>
+        <div class="t">Publish payments-api 2.15.0 to npm?</div>
+        <div class="h" style="margin-top:4px"><span>Ship release v2.15</span><span class="more">+2 · Keep the old Grafana folder? · Ada</span></div>
+      </div>
+      <i class="edge e1"></i><i class="edge e2"></i>
+    </div>
+
+    <!-- The Live Activity for the working thread. -->
+    <div class="note has-tab live kind-request">
+      <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+      <span class="haptic"><svg class="i"><use href="#i-wave"/></svg>firm tap when it starts waiting</span>
+      <div class="h"><svg class="appicon"><use href="#appicon"/></svg><b>Fix 3-D Secure checkout</b><span class="w"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>waiting on you</span></div>
+      <div class="q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+      <div class="lprog"><span>3 files <span class="plus num">+48</span> <span class="minus num">-12</span></span><span class="bar" aria-label="Worked 7 minutes, waiting 32 seconds"><i style="flex:13"></i><i style="flex:6"></i><i style="flex:31"></i><i class="wait" style="flex:5"></i></span><span class="num">0:32</span></div>
+      <div class="acts">
+        <button class="nogo"><svg class="i"><use href="#i-x"/></svg>Deny</button>
+        <button class="go"><svg class="i"><use href="#i-check"/></svg>Allow once</button>
+      </div>
+    </div>
+  </div>
+
+  <button class="corner l" aria-label="Torch"><svg class="i"><use href="#i-torch"/></svg></button>
+  <button class="corner r" aria-label="Camera"><svg class="i"><use href="#i-camera"/></svg></button>
+  <div class="homebar"></div>
+</div>
+</body>
+</html>

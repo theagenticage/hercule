@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>(!) Waiting on you · Fix 3-D Secure checkout · Hercule</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%235b3fc4' stroke-width='3'/%3E%3Cpath fill='%235b3fc4' d='M10.5 9h3.2v5h4.6V9h3.2v14h-3.2v-5.8h-4.6V23h-3.2z'/%3E%3Ccircle cx='26' cy='6' r='5.5' fill='%23c98a00'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .chrome .crumb {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 14px;
+      }
+      .chrome .crumb .tag {
+        width: 14px;
+        height: 14px;
+      }
+      .col {
+        padding-bottom: 372px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win win--web">
+      <aside class="side" data-kit="sidebar" data-face="threads" data-active="t-3ds" data-web></aside>
+      <main class="main">
+        <div class="chrome">
+          <span class="crumb"><i class="tag" data-p="webshop"></i>webshop /</span>
+          <div class="ttabs">
+            <a class="ttab is-on"><i data-m="decision" class="s-attn sm"></i>Fix 3-D Secure checkout for EU cards</a>
+            <a class="ttab"><i data-m="working" class="s-live sm"></i>Refactor cart totals</a>
+          </div>
+          <div class="chrome-actions">
+            <button class="btn btn--ghost btn--sm"><svg class="mk"><use href="#plus" /></svg>New thread here</button>
+            <span class="chip"><span class="plus">+48</span><span class="minus">-12</span></span>
+            <button class="icon-btn" aria-label="Copy link" title="Copy link to this thread"><svg class="mk"><use href="#connection" /></svg></button>
+            <button class="icon-btn" aria-label="More"><svg class="mk"><use href="#more" /></svg></button>
+          </div>
+        </div>
+
+        <div class="pane">
+          <div class="transcript" data-transcript>
+            <div class="col">
+              <div class="ts-line">
+                <span data-postmark data-top="STARTED" data-mid="09:02" data-bot="29 SEP"></span>
+                <span>Tue 29 Sep · 09:02 · Opus 5.5 · studio-mac</span>
+              </div>
+              <a class="from-slip">
+                <svg class="mk"><use href="#proposal" /></svg>
+                <span>From the Proposal <b>Checkout fails for EU cards with 3-D Secure</b></span>
+                <span class="stamp-cluster"><span class="post" data-src="sentry"></span><span class="post" data-src="gmail"></span><span class="post" data-src="posthog"></span><span class="post" data-src="github"></span></span>
+              </a>
+
+              <div class="msg-user">
+                <div>
+                  <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+                  <span class="bubble-meta">Rogier · 09:02</span>
+                </div>
+              </div>
+
+              <div class="worked"><span>Worked for <b>2m 14s</b></span><svg class="mk"><use href="#chev-down" /></svg></div>
+              <div class="tools">
+                <div><b>read</b> src/checkout/payment.ts</div>
+                <div><b>read</b> src/checkout/3ds-modal.tsx · +4 files</div>
+                <div><b>ran</b> git log --oneline -5 -- package.json <span class="ok">✓</span></div>
+              </div>
+
+              <div class="prose">
+                <p>
+                  Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that
+                  need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles
+                  <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure
+                  modal.
+                </p>
+              </div>
+              <div class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+              <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+
+              <div class="worked"><span>Worked for <b>4m 51s</b></span><svg class="mk"><use href="#chev-right" /></svg></div>
+
+              <div class="files">
+                <div class="files-main">
+                  <div class="files-head">3 changed files <span class="plus">+48</span><span class="minus">-12</span></div>
+                  <div class="file"><span>src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+                  <div class="file"><span>src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+                  <div class="file"><span>src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+                  <div class="file-acts"><a class="link">Show files</a><a class="link">Open diff<svg class="mk"><use href="#external" /></svg></a></div>
+                </div>
+                <div class="files-stub stub-notch">
+                  <span class="rs rs--green rs--lg tilt-a"><svg class="mk"><use href="#done" /></svg>24 passed</span>
+                  <span class="mono">pnpm test checkout</span>
+                </div>
+              </div>
+
+              <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+            </div>
+          </div>
+
+          <div class="composer-dock">
+            <div class="composer" data-composer>
+              <div class="queued">
+                <i data-m="queued" class="s-attn sm"></i>
+                <span class="q-text">Also check the Apple Pay path</span>
+                <span class="mono">queued · runs next</span>
+                <button class="sel">Steer</button>
+                <button class="sel">Cancel</button>
+              </div>
+              <div class="dock">
+                <i data-m="decision" class="s-attn"></i>
+                <div>
+                  <div class="dock-title">Run a command?<span class="rs rs--ochre tilt-d">Waiting on you</span></div>
+                  <div class="dock-subject">git push -u origin fix/3ds-eu-cards</div>
+                  <div class="ledger">
+                    <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Deny</b><span class="d">The agent is told no and carries on</span><kbd>N</kbd></button>
+                    <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#shield" /></svg></span><b>Always allow git push</b><span class="d">Adds a Grant to this thread's profile</span><kbd>⇧⏎</kbd></button>
+                    <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#check" /></svg></span><b>Allow once</b><span class="d">Runs this push, asks again next time</span><kbd>⏎</kbd></button>
+                  </div>
+                </div>
+              </div>
+              <div class="c-card">
+                <textarea class="c-input" rows="1" placeholder="Queued until the turn finishes…"></textarea>
+                <div class="c-row">
+                  <button class="c-plus" aria-label="Attach"><svg class="mk"><use href="#plus" /></svg></button>
+                  <button class="sel"><svg class="mk"><use href="#shield" /></svg>Auto-accept edits<svg class="mk"><use href="#chev-down" /></svg></button>
+                  <span class="c-spacer"></span>
+                  <button class="sel opts">High<svg class="mk"><use href="#chev-down" /></svg></button>
+                  <button class="pill"><svg class="mk"><use href="#b-claude" /></svg>Opus 5.5</button>
+                  <button class="c-voice" aria-label="Voice"><svg class="mk"><use href="#mic" /></svg></button>
+                  <button class="stop"><svg class="mk"><use href="#stop" /></svg>Stop</button>
+                  <button class="send" aria-label="Send"><svg class="mk"><use href="#arrow-up" /></svg></button>
+                </div>
+              </div>
+              <div class="lip">
+                <button class="sel"><svg class="mk"><use href="#worktree" /></svg><span class="mono">fix-3ds-eu-cards</span></button>
+                <span class="rule"></span>
+                <span class="sel"><svg class="mk"><use href="#branch" /></svg><span class="mono">fix/3ds-eu-cards</span></span>
+                <button class="sel right"><svg class="mk"><use href="#machine" /></svg>studio-mac</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

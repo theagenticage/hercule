@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>At a glance · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      /* Hercule draws the popover and the quick panel in its own type. macOS draws the menu bar,
+         the notifications and the Dock, so those use the system font. */
+      .glance { position: relative; width: 1440px; height: 900px; }
+      .os { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+      .sp { flex: 1; }
+      .glass-os {
+        background: var(--glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+      }
+
+      /* ---------------------------------------------------------------- wallpaper */
+      .wall { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .w-sky-a { stop-color: var(--sky-a); }
+      .w-sky-b { stop-color: var(--sky-b); }
+      .w-glow-a { stop-color: color-mix(in oklch, var(--now) 45%, var(--sky-b)); stop-opacity: 0.55; }
+      .w-glow-b { stop-color: var(--sky-b); stop-opacity: 0; }
+      .w-sun { fill: color-mix(in oklch, var(--now) 30%, white); opacity: 0.9; }
+      /* The sea runs from the horizon, pale with sky, to deep water at the shore. */
+      .wall { --sea-far: color-mix(in oklch, var(--live) 30%, var(--sky-a)); --sea-deep: color-mix(in oklch, var(--live) 82%, var(--sky-a)); }
+      :root:is([data-theme="dark"], [data-theme="kelp"], [data-theme="driftwood"], [data-theme="low-tide"]) .wall {
+        --sea-far: color-mix(in oklch, var(--live) 38%, var(--sky-a));
+        --sea-deep: color-mix(in oklch, var(--live) 40%, var(--bg));
+      }
+      .w-sea.s1 { fill: var(--sea-far); }
+      .w-sea.s2 { fill: color-mix(in oklch, var(--sea-far) 66%, var(--sea-deep)); }
+      .w-sea.s3 { fill: color-mix(in oklch, var(--sea-far) 33%, var(--sea-deep)); }
+      .w-sea.s4 { fill: var(--sea-deep); }
+      .w-glint { stroke: white; stroke-width: 2; stroke-linecap: round; opacity: 0.55; }
+      .w-sand { fill: color-mix(in oklch, var(--sky-b) 55%, var(--past)); }
+      .w-foam { fill: none; stroke: white; stroke-width: 1.5; opacity: 0.5; }
+
+      /* ---------------------------------------------------------------- menu bar */
+      .menubar {
+        position: absolute; inset: 0 0 auto 0; height: 26px; z-index: 20;
+        display: flex; align-items: center; gap: 2px; padding: 0 8px 0 12px;
+        font-size: 13px; color: var(--ink);
+        background: color-mix(in oklch, var(--raised) 42%, transparent);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+      }
+      .mb-menu { padding: 0 8px; font-weight: 500; }
+      .mb-menu.is-app { font-weight: 700; }
+      .mb-item {
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        height: 22px; min-width: 36px; padding: 0 9px; border-radius: 6px;
+      }
+      .mb-item svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+      .mb-item .fill { fill: currentColor; stroke: none; }
+      .mb-hercule { background: color-mix(in oklch, var(--ink) 13%, transparent); padding: 0 8px 0 7px; }
+      .mb-hercule .mini { width: 34px; height: 14px; }
+      .mini .f { fill: currentColor; stroke: none; opacity: 0.32; }
+      .mini .n { stroke: var(--now); stroke-width: 2; }
+      .mini .u { stroke-width: 1.3; }
+      .mb-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--now); color: var(--on-now); font-size: 11px; font-weight: 700; }
+      .mb-batt { font-size: 12px; }
+      .mb-clock { padding: 0 8px 0 10px; font-weight: 500; white-space: nowrap; }
+
+      /* ---------------------------------------------------------------- the other app */
+      .ed {
+        position: absolute; left: 40px; top: 58px; width: 704px; height: 724px; z-index: 1;
+        display: grid; grid-template-columns: 184px 1fr; grid-template-rows: 38px 1fr 24px;
+        border-radius: 12px; overflow: hidden; background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+        font-size: 12px; color: var(--muted);
+      }
+      .ed-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+      .ed-top .lights i { background: color-mix(in oklch, var(--ink) 16%, transparent); box-shadow: none; }
+      .ed-tab { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px; }
+      .ed-tab.is-on { background: var(--raised); color: var(--ink); box-shadow: inset 0 -1.5px 0 var(--muted); }
+      .ed-tree { background: var(--surface); border-right: 1px solid var(--line-soft); padding: 10px 8px; display: flex; flex-direction: column; gap: 1px; }
+      .ed-tree span { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px; border-radius: 5px; white-space: nowrap; }
+      .ed-tree .d1 { padding-left: 18px; }
+      .ed-tree .d2 { padding-left: 30px; }
+      .ed-tree .is-on { background: var(--hover); color: var(--ink); }
+      .ed-tree em { font-style: normal; margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--lane-ops-ink); }
+      .ed-tree .h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 4px; }
+      .ed-code { margin: 0; padding: 12px 0; font: 12px/20px var(--font-mono); color: var(--ink); white-space: pre; overflow: hidden; opacity: 0.92; }
+      .ed-code b { display: block; font-weight: 400; padding-left: 14px; }
+      .ed-code b::before { content: attr(data-n); display: inline-block; width: 26px; margin-right: 18px; text-align: right; color: var(--faint); opacity: 0.7; }
+      .ed-code b.add { box-shadow: inset 3px 0 0 var(--live); background: color-mix(in oklch, var(--live) 7%, transparent); }
+      .ed-code .k { color: var(--lane-payments-ink); }
+      .ed-code .s { color: var(--lane-webshop-ink); }
+      .ed-code .f { color: var(--live-ink); }
+      .ed-code .c { color: var(--faint); }
+      .ed-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: var(--surface); border-top: 1px solid var(--line-soft); font-size: 11px; }
+
+      /* ---------------------------------------------------------------- the quick panel (⌥Space) */
+      .qp {
+        position: absolute; left: 92px; top: 196px; width: 588px; z-index: 8;
+        border-radius: 22px; overflow: hidden;
+        background: color-mix(in oklch, var(--raised) 88%, transparent);
+        box-shadow: var(--glass-edge), 0 0 0 1px var(--line), var(--shadow-3);
+      }
+      .qp-in { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px 0 18px; border-bottom: 1px solid var(--line-soft); }
+      .qp-in .logo { width: 22px; height: 22px; }
+      .qp-ph { flex: 1; display: flex; align-items: center; font-size: 16px; color: var(--faint); }
+      .qp-ph::before { content: ""; width: 1.5px; height: 20px; margin-right: 2px; background: var(--live); }
+      .qp-list { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+      .qp-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 10px 12px; border-radius: 15px; }
+      .qp-row.is-on { background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1); padding: 12px; }
+      .qp-t { display: flex; align-items: center; gap: 10px; min-width: 0; }
+      .qp-t b { font-weight: var(--w-emph); white-space: nowrap; }
+      .qp-t .q { color: var(--muted); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .qp-more { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+      .qp-q { font-size: var(--fs-lg); }
+      .qp-facts { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--faint); }
+      .qp-facts .m { width: 12px; height: 12px; color: var(--live); }
+      .qp-acts { display: flex; gap: 6px; margin-top: 4px; }
+      .qp-acts kbd { margin-right: -4px; }
+      .btn-ink kbd { color: color-mix(in oklch, var(--bg) 72%, transparent); border-color: color-mix(in oklch, var(--bg) 28%, transparent); background: transparent; }
+      .qp-foot { display: flex; align-items: center; gap: 16px; height: 38px; padding: 0 18px; border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--muted); }
+      .qp-foot span { display: inline-flex; align-items: center; gap: 5px; }
+
+      /* ---------------------------------------------------------------- the menu bar popover */
+      .pop {
+        position: absolute; top: 32px; left: 718px; width: 336px; z-index: 9;
+        padding: 10px 14px 8px; border-radius: 18px;
+        box-shadow: var(--glass-edge), 0 0 0 1px var(--line), var(--shadow-3);
+      }
+      .pop-h { display: flex; align-items: center; gap: 8px; height: 30px; }
+      .pop-h b { font-weight: var(--w-strong); }
+      .pop-h .icon-btn { margin-right: -6px; }
+      .pop-tide { position: relative; height: 84px; margin-top: 4px; }
+      .pt-chart { position: absolute; left: 0; top: 22px; }
+      .pt-now { position: absolute; top: 2px; transform: translateX(-50%); display: inline-grid; place-items: center; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--now); color: var(--on-now); font: 500 10.5px/1 var(--font-mono); }
+      .pt-soon { position: absolute; top: 41px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; line-height: 12px; color: var(--future-ink); white-space: nowrap; }
+      .pt-soon i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--future-ink); background: var(--raised); }
+      .pt-axis span { position: absolute; top: 70px; transform: translateX(-50%); font: 10px/12px var(--font-mono); color: var(--faint); }
+      .pt-axis span:first-child { transform: none; }
+      .pt-axis span:last-child { transform: translateX(-100%); }
+      .pop-next { display: flex; align-items: center; gap: 7px; height: 34px; color: var(--future-ink); font-size: var(--fs-sm); }
+      .pop-next b { color: var(--ink); font-weight: var(--w-emph); }
+      .pop-next .mono { color: var(--muted); font-size: var(--fs-xs); }
+      .pop hr { margin: 2px -14px; }
+      .pop .label { height: 32px; }
+      .pop-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; }
+      .pop-row:hover { background: var(--hover); }
+      .pop-row b { font-weight: var(--w-emph); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .pop-row small { grid-column: 2; display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+      .pop-row small .proj { font-size: var(--fs-xs); color: var(--muted); }
+      .pop-row .wait { grid-row: 1 / 3; grid-column: 3; }
+      .pop-row > .m { grid-row: 1; align-self: center; }
+      .pop-live { display: flex; align-items: center; gap: 14px; height: 38px; font-size: var(--fs-sm); color: var(--muted); }
+      .pop-live span { display: inline-flex; align-items: center; gap: 6px; }
+      .pop-live b { color: var(--ink); font-weight: var(--w-emph); }
+      .pop-foot { display: flex; margin: 0 -8px; }
+      .pop-foot button { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 8px; font-size: var(--fs-sm); color: var(--ink); }
+      .pop-foot button:hover { background: var(--hover); }
+      .pop-foot .sp + button { color: var(--muted); }
+
+      /* ---------------------------------------------------------------- notifications */
+      .notes { position: absolute; top: 34px; right: 12px; width: 348px; z-index: 9; display: flex; flex-direction: column; gap: 8px; }
+      .note {
+        display: grid; grid-template-columns: 38px minmax(0, 1fr); column-gap: 11px;
+        padding: 12px 14px 12px 12px; border-radius: 20px;
+        box-shadow: var(--glass-edge), 0 0 0 1px var(--line-soft), var(--shadow-2);
+        font-size: 13px; line-height: 1.35; color: var(--ink);
+      }
+      .note .app-icon { --icon: 38px; align-self: start; }
+      .note-h { display: flex; align-items: baseline; gap: 8px; }
+      .note-h b { flex: 1; font-weight: 600; }
+      .note-h time { font-size: 11.5px; color: var(--faint); }
+      .note-kind { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); margin-top: 1px; }
+      .note-kind .m { width: 13px; height: 13px; }
+      .note-body { margin-top: 3px; }
+      .note-body code { font-size: 11.5px; }
+      .note-acts { grid-column: 1 / -1; display: flex; gap: 6px; margin-top: 11px; }
+      .note-acts button { flex: 1; height: 28px; border-radius: 10px; font-size: 12.5px; font-weight: 500; background: color-mix(in oklch, var(--ink) 7%, transparent); }
+      .note-acts button:hover { background: color-mix(in oklch, var(--ink) 12%, transparent); }
+      .note-av { position: relative; align-self: start; width: 38px; height: 38px; }
+      .note-av .av { width: 38px; height: 38px; font-size: 16px; }
+      .note-av .app-icon { --icon: 18px; position: absolute; right: -3px; bottom: -3px; box-shadow: 0 0 0 1.5px var(--raised); }
+
+      /* ---------------------------------------------------------------- the Dock */
+      .mac-dock {
+        position: absolute; left: 476px; bottom: 6px; z-index: 6;
+        display: flex; align-items: flex-end; gap: 6px; padding: 6px 7px 9px; border-radius: 24px;
+        background: color-mix(in oklch, var(--raised) 34%, transparent);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.28), 0 0 0 0.5px var(--line), var(--shadow-2);
+      }
+      .dk { position: relative; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 22.5%; flex: none; }
+      .dk svg { width: 60%; height: 60%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .dk.run::after { content: ""; position: absolute; bottom: -7px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--ink); opacity: 0.55; }
+      .dk.app-icon { --icon: 52px; }
+      .dk-files { background: linear-gradient(oklch(88% 0.06 85), oklch(78% 0.08 75)); color: oklch(40% 0.06 70); }
+      .dk-web { background: linear-gradient(oklch(72% 0.08 190), oklch(56% 0.08 195)); color: white; }
+      .dk-mail { background: linear-gradient(oklch(97% 0.005 90), oklch(90% 0.01 90)); color: oklch(45% 0.02 90); }
+      .dk-cal { background: oklch(99% 0 0); flex-direction: column; color: oklch(22% 0 0); display: flex; justify-content: center; gap: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+      .dk-cal small { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; color: oklch(57% 0.2 30); line-height: 1; margin-top: 2px; }
+      .dk-cal span { font-size: 26px; font-weight: 400; line-height: 1.05; }
+      .dk-code { background: linear-gradient(oklch(34% 0.02 280), oklch(24% 0.02 280)); color: oklch(84% 0.08 130); font: 600 17px var(--font-mono); }
+      .dk-term { background: linear-gradient(oklch(28% 0 0), oklch(16% 0 0)); color: oklch(92% 0 0); font: 500 15px var(--font-mono); justify-items: start; align-items: start; padding: 8px 9px; }
+      .dk-trash { background: color-mix(in oklch, var(--raised) 40%, transparent); box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.35); color: var(--muted); }
+      .dk-sep { width: 1px; height: 44px; margin: 0 5px 4px; background: var(--line); align-self: center; }
+      .dk-badge {
+        position: absolute; top: -5px; right: -6px; display: grid; place-items: center;
+        min-width: 21px; height: 21px; padding: 0 6px; border-radius: 11px;
+        background: oklch(56% 0.21 28); color: white; font: 600 12.5px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+        box-shadow: 0 1px 3px oklch(10% 0 0 / 0.3);
+      }
+
+      @media (prefers-reduced-transparency: reduce) {
+        .glass-os, .menubar, .mac-dock { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--raised); }
+      }
+    </style>
+  </head>
+  <body class="glance">
+    <svg class="wall" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="w-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="w-sky-a" /><stop offset="1" class="w-sky-b" /></linearGradient>
+        <radialGradient id="w-glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" class="w-glow-a" /><stop offset="1" class="w-glow-b" /></radialGradient>
+      </defs>
+      <rect width="1440" height="560" fill="url(#w-sky)" />
+      <ellipse cx="1180" cy="520" rx="420" ry="300" fill="url(#w-glow)" />
+      <circle class="w-sun" cx="1180" cy="512" r="44" />
+      <path class="w-sea s1" d="M0 540C240 536 480 544 720 540S1200 536 1440 540V900H0Z" />
+      <path class="w-glint" d="M1150 552h60M1136 566h40M1196 566h22M1160 581h46M1146 597h24M1184 597h32" />
+      <path class="w-sea s2" d="M0 606C220 598 440 612 720 603S1180 598 1440 607V900H0Z" />
+      <path class="w-sea s3" d="M0 682C260 670 520 692 800 678S1240 668 1440 684V900H0Z" />
+      <path class="w-sea s4" d="M0 768C300 752 600 782 900 762S1300 752 1440 772V900H0Z" />
+      <path class="w-sand" d="M0 846C360 818 720 858 1080 832S1380 824 1440 836V900H0Z" />
+      <path class="w-foam" d="M0 846C360 818 720 858 1080 832S1380 824 1440 836" />
+    </svg>
+
+    <!-- The menu bar. Hercule's extra is the day's tide in miniature with the count waiting on you. -->
+    <header class="menubar os">
+      <span class="mb-menu is-app">Editor</span>
+      <span class="mb-menu">File</span><span class="mb-menu">Edit</span><span class="mb-menu">Selection</span><span class="mb-menu">View</span><span class="mb-menu">Go</span><span class="mb-menu">Window</span><span class="mb-menu">Help</span>
+      <span class="sp"></span>
+      <button class="mb-item mb-hercule" aria-label="Hercule: 3 waiting on you, next triage 11:00" aria-expanded="true">
+        <svg class="mini" viewBox="0 0 34 14" aria-hidden="true"><path class="f" d="M0 13C4 12.5 6 9.5 9 10.5S13 6.5 16 8.5 20 3.5 23 5.5V14H0Z" /><path d="M0 13C4 12.5 6 9.5 9 10.5S13 6.5 16 8.5 20 3.5 23 5.5" /><circle class="u" cx="30.5" cy="9" r="2.6" /><path class="n" d="M24 0.5V13.5" /></svg>
+        <span class="mb-count">3</span>
+      </button>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><rect x="4" y="3.5" width="10" height="12" rx="2" /><path d="M7 3.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.5M7 8h4M7 11h3" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="9" rx="1.8" /><path d="M6.5 15.5h5M9 12.5v3" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M5.2 13.5h7.6a3.2 3.2 0 0 0 .4-6.4 4.3 4.3 0 0 0-8.3.9 2.8 2.8 0 0 0 .3 5.5z" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><circle cx="9" cy="10" r="5.5" /><path d="M9 10V7.2M7.5 2.5h3" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><path class="fill" d="M3 7h2.6L9 4.2v9.6L5.6 11H3z" /><path d="M11.5 6.6a3.4 3.4 0 0 1 0 4.8M13.4 4.8a6 6 0 0 1 0 8.4" /></svg></span>
+      <span class="mb-item mb-batt" aria-hidden="true">82%<svg viewBox="0 0 26 14" style="width: 26px; height: 14px"><rect x="1" y="1.5" width="21" height="11" rx="3.2" stroke-width="1.1" /><rect class="fill" x="3" y="3.5" width="14.5" height="7" rx="1.6" /><path class="fill" d="M23.5 5.2v3.6c.8-.3 1.3-1 1.3-1.8s-.5-1.5-1.3-1.8z" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M2.6 7.1a9.2 9.2 0 0 1 12.8 0M4.9 9.5a5.9 5.9 0 0 1 8.2 0M7.2 11.9a2.6 2.6 0 0 1 3.6 0" /><circle class="fill" cx="9" cy="14.2" r="1" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="4.6" rx="2.3" /><rect x="2.5" y="10" width="13" height="4.6" rx="2.3" /><circle class="fill" cx="12.6" cy="5.8" r="1.3" /><circle class="fill" cx="5.4" cy="12.3" r="1.3" /></svg></span>
+      <span class="mb-item" aria-hidden="true"><svg viewBox="0 0 18 18"><circle cx="7.8" cy="7.8" r="4.6" /><path d="M11.2 11.2l3.8 3.8" /></svg></span>
+      <span class="mb-clock">Tue 29 Sep 09:41</span>
+    </header>
+
+    <!-- Another app underneath: Rogier reads the agent's fix in his editor. -->
+    <div class="ed os" aria-hidden="true">
+      <div class="ed-top">
+        <span class="lights"><i></i><i></i><i></i></span>
+        <span class="ed-tab is-on">payment.ts</span><span class="ed-tab">payment.test.ts</span><span class="ed-tab">3ds-modal.tsx</span>
+      </div>
+      <nav class="ed-tree">
+        <span class="h">WEBSHOP</span>
+        <span>▾ src</span>
+        <span class="d1">▸ cart</span>
+        <span class="d1">▾ checkout</span>
+        <span class="d2 is-on">payment.ts<em>M</em></span>
+        <span class="d2">payment.test.ts<em style="color: var(--lane-webshop-ink)">A</em></span>
+        <span class="d2">3ds-modal.tsx<em>M</em></span>
+        <span class="d2">index.ts</span>
+        <span class="d1">▸ lib</span>
+        <span class="d1">▸ pages</span>
+        <span>package.json</span>
+        <span>tsconfig.json</span>
+      </nav>
+      <pre class="ed-code"><b data-n="1"><span class="k">import</span> { stripe } <span class="k">from</span> <span class="s">"../lib/stripe"</span>;</b><b data-n="2"><span class="k">import type</span> { Cart } <span class="k">from</span> <span class="s">"../cart/types"</span>;</b><b data-n="3"><span class="k">import</span> { open3dsModal } <span class="k">from</span> <span class="s">"./3ds-modal"</span>;</b><b data-n="4"> </b><b data-n="5"><span class="c">/** Confirms a card payment, and runs 3-D Secure when the bank asks for it. */</span></b><b data-n="6"><span class="k">export async function</span> <span class="f">confirmPayment</span>(cart: Cart, card: CardInput) {</b><b data-n="7">  <span class="k">const</span> intent = <span class="k">await</span> stripe.paymentIntents.<span class="f">create</span>({</b><b data-n="8">    amount: cart.totalCents,</b><b data-n="9">    currency: <span class="s">"eur"</span>,</b><b data-n="10">    payment_method_types: [<span class="s">"card"</span>],</b><b data-n="11">  });</b><b data-n="12"> </b><b data-n="13">  <span class="k">const</span> result = <span class="k">await</span> stripe.<span class="f">confirmCardPayment</span>(intent.client_secret, {</b><b data-n="14">    payment_method: { card },</b><b data-n="15">  });</b><b data-n="16"> </b><b data-n="17" class="add">  <span class="c">// EU cards come back as requires_action. This used to count as a failure.</span></b><b data-n="18" class="add">  <span class="k">if</span> (result.paymentIntent?.status === <span class="s">"requires_action"</span>) {</b><b data-n="19" class="add">    <span class="k">return</span> <span class="f">handleNextAction</span>(result.paymentIntent);</b><b data-n="20" class="add">  }</b><b data-n="21">  <span class="k">return</span> result;</b><b data-n="22">}</b><b data-n="23"> </b><b data-n="24" class="add"><span class="k">async function</span> <span class="f">handleNextAction</span>(intent: PaymentIntent) {</b><b data-n="25" class="add">  <span class="k">const</span> outcome = <span class="k">await</span> <span class="f">open3dsModal</span>(intent.next_action);</b><b data-n="26" class="add">  <span class="k">if</span> (outcome === <span class="s">"cancelled"</span>) {</b><b data-n="27" class="add">    <span class="k">return</span> { status: <span class="s">"cancelled"</span> <span class="k">as const</span> };</b><b data-n="28" class="add">  }</b><b data-n="29" class="add">  <span class="k">return</span> stripe.<span class="f">retrievePaymentIntent</span>(intent.client_secret);</b><b data-n="30" class="add">}</b><b data-n="31"> </b><b data-n="32"><span class="k">export function</span> <span class="f">isEuCard</span>(card: CardInput) {</b><b data-n="33">  <span class="k">return</span> EU_COUNTRIES.<span class="f">has</span>(card.country);</b><b data-n="34">}</b></pre>
+      <div class="ed-foot"><span>fix/3ds-eu-cards</span><span>3 changed</span><span class="sp"></span><span>Ln 18, Col 5</span><span>TypeScript</span></div>
+    </div>
+
+    <!-- The quick panel: ⌥Space from any app answers what waits, without switching apps. -->
+    <section class="qp glass-os" aria-label="Quick panel: waiting on you">
+      <div class="qp-in">
+        <i data-logo></i>
+        <span class="qp-ph">Answer, or type a reply to the agent…</span>
+        <kbd>⌥ Space</kbd>
+      </div>
+      <div class="qp-list">
+        <div class="qp-row is-on">
+          <i data-m="decision" class="now"></i>
+          <div class="qp-t"><b>Fix 3-D Secure checkout for EU cards</b><span class="proj lane-webshop">webshop</span></div>
+          <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
+          <div class="qp-more">
+            <p class="qp-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+            <p class="qp-facts">3 files +48 -12 · <i data-m="done"></i>24 passed · Claude Code · Opus 5.5 · studio-mac</p>
+            <div class="qp-acts">
+              <button class="btn btn-ink btn-sm">Allow once<kbd>↵</kbd></button>
+              <button class="btn btn-sm">Always allow git push<kbd>⌘↵</kbd></button>
+              <button class="btn btn-sm">Deny<kbd>⌘⌫</kbd></button>
+            </div>
+          </div>
+        </div>
+        <div class="qp-row">
+          <i data-m="decision" class="now"></i>
+          <div class="qp-t"><b>Migrate ops dashboards</b><span class="proj lane-ops">ops</span><span class="q">Keep the old Grafana folder?</span></div>
+          <span class="wait"><span class="wbar"><i style="width: 57%"></i></span><span class="mono">17m</span></span>
+        </div>
+        <div class="qp-row">
+          <i data-m="decision" class="now"></i>
+          <div class="qp-t"><b>Ship release v2.15</b><span class="proj lane-payments">payments-api</span><span class="q">Publish payments-api 2.15.0 to npm?</span></div>
+          <span class="wait"><span class="wbar"><i style="width: 20%"></i></span><span class="mono">6m</span></span>
+        </div>
+      </div>
+      <footer class="qp-foot">
+        <span><kbd>↑</kbd><kbd>↓</kbd>move</span><span><kbd>↵</kbd>answer</span><span><kbd>⌘O</kbd>open thread</span><span><kbd>esc</kbd>close</span>
+        <span class="sp"></span><span class="mono">1 of 3</span>
+      </footer>
+    </section>
+
+    <!-- The menu bar popover: the day on one axis. What came in, Now, and what is scheduled next. -->
+    <section class="pop glass-os" aria-label="Hercule today">
+      <header class="pop-h"><b>Today</b><span class="muted sm">Tue 29 Sep</span><span class="sp"></span><span class="t-mono">23 live</span><button class="icon-btn sm" aria-label="Settings"><i data-m="settings" class="sm"></i></button></header>
+      <div class="pop-tide" role="img" aria-label="Events since 06:00, Now at 09:41, Ada's heartbeat at 10:00, triage at 11:00">
+        <div class="pt-chart" data-tide="day" data-from="360" data-to="720" data-bucket="12" style="width: 308px; height: 40px"></div>
+        <span class="pt-now" style="left: 189px">09:41</span>
+        <span class="pt-soon" style="left: 205.3px">Ada<i></i></span>
+        <span class="pt-soon" style="left: 256.7px">triage<i></i></span>
+        <div class="pt-axis"><span style="left: 0">06:00</span><span style="left: 102.7px">08:00</span><span style="left: 205.3px">10:00</span><span style="left: 308px">12:00</span></div>
+      </div>
+      <p class="pop-next"><i data-m="triage"></i>Next: <b>triage at 11:00</b><span class="sp"></span><span class="mono">in 1h 19m</span></p>
+      <hr />
+      <div class="label">Waiting on you<span class="n">3</span></div>
+      <a class="pop-row" href="session-active.html">
+        <i data-m="decision" class="now"></i><b>Fix 3-D Secure checkout for EU cards</b>
+        <span class="wait"><span class="wbar"><i style="width: 93%"></i></span><span class="mono">28m</span></span>
+        <small><span class="proj lane-webshop">webshop</span>· Request · git push</small>
+      </a>
+      <a class="pop-row">
+        <i data-m="decision" class="now"></i><b>Migrate ops dashboards</b>
+        <span class="wait"><span class="wbar"><i style="width: 57%"></i></span><span class="mono">17m</span></span>
+        <small><span class="proj lane-ops">ops</span>· Question · Grafana folder</small>
+      </a>
+      <a class="pop-row">
+        <i data-m="decision" class="now"></i><b>Ship release v2.15</b>
+        <span class="wait"><span class="wbar"><i style="width: 20%"></i></span><span class="mono">6m</span></span>
+        <small><span class="proj lane-payments">payments-api</span>· Request · npm publish</small>
+      </a>
+      <hr />
+      <p class="pop-live"><span><i data-m="working" class="live"></i><b>8</b> working</span><span><i data-m="idle" class="faint"></i><b>12</b> idle</span><span class="sp"></span><span class="faint xs">build-box-1 at cap</span></p>
+      <hr />
+      <div class="pop-foot"><button>Open Hercule<kbd>⌘0</kbd></button><span class="sp"></span><button>Quick panel<kbd>⌥ Space</kbd></button></div>
+    </section>
+
+    <!-- Native notifications. Each carries the answers as action buttons. -->
+    <div class="notes os">
+      <article class="note glass-os">
+        <span class="app-icon"><i data-logo></i></span>
+        <div>
+          <div class="note-h"><b>Ship release v2.15</b><time>6m ago</time></div>
+          <div class="note-kind"><i data-m="decision" class="now"></i>Request · payments-api</div>
+          <p class="note-body">Publish payments-api 2.15.0 to npm?</p>
+        </div>
+        <div class="note-acts"><button>Allow once</button><button>Deny</button></div>
+      </article>
+      <article class="note glass-os">
+        <span class="app-icon"><i data-logo></i></span>
+        <div>
+          <div class="note-h"><b>Migrate ops dashboards</b><time>17m ago</time></div>
+          <div class="note-kind"><i data-m="decision" class="now"></i>Question · ops · pi</div>
+          <p class="note-body">Keep the old Grafana folder?</p>
+        </div>
+        <div class="note-acts"><button>Keep</button><button>Delete</button></div>
+      </article>
+      <article class="note glass-os">
+        <span class="note-av"><span class="av working">A</span><span class="app-icon"><i data-logo></i></span></span>
+        <div>
+          <div class="note-h"><b>Ada</b><time>09:00</time></div>
+          <div class="note-kind"><i data-m="heartbeat" class="future"></i>Heartbeat · Web chat</div>
+          <p class="note-body">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+        </div>
+        <div class="note-acts"><button>Reply</button><button>Open</button></div>
+      </article>
+    </div>
+
+    <!-- The Dock. The badge counts what waits on Rogier, nothing else. -->
+    <nav class="mac-dock os" aria-label="Dock">
+      <span class="dk dk-files run" aria-label="Files"><svg viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg></span>
+      <span class="dk dk-web run" aria-label="Browser"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.6 2.4 3.7 5.3 3.7 8.5s-1.1 6.1-3.7 8.5c-2.6-2.4-3.7-5.3-3.7-8.5s1.1-6.1 3.7-8.5z" /></svg></span>
+      <span class="dk dk-mail" aria-label="Mail"><svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="M4 7l8 6 8-6" /></svg></span>
+      <span class="dk dk-cal" aria-label="Calendar"><small>TUE</small><span>29</span></span>
+      <span class="dk dk-code run" aria-label="Editor">{ }</span>
+      <span class="dk dk-term run" aria-label="Terminal">&gt;_</span>
+      <span class="dk app-icon run" aria-label="Hercule, 3 waiting on you"><i data-logo></i><b class="dk-badge">3</b></span>
+      <span class="dk-sep" aria-hidden="true"></span>
+      <span class="dk dk-trash" aria-label="Trash"><svg viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V5h5v2M6.5 7l1 12.5h9l1-12.5M10 10.5v6M14 10.5v6" /></svg></span>
+    </nav>
+  </body>
+</html>

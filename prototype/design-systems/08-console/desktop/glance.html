@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Glance · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  /* The desktop surfaces that live outside the window: the menu bar extra, the
+     quick panel on a global hotkey, native notifications and the dock. They sit on
+     a wallpaper drawn from the theme's own slots, over another app. */
+  body { --sys: -apple-system, "SF Pro Text", var(--font-sans); }
+  .screen { position: relative; width: 1440px; height: 900px; overflow: hidden; }
+  .wall {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 70% at 88% 108%, color-mix(in oklab, var(--c5) 34%, transparent), transparent 70%),
+      radial-gradient(50% 60% at 6% 96%, color-mix(in oklab, var(--c6) 26%, transparent), transparent 70%),
+      radial-gradient(70% 60% at 40% -10%, color-mix(in oklab, var(--c4) 22%, transparent), transparent 70%),
+      linear-gradient(170deg, var(--surface), var(--bg-sunk) 70%);
+  }
+
+  /* ---------------------------------------------------------- the menu bar --- */
+  .menubar {
+    position: absolute; inset: 0 0 auto; height: 26px; z-index: 10;
+    display: flex; align-items: center; gap: 18px; padding: 0 14px 0 18px;
+    background: color-mix(in oklab, var(--bg-sunk) 58%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
+    font: 500 13px / 1 var(--sys); color: var(--ink); white-space: nowrap;
+  }
+  .menubar .sysmark { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--ink); opacity: 0.9; }
+  .menubar b { font-weight: 700; }
+  .menubar .menus { display: flex; gap: 18px; color: var(--ink); }
+  .menubar .extras { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+  .menubar .extras svg { display: block; }
+  .extra-hercule { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 7px; border-radius: 5px; background: color-mix(in oklab, var(--ink) 18%, transparent); font: 650 12px / 1 var(--font-mono); }
+  .menubar .mx { width: 15px; height: 15px; color: var(--ink); opacity: 0.9; }
+  .extra-hercule .logo { width: 15px; height: 15px; --logo-cursor: var(--ink); }
+  .extra-hercule .mk { width: 10px; height: 10px; color: var(--attn); }
+  .extra-hercule b { color: var(--attn); }
+  .clock { font-variant-numeric: tabular-nums; }
+
+  /* ----------------------------------------------------- the other app --- */
+  .other {
+    position: absolute; left: 44px; top: 58px; width: 820px; height: 640px;
+    border-radius: 12px; overflow: hidden;
+    background: light-dark(#fbfbfa, #1c1c1d);
+    box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.55), 0 0 0 1px light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.08));
+    display: grid; grid-template-columns: 190px 1fr; grid-template-rows: 38px 1fr;
+    font: 12.5px / 1.75 ui-monospace, "SF Mono", Menlo, monospace;
+    color: light-dark(#3a3a3c, #b9b9bd);
+    filter: saturate(0.6);
+  }
+  .other .o-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: light-dark(#efefee, #262628); border-bottom: 1px solid light-dark(#dededc, #333336); font: 500 12px var(--sys); color: light-dark(#6d6d70, #8d8d92); }
+  .other .o-bar i { width: 12px; height: 12px; border-radius: 50%; background: light-dark(#d8d8d6, #48484b); }
+  .other .o-bar span { margin: 0 auto; }
+  .other .files { padding: 12px 0 0 14px; background: light-dark(#f4f4f3, #202022); border-right: 1px solid light-dark(#e4e4e2, #2e2e31); font: 12px / 2 var(--sys); color: light-dark(#6d6d70, #8d8d92); }
+  .other .files .on { color: light-dark(#1d1d1f, #e4e4e6); }
+  .other pre { margin: 0; padding: 14px 18px; white-space: pre; }
+  .other .dim { color: light-dark(#a1a1a5, #6b6b70); }
+  .other .kw { color: light-dark(#8a3ab9, #c69be4); }
+  .other .str { color: light-dark(#a0522d, #d8a57a); }
+
+  /* ------------------------------------------------------- callouts --- */
+  .callout { position: absolute; z-index: 12; display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); box-shadow: 0 6px 18px -8px rgb(0 0 0 / 0.5); font: 600 11.5px / 1 var(--font-mono); color: var(--ink); white-space: nowrap; }
+  .callout kbd { height: 18px; min-width: 18px; }
+  .callout span { font-weight: 450; color: var(--muted); }
+
+  /* ------------------------------------------ the menu bar extra's menu --- */
+  .mbx {
+    position: absolute; top: 31px; left: 690px; width: 356px; z-index: 11;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow-float), inset 0 1px 0 var(--edge);
+    padding: 6px 0 6px;
+    font-size: 13px;
+  }
+  .mbx-head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; font: 600 11px / 1 var(--font-mono); color: var(--faint); letter-spacing: 0.02em; }
+  .mbx-head .end { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 450; letter-spacing: 0; }
+  .mbx-head.attn { color: var(--attn); }
+  .mbx-row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; margin: 0 6px; padding: 6px 8px; border-radius: 7px; }
+  .mbx-row.is-cursor { background: var(--sel); }
+  .mbx-row.is-cursor::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+  .mbx-row .t { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mbx-row .s { grid-column: 2 / -1; font: 450 11px / 1.4 var(--font-mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mbx-row .s code { color: var(--muted); }
+  .mbx-row .k { display: inline-flex; gap: 3px; }
+  .mbx-row .k kbd { height: 16px; min-width: 16px; font-size: 10px; }
+  .mbx-row:not(.is-cursor) .k kbd { background: transparent; border-color: var(--line-soft); color: var(--faint); }
+  .mbx-row .age { font: 450 10.5px / 1 var(--font-mono); color: var(--faint); }
+  .mbx-sep { height: 1px; margin: 6px 14px; background: var(--line-soft); }
+  .mbx .meters { padding: 4px 14px 6px; }
+  .mbx .meter { grid-template-columns: 84px 1fr auto; }
+  .mbx-item { display: flex; align-items: center; gap: 10px; height: 28px; margin: 0 6px; padding: 0 8px; border-radius: 6px; color: var(--ink); }
+  .mbx-item .mk { color: var(--muted); }
+  .mbx-item .end { margin-left: auto; display: inline-flex; }
+  .mbx-item .end kbd { background: transparent; border-color: transparent; color: var(--faint); padding: 0 1px; min-width: 0; }
+  .mbx-item .end kbd + kbd { margin-left: 0; }
+  .mbx-swarm { display: flex; gap: 12px; padding: 2px 14px 6px; font: 450 11px / 1 var(--font-mono); }
+  .mbx-swarm span { display: inline-flex; align-items: center; gap: 5px; }
+  .mbx-swarm .mk { width: 8px; height: 8px; }
+
+  /* ------------------------------------------------ the quick panel --- */
+  .quick {
+    position: absolute; left: 60px; top: 184px; width: 596px; z-index: 9;
+    background: color-mix(in oklab, var(--raised) 90%, transparent);
+    border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow-float), 0 0 0 6px color-mix(in oklab, var(--accent) 10%, transparent), inset 0 1px 0 var(--edge);
+    overflow: hidden;
+  }
+  .q-input { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line-soft); font: 450 14px / 1 var(--font-mono); color: var(--faint); }
+  .q-input .prompt { width: 13px; height: 13px; color: var(--accent); }
+  .q-input .scope { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 5px; background: var(--attn-soft); color: var(--attn); font-size: 11.5px; font-weight: 650; }
+  .q-input .scope .mk { width: 10px; height: 10px; }
+  .q-input .end { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11px; }
+  .q-pager { display: inline-flex; gap: 3px; }
+  .q-pager i { width: 14px; height: 4px; border-radius: 2px; background: var(--line); }
+  .q-pager i.on { background: var(--attn); }
+  .q-body { padding: 16px 18px 10px; }
+  .q-kicker { display: flex; align-items: center; gap: 10px; font: 450 11.5px / 1 var(--font-mono); color: var(--faint); }
+  .q-kicker .kind { display: inline-flex; align-items: center; gap: 6px; color: var(--attn); font-weight: 600; }
+  .q-title { margin: 10px 0 4px; font-size: 16px; font-weight: var(--w-strong); line-height: 1.4; color: var(--ink); }
+  .q-title code { font-size: 13.5px; padding: 1px 6px; border-radius: 5px; background: var(--bg-sunk); border: 1px solid var(--line-soft); }
+  .q-why { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font: 450 11.5px / 1.4 var(--font-mono); color: var(--muted); }
+  .q-why .tone-ok { display: inline-flex; align-items: center; gap: 5px; }
+  .quick .ledger { margin: 0 -10px; }
+  .quick .ans { grid-template-columns: 22px 168px minmax(0, 1fr); }
+  .q-next { border-top: 1px solid var(--line-soft); padding: 6px 8px 6px; }
+  .q-next .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; height: 30px; padding: 0 10px; font-size: 12.5px; color: var(--muted); }
+  .q-next .row b { font-weight: var(--w-emph); color: var(--ink); }
+  .q-next .row .sub { font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .q-foot { display: flex; align-items: center; gap: 16px; height: 36px; padding: 0 16px; border-top: 1px solid var(--line-soft); font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .q-foot .spacer { flex: 1; }
+
+  /* ------------------------------------------------ native notifications --- */
+  /* Drawn by the system, not by Hercule: system font, system material. Hercule
+     chooses only the words, the order, and the buttons. */
+  .notes { position: absolute; top: 34px; right: 12px; width: 372px; z-index: 12; display: flex; flex-direction: column; gap: 9px; }
+  .note {
+    display: grid; grid-template-columns: 38px minmax(0, 1fr) 92px; column-gap: 10px;
+    min-height: 74px; padding: 11px 0 11px 12px;
+    border-radius: 16px;
+    background: light-dark(rgb(246 246 246 / 0.78), rgb(40 40 42 / 0.72));
+    -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8);
+    box-shadow: 0 10px 30px -8px rgb(0 0 0 / 0.35), inset 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.14));
+    font: 13px / 1.3 var(--sys); color: light-dark(#1d1d1f, #f2f2f4);
+  }
+  .note img { width: 38px; height: 38px; margin-top: 1px; }
+  .note .txt { min-width: 0; }
+  .note .app { display: flex; justify-content: space-between; font-size: 11.5px; color: light-dark(#6e6e73, #a1a1a6); margin-bottom: 1px; }
+  .note .ttl { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .body { color: light-dark(#3a3a3c, #d4d4d8); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .note .btns { display: flex; flex-direction: column; margin: -11px 0; border-left: 0.5px solid light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.14)); }
+  .note .btns button { flex: 1; font: 500 12.5px / 1.2 var(--sys); color: light-dark(#1d1d1f, #f2f2f4); padding: 0 8px; }
+  .note .btns button + button { border-top: 0.5px solid light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.14)); }
+  .note .btns.one button { flex: none; height: 100%; }
+  .notes-more { align-self: flex-end; margin-top: 1px; padding: 5px 10px; border-radius: 12px; background: light-dark(rgb(246 246 246 / 0.6), rgb(40 40 42 / 0.6)); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); font: 500 11.5px / 1 var(--sys); color: light-dark(#3a3a3c, #d4d4d8); }
+
+  /* ----------------------------------------------------------- the dock --- */
+  .dock-bar {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 8;
+    display: flex; align-items: flex-end; gap: 10px; height: 74px; padding: 0 10px 9px;
+    border-radius: 22px;
+    background: light-dark(rgb(255 255 255 / 0.4), rgb(40 40 42 / 0.45));
+    -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
+    box-shadow: inset 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.16));
+  }
+  .app-i { position: relative; width: 56px; height: 56px; display: grid; place-items: center; }
+  .app-i .gen { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; color: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.25); }
+  .app-i .gen .mk { width: 24px; height: 24px; }
+  .app-i img { width: 56px; height: 56px; }
+  .app-i.run::after { content: ""; position: absolute; bottom: -7px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: light-dark(#1d1d1f, #f2f2f4); opacity: 0.7; }
+  .badge { position: absolute; top: -3px; right: -3px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: #ff3b30; color: #fff; font: 600 13px / 22px var(--sys); text-align: center; box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); }
+  .dock-sep { width: 1px; height: 48px; margin: 0 2px 4px; background: light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.2)); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="screen">
+  <div class="wall"></div>
+
+  <!-- The menu bar: another app is in front; Hercule lives on the right. -->
+  <header class="menubar">
+    <span class="sysmark" aria-hidden="true"></span>
+    <b>Editor</b>
+    <span class="menus"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></span>
+    <span class="extras">
+      <span class="extra-hercule" title="Hercule">
+        <svg class="logo"><use href="#logo"/></svg><svg class="mk"><use href="#m-decision"/></svg><b>3</b>
+      </span>
+      <svg class="mx"><use href="#g-key"/></svg>
+      <svg class="mx"><use href="#g-cube"/></svg>
+      <svg class="mx"><use href="#g-gauge"/></svg>
+      <svg class="mx"><use href="#g-bolt"/></svg>
+      <svg class="mx"><use href="#c-search"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 11.2 1 4.6a10 10 0 0 1 14 0z" fill="currentColor" opacity="0.92"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity="0.5"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="currentColor"/><rect x="22.5" y="4" width="1.6" height="4" rx="0.8" fill="currentColor" opacity="0.5"/></svg>
+      <svg width="15" height="13" viewBox="0 0 15 13" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="13" height="4.5" rx="2.25"/><rect x="1" y="7.5" width="13" height="4.5" rx="2.25"/></g><circle cx="11.5" cy="3.25" r="1.3" fill="currentColor"/><circle cx="3.5" cy="9.75" r="1.3" fill="currentColor"/></svg>
+      <span class="clock">Tue 29 Sep 09:41</span>
+    </span>
+  </header>
+
+  <!-- Another app, so the surfaces read as "over your work". -->
+  <div class="other" aria-hidden="true">
+    <div class="o-bar"><i></i><i></i><i></i><span>payment.ts - webshop</span></div>
+    <div class="files">
+      <div>src</div><div>&nbsp;&nbsp;checkout</div><div class="on">&nbsp;&nbsp;&nbsp;&nbsp;payment.ts</div><div>&nbsp;&nbsp;&nbsp;&nbsp;payment.test.ts</div><div>&nbsp;&nbsp;&nbsp;&nbsp;3ds-modal.tsx</div><div>&nbsp;&nbsp;cart</div><div>&nbsp;&nbsp;lib</div><div>package.json</div>
+    </div>
+<pre><span class="dim"> 1</span>  <span class="kw">import</span> { stripe } <span class="kw">from</span> <span class="str">"../lib/stripe"</span>;
+<span class="dim"> 2</span>  <span class="kw">import</span> { openThreeDSModal } <span class="kw">from</span> <span class="str">"./3ds-modal"</span>;
+<span class="dim"> 3</span>
+<span class="dim"> 4</span>  <span class="kw">export async function</span> handlePaymentResult(result) {
+<span class="dim"> 5</span>    <span class="kw">if</span> (result.status === <span class="str">"succeeded"</span>) {
+<span class="dim"> 6</span>      <span class="kw">return</span> { ok: <span class="kw">true</span> };
+<span class="dim"> 7</span>    }
+<span class="dim"> 8</span>    <span class="kw">if</span> (result.status === <span class="str">"requires_action"</span>) {
+<span class="dim"> 9</span>      <span class="kw">return</span> openThreeDSModal(result.clientSecret);
+<span class="dim">10</span>    }
+<span class="dim">11</span>    <span class="kw">return</span> { ok: <span class="kw">false</span>, reason: result.status };
+<span class="dim">12</span>  }
+<span class="dim">13</span>
+<span class="dim">14</span>  <span class="kw">export async function</span> confirmCheckout(cart, card) {
+<span class="dim">15</span>    <span class="kw">const</span> intent = <span class="kw">await</span> stripe.paymentIntents.create({
+<span class="dim">16</span>      amount: cart.total,
+<span class="dim">17</span>      currency: <span class="str">"eur"</span>,
+<span class="dim">18</span>    });
+<span class="dim">19</span>    <span class="kw">const</span> result = <span class="kw">await</span> stripe.confirmPayment(intent, card);
+<span class="dim">20</span>    <span class="kw">return</span> handlePaymentResult(result);
+<span class="dim">21</span>  }</pre>
+  </div>
+
+  <!-- 1. The menu bar extra, open. -->
+  <div class="mbx card-glass" role="menu">
+    <div class="mbx-head attn"><svg class="mk"><use href="#m-decision"/></svg>3 wait on you<span class="end"><kbd>⌥</kbd><kbd>Space</kbd>answer</span></div>
+    <div class="mbx-row is-cursor"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span class="t">Fix 3-D Secure checkout for EU cards</span><span class="k"><kbd>y</kbd><kbd>n</kbd></span><span class="s">Request · run <code>git push</code> · studio-mac</span></div>
+    <div class="mbx-row"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span class="t">Ship release v2.15</span><span class="k"><kbd>y</kbd><kbd>n</kbd></span><span class="s">Request · publish payments-api 2.15.0 to npm</span></div>
+    <div class="mbx-row"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span class="t">Migrate ops dashboards</span><span class="k"><kbd>1</kbd><kbd>2</kbd></span><span class="s">Question · keep the old Grafana folder?</span></div>
+    <div class="mbx-sep"></div>
+    <div class="mbx-head">Working<span class="end">8</span></div>
+    <div class="mbx-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span class="t">Ada · heartbeat</span><span class="age">now</span><span class="s">Sonnet 5 · answering in Web chat</span></div>
+    <div class="mbx-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span class="t">Investigate backup timeouts</span><span class="age">6m</span><span class="s">Run · gpt-5.4 · build-box-1</span></div>
+    <div class="mbx-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span class="t">Webhook retry backoff</span><span class="age">3m</span><span class="s">Run · Opus 5.5 · build-box-1</span></div>
+    <div class="mbx-sep"></div>
+    <div class="mbx-head">Fleet<span class="end">16 of 22 slots</span></div>
+    <div class="meters">
+      <div class="meter"><span>studio-mac</span><span class="meter-cells"><i class="attn"></i><i class="attn"></i><i class="live"></i><i class="live"></i><i class="idle"></i><i class="free"></i></span><span class="meter-note">5/6</span></div>
+      <div class="meter is-cap"><span>build-box-1</span><span class="meter-cells"><i class="live"></i><i class="live"></i><i class="live"></i><i class="live"></i><i class="live"></i><i class="idle"></i><i class="idle"></i><i class="idle"></i></span><span class="meter-note">8/8</span></div>
+      <div class="meter"><span>build-box-2</span><span class="meter-cells"><i class="attn"></i><i class="live"></i><i class="idle"></i><i class="free"></i><i class="free"></i><i class="free"></i><i class="free"></i><i class="free"></i></span><span class="meter-note">3/8</span></div>
+    </div>
+    <div class="mbx-sep"></div>
+    <div class="mbx-item"><svg class="mk"><use href="#logo"/></svg>Open Hercule<span class="end"><kbd>⌘</kbd><kbd>0</kbd></span></div>
+    <div class="mbx-item"><svg class="mk"><use href="#g-moon"/></svg>Pause notifications for an hour</div>
+    <div class="mbx-item"><svg class="mk"><use href="#g-gear"/></svg>Settings<span class="end"><kbd>⌘</kbd><kbd>,</kbd></span></div>
+  </div>
+
+  <!-- 2. The quick panel, on a global hotkey from any app. -->
+  <div class="quick card-glass" role="dialog" aria-label="Answer">
+    <div class="q-input">
+      <svg class="mk prompt"><use href="#c-caret"/></svg>
+      <span class="scope"><svg class="mk"><use href="#m-decision"/></svg>answer</span>
+      <span>filter the 3 waiting…</span>
+      <span class="end"><span class="q-pager" aria-label="1 of 3"><i class="on"></i><i></i><i></i></span>1 of 3</span>
+    </div>
+    <div class="q-body">
+      <div class="q-kicker">
+        <span class="kind"><svg class="mk"><use href="#m-decision"/></svg>Request</span>
+        <span>Fix 3-D Secure checkout for EU cards</span>
+        <span class="proj webshop">webshop</span>
+        <span>studio-mac · 09:39</span>
+      </div>
+      <p class="q-title">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+      <div class="q-why">
+        <span>3 files <span class="plus">+48</span> <span class="minus">-12</span></span>
+        <span class="tone-ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span>
+        <span class="faint">then it opens a pull request</span>
+      </div>
+      <div class="ledger">
+        <button class="ans is-primary" type="button"><kbd>y</kbd><b>Allow once</b><span>Pushes the branch this one time.</span></button>
+        <button class="ans" type="button"><kbd>a</kbd><b>Always allow git push</b><span>In this thread, it stops asking for git push.</span></button>
+        <button class="ans" type="button"><kbd>n</kbd><b>Deny</b><span>The agent is told no and asks what to do.</span></button>
+      </div>
+    </div>
+    <div class="q-next">
+      <div class="row"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span><b>Ship release v2.15</b> · Publish payments-api 2.15.0 to npm?</span><span class="sub">2</span></div>
+      <div class="row"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span><b>Migrate ops dashboards</b> · Keep the old Grafana folder?</span><span class="sub">3</span></div>
+    </div>
+    <div class="q-foot">
+      <span class="hint"><kbd>y</kbd><kbd>a</kbd><kbd>n</kbd>answer</span>
+      <span class="hint"><kbd>tab</kbd>next</span>
+      <span class="hint"><kbd>⏎</kbd>open in Hercule</span>
+      <span class="spacer"></span>
+      <span class="hint"><kbd>esc</kbd>back to Editor</span>
+    </div>
+  </div>
+
+  <!-- 3. Native notifications, with the answers as buttons. -->
+  <div class="notes">
+    <div class="note"><img src="../app-icon.svg" alt=""><div class="txt"><div class="app"><span>Hercule · Request</span><span>now</span></div><div class="ttl">Fix 3-D Secure checkout</div><div class="body">Run git push -u origin fix/3ds-eu-cards?</div></div><div class="btns"><button type="button">Allow once</button><button type="button">Deny</button></div></div>
+    <div class="note"><img src="../app-icon.svg" alt=""><div class="txt"><div class="app"><span>Hercule · Proposal</span><span>09:01</span></div><div class="ttl">Checkout fails for EU cards with 3-D Secure</div><div class="body">Urgent · webshop · 412 Sentry events, 3 customer emails</div></div><div class="btns"><button type="button">Fix bug</button><button type="button">Dismiss</button></div></div>
+    <div class="note"><img src="../app-icon.svg" alt=""><div class="txt"><div class="app"><span>Hercule · Request</span><span>09:31</span></div><div class="ttl">Ship release v2.15</div><div class="body">Publish payments-api 2.15.0 to npm?</div></div><div class="btns"><button type="button">Allow once</button><button type="button">Deny</button></div></div>
+    <div class="note"><img src="../app-icon.svg" alt=""><div class="txt"><div class="app"><span>Hercule · Question</span><span>08:53</span></div><div class="ttl">Migrate ops dashboards</div><div class="body">Keep the old Grafana folder?</div></div><div class="btns"><button type="button">Keep</button><button type="button">Delete</button></div></div>
+    <div class="note"><img src="../app-icon.svg" alt=""><div class="txt"><div class="app"><span>Hercule · Assistant</span><span>09:00</span></div><div class="ttl">Ada</div><div class="body">Morning Rogier. One urgent thing…</div></div><div class="btns one"><button type="button">Reply</button></div></div>
+  </div>
+
+  <!-- 4. The dock: Hercule's badge counts what waits on you. -->
+  <div class="dock-bar">
+    <span class="app-i"><span class="gen" style="background:linear-gradient(#6ab7ff,#2f7bf5)"><svg class="mk"><use href="#g-folder"/></svg></span></span>
+    <span class="app-i"><span class="gen" style="background:linear-gradient(#8ee5c9,#1f9f86)"><svg class="mk"><use href="#g-web"/></svg></span></span>
+    <span class="app-i run"><span class="gen" style="background:linear-gradient(#5b5b62,#2b2b30)"><svg class="mk"><use href="#g-file"/></svg></span></span>
+    <span class="app-i"><span class="gen" style="background:linear-gradient(#ffb36b,#f0712c)"><svg class="mk"><use href="#g-bell"/></svg></span></span>
+    <span class="dock-sep"></span>
+    <span class="app-i run"><img src="../app-icon.svg" alt="Hercule"><span class="badge">3</span></span>
+  </div>
+
+  <!-- Callouts: which surface is which. -->
+  <span class="callout" style="left:690px; top:606px"><kbd class="is-accent">1</kbd>Menu bar extra<span>the meters, and what waits</span></span>
+  <span class="callout" style="left:60px; top:146px"><kbd class="is-accent">2</kbd>Quick panel<span>⌥ Space from any app · answer and go back</span></span>
+  <span class="callout" style="left:1068px; top:512px"><kbd class="is-accent">3</kbd>Notifications<span>the answers are the buttons</span></span>
+  <span class="callout" style="left:910px; top:846px"><kbd class="is-accent">4</kbd>Dock<span>the badge counts what waits on you</span></span>
+</div>
+</body>
+</html>

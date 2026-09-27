@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appearance · Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.themes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 4px; }
+.follow { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: var(--t-meta); color: var(--muted); }
+.follow .i { color: var(--faint); }
+.follow b { color: var(--ink); font-weight: var(--w-medium); }
+.hn { display: flex !important; align-items: center; gap: 8px; }
+.doctrine { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: var(--r-md); background: color-mix(in oklab, var(--ink) 4%, transparent); font-size: var(--t-meta); color: var(--muted); }
+.doctrine .st { color: var(--ink); gap: 4px; }
+.doctrine .qdot { width: 14px; height: 14px; }
+.mprev { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--r-md); font-size: var(--t-meta); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.mprev .brand { width: 12px; height: 12px; }
+.aa { display: inline-flex; align-items: baseline; gap: 1px; font-weight: var(--w-medium); }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win" data-space="all">
+  <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+  <aside class="side">
+  <div class="side-top"><button class="iconbtn" title="Notifications"><svg class="i16" aria-hidden="true"><use href="#i-bell"/></svg></button><button class="iconbtn" title="Hide sidebar"><svg class="i16" aria-hidden="true"><use href="#i-sidebar"/></svg></button></div>
+  <div class="space-head"><button class="iconbtn" title="Back" style="margin-left:-4px"><svg class="i16" aria-hidden="true"><use href="#i-chev-left"/></svg></button><div class="grow"><div class="name">Settings</div><div class="sub">controller · studio-mac</div></div></div>
+  <div class="cmd"><svg class="i16" aria-hidden="true"><use href="#i-search"/></svg><span class="grow">Search settings</span><span class="kbd">⌘,</span></div>
+  <div class="side-scroll">
+    <div class="group">
+      <div class="group-h"><span class="grow">You</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-user"/></svg>Profile</a>
+      <a class="nav on"><svg class="i16" aria-hidden="true"><use href="#i-palette"/></svg>Appearance</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-chat"/></svg>Threads</a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Agents</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-users"/></svg>Assistants<span class="count">3</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-sparkle"/></svg>Providers<span class="count">3</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-machine"/></svg>Machines<span class="count">3</span></a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Access</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-plug"/></svg>Connections<span class="count">11</span></a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-key"/></svg>Identities</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-shield"/></svg>Permission profiles</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-lock"/></svg>Secrets</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-gauge"/></svg>Bounds</a>
+    </div>
+    <div class="group">
+      <div class="group-h"><span class="grow">Instance</span></div>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-layers"/></svg>Plugins</a>
+      <a class="nav"><svg class="i16" aria-hidden="true"><use href="#i-server"/></svg>System</a>
+    </div>
+  </div>
+  <div class="side-foot"><div class="band" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div><div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div><div class="spaces"><button class="sp on" title="All projects"><span class="sw all"></span></button><button class="sp" title="webshop"><span class="sw p-webshop"></span></button><button class="sp" title="payments-api"><span class="sw p-payments"></span></button><button class="sp" title="ops"><span class="sw p-ops"></span></button><span class="label">All projects</span><span class="grow"></span><button class="iconbtn" title="Settings"><svg class="i16" aria-hidden="true"><use href="#i-gear"/></svg></button></div></div>
+</aside>
+  <main class="panel">
+    <header class="bar"><span class="crumb">Settings /</span><span class="title">Appearance</span><span class="grow"></span><span class="meta"><svg class="i14" aria-hidden="true"><use href="#i-user"/></svg>Saved to your profile · every device follows it</span></header>
+    <div class="set">
+      <div class="set-in">
+        <section class="sec">
+          <div class="sec-h"><h2>Theme</h2><span class="grow"></span><div class="seg-ctl"><button aria-pressed="false">Light</button><button aria-pressed="false">Dark</button><button aria-pressed="true">Follow system</button></div></div>
+          <div class="themes">
+            <button class="tc" data-card="prism" aria-pressed="false">
+        <span class="tc-prev" data-theme="prism">
+          <span class="mw" data-space="webshop">
+            <span class="mw-side"><span class="dots"><i></i><i></i><i></i></span><span class="mw-l s"></span><span class="mw-l on"></span><span class="mw-l"></span><span class="mw-l s"></span>
+              <span class="mw-band"><i class="p-webshop w"></i><i class="p-webshop w"></i><i class="q"></i><i class="p-webshop"></i><i class="p-payments w"></i><i class="p-payments"></i><i class="p-ops w"></i><i class="p-ops"></i></span>
+            </span>
+            <span class="mw-panel"><span class="mw-top"><span class="mw-l s" style="width:34%"></span></span><span class="mw-bub"></span><span class="mw-l"></span><span class="mw-l s"></span><span class="mw-comp"></span></span>
+          </span>
+        </span>
+        <span class="tc-name">Prism<small>light</small><span class="grow"></span><span class="pill soft">by day</span></span>
+      </button>
+            <button class="tc" data-card="pastel" aria-pressed="false">
+        <span class="tc-prev" data-theme="pastel">
+          <span class="mw" data-space="webshop">
+            <span class="mw-side"><span class="dots"><i></i><i></i><i></i></span><span class="mw-l s"></span><span class="mw-l on"></span><span class="mw-l"></span><span class="mw-l s"></span>
+              <span class="mw-band"><i class="p-webshop w"></i><i class="p-webshop w"></i><i class="q"></i><i class="p-webshop"></i><i class="p-payments w"></i><i class="p-payments"></i><i class="p-ops w"></i><i class="p-ops"></i></span>
+            </span>
+            <span class="mw-panel"><span class="mw-top"><span class="mw-l s" style="width:34%"></span></span><span class="mw-bub"></span><span class="mw-l"></span><span class="mw-l s"></span><span class="mw-comp"></span></span>
+          </span>
+        </span>
+        <span class="tc-name">Pastel<small>light</small><span class="grow"></span></span>
+      </button>
+            <button class="tc" data-card="obsidian" aria-pressed="false">
+        <span class="tc-prev" data-theme="obsidian">
+          <span class="mw" data-space="webshop">
+            <span class="mw-side"><span class="dots"><i></i><i></i><i></i></span><span class="mw-l s"></span><span class="mw-l on"></span><span class="mw-l"></span><span class="mw-l s"></span>
+              <span class="mw-band"><i class="p-webshop w"></i><i class="p-webshop w"></i><i class="q"></i><i class="p-webshop"></i><i class="p-payments w"></i><i class="p-payments"></i><i class="p-ops w"></i><i class="p-ops"></i></span>
+            </span>
+            <span class="mw-panel"><span class="mw-top"><span class="mw-l s" style="width:34%"></span></span><span class="mw-bub"></span><span class="mw-l"></span><span class="mw-l s"></span><span class="mw-comp"></span></span>
+          </span>
+        </span>
+        <span class="tc-name">Obsidian<small>dark</small><span class="grow"></span><span class="pill soft">by night</span></span>
+      </button>
+            <button class="tc" data-card="mulberry" aria-pressed="false">
+        <span class="tc-prev" data-theme="mulberry">
+          <span class="mw" data-space="webshop">
+            <span class="mw-side"><span class="dots"><i></i><i></i><i></i></span><span class="mw-l s"></span><span class="mw-l on"></span><span class="mw-l"></span><span class="mw-l s"></span>
+              <span class="mw-band"><i class="p-webshop w"></i><i class="p-webshop w"></i><i class="q"></i><i class="p-webshop"></i><i class="p-payments w"></i><i class="p-payments"></i><i class="p-ops w"></i><i class="p-ops"></i></span>
+            </span>
+            <span class="mw-panel"><span class="mw-top"><span class="mw-l s" style="width:34%"></span></span><span class="mw-bub"></span><span class="mw-l"></span><span class="mw-l s"></span><span class="mw-comp"></span></span>
+          </span>
+        </span>
+        <span class="tc-name">Mulberry<small>dark</small><span class="grow"></span></span>
+      </button>
+            <button class="tc" data-card="moss" aria-pressed="false">
+        <span class="tc-prev" data-theme="moss">
+          <span class="mw" data-space="webshop">
+            <span class="mw-side"><span class="dots"><i></i><i></i><i></i></span><span class="mw-l s"></span><span class="mw-l on"></span><span class="mw-l"></span><span class="mw-l s"></span>
+              <span class="mw-band"><i class="p-webshop w"></i><i class="p-webshop w"></i><i class="q"></i><i class="p-webshop"></i><i class="p-payments w"></i><i class="p-payments"></i><i class="p-ops w"></i><i class="p-ops"></i></span>
+            </span>
+            <span class="mw-panel"><span class="mw-top"><span class="mw-l s" style="width:34%"></span></span><span class="mw-bub"></span><span class="mw-l"></span><span class="mw-l s"></span><span class="mw-comp"></span></span>
+          </span>
+        </span>
+        <span class="tc-name">Moss<small>dark</small><span class="grow"></span></span>
+      </button>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Project hues</h2><p>One hue per project, everywhere: its sidebar, its band segments, its buttons, its floor in the office.</p></div>
+          <div class="fld p-webshop">
+          <div class="lbl"><b class="hn"><span class="sw lg p-webshop"></span>webshop</b><span>github.com/rogier/webshop</span></div>
+          <div class="ctl"><span class="hues"><i class="on" style="--h:var(--p)" title="hue 50"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 85)" title="hue 85"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 128)" title="hue 128"></i><i class="taken" style="--h:oklch(from var(--p-webshop) l c 152)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 200)" title="hue 200"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 240)" title="hue 240"></i><i class="taken" style="--h:oklch(from var(--p-webshop) l c 292)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 340)" title="hue 340"></i></span></div>
+        </div>
+          <div class="fld p-payments">
+          <div class="lbl"><b class="hn"><span class="sw lg p-payments"></span>payments-api</b><span>github.com/rogier/payments-api</span></div>
+          <div class="ctl"><span class="hues"><i class="taken" style="--h:oklch(from var(--p-webshop) l c 50)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 85)" title="hue 85"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 128)" title="hue 128"></i><i class="taken" style="--h:oklch(from var(--p-webshop) l c 152)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 200)" title="hue 200"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 240)" title="hue 240"></i><i class="on" style="--h:var(--p)" title="hue 292"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 340)" title="hue 340"></i></span></div>
+        </div>
+          <div class="fld p-ops">
+          <div class="lbl"><b class="hn"><span class="sw lg p-ops"></span>ops</b><span>github.com/rogier/ops</span></div>
+          <div class="ctl"><span class="hues"><i class="taken" style="--h:oklch(from var(--p-webshop) l c 50)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 85)" title="hue 85"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 128)" title="hue 128"></i><i class="on" style="--h:var(--p)" title="hue 152"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 200)" title="hue 200"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 240)" title="hue 240"></i><i class="taken" style="--h:oklch(from var(--p-webshop) l c 292)" title="used by another project"></i><i class="" style="--h:oklch(from var(--p-webshop) l c 340)" title="hue 340"></i></span></div>
+        </div>
+          <div class="fld">
+            <div class="lbl"><b>Tint the sidebar</b><span>How much of the project hue a project space takes</span></div>
+            <div class="ctl"><div class="seg-ctl"><button aria-pressed="false">Off</button><button aria-pressed="true">Soft</button><button aria-pressed="false">Strong</button></div></div>
+          </div>
+          <div class="doctrine"><svg class="i14" aria-hidden="true"><use href="#i-eye"/></svg><span class="grow">No hue means good or bad. State is a mark:</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>working</span><span class="st"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span>needs you</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-failed"/></svg>failed</span><span class="st"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>idle</span></div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Text and density</h2></div>
+          <div class="fld">
+            <div class="lbl"><b>Density</b><span>Compact fits 30% more rows in lists and Intake</span></div>
+            <div class="ctl"><div class="seg-ctl"><button aria-pressed="true">Comfortable</button><button aria-pressed="false">Compact</button></div></div>
+          </div>
+          <div class="fld">
+            <div class="lbl"><b>Text size</b><span>Transcripts and Conversations follow it</span></div>
+            <div class="ctl"><div class="seg-ctl"><button aria-pressed="false"><span style="font-size:11px">A</span>13</button><button aria-pressed="true"><span style="font-size:13px">A</span>14</button><button aria-pressed="false"><span style="font-size:15px">A</span>15</button></div></div>
+          </div>
+          <div class="fld">
+            <div class="lbl"><b>Source marks</b><span>Show the mark of the system each event came from</span></div>
+            <div class="ctl"><span class="mprev"><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg><span>Checkout fails for EU cards</span></span><span class="switch on" role="switch" aria-checked="true" aria-label="Source marks"></span></div>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Motion and glass</h2><p>Both follow your system setting until you change them here</p></div>
+          <div class="fld">
+            <div class="lbl"><b>Reduce motion</b><span>The band stops shimmering; the composer changes without animating</span></div>
+            <div class="ctl"><span class="faint" style="font-size:12px">system: off</span><span class="switch" role="switch" aria-checked="false" aria-label="Reduce motion"></span></div>
+          </div>
+          <div class="fld">
+            <div class="lbl"><b>Reduce transparency</b><span>The composer and sheets turn solid instead of glass</span></div>
+            <div class="ctl"><span class="faint" style="font-size:12px">system: off</span><span class="switch" role="switch" aria-checked="false" aria-label="Reduce transparency"></span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+// Rings the card of the theme the page is showing, so the picker agrees with the screen.
+const t = { light: "prism", dark: "obsidian" }[document.documentElement.dataset.theme] || document.documentElement.dataset.theme;
+document.querySelectorAll("[data-card]").forEach((c) => { const on = c.dataset.card === t; c.classList.toggle("on", on); c.setAttribute("aria-pressed", on); });
+</script>
+</body>
+</html>

@@ -1,0 +1,424 @@
+/* PROTOTYPE - Crew design tokens.
+
+   Color doctrine: COLOR = WHO.
+   - Every colleague (agent session, workflow, assistant) owns one signature hue from the
+     eight-hue crew wheel below. Its face, its row tint and its name ink use that hue and nothing else.
+   - State is never a color. It is a pose on the character (focused eyes, a raised hand, closed
+     eyes, a bandage) plus a small badge, so it reads in grayscale too.
+   - Two colors are reserved and belong to no colleague:
+       --you   marigold: anything addressed to you (a raised hand's palm, "waiting on you" counts).
+               You are part of the crew, so your color is a "who" as well.
+       --fail  tomato: something got hurt (the bandage badge, a failed turn).
+   - Places get tints, not hues: projects are low-chroma rugs (--proj-*), so rooms never compete
+     with the people in them.
+   - Diff and test results keep the code convention: --ok green for added / passed, --fail for removed.
+
+   Themes: Studio (light, flagship), Sunroom (light, warm), Cocoa (dark, flagship, warm
+   brown-black), Pine (dark, green-black), Plum (dark, violet-red). `light` = Studio, `dark` = Cocoa.
+   Themes sit on [data-theme] selectors, not only :root, so a theme preview can nest one inside
+   another page. */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("fonts/bricolage-grotesque-latin-standard-normal.woff2") format("woff2");
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: block;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("fonts/bricolage-grotesque-latin-ext-standard-normal.woff2") format("woff2");
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: block;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Recursive";
+  src: url("fonts/recursive-latin-full-normal.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-display: block;
+}
+
+/* ---------- Theme-independent scales ---------- */
+:root {
+  --font-ui: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Recursive", ui-monospace, "SF Mono", monospace;
+  --mono-axes: "MONO" 1, "CASL" 0.5, "CRSV" 0;
+
+  /* Type: modest titles; size hierarchy comes from numerals, color and position. */
+  --t-11: 11px;
+  --t-12: 12px;
+  --t-13: 13px;   /* UI body */
+  --t-14: 14px;   /* transcript prose */
+  --t-16: 16px;
+  --t-18: 18px;   /* page titles */
+  --t-20: 20px;   /* the largest title on desktop */
+  --t-num: 26px;  /* headline numerals */
+  --w-regular: 400;
+  --w-medium: 520;
+  --w-bold: 640;
+
+  /* Space: a 4px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* Shape: chunky and soft, like a toy set. */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* Motion: interface moves fast and plainly; only characters get a little spring. */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.5, 0.64, 1);
+
+  /* The crew wheel: eight signature hues (oklch hue angles). Kept away from marigold (--you)
+     and tomato (--fail) so a colleague is never mistaken for a state. */
+  --hue-lime: 132;
+  --hue-mint: 166;
+  --hue-teal: 198;
+  --hue-sky: 240;
+  --hue-iris: 282;
+  --hue-grape: 312;
+  --hue-orchid: 345;
+  --hue-peach: 52;
+  --hue-you: 78;
+  --hue-fail: 27;
+}
+
+/* ---------- Studio: light flagship. Clean warm-white, ink near-black. ---------- */
+:root,
+[data-theme="studio"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(0.972 0.004 80);
+  --surface: oklch(0.99 0.002 80);
+  --raised: oklch(1 0 0);
+  --sunken: oklch(0.948 0.005 80);
+  --ink: oklch(0.235 0.01 60);
+  --muted: oklch(0.47 0.012 60);
+  --faint: oklch(0.6 0.01 60);
+  --line: oklch(0.885 0.006 70);
+  --line-soft: oklch(0.925 0.005 75);
+
+  /* Characters: fill lightness/chroma, the rim shade, text-safe ink and a quiet tint. */
+  --char-l: 0.775;
+  --char-c: 0.13;
+  --char-shade: 0.08;
+  --char-ink-l: 0.5;
+  --char-tint-l: 0.95;
+  --char-tint-c: 0.03;
+  --face-ink: oklch(0.24 0.03 60);
+  --blush: oklch(0.72 0.14 15 / 0.42);
+
+  --you: oklch(0.8 0.155 78);
+  --you-ink: oklch(0.53 0.12 68);
+  --you-tint: oklch(0.955 0.045 85);
+  --fail: oklch(0.62 0.19 27);
+  --fail-ink: oklch(0.53 0.17 27);
+  --fail-tint: oklch(0.955 0.025 27);
+  --ok: oklch(0.52 0.12 150);
+  --ok-tint: oklch(0.955 0.03 150);
+
+  --proj-webshop: oklch(0.89 0.045 62);
+  --proj-payments: oklch(0.885 0.04 290);
+  --proj-ops: oklch(0.89 0.045 150);
+
+  --glass: oklch(1 0 0 / 0.74);
+  --glass-thin: oklch(1 0 0 / 0.5);
+  --glass-edge: oklch(1 0 0 / 0.7);
+  --glass-blur: 18px;
+  --scrim: oklch(0.3 0.02 60 / 0.18);
+  --wallpaper: radial-gradient(120% 90% at 10% 0%, oklch(0.93 0.05 85) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 100%, oklch(0.92 0.05 282) 0%, transparent 60%), var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0.3 0.03 60 / 0.05), 0 1px 3px oklch(0.3 0.03 60 / 0.06);
+  --shadow-2: 0 1px 2px oklch(0.3 0.03 60 / 0.06), 0 8px 24px -8px oklch(0.3 0.03 60 / 0.16);
+  --shadow-3: 0 2px 4px oklch(0.3 0.03 60 / 0.06), 0 24px 56px -16px oklch(0.3 0.03 60 / 0.28);
+
+  /* The office: floor, walls and furniture are theme-aware too. */
+  --room-floor: oklch(0.93 0.012 75);
+  --room-wall: oklch(0.955 0.01 80);
+  --room-wood: oklch(0.8 0.055 65);
+  --room-desk: oklch(0.985 0.004 80);
+  --room-metal: oklch(0.72 0.01 70);
+  --room-plant: oklch(0.68 0.12 150);
+  --room-sun: oklch(0.96 0.07 90);
+  --room-screen: oklch(0.34 0.02 60);
+  --room-shade: oklch(0.4 0.03 60); /* what furniture sides darken toward */
+  --room-fabric: oklch(0.84 0.03 45);
+  --room-lounge: oklch(0.905 0.02 85);
+}
+
+/* ---------- Sunroom: light, warm. Peach-cream paper, cocoa ink. ---------- */
+[data-theme="sunroom"] {
+  color-scheme: light;
+  --bg: oklch(0.955 0.018 72);
+  --surface: oklch(0.975 0.013 76);
+  --raised: oklch(0.99 0.007 80);
+  --sunken: oklch(0.93 0.02 70);
+  --ink: oklch(0.25 0.025 45);
+  --muted: oklch(0.46 0.03 50);
+  --faint: oklch(0.58 0.03 55);
+  --line: oklch(0.87 0.022 68);
+  --line-soft: oklch(0.91 0.018 70);
+
+  --char-l: 0.76;
+  --char-c: 0.135;
+  --char-shade: 0.08;
+  --char-ink-l: 0.49;
+  --char-tint-l: 0.935;
+  --char-tint-c: 0.035;
+  --face-ink: oklch(0.25 0.035 45);
+  --blush: oklch(0.7 0.15 20 / 0.45);
+
+  --you: oklch(0.79 0.16 76);
+  --you-ink: oklch(0.52 0.12 65);
+  --you-tint: oklch(0.94 0.055 82);
+  --fail: oklch(0.61 0.19 27);
+  --fail-ink: oklch(0.52 0.17 27);
+  --fail-tint: oklch(0.94 0.03 30);
+  --ok: oklch(0.5 0.12 150);
+  --ok-tint: oklch(0.94 0.035 145);
+
+  --proj-webshop: oklch(0.87 0.055 60);
+  --proj-payments: oklch(0.865 0.045 295);
+  --proj-ops: oklch(0.87 0.05 145);
+
+  --glass: oklch(0.99 0.008 80 / 0.72);
+  --glass-thin: oklch(0.99 0.008 80 / 0.5);
+  --glass-edge: oklch(1 0 0 / 0.6);
+  --scrim: oklch(0.3 0.04 45 / 0.2);
+  --wallpaper: radial-gradient(120% 90% at 0% 0%, oklch(0.92 0.07 70) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 100%, oklch(0.9 0.06 20) 0%, transparent 60%), var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0.35 0.05 45 / 0.06), 0 1px 3px oklch(0.35 0.05 45 / 0.07);
+  --shadow-2: 0 1px 2px oklch(0.35 0.05 45 / 0.07), 0 8px 24px -8px oklch(0.35 0.05 45 / 0.2);
+  --shadow-3: 0 2px 4px oklch(0.35 0.05 45 / 0.07), 0 24px 56px -16px oklch(0.35 0.05 45 / 0.32);
+
+  --room-floor: oklch(0.905 0.028 70);
+  --room-wall: oklch(0.945 0.02 75);
+  --room-wood: oklch(0.76 0.075 58);
+  --room-desk: oklch(0.975 0.012 78);
+  --room-metal: oklch(0.7 0.02 60);
+  --room-plant: oklch(0.66 0.12 145);
+  --room-sun: oklch(0.95 0.09 85);
+  --room-screen: oklch(0.33 0.03 45);
+  --room-shade: oklch(0.38 0.05 45); /* what furniture sides darken toward */
+  --room-fabric: oklch(0.8 0.05 35);
+  --room-lounge: oklch(0.88 0.035 80);
+}
+
+/* ---------- Cocoa: dark flagship. Warm brown-black, never navy. ---------- */
+[data-theme="cocoa"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(0.2 0.011 55);
+  --surface: oklch(0.232 0.012 55);
+  --raised: oklch(0.268 0.013 55);
+  --sunken: oklch(0.175 0.01 55);
+  --ink: oklch(0.945 0.01 80);
+  --muted: oklch(0.77 0.014 70);
+  --faint: oklch(0.61 0.014 65);
+  --line: oklch(0.32 0.012 55);
+  --line-soft: oklch(0.27 0.011 55);
+
+  --char-l: 0.76;
+  --char-c: 0.12;
+  --char-shade: 0.09;
+  --char-ink-l: 0.8;
+  --char-tint-l: 0.3;
+  --char-tint-c: 0.045;
+  --face-ink: oklch(0.22 0.03 55);
+  --blush: oklch(0.7 0.14 15 / 0.45);
+
+  --you: oklch(0.82 0.15 80);
+  --you-ink: oklch(0.84 0.14 82);
+  --you-tint: oklch(0.32 0.06 75);
+  --fail: oklch(0.68 0.17 28);
+  --fail-ink: oklch(0.76 0.14 30);
+  --fail-tint: oklch(0.3 0.06 28);
+  --ok: oklch(0.78 0.13 150);
+  --ok-tint: oklch(0.3 0.05 150);
+
+  --proj-webshop: oklch(0.42 0.05 62);
+  --proj-payments: oklch(0.41 0.05 290);
+  --proj-ops: oklch(0.42 0.05 150);
+
+  --glass: oklch(0.268 0.013 55 / 0.72);
+  --glass-thin: oklch(0.268 0.013 55 / 0.5);
+  --glass-edge: oklch(1 0 0 / 0.08);
+  --scrim: oklch(0.1 0.01 55 / 0.5);
+  --wallpaper: radial-gradient(120% 90% at 0% 0%, oklch(0.3 0.05 60) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 100%, oklch(0.28 0.05 330) 0%, transparent 60%), var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0 0 0 / 0.25), 0 1px 3px oklch(0 0 0 / 0.2);
+  --shadow-2: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 28px -8px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 2px 4px oklch(0 0 0 / 0.3), 0 28px 60px -16px oklch(0 0 0 / 0.6);
+
+  --room-floor: oklch(0.335 0.018 58);
+  --room-wall: oklch(0.29 0.016 55);
+  --room-wood: oklch(0.5 0.06 55);
+  --room-desk: oklch(0.44 0.014 62);
+  --room-metal: oklch(0.5 0.012 60);
+  --room-plant: oklch(0.58 0.1 150);
+  --room-sun: oklch(0.55 0.09 75);
+  --room-screen: oklch(0.2 0.012 55);
+  --room-shade: oklch(0.12 0.012 55); /* what furniture sides darken toward */
+  --room-fabric: oklch(0.47 0.04 40);
+  --room-lounge: oklch(0.385 0.028 62);
+}
+
+/* ---------- Pine: dark, green-black. ---------- */
+[data-theme="pine"] {
+  color-scheme: dark;
+  --bg: oklch(0.195 0.014 165);
+  --surface: oklch(0.228 0.016 165);
+  --raised: oklch(0.265 0.018 165);
+  --sunken: oklch(0.17 0.012 165);
+  --ink: oklch(0.945 0.012 150);
+  --muted: oklch(0.77 0.02 155);
+  --faint: oklch(0.61 0.02 160);
+  --line: oklch(0.32 0.018 165);
+  --line-soft: oklch(0.27 0.016 165);
+
+  --char-l: 0.77;
+  --char-c: 0.12;
+  --char-shade: 0.09;
+  --char-ink-l: 0.81;
+  --char-tint-l: 0.3;
+  --char-tint-c: 0.045;
+  --face-ink: oklch(0.22 0.03 165);
+  --blush: oklch(0.7 0.14 15 / 0.42);
+
+  --you: oklch(0.83 0.15 82);
+  --you-ink: oklch(0.85 0.14 84);
+  --you-tint: oklch(0.32 0.06 90);
+  --fail: oklch(0.68 0.17 28);
+  --fail-ink: oklch(0.77 0.14 30);
+  --fail-tint: oklch(0.3 0.06 28);
+  --ok: oklch(0.8 0.13 150);
+  --ok-tint: oklch(0.31 0.05 150);
+
+  --proj-webshop: oklch(0.42 0.05 70);
+  --proj-payments: oklch(0.41 0.05 290);
+  --proj-ops: oklch(0.43 0.055 150);
+
+  --glass: oklch(0.265 0.018 165 / 0.72);
+  --glass-thin: oklch(0.265 0.018 165 / 0.5);
+  --glass-edge: oklch(1 0 0 / 0.08);
+  --scrim: oklch(0.1 0.01 165 / 0.5);
+  --wallpaper: radial-gradient(120% 90% at 0% 0%, oklch(0.32 0.06 150) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 100%, oklch(0.3 0.05 90) 0%, transparent 60%), var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0 0 0 / 0.25), 0 1px 3px oklch(0 0 0 / 0.2);
+  --shadow-2: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 28px -8px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 2px 4px oklch(0 0 0 / 0.3), 0 28px 60px -16px oklch(0 0 0 / 0.6);
+
+  --room-floor: oklch(0.335 0.022 160);
+  --room-wall: oklch(0.29 0.02 165);
+  --room-wood: oklch(0.5 0.055 70);
+  --room-desk: oklch(0.44 0.018 160);
+  --room-metal: oklch(0.5 0.014 160);
+  --room-plant: oklch(0.6 0.11 145);
+  --room-sun: oklch(0.55 0.08 105);
+  --room-screen: oklch(0.2 0.014 165);
+  --room-shade: oklch(0.12 0.012 165); /* what furniture sides darken toward */
+  --room-fabric: oklch(0.47 0.04 170);
+  --room-lounge: oklch(0.385 0.03 160);
+}
+
+/* ---------- Plum: dark, violet-red. ---------- */
+[data-theme="plum"] {
+  color-scheme: dark;
+  --bg: oklch(0.2 0.02 345);
+  --surface: oklch(0.232 0.022 345);
+  --raised: oklch(0.27 0.024 345);
+  --sunken: oklch(0.175 0.018 345);
+  --ink: oklch(0.95 0.012 350);
+  --muted: oklch(0.78 0.022 345);
+  --faint: oklch(0.62 0.024 345);
+  --line: oklch(0.33 0.024 345);
+  --line-soft: oklch(0.275 0.022 345);
+
+  --char-l: 0.77;
+  --char-c: 0.12;
+  --char-shade: 0.09;
+  --char-ink-l: 0.82;
+  --char-tint-l: 0.31;
+  --char-tint-c: 0.05;
+  --face-ink: oklch(0.22 0.03 345);
+  --blush: oklch(0.72 0.14 10 / 0.45);
+
+  --you: oklch(0.83 0.15 80);
+  --you-ink: oklch(0.85 0.14 82);
+  --you-tint: oklch(0.33 0.06 70);
+  --fail: oklch(0.69 0.17 28);
+  --fail-ink: oklch(0.78 0.14 30);
+  --fail-tint: oklch(0.31 0.06 25);
+  --ok: oklch(0.8 0.13 150);
+  --ok-tint: oklch(0.31 0.05 150);
+
+  --proj-webshop: oklch(0.43 0.05 55);
+  --proj-payments: oklch(0.42 0.055 295);
+  --proj-ops: oklch(0.43 0.05 155);
+
+  --glass: oklch(0.27 0.024 345 / 0.72);
+  --glass-thin: oklch(0.27 0.024 345 / 0.5);
+  --glass-edge: oklch(1 0 0 / 0.08);
+  --scrim: oklch(0.1 0.02 345 / 0.5);
+  --wallpaper: radial-gradient(120% 90% at 0% 0%, oklch(0.32 0.07 350) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 100%, oklch(0.3 0.06 60) 0%, transparent 60%), var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0 0 0 / 0.25), 0 1px 3px oklch(0 0 0 / 0.2);
+  --shadow-2: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 28px -8px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 2px 4px oklch(0 0 0 / 0.3), 0 28px 60px -16px oklch(0 0 0 / 0.6);
+
+  --room-floor: oklch(0.34 0.028 345);
+  --room-wall: oklch(0.295 0.026 345);
+  --room-wood: oklch(0.5 0.06 40);
+  --room-desk: oklch(0.45 0.024 345);
+  --room-metal: oklch(0.51 0.018 345);
+  --room-plant: oklch(0.6 0.1 150);
+  --room-sun: oklch(0.56 0.09 40);
+  --room-screen: oklch(0.2 0.018 345);
+  --room-shade: oklch(0.12 0.016 345); /* what furniture sides darken toward */
+  --room-fabric: oklch(0.48 0.05 350);
+  --room-lounge: oklch(0.39 0.032 345);
+}
+
+/* ---------- Derived tokens: same recipe in every theme ---------- */
+:root,
+[data-theme] {
+  --accent: var(--you);
+  --attn: var(--you-ink); /* today's --attn becomes "addressed to you" */
+  --live: var(--ok);
+  --focus: color-mix(in oklab, var(--you) 80%, var(--ink));
+  --hover: color-mix(in oklab, var(--ink) 5%, transparent);
+  --press: color-mix(in oklab, var(--ink) 9%, transparent);
+  --selected: color-mix(in oklab, var(--ink) 7%, transparent);
+  --field: color-mix(in oklab, var(--sunken) 70%, var(--surface));
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+
+/* A colleague's colors come from its hue: set --hue on any element and these follow. */
+[style*="--hue"],
+.who {
+  --who: oklch(var(--char-l) var(--char-c) var(--hue, var(--hue-iris)));
+  --who-shade: oklch(calc(var(--char-l) - var(--char-shade)) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris)));
+  --who-ink: oklch(var(--char-ink-l) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris)));
+  --who-tint: oklch(var(--char-tint-l) var(--char-tint-c) var(--hue, var(--hue-iris)));
+}

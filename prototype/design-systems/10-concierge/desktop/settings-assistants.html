@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Ada · Assistants · Settings · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="settings" data-active="Assistants"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i class="orb" data-v="ada" data-p="idle" style="--size:14px"></i>
+      <h1>Assistants</h1><span class="crumb">Settings</span>
+      <div class="tools">
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada</span><kbd class="kbd">&#8997;Space</kbd></label>
+      </div>
+    </header>
+
+    <section class="pane">
+      <div class="scroll">
+        <div class="set set-wide">
+          <nav class="as-tabs">
+            <a class="as-tab is-on" href="#"><i class="orb" data-v="ada" data-p="working" style="--size:16px"></i><b>Ada</b><small>personal</small></a>
+            <a class="as-tab" href="#"><i class="orb" data-v="milo" data-p="idle" style="--size:16px"></i><b>Milo</b><small>ops</small></a>
+            <a class="as-tab" href="#"><i class="orb" data-v="juno" data-p="asleep" style="--size:16px"></i><b>Juno</b><small>support</small></a>
+            <a class="as-tab as-new" href="#"><i data-i="plus"></i>New assistant</a>
+          </nav>
+
+          <header class="as-id">
+            <i class="orb" data-v="ada" data-p="working" style="--size:52px"></i>
+            <div class="grow">
+              <h2>Ada</h2>
+              <p><span>personal assistant</span><span class="dot-sep"></span><span class="c-live"><i data-m="working"></i>working · heartbeat 09:00</span></p>
+            </div>
+            <a class="btn" href="assistant.html"><i data-m="session"></i>Open Conversation</a>
+            <button class="iconbtn" aria-label="More"><i data-i="more"></i></button>
+          </header>
+
+          <section class="sec">
+            <div class="sec-h"><h2>How she runs</h2><small>used for every session she starts</small></div>
+            <div class="frow"><span class="frow-l">Provider<small>account rogier@personal</small></span><span class="frow-v"></span><button class="select"><i data-b="claude"></i>Claude Code · Sonnet 5<i data-i="down"></i></button></div>
+            <div class="frow"><span class="frow-l">Access mode<small>she runs tools without asking, except the ones below</small></span><span class="frow-v"></span><button class="select"><i data-i="shield"></i>full access<i data-i="down"></i></button></div>
+            <div class="frow"><span class="frow-l">Disallowed tools<small>she delegates changes instead of making them</small></span><span class="frow-v"></span><span class="row"><span class="tool-chip"><code>edit</code><i data-i="close"></i></span><button class="btn btn-sm btn-quiet"><i data-i="plus"></i>Add tool</button></span></div>
+            <div class="frow"><span class="frow-l">Reply mode<small>one message when she is done, or each part as it is ready</small></span><span class="frow-v"></span><span class="seg"><button class="is-on">Turn end</button><button>Segments</button></span></div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Channel bindings</h2><small>where she answers; the most specific binding wins</small><button class="end btn btn-sm btn-quiet"><i data-i="plus"></i>Bind a channel</button></div>
+            <div class="bind">
+              <span class="bind-ic"><i data-b="webchat"></i></span>
+              <span class="bind-t"><b>Web chat</b><small>built in · the Conversation in this app</small></span>
+              <span class="bind-s">always</span>
+              <span class="bind-h"><i class="dot-ok"></i>healthy</span>
+              <span class="toggle is-on is-locked" aria-disabled="true"></span>
+            </div>
+            <div class="bind">
+              <span class="bind-ic"><i data-b="slack"></i></span>
+              <span class="bind-t"><b>Slack · acme-hq</b><small>DM with Rogier</small></span>
+              <span class="bind-s">DMs</span>
+              <span class="bind-h"><i class="dot-ok"></i>healthy</span>
+              <span class="toggle is-on"></span>
+            </div>
+          </section>
+
+          <div class="as-2">
+            <section class="sec">
+              <div class="sec-h"><h2>Heartbeat</h2><small>a check-in that finds nothing stays silent</small><span class="end toggle is-on"></span></div>
+              <p class="sentence">Every <button class="select">1 hour<i data-i="down"></i></button> from <button class="select num">07:00<i data-i="down"></i></button> to <button class="select num">23:00<i data-i="down"></i></button> in <button class="select">Web chat<i data-i="down"></i></button></p>
+              <div class="hb">
+                <div class="beats" aria-label="Heartbeat today">
+                  <i class="b-quiet"></i><i class="b-quiet"></i><i class="b-spoke"></i><i class="b-now"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </div>
+                <div class="beats-l"><span>07</span><span class="at-spoke">09 spoke</span><span class="at-end">23</span></div>
+              </div>
+              <div class="prompt"><small>What she checks</small>Look at Intake, the Fleet and my reminders. Speak only if something needs Rogier today.</div>
+            </section>
+
+            <section class="sec">
+              <div class="sec-h"><h2>Rotation</h2><small>memory carries over; never mid-turn</small></div>
+              <p class="sentence">At <button class="select num">70%<i data-i="down"></i></button> of context or <button class="select num">200k<i data-i="down"></i></button> tokens, and daily at <button class="select num">04:00<i data-i="down"></i></button></p>
+              <div class="ctx">
+                <div class="ctx-l"><span><b class="num">82k</b> tokens in her current session</span><span class="num faint">41% · since 04:00</span></div>
+                <span class="bound"><i style="--v:41%"></i><em style="--at:70%"></em></span>
+                <div class="ctx-k"><span class="faint">0</span><span class="ctx-at" style="--at:70%">rotates at 70%</span></div>
+              </div>
+              <div class="fresh">
+                <button class="btn"><i data-i="return"></i>Start fresh</button>
+                <span>Distills what matters into <b>memory</b>, then continues this Conversation in a new session</span>
+              </div>
+            </section>
+          </div>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Memory</h2><small>her own notes; you can read and edit every word</small></div>
+            <div class="core">
+              <div class="core-h"><b>Core note</b><small>in every session she runs</small><span class="grow"></span><span class="num core-n">1,284 <span class="faint">/ 4,000</span></span><span class="meter is-accent core-m"><i style="--v:32%"></i></span><button class="btn btn-sm btn-quiet">Edit</button></div>
+              <p class="core-t">Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German, and get answers in their own language. Mornings: one message, the urgent thing first<span class="fade">…</span></p>
+            </div>
+            <div class="topics-h"><b>Topics</b><small>7 of 24 · each up to 12,000 characters · opened when needed</small><button class="end btn btn-sm btn-quiet"><i data-i="plus"></i>New topic</button></div>
+            <div class="trows">
+              <div class="trow"><b>work-style</b><span>Prefers short answers; decides fast; hates long preambles</span><span class="tsize"><i style="--v:10%"></i></span><em>1.2k</em></div>
+              <div class="trow"><b>webshop</b><span>Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span><span class="tsize"><i style="--v:28.3%"></i></span><em>3.4k</em></div>
+              <div class="trow"><b>payments-api</b><span>Owns webhooks + payouts; v2.x; publish via npm</span><span class="tsize"><i style="--v:17.5%"></i></span><em>2.1k</em></div>
+              <div class="trow"><b>ops</b><span>Backups nightly 04:00 to B2; certs on status.acme.dev</span><span class="tsize"><i style="--v:15%"></i></span><em>1.8k</em></div>
+              <div class="trow"><b>customers</b><span>Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)<a class="prov" href="#"><i data-i="user"></i>written from Slack messages · review</a></span><span class="tsize"><i style="--v:22.5%"></i></span><em>2.7k</em></div>
+              <div class="trow"><b>family</b><span>School run Tue/Thu; no meetings before 09:30</span><span class="tsize"><i style="--v:5%"></i></span><em>0.6k</em></div>
+              <div class="trow"><b>reading</b><span>Wants summaries of the weekly Rust + Postgres newsletters</span><span class="tsize"><i style="--v:7.5%"></i></span><em>0.9k</em></div>
+            </div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-h"><h2>Reminders</h2><small>3 · each one wakes her in the Conversation that set it</small><button class="end btn btn-sm btn-quiet"><i data-i="plus"></i>New reminder</button></div>
+            <div class="rems">
+              <div class="rem"><i data-m="reminder"></i><b>Call the accountant</b><span class="rem-w num">Thu 1 Oct · 16:00</span><span class="rem-r">once</span><span class="rem-c"><i data-b="webchat"></i>Web chat</span><button class="iconbtn" aria-label="Delete"><i data-i="close"></i></button></div>
+              <div class="rem is-new"><i data-m="reminder"></i><b>Renew the SSL cert for ops</b><span class="rem-w num">Fri 2 Oct · 09:00</span><span class="rem-r">once · set today 09:20</span><span class="rem-c"><i data-b="webchat"></i>Web chat</span><button class="iconbtn" aria-label="Delete"><i data-i="close"></i></button></div>
+              <div class="rem"><i data-m="reminder"></i><b>Weekly revenue summary</b><span class="rem-w num">Mon 5 Oct · 08:30</span><span class="rem-r">every Monday</span><span class="rem-c"><i data-b="slack"></i>Slack DM</span><button class="iconbtn" aria-label="Delete"><i data-i="close"></i></button></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

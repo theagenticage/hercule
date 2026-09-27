@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>? Fix 3-D Secure checkout for EU cards · Hercule</title>
+<style>
+  .mhead { padding-left: 4px; gap: 4px; border-bottom: 1px solid var(--line-soft); height: 56px; }
+  .mhead .mbtn .i { width: 22px; height: 22px; }
+  .ttl { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ttl b { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 15px; font-weight: 620; }
+  .ttl .tt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .ttl span { font-size: var(--fs-small); color: var(--muted); white-space: nowrap; }
+  .ttl .proj { font-size: var(--fs-small); }
+
+  .stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .thread .col { padding: 14px 18px 340px; }
+  .opener { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .bubble-row { margin: 18px 0; }
+  .bubble { max-width: 88%; font-size: 15px; }
+  .prose { font-size: 15px; line-height: 1.55; margin: 14px 0; }
+  .prose code { font-size: 12.5px; }
+  .worked { margin: 18px 0; font-size: 13px; }
+  .worked .tail { color: var(--faint); }
+  .codeblock { font-size: 11.5px; padding: 11px 12px; }
+  .files-head { padding: 9px 12px; font-size: 14px; }
+  .files-head .num { font-size: 13px; }
+  .files-row { padding: 7px 12px; font-size: 11.5px; }
+  .files-row .path { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .files-foot { padding: 9px 12px; font-size: 13px; }
+  .files-foot .mono { color: var(--muted); font-size: 11px; }
+  .agent-end { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: var(--fs-small); color: var(--hold-text); font-weight: 560; }
+
+  /* The composer: the Request as a docket card above the voice bar. */
+  .composer { padding: 0 12px 36px; }
+  .dock { margin: 22px 0 0; border-bottom: 1px solid var(--glass-edge); border-radius: 2px var(--r-lg) var(--r-lg) var(--r-lg); box-shadow: var(--shadow-3); transition: background var(--t-glass) var(--ease-out); }
+  .dock-q { grid-template-columns: 18px 1fr auto; padding: 14px 14px 12px; }
+  .dock-q .ask { grid-row: 1 / 3; align-self: start; margin-top: 2px; }
+  .dock-q .t { font-size: 16px; }
+  .dock-q .t code { font-size: 14px; }
+  .dock-q .s { font-size: 12px; }
+  .dock .mverbs { padding: 0 12px 12px; }
+  .dock .mverb { background: color-mix(in oklab, var(--raised) 80%, transparent); }
+  .dock .mverb.is-primary { background: var(--go); }
+  .dock .haptic { position: absolute; right: 12px; top: -26px; }
+  .dock-mini { display: none; gap: 6px; grid-column: 3; grid-row: 1 / 3; }
+  .dock-mini button { height: 36px; padding: 0 12px; border-radius: 18px; font-size: 14px; font-weight: 620; background: color-mix(in oklab, var(--ink) 7%, transparent); color: var(--nogo-text); }
+  .dock-mini button.go { background: var(--go); color: var(--on-verdict); }
+  .vbar { margin-top: 10px; }
+
+  html[data-state="scrolled"] .dock { background: var(--glass-thin); }
+  html[data-state="scrolled"] .dock .mverbs,
+  html[data-state="scrolled"] .dock .haptic,
+  html[data-state="scrolled"] .dock-q .s,
+  html[data-state="scrolled"] .dock-q .who { display: none; }
+  html[data-state="scrolled"] .dock-mini { display: flex; }
+  html[data-state="scrolled"] .dock-q { padding: 10px 10px 10px 14px; align-items: center; }
+  html[data-state="scrolled"] .dock-q .ask { grid-row: 1; margin-top: 0; align-self: center; }
+  html[data-state="scrolled"] .dock-q .t { font-size: 15px; }
+  html[data-state="scrolled"] .vbar { background: var(--glass-thin); transform: scale(0.94); transform-origin: 50% 100%; opacity: 0.94; }
+  html[data-state="scrolled"] .vbar .vfield { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) {
+    .vbar, .dock { transition: none; }
+  }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="island"></span><span class="sys"><svg class="sig"><use href="#sb-signal"/></svg><svg class="wifi"><use href="#sb-wifi"/></svg><svg class="bat"><use href="#sb-battery"/></svg></span></div>
+
+  <header class="mhead">
+    <button class="mbtn" aria-label="Back to Threads"><svg class="i"><use href="#i-chev-l"/></svg></button>
+    <div class="ttl">
+      <b><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="tt">Fix 3-D Secure checkout for EU cards</span></b>
+      <span><span class="proj proj--webshop">webshop</span> · Opus 5.5 · studio-mac</span>
+    </div>
+    <div class="tools"><button class="mbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button></div>
+  </header>
+
+  <div class="stage">
+    <div class="thread" id="thread">
+      <div class="col">
+        <div class="opener">
+          <span class="stamp">Tue 09:02</span>
+          <span class="origin kind-proposal">from <a class="mini"><svg class="m"><use href="#m-task"/></svg>Checkout fails for EU cards…<svg class="i"><use href="#i-arrow-r"/></svg></a></span>
+        </div>
+        <div class="bubble-row">
+          <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+        </div>
+        <div class="worked">Worked for 2m 14s <svg class="i"><use href="#i-chev-r"/></svg><span class="tail">6 files · 1 command</span></div>
+        <div class="prose">
+          <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> only handles <code>succeeded</code>, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+        </div>
+        <div class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+        <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+        <div class="worked">Worked for 4m 51s <svg class="i"><use href="#i-chev-r"/></svg><span class="tail">3 files · 2 commands</span></div>
+        <div class="files">
+          <div class="files-head"><svg class="i"><use href="#i-diff"/></svg>3 files <span class="plus num">+48</span><span class="minus num">-12</span>
+            <span class="actions"><button class="btn btn--s">Open diff</button></span></div>
+          <div class="files-row"><span class="path">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+          <div class="files-row"><span class="path">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+          <div class="files-row"><span class="path">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+          <div class="files-foot"><svg class="m go"><use href="#m-done"/></svg><span class="go">24 passed</span><span class="mono">pnpm test checkout</span></div>
+        </div>
+        <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        <div class="agent-end"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Waiting on you · 32s</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="dock kind-request">
+        <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+        <span class="haptic"><svg class="i"><use href="#i-wave"/></svg>arrives with a tap</span>
+        <div class="dock-q">
+          <span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>
+          <span class="t">Run <code>git push</code>?</span>
+          <span class="who">32s</span>
+          <span class="s">git push -u origin fix/3ds-eu-cards</span>
+          <span class="dock-mini"><button>Deny</button><button class="go">Allow once</button></span>
+        </div>
+        <div class="mverbs">
+          <div class="row">
+            <button class="mverb mverb--nogo"><svg class="i"><use href="#i-x"/></svg>Deny</button>
+            <button class="mverb mverb--go"><svg class="i"><use href="#i-shield"/></svg>Always allow</button>
+          </div>
+          <button class="mverb mverb--go is-primary"><svg class="i"><use href="#i-check"/></svg>Allow once</button>
+        </div>
+      </div>
+      <div class="vbar">
+        <button class="vplus" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+        <span class="vfield">Reply, or hold to talk</span>
+        <button class="vstop"><svg class="i"><use href="#i-stop"/></svg>Stop</button>
+        <button class="vmic" aria-label="Hold to talk"><svg class="i"><use href="#i-mic"/></svg></button>
+      </div>
+    </div>
+  </div>
+  <div class="homebar"></div>
+</div>
+<script>
+  // The composer shrinks and turns see-through while the transcript scrolls away from the end.
+  // It restores at the bottom or when it gets focus. ?state=scrolled holds the shrunk state.
+  (function () {
+    var root = document.documentElement;
+    var thread = document.getElementById("thread");
+    var forced = root.dataset.state === "scrolled";
+    thread.scrollTop = thread.scrollHeight - (forced ? thread.clientHeight + 300 : 0);
+    if (forced) return;
+    var restore = function () { delete root.dataset.state; };
+    thread.addEventListener("scroll", function () {
+      var fromEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      if (fromEnd < 24) restore(); else root.dataset.state = "scrolled";
+    }, { passive: true });
+    document.querySelector(".composer").addEventListener("focusin", restore);
+  })();
+</script>
+</body>
+</html>

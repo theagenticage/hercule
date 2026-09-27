@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout fails for EU cards with 3-D Secure · Proposal · webshop</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23fc7a14%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2210.5%22%20fill%3D%22%231d1a17%22%2F%3E%3Cg%20transform%3D%22translate(8.8%208.8)%20scale(1.2)%22%20fill%3D%22none%22%20stroke%3D%22%23fdfdfb%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3.9%204.2a2.15%202.15%200%201%201%203.05%201.95c-.62.33-.95.75-.95%201.4v.25%22%20stroke-width%3D%221.6%22%2F%3E%3Cpath%20d%3D%22M6%2010.1h.01%22%20stroke-width%3D%221.9%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"><link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.dpanel { background: linear-gradient(to bottom, color-mix(in oklab, var(--p) 7%, transparent), transparent 300px), var(--canvas); }
+.dscroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.dgrid { width: 1040px; margin: 0 auto; padding: 22px 0 32px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; column-gap: 48px; }
+.from { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px 0 8px; margin-bottom: 16px; border-radius: 12px; font-size: var(--t-fine); color: var(--muted); background: color-mix(in oklab, var(--ink) 5%, transparent); }
+.from .brand { width: 12px; height: 12px; }
+.from b { color: var(--ink); font-weight: var(--w-medium); }
+.dt { margin: 10px 0 8px; font-size: 22px; font-weight: var(--w-strong); letter-spacing: -0.02em; line-height: 1.25; }
+.dgrid .gist { font-size: 14.5px; line-height: 1.55; color: color-mix(in oklab, var(--ink) 84%, var(--p)); max-width: 620px; }
+.chart { margin: 22px 0 6px; }
+.chart-h { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-meta); color: var(--muted); margin-bottom: 8px; }
+.chart-h b { color: var(--ink); font-weight: var(--w-medium); }
+.bars { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 84px; padding-bottom: 1px; box-shadow: inset 0 -1px 0 var(--line); }
+.bars i { flex: 1; border-radius: 3px 3px 1px 1px; background: color-mix(in oklab, var(--p) 62%, transparent); }
+.bars i.pre { background: var(--line); }
+.bars i.now { background: var(--p); }
+.deploy { position: absolute; left: calc(2 * (100% + 3px) / 22 - 2px); top: -6px; bottom: 0; border-left: 1.5px dashed var(--ink); }
+.deploy span { position: absolute; left: 6px; top: -2px; font-size: var(--t-fine); white-space: nowrap; font-weight: var(--w-medium); }
+.axis { display: flex; justify-content: space-between; margin-top: 5px; font-family: var(--font-mono); font-stretch: var(--mono-stretch); font-size: 10.5px; color: var(--faint); }
+.srcs { margin-top: 18px; }
+.srow { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; column-gap: 16px; height: 54px; padding: 0 10px; margin: 0 -10px; border-radius: 10px; background: linear-gradient(var(--line-soft), var(--line-soft)) 10px 0 / calc(100% - 20px) 1px no-repeat; }
+.srow:hover { background-color: color-mix(in oklab, var(--ink) 4%, transparent); }
+.s-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.s-src { display: flex; align-items: center; gap: 7px; font-size: var(--t-fine); color: var(--muted); white-space: nowrap; }
+.s-src .brand { width: 14px; height: 14px; }
+.s-num { font-size: 18px; font-weight: var(--w-strong); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.s-num small { font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--muted); letter-spacing: 0; }
+.s-what { font-size: var(--t-ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-what code { font-size: 11.5px; }
+.s-open { color: var(--faint); }
+.srow:hover .s-open { color: var(--ink); }
+.decide { padding-top: 40px; }
+.decide-h { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--t-meta); color: var(--muted); margin-bottom: 10px; }
+.decide-h b { color: var(--ink); font-weight: var(--w-strong); font-size: var(--t-ui); }
+.dans { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; width: 100%; padding: 13px 16px 14px; border-radius: 14px; border: 0; text-align: left; font: inherit; color: var(--ink); background: color-mix(in oklab, var(--ink) 5%, transparent); cursor: pointer; }
+.dans + .dans { margin-top: 8px; }
+.dans:hover { background: color-mix(in oklab, var(--ink) 8%, transparent); }
+.dans .l { display: inline-flex; align-items: center; gap: 7px; font-size: 15px; font-weight: var(--w-strong); }
+.dans .d { grid-column: 1; font-size: var(--t-meta); color: var(--muted); }
+.dans .kbd { grid-row: 1 / 3; grid-column: 2; align-self: center; }
+.dans.go { background: var(--p); color: var(--p-on); box-shadow: var(--sh-2), inset 0 1px 0 rgb(255 255 255 / 0.18); padding: 16px 16px 17px; }
+.dans.go:hover { background: color-mix(in oklab, var(--p) 90%, var(--ink)); }
+.dans.go .l { font-size: 16px; }
+.dans.go .d { color: color-mix(in oklab, var(--p-on) 80%, transparent); }
+.dans.go .kbd { background: color-mix(in oklab, var(--p-on) 18%, transparent); color: var(--p-on); box-shadow: none; }
+.runs { margin: 12px 4px 18px; display: grid; grid-template-columns: 84px minmax(0, 1fr); row-gap: 7px; font-size: var(--t-meta); }
+.runs dt { color: var(--faint); }
+.runs dd { display: flex; align-items: center; gap: 6px; color: var(--ink); }
+.runs dd .i { color: var(--muted); }
+.runs a { margin-left: auto; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.also { display: flex; gap: 10px; margin-top: 20px; padding-top: 16px; box-shadow: inset 0 1px 0 var(--line-soft); font-size: var(--t-meta); color: var(--muted); line-height: 1.45; }
+.also .i { width: 16px; height: 16px; color: var(--ink); margin-top: 1px; }
+.also .btn { margin-top: 8px; }
+.nextd { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin-top: 28px; height: 52px; padding: 0 14px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-soft); font-size: var(--t-ui); color: var(--muted); }
+.nextd b { color: var(--ink); font-weight: var(--w-medium); }
+.nextd .spine { width: 3px; height: 22px; border-radius: 2px; background: repeating-linear-gradient(135deg, var(--faint) 0 2px, transparent 2px 4px); }
+.pager { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-meta); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pager .btn { width: 28px; padding: 0; justify-content: center; }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web solo" data-space="webshop">
+  <div class="strip" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+  <nav class="wrail" aria-label="Spaces">
+    <a class="wr-logo" title="Hercule"><svg><use href="#logo"/></svg></a>
+    <a class="wr-sp" title="All projects"><span class="sw all"></span></a>
+    <a class="wr-sp" title="webshop · 1 needs you"><span class="sw p-webshop"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="payments-api · 1 needs you"><span class="sw p-payments"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <a class="wr-sp" title="ops · 1 needs you"><span class="sw p-ops"></span><span class="wr-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></a>
+    <span class="wr-div"></span>
+    <a class="wr-nav on" title="Intake"><svg class="i18" aria-hidden="true"><use href="#i-sun-rise"/></svg><span>Intake</span><span class="wr-n">9</span></a>
+    <a class="wr-nav" title="Tasks"><svg class="i18" aria-hidden="true"><use href="#i-layers"/></svg><span>Tasks</span></a>
+    <a class="wr-nav" title="Runs"><svg class="i18" aria-hidden="true"><use href="#i-play"/></svg><span>Runs</span></a>
+    <a class="wr-nav" title="Fleet"><svg class="i18" aria-hidden="true"><use href="#i-cube"/></svg><span>Fleet</span></a>
+    <span class="wr-div"></span>
+    <a class="wr-av" title="Ada · working"><span class="av">A</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg></span></a>
+    <a class="wr-av" title="Milo · idle"><span class="av">M</span></a>
+    <a class="wr-av" title="Juno · asleep"><span class="av off">J</span><span class="pres"><svg class="i" aria-hidden="true"><use href="#m-asleep"/></svg></span></a>
+    <span class="grow"></span>
+    <a class="wr-nav bare" title="Notifications"><svg class="i18" aria-hidden="true"><use href="#i-bell"/></svg><span class="wr-n">5</span></a>
+    <a class="wr-nav bare" title="Settings"><svg class="i18" aria-hidden="true"><use href="#i-gear"/></svg></a>
+    <a class="wr-me" title="Rogier">R</a>
+  </nav>
+  <main class="panel dpanel p-webshop">
+    <header class="bar">
+      <span class="crumb">Intake / Now /</span><span class="title">Proposal</span>
+      <span class="grow"></span>
+      <span class="pager"><button class="btn sm ghost" aria-label="Previous"><svg class="i14" aria-hidden="true"><use href="#i-chev-left"/></svg></button>1 of 9<button class="btn sm ghost" aria-label="Next"><svg class="i14" aria-hidden="true"><use href="#i-chev-right"/></svg></button></span>
+      <button class="btn sm ghost"><svg class="i14" aria-hidden="true"><use href="#i-copy"/></svg>Copy link</button>
+    </header>
+    <div class="dscroll">
+      <div class="dgrid">
+        <div>
+          <span class="from"><svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg>Opened from a link in <b>Slack · acme-hq</b></span>
+          <div class="kicker"><span class="k"><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>Proposal</span><span class="sep">·</span>Checkout<span class="sep">·</span><span class="prio" data-n="4" title="priority urgent"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="sep">·</span><span>first seen 08:52</span><span class="grow"></span><span class="pchip"><span class="sw"></span>webshop</span></div>
+          <h1 class="dt">Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+          <div class="chart">
+            <div class="chart-h"><b>PaymentError: authentication_required</b><span>Sentry events per hour</span></div>
+            <div class="bars" role="img" aria-label="Errors start right after deploy 1289 at 14:02 and peak this morning at 69 an hour"><i class="pre" style="height:4.0%" title="12:00 · 0 events"></i><i class="pre" style="height:4.0%" title="13:00 · 0 events"></i><i class="" style="height:26.1%" title="14:00 · 18 events"></i><i class="" style="height:44.9%" title="15:00 · 31 events"></i><i class="" style="height:49.3%" title="16:00 · 34 events"></i><i class="" style="height:52.2%" title="17:00 · 36 events"></i><i class="" style="height:47.8%" title="18:00 · 33 events"></i><i class="" style="height:42.0%" title="19:00 · 29 events"></i><i class="" style="height:34.8%" title="20:00 · 24 events"></i><i class="" style="height:24.6%" title="21:00 · 17 events"></i><i class="" style="height:14.5%" title="22:00 · 10 events"></i><i class="" style="height:8.7%" title="23:00 · 6 events"></i><i class="" style="height:4.3%" title="00:00 · 3 events"></i><i class="" style="height:4.0%" title="01:00 · 2 events"></i><i class="" style="height:4.0%" title="02:00 · 1 events"></i><i class="" style="height:4.0%" title="03:00 · 1 events"></i><i class="" style="height:4.0%" title="04:00 · 2 events"></i><i class="" style="height:7.2%" title="05:00 · 5 events"></i><i class="" style="height:20.3%" title="06:00 · 14 events"></i><i class="" style="height:43.5%" title="07:00 · 30 events"></i><i class="" style="height:68.1%" title="08:00 · 47 events"></i><i class=" now" style="height:100.0%" title="09:00 · 69 events"></i><span class="deploy"><span>#1289 · Stripe SDK v14</span></span></div>
+            <div class="axis"><span>12:00</span><span>18:00</span><span>00:00</span><span>06:00</span><span>09:41</span></div>
+          </div>
+          <div class="srcs">
+            <a class="srow" title="Open in Sentry">
+            <span class="s-num">412 <small>events</small></span>
+            <span class="s-body"><span class="s-src"><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg>Sentry · webshop-prod</span><span class="s-what">188 users hit <code>PaymentError: authentication_required</code></span></span>
+            <span class="s-open"><svg class="i14" aria-hidden="true"><use href="#i-external"/></svg></span>
+          </a>
+            <a class="srow" title="Open in Gmail">
+            <span class="s-num">3 <small>emails</small></span>
+            <span class="s-body"><span class="s-src"><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg>Gmail · rogier@personal</span><span class="s-what">"Card declined at checkout" · "Can't pay with my Rabobank card" · 1 more</span></span>
+            <span class="s-open"><svg class="i14" aria-hidden="true"><use href="#i-external"/></svg></span>
+          </a>
+            <a class="srow" title="Open in PostHog">
+            <span class="s-num">-18% <small>conversion</small></span>
+            <span class="s-body"><span class="s-src"><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg>PostHog · webshop</span><span class="s-what">Checkout, EU only, since 14:10 yesterday</span></span>
+            <span class="s-open"><svg class="i14" aria-hidden="true"><use href="#i-external"/></svg></span>
+          </a>
+            <a class="srow" title="Open in GitHub">
+            <span class="s-num">#1289 <small>deploy</small></span>
+            <span class="s-body"><span class="s-src"><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>GitHub · rogier/webshop</span><span class="s-what">"Upgrade Stripe SDK to v14" · 14:02 yesterday</span></span>
+            <span class="s-open"><svg class="i14" aria-hidden="true"><use href="#i-external"/></svg></span>
+          </a>
+          </div>
+        </div>
+        <aside class="decide" aria-label="Your answer">
+          <div class="decide-h"><b>Your call</b><span>triage suggests Start</span></div>
+          <button class="dans go"><span class="l"><svg class="i16" aria-hidden="true"><use href="#i-play"/></svg>Start "Fix bug"</span><span class="d">Starts Fix bug on webshop in a new worktree</span><span class="kbd">⏎</span></button>
+          <dl class="runs">
+            <dt>Runs on</dt><dd><svg class="i14" aria-hidden="true"><use href="#i-cube"/></svg>studio-mac<a>Change</a></dd>
+            <dt>Agent</dt><dd>Claude Code · Opus 5.5</dd>
+            <dt>Workspace</dt><dd><svg class="i14" aria-hidden="true"><use href="#i-branch"/></svg>new worktree from main</dd>
+          </dl>
+          <button class="dans"><span class="l">Accept</span><span class="d">Adds it to the backlog as a Task</span><span class="kbd">A</span></button>
+          <button class="dans"><span class="l">Dismiss</span><span class="d">Closes the Proposal</span><span class="kbd">D</span></button>
+          <div class="also"><svg class="i" aria-hidden="true"><use href="#m-offer"/></svg><div>I can also draft a reply to the 3 customers once the fix ships.<br><button class="btn sm">Yes, after the fix</button></div></div>
+        </aside>
+        <a class="nextd"><span class="spine"></span><svg class="i16" aria-hidden="true"><use href="#m-unsure"/></svg><span>Next · Needs a call</span><b>Which project is "App is slow on Android"?</b><span class="grow"></span><span class="kbd">J</span></a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

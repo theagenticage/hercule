@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .head {
+        flex: none;
+        padding: 0 16px 0 28px;
+      }
+      .head .chrome {
+        padding: 0;
+      }
+      .folder {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 332px;
+        background: var(--surface);
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .lane {
+        overflow: auto;
+        scrollbar-width: none;
+        padding: 20px 28px 40px;
+      }
+      .lane > section + section {
+        margin-top: 26px;
+      }
+      .rail {
+        overflow: auto;
+        scrollbar-width: none;
+        padding: 20px 24px 32px 4px;
+      }
+      .rail h3 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .rail h3 .when {
+        text-transform: none;
+        letter-spacing: 0;
+        font-family: var(--sans);
+        font-weight: 400;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .rail section + section {
+        margin-top: 22px;
+      }
+      .receipt-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 22px;
+      }
+      .lead .env-body {
+        padding: 18px 22px 12px;
+      }
+      .lead .kicker {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .lead .env-title {
+        max-width: 470px;
+      }
+      .lead .gist {
+        max-width: 480px;
+        margin: 8px 0 14px;
+        font-size: 13.5px;
+        line-height: 1.55;
+        color: var(--ink);
+      }
+      .lead .gist code {
+        font-size: 12px;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: color-mix(in oklch, var(--ink) 6%, transparent);
+      }
+      .lead .perf {
+        margin: 14px 0 8px;
+      }
+      .thread-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 -8px 6px;
+        padding: 7px 10px;
+        border-radius: 8px;
+        font-size: var(--t-ui);
+        background: var(--ochre-soft);
+      }
+      .thread-note .link {
+        margin-left: auto;
+      }
+      .offer-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        padding-top: 10px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 0 0 / var(--perf-pitch) 5px
+          repeat-x;
+      }
+      .offer-note .link {
+        margin-left: auto;
+      }
+      .call {
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr) auto;
+        column-gap: 12px;
+        align-items: start;
+        padding: 14px 16px;
+      }
+      .call .t {
+        font-size: 14px;
+        font-weight: 580;
+      }
+      .call .sub {
+        font-size: var(--t-sm);
+        color: var(--muted);
+        margin: 3px 0 10px;
+      }
+      .call .rs {
+        margin-top: 1px;
+      }
+      .prow .src {
+        display: flex;
+        gap: 3px;
+      }
+      .prow .src .post:nth-child(2) {
+        transform: rotate(4deg);
+      }
+      .attached {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        padding: 0 16px;
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .fyi {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        column-gap: 10px;
+        align-items: center;
+        padding: 7px 0;
+        font-size: var(--t-ui);
+      }
+      .fyi + .fyi {
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 30px 0 / var(--perf-pitch) 5px
+          repeat-x;
+      }
+      .quiet {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: color-mix(in oklch, var(--ink) 3.5%, transparent);
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .quiet b {
+        font: 620 20px / 1 var(--narrow);
+        color: var(--ink);
+      }
+      .quiet .link {
+        margin-left: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="hercule" data-active="intake"></aside>
+      <main class="main">
+        <div class="head">
+          <div class="chrome">
+            <h1>Intake</h1>
+            <span class="when"><i data-m="clock"></i>triaged 09:00 in 42s · next 11:00</span>
+            <div class="chrome-actions">
+              <span class="search-pill"><svg class="mk"><use href="#search" /></svg>Search Intake<kbd>/</kbd></span>
+              <button class="icon-btn" aria-label="Filter"><svg class="mk"><use href="#filter" /></svg></button>
+            </div>
+          </div>
+          <nav class="topics">
+            <a class="topic is-on">All <b>6</b></a>
+            <a class="topic"><span class="live-dot attn"></span>Checkout <b>3</b></a>
+            <a class="topic">Infrastructure <b>1</b></a>
+            <a class="topic">Customers <b>1</b></a>
+            <a class="topic">Releases <b>1</b></a>
+            <span class="topics-manage"><svg class="mk"><use href="#gear" /></svg>Manage topics</span>
+          </nav>
+        </div>
+
+        <div class="folder">
+          <div class="lane">
+            <div class="receipt-wrap">
+              <div class="receipt">
+                <span data-postmark data-waves data-top="TRIAGE" data-mid="09:00" data-bot="29 SEP 2026"></span>
+                <div class="tally">
+                  <div class="tally-item is-fail"><b>1</b><span><i data-m="burning" class="s-fail"></i>burning</span></div>
+                  <div class="tally-item"><b>6</b><span><i data-m="proposal"></i>proposals</span></div>
+                  <div class="tally-item is-attn"><b>2</b><span><i data-m="decision" class="s-attn"></i>need a call</span></div>
+                  <div class="tally-item"><b>3</b><span>FYI</span></div>
+                  <div class="tally-item is-quiet"><b>198</b><span>handled quietly</span></div>
+                </div>
+              </div>
+              <p class="receipt-line">
+                <b>212 events</b> since yesterday 18:20 → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action
+              </p>
+            </div>
+
+            <section>
+              <div class="tier"><h2>Now</h2><span class="perf"></span></div>
+              <article class="env env--urgent lead">
+                <div class="corner">
+                  <div class="stamps">
+                    <span class="post post--md" data-src="sentry" data-n="412"></span>
+                    <span class="post post--md" data-src="gmail" data-n="3"></span>
+                    <span class="post post--md" data-src="posthog" data-n="-18%"></span>
+                    <span class="post post--md" data-src="github" data-n="#1289"></span>
+                  </div>
+                  <span data-postmark data-waves data-top="SORTED" data-mid="09:00" data-bot="CHECKOUT"></span>
+                </div>
+                <div class="env-body">
+                  <div class="kicker">
+                    <span class="rs rs--red rs--solid tilt-a"><svg class="mk"><use href="#burning" /></svg>Urgent</span>
+                    <span class="bars" data-n="4"><i></i><i></i><i></i><i></i></span>
+                    <span class="proj"><i class="tag" data-p="webshop"></i>webshop</span>
+                    <span class="sep">·</span><span>Checkout</span>
+                    <span class="sep">·</span><span class="mono faint">first seen 08:52</span>
+                  </div>
+                  <h2 class="env-title">Checkout fails for EU cards with 3-D Secure</h2>
+                  <p class="gist">
+                    Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK
+                    returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+                  </p>
+                  <dl class="made-from">
+                    <dt>Sentry</dt>
+                    <dd><code>PaymentError: authentication_required</code> <span class="muted">· 412 events, 188 users</span></dd>
+                    <dt>Gmail</dt>
+                    <dd>3 customer emails <span class="muted">· "Can't pay with my Rabobank card"</span></dd>
+                    <dt>PostHog</dt>
+                    <dd>Checkout conversion -18% since 14:10 yesterday <span class="muted">· EU only</span></dd>
+                    <dt>GitHub</dt>
+                    <dd>Deploy #1289 at 14:02 yesterday <span class="muted">· "Upgrade Stripe SDK to v14"</span></dd>
+                  </dl>
+                  <div class="perf"></div>
+                  <div class="thread-note">
+                    <i data-m="decision" class="s-attn"></i>
+                    <span>Your thread on this, started 09:02, is waiting on you: approve <code>git push</code></span>
+                    <a class="link">Open thread<svg class="mk"><use href="#chev-right" /></svg></a>
+                  </div>
+                  <div class="ledger">
+                    <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Dismiss</b><span class="d">Closes the Proposal</span><kbd>D</kbd></button>
+                    <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#task" /></svg></span><b>Accept</b><span class="d">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+                    <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span><b>Start "Fix bug"</b><span class="d">Starts Fix bug on webshop in a new worktree <em>· Opus 5.5 · studio-mac</em></span><kbd>⏎</kbd></button>
+                  </div>
+                  <div class="offer-note">
+                    <svg class="mk s-live"><use href="#offer" /></svg>
+                    <span>I can also draft a reply to the 3 customers once the fix ships.</span>
+                    <a class="link">Queue it</a>
+                  </div>
+                </div>
+              </article>
+            </section>
+
+            <section>
+              <div class="tier"><h2>Needs a call</h2><span class="n">2</span><span class="perf"></span></div>
+              <div class="sheet">
+                <div class="call">
+                  <span class="post post--sm" data-src="intercom" data-n="7"></span>
+                  <div>
+                    <div class="t">App is slow on Android</div>
+                    <div class="sub">Intercom · support · 7 conversations since Sunday · I can't tell which project this belongs to.</div>
+                    <div class="choices">
+                      <button class="choice"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span>Not work</button>
+                      <button class="choice" style="--c: var(--green)"><span class="ans-key"><svg class="mk"><use href="#tag" /></svg></span>Both</button>
+                      <button class="choice" style="--c: var(--proj-payments)"><span class="ans-key"><svg class="mk"><use href="#tag" /></svg></span>payments-api</button>
+                      <button class="choice" style="--c: var(--proj-webshop)"><span class="ans-key"><svg class="mk"><use href="#tag" /></svg></span>webshop</button>
+                    </div>
+                  </div>
+                  <span class="rs rs--ochre tilt-d">Unsure</span>
+                </div>
+                <div class="perf"></div>
+                <div class="call">
+                  <span class="post post--sm" data-src="github" data-n="34"></span>
+                  <div>
+                    <div class="t">"Label new issues" held 34 events</div>
+                    <div class="sub">GitHub · rogier · its Spawn Bound of 20 per hour tripped at 08:14 after a bot opened 34 issues.</div>
+                    <div class="choices">
+                      <button class="choice"><span class="ans-key"><svg class="mk"><use href="#paused" /></svg></span>Keep held</button>
+                      <button class="choice" style="--c: var(--attn)"><span class="ans-key"><svg class="mk"><use href="#bolt" /></svg></span>Raise bound to 50/h</button>
+                      <button class="choice" style="--c: var(--violet)"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span>Release all 34</button>
+                    </div>
+                  </div>
+                  <span class="rs rs--ochre tilt-b">Held</span>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="tier"><h2>Today</h2><span class="n">4</span><span class="perf"></span></div>
+              <div class="sheet">
+                <div class="prow">
+                  <span class="kind"><svg class="mk"><use href="#proposal" /></svg></span>
+                  <div><div class="t">Nightly backup job timing out on ops-db</div><div class="sub">3 nights in a row; the job hits its 2h limit at 04:00.</div></div>
+                  <span class="src"><span class="post" data-src="grafana"></span><span class="post" data-src="cron"></span></span>
+                  <span class="bars" data-n="3"><i></i><i></i><i></i><i></i></span>
+                  <button class="suggest" style="--c: var(--violet)"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#run" /></svg></span>Start "Investigate"</button>
+                  <time>07:12</time>
+                </div>
+                <div class="perf"></div>
+                <div class="prow">
+                  <span class="kind s-live"><svg class="mk"><use href="#offer" /></svg></span>
+                  <div><div class="t">Draft a reply to Marta at Brightline</div><div class="sub">Asks for invoice INV-2291 in the company name, not hers.</div></div>
+                  <span class="src"><span class="post" data-src="gmail"></span></span>
+                  <span></span>
+                  <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#reply" /></svg></span>Draft reply</button>
+                  <time>08:31</time>
+                </div>
+                <div class="perf"></div>
+                <div class="prow">
+                  <span class="kind"><svg class="mk"><use href="#proposal" /></svg></span>
+                  <div><div class="t">Stripe webhook retries rising</div><div class="sub">payments-api · retries doubled since Sunday</div></div>
+                  <span class="src"><span class="post" data-src="stripe"></span><span class="post" data-src="sentry"></span></span>
+                  <span class="bars" data-n="2"><i></i><i></i><i></i><i></i></span>
+                  <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#run" /></svg></span>Start "Investigate"</button>
+                  <time>06:48</time>
+                </div>
+                <div class="perf"></div>
+                <div class="prow">
+                  <span class="kind s-live"><svg class="mk"><use href="#offer" /></svg></span>
+                  <div><div class="t">Merge 4 dependency bumps</div><div class="sub">All green, patch versions only.</div></div>
+                  <span class="src"><span class="post" data-src="github"></span></span>
+                  <span></span>
+                  <button class="suggest"><span class="ans-key" style="--c: var(--green)"><svg class="mk"><use href="#check" /></svg></span>Merge all 4</button>
+                  <time>05:20</time>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="tier"><h2>When you can</h2><span class="n">2</span><span class="perf"></span></div>
+              <div class="sheet">
+                <div class="prow">
+                  <span class="kind"><svg class="mk"><use href="#proposal" /></svg></span>
+                  <div><div class="t">SSL certificate for status.acme.dev expires in 12 days</div><div class="sub">ops · renews by hand</div></div>
+                  <span class="src"><span class="post" data-src="cron"></span></span>
+                  <span class="bars" data-n="1"><i></i><i></i><i></i><i></i></span>
+                  <button class="suggest"><span class="ans-key" style="--c: var(--violet)"><svg class="mk"><use href="#run" /></svg></span>Start "Fix bug"</button>
+                  <time>04:00</time>
+                </div>
+                <div class="perf"></div>
+                <div class="prow">
+                  <span class="kind"><svg class="mk"><use href="#proposal" /></svg></span>
+                  <div><div class="t">Add iDEAL as a payment method</div><div class="sub">webshop · 5 customers asked</div></div>
+                  <span class="src"><span class="post" data-src="intercom"></span></span>
+                  <span class="bars" data-n="1"><i></i><i></i><i></i><i></i></span>
+                  <button class="suggest"><span class="ans-key" style="--c: var(--green)"><svg class="mk"><use href="#task" /></svg></span>Accept</button>
+                  <time>Mon</time>
+                </div>
+              </div>
+              <div class="attached">
+                <span class="rs rs--green tilt-c">Attached</span>
+                <span>2 new Sentry events went onto the Task "Cart total rounding on discounts"</span>
+              </div>
+            </section>
+          </div>
+
+          <aside class="rail">
+            <section>
+              <h3 class="label">What came in <span class="when">since yesterday 18:20</span></h3>
+              <div class="album">
+                <div class="album-row">
+                  <span class="post post--md" data-src="sentry" data-n="131"></span>
+                  <div><div class="name">Sentry <small>webshop-prod</small></div><div class="became"><span class="rs rs--green tilt-c">→ Proposal</span><span class="rs rs--green tilt-b">Attached</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="github" data-n="38"></span>
+                  <div><div class="name">GitHub <small>rogier</small></div><div class="became"><span class="rs rs--violet tilt-b">Offer</span><span class="rs rs--ochre tilt-a">34 held</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="gmail" data-n="17"></span>
+                  <div><div class="name">Gmail <small>rogier@personal</small></div><div class="became"><span class="rs rs--green tilt-a">→ Proposal</span><span class="rs rs--violet tilt-d">Offer</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="stripe" data-n="12"></span>
+                  <div><div class="name">Stripe <small>live</small></div><div class="became"><span class="rs rs--green tilt-b">→ Proposal</span><span class="rs tilt-c">FYI</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="intercom" data-n="9"></span>
+                  <div><div class="name">Intercom <small>support</small></div><div class="became"><span class="rs rs--ochre tilt-d">Unsure</span><span class="rs rs--green tilt-a">→ Proposal</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="posthog" data-n="3"></span>
+                  <div><div class="name">PostHog <small>webshop</small></div><div class="became"><span class="rs rs--red tilt-a">Lead</span><span class="rs tilt-b">FYI</span></div></div>
+                </div>
+                <div class="album-row">
+                  <span class="post post--md" data-src="grafana" data-n="2"></span>
+                  <div><div class="name">Grafana <small>ops</small></div><div class="became"><span class="rs rs--green tilt-c">→ Proposal</span></div></div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 class="label">FYI <span class="when">3</span></h3>
+              <div class="fyi"><span class="post" data-src="github"></span><span>Release <b class="emph">v2.14.0</b> of payments-api was published</span></div>
+              <div class="fyi"><span class="post" data-src="posthog"></span><span>Sign-ups up <b class="emph">+9%</b> week over week</span></div>
+              <div class="fyi"><span class="post" data-src="stripe"></span><span>Payout of <b class="emph">€18,240</b> arrives Thursday</span></div>
+            </section>
+
+            <section>
+              <div class="quiet">
+                <b>198</b><span>handled quietly</span>
+                <span class="rs tilt-a">No action</span>
+                <a class="link">All 212<svg class="mk"><use href="#chev-right" /></svg></a>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

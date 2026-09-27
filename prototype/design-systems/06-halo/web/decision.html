@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait1.4| wait2.3| wait4.2| wait2.1| empty6" data-favicon-center="9">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(9) Checkout fails for EU cards with 3-D Secure · Intake · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="intake" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="bar">
+          <a class="crumb-pick" href="intake.html"><i data-icon="back" class="v" style="width: 12px; height: 12px"></i>Intake</a>
+          <span class="crumb">/</span>
+          <span class="d-crumb">Now</span>
+          <span class="right">
+            <span class="d-pos">
+              <span data-halo="wait1.4| wait2.3| wait4.2| wait2.1|" data-notch="0" data-size="22" data-still aria-hidden="true"></span>
+              <span><b>1</b> of 9 to decide</span>
+            </span>
+            <span class="d-step">
+              <button class="icon-btn" title="Previous  K" disabled><i data-icon="left"></i></button>
+              <a class="icon-btn" href="intake.html" title="Next: App is slow on Android  J"><i data-icon="right"></i></a>
+            </span>
+            <button class="btn sm" title="hercule.home.arpa/intake/p/checkout-eu-3ds"><i data-icon="link" style="width: 13px; height: 13px"></i>Copy link</button>
+          </span>
+        </header>
+
+        <div class="d-page">
+          <!-- ============================================================ the case: what happened, and what it was made from -->
+          <article class="d-case">
+            <div class="d-from">
+              <span class="chip line"><i data-brand="slack"></i>Opened from Slack · acme-hq</span>
+              <span class="chip wait"><i data-mark="wait"></i>Still open · nobody has answered</span>
+            </div>
+            <div class="d-head">
+              <i data-mark="pri4"></i><span class="kind">Proposal</span><span>Checkout</span><span>·</span><span>webshop</span><span>·</span><span>first seen 08:52</span><span>·</span><span>urgent, from 4 sources</span>
+            </div>
+            <h1>Checkout fails for EU cards with 3-D Secure</h1>
+            <p class="gist">
+              Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+              <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+            </p>
+
+            <!-- The story in one picture: failures start the minute the deploy lands, and have not stopped. -->
+            <section class="d-story" aria-label="Payment errors per hour since yesterday 14:00">
+              <div class="d-label">Since the deploy <span>PaymentError per hour, yesterday 14:00 to now</span></div>
+              <div class="d-chart">
+                <div class="d-pins">
+                  <span class="pin lead" style="--x: 0.002"><i data-brand="github"></i>#1289 deployed 14:02</span>
+                  <span class="pin" style="--x: 0.233" title="Email 18:40: Card declined at checkout"><i data-brand="gmail"></i></span>
+                  <span class="pin" style="--x: 0.3625" title="Email 21:15: Can't pay with my Rabobank card"><i data-brand="gmail"></i></span>
+                  <span class="pin" style="--x: 0.796" title="Email 05:55: Payment keeps failing"><i data-brand="gmail"></i></span>
+                  <span class="pin seen" style="--x: 0.943"><i data-mark="proposal"></i>seen 08:52</span>
+                </div>
+                <div class="d-bars">
+                  <i style="--h: 18"></i><i style="--h: 32"></i><i style="--h: 35"></i><i style="--h: 38"></i><i style="--h: 41"></i>
+                  <i style="--h: 44"></i><i style="--h: 39"></i><i style="--h: 30"></i><i style="--h: 18"></i><i style="--h: 9"></i>
+                  <i style="--h: 4"></i><i style="--h: 2"></i><i style="--h: 1"></i><i style="--h: 1"></i><i style="--h: 2"></i>
+                  <i style="--h: 5"></i><i style="--h: 11"></i><i style="--h: 22"></i><i style="--h: 33"></i><i class="now" style="--h: 27"></i>
+                </div>
+                <div class="d-axis"><span>14:00</span><span>18:00</span><span>22:00</span><span>02:00</span><span>06:00</span><span>now</span></div>
+              </div>
+            </section>
+
+            <div class="made-label">Made from 4 sources</div>
+            <div class="made d-made">
+              <div>
+                <span><i data-brand="sentry"></i></span><span class="src">Sentry · webshop-prod</span>
+                <span class="what"><span class="mono">PaymentError: authentication_required</span><small>first 14:11 yesterday · last 09:39 · in src/checkout/payment.ts</small></span>
+                <span class="fig">412 events · 188 users</span>
+              </div>
+              <div>
+                <span><i data-brand="gmail"></i></span><span class="src">Gmail · rogier@personal</span>
+                <span class="what">“Card declined at checkout”<small>“Can't pay with my Rabobank card” · “Payment keeps failing”</small></span>
+                <span class="fig">3 emails</span>
+              </div>
+              <div>
+                <span><i data-brand="posthog"></i></span><span class="src">PostHog · webshop</span>
+                <span class="what">Checkout conversion, EU only<small>since 14:10 yesterday, against the week before</small></span>
+                <span class="fig" style="color: var(--fail-ink)">-18%</span>
+              </div>
+              <div>
+                <span><i data-brand="github"></i></span><span class="src">GitHub · rogier/webshop</span>
+                <span class="what">Deploy #1289 “Upgrade Stripe SDK to v14”<small>merged to main, deployed 14:02 yesterday</small></span>
+                <span class="fig">14:02 yesterday</span>
+              </div>
+            </div>
+          </article>
+
+          <!-- ============================================================ the answer, what it will do, and what comes next -->
+          <aside class="d-side">
+            <section class="d-answer" aria-label="Answer">
+              <div class="d-label">Your answer <span class="kbd">⌘⏎ starts</span></div>
+              <div class="ledger">
+                <button><span class="btn lg wait">Start “Fix bug”</span><span><span class="d">Starts Fix bug on webshop in a new worktree</span></span></button>
+                <button><span class="btn lg">Accept</span><span><span class="d">Adds it to the backlog as a Task</span></span></button>
+                <button><span class="btn lg">Dismiss</span><span><span class="d">Closes the Proposal</span></span></button>
+              </div>
+
+              <div class="d-plan">
+                <div class="d-label">What Start does <button class="btn sm ghost">Change</button></div>
+                <ul>
+                  <li><i data-icon="worktree"></i><span>A new worktree of webshop, <span class="mono">from main</span></span></li>
+                  <li><i data-icon="machine"></i><span>On studio-mac</span><span class="h">5 of 6 busy</span></li>
+                  <li><i data-brand="claude"></i><span>Claude Code · Opus 5.5 · high</span></li>
+                  <li><i data-icon="edit"></i><span>Auto-accept edits</span><span class="h">asks before commands</span></li>
+                  <li><i data-mark="proposal"></i><span>This Proposal and its 4 sources become the first message</span></li>
+                </ul>
+              </div>
+
+              <div class="note"><i data-mark="offer"></i>I can also draft a reply to the 3 customers once the fix ships.<button class="btn sm">Yes, after the fix</button></div>
+            </section>
+
+            <section class="d-next" aria-label="Up next">
+              <div class="d-next-head">
+                <span data-halo="wait1.4| wait2.3| wait4.2| wait2.1|" data-notch="0" data-center="9" data-size="44"
+                  aria-label="9 to decide; you are on the first, the urgent one"></span>
+                <span><b>8 more to decide</b><span class="faint">2 need a call · 4 today · 2 when you can</span></span>
+              </div>
+              <a class="d-next-row" href="intake.html"><i data-mark="wait"></i><span>App is slow on Android</span><span class="k">J</span></a>
+              <a class="d-next-row" href="intake.html"><i data-mark="held"></i><span>Breaker tripped: “Label new issues” held 34 events</span></a>
+              <a class="d-next-row" href="intake.html"><i data-mark="pri3"></i><span>Nightly backup job timing out on ops-db</span></a>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

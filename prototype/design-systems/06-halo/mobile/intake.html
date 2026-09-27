@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" data-theme="daylight">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="status" data-status></div>
+
+      <div class="m-body">
+        <header class="m-head">
+          <h1>Intake</h1>
+          <span class="m-when"><span data-halo="ink41 empty79" data-size="14" data-still aria-label="41 of 120 minutes to the next triage"></span>next triage 11:00</span>
+          <button class="icon-btn m-ib" title="Search"><i data-icon="search"></i></button>
+        </header>
+
+        <!-- The glance: the dial and the numerals, before anything is read. -->
+        <section class="m-band">
+          <span data-halo="wait1.4| wait2.3| wait4.2| wait2.1|" data-span="0.42" data-track data-notch="0" data-center="9" data-label="to decide" data-size="128"></span>
+          <div class="m-stats">
+            <div class="burn"><b>1</b><span><i data-mark="wait"></i>burning</span></div>
+            <div class="row"><span><b>6</b> proposals</span><span><b>2</b> need a call</span><span><b>3</b> FYI</span></div>
+            <div class="quiet"><b>198</b> of 212 events handled<br />quietly since 18:20</div>
+          </div>
+        </section>
+
+        <div class="m-chips" role="tablist" aria-label="Topics">
+          <button aria-selected="true">All <span class="n">9</span></button>
+          <button>Checkout <span class="n">2</span></button>
+          <button>Infrastructure <span class="n">2</span></button>
+          <button>Customers <span class="n">3</span></button>
+          <button>Releases <span class="n">2</span></button>
+        </div>
+
+        <div class="m-tier"><i class="sw"></i>Now <span class="n">1</span></div>
+        <article class="m-lead">
+          <div class="head"><i data-mark="pri4"></i><b>Proposal</b><span>Checkout · webshop</span><span class="t">08:52</span></div>
+          <a class="title" href="decision.html">Checkout fails for EU cards with 3-D Secure</a>
+          <div class="srcs">
+            <span><i data-brand="sentry"></i>412 events</span><span><i data-brand="gmail"></i>3 emails</span><span><i data-brand="posthog"></i><b>-18%</b></span><span><i data-brand="github"></i>#1289</span>
+          </div>
+          <div class="m-ledger">
+            <button class="primary">
+              <span class="l">Start “Fix bug”</span><span class="d">new worktree · Opus 5.5 · studio-mac</span>
+            </button>
+            <div class="pair">
+              <button><span class="l">Accept</span><span class="d">backlog it as a Task</span></button>
+              <button><span class="l">Dismiss</span><span class="d">close the Proposal</span></button>
+            </div>
+          </div>
+          <span class="haptic m-hap">haptic · success tap when answered</span>
+        </article>
+
+        <div class="m-tier"><i class="sw l3"></i>Needs a call <span class="n">2</span></div>
+        <div class="m-item">
+          <i data-mark="wait"></i>
+          <div>
+            <b>App is slow on Android</b>
+            <span class="meta"><i data-brand="intercom"></i>7 conversations · which project?</span>
+            <div class="m-picks"><button>webshop</button><button>payments-api</button><button>Both</button><button class="ghost">Not work</button></div>
+          </div>
+        </div>
+        <div class="m-item">
+          <i data-mark="held"></i>
+          <div>
+            <b>Breaker tripped: “Label new issues” held 34 events</b>
+            <span class="meta"><i data-brand="github"></i>Spawn Bound 20/h tripped at 08:14</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="tabbar" data-current="intake" aria-label="Hercule"></nav>
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

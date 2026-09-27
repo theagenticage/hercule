@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="win">
+      <div class="field">
+        <i class="burn" style="--x: 30%; --y: 30%; --w: 820px; --h: 700px; --o: 0.8"></i>
+        <i class="wait" style="--x: 86%; --y: 14%; --w: 640px; --h: 460px; --o: 0.8"></i>
+        <i class="calm" style="--x: 92%; --y: 96%; --w: 620px; --h: 440px; --o: 0.7"></i>
+        <i class="burn" style="--x: 4%; --y: 14%; --w: 380px; --o: 0.55"></i>
+        <i class="own" style="--x: 60%; --y: -12%; --w: 700px; --h: 360px; --o: 0.45"></i>
+      </div>
+
+      <aside class="side glass">
+        <div class="side-top">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <button class="icon-btn" title="Hide sidebar"><svg class="i"><use href="#m-sidebar" /></svg></button>
+          <button class="icon-btn" title="New thread  ⌘N"><svg class="i"><use href="#m-compose" /></svg></button>
+        </div>
+        <div class="faces" role="tablist">
+          <button role="tab">Threads <i class="orb wait"></i></button>
+          <button role="tab" aria-selected="true">Hercule</button>
+        </div>
+        <button class="search-row">
+          <svg class="i s14"><use href="#m-search" /></svg>
+          <span class="grow">Search or jump to</span>
+          <span class="kbd">⌘K</span>
+        </button>
+
+        <nav class="nav">
+          <a class="nav-item glow burn" aria-current="page"><svg class="i"><use href="#m-intake" /></svg>Intake<span class="count burn"><span class="not-swarm">9</span><span class="only-swarm">74</span></span></a>
+          <a class="nav-item glow wait"><svg class="i"><use href="#m-checkin" /></svg>Check-in<span class="count wait"><span class="not-swarm">3</span><span class="only-swarm">9</span></span></a>
+          <a class="nav-item"><svg class="i"><use href="#m-tasks" /></svg>Tasks<span class="count">14</span></a>
+          <a class="nav-item"><svg class="i"><use href="#m-run" /></svg>Runs<span class="count">4</span></a>
+          <a class="nav-item"><svg class="i"><use href="#m-workflow" /></svg>Workflows<span class="count">6</span></a>
+        </nav>
+        <nav class="nav">
+          <a class="nav-item"><svg class="i"><use href="#m-fleet" /></svg>Fleet<span class="count">3</span></a>
+          <a class="nav-item"><svg class="i"><use href="#m-connections" /></svg>Connections<span class="count"><i class="orb wait sm"></i></span></a>
+          <a class="nav-item"><svg class="i"><use href="#m-bell" /></svg>Notifications</a>
+          <a class="nav-item"><svg class="i"><use href="#m-settings" /></svg>Settings</a>
+        </nav>
+
+        <div class="side-label">Assistants</div>
+        <a class="arow"><span class="av sm work">A</span><span class="grow">Ada</span><span class="st work"><svg class="i"><use href="#m-working" /></svg></span></a>
+        <a class="arow"><span class="av sm idle">M</span><span class="grow">Milo</span><span class="st idle faint">idle</span></a>
+        <a class="arow"><span class="av sm sleep">J</span><span class="grow">Juno</span><span class="st sleep"><svg class="i"><use href="#m-asleep" /></svg></span></a>
+
+        <div class="grow"></div>
+        <div class="side-foot">
+          <a class="foot-row"><svg class="i s14"><use href="#m-session" /></svg>All sessions<span class="val num"><span class="not-swarm">23</span><span class="only-swarm">140</span> live</span></a>
+          <div class="pulse">
+            <span class="pulse-bar not-swarm" aria-hidden="true"><i style="--n: 8" class="work"></i><i style="--n: 3" class="wait"></i><i style="--n: 12" class="idle"></i></span>
+            <span class="not-swarm"><b class="num">8</b> working · <b class="num" style="color: var(--attn)">3</b> waiting · <b class="num">12</b> idle</span>
+            <span class="pulse-bar only-swarm" aria-hidden="true"><i style="--n: 52" class="work"></i><i style="--n: 9" class="wait"></i><i style="--n: 79" class="idle"></i></span>
+            <span class="only-swarm"><b class="num">52</b> working · <b class="num" style="color: var(--attn)">9</b> waiting · <b class="num">79</b> idle</span>
+          </div>
+          <div class="me-row">
+            <span class="av me">R</span><span class="grow">Rogier</span>
+            <button class="icon-btn" title="Settings  ⌘,"><svg class="i"><use href="#m-settings" /></svg></button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <span class="bar-meta"><svg class="i s14"><use href="#m-clock" /></svg>Last triage 09:00 · 42s · next 11:00</span>
+          <span class="spacer"></span>
+          <div class="seg" role="tablist" aria-label="Topic">
+            <button aria-selected="true">All</button>
+            <button>Checkout <span class="seg-n"><span class="not-swarm">3</span><span class="only-swarm">18</span></span></button>
+            <button>Infrastructure <span class="seg-n"><span class="not-swarm">2</span><span class="only-swarm">14</span></span></button>
+            <button>Customers <span class="seg-n"><span class="not-swarm">3</span><span class="only-swarm">16</span></span></button>
+            <button>Releases <span class="seg-n"><span class="not-swarm">1</span><span class="only-swarm">12</span></span></button>
+          </div>
+          <button class="icon-btn" title="Manage topics"><svg class="i"><use href="#m-more" /></svg></button>
+        </header>
+
+        <div class="intake">
+          <div class="tally not-swarm">
+            <div class="n burn"><b>1</b><span>burning</span></div>
+            <div class="n"><b>6</b><span>proposals</span></div>
+            <div class="n wait"><b>2</b><span>need a call</span></div>
+            <div class="n"><b>3</b><span>FYI</span></div>
+            <div class="n quiet"><b>198</b><span>handled quietly</span></div>
+            <p class="receipt">
+              <span class="faint">since yesterday 18:20</span>
+              <span class="mono">212 events → 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action</span>
+            </p>
+          </div>
+          <div class="tally only-swarm">
+            <div class="n burn"><b>3</b><span>burning</span></div>
+            <div class="n"><b>60</b><span>proposals</span></div>
+            <div class="n wait"><b>11</b><span>need a call</span></div>
+            <div class="n"><b>22</b><span>FYI</span></div>
+            <div class="n quiet"><b>19,227</b><span>handled quietly</span></div>
+            <p class="receipt">
+              <span class="faint">since yesterday 18:20 · 31,000 events a day</span>
+              <span class="mono">19,380 events → 60 proposals · 48 attached · 14 offers · 22 FYI · 9 unsure · 19,227 no action</span>
+            </p>
+          </div>
+
+          <div class="intake-grid">
+            <div class="intake-left">
+              <article class="lead glass-strong lit burn">
+                <header class="lead-top">
+                  <span class="st burn"><svg class="i"><use href="#m-burning" /></svg>Burning</span>
+                  <span class="faint">Proposal</span>
+                  <span class="only-swarm"><span class="burn-more"><i class="orb burn sm"></i><i class="orb burn sm"></i>1 of 3 burning<svg class="i s12"><use href="#m-chev-r" /></svg></span></span>
+                  <span class="spacer grow"></span>
+                  <span class="faint">first seen 08:52</span>
+                </header>
+                <h2 class="lead-title">Checkout fails for EU cards with 3-D Secure</h2>
+                <div class="lead-meta">
+                  <span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span>Urgent</span>
+                  <span class="dot-sep"></span><span class="src"><svg class="i s14"><use href="#m-topic" /></svg>Checkout</span>
+                  <span class="dot-sep"></span><span class="proj webshop">webshop</span>
+                </div>
+                <p class="gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+                <div class="made-from" aria-label="Made from">
+                  <div class="ev">
+                    <span class="src"><svg class="brand"><use href="#b-sentry" /></svg>Sentry</span>
+                    <b class="num">412</b>
+                    <span>events · 188 users</span>
+                  </div>
+                  <div class="ev">
+                    <span class="src"><svg class="brand"><use href="#b-gmail" /></svg>Gmail</span>
+                    <b class="num">3</b>
+                    <span>customer emails</span>
+                  </div>
+                  <div class="ev">
+                    <span class="src"><svg class="brand"><use href="#b-posthog" /></svg>PostHog</span>
+                    <b class="num" style="color: var(--fail)">−18%</b>
+                    <span>EU conversion</span>
+                  </div>
+                  <div class="ev">
+                    <span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span>
+                    <b class="num">#1289</b>
+                    <span>deploy · Stripe SDK v14</span>
+                  </div>
+                </div>
+
+                <div class="ledger">
+                  <button class="ans go">
+                    <b>Start "Fix bug"</b><span>Starts Fix bug on webshop in a new worktree</span><span class="kbd">⏎</span>
+                    <small><svg class="brand" style="width: 11px; height: 11px; vertical-align: -1px"><use href="#b-claude" /></svg> Claude Code · Opus 5.5 · studio-mac</small>
+                  </button>
+                  <button class="ans"><b>Accept</b><span>Adds it to the backlog as a Task</span><span class="kbd">A</span></button>
+                  <button class="ans"><b>Dismiss</b><span>Closes the Proposal</span><span class="kbd">D</span></button>
+                </div>
+
+                <p class="offer-note">
+                  <svg class="i s14"><use href="#m-offer" /></svg>
+                  <span class="grow">I can also draft a reply to the 3 customers once the fix ships.</span>
+                  <button class="btn sm quiet">Not now</button>
+                  <button class="btn sm">Yes, after the fix</button>
+                </p>
+              </article>
+
+              <section class="came-in not-swarm">
+                <div class="lane-h">What came in <span class="n">212</span><span class="hint">since yesterday 18:20 · all Connections</span></div>
+                <div class="vol">
+                  <span class="src"><svg class="brand"><use href="#b-sentry" /></svg>Sentry</span><span class="bar-track"><i style="--v: 100%"></i></span><b class="num">131</b><span class="became">1 proposal, 1 attached</span>
+                  <span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span><span class="bar-track"><i style="--v: 29%" class="held"></i></span><b class="num">38</b><span class="became">1 offer, 34 held</span>
+                  <span class="src"><svg class="brand"><use href="#b-gmail" /></svg>Gmail</span><span class="bar-track"><i style="--v: 13%"></i></span><b class="num">17</b><span class="became">1 proposal, 1 offer</span>
+                  <span class="src"><svg class="brand"><use href="#b-stripe" /></svg>Stripe</span><span class="bar-track"><i style="--v: 9%"></i></span><b class="num">12</b><span class="became">1 proposal, 1 FYI</span>
+                  <span class="src"><svg class="brand"><use href="#b-intercom" /></svg>Intercom</span><span class="bar-track"><i style="--v: 7%"></i></span><b class="num">9</b><span class="became">1 unsure, 1 proposal</span>
+                  <span class="src"><svg class="brand"><use href="#b-posthog" /></svg>PostHog</span><span class="bar-track"><i style="--v: 2.3%"></i></span><b class="num">3</b><span class="became">lead proposal, 1 FYI</span>
+                  <span class="src"><svg class="brand"><use href="#b-grafana" /></svg>Grafana</span><span class="bar-track"><i style="--v: 1.5%"></i></span><b class="num">2</b><span class="became">1 proposal</span>
+                </div>
+              </section>
+              <section class="came-in only-swarm">
+                <div class="lane-h">What came in <span class="n">19,380</span><span class="hint">since yesterday 18:20 · 14 Connections</span></div>
+                <div class="vol">
+                  <span class="src"><svg class="brand"><use href="#b-sentry" /></svg>Sentry</span><span class="bar-track"><i style="--v: 100%"></i></span><b class="num">11,240</b><span class="became">14 proposals, 31 attached</span>
+                  <span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span><span class="bar-track"><i style="--v: 23%" class="held"></i></span><b class="num">2,610</b><span class="became">9 offers, 2 held</span>
+                  <span class="src"><svg class="brand"><use href="#b-stripe" /></svg>Stripe</span><span class="bar-track"><i style="--v: 15%"></i></span><b class="num">1,720</b><span class="became">8 proposals, 6 FYI</span>
+                  <span class="src"><svg class="brand"><use href="#b-gmail" /></svg>Gmail</span><span class="bar-track"><i style="--v: 12%"></i></span><b class="num">1,380</b><span class="became">12 proposals, 5 offers</span>
+                  <span class="src"><svg class="brand"><use href="#b-intercom" /></svg>Intercom</span><span class="bar-track"><i style="--v: 8%"></i></span><b class="num">890</b><span class="became">7 unsure, 9 proposals</span>
+                  <span class="src"><svg class="brand"><use href="#b-posthog" /></svg>PostHog</span><span class="bar-track"><i style="--v: 7%"></i></span><b class="num">760</b><span class="became">5 proposals, 8 FYI</span>
+                  <span class="src"><svg class="i s14"><use href="#m-plug" /></svg>8 more</span><span class="bar-track"><i style="--v: 7%"></i></span><b class="num">780</b><span class="became">12 proposals, 8 FYI</span>
+                </div>
+              </section>
+            </div>
+
+            <div class="intake-right">
+              <section class="lane only-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--muted)"><use href="#m-proposed" /></svg>60 proposals by Topic<span class="hint">the size of a light is its count</span></div>
+                <div class="cst">
+                  <div class="cst-row cst-head">
+                    <span></span>
+                    <span><span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span>Urgent</span>
+                    <span><span class="prio" data-level="3"><i></i><i></i><i></i><i></i></span>High</span>
+                    <span><span class="prio" data-level="2"><i></i><i></i><i></i><i></i></span>Medium</span>
+                    <span><span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span>Low</span>
+                  </div>
+                  <div class="cst-row">
+                    <span class="cst-t">Checkout<span class="n">18</span></span>
+                    <span class="cell"><i class="disc burn" style="--d: 26px">2</i></span>
+                    <span class="cell"><i class="disc wait" style="--d: 34px">5</i></span>
+                    <span class="cell"><i class="disc wait soft" style="--d: 39px">7</i></span>
+                    <span class="cell"><i class="disc" style="--d: 30px">4</i></span>
+                  </div>
+                  <div class="cst-row">
+                    <span class="cst-t">Infrastructure<span class="n">14</span></span>
+                    <span class="cell"><i class="disc burn" style="--d: 22px">1</i></span>
+                    <span class="cell"><i class="disc wait" style="--d: 28px">3</i></span>
+                    <span class="cell"><i class="disc wait soft" style="--d: 30px">4</i></span>
+                    <span class="cell"><i class="disc" style="--d: 36px">6</i></span>
+                  </div>
+                  <div class="cst-row">
+                    <span class="cst-t">Customers<span class="n">16</span></span>
+                    <span class="cell"><i class="none"></i></span>
+                    <span class="cell"><i class="disc wait" style="--d: 30px">4</i></span>
+                    <span class="cell"><i class="disc wait soft" style="--d: 34px">5</i></span>
+                    <span class="cell"><i class="disc" style="--d: 39px">7</i></span>
+                  </div>
+                  <div class="cst-row">
+                    <span class="cst-t">Releases<span class="n">12</span></span>
+                    <span class="cell"><i class="none"></i></span>
+                    <span class="cell"><i class="disc wait" style="--d: 22px">1</i></span>
+                    <span class="cell"><i class="disc wait soft" style="--d: 28px">3</i></span>
+                    <span class="cell"><i class="disc" style="--d: 41px">8</i></span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="lane only-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--accent)"><use href="#m-bolt" /></svg>Suggested for the batch</div>
+                <div class="ledger">
+                  <button class="ans go"><b>Accept 25 low</b><span>Adds 25 Tasks to the backlog; nothing starts</span><span class="kbd">⏎</span></button>
+                  <button class="ans"><b>Start "Investigate" ×3</b><span>One Run each for the high Infrastructure items</span><span class="kbd">I</span></button>
+                  <button class="ans"><b>Review one by one</b><span>Opens the 35 others in urgency order</span><span class="kbd">R</span></button>
+                </div>
+              </section>
+
+              <section class="lane only-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--attn)"><use href="#m-decision" /></svg>Needs a call <span class="n">11</span><span class="hint">grouped by question</span></div>
+                <div class="item">
+                  <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Which project is this?</span></div>
+                    <div class="item-m"><b class="num">7</b>&nbsp;unsure<span class="dot-sep"></span><span class="src"><svg class="brand"><use href="#b-intercom" /></svg><svg class="brand"><use href="#b-gmail" /></svg></span></div>
+                  </div>
+                  <button class="chip-ans suggest">Sort 7</button>
+                </div>
+                <div class="item">
+                  <span class="disc wait sm"><svg class="i s12"><use href="#m-topic" /></svg></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Which Topic is this?</span></div>
+                    <div class="item-m"><b class="num">2</b>&nbsp;unsure<span class="dot-sep"></span><span class="src"><svg class="brand"><use href="#b-sentry" /></svg></span></div>
+                  </div>
+                  <button class="chip-ans suggest">Sort 2</button>
+                </div>
+                <div class="item">
+                  <span class="disc wait sm"><svg class="i s12"><use href="#m-paused" /></svg></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Breakers tripped</span></div>
+                    <div class="item-m"><b class="num">2</b>&nbsp;Workflows held 61 events<span class="dot-sep"></span>Label new issues · Draft reply</div>
+                  </div>
+                  <button class="chip-ans suggest">Review 2</button>
+                </div>
+              </section>
+
+              <section class="quiet-lines only-swarm">
+                <div class="ql"><svg class="i s14"><use href="#m-offer" /></svg><span><b>14 offers</b> 9 dependency bumps all green · 5 replies drafted</span></div>
+                <div class="ql"><svg class="i s14"><use href="#m-fyi" /></svg><span><b>22 FYI</b> 3 releases · 11 metrics · 8 payouts and invoices</span></div>
+              </section>
+
+              <section class="lane not-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--attn)"><use href="#m-decision" /></svg>Needs a call <span class="n">2</span><span class="hint">triage could not decide</span></div>
+                <div class="item call">
+                  <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+                  <div class="item-body">
+                    <div class="item-t">App is slow on Android</div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-intercom" /></svg>Intercom</span><span class="dot-sep"></span>7 conversations since Sunday</div>
+                    <div class="item-q">Which project is this?</div>
+                    <div class="answers">
+                      <button class="chip-ans"><i class="pdot webshop"></i>webshop</button>
+                      <button class="chip-ans"><i class="pdot payments"></i>payments-api</button>
+                      <button class="chip-ans">Both</button>
+                      <button class="chip-ans no">Not work</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="item call">
+                  <span class="disc wait sm"><svg class="i s12"><use href="#m-paused" /></svg></span>
+                  <div class="item-body">
+                    <div class="item-t">Breaker tripped · "Label new issues" held 34 events</div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span><span class="dot-sep"></span>bound 20/h tripped 08:14 · a bot opened 34 issues</div>
+                    <div class="answers">
+                      <button class="chip-ans no">Keep held</button>
+                      <button class="chip-ans">Raise bound to 50/h</button>
+                      <button class="chip-ans">Release all 34</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="lane not-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--muted)"><use href="#m-sun" /></svg>Today <span class="n">4</span></div>
+                <div class="item">
+                  <span class="prio" data-level="3"><i></i><i></i><i></i><i></i></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Nightly backup job timing out on ops-db</span></div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-grafana" /></svg><svg class="i s12"><use href="#m-clock" /></svg></span><span class="dot-sep"></span><span class="proj ops">ops</span><span class="dot-sep"></span>3 nights in a row</div>
+                  </div>
+                  <button class="chip-ans suggest">Start "Investigate"</button>
+                </div>
+                <div class="item">
+                  <svg class="i s14 offer-mark"><use href="#m-offer" /></svg>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Draft a reply to Marta at Brightline</span></div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-gmail" /></svg>Customers</span><span class="dot-sep"></span>invoice INV-2291 in the company name</div>
+                  </div>
+                  <button class="chip-ans suggest">Draft reply</button>
+                </div>
+                <div class="item">
+                  <span class="prio" data-level="2"><i></i><i></i><i></i><i></i></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Stripe webhook retries rising</span></div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-stripe" /></svg><svg class="brand"><use href="#b-sentry" /></svg></span><span class="dot-sep"></span><span class="proj payments">payments-api</span></div>
+                  </div>
+                  <button class="chip-ans suggest">Start "Investigate"</button>
+                </div>
+                <div class="item">
+                  <svg class="i s14 offer-mark"><use href="#m-offer" /></svg>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Merge 4 dependency bumps</span></div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span><span class="dot-sep"></span>all green, patch versions only</div>
+                  </div>
+                  <button class="chip-ans suggest">Merge all 4</button>
+                </div>
+              </section>
+
+              <section class="lane not-swarm">
+                <div class="lane-h"><svg class="i s14" style="color: var(--muted)"><use href="#m-calendar" /></svg>When you can <span class="n">2</span></div>
+                <div class="item">
+                  <span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">SSL certificate for status.acme.dev expires in 12 days</span></div>
+                    <div class="item-m"><span class="src"><svg class="i s12"><use href="#m-clock" /></svg>Cron</span><span class="dot-sep"></span><span class="proj ops">ops</span></div>
+                  </div>
+                  <button class="chip-ans suggest">Start "Fix bug"</button>
+                </div>
+                <div class="item">
+                  <span class="prio" data-level="1"><i></i><i></i><i></i><i></i></span>
+                  <div class="item-body">
+                    <div class="item-t"><span class="tt">Add iDEAL as a payment method</span></div>
+                    <div class="item-m"><span class="src"><svg class="brand"><use href="#b-intercom" /></svg>5 requests</span><span class="dot-sep"></span><span class="proj webshop">webshop</span></div>
+                  </div>
+                  <button class="chip-ans suggest">Accept</button>
+                </div>
+              </section>
+
+              <section class="quiet-lines not-swarm">
+                <div class="ql"><svg class="i s14"><use href="#m-link" /></svg><span><b>Attached</b> 2 Sentry events to the Task "Cart total rounding on discounts"</span></div>
+                <div class="ql"><svg class="i s14"><use href="#m-fyi" /></svg><span><b>FYI</b> payments-api v2.14.0 published · sign-ups <span style="color: var(--ok)">+9%</span> · €18,240 payout Thursday</span></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

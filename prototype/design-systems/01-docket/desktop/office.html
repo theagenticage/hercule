@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) Fleet · Office · Hercule</title>
+<style>
+  .seg .i { width: 14px; height: 14px; }
+  .scene { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+  .scene > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* Every solid in the office is one of these: a top and the two faces the camera sees. */
+  .scene svg polygon { stroke: var(--o-edge); stroke-width: 0.6; stroke-linejoin: round; }
+  .scene {
+    --o-edge: color-mix(in oklab, var(--ink) 9%, transparent);
+    --o-top: var(--raised);
+    --o-left: color-mix(in oklab, var(--raised) 50%, var(--bg));
+    --o-right: color-mix(in oklab, var(--bg) 86%, #000);
+    --o-floor: color-mix(in oklab, var(--surface) 70%, var(--bg));
+    --o-room: var(--surface);
+    --o-lounge: color-mix(in oklab, var(--surface) 94%, var(--accent));
+    --o-screen-off: color-mix(in oklab, var(--ink) 22%, var(--raised));
+    --o-agent: color-mix(in oklab, var(--ink) 84%, var(--bg));
+    --o-agent-lit: color-mix(in oklab, var(--ink) 64%, var(--bg));
+    --o-agent-idle: color-mix(in oklab, var(--ink) 34%, var(--bg));
+    --o-agent-idle-lit: color-mix(in oklab, var(--ink) 24%, var(--bg));
+  }
+  .t { fill: var(--o-top); }
+  .l { fill: var(--o-left); }
+  .r { fill: var(--o-right); }
+  .slab.t { fill: var(--o-floor); }
+  .slab.l { fill: color-mix(in oklab, var(--o-floor) 80%, #000); }
+  .slab.r { fill: color-mix(in oklab, var(--o-floor) 66%, #000); }
+  .room.t { fill: var(--o-room); }
+  .room.l, .room.r { fill: color-mix(in oklab, var(--o-room) 82%, #000); }
+  .lounge.t { fill: var(--o-lounge); }
+  .lounge.l, .lounge.r { fill: color-mix(in oklab, var(--o-lounge) 82%, #000); }
+  .wall.t { fill: var(--raised); }
+  .wall.l { fill: color-mix(in oklab, var(--raised) 62%, var(--bg)); }
+  .wall.r { fill: color-mix(in oklab, var(--bg) 90%, #000); }
+  .screen-work.l { fill: var(--accent); }
+  .screen-away.l { fill: var(--hold); }
+  .screen-idle.l, .screen-off.l { fill: var(--o-screen-off); }
+  .screen-off.l { fill: color-mix(in oklab, var(--ink) 10%, var(--raised)); }
+  .atcap.t { fill: color-mix(in oklab, var(--hold) 50%, var(--o-room)); }
+  .rug { fill: color-mix(in oklab, var(--accent) 9%, var(--o-lounge)); stroke: color-mix(in oklab, var(--accent) 22%, transparent) !important; }
+  .tile { stroke: color-mix(in oklab, var(--ink) 5%, transparent); stroke-width: 0.6; fill: none; }
+  .path { fill: none; stroke: var(--hold); stroke-width: 1.6; stroke-dasharray: 2 5; stroke-linecap: round; opacity: 0.9; }
+  .shadow { fill: color-mix(in oklab, var(--ink) 12%, transparent); }
+  .ring { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+  .sheet-t { fill: color-mix(in oklab, var(--raised) 60%, #fff); }
+  .body { fill: var(--o-agent); }
+  .body-lit { fill: var(--o-agent-lit); }
+  .idle .body { fill: var(--o-agent-idle); }
+  .idle .body-lit { fill: var(--o-agent-idle-lit); }
+  .card-held { stroke: color-mix(in oklab, #000 15%, transparent); stroke-width: 0.6; }
+
+  /* Things in the office that are words: signs, tags and badges, placed by the script. */
+  .at { position: absolute; left: 0; top: 0; z-index: 2; white-space: nowrap; }
+  .sign { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px 0 8px; border-radius: var(--r-sm); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1); font-size: var(--fs-small); color: var(--muted); transform: translate(-50%, -100%); }
+  .sign b { color: var(--ink); font-weight: 620; font-size: var(--fs-ui); }
+  .sign .i { width: 14px; height: 14px; color: var(--ink); }
+  .sign .num { font-size: var(--fs-small); color: var(--ink); font-weight: 600; }
+  .slots { display: inline-flex; gap: 2px; }
+  .slots i { width: 5px; height: 11px; border-radius: 1.5px; box-shadow: inset 0 0 0 1px var(--line); }
+  .slots i.w { background: var(--accent); box-shadow: none; }
+  .slots i.a { background: var(--hold); box-shadow: none; }
+  .slots i.p { box-shadow: inset 0 0 0 1.5px var(--hold); }
+  .slots i.d { background: color-mix(in oklab, var(--ink) 26%, transparent); box-shadow: none; }
+  .sign .cap { display: inline-flex; align-items: center; gap: 4px; color: var(--hold-text); font-weight: 600; }
+  .sign-r { transform: translate(-28px, -100%); }
+  .sign-l { transform: translate(calc(-100% + 28px), -100%); }
+  .at.left { transform: translate(-100%, -50%); }
+  .at.right { transform: translate(0, -50%); }
+  .at.up { transform: translate(-50%, -100%); }
+  .leader { stroke: var(--accent); stroke-width: 1.5; }
+  .floorword { font: 700 17px var(--font-sans); letter-spacing: 0.32em; fill: color-mix(in oklab, var(--accent) 34%, var(--o-lounge)); }
+  .seatname { transform: translate(-50%, -50%); }
+  .seatname .avatar { width: 16px; height: 16px; border-radius: 5px; font-size: 9.5px; }
+  .tenx-n { font: 650 15px var(--font-sans); letter-spacing: -0.03em; fill: var(--ink); paint-order: stroke; stroke: var(--raised); stroke-width: 4px; stroke-linejoin: round; }
+
+  .badge { transform: translate(-50%, -100%); display: grid; place-items: center; }
+  .badge .ask { width: 16px; height: 16px; border-radius: 5px; box-shadow: 0 0 0 2px var(--bg); }
+  .badge .ask .m { width: 12px; height: 12px; }
+  .badge .eq { height: 11px; }
+  .badge .m.idle { width: 11px; height: 11px; color: var(--faint); }
+  .badge .m.pause { width: 12px; height: 12px; color: var(--hold-text); }
+  .badge .zz { font-size: 11px; font-weight: 700; color: var(--faint); letter-spacing: 0.04em; transform: rotate(-12deg); }
+
+  .tag { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 9px 0 0; border-radius: 2px var(--r-sm) var(--r-sm) 2px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1); font-size: var(--fs-small); color: var(--muted); overflow: hidden; }
+  .tag::before { content: ""; align-self: stretch; width: 4px; background: var(--kc, var(--line)); }
+  .tag b { color: var(--ink); font-weight: 600; }
+  .tag--hold { --kc: var(--hold); }
+  .tag--hold .m { width: 12px; height: 12px; color: var(--hold-text); }
+  .tag.is-sel { box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-2); }
+  .tag--quiet { background: color-mix(in oklab, var(--raised) 86%, transparent); }
+  .tag--quiet::before { display: none; }
+  .tag--quiet { padding-left: 8px; }
+  .tag .avatar { width: 18px; height: 18px; border-radius: 6px; font-size: 10px; }
+  .tag .b { width: 12px; height: 12px; color: var(--ink); }
+  .tray-n { transform: translate(-50%, -100%); display: flex; align-items: baseline; gap: 5px; font-size: var(--fs-small); color: var(--muted); }
+  .tray-n .num { font-size: var(--fs-num-s); color: var(--ink); }
+  .tray-n { text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 6px var(--bg); }
+
+  /* Corner panels: the tally, the selected decision, and the office at 10x. */
+  .tally { position: absolute; left: 28px; top: 24px; z-index: 3; }
+  .tally .big { display: flex; align-items: baseline; gap: 10px; }
+  .tally .big .num { font-size: var(--fs-num-m); }
+  .tally .big span { font-size: var(--fs-small); color: var(--muted); }
+  .tally ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: var(--fs-ui); }
+  .tally li { display: grid; grid-template-columns: 18px 24px auto; align-items: center; column-gap: 6px; color: var(--muted); }
+  .tally li b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .tally li .m { width: 12px; height: 12px; }
+  .tally li .ask { width: 14px; height: 14px; }
+
+  .legend { position: absolute; right: 24px; top: 24px; z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: var(--fs-small); color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .sw-path { width: 22px; height: 0; border-top: 2px dotted var(--hold); }
+  .legend .sw-tray { width: 12px; height: 10px; border-radius: 1px; background: repeating-linear-gradient(180deg, var(--k-proposal) 0 2px, var(--raised) 2px 3px, var(--k-request) 3px 5px, var(--raised) 5px 6px); box-shadow: inset 0 0 0 1px var(--line); }
+
+  .pick { position: absolute; left: 28px; bottom: 26px; width: 360px; z-index: 3; }
+  .pick .minicard { margin: 0; box-shadow: var(--shadow-3); }
+  .pick .mc-q { flex-wrap: wrap; row-gap: 3px; padding: 12px 14px 11px; }
+  .pick .mc-q .t { font-size: var(--fs-read); width: 100%; }
+  .pick .mc-q .s { margin-left: 0; }
+  .pick .verb { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 8px 11px !important; }
+  .pick .verb .key { margin: 0; }
+  .pick .from { display: flex; align-items: center; gap: 6px; margin: 0 0 30px 2px; font-size: var(--fs-small); color: var(--muted); }
+  .pick .from .ask { width: 14px; height: 14px; }
+
+  .tenx { position: absolute; right: 24px; bottom: 24px; width: 318px; z-index: 3; padding: 14px 16px 14px; border-radius: var(--r-lg); }
+  .tenx h3 { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-ui); font-weight: 620; }
+  .tenx h3 span { font-weight: 450; color: var(--muted); font-size: var(--fs-small); }
+  .tenx svg { display: block; width: 286px; height: 150px; margin: 4px 0 2px; }
+  .tenx p { font-size: var(--fs-small); line-height: 1.45; color: var(--muted); }
+  .tenx p b { color: var(--ink); font-weight: 600; }
+  @media (prefers-reduced-transparency: reduce) {
+    .tag--quiet { background: var(--raised); }
+  }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <aside class="side">
+    <div class="side-top">
+      <div class="tl"><i></i><i></i><i></i></div>
+      <button class="iconbtn" aria-label="Hide sidebar"><svg class="i"><use href="#i-sidebar"/></svg></button>
+      <button class="iconbtn" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+    <div class="face"><button aria-pressed="false">Threads</button><button aria-pressed="true">Hercule <span class="dot-count">12</span></button></div>
+    <nav class="nav">
+      <a><svg class="i i--s"><use href="#i-tray"/></svg>Intake<span class="count count--hold">12</span></a>
+      <a><svg class="i i--s"><use href="#i-pulse"/></svg>Check-in<span class="count">3</span></a>
+      <a><svg class="m"><use href="#m-task"/></svg>Tasks<span class="count">18</span></a>
+      <a><svg class="m"><use href="#m-run"/></svg>Runs<span class="count">4</span></a>
+      <a><svg class="m"><use href="#m-workflow"/></svg>Workflows<span class="count">6</span></a>
+      <div class="gap"></div>
+      <a aria-current="page"><svg class="i i--s"><use href="#i-server"/></svg>Fleet<span class="count">3</span></a>
+      <a><svg class="i i--s"><use href="#i-globe"/></svg>Connections<span class="count">11</span></a>
+      <a><svg class="i i--s"><use href="#i-bell"/></svg>Notifications<span class="count">5</span></a>
+      <a><svg class="i i--s"><use href="#i-gear"/></svg>Settings</a>
+    </nav>
+    <div class="side-scroll"></div>
+    <div class="side-foot">
+      <div class="side-docket">
+        <div class="row1"><b>12</b> on your docket <span class="key key--s">⌥</span><span class="key key--s">Space</span></div>
+        <div class="rail rail--s">
+          <i class="now kind-proposal"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-request"></i><i class="kind-unsure"></i><i class="kind-breaker"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-offer"></i><i class="kind-proposal"></i><i class="kind-proposal"></i>
+        </div>
+      </div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 8 working · 3 wait</span><svg class="i"><use href="#i-chev-r"/></svg></div>
+      <div class="me"><span class="avatar">R</span>Rogier</div>
+    </div>
+  </aside>
+
+  <main class="win-main">
+    <header class="topbar">
+      <h1>Fleet</h1>
+      <span class="when">23 live sessions on 3 runners · 3 assistants</span>
+      <div class="tools">
+        <div class="seg" role="group" aria-label="View">
+          <button aria-pressed="false"><svg class="i"><use href="#i-list"/></svg>List</button>
+          <button aria-pressed="true"><svg class="i"><use href="#i-cube"/></svg>Office</button>
+        </div>
+        <span class="key key--s">O</span>
+      </div>
+    </header>
+
+    <div class="scene" id="scene">
+      <svg id="office" viewBox="0 0 1195 847" aria-label="The office: three runner rooms, the assistants' lounge, and Rogier's desk in the middle"></svg>
+
+      <div class="tally">
+        <div class="big"><span class="num">23</span><span>live now</span></div>
+        <ul>
+          <li><span class="eq"><i></i><i></i><i></i></span><b>8</b>working</li>
+          <li><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><b>3</b>at your desk, waiting on you</li>
+          <li><svg class="m" style="color:var(--faint)"><use href="#m-idle"/></svg><b>12</b>idle</li>
+        </ul>
+      </div>
+
+      <div class="legend">
+        <span>Walked to your desk<i class="sw-path"></i></span>
+        <span>Tray height is your docket<i class="sw-tray"></i></span>
+      </div>
+
+      <div class="pick">
+        <p class="from"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Selected · walked over from studio-mac 32s ago</p>
+        <div class="minicard kind-request">
+          <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+          <div class="mc-q"><span class="t">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span><span class="s">Fix 3-D Secure checkout · 3 files +48 -12</span></div>
+          <div class="verbs">
+            <button class="verb verb--nogo"><span class="key key--s">D</span><span class="v">Deny</span></button>
+            <button class="verb verb--go"><span class="key key--s">A</span><span class="v">Always</span></button>
+            <button class="verb verb--go is-primary"><span class="key key--s key--dark">Y</span><span class="v">Allow once</span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tenx glass">
+        <h3>At 10x <span>140 live · 9 runners · 4 assistants</span></h3>
+        <svg id="tenx" viewBox="0 0 286 150" aria-label="Nine runner blocks around the desk; the tray holds 60 cards"></svg>
+        <p>Rooms fold into blocks lit by what they run. Agents stay at work; <b>only their cards</b> reach the desk. The tray reads <b>60</b>.</p>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+  // Draws the office as an isometric diorama from the fixture below, then pins the words to it.
+  // The world is 18 x 18 units: three 7 x 7 runner rooms and the lounge around a plaza, with Rogier's desk in the middle.
+  (function () {
+    var U = 32, C = 0.866, OX = 598, OY = 104;
+    function P(x, y, z) { return [OX + (x - y) * C * U, OY + (x + y) * 0.5 * U - (z || 0) * U]; }
+    var out = [];
+    function pts(list) { return list.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" "); }
+    function poly(list, cls, style) { out.push("<polygon" + (cls ? ' class="' + cls + '"' : "") + (style ? ' style="' + style + '"' : "") + ' points="' + pts(list) + '"/>'); }
+    // A box shows its top and the two faces that point at the camera (+x and +y).
+    function box(x, y, z, w, d, h, cls, frontCls) {
+      poly([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)], (frontCls || cls) + " l");
+      poly([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)], cls + " r");
+      poly([P(x, y, z + h), P(x + w, y, z + h), P(x + w, y + d, z + h), P(x, y + d, z + h)], cls + " t");
+    }
+    function floorLine(list, cls) { out.push('<polyline class="' + cls + '" points="' + pts(list.map(function (p) { return P(p[0], p[1], 0.09); })) + '"/>'); }
+
+    var projectColor = { webshop: "var(--p-webshop)", payments: "var(--p-payments)", ops: "var(--p-ops)" };
+    // Draws a person at floor point (x, y), standing or seated, with a belt in its project's color.
+    // Returns the screen point just above the head, where its state badge goes.
+    function agent(x, y, a) {
+      var f = P(x, y, 0), fx = f[0], fy = f[1], h = a.seated ? 15 : 19;
+      out.push("<g" + (a.idle ? ' class="idle"' : "") + ">");
+      out.push('<ellipse class="shadow" cx="' + fx + '" cy="' + fy + '" rx="9" ry="4.2"/>');
+      out.push('<path class="body" d="M' + (fx - 7) + " " + fy + " v" + -(h - 7) + " a7 7 0 0 1 14 0 v" + (h - 7) + ' q-7 3 -14 0z"/>');
+      out.push('<path class="body-lit" d="M' + (fx - 7) + " " + fy + " v" + -(h - 7) + " a7 7 0 0 1 7 -7 v" + (h + 1.5) + ' q-4 0 -7 -1.5z"/>');
+      if (a.project) out.push('<path d="M' + (fx - 7) + " " + (fy - 7) + ' q7 3 14 0 v2.6 q-7 3 -14 0z" style="fill:' + projectColor[a.project] + '"/>');
+      var hy = fy - h - 7.5;
+      if (a.assistant) out.push('<rect class="body" x="' + (fx - 6.5) + '" y="' + (hy - 6.5) + '" width="13" height="13" rx="4.5"/>');
+      else out.push('<circle class="body" cx="' + fx + '" cy="' + hy + '" r="6.4"/>');
+      out.push('<path class="body-lit" d="M' + fx + " " + (hy - 6.4) + ' a6.4 6.4 0 0 0 0 12.8z"/>');
+      if (a.card) {
+        // The card is held up in front of the chest, its kind color facing Rogier.
+        var cx = fx - 4, cy = fy - 15;
+        out.push('<polygon class="card-held" points="' + [[cx, cy - 5], [cx + 11, cy - 5], [cx + 11, cy + 8], [cx, cy + 8]].map(function (p) { return p.join(","); }).join(" ") + '" style="fill:' + a.card + '"/>');
+        out.push('<path d="M' + cx + " " + (cy - 5) + " h4 v2 h-4z" + '" style="fill:' + a.card + ';filter:brightness(.8)"/>');
+        out.push('<path d="M' + (cx + 2.5) + " " + (cy) + " h6 M" + (cx + 2.5) + " " + (cy + 3) + ' h4" style="stroke:var(--on-kind);stroke-width:1.1;opacity:.85"/>');
+      }
+      out.push("</g>");
+      return [fx, hy - 9];
+    }
+    var pins = [];
+    function pin(xy, html, cls, dx, dy) { pins.push({ x: xy[0] + (dx || 0), y: xy[1] + (dy || 0), html: html, cls: cls || "" }); }
+    var badgeHtml = {
+      work: '<span class="eq"><i></i><i></i><i></i></span>',
+      ask: '<span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>',
+      idle: '<svg class="m idle"><use href="#m-idle"/></svg>',
+      pause: '<svg class="m pause"><use href="#m-paused"/></svg>',
+      asleep: '<span class="zz">z z</span>'
+    };
+    function badge(xy, state) { pin(xy, badgeHtml[state], "badge"); }
+
+    // The fixture: who sits where. Away means the agent has walked to Rogier's desk.
+    // 16 sessions hold runner slots; with Ada, Milo, Juno and the four stopped sessions in the lounge that makes 23.
+    var rooms = [
+      { x0: 0, y0: 0, name: "build-box-1", icon: "server", cap: 8, sign: "", seats: [
+        { s: "work", p: "ops" }, { s: "work", p: "webshop" }, { s: "work", p: "payments" }, { s: "pause", p: "webshop", label: "<b>Label new issues</b>paused · bound tripped" },
+        { s: "work", p: "payments" }, { s: "work", p: "webshop" }, { s: "work", p: "ops" }, { s: "idle", p: "payments" } ] },
+      { x0: 11, y0: 0, name: "build-box-2", icon: "server", cap: 8, sign: "sign-r", seats: [
+        { s: "idle", p: "webshop" }, { s: "away" }, { s: "idle", p: "payments", label: "<b>Add iDEAL research</b>idle 1h" }, { s: "off" },
+        { s: "off" }, { s: "off" }, { s: "off" }, { s: "off" } ] },
+      { x0: 0, y0: 11, name: "studio-mac", icon: "machine", cap: 6, sign: "sign-l", seats: [
+        { s: "work", p: "webshop" }, { s: "idle", p: "ops" }, { s: "away" },
+        { s: "idle", p: "webshop" }, { s: "away" }, { s: "off" } ] }
+    ];
+    rooms.forEach(function (r) {
+      var cols = r.cap === 8 ? 4 : 3, stepX = r.cap === 8 ? 1.62 : 2.1, x1 = r.cap === 8 ? 0.55 : 0.8;
+      r.seats.forEach(function (seat, i) {
+        seat.dx = r.x0 + x1 + (i % cols) * stepX;
+        seat.dy = r.y0 + 1.2 + Math.floor(i / cols) * 2.9;
+        seat.at = [seat.dx + 0.3, seat.dy + 1.0];
+      });
+    });
+
+    // The board, the floors and the low back walls.
+    box(-0.4, -0.4, -0.35, 18.8, 18.8, 0.35, "slab");
+    rooms.forEach(function (r) {
+      box(r.x0, r.y0, 0, 7, 7, 0.08, "room");
+      for (var k = 1.4; k < 7; k += 1.4) {
+        floorLine([[r.x0 + k, r.y0], [r.x0 + k, r.y0 + 7]], "tile");
+        floorLine([[r.x0, r.y0 + k], [r.x0 + 7, r.y0 + k]], "tile");
+      }
+      box(r.x0, r.y0, 0, 7, 0.16, 0.7, "wall");
+      box(r.x0, r.y0, 0, 0.16, 7, 0.7, "wall");
+    });
+    box(11, 11, 0, 7, 7, 0.08, "lounge");
+    poly([P(11.6, 11.6, 0.09), P(17.4, 11.6, 0.09), P(17.4, 17.0, 0.09), P(11.6, 17.0, 0.09)], "rug");
+    var lw = P(11.7, 17.75, 0.09);
+    out.push('<text class="floorword" transform="matrix(' + C + ',0.5,' + -C + ',0.5,' + lw[0].toFixed(1) + "," + lw[1].toFixed(1) + ')">LOUNGE</text>');
+
+    // The walks from the empty chairs to the back of Rogier's desk, on the floor under everything else.
+    var seatOf = function (room, i) { return rooms.filter(function (r) { return r.name === room; })[0].seats[i].at; };
+    var fix = seatOf("studio-mac", 2), grafana = seatOf("studio-mac", 4), ship = seatOf("build-box-2", 1);
+    floorLine([fix, [7.6, fix[1]], [7.6, 7.7], [9.05, 7.7], [9.05, 8.05]], "path");
+    floorLine([grafana, [7.3, grafana[1]], [7.3, 7.4], [8.25, 7.4], [8.25, 8.05]], "path");
+    floorLine([ship, [13.01, ship[1]], [13.01, 7.85], [9.85, 7.85], [9.85, 8.05]], "path");
+
+    // The rooms: a desk per slot. The monitor shows the state; an empty chair means its agent walked over.
+    var screenOf = { work: "work", away: "away", idle: "idle", pause: "idle", off: "off" };
+    rooms.forEach(function (r) {
+      r.seats.forEach(function (seat) {
+        box(seat.dx, seat.dy, 0, 1.3, 0.62, 0.48, "desk");
+        box(seat.dx + 0.72, seat.dy + 0.2, 0.48, 0.12, 0.1, 0.12, "mon");
+        box(seat.dx + 0.5, seat.dy + 0.12, 0.6, 0.62, 0.06, 0.4, "mon", "screen-" + screenOf[seat.s]);
+        if (seat.s === "away" || seat.s === "off") {
+          box(seat.dx + 0.1, seat.dy + 0.8, 0, 0.42, 0.4, 0.24, "chair");
+          return;
+        }
+        var head = agent(seat.at[0], seat.at[1], { seated: true, idle: seat.s !== "work", project: seat.p });
+        badge(head, seat.s === "work" ? "work" : seat.s === "pause" ? "pause" : "idle");
+        if (seat.label) pin(head, '<span class="tag ' + (seat.s === "pause" ? "tag--hold" : "tag--quiet") + '">' + seat.label + "</span>", "right", 12, seat.s === "pause" ? -18 : -8);
+      });
+      var slots = r.seats.map(function (s) { return '<i class="' + ({ work: "w", away: "a", idle: "d", pause: "p", off: "" }[s.s]) + '"></i>'; }).join("");
+      var used = r.seats.filter(function (s) { return s.s !== "off"; }).length;
+      pin(P(r.x0, r.y0, 1.35), '<span class="sign ' + r.sign + '"><svg class="i"><use href="#i-' + r.icon + '"/></svg><b>' + r.name + '</b><span class="slots">' + slots + '</span><span class="num">' + used + "/" + r.cap + "</span>" + (used === r.cap ? '<span class="cap"><svg class="m"><use href="#m-paused"/></svg>at cap</span>' : "") + "</span>");
+    });
+
+    // The plaza. The three who walked over stand behind Rogier's desk, each holding up the card they need answered.
+    var ring = P(9.05, 8.05);
+    out.push('<ellipse class="ring" cx="' + ring[0] + '" cy="' + ring[1] + '" rx="15" ry="7.5"/>');
+    var q1 = agent(8.25, 8.05, { card: "var(--k-request)", project: "ops" });
+    var q2 = agent(9.05, 8.05, { card: "var(--k-request)", project: "webshop" });
+    var q3 = agent(9.85, 8.05, { card: "var(--k-request)", project: "payments" });
+    [q1, q2, q3].forEach(function (h) { badge(h, "ask"); });
+    out.push('<line class="leader" x1="' + q2[0] + '" y1="' + (q2[1] - 18) + '" x2="' + q2[0] + '" y2="' + (q2[1] - 40) + '"/>');
+    pin(q1, '<span class="tag kind-request"><b>Keep the old Grafana folder?</b>11m</span>', "left", -13, -8);
+    pin(q2, '<span class="tag kind-request is-sel"><b>Run git push?</b>32s</span>', "up", 0, -40);
+    pin(q3, '<span class="tag kind-request"><b>Publish to npm?</b>4m</span>', "right", 13, -8);
+
+    // The desk, and on it the tray: one sheet per card on the docket, stacked in docket order with the next card on top.
+    box(7.9, 8.7, 0, 2.2, 0.9, 0.55, "desk");
+    box(9.35, 8.95, 0.55, 0.6, 0.38, 0.03, "desk");
+    var docket = ["proposal", "proposal", "offer", "proposal", "offer", "proposal", "breaker", "unsure", "request", "request", "request", "proposal"];
+    docket.forEach(function (kind, i) {
+      var c = kind === "unsure" ? "var(--faint)" : "var(--k-" + kind + ")";
+      var z = 0.55 + i * 0.07, t = 0.05, x0 = 8.05, x1 = 8.95, y0 = 8.82, y1 = 9.46;
+      poly([P(x0, y1, z), P(x1, y1, z), P(x1, y1, z + t), P(x0, y1, z + t)], "", "fill:" + c);
+      poly([P(x1, y0, z), P(x1, y1, z), P(x1, y1, z + t), P(x1, y0, z + t)], "", "fill:color-mix(in oklab, " + c + " 72%, #000)");
+      poly([P(x0, y0, z + t), P(x1, y0, z + t), P(x1, y1, z + t), P(x0, y1, z + t)], "sheet-t");
+    });
+    pin(P(8.05, 9.46, 0.95), '<span class="num">12</span>on your docket', "tray-n left", -10, 0);
+    // Rogier's chair faces the desk from the front, so the camera sees its back.
+    box(8.9, 9.75, 0, 0.5, 0.42, 0.26, "chair");
+    box(8.9, 10.09, 0.26, 0.5, 0.08, 0.46, "chair");
+    pin(P(9.15, 10.17, 0.62), '<span class="avatar">R</span>', "seatname");
+
+    // The lounge: Ada at work, Milo on the sofa, Juno asleep, and four stopped sessions on the bench.
+    box(12.0, 12.1, 0, 1.3, 0.62, 0.48, "desk");
+    box(12.72, 12.3, 0.48, 0.12, 0.1, 0.12, "mon");
+    box(12.5, 12.22, 0.6, 0.62, 0.06, 0.4, "mon", "screen-work");
+    var ada = agent(12.3, 13.1, { seated: true, assistant: true });
+    badge(ada, "work");
+    pin(ada, '<span class="tag tag--quiet"><span class="avatar avatar--asst">A</span><b>Ada</b>heartbeat · Sonnet 5</span>', "right", 12, -8);
+    box(14.6, 12.1, 0, 2.4, 0.85, 0.3, "sofa");
+    box(14.6, 12.02, 0.3, 2.4, 0.22, 0.34, "sofa");
+    var milo = agent(15.6, 13.15, { seated: true, assistant: true, idle: true });
+    badge(milo, "idle");
+    pin(milo, '<span class="tag tag--quiet"><span class="avatar avatar--asst">M</span><b>Milo</b>idle · <svg class="b"><use href="#b-slack"/></svg>#ops</span>', "right", 12, -8);
+    box(12.3, 14.9, 0, 0.9, 0.85, 0.3, "sofa");
+    box(12.3, 14.82, 0.3, 0.9, 0.22, 0.4, "sofa");
+    var juno = agent(12.75, 15.95, { seated: true, assistant: true, idle: true });
+    badge(juno, "asleep");
+    pin(juno, '<span class="tag tag--quiet"><span class="avatar avatar--asst">J</span><b>Juno</b>asleep · <svg class="b"><use href="#b-discord"/></svg><span class="hold">reconnecting</span></span>', "left", -12, -8);
+    box(14.3, 15.3, 0, 2.7, 0.5, 0.26, "sofa");
+    [14.7, 15.33, 15.96, 16.59].forEach(function (x) { agent(x, 16.15, { seated: true, idle: true }); });
+    pin(P(15.6, 16.7, 0), '<span class="tag tag--quiet">4 idle · resume on next input</span>', "right", -40, 30);
+
+    document.getElementById("office").innerHTML = out.join("");
+    var scene = document.getElementById("scene");
+    pins.forEach(function (p) {
+      var el = document.createElement("div");
+      el.className = "at " + p.cls;
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+      el.innerHTML = p.html;
+      scene.appendChild(el);
+    });
+
+    // The 10x inset: nine runner blocks around the desk, their tops lit by what they run, drawn back to front.
+    out = [];
+    U = 11; OX = 143; OY = 22;
+    var blocks = [[0, 0, 16, 14], [4.4, 0, 16, 16], [0, 4.4, 16, 12], [8.8, 0, 16, 9], [4.4, 4.4, 0, 0], [0, 8.8, 8, 7], [8.8, 4.4, 24, 20], [4.4, 8.8, 16, 15], [8.8, 8.8, 16, 11]];
+    var waiting = { 1: [3], 2: [5], 3: [1], 6: [2, 9, 12], 7: [7], 8: [4] };
+    blocks.forEach(function (b, n) {
+      if (!b[2]) { drawDesk(); return; }
+      var h = 0.35 + b[3] * 0.05;
+      box(b[0], b[1], 0, 3.2, 3.2, h, "desk");
+      for (var i = 0; i < 16; i++) {
+        var cx = b[0] + 0.25 + (i % 4) * 0.72, cy = b[1] + 0.25 + Math.floor(i / 4) * 0.72;
+        var lit = i < Math.round(b[3] * 16 / b[2]);
+        var wait = (waiting[n] || []).indexOf(i) >= 0;
+        poly([P(cx, cy, h), P(cx + 0.5, cy, h), P(cx + 0.5, cy + 0.5, h), P(cx, cy + 0.5, h)], "", "stroke:none;fill:" + (wait ? "var(--hold)" : lit ? "var(--accent)" : "color-mix(in oklab, var(--ink) 16%, transparent)"));
+      }
+    });
+    function drawDesk() {
+      box(5.0, 5.3, 0, 2.0, 1.2, 0.5, "desk");
+      for (var s = 0; s < 30; s++) {
+        var k = ["proposal", "request", "proposal", "offer", "proposal", "request"][s % 6];
+        var z = 0.5 + s * 0.09;
+        poly([P(5.3, 6.1, z), P(6.1, 6.1, z), P(6.1, 6.1, z + 0.06), P(5.3, 6.1, z + 0.06)], "", "stroke:none;fill:var(--k-" + k + ")");
+        poly([P(6.1, 5.5, z), P(6.1, 6.1, z), P(6.1, 6.1, z + 0.06), P(6.1, 5.5, z + 0.06)], "", "stroke:none;fill:color-mix(in oklab, var(--k-" + k + ") 70%, #000)");
+      }
+      poly([P(5.3, 5.5, 3.2), P(6.1, 5.5, 3.2), P(6.1, 6.1, 3.2), P(5.3, 6.1, 3.2)], "sheet-t");
+      // The four assistants wait in front of the desk.
+      [4.9, 5.6, 6.3, 7.0].forEach(function (x) {
+        var a = P(x, 7.15, 0);
+        out.push('<rect class="body" x="' + (a[0] - 2.8) + '" y="' + (a[1] - 9) + '" width="5.6" height="9" rx="2.4"/><rect class="body" x="' + (a[0] - 2.4) + '" y="' + (a[1] - 14.5) + '" width="4.8" height="4.8" rx="1.6"/>');
+      });
+      var top = P(6.1, 5.8, 3.2);
+      out.push('<text class="tenx-n" x="' + (top[0] + 6) + '" y="' + (top[1] + 4) + '">60</text>');
+    }
+    document.getElementById("tenx").innerHTML = out.join("");
+  })();
+</script>
+</body>
+</html>

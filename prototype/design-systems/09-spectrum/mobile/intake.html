@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intake · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+.hl { display: flex; align-items: center; gap: 14px; padding: 0 20px 12px; font-size: var(--t-meta); color: var(--muted); }
+.hl b { color: var(--ink); font-weight: var(--w-strong); font-size: 15px; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.hl .grow { flex: 1; }
+.deck { position: relative; margin: 30px 16px 0; height: 344px; }
+.deck .back { position: absolute; left: 0; right: 0; top: 0; height: 100%; border-radius: 26px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft); }
+.deck .b1 { transform: translateY(-12px) scale(0.94); opacity: .75; }
+.deck .b2 { transform: translateY(-22px) scale(0.88); opacity: .45; }
+.deck .back::before { content: ""; position: absolute; left: 22px; right: 22px; top: 0; height: 4px; border-radius: 0 0 3px 3px; background: var(--p); }
+.mcard { position: absolute; inset: 0; padding: 18px 18px 16px 22px; border-radius: 26px; overflow: hidden; background: color-mix(in oklab, var(--p) 7%, var(--raised)); box-shadow: 0 0 0 1px color-mix(in oklab, var(--p) 22%, transparent), var(--sh-3); transform: translateX(12px) rotate(1.6deg); transform-origin: 50% 140%; }
+.mcard::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--p); }
+.mcard .kicker { font-size: var(--t-fine); }
+.mcard h2 { margin: 10px 0 6px; font-size: 19px; line-height: 1.25; font-weight: var(--w-strong); letter-spacing: -0.02em; }
+.mcard .gist { font-size: 14px; line-height: 1.45; color: color-mix(in oklab, var(--ink) 84%, var(--p)); }
+.mcard .nums { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 14px; }
+.mcard .nums div { display: flex; flex-direction: column; gap: 1px; }
+.mcard .nums b { font-size: 20px; font-weight: var(--w-strong); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.mcard .nums span { display: flex; align-items: center; gap: 5px; font-size: var(--t-fine); color: var(--muted); }
+.mcard .nums .brand { width: 11px; height: 11px; }
+.stamp { position: absolute; right: 18px; bottom: 18px; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 10px; border-radius: 10px; font-weight: var(--w-strong); font-size: 14px; background: var(--p); color: var(--p-on); transform: rotate(-5deg); box-shadow: var(--sh-2); }
+.stamp .i { width: 14px; height: 14px; }
+.hints { display: flex; justify-content: space-between; align-items: center; margin: 12px 22px 0; font-size: var(--t-fine); color: var(--muted); }
+.hints span { display: inline-flex; align-items: center; gap: 5px; }
+.hints .i { width: 12px; height: 12px; }
+.hints .r { color: var(--p-ink); font-weight: var(--w-medium); }
+.mans { margin: 14px 16px 0; }
+.more-l { display: flex; align-items: center; gap: 8px; margin: 16px 20px 0; font-size: var(--t-meta); color: var(--muted); }
+.more-l b { color: var(--ink); font-weight: var(--w-medium); }
+.more-l .sep { color: var(--faint); }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone" data-space="all">
+  <div class="ph-status">
+    <span class="time">9:41</span>
+    <span class="ph-island"></span>
+    <span class="ph-sys" aria-label="Full signal, wifi, battery 82%">
+      <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 2.6c2.2 0 4.2.85 5.7 2.25l1.1-1.15A9.6 9.6 0 0 0 8 1 9.6 9.6 0 0 0 1.2 3.7l1.1 1.15A8.1 8.1 0 0 1 8 2.6Zm0 3.2c1.35 0 2.6.52 3.5 1.38l1.1-1.15A6.5 6.5 0 0 0 8 4.2 6.5 6.5 0 0 0 3.4 6.03L4.5 7.18A5 5 0 0 1 8 5.8Zm0 3.2c.5 0 .95.2 1.3.5L8 11 6.7 9.5c.35-.3.8-.5 1.3-.5Z"/></svg>
+      <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="16.5" height="9" rx="2.4"/><path d="M25 4.5v4a2.2 2.2 0 0 0 0-4Z" opacity=".45"/></svg>
+    </span>
+  </div>
+  <div class="ph-body">
+    <div class="ph-head"><div class="grow"><h1>Intake</h1></div><span class="sub">Triage 09:00 · next 11:00</span><a class="ph-icon" aria-label="Triage now"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></a></div>
+    <div class="hl"><span><b>1</b>burning</span><span><b>6</b>proposals</span><span><b>2</b>need a call</span><span class="grow"></span><span class="ph-dots" aria-label="Swipe sideways to change space"><i class="all on"></i><i class="p-webshop"></i><i class="p-payments"></i><i class="p-ops"></i></span></div>
+    <div class="deck">
+      <div class="back b2 p-payments"></div>
+      <div class="back b1 p-ops"></div>
+      <article class="mcard p-webshop">
+        <div class="kicker"><span class="k"><svg class="i" aria-hidden="true"><use href="#m-proposal"/></svg>Proposal</span><span class="sep">·</span><span class="prio" data-n="4" title="priority urgent"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="sep">·</span><span>08:52</span></div>
+        <h2>Checkout fails for EU cards with 3-D Secure</h2>
+        <p class="gist">Since deploy #1289, EU card payments that need 3-D Secure fail at checkout. The new Stripe SDK returns <code>requires_action</code>.</p>
+        <div class="nums">
+          <div><b>412</b><span><svg class="brand" aria-hidden="true"><use href="#b-sentry"/></svg>events · 188 users</span></div>
+          <div><b>-18%</b><span><svg class="brand" aria-hidden="true"><use href="#b-posthog"/></svg>EU conversion</span></div>
+          <div><b>3</b><span><svg class="brand" aria-hidden="true"><use href="#b-gmail"/></svg>customer emails</span></div>
+          <div><b>#1289</b><span><svg class="brand" aria-hidden="true"><use href="#b-github"/></svg>deploy, 14:02 yesterday</span></div>
+        </div>
+        <span class="stamp"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>Start</span>
+      </article>
+    </div>
+    <div class="hints p-webshop"><span><svg class="i" aria-hidden="true"><use href="#i-chev-left"/></svg>Dismiss</span><span>swipe up to Accept</span><span class="r">Start "Fix bug"<svg class="i" aria-hidden="true"><use href="#i-chev-right"/></svg></span></div>
+    <div class="bigans pair mans p-webshop">
+      <button class="go"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg><span><span class="l">Start "Fix bug"</span><span class="d">On webshop · new worktree · studio-mac</span></span></button>
+      <button><svg class="i" aria-hidden="true"><use href="#m-task"/></svg><span><span class="l">Accept</span><span class="d">Adds a Task</span></span></button>
+      <button><svg class="i" aria-hidden="true"><use href="#i-x"/></svg><span><span class="l">Dismiss</span><span class="d">Closes it</span></span></button>
+    </div>
+    <div class="more-l"><b>8 more</b><span class="sep">·</span>2 need a call<span class="sep">·</span>4 today<span class="sep">·</span>2 when you can</div>
+  </div>
+  <nav class="ph-tabs" aria-label="Tabs">
+    <div class="strip" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+    <a class="ph-tab on"><svg class="i" aria-hidden="true"><use href="#i-sun-rise"/></svg><span>Intake</span><span class="bd">9</span></a>
+    <a class="ph-tab"><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg><span>Threads</span></a>
+    <a class="ph-new" aria-label="New thread"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></a>
+    <a class="ph-tab"><span class="av">A</span><span>Ada</span></a>
+    <a class="ph-tab"><svg class="i" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span></a>
+  </nav>
+  <span class="ph-home" aria-hidden="true"></span>
+  <span class="hap" style="left: 20px; top: 138px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>rigid tick · swipe passes the line</span>
+  <span class="hap" style="right: 26px; top: 557px"><svg class="i" aria-hidden="true"><use href="#i-haptic"/></svg>success · on Start</span>
+</div>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Settings · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .set-body {
+        padding-top: 0;
+      }
+      .set-body > .set-inner {
+        max-width: none;
+      }
+      /* One index tab per assistant, like the Topic tabs on Intake. */
+      .who-tabs {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        padding-top: 14px;
+        box-shadow: inset 0 -1px 0 var(--line);
+      }
+      .who-tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 14px 0 10px;
+        border-radius: 8px 8px 0 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .who-tab small {
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .who-tab.is-on {
+        color: var(--ink);
+        font-weight: 600;
+        background: var(--surface);
+        box-shadow:
+          inset 1px 0 0 var(--line),
+          inset -1px 0 0 var(--line),
+          inset 0 1px 0 var(--line);
+      }
+      .who-tabs .btn {
+        margin: 0 0 6px auto;
+      }
+      .ident {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 0 16px;
+      }
+      .ident h2 {
+        font-size: var(--t-title);
+        font-weight: 640;
+      }
+      .ident .role {
+        font-size: var(--t-ui);
+        color: var(--muted);
+      }
+      .ident .facts {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .fact {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 7px;
+        font-size: var(--t-ui);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .fact .mk {
+        width: 14px;
+        height: 14px;
+        color: var(--muted);
+      }
+      .fact s {
+        font-family: var(--mono);
+        color: var(--red);
+        text-decoration-thickness: 1.5px;
+      }
+      .record {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 356px;
+        gap: 36px;
+      }
+      .part + .part {
+        margin-top: 16px;
+        padding-top: 16px;
+        background: radial-gradient(circle, var(--hole) var(--perf-r), #0000 calc(var(--perf-r) + 0.45px)) 0 0 / var(--perf-pitch) 5px repeat-x;
+      }
+      .part > h3 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .part > h3 .aside {
+        font: 400 var(--t-sm) var(--sans);
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--faint);
+      }
+      .part > h3 .link {
+        margin-left: auto;
+        font: var(--w-emph) var(--t-sm) var(--sans);
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .line {
+        text-wrap: pretty;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .line b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      /* The core note: an index card Ada writes on. */
+      .core-card {
+        margin-top: 12px;
+        padding: 12px 14px 12px 18px;
+        border-radius: 8px;
+        background:
+          linear-gradient(to right, transparent 8px, color-mix(in oklch, var(--red) 40%, transparent) 8px 9.5px, transparent 9.5px),
+          repeating-linear-gradient(to bottom, transparent 0 21px, color-mix(in oklch, var(--violet) 12%, transparent) 21px 22px) 0 11px,
+          var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+        font-size: 13px;
+        line-height: 22px;
+        color: var(--ink);
+      }
+      /* A topic: its name and size on one line, the one-line gist under it. */
+      .mem-topics {
+        display: flex;
+        flex-direction: column;
+      }
+      .mem-topic {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 72px 38px;
+        align-items: center;
+        column-gap: 12px;
+        padding: 7px 0 8px;
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+      }
+      .mem-topic .n {
+        font: 12px var(--mono);
+      }
+      .mem-topic .g {
+        grid-column: 1 / -1;
+        margin-top: 1px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .mem-topic .sz {
+        text-align: right;
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .mem-topic .meter {
+        height: 5px;
+      }
+      .rems {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .rems .reminder {
+        display: grid;
+        margin: 0;
+        grid-template-columns: 46px 1fr;
+      }
+      .rems .leaf {
+        padding: 5px 0;
+        font-size: 9px;
+      }
+      .rems .leaf b {
+        font-size: 17px;
+      }
+      .rems .leaf.every {
+        background: var(--carbon);
+      }
+      .rems .what {
+        padding: 6px 12px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .rems .what b {
+        font-weight: 560;
+      }
+      .ctl {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .ctl .hint {
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .binds {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .binds div {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .binds .mk {
+        width: 15px;
+        height: 15px;
+        color: var(--muted);
+      }
+      .binds small {
+        margin-left: auto;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-kit="sidebar" data-face="hercule" data-active="settings"></aside>
+      <main class="main">
+        <div class="chrome ruled">
+          <span class="crumb">Settings /</span>
+          <h1>Assistants</h1>
+        </div>
+        <div class="settings">
+          <nav data-kit="setnav" data-active="assistants"></nav>
+          <div class="set-body">
+            <div class="set-inner">
+              <div class="who-tabs">
+                <a class="who-tab is-on"><span class="seal is-working">A</span>Ada<small>working</small></a>
+                <a class="who-tab"><span class="seal">M</span>Milo<small>idle</small></a>
+                <a class="who-tab"><span class="seal is-asleep">J</span>Juno<small>asleep</small></a>
+                <button class="btn btn--ghost btn--sm"><svg class="mk"><use href="#plus" /></svg>New assistant</button>
+              </div>
+
+              <div class="ident">
+                <span class="seal seal--xl is-working">A</span>
+                <div>
+                  <h2>Ada</h2>
+                  <div class="role">personal assistant</div>
+                </div>
+                <span class="rs rs--violet tilt-a"><i data-m="working" class="sm"></i>Working</span>
+                <div class="facts">
+                  <span class="fact"><svg class="mk"><use href="#b-claude" /></svg>Claude Code · Sonnet 5</span>
+                  <span class="fact"><svg class="mk"><use href="#shield" /></svg>Full access</span>
+                  <span class="fact">Disallowed <s>edit</s></span>
+                </div>
+              </div>
+
+              <div class="record">
+                <div>
+                  <div class="part">
+                    <h3 class="label">Memory · core note <span class="aside">always in her context</span><a class="link">Edit</a></h3>
+                    <div class="meter"><i style="width: 32%"></i></div>
+                    <div class="meter-line"><span>1,284 of 4,000 characters</span><span>32%</span></div>
+                    <div class="core-card">
+                      Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in
+                      English, Dutch and German…
+                    </div>
+                  </div>
+                  <div class="part">
+                    <h3 class="label">Memory · topics <span class="aside">7 of 24 · each up to 12,000 characters, read when relevant</span></h3>
+                    <div class="mem-topics">
+                      <div class="mem-topic"><span class="n">work-style</span><span class="meter"><i style="width: 10%"></i></span><span class="sz">1.2k</span><span class="g">Prefers short answers; decides fast; hates long preambles</span></div>
+                      <div class="mem-topic"><span class="n">webshop</span><span class="meter"><i style="width: 28%"></i></span><span class="sz">3.4k</span><span class="g">Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span></div>
+                      <div class="mem-topic"><span class="n">payments-api</span><span class="meter"><i style="width: 18%"></i></span><span class="sz">2.1k</span><span class="g">Owns webhooks + payouts; v2.x; publish via npm</span></div>
+                      <div class="mem-topic"><span class="n">ops</span><span class="meter"><i style="width: 15%"></i></span><span class="sz">1.8k</span><span class="g">Backups nightly 04:00 to B2; certs on status.acme.dev</span></div>
+                      <div class="mem-topic"><span class="n">customers</span><span class="meter"><i style="width: 23%"></i></span><span class="sz">2.7k</span><span class="g">Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span></div>
+                      <div class="mem-topic"><span class="n">family</span><span class="meter"><i style="width: 5%"></i></span><span class="sz">0.6k</span><span class="g">School run Tue/Thu; no meetings before 09:30</span></div>
+                      <div class="mem-topic"><span class="n">reading</span><span class="meter"><i style="width: 8%"></i></span><span class="sz">0.9k</span><span class="g">Wants summaries of the weekly Rust + Postgres newsletters</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="part">
+                    <h3 class="label">Heartbeat<a class="link">Change</a></h3>
+                    <p class="line"><b>Every 1 h</b>, 07:00 to 23:00 → Web chat. Silent when nothing matters.</p>
+                    <div class="beats" style="margin-top: 12px">
+                      <i class="q" title="07:00 quiet"></i><i class="q" title="08:00 quiet"></i><i class="s" title="09:00 spoke"></i><i class="n" title="10:00 next"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                    </div>
+                    <div class="beat-scale"><span>07</span><span>11</span><span>15</span><span>19</span><span>23</span></div>
+                  </div>
+                  <div class="part">
+                    <h3 class="label">Reminders 3<a class="link">Add</a></h3>
+                    <div class="rems">
+                      <div class="reminder"><span class="leaf">Thu<b>1</b>Oct</span><div class="what"><b>Call the accountant</b><span>16:00</span></div></div>
+                      <div class="reminder"><span class="leaf">Fri<b>2</b>Oct</span><div class="what"><b>Renew the SSL cert for ops</b><span>09:00</span></div></div>
+                      <div class="reminder"><span class="leaf every">Every<b>Mon</b></span><div class="what"><b>Weekly revenue summary</b><span>08:30</span></div></div>
+                    </div>
+                  </div>
+                  <div class="part">
+                    <h3 class="label">Rotation</h3>
+                    <p class="line">At <b>70%</b> of context or <b>200k</b> tokens, and daily at <b>04:00</b>.</p>
+                    <div class="ctl"><button class="btn btn--ghost btn--sm"><svg class="mk"><use href="#rotate" /></svg>Start fresh</button><span class="hint">Memory is kept</span></div>
+                  </div>
+                  <div class="part">
+                    <h3 class="label">Reply mode</h3>
+                    <div class="ctl" style="margin-top: 0">
+                      <div class="seg"><button class="is-on">Turn end</button><button>Segments</button></div>
+                      <span class="hint">One message when the turn is done</span>
+                    </div>
+                  </div>
+                  <div class="part">
+                    <h3 class="label">Channel bindings<a class="link">Add</a></h3>
+                    <div class="binds">
+                      <div><svg class="mk"><use href="#webchat" /></svg>Web chat<small>always</small></div>
+                      <div><svg class="mk"><use href="#b-slack" /></svg>Slack · acme-hq<small>DM with Rogier</small></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Fix 3-D Secure checkout · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="threads" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="chrome">
+          <button class="crumb-pick" title="Switch project or thread">webshop<i data-icon="down" class="v"></i></button>
+          <span class="crumb">/</span>
+          <button class="ttab" aria-selected="true"><i data-mark="wait"></i>Fix 3-D Secure checkout for EU cards</button>
+          <button class="ttab"><i data-mark="work"></i>Refactor cart totals</button>
+          <span class="right">
+            <span class="chip wait"><i data-mark="wait"></i>waiting on you · 2m</span>
+            <button class="btn sm"><i data-icon="plus" style="width: 13px; height: 13px"></i>New thread here</button>
+            <button class="icon-btn" title="Copy link to this thread"><i data-icon="link"></i></button>
+            <button class="icon-btn" title="More"><i data-icon="more"></i></button>
+          </span>
+        </header>
+
+        <div class="transcript" data-transcript>
+          <div class="column" style="padding-bottom: 400px">
+            <div class="stamp">Today · 09:02</div>
+            <div class="from">
+              <a href="intake.html"><i data-mark="proposal"></i>Started from the Proposal “Checkout fails for EU cards with 3-D Secure”<i data-icon="right" style="width: 11px; height: 11px"></i></a>
+            </div>
+            <div class="msg-me">
+              <div>Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+            </div>
+
+            <div class="worked">Worked for 2m 14s <span class="tally">read 6 files · ran 1 command</span><i data-icon="down"></i></div>
+            <div class="calls">
+              <div><span class="v">run</span>git log --oneline -3 main<span class="r">#1289 Upgrade Stripe SDK to v14</span></div>
+              <div><span class="v">read</span>src/checkout/payment.ts<span class="r">142 lines</span></div>
+              <div><span class="v">read</span>src/checkout/checkout.tsx<span class="r">318 lines</span></div>
+              <div><span class="v">read</span>src/checkout/3ds-modal.tsx<span class="r">64 lines</span></div>
+              <div><span class="v">read</span>node_modules/stripe/CHANGELOG.md<span class="r">v14.0.0 section</span></div>
+              <div><span class="v">read</span>src/checkout/payment.test.ts<span class="r">87 lines</span></div>
+              <div><span class="v">read</span>package.json<span class="r">stripe 14.2.0</span></div>
+            </div>
+
+            <div class="msg-agent">
+              <p>
+                Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need
+                3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats
+                everything else as a failure, so we show “Card declined” instead of opening the 3-D Secure modal.
+              </p>
+              <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> openThreeDSModal(result.clientSecret);
+}</pre>
+            </div>
+            <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+
+            <div class="worked">Worked for 4m 51s <span class="tally">edited 3 files · ran 2 commands</span><i data-icon="right"></i></div>
+
+            <div class="files">
+              <div class="head">
+                <i data-icon="diff" style="color: var(--faint)"></i><b>3 changed files</b><span class="plus mono">+48</span><span class="minus mono">-12</span>
+                <span class="right"><button class="btn sm ghost">Show files</button><button class="btn sm">Open diff</button></span>
+              </div>
+              <div class="f"><span class="grow">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span><span class="bar"><i class="p"></i><i class="p"></i><i class="p"></i><i class="m"></i><i class="m"></i></span></div>
+              <div class="f"><span class="grow">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span><span class="bar"><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i><i class="p"></i></span></div>
+              <div class="f"><span class="grow">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span><span class="bar"><i class="p"></i><i class="p"></i><i class="p"></i><i class="m"></i><i></i></span></div>
+              <div class="foot"><i data-mark="done"></i><b style="color: var(--ink); font-weight: 560">24 passed</b><span class="mono faint">pnpm test checkout</span></div>
+            </div>
+
+            <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+          </div>
+        </div>
+
+        <div class="composer" data-composer>
+          <div class="dock-mini">
+            <i data-mark="wait"></i><span class="mono" style="font-size: 12px">git push -u origin fix/3ds-eu-cards</span>
+            <button class="btn sm wait">Allow once</button><button class="btn sm">Deny</button>
+          </div>
+          <div class="queued">
+            <i data-mark="queued"></i>Also check the Apple Pay path<span class="state">queued · runs next</span>
+            <span class="act"><button class="sel">Steer</button><button class="sel">Cancel</button></span>
+          </div>
+          <div class="dock">
+            <i data-mark="wait"></i>
+            <div>
+              <div class="q">Run this command? <span class="who">Claude Code asks · 2m ago</span></div>
+              <div class="subject">git push -u origin fix/3ds-eu-cards</div>
+              <div class="ledger">
+                <button><span class="btn wait">Allow once</span><span><span class="d">Pushes this once; asks again next time</span><span class="k">⌘⏎</span></span></button>
+                <button><span class="btn">Always allow git push</span><span><span class="d">Adds a Grant for git push to this thread</span></span></button>
+                <button><span class="btn">Deny</span><span><span class="d">The agent keeps the branch local and stops</span><span class="k">esc</span></span></button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <textarea placeholder="Queued until the turn finishes…" aria-label="Message"></textarea>
+            <div class="tools">
+              <button class="icon-btn" title="Attach"><i data-icon="plus"></i></button>
+              <button class="sel"><i data-icon="edit"></i>Auto-accept edits</button>
+              <span class="grow"></span>
+              <button class="sel" style="color: var(--ink)">High<i data-icon="down" class="v"></i></button>
+              <span class="pill"><i data-brand="claude"></i>Opus 5.5</span>
+              <button class="icon-btn" title="Voice"><i data-icon="mic"></i></button>
+              <button class="send" title="Send ⏎"><i data-icon="send"></i></button>
+            </div>
+          </div>
+          <div class="lip">
+            <span><i data-icon="worktree"></i> webshop worktree</span><span class="rule"></span>
+            <span class="mono"><i data-icon="branch"></i> fix/3ds-eu-cards</span>
+            <span class="end"><i data-icon="machine"></i> studio-mac</span>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="work1" data-favicon-center="A">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · replying · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="web">
+      <nav class="rail" data-current="assistants" aria-label="Hercule"></nav>
+      <main class="main">
+        <header class="chrome">
+          <span class="crumb" style="margin-right: 8px">Assistants</span>
+          <a class="ttab" href="assistant.html" aria-selected="true"><span class="face sm working">A</span>Ada</a>
+          <a class="ttab" href="#"><span class="face sm idle">M</span>Milo</a>
+          <a class="ttab" href="#"><span class="face sm asleep">J</span>Juno</a>
+          <span class="chip work" style="margin-left: 12px"><i data-mark="work"></i>working · replying to you</span>
+          <span class="right">
+            <span class="chip line"><i data-brand="webchat"></i>Web chat</span>
+            <span class="chip line"><i data-brand="slack"></i>Slack · DM</span>
+            <button class="btn sm" style="margin-left: 6px">Start fresh</button>
+            <a class="icon-btn" href="settings-providers.html" title="Ada's settings"><i data-icon="sliders"></i></a>
+          </span>
+        </header>
+
+        <div class="asst">
+          <div class="asst-main">
+            <div class="transcript" data-transcript>
+              <div class="column" style="padding-bottom: 150px">
+                <div class="stamp">Yesterday · 22:13</div>
+                <div class="msg-me"><div>Summarize this week's Postgres newsletter for me.</div></div>
+                <div class="notice-line">
+                  <i data-mark="notice"></i>
+                  <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.<span class="faint mono" style="font-size: 11px; margin-left: 8px">22:14</span></span>
+                </div>
+
+                <div class="stamp">Today</div>
+                <div class="worked quiet"><i data-mark="heartbeat"></i>2 quiet check-ins <span class="tally">07:00 · 08:00 · nothing to say</span><i data-icon="right"></i></div>
+
+                <div class="said"><span class="face sm working">A</span><b>Ada</b><i data-mark="heartbeat"></i><span class="faint">heartbeat · 09:00</span></div>
+                <div class="msg-agent">
+                  <p>
+                    Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You
+                    started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I
+                    can draft that.
+                  </p>
+                  <div class="refs">
+                    <a class="ref wait" href="session-active.html"><i data-mark="wait"></i>Fix 3-D Secure checkout for EU cards<span class="state">waiting on you</span></a>
+                    <button class="ref"><i data-mark="offer"></i>Draft the reply to Marta</button>
+                  </div>
+                </div>
+
+                <div class="stamp">09:20</div>
+                <div class="msg-me"><div>Remind me Friday to renew the SSL cert for ops.</div></div>
+                <div class="said"><span class="face sm working">A</span><b>Ada</b><span class="faint">09:20</span></div>
+                <div class="msg-agent">
+                  <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+                  <div class="remind">
+                    <span class="day"><small>Fri</small><b>2</b></span>
+                    <span class="t">Renew the SSL cert for ops</span>
+                    <span class="w">Fri 2 Oct · 09:00 · here and in Slack</span>
+                    <span class="acts"><button class="btn sm ghost">Edit</button><button class="btn sm ghost">Cancel</button></span>
+                  </div>
+                </div>
+
+                <div class="stamp">09:38</div>
+                <div class="msg-me"><div>What's the status of the backup job?</div></div>
+                <div class="said"><span class="face sm working">A</span><b>Ada</b><span class="faint">replying · 3m</span></div>
+                <div class="msg-agent">
+                  <p>
+                    Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night
+                    since the table <code>events</code> passed 40 GB…<span class="caret" aria-label="Ada is still writing"></span>
+                  </p>
+                  <div class="refs">
+                    <a class="ref" href="office.html"><i data-mark="work"></i>Investigate backup timeouts<span class="faint">Milo's Run · working 6m</span></a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer" data-composer>
+              <div class="card">
+                <textarea placeholder="Message Ada…" aria-label="Message Ada"></textarea>
+                <div class="tools">
+                  <button class="icon-btn" title="Attach"><i data-icon="plus"></i></button>
+                  <span class="grow"></span>
+                  <span class="pill"><i data-brand="claude"></i>Claude Code · Sonnet 5</span>
+                  <button class="icon-btn" title="Voice"><i data-icon="mic"></i></button>
+                  <button class="send" title="Stop Ada's turn" style="background: var(--ink)"><i data-icon="stop"></i></button>
+                </div>
+              </div>
+              <div class="lip">
+                <span><i data-brand="webchat" class="ic"></i> Web chat</span><span class="rule"></span>
+                <span>replies at turn end</span>
+                <span class="end"><i data-icon="shield"></i> full access</span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="a-rail">
+            <h3>Heartbeat <span class="faint">every hour, 07:00-23:00</span></h3>
+            <div class="beat">
+              <span class="clock">
+                <span data-halo="asleep7 idle2 ink1 slot1 empty13" data-size="132" data-center="10:00" data-label="next"
+                  aria-label="Heartbeat clock, midnight at the top: 2 quiet check-ins, 1 that spoke, next at 10:00, 13 more today"></span>
+                <i class="h0">0</i><i class="h6">6</i><i class="h12">12</i><i class="h18">18</i>
+              </span>
+              <dl>
+                <dt><i class="sw-dot quiet"></i>2 quiet</dt>
+                <dt><i class="sw-dot spoke"></i>1 spoke · 09:00</dt>
+                <dt><i class="sw-dot next"></i>next · 10:00</dt>
+                <dt><i class="sw-dot later"></i>13 more today</dt>
+                <dt><i class="sw-dot off"></i>off · 23:00-07:00</dt>
+              </dl>
+            </div>
+
+            <h3>Memory <a href="#">Open</a></h3>
+            <div class="mem">
+              <span class="l">Core note</span><span class="v">1,284 of 4,000</span>
+              <span class="meter wide" style="--v: 0.321" role="img" aria-label="Core note: 1,284 of 4,000 characters"><i></i></span>
+            </div>
+            <div class="mem">
+              <span class="l">Topics</span><span class="v">7 of 24 · up to 12,000 each</span>
+              <span data-ticks="ink7.4 empty17.4" data-width="256" data-height="10" role="img" aria-label="7 of 24 topics"></span>
+            </div>
+            <div class="topics">
+              <div class="topic" title="Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only"><span class="n">webshop</span><span class="meter" style="--v: 0.283"><i></i></span><span class="sz">3.4k</span></div>
+              <div class="topic" title="Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)"><span class="n">customers</span><span class="meter" style="--v: 0.225"><i></i></span><span class="sz">2.7k</span></div>
+              <div class="topic" title="Owns webhooks + payouts; v2.x; publish via npm"><span class="n">payments-api</span><span class="meter" style="--v: 0.175"><i></i></span><span class="sz">2.1k</span></div>
+              <div class="topic" title="Backups nightly 04:00 to B2; certs on status.acme.dev"><span class="n">ops</span><span class="meter" style="--v: 0.15"><i></i></span><span class="sz">1.8k</span></div>
+              <div class="topic" title="Prefers short answers; decides fast; hates long preambles"><span class="n">work-style</span><span class="meter" style="--v: 0.1"><i></i></span><span class="sz">1.2k</span></div>
+              <div class="topic" title="Wants summaries of the weekly Rust + Postgres newsletters"><span class="n">reading</span><span class="meter" style="--v: 0.075"><i></i></span><span class="sz">0.9k</span></div>
+              <div class="topic" title="School run Tue/Thu; no meetings before 09:30"><span class="n">family</span><span class="meter" style="--v: 0.05"><i></i></span><span class="sz">0.6k</span></div>
+            </div>
+
+            <h3>Reminders <span class="faint">3</span></h3>
+            <div class="rem"><i data-mark="reminder"></i><span>Call the accountant</span><span class="w">Thu 1 Oct · 16:00</span></div>
+            <div class="rem new"><i data-mark="reminder"></i><span>Renew the SSL cert for ops</span><span class="w">Fri 2 Oct · 09:00 · set today</span></div>
+            <div class="rem"><i data-mark="reminder"></i><span>Weekly revenue summary</span><span class="w">every Monday · 08:30</span></div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

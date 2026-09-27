@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Proposal #318 · Intake · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<!-- Opened from the 09:00 notification. The evidence scrolls; the answers stay under the thumb. -->
+<div class="phone">
+  <nav class="m-nav">
+    <a class="m-back" href="intake.html"><i data-i="left"></i>Intake</a>
+    <span class="m-nav-t"><b>Proposal #318</b><small><i data-m="q" class="c-attn"></i>1 of 3 waiting on you</small></span>
+    <span class="end"><span class="m-btn"><i data-i="link"></i></span></span>
+  </nav>
+  <div class="m-body">
+    <div class="md">
+      <p class="md-arrive"><i data-i="bell"></i>From a notification · 09:00 · also in Slack</p>
+      <div class="dc-head"><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span><span class="dot-sep"></span><span>Checkout</span></div>
+      <h1>Checkout fails for EU cards with <span class="nw">3-D Secure</span></h1>
+      <p class="md-gist">Since deploy #1289, card payments that need <span class="nw">3-D Secure</span> fail for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+      <div class="md-figs">
+        <div class="md-fig"><b class="c-fail">&minus;18%</b><span>EU checkout conversion</span></div>
+        <div class="md-fig"><b>412</b><span>payment errors</span></div>
+        <div class="md-fig"><b>188</b><span>customers hit it</span></div>
+        <div class="md-fig"><b>3</b><span>customer emails</span></div>
+      </div>
+      <figure class="md-chart">
+        <figcaption class="md-legend"><span><i></i>EU</span><span><i class="row"></i>rest of the world</span><span style="margin-left:auto">48 hours · PostHog</span></figcaption>
+        <div class="chart-plot">
+          <svg viewBox="0 0 640 150" preserveAspectRatio="none" aria-hidden="true">
+                <g stroke="var(--line-soft)" stroke-width="1" vector-effect="non-scaling-stroke">
+                  <line x1="0" x2="640" y1="37.5" y2="37.5" vector-effect="non-scaling-stroke"/>
+                  <line x1="0" x2="640" y1="75" y2="75" vector-effect="non-scaling-stroke"/>
+                  <line x1="0" x2="640" y1="112.5" y2="112.5" vector-effect="non-scaling-stroke"/>
+                </g>
+                <rect x="378" y="0" width="262" height="150" fill="var(--fail)" opacity="0.06"/>
+                <line x1="378" x2="378" y1="0" y2="150" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+                <path d="M0.0,72.6 L6.7,72.3 L13.3,69.2 L20.0,67.3 L26.7,67.1 L33.3,69.0 L40.0,62.9 L46.7,66.9 L53.3,61.1 L60.0,65.0 L66.7,67.5 L73.3,65.6 L80.0,67.0 L86.7,62.0 L93.3,64.1 L100.0,66.1 L106.7,69.0 L113.3,68.6 L120.0,67.7 L126.7,67.3 L133.3,70.3 L140.0,68.2 L146.7,70.1 L153.3,68.8 L160.0,74.1 L166.7,76.3 L173.3,72.4 L180.0,75.2 L186.7,74.6 L193.3,76.0 L200.0,78.6 L206.7,76.9 L213.3,78.4 L220.0,74.9 L226.7,77.2 L233.3,76.9 L240.0,74.6 L246.7,79.7 L253.3,76.5 L260.0,77.6 L266.7,79.6 L273.3,74.1 L280.0,77.3 L286.7,71.8 L293.3,74.1 L300.0,69.9 L306.7,69.1 L313.3,71.5 L320.0,67.1 L326.7,71.7 L333.3,70.2 L340.0,67.5 L346.7,68.4 L353.3,66.5 L360.0,64.8 L366.7,63.4 L373.3,63.6 L380.0,67.6 L386.7,62.0 L393.3,61.8 L400.0,64.9 L406.7,63.4 L413.3,68.0 L420.0,67.7 L426.7,69.1 L433.3,69.0 L440.0,68.2 L446.7,65.1 L453.3,71.4 L460.0,70.9 L466.7,73.5 L473.3,67.9 L480.0,72.6 L486.7,76.4 L493.3,76.1 L500.0,77.7 L506.7,72.5 L513.3,79.2 L520.0,80.7 L526.7,74.1 L533.3,76.6 L540.0,79.3 L546.7,76.4 L553.3,76.3 L560.0,80.4 L566.7,74.5 L573.3,75.5 L580.0,75.5 L586.7,76.6 L593.3,79.6 L600.0,77.0 L606.7,73.1 L613.3,74.1 L620.0,69.1 L626.7,72.9 L633.3,73.0 L640.0,72.2" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
+                <path d="M0.0,52.8 L6.7,48.2 L13.3,48.3 L20.0,52.3 L26.7,51.5 L33.3,50.4 L40.0,45.9 L46.7,48.5 L53.3,42.7 L60.0,42.9 L66.7,38.5 L73.3,39.7 L80.0,47.4 L86.7,45.9 L93.3,47.7 L100.0,43.5 L106.7,45.1 L113.3,51.1 L120.0,45.5 L126.7,50.3 L133.3,49.9 L140.0,47.5 L146.7,54.4 L153.3,52.7 L160.0,51.7 L166.7,50.2 L173.3,57.2 L180.0,61.0 L186.7,63.1 L193.3,56.4 L200.0,55.9 L206.7,58.4 L213.3,60.1 L220.0,57.7 L226.7,61.7 L233.3,66.1 L240.0,59.8 L246.7,57.7 L253.3,61.8 L260.0,65.1 L266.7,62.9 L273.3,63.2 L280.0,61.5 L286.7,57.8 L293.3,60.0 L300.0,53.9 L306.7,49.9 L313.3,54.4 L320.0,52.4 L326.7,45.0 L333.3,52.1 L340.0,50.4 L346.7,45.8 L353.3,51.1 L360.0,46.5 L366.7,39.7 L373.3,43.9 L380.0,75.0" fill="none" stroke="var(--ink)" stroke-width="1.75" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+                <path d="M380.0,75.0 L386.7,86.1 L393.3,86.4 L400.0,91.5 L406.7,94.8 L413.3,95.6 L420.0,94.5 L426.7,93.7 L433.3,97.9 L440.0,97.6 L446.7,99.2 L453.3,93.9 L460.0,98.6 L466.7,98.3 L473.3,94.2 L480.0,99.1 L486.7,104.0 L493.3,102.2 L500.0,97.9 L506.7,107.2 L513.3,102.5 L520.0,103.0 L526.7,103.6 L533.3,100.5 L540.0,107.0 L546.7,108.2 L553.3,104.3 L560.0,106.4 L566.7,101.1 L573.3,100.3 L580.0,100.2 L586.7,105.9 L593.3,103.9 L600.0,106.6 L606.7,103.3 L613.3,95.1 L620.0,94.4 L626.7,93.3 L633.3,100.1 L640.0,99.4" fill="none" stroke="var(--fail)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              </svg>
+          <span class="chart-mark" style="left:59.06%">#1289</span>
+          <span class="chart-note" style="left:3%;top:10%;color:var(--muted)">3.3% before</span>
+          <span class="chart-note c-fail" style="left:72%;top:80%">2.7% since</span>
+        </div>
+        <div class="md-chart-k"><span>Sun 12:00</span><span>Mon 12:00</span><span>now</span></div>
+      </figure>
+      <a class="md-live" href="session-active.html"><i data-m="session" style="color:var(--project-webshop)"></i><span>Your Thread from 09:02 is <b>waiting on you</b></span><i data-i="right"></i></a>
+      <p class="aside-voice"><i class="orb" data-v="ada" data-p="idle" style="--size:16px"></i><span>I can also draft a reply to the 3 customers once the fix ships.</span></p>
+      <h2 class="md-h">Made from<small>4 sources · 548 events</small></h2>
+      <div class="msrc"><i data-b="sentry"></i><div><b>Sentry · webshop-prod</b><p><code>PaymentError: authentication_required</code> · 412 events · 188 users</p></div></div>
+      <div class="msrc"><i data-b="gmail"></i><div><b>Gmail · rogier@personal</b><p>3 customer emails, 08:12 to 08:47</p></div></div>
+      <div class="msrc"><i data-b="posthog"></i><div><b>PostHog · webshop</b><p>Conversion &minus;18% since 14:10 yesterday, EU only</p></div></div>
+      <div class="msrc"><i data-b="github"></i><div><b>GitHub · rogier/webshop</b><p>Deploy #1289 · “Upgrade Stripe SDK to v14” · 14:02</p></div></div>
+    </div>
+  </div>
+
+  <section class="m-dock" aria-label="Answers">
+    <span class="grab"></span>
+    <div class="m-dock-h"><i data-m="q" class="c-attn"></i><b>Your answer</b><span class="end haptic"><i data-i="haptic"></i>firm tap when it starts</span></div>
+    <div class="m-ledger">
+      <button class="m-ans is-primary"><span><b>Start “Fix bug”</b><span>Starts <em>Fix bug</em> on <em>webshop</em> in a new worktree</span><small>Claude Code · Opus 5.5 · studio-mac</small></span><i data-i="right"></i></button>
+      <button class="m-ans"><span><b>Accept</b><span>Adds it to the backlog as a Task</span></span></button>
+      <button class="m-ans"><span><b>Dismiss</b><span>Closes the Proposal</span></span></button>
+    </div>
+  </section>
+</div>
+</body>
+</html>

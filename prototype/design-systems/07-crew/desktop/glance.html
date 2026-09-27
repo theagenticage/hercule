@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>At a glance · Hercule</title>
+    <style>
+      /* The Mac desktop: a soft wallpaper tinted from the crew wheel, following the theme's lightness. */
+      .desk {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background:
+          radial-gradient(70% 80% at 12% 18%, color-mix(in oklab, oklch(0.72 0.13 52) 55%, var(--bg)) 0%, transparent 60%),
+          radial-gradient(60% 70% at 88% 12%, color-mix(in oklab, oklch(0.7 0.12 282) 50%, var(--bg)) 0%, transparent 62%),
+          radial-gradient(80% 70% at 70% 100%, color-mix(in oklab, oklch(0.72 0.11 166) 45%, var(--bg)) 0%, transparent 65%),
+          radial-gradient(60% 60% at 10% 100%, color-mix(in oklab, oklch(0.7 0.12 345) 40%, var(--bg)) 0%, transparent 60%),
+          var(--bg);
+      }
+      .menubar {
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        height: 30px;
+        padding: 0 14px 0 18px;
+        background: color-mix(in oklab, var(--bg) 55%, transparent);
+        backdrop-filter: blur(24px) saturate(1.4);
+        -webkit-backdrop-filter: blur(24px) saturate(1.4);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .menubar b {
+        font-weight: var(--w-bold);
+      }
+      .menubar .mb-right {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-left: auto;
+      }
+      .mb-right .ic {
+        opacity: 0.85;
+      }
+      .extra {
+        position: absolute;
+        left: 872px;
+        top: 3px;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 8px 0 6px;
+        border-radius: 6px;
+        background: color-mix(in oklab, var(--ink) 14%, transparent);
+      }
+      .extra b {
+        display: grid;
+        place-items: center;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: var(--you);
+        color: var(--face-ink);
+        font-size: var(--t-11);
+      }
+
+      /* A hint of another app: the code editor Rogier was in. */
+      .editor {
+        position: absolute;
+        left: 40px;
+        top: 62px;
+        width: 880px;
+        height: 660px;
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        grid-template-rows: 38px 1fr;
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--surface);
+        box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+        opacity: 0.9;
+      }
+      .ed-top {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 14px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .ed-top .tl i {
+        background: var(--line) !important;
+      }
+      .ed-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 6px;
+      }
+      .ed-tab.is-on {
+        background: var(--surface);
+        color: var(--muted);
+      }
+      .ed-tree {
+        padding: 12px 10px;
+        background: var(--bg);
+        border-right: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+        line-height: 2;
+      }
+      .ed-tree .on {
+        color: var(--muted);
+      }
+      .ed-code {
+        margin: 0;
+        padding: 14px 18px;
+        color: var(--faint);
+        font: 12px/1.9 var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        white-space: pre;
+      }
+      .ed-code .k {
+        color: var(--muted);
+      }
+
+      /* The global-hotkey quick panel. */
+      .quick {
+        position: absolute;
+        left: 92px;
+        top: 150px;
+        z-index: 3;
+        width: 616px;
+        border-radius: var(--r-xl);
+        background: var(--glass);
+        backdrop-filter: blur(28px) saturate(1.4);
+        -webkit-backdrop-filter: blur(28px) saturate(1.4);
+        box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 30px 80px -20px oklch(0.15 0.03 60 / 0.45), var(--shadow-3);
+        overflow: hidden;
+      }
+      .q-in {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 58px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .q-in input {
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: var(--ink);
+        font: inherit;
+        font-size: var(--t-18);
+      }
+      .q-in input::placeholder {
+        color: var(--faint);
+      }
+      .q-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px;
+      }
+      .q-h {
+        padding: 8px 12px 4px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .q-row {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        padding: 6px 12px 6px 8px;
+        border-radius: var(--r-md);
+      }
+      .q-row.is-on {
+        background: color-mix(in oklab, var(--raised) 80%, transparent);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        align-items: start;
+        padding-top: 10px;
+        padding-bottom: 10px;
+      }
+      .q-what {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .q-what b {
+        font-weight: var(--w-medium);
+      }
+      .q-what span {
+        overflow: hidden;
+        color: var(--muted);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .q-what code {
+        font-size: 12px;
+      }
+      .q-row .ledger {
+        grid-column: 2 / -1;
+        margin-top: 8px;
+        gap: 2px;
+      }
+      .q-row .ans {
+        grid-template-columns: 172px 1fr auto;
+        gap: 12px;
+        min-height: 36px;
+      }
+      .q-foot {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 38px;
+        padding: 0 18px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .q-foot span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      /* The menu bar extra's popover. */
+      .pop {
+        position: absolute;
+        left: 734px;
+        top: 38px;
+        z-index: 4;
+        width: 330px;
+        border-radius: var(--r-lg);
+        background: var(--glass);
+        backdrop-filter: blur(28px) saturate(1.4);
+        -webkit-backdrop-filter: blur(28px) saturate(1.4);
+        box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+      }
+      .pop-h {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 12px 14px 10px;
+      }
+      .pop-h b {
+        font-weight: var(--w-bold);
+      }
+      .pop-h span {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .pop-sec {
+        padding: 6px 8px 8px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .pop-sec .q-h {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 6px 6px;
+      }
+      .ask {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 4px 10px;
+        padding: 7px 6px;
+        border-radius: var(--r-md);
+      }
+      .ask:hover {
+        background: var(--hover);
+      }
+      .ask b {
+        font-weight: var(--w-medium);
+      }
+      .ask .q-what span {
+        font-size: var(--t-12);
+      }
+      .ask-acts {
+        grid-column: 2;
+        display: flex;
+        gap: 6px;
+        margin-top: 3px;
+      }
+      .line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px;
+        border-radius: var(--r-md);
+        font-size: var(--t-12);
+      }
+      .line:hover {
+        background: var(--hover);
+      }
+      .line .grow {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--muted);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .line .grow b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .pop-foot {
+        display: flex;
+        justify-content: space-between;
+        padding: 9px 14px 11px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .pop-foot span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* Native notifications, top right. */
+      .notes {
+        position: absolute;
+        right: 14px;
+        top: 40px;
+        z-index: 3;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 344px;
+      }
+      .note {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr) auto;
+        gap: 2px 11px;
+        padding: 12px 12px 12px 12px;
+        border-radius: 18px;
+        background: var(--glass);
+        backdrop-filter: blur(28px) saturate(1.5);
+        -webkit-backdrop-filter: blur(28px) saturate(1.5);
+        box-shadow: inset 0 0 0 1px var(--line-soft), inset 0 1px 0 var(--glass-edge), var(--shadow-2);
+        font-size: var(--t-13);
+      }
+      .note > .app-icon {
+        --size: 38px;
+        grid-row: span 2;
+      }
+      .note-top {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
+      }
+      .note-top b {
+        font-weight: var(--w-bold);
+      }
+      .note-top small {
+        margin-left: auto;
+        color: var(--faint);
+        font-size: var(--t-11);
+      }
+      .note-body {
+        grid-column: 2;
+        color: var(--ink);
+        line-height: 1.35;
+      }
+      .note-body code {
+        font-size: 12px;
+      }
+      .note > .cr {
+        grid-column: 3;
+        grid-row: 1 / span 2;
+        align-self: center;
+      }
+      .note-acts {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .note-acts .btn {
+        height: 30px;
+        background: color-mix(in oklab, var(--raised) 70%, transparent);
+      }
+      .note-acts .btn--you {
+        background: var(--you);
+      }
+      .note-reply {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        margin-top: 10px;
+        padding: 0 6px 0 12px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--raised) 70%, transparent);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        color: var(--faint);
+      }
+      .note-reply .send {
+        width: 24px;
+        height: 24px;
+        margin-left: auto;
+      }
+      .note--stacked {
+        position: relative;
+        margin-bottom: 12px;
+      }
+      .note--stacked::after,
+      .note--stacked::before {
+        content: "";
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: -6px;
+        height: 12px;
+        z-index: -1;
+        border-radius: 0 0 16px 16px;
+        background: var(--glass-thin);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .note--stacked::before {
+        left: 20px;
+        right: 20px;
+        bottom: -12px;
+      }
+
+      /* A popped-out thread: any thread can live in its own small window. */
+      .mini {
+        position: absolute;
+        right: 14px;
+        top: 392px;
+        z-index: 2;
+        width: 344px;
+        height: 304px;
+        display: flex;
+        flex-direction: column;
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--surface);
+        box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+      }
+      .mini-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 40px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--line-soft);
+        font-weight: var(--w-medium);
+        font-size: var(--t-12);
+      }
+      .mini-top .tl {
+        margin-right: 4px;
+      }
+      .mini-top .time {
+        margin-left: auto;
+      }
+      .mini-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 12px 14px;
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .mini-body p {
+        margin: 0;
+      }
+      .mini .bubble {
+        padding: 7px 11px;
+        font-size: var(--t-12);
+      }
+      .mini .worked {
+        font-size: var(--t-12);
+      }
+      .mini-comp {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        margin: 0 10px 10px;
+        padding: 0 6px 0 12px;
+        border-radius: var(--r-md);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .mini-comp .stop {
+        width: 24px;
+        height: 24px;
+        margin-left: auto;
+      }
+
+      /* The dock. */
+      .dock-bar {
+        position: absolute;
+        left: 50%;
+        bottom: 8px;
+        z-index: 2;
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        padding: 8px 10px 10px;
+        border-radius: 22px;
+        transform: translateX(-50%);
+        background: color-mix(in oklab, var(--bg) 45%, transparent);
+        backdrop-filter: blur(24px) saturate(1.4);
+        -webkit-backdrop-filter: blur(24px) saturate(1.4);
+        box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow-2);
+      }
+      .dk {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 54px;
+        height: 54px;
+        border-radius: 23%;
+        color: #fff;
+        box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.35), 0 2px 6px oklch(0 0 0 / 0.2);
+      }
+      .dk-run::after,
+      .dock-bar .app-icon::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -7px;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--ink);
+        opacity: 0.6;
+        transform: translateX(-50%);
+      }
+      .dock-bar .app-icon {
+        --size: 54px;
+      }
+      .dock-sep {
+        align-self: stretch;
+        width: 1px;
+        margin: 4px 2px;
+        background: var(--line);
+      }
+      .dock-tip {
+        position: absolute;
+        bottom: 76px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="desk">
+      <header class="menubar">
+        <b>Editor</b><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span>
+        <span class="extra" title="Hercule: 3 waiting on you"><i data-logo="18" data-mono></i><b>3</b></span>
+        <span class="mb-right">
+          <i data-i="search" data-size="15"></i>
+          <i data-i="sliders" data-size="15"></i>
+          <svg width="22" height="11" viewBox="0 0 27 13" aria-hidden="true"><rect x=".5" y=".5" width="23" height="12" rx="3.6" fill="none" stroke="currentColor" opacity=".5" /><rect x="2" y="2" width="15" height="9" rx="2.2" fill="currentColor" /><path d="M25 4.4v4.2c.8-.3 1.4-1.1 1.4-2.1s-.6-1.8-1.4-2.1z" fill="currentColor" opacity=".5" /></svg>
+          <span>Tue 29 Sep&nbsp; 09:41</span>
+        </span>
+      </header>
+
+      <div class="editor" aria-hidden="true">
+        <div class="ed-top"><span class="tl"><i></i><i></i><i></i></span><span class="ed-tab is-on">payment.ts</span><span class="ed-tab">3ds-modal.tsx</span><span class="spacer"></span><span>webshop · fix/3ds-eu-cards</span></div>
+        <div class="ed-tree">webshop<br />&nbsp; src<br />&nbsp;&nbsp;&nbsp; cart<br />&nbsp;&nbsp;&nbsp; checkout<br /><span class="on">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; payment.ts</span><br />&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; payment.test.ts<br />&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3ds-modal.tsx<br />&nbsp;&nbsp;&nbsp; lib<br />&nbsp; package.json</div>
+<pre class="ed-code"><span class="k">export async function</span> handlePaymentResult(result: PaymentResult) {
+  <span class="k">if</span> (result.status === "succeeded") {
+    <span class="k">return</span> showReceipt(result.paymentIntent);
+  }
+  <span class="k">if</span> (result.status === "requires_action") {
+    <span class="k">return</span> openThreeDSModal(result.clientSecret);
+  }
+  <span class="k">return</span> showCardDeclined(result.error);
+}
+
+<span class="k">export function</span> openThreeDSModal(clientSecret: string) {
+  <span class="k">const</span> modal = mountModal(ThreeDSModal, { clientSecret });
+  <span class="k">return</span> modal.result;
+}</pre>
+      </div>
+
+      <section class="quick" aria-label="Quick panel">
+        <div class="q-in"><i data-logo="24"></i><input placeholder="Answer, ask Ada, or start a thread…" /><kbd>esc</kbd></div>
+        <div class="q-list">
+          <div class="q-h">Waiting on you · 3</div>
+          <div class="q-row is-on">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="34"></i>
+            <div class="q-what">
+              <b>Fix 3-D Secure checkout <span class="proj proj--webshop" style="font-size: 12px; margin-left: 6px">webshop</span></b>
+              <span>Run <code>git push -u origin fix/3ds-eu-cards</code>?</span>
+            </div>
+            <span class="time">2m</span>
+            <div class="ledger">
+              <div class="ans"><button class="btn btn--you btn--sm">Allow once</button><span class="ans-desc">Pushes the branch; asks again next time</span><kbd>↩</kbd></div>
+              <div class="ans"><button class="btn btn--sm">Always allow git push</button><span class="ans-desc">Adds a Grant for this thread</span><kbd>⌘↩</kbd></div>
+              <div class="ans"><button class="btn btn--sm">Deny</button><span class="ans-desc">The agent stops and asks what next</span><kbd>⌫</kbd></div>
+            </div>
+          </div>
+          <div class="q-row">
+            <i data-face="Ship release" data-pose="waiting" data-size="30"></i>
+            <div class="q-what"><b>Ship release v2.15</b><span>Publish payments-api 2.15.0 to npm?</span></div>
+            <kbd>2</kbd>
+          </div>
+          <div class="q-row">
+            <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="30"></i>
+            <div class="q-what"><b>Migrate ops dashboards</b><span>Keep the old Grafana folder?</span></div>
+            <kbd>3</kbd>
+          </div>
+          <div class="q-h">From Intake</div>
+          <div class="q-row">
+            <i data-face="Triage" data-pose="idle" data-size="30"></i>
+            <div class="q-what"><b>Checkout fails for EU cards with 3-D Secure</b><span>Urgent · webshop · 412 Sentry events</span></div>
+            <button class="btn btn--who btn--sm" style="--hue: var(--hue-iris)"><i data-face="Fix bug" data-pose="idle" data-size="20"></i>Start "Fix bug"</button>
+          </div>
+        </div>
+        <div class="q-foot"><span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>↩</kbd> answer</span><span><kbd>⇥</kbd> ask Ada instead</span><span class="spacer"></span><span><kbd>⌥</kbd><kbd>Space</kbd> anywhere</span></div>
+      </section>
+
+      <section class="pop" aria-label="Hercule menu">
+        <div class="pop-h"><i data-logo="20"></i><b>Hercule</b><span>23 live · 3 machines</span></div>
+        <div class="pop-sec">
+          <div class="q-h">Waiting on you <b class="count count--you">3</b></div>
+          <div class="ask">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="32"></i>
+            <div class="q-what"><b>Fix 3-D Secure checkout</b><span>Run <code>git push</code>?</span></div>
+            <div class="ask-acts"><button class="btn btn--you btn--sm">Allow once</button><button class="btn btn--sm">Deny</button></div>
+          </div>
+          <div class="ask">
+            <i data-face="Ship release" data-pose="waiting" data-size="32"></i>
+            <div class="q-what"><b>Ship release v2.15</b><span>Publish to npm?</span></div>
+            <div class="ask-acts"><button class="btn btn--you btn--sm">Allow once</button><button class="btn btn--sm">Deny</button></div>
+          </div>
+          <div class="ask">
+            <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="32"></i>
+            <div class="q-what"><b>Migrate ops dashboards</b><span>Keep the old Grafana folder?</span></div>
+            <div class="ask-acts"><button class="btn btn--sm">Keep</button><button class="btn btn--sm">Delete</button></div>
+          </div>
+        </div>
+        <div class="pop-sec">
+          <a class="line" href="office.html"><span class="stack"><i data-face="Refactor cart totals" data-pose="working" data-size="22"></i><i data-face="Investigate" data-pose="working" data-size="22"></i><i data-face="Fix bug" data-pose="working" data-size="22"></i><i data-face="Ada" data-pose="working" data-size="22"></i></span><span class="grow"><b>8 working</b> · 12 idle</span><i data-i="chev-r" data-size="13"></i></a>
+          <a class="line" href="intake.html"><span class="stack"><i data-face="Triage" data-pose="idle" data-size="22"></i></span><span class="grow"><b>9 in Intake</b> · 1 urgent: EU card checkout</span><i data-i="chev-r" data-size="13"></i></a>
+          <a class="line" href="assistant.html"><span class="stack"><i data-face="Ada" data-pose="working" data-size="22"></i><i data-face="Milo" data-pose="idle" data-size="22"></i><i data-face="Juno" data-pose="asleep" data-size="22"></i></span><span class="grow"><b>Ada</b> is answering you</span><i data-i="chev-r" data-size="13"></i></a>
+        </div>
+        <div class="pop-foot"><span>Open Hercule <kbd>⌘0</kbd></span><span>Quick panel <kbd>⌥</kbd><kbd>Space</kbd></span></div>
+      </section>
+
+      <div class="notes">
+        <div class="note">
+          <span class="app-icon" data-theme="studio"><i data-logo="28"></i></span>
+          <div class="note-top"><b>Ship release v2.15</b><small>now</small></div>
+          <div class="note-body">Publish payments-api 2.15.0 to npm?</div>
+          <i data-face="Ship release" data-pose="waiting" data-size="36"></i>
+          <div class="note-acts"><button class="btn btn--you">Allow once</button><button class="btn">Deny</button></div>
+        </div>
+        <div class="note">
+          <span class="app-icon" data-theme="studio"><i data-logo="28"></i></span>
+          <div class="note-top"><b>Ada</b><small>09:00</small></div>
+          <div class="note-body">Morning Rogier. One urgent thing…</div>
+          <i data-face="Ada" data-pose="idle" data-size="36"></i>
+          <div class="note-reply">Reply to Ada<button class="send" title="Send"><i data-i="send" data-size="13"></i></button></div>
+        </div>
+        <div class="note note--stacked">
+          <span class="app-icon" data-theme="studio"><i data-logo="28"></i></span>
+          <div class="note-top"><b>Intake · urgent</b><small>08:52</small></div>
+          <div class="note-body">Checkout fails for EU cards with 3-D Secure</div>
+          <i data-face="Triage" data-pose="idle" data-size="36"></i>
+        </div>
+      </div>
+
+      <section class="mini" aria-label="Refactor cart totals, popped out">
+        <div class="mini-top"><span class="tl"><i></i><i></i><i></i></span><i data-face="Refactor cart totals" data-pose="working" data-size="22"></i>Refactor cart totals<span class="time">working 22m</span></div>
+        <div class="mini-body">
+          <div class="msg--me"><div><div class="bubble">Refactor cart totals so rounding happens once, after discounts.</div></div></div>
+          <p>Moved the rounding into <code>cartTotals()</code> so discounts and VAT round once, at the end.</p>
+          <div class="worked"><b>Working for 1m 40s</b><span class="tools">ran pnpm test cart</span></div>
+        </div>
+        <div class="mini-comp">Steer Refactor cart totals…<button class="stop" title="Stop"><i data-i="stop" data-size="12"></i></button></div>
+      </section>
+
+      <nav class="dock-bar">
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.62 0.1 240), oklch(0.48 0.12 250))"><i data-i="globe" data-size="26"></i></span>
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.4 0.03 250), oklch(0.26 0.03 250))"><i data-i="terminal" data-size="26"></i></span>
+        <span class="dk" style="background: linear-gradient(160deg, oklch(0.7 0.14 165), oklch(0.55 0.13 160))"><i data-i="chat" data-size="26"></i></span>
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.68 0.12 240), oklch(0.56 0.14 255))"><i data-i="mail" data-size="26"></i></span>
+        <span class="dk" style="background: linear-gradient(160deg, oklch(0.98 0 0), oklch(0.9 0 0)); color: oklch(0.6 0.2 27)"><i data-i="calendar" data-size="26"></i></span>
+        <span class="dock-sep"></span>
+        <span class="app-icon" data-theme="studio" title="Hercule"><i data-logo="40"></i><b class="app-icon-badge">3</b></span>
+      </nav>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

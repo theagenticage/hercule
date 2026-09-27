@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en" data-theme="prism">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glance · Hercule on the desktop</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<style>
+
+body { background: var(--bg); }
+/* The wallpaper: a dusk over dunes, mixed from the theme's ground so it follows light and dark. */
+.desk { position: fixed; inset: 0; overflow: hidden;
+  background: linear-gradient(180deg,
+    color-mix(in oklab, oklch(0.62 0.07 240) 42%, var(--bg)) 0%,
+    color-mix(in oklab, oklch(0.8 0.06 70) 46%, var(--bg)) 62%,
+    color-mix(in oklab, oklch(0.74 0.08 50) 50%, var(--bg)) 100%); }
+.desk svg.dunes { position: absolute; left: 0; bottom: 0; width: 1440px; height: 520px; }
+.dunes .d1 { fill: color-mix(in oklab, oklch(0.7 0.07 55) 52%, var(--bg)); }
+.dunes .d2 { fill: color-mix(in oklab, oklch(0.62 0.07 45) 56%, var(--bg)); }
+.dunes .d3 { fill: color-mix(in oklab, oklch(0.52 0.06 40) 58%, var(--bg)); }
+
+/* Menu bar */
+.mbar { position: absolute; inset: 0 0 auto; height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 14px;
+  background: color-mix(in oklab, var(--bg) 58%, transparent); -webkit-backdrop-filter: blur(30px) saturate(1.6); backdrop-filter: blur(30px) saturate(1.6);
+  font-size: 13px; color: var(--ink); z-index: 10; }
+.mbar .m { padding: 0 9px; height: 22px; display: inline-flex; align-items: center; border-radius: 5px; }
+.mbar .m.app { font-weight: var(--w-strong); }
+.mbar .x { height: 22px; min-width: 28px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 5px; }
+.mbar .x .i { width: 15px; height: 15px; }
+.mbar .x.on { background: color-mix(in oklab, var(--ink) 12%, transparent); }
+.mbar .clock { padding: 0 8px; font-variant-numeric: tabular-nums; }
+.mb-band { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; }
+.mb-band i { width: 2.5px; border-radius: 1px; background: var(--p); }
+.mb-band b { width: 2px; }
+.mb-q { display: inline-flex; align-items: center; gap: 1px; height: 15px; padding: 0 5px 0 2px; border-radius: 5px; background: var(--attn); color: var(--on-attn); font-size: 11px; font-weight: var(--w-strong); }
+.mb-q .i { width: 11px; height: 11px; }
+.batt { width: 24px; height: 11.5px; border-radius: 3.5px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 45%, transparent); padding: 2px; position: relative; }
+.batt::before { content: ""; display: block; height: 100%; width: 78%; border-radius: 1.5px; background: var(--ink); }
+.batt::after { content: ""; position: absolute; right: -3px; top: 3.5px; width: 1.5px; height: 4.5px; border-radius: 0 1px 1px 0; background: color-mix(in oklab, var(--ink) 45%, transparent); }
+
+/* Another app, behind: a code editor on the same fix. */
+.other { position: absolute; left: 24px; top: 58px; width: 880px; height: 690px; border-radius: 12px; overflow: hidden;
+  background: #1d1e21; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.5), 0 24px 60px -16px rgb(0 0 0 / 0.45); color: #b9bcc2; font-size: 12px; display: grid; grid-template-rows: 36px 1fr; grid-template-columns: 210px 1fr; }
+.other .tb { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #26282c; border-bottom: 1px solid #0f1012; color: #8b8f96; }
+.other .tb .traffic { position: static; }
+.other .tb .fn { margin: 0 auto; transform: translateX(-30px); }
+.other .tree { padding: 12px 10px; background: #212326; border-right: 1px solid #0f1012; display: flex; flex-direction: column; gap: 5px; }
+.other .tree span { padding-left: calc(var(--d, 0) * 12px); color: #8b8f96; white-space: nowrap; }
+.other .tree span.on { color: #e3e5e8; background: #2e3136; border-radius: 4px; margin: 0 -6px; padding-right: 6px; padding-left: calc(var(--d, 0) * 12px + 6px); }
+.other pre { margin: 0; padding: 14px 18px; font: 12px/1.75 var(--font-mono); font-stretch: var(--mono-stretch); color: #c7cad0; white-space: pre; }
+.other pre .n { color: #5b5f66; display: inline-block; width: 28px; }
+.other pre .k { color: #c9a2f0; }
+.other pre .s { color: #9fd49a; }
+.other pre .c { color: #6c7078; }
+.other pre .hl { background: rgb(255 255 255 / 0.05); display: inline-block; width: 100%; }
+
+/* Menu bar extra */
+.mx { position: absolute; top: 34px; left: 706px; width: 340px; border-radius: 14px; padding: 12px 14px 10px; z-index: 20;
+  background: color-mix(in oklab, var(--raised) 86%, transparent); -webkit-backdrop-filter: blur(34px) saturate(1.6); backdrop-filter: blur(34px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-3); }
+.mx-h { display: flex; align-items: center; gap: 8px; font-weight: var(--w-strong); }
+.mx-h .logo { width: 16px; height: 16px; }
+.mx-h .sub { font-weight: var(--w-regular); font-size: var(--t-meta); color: var(--muted); }
+.mx .band { --chrome: color-mix(in oklab, var(--ink) 4%, var(--raised)); margin-top: 4px; }
+.mx .pulse { margin-top: 6px; }
+.mx-sec { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.mx-sh { display: flex; align-items: center; gap: 6px; font-size: var(--t-meta); font-weight: var(--w-medium); color: var(--muted); margin-bottom: 4px; }
+.mx-sh .n { color: var(--faint); font-weight: var(--w-regular); }
+.dx { padding: 8px 0 10px; }
+.dx + .dx { border-top: 1px solid var(--line-soft); }
+.dx-h { display: flex; align-items: center; gap: 8px; }
+.dx-h b { font-weight: var(--w-medium); }
+.dx-h .age, .wk .age { font-size: var(--t-fine); color: var(--faint); font-variant-numeric: tabular-nums; }
+.dx-q { display: flex; align-items: center; gap: 6px; margin: 3px 0 8px 24px; font-size: var(--t-meta); color: var(--muted); min-width: 0; }
+.dx-q .pname { font-weight: var(--w-medium); }
+.dx-a { display: flex; gap: 6px; margin-left: 24px; align-items: center; }
+.iconbtn.sm { width: 24px; height: 24px; }
+.wk { display: grid; grid-template-columns: 10px 82px 12px minmax(0, 1fr) auto 20px; align-items: center; gap: 6px; height: 26px; font-size: var(--t-meta); }
+.wk .pname { font-weight: var(--w-medium); }
+.wk .n { font-weight: var(--w-strong); font-variant-numeric: tabular-nums; }
+.wk .t { color: var(--muted); min-width: 0; }
+.wk .plus { color: var(--faint); font-size: var(--t-fine); text-align: right; }
+.wk.ada .sw { background: var(--spectrum-conic); }
+.intake-l { display: flex; align-items: center; gap: 8px; height: 30px; font-size: var(--t-meta); white-space: nowrap; }
+.intake-l b { font-weight: var(--w-medium); }
+.intake-l .m { color: var(--muted); }
+.mx-f { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.mx-f .hint { font-size: var(--t-fine); color: var(--faint); display: inline-flex; align-items: center; gap: 5px; }
+
+/* Quick panel */
+.qp { position: absolute; left: 52px; top: 150px; width: 572px; border-radius: 20px; z-index: 15; overflow: hidden;
+  background: color-mix(in oklab, var(--raised) 84%, transparent); -webkit-backdrop-filter: blur(40px) saturate(1.7); backdrop-filter: blur(40px) saturate(1.7);
+  box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-3); }
+.qp-in { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 18px; border-bottom: 1px solid var(--line-soft); font-size: 17px; color: var(--faint); }
+.qp-in .appicon { --s: 26px; }
+.qp-in .caret { width: 2px; height: 20px; background: var(--ink); margin-right: -8px; border-radius: 1px; }
+.qp-b { padding: 14px 18px 12px; }
+.qp-k { display: flex; align-items: center; gap: 7px; font-size: var(--t-meta); color: var(--muted); }
+.qp-k .pname { font-weight: var(--w-medium); }
+.qp-t { font-size: var(--t-section); font-weight: var(--w-strong); letter-spacing: -0.01em; margin: 5px 0 2px; }
+.qp-m { font-size: var(--t-meta); color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.qp-m .brand { width: 12px; height: 12px; }
+.qp .ask { margin-top: 12px; }
+.qp-next { margin-top: 12px; }
+.qr { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 8px; margin: 0 -8px; border-radius: 9px; font-size: var(--t-meta); }
+.qr .qdot { width: 15px; height: 15px; }
+.qr b { font-weight: var(--w-medium); font-size: var(--t-ui); }
+.qr .m { color: var(--muted); }
+.qp-f { display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 18px; border-top: 1px solid var(--line-soft); font-size: var(--t-fine); color: var(--muted); background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.qp-f span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Notifications */
+.nts { position: absolute; top: 40px; right: 12px; width: 340px; display: flex; flex-direction: column; gap: 8px; z-index: 12; }
+.nt { display: grid; grid-template-columns: 34px 1fr 38px; gap: 0 10px; padding: 11px 12px 12px; border-radius: 18px;
+  background: var(--glass); -webkit-backdrop-filter: blur(34px) saturate(1.7); backdrop-filter: blur(34px) saturate(1.7);
+  box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-2); }
+.nt-b { min-width: 0; }
+.nt-h { display: flex; align-items: baseline; gap: 8px; }
+.nt-h b { font-weight: var(--w-strong); font-size: 13px; }
+.nt-h .time { margin-left: auto; font-size: var(--t-fine); color: var(--faint); flex: none; }
+.nt-s { font-size: 12.5px; font-weight: var(--w-medium); color: var(--ink); }
+.nt-t { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.nt-t .mono { font-size: 11px; }
+.nt-th { width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; background: var(--p); color: var(--p-on); align-self: start; margin-top: 2px; }
+.nt-th .qdot { width: 18px; height: 18px; }
+.nt-th .qdot .i { width: 12px; height: 12px; }
+.nt-th.av-th { background: color-mix(in oklab, var(--ink) 6%, transparent); }
+.nt-a { grid-column: 2 / -1; display: flex; gap: 6px; margin-top: 9px; }
+.nt-a button { flex: 1; height: 26px; border-radius: 8px; font-size: 12px; font-weight: var(--w-medium); background: color-mix(in oklab, var(--ink) 7%, transparent); }
+.nt.stack { position: relative; }
+.nt.stack::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -6px; height: 10px; border-radius: 0 0 14px 14px; background: var(--glass-thin); box-shadow: inset 0 0 0 1px var(--glass-line); z-index: -1; }
+
+/* Dock */
+.dock-bar { position: absolute; left: 50%; bottom: 8px; translate: -50% 0; display: flex; align-items: flex-end; gap: 8px; padding: 7px 9px; border-radius: 22px; z-index: 11;
+  background: color-mix(in oklab, var(--bg) 40%, transparent); -webkit-backdrop-filter: blur(30px) saturate(1.6); backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--glass-line), var(--sh-2); }
+.da { position: relative; width: 54px; height: 54px; border-radius: 13px; display: grid; place-items: center; color: #fff; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 2px 5px rgb(0 0 0 / 0.14); }
+.da svg { width: 26px; height: 26px; }
+.da .run { position: absolute; bottom: -6px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 70%, transparent); }
+.da.files { background: linear-gradient(#f3f4f6, #d9dce1); color: #4b5563; }
+.da.web { background: linear-gradient(#e9eef5, #c9d3df); color: #36424f; }
+.da.mail { background: linear-gradient(#f7f7f5, #dcdcd6); color: #57534e; }
+.da.code { background: linear-gradient(#34373c, #1d1e21); color: #d7dae0; }
+.da.term { background: linear-gradient(#2a2b2e, #111214); color: #e5e7eb; }
+.da.slack { background: linear-gradient(#fbfbfb, #e3e3e3); }
+.da.slack svg { color: #3f3f46; }
+.dock-bar .div { width: 1px; height: 46px; margin: 0 2px 4px; background: color-mix(in oklab, var(--ink) 18%, transparent); }
+.dock-bar .appicon { --s: 54px; position: relative; }
+.badge { position: absolute; top: -5px; right: -6px; min-width: 21px; height: 21px; padding: 0 6px; border-radius: 11px; background: #ff3b30; color: #fff; font-size: 12.5px; font-weight: 650; display: grid; place-items: center; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+.dock-bar .appicon .run { position: absolute; bottom: -6px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 70%, transparent); }
+
+/* Annotations: the design notes on this sheet, not part of the product. */
+.note { position: absolute; z-index: 30; display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px 0 4px; border-radius: 12px;
+  font-size: 11.5px; font-weight: var(--w-medium); color: var(--ink); background: color-mix(in oklab, var(--raised) 86%, transparent); box-shadow: inset 0 0 0 1px var(--line), var(--sh-1); white-space: nowrap; }
+.note .k { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: var(--w-strong); box-shadow: inset 0 0 0 1.2px var(--ink); }
+.note .d { color: var(--muted); font-weight: var(--w-regular); }
+
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="desk">
+  <svg class="dunes" viewBox="0 0 1440 520" preserveAspectRatio="none" aria-hidden="true">
+    <path class="d1" d="M0 250 C 220 180 420 200 640 240 S 1100 170 1440 210 V520 H0 Z"/>
+    <path class="d2" d="M0 360 C 260 300 520 330 760 360 S 1180 300 1440 330 V520 H0 Z"/>
+    <path class="d3" d="M0 450 C 300 410 600 430 900 450 S 1260 420 1440 440 V520 H0 Z"/>
+  </svg>
+
+  <div class="mbar">
+    <span class="m app">Code</span><span class="m">File</span><span class="m">Edit</span><span class="m">Selection</span><span class="m">View</span><span class="m">Go</span><span class="m">Window</span><span class="m">Help</span>
+    <span class="grow"></span>
+    <span class="x on" title="Hercule: 3 need you"><span class="mb-band"><i class="p-webshop" style="height:11px"></i><i class="p-webshop" style="height:7px"></i><i class="p-webshop" style="height:9px"></i><b></b><i class="p-payments" style="height:9px"></i><i class="p-payments" style="height:12px"></i><b></b><i class="p-ops" style="height:8px"></i><i class="p-ops" style="height:11px"></i></span><span class="mb-q"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg>3</span></span>
+    <span class="x"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></span>
+    <span class="x"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg></span>
+    <span class="x"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 5 7 6-3.5 3V2l3.5 3-7 6"/></svg></span>
+    <span class="x"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.2L8 3.4v9.2L4.7 9.8H2.5z"/><path d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8"/><path d="M12.5 3.8a6 6 0 0 1 0 8.4"/></svg></span>
+    <span class="x"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg></span>
+    <span class="x"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.8 6.2a9 9 0 0 1 12.4 0"/><path d="M4 8.6a5.8 5.8 0 0 1 8 0"/><circle cx="8" cy="11.6" r="1.1" fill="currentColor" stroke="none"/></svg></span>
+    <span class="x"><span class="batt"></span></span>
+    <span class="x"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="3" width="13" height="4.4" rx="2.2"/><rect x="1.5" y="8.6" width="13" height="4.4" rx="2.2"/><circle cx="11.9" cy="5.2" r="1.3" fill="currentColor"/><circle cx="4.1" cy="10.8" r="1.3" fill="currentColor"/></svg></span>
+    <span class="clock">Tue 29 Sep  09:41</span>
+  </div>
+
+  <div class="other" aria-hidden="true">
+    <div class="tb"><div class="traffic"><i></i><i></i><i></i></div><span class="fn">payment.ts · webshop</span></div>
+    <div class="tree">
+      <span>webshop</span><span style="--d:1">src</span><span style="--d:2">checkout</span><span style="--d:3">3ds-modal.tsx</span><span style="--d:3" class="on">payment.ts</span><span style="--d:3">payment.test.ts</span><span style="--d:3">cart.ts</span><span style="--d:2">components</span><span style="--d:2">pages</span><span style="--d:1">tests</span><span style="--d:1">package.json</span>
+    </div>
+    <pre><span class="n">38</span><span class="k">export async function</span> handlePaymentResult(result) {
+<span class="n">39</span>  <span class="k">if</span> (result.status === <span class="s">"succeeded"</span>) {
+<span class="n">40</span>    <span class="k">return</span> confirmOrder(result.orderId);
+<span class="n">41</span>  }
+<span class="hl"><span class="n">42</span>  <span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {</span>
+<span class="hl"><span class="n">43</span>    <span class="k">return</span> openThreeDSModal(result.clientSecret);</span>
+<span class="hl"><span class="n">44</span>  }</span>
+<span class="n">45</span>  <span class="c">// anything else is a real decline</span>
+<span class="n">46</span>  <span class="k">return</span> showDeclined(result.error);
+<span class="n">47</span>}
+<span class="n">48</span>
+<span class="n">49</span><span class="k">export function</span> openThreeDSModal(clientSecret) {
+<span class="n">50</span>  <span class="k">const</span> modal = mount(ThreeDSModal, { clientSecret });
+<span class="n">51</span>  <span class="k">return</span> modal.result;
+<span class="n">52</span>}</pre>
+  </div>
+
+  <div class="qp" data-space="webshop" role="dialog" aria-label="Quick panel">
+    <div class="qp-in"><span class="appicon"><svg><use href="#logo"/></svg></span><span class="caret"></span><span class="grow">Answer, jump to a session, or start a thread</span><span class="kbd">⌥</span><span class="kbd">Space</span></div>
+    <div class="qp-b p-webshop">
+      <div class="qp-k"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span>Needs you · 1 of 3</span><span class="grow"></span><span class="sw  p-webshop"></span><span class="pname">webshop</span><span class="faint">· waiting 4m</span></div>
+      <div class="qp-t">Fix 3-D Secure checkout for EU cards</div>
+      <div class="qp-m"><svg class="brand" aria-hidden="true"><use href="#b-claude"/></svg>Claude Code · Opus 5.5 · studio-mac<span class="sep">·</span>3 files <span class="dstat"><span class="a">+48</span> <span class="d">-12</span></span></div>
+      <div class="ask"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span>Run <span class="mono">git push -u origin fix/3ds-eu-cards</span>?</span></div>
+      <div class="vled">
+        <button class="go">Allow once<span class="kbd">1</span></button>
+        <button>Always allow git push<span class="kbd">2</span></button>
+        <button>Deny<span class="kbd">3</span></button>
+      </div>
+      <div class="qp-next">
+        <a class="qr p-payments"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="sw  p-payments"></span><b>Ship release v2.15</b><span class="m ell grow">Publish payments-api 2.15.0 to npm?</span><span class="kbd">⇥</span></a>
+        <a class="qr p-ops"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><span class="sw  p-ops"></span><b>Migrate ops dashboards</b><span class="m ell grow">Keep the old Grafana folder?</span></a>
+      </div>
+    </div>
+    <div class="qp-f"><span><span class="kbd">1</span><span class="kbd">2</span><span class="kbd">3</span> answer</span><span><span class="kbd">⇥</span> next</span><span><span class="kbd">↵</span> open thread</span><span><span class="kbd">esc</span> close</span><span class="grow"></span><span>focus stays in Code</span></div>
+  </div>
+
+  <div class="mx" data-space="all" role="menu" aria-label="Hercule menu">
+    <div class="mx-h"><svg class="logo"><use href="#logo"/></svg>Hercule<span class="sub">· studio-mac</span><span class="grow"></span><button class="iconbtn sm" title="Settings"><svg class="i14" aria-hidden="true"><use href="#i-gear"/></svg></button></div>
+    <div class="band" role="img" aria-label="23 live sessions: 8 working, 3 need you, 12 idle"><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop work"></i><i class="seg p-webshop wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-webshop paused"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-webshop idle"></i><i class="seg p-payments work gap"></i><i class="seg p-payments work"></i><i class="seg p-payments wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-payments idle"></i><i class="seg p-ops work gap"></i><i class="seg p-ops work"></i><i class="seg p-ops wait"><span class="flag"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></i><i class="seg p-ops idle"></i><i class="seg p-ops idle"></i><i class="seg mixed work gap"></i><i class="seg mixed idle"></i></div>
+    <div class="pulse"><span><b>23</b> live</span><span class="st work"><svg class="i" aria-hidden="true"><use href="#m-working"/></svg>8</span><span class="st"><span class="qdot" style="width:13px;height:13px"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b>3</b> need you</span><span class="st idle"><svg class="i" aria-hidden="true"><use href="#m-idle"/></svg>12</span></div>
+    <div class="mx-sec">
+      <div class="mx-sh">Needs you<span class="n">3</span></div>
+      <div class="dx p-webshop">
+          <div class="dx-h"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b class="ell">Fix 3-D Secure checkout</b><span class="grow"></span><span class="age">4m</span></div>
+          <div class="dx-q"><span class="sw  p-webshop"></span><span class="pname">webshop</span><span class="sep">·</span><span class="ell">git push -u origin fix/3ds-eu-cards</span></div>
+          <div class="dx-a"><button class="btn sm go">Allow once</button><button class="btn sm">Deny</button><span class="grow"></span><button class="iconbtn sm" title="More answers"><svg class="i14" aria-hidden="true"><use href="#i-more"/></svg></button></div>
+        </div>
+      <div class="dx p-payments">
+          <div class="dx-h"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b class="ell">Ship release v2.15</b><span class="grow"></span><span class="age">7m</span></div>
+          <div class="dx-q"><span class="sw  p-payments"></span><span class="pname">payments-api</span><span class="sep">·</span><span class="ell">Publish 2.15.0 to npm?</span></div>
+          <div class="dx-a"><button class="btn sm go">Allow once</button><button class="btn sm">Deny</button><span class="grow"></span><button class="iconbtn sm" title="More answers"><svg class="i14" aria-hidden="true"><use href="#i-more"/></svg></button></div>
+        </div>
+      <div class="dx p-ops">
+          <div class="dx-h"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span><b class="ell">Migrate ops dashboards</b><span class="grow"></span><span class="age">9m</span></div>
+          <div class="dx-q"><span class="sw  p-ops"></span><span class="pname">ops</span><span class="sep">·</span><span class="ell">Keep the old Grafana folder?</span></div>
+          <div class="dx-a"><button class="btn sm go">Keep</button><button class="btn sm">Delete</button><span class="grow"></span><button class="iconbtn sm" title="More answers"><svg class="i14" aria-hidden="true"><use href="#i-more"/></svg></button></div>
+        </div>
+    </div>
+    <div class="mx-sec">
+      <div class="mx-sh">Working<span class="n">8</span></div>
+      <div class="wk p-webshop"><span class="sw  p-webshop"></span><span class="pname">webshop</span><span class="n">3</span><span class="ell t">Refactor cart totals</span><span class="age">22m</span><span class="plus">+2</span></div>
+      <div class="wk p-payments"><span class="sw  p-payments"></span><span class="pname">payments-api</span><span class="n">2</span><span class="ell t">Webhook retry backoff</span><span class="age">3m</span><span class="plus">+1</span></div>
+      <div class="wk p-ops"><span class="sw  p-ops"></span><span class="pname">ops</span><span class="n">2</span><span class="ell t">Investigate backup timeouts</span><span class="age">6m</span><span class="plus">+1</span></div>
+      <div class="wk ada"><span class="sw"></span><span class="medium">Ada</span><span class="n">1</span><span class="ell t">heartbeat · Conversation</span><span class="age">09:00</span><span class="plus"></span></div>
+    </div>
+    <div class="mx-sec" style="padding-top:4px">
+      <div class="intake-l"><svg class="i14" aria-hidden="true"><use href="#i-sun-rise"/></svg><b>Intake</b><span class="m">1 burning · 6 proposals · 2 need a call</span></div>
+    </div>
+    <div class="mx-f"><button class="btn sm ink">Open Hercule</button><span class="grow"></span><span class="hint">Quick panel <span class="kbd">⌥</span><span class="kbd">Space</span></span></div>
+  </div>
+
+  <div class="nts">
+    <div class="nt">
+        <span class="appicon" style="--s:34px"><svg><use href="#logo"/></svg></span>
+        <div class="nt-b">
+          <div class="nt-h"><b class="ell">Fix 3-D Secure checkout</b><span class="time">now</span></div>
+          <div class="nt-s">webshop · Request</div>
+          <div class="nt-t">Run <span class="mono">git push -u origin fix/3ds-eu-cards</span>?</div>
+        </div>
+        <span class="nt-th p-webshop"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span>
+        <div class="nt-a"><button>Allow once</button><button>Deny</button></div>
+      </div>
+    <div class="nt">
+        <span class="appicon" style="--s:34px"><svg><use href="#logo"/></svg></span>
+        <div class="nt-b">
+          <div class="nt-h"><b class="ell">Ship release v2.15</b><span class="time">7m ago</span></div>
+          <div class="nt-s">payments-api · Request</div>
+          <div class="nt-t">Publish payments-api 2.15.0 to npm?</div>
+        </div>
+        <span class="nt-th p-payments"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span>
+        <div class="nt-a"><button>Allow once</button><button>Deny</button></div>
+      </div>
+    <div class="nt">
+        <span class="appicon" style="--s:34px"><svg><use href="#logo"/></svg></span>
+        <div class="nt-b">
+          <div class="nt-h"><b class="ell">Migrate ops dashboards</b><span class="time">9m ago</span></div>
+          <div class="nt-s">ops · Question</div>
+          <div class="nt-t">Keep the old Grafana folder?</div>
+        </div>
+        <span class="nt-th p-ops"><span class="qdot"><svg class="i" aria-hidden="true"><use href="#m-decision"/></svg></span></span>
+        <div class="nt-a"><button>Keep</button><button>Delete</button></div>
+      </div>
+    <div class="nt">
+        <span class="appicon" style="--s:34px"><svg><use href="#logo"/></svg></span>
+        <div class="nt-b">
+          <div class="nt-h"><b class="ell">Ada</b><span class="time">09:00</span></div>
+          <div class="nt-s">Web chat</div>
+          <div class="nt-t">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure fail since yesterday's deploy…</div>
+        </div>
+        <span class="nt-th av-th"><span class="av">A</span></span>
+        <div class="nt-a"><button>Reply</button></div>
+      </div>
+    <div class="nt stack">
+      <span class="appicon" style="--s:34px"><svg><use href="#logo"/></svg></span>
+      <div class="nt-b"><div class="nt-h"><b class="ell">Checkout fails for EU cards with 3-D Secure</b><span class="time">09:00</span></div><div class="nt-s">webshop · Proposal · urgent</div><div class="nt-t">Started as "Fix 3-D Secure checkout" at 09:02</div></div>
+      <span class="nt-th p-webshop"><svg class="i20" aria-hidden="true"><use href="#m-proposal"/></svg></span>
+    </div>
+  </div>
+
+  <div class="dock-bar" aria-label="Dock">
+    <span class="da files" title="Files"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg></span>
+    <span class="da web" title="Browser"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg><i class="run"></i></span>
+    <span class="da mail" title="Mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg><i class="run"></i></span>
+    <span class="da slack" title="Slack"><svg class="brand" aria-hidden="true"><use href="#b-slack"/></svg><i class="run"></i></span>
+    <span class="da code" title="Code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.5 7-5 5 5 5M15.5 7l5 5-5 5"/></svg><i class="run"></i></span>
+    <span class="da term" title="Terminal"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg><i class="run"></i></span>
+    <span class="div"></span>
+    <span class="appicon" title="Hercule"><svg><use href="#logo"/></svg><span class="badge">3</span><i class="run"></i></span>
+  </div>
+
+  <span class="note" style="left:470px;top:40px"><span class="k">1</span>Menu bar extra<span class="d">band + what needs you</span></span>
+  <span class="note" style="left:52px;top:116px"><span class="k">2</span>Quick panel<span class="d">⌥ Space from any app · answer with 1 2 3</span></span>
+  <span class="note" style="right:12px;top:676px"><span class="k">3</span>Notifications<span class="d">actions answer in place</span></span>
+  <span class="note" style="left:960px;top:852px"><span class="k">4</span>Dock badge<span class="d">counts decisions only · macOS paints it</span></span>
+</div>
+</body>
+</html>

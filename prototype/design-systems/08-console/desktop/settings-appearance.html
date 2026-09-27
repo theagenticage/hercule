@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Settings · Appearance · Console</title>
+<script src="../console.js" defer></script>
+<style>
+  .match { display: flex; align-items: center; gap: 10px; margin: -2px 0 14px; font-size: 12.5px; color: var(--muted); }
+  .match b { font-weight: var(--w-emph); color: var(--ink); }
+  .match .arrow { color: var(--faint); font-family: var(--font-mono); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 40px; margin-top: 26px; }
+  .tp-code { font-variant-ligatures: none; }
+  .opt { display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: center; column-gap: 16px; min-height: 40px; padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+  .opt:first-of-type { border-top: 0; }
+  .opt > .lbl { color: var(--ink); font-weight: var(--w-emph); }
+  .opt > .ctl { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+  .opt > .ctl .note { font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hues { display: grid; grid-template-columns: 112px auto; row-gap: 6px; align-items: center; }
+  .hues .row { display: flex; gap: 5px; }
+  .hues .sw.is-on { box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--ink); }
+  .hues .sw.is-taken { opacity: 0.28; }
+  .mark-demo { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 8px; border-radius: 5px; background: var(--surface); font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .mark-demo .brand { width: 11px; height: 11px; color: var(--ink); }
+  .sec + .opt { border-top: 0; }
+  .theme-opt:not(.is-on) .theme-meta .on { display: none; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="win">
+  <header class="titlebar" data-titlebar></header>
+  <nav class="side" data-side="hercule" data-active="settings"></nav>
+
+  <main class="main">
+    <section class="pane set-pane">
+      <header class="pane-head"><span class="pane-num">1</span><span class="pane-title">Settings</span><span class="pane-actions"><span class="hint"><kbd>⌘</kbd><kbd>,</kbd></span></span></header>
+      <div class="pane-body" data-settings-nav data-active="appearance"></div>
+    </section>
+
+    <section class="pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">2</span><span class="pane-title">Appearance</span><span class="pane-sub">themes, type, motion · this Mac and every browser you sign in from</span>
+      </header>
+      <div class="pane-body">
+        <div class="set-body">
+          <div class="sec" style="margin-top:0">Theme <span class="n">6 themes · each brings its own 16 colors</span></div>
+          <div class="match"><span class="toggle is-on" role="switch" aria-checked="true"></span><span>Follow macOS: <b>Paper Tape</b> by day <span class="arrow">·</span> <b>Phosphor</b> by night</span></div>
+          <div class="themes">
+            <button class="theme-opt" type="button" data-theme-choice="phosphor">
+              <div class="frame"><div class="tp" data-theme="phosphor">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Phosphor <small>dark · flagship</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>1</kbd></div>
+            </button>
+            <button class="theme-opt" type="button" data-theme-choice="graphite">
+              <div class="frame"><div class="tp" data-theme="graphite">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Graphite <small>dark · neutral</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>2</kbd></div>
+            </button>
+            <button class="theme-opt" type="button" data-theme-choice="ember">
+              <div class="frame"><div class="tp" data-theme="ember">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Ember <small>dark · warm</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>3</kbd></div>
+            </button>
+            <button class="theme-opt" type="button" data-theme-choice="void">
+              <div class="frame"><div class="tp" data-theme="void">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Void <small>dark · OLED black</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>4</kbd></div>
+            </button>
+            <button class="theme-opt" type="button" data-theme-choice="paper-tape">
+              <div class="frame"><div class="tp" data-theme="paper-tape">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Paper Tape <small>light · flagship</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>5</kbd></div>
+            </button>
+            <button class="theme-opt" type="button" data-theme-choice="porcelain">
+              <div class="frame"><div class="tp" data-theme="porcelain">
+                <div class="tp-rows">
+                  <div class="tp-row cur"><svg class="mk tone-attn"><use href="#m-decision"/></svg><span>Checkout fails for EU cards</span><span class="proj webshop">webshop</span></div>
+                  <div class="tp-row"><svg class="mk tone-live"><use href="#m-working"/></svg><span>Refactor cart totals</span><small>22m</small></div>
+                  <div class="tp-row"><svg class="mk tone-ok"><use href="#m-done"/></svg><span>24 passed</span><span class="proj payments-api">payments-api</span></div>
+                  <div class="tp-row"><svg class="mk tone-fail"><use href="#m-failed"/></svg><span>Backup job timed out</span><span class="proj ops">ops</span></div>
+                </div>
+                <div class="tp-code"><span class="k">if</span> (status <span class="p">===</span> <span class="s">"requires_action"</span>) <span class="f">open</span>(<span class="n">3</span>)</div>
+                <div class="tp-swatch"><i style="background:var(--c0)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c3)"></i><i style="background:var(--c4)"></i><i style="background:var(--c5)"></i><i style="background:var(--c6)"></i><i style="background:var(--c7)"></i><i style="background:var(--c8)"></i><i style="background:var(--c9)"></i><i style="background:var(--c10)"></i><i style="background:var(--c11)"></i><i style="background:var(--c12)"></i><i style="background:var(--c13)"></i><i style="background:var(--c14)"></i><i style="background:var(--c15)"></i></div>
+                <div class="tp-status"><span class="mode">NAV</span><span class="tone-live">23 live</span><span class="tone-attn">3 wait on you</span><span class="end">09:41</span></div>
+              </div></div>
+              <div class="theme-meta">Porcelain <small>light · cool</small><span class="on"><svg class="mk" style="width:10px;height:10px"><use href="#m-done"/></svg>in use</span><kbd>6</kbd></div>
+            </button>
+          </div>
+
+          <div class="cols">
+            <div>
+              <div class="sec">Type and color</div>
+              <div class="opt"><span class="lbl">Density</span><span class="ctl"><span class="seg-ctl"><button class="is-on" type="button">Comfortable</button><button type="button">Compact</button></span><span class="note">rows 26px</span></span></div>
+              <div class="opt"><span class="lbl">Text size</span><span class="ctl"><span class="seg-ctl"><button type="button">12</button><button type="button">13</button><button class="is-on" type="button">13.5</button><button type="button">15</button></span><span class="note">code follows at -1.5</span></span></div>
+              <div class="opt"><span class="lbl">Cursor color</span><span class="ctl"><i class="sw" style="background:var(--c5)"></i><span class="ink">Magenta</span><span class="note">same in every theme</span></span></div>
+              <div class="opt"><span class="lbl">Project hues</span><span class="ctl">
+                <span class="hues">
+                  <span class="proj webshop">webshop</span><span class="row"><i class="sw is-on" style="background:var(--c4)"></i><i class="sw is-taken" style="background:var(--c13)"></i><i class="sw is-taken" style="background:var(--c9)"></i><i class="sw" style="background:var(--c12)"></i><i class="sw" style="background:var(--c14)"></i><i class="sw" style="background:var(--c10)"></i><i class="sw" style="background:var(--c11)"></i></span>
+                  <span class="proj payments-api">payments-api</span><span class="row"><i class="sw is-taken" style="background:var(--c4)"></i><i class="sw is-on" style="background:var(--c13)"></i><i class="sw is-taken" style="background:var(--c9)"></i><i class="sw" style="background:var(--c12)"></i><i class="sw" style="background:var(--c14)"></i><i class="sw" style="background:var(--c10)"></i><i class="sw" style="background:var(--c11)"></i></span>
+                  <span class="proj ops">ops</span><span class="row"><i class="sw is-taken" style="background:var(--c4)"></i><i class="sw is-taken" style="background:var(--c13)"></i><i class="sw is-on" style="background:var(--c9)"></i><i class="sw" style="background:var(--c12)"></i><i class="sw" style="background:var(--c14)"></i><i class="sw" style="background:var(--c10)"></i><i class="sw" style="background:var(--c11)"></i></span>
+                </span></span></div>
+            </div>
+            <div>
+              <div class="sec">Motion, glass and marks</div>
+              <div class="opt"><span class="lbl">Reduce motion</span><span class="ctl"><span class="toggle" role="switch" aria-checked="false"></span><span class="note">follows macOS · off</span></span></div>
+              <div class="opt"><span class="lbl">Reduce glass</span><span class="ctl"><span class="toggle" role="switch" aria-checked="false"></span><span class="note">the composer and palette turn solid</span></span></div>
+              <div class="opt"><span class="lbl">Cursor blinks</span><span class="ctl"><span class="toggle is-on" role="switch" aria-checked="true"></span><span class="note">only where you are typing</span></span></div>
+              <div class="opt"><span class="lbl">Source marks</span><span class="ctl"><span class="toggle is-on" role="switch" aria-checked="true"></span><span class="mark-demo"><svg class="brand"><use href="#b-sentry"/></svg>webshop-prod</span><span class="note">on rows</span></span></div>
+              <div class="opt"><span class="lbl">Key hints</span><span class="ctl"><span class="seg-ctl"><button class="is-on" type="button">Always</button><button type="button">On hover</button><button type="button">Never</button></span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-mode="NAV" data-context="Settings · Appearance" data-keys="1-6:theme|j k:move|space:toggle|/:filter|esc:back"></footer>
+</div>
+<script>
+  // Marks the card of the theme the page is drawn in, and lets a click or the keys 1-6 switch it.
+  (function () {
+    const root = document.documentElement;
+    const cards = [...document.querySelectorAll("[data-theme-choice]")];
+    const ALIASES = { dark: "phosphor", light: "paper-tape" };
+    function markCurrentTheme() {
+      const current = ALIASES[root.dataset.theme] || root.dataset.theme;
+      cards.forEach((card) => card.classList.toggle("is-on", card.dataset.themeChoice === current));
+    }
+    function chooseTheme(name) {
+      root.dataset.theme = name;
+      markCurrentTheme();
+      const label = window.Console.THEME_NAMES[name];
+      document.querySelectorAll(".set-row.is-active .set-note, .side-foot b").forEach((el) => (el.textContent = label));
+    }
+    cards.forEach((card) => card.addEventListener("click", () => chooseTheme(card.dataset.themeChoice)));
+    document.addEventListener("keydown", (e) => {
+      const i = Number(e.key);
+      if (i >= 1 && i <= cards.length && !e.metaKey && !e.ctrlKey) chooseTheme(cards[i - 1].dataset.themeChoice);
+    });
+    markCurrentTheme();
+  })();
+</script>
+</body>
+</html>

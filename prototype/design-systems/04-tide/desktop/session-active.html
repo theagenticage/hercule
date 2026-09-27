@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Fix 3-D Secure checkout for EU cards · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .bar { gap: 6px; }
+      .bar-title { align-items: center; gap: 4px; }
+      .crumb { margin-right: 4px; }
+      .ttabs { display: flex; align-items: center; gap: 2px; }
+      .bar-end { gap: 8px; }
+      .body { position: relative; flex: 1; min-height: 0; }
+      .body::before {
+        content: ""; position: absolute; left: 0; right: 0; top: 0; height: 18px; z-index: 2; pointer-events: none;
+        background: linear-gradient(var(--bg), transparent);
+      }
+      .tx { --tx-pad: 352px; }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="threads" data-active="fix-3ds"></aside>
+    <main class="main">
+      <!-- Thread chrome in one row: project, the thread as the active tab, its sibling, then the
+           session's own tideline and the thread actions. -->
+      <header class="bar">
+        <div class="bar-title">
+          <span class="crumb">webshop /</span>
+          <div class="ttabs" role="tablist" aria-label="Threads in this workspace">
+            <a class="ttab" role="tab" aria-selected="true" href="session-active.html"><i data-m="decision" class="now"></i><span>Fix 3-D Secure checkout for EU cards</span></a>
+            <a class="ttab" role="tab" aria-selected="false"><i data-m="working" class="live"></i><span>Refactor cart totals</span></a>
+          </div>
+        </div>
+        <div class="bar-end">
+          <div data-tideline="session" data-w="132" role="img" aria-label="Started 09:02, worked until 09:13, waiting on you for 28 minutes, one message queued"></div>
+          <button class="btn btn-sm btn-ghost"><i data-m="plus" class="xs"></i>New thread here</button>
+          <button class="icon-btn" aria-label="More thread actions"><i data-m="more"></i></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <div class="tx" data-transcript data-scrolled-by="300">
+          <div class="tx-col">
+            <div class="tx-axis" aria-hidden="true"></div>
+            <p class="tx-start"><i data-m="session"></i>Started from the Proposal <a href="intake.html">Checkout fails for EU cards with 3-D Secure</a><span class="faint">·</span><span class="t-mono">fix/3ds-eu-cards from main</span></p>
+
+            <div class="tx-row is-you">
+              <time>09:02</time>
+              <p class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</p>
+            </div>
+
+            <div class="tx-row worked">
+              <time></time>
+              <button class="worked-line"><span>Worked for <b>2m 14s</b></span><i data-m="chev-right"></i><span class="faint">read 6 files · ran 1 command</span></button>
+            </div>
+
+            <div class="tx-row">
+              <time>09:04</time>
+              <div class="prose">
+                <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+                <pre class="code"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</pre>
+              </div>
+            </div>
+
+            <div class="tx-row">
+              <time>09:05</time>
+              <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+            </div>
+
+            <div class="tx-row worked">
+              <time></time>
+              <div>
+                <button class="worked-line is-open" aria-expanded="true"><span>Worked for <b>4m 51s</b></span><i data-m="chev-right"></i><span class="faint">edited 3 files · ran 1 command</span></button>
+                <ol class="calls">
+                  <li><i data-m="file"></i><span>Edited</span><code>src/checkout/payment.test.ts</code><span class="add">+19</span><span></span><time>09:05</time></li>
+                  <li><i data-m="command"></i><span>Ran</span><code>pnpm test checkout</code><span class="fail-n">1 failed, as expected</span><span></span><time>09:06</time></li>
+                  <li><i data-m="file"></i><span>Edited</span><code>src/checkout/payment.ts</code><span><span class="add">+21</span> <span class="del">-9</span></span><span></span><time>09:08</time></li>
+                  <li><i data-m="file"></i><span>Edited</span><code>src/checkout/3ds-modal.tsx</code><span><span class="add">+8</span> <span class="del">-3</span></span><span></span><time>09:09</time></li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="tx-row">
+              <time>09:10</time>
+              <div class="files">
+                <div class="files-head"><i data-m="diff"></i>3 changed files<span class="add">+48</span><span class="del">-12</span><span class="acts"><button class="btn btn-sm btn-ghost">Show files</button><button class="btn btn-sm">Open diff</button></span></div>
+                <div class="file"><span><span class="dir">src/checkout/</span>payment.ts</span><span class="add">+21</span><span class="del">-9</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span></div>
+                <div class="file"><span><span class="dir">src/checkout/</span>payment.test.ts</span><span class="add">+19</span><span class="del">-0</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span></div>
+                <div class="file"><span><span class="dir">src/checkout/</span>3ds-modal.tsx</span><span class="add">+8</span><span class="del">-3</span><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span></div>
+              </div>
+            </div>
+
+            <div class="tx-row">
+              <time>09:12</time>
+              <div><span class="test-line"><i data-m="done"></i><b>24 passed</b><span class="mono">pnpm test checkout</span></span></div>
+            </div>
+
+            <div class="tx-row">
+              <time>09:13</time>
+              <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+            </div>
+
+            <div class="tx-row waiting">
+              <time>09:13</time>
+              <div class="wait-line"><i data-m="decision"></i>Waiting on you to allow <code>git push</code><span class="t-mono">for 28m</span></div>
+            </div>
+            <div class="tx-nowrow" aria-label="Now, 09:41"><span class="nowtab">09:41</span></div>
+          </div>
+        </div>
+
+        <!-- The composer, from top to bottom: the queued input (future), the Request dock, the
+             card, and the lip with where the work runs. -->
+        <div class="composer-wrap">
+          <div class="composer" data-composer>
+            <div class="queued">
+              <i data-m="queued"></i>
+              <span class="queued-text">Also check the Apple Pay path</span>
+              <span class="queued-when">queued · runs next</span>
+              <button class="c-sel">Steer</button>
+              <button class="c-sel">Cancel</button>
+            </div>
+
+            <div class="dock" role="group" aria-label="Request: run a command">
+              <i data-m="decision" class="now"></i>
+              <div class="dock-title">Run a command?<span class="t-mono">asked 09:13 · 28m ago</span></div>
+              <div class="dock-full">
+                <code class="dock-subject">git push -u origin fix/3ds-eu-cards</code>
+                <div class="ledger">
+                  <button class="ans is-go"><span class="ans-label">Allow once</span><span class="ans-say">Runs this push now; asks again next time</span><kbd><i data-m="return" class="xs"></i></kbd></button>
+                  <button class="ans"><span class="ans-label">Always allow git push</span><span class="ans-say">Stops asking about git push in this thread</span><kbd>⌥↩</kbd></button>
+                  <button class="ans"><span class="ans-label">Deny</span><span class="ans-say">Tells the agent no; the turn goes on without it</span><kbd>esc</kbd></button>
+                </div>
+              </div>
+              <div class="dock-short"><code class="mono">git push -u origin fix/3ds-eu-cards</code><span class="c-spacer"></span><button class="btn btn-sm btn-ink">Allow once</button><button class="btn btn-sm btn-ghost">Deny</button></div>
+            </div>
+
+            <div class="card-c">
+              <div class="c-input" role="textbox" tabindex="0" aria-label="Reply">Reply…</div>
+              <div class="c-row">
+                <button class="icon-btn" aria-label="Attach"><i data-m="plus"></i></button>
+                <button class="c-sel c-hide-shrunk"><i data-m="shield"></i>auto-accept edits<i data-m="chev-down" class="caret"></i></button>
+                <button class="c-sel c-hide-shrunk" style="min-width: 84px"><i data-m="gauge"></i>High<i data-m="chev-down" class="caret"></i></button>
+                <button class="c-pill"><i data-b="anthropic"></i>Opus 5.5</button>
+                <span class="c-spacer"></span>
+                <button class="icon-btn c-hide-shrunk" aria-label="Voice"><i data-m="mic"></i></button>
+                <button class="stop-btn"><i data-m="stop"></i>Stop</button>
+                <button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button>
+              </div>
+            </div>
+
+            <div class="lip">
+              <i data-m="worktree"></i><span>worktree · 3ds-eu-cards</span>
+              <span class="c-rule"></span>
+              <i data-m="branch"></i><span class="mono">fix/3ds-eu-cards</span>
+              <span class="c-spacer"></span>
+              <i data-m="machine"></i><span>studio-mac</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

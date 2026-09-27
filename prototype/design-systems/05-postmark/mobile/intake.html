@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      .m-head {
+        padding: 4px 16px 6px 20px;
+      }
+      .m-head h1 {
+        font-size: 20px;
+      }
+      .m-head .postmark {
+        width: 40px;
+        --tilt: -10deg;
+        margin-left: -2px;
+      }
+      .m-head .icon-btn {
+        margin-left: auto;
+      }
+      /* What came in, as one line: the pile of stamps, then what triage made of it. */
+      .came {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 2px 20px 14px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .came .pile {
+        display: flex;
+      }
+      .came .pile .post + .post {
+        margin-left: -4px;
+      }
+      .came .pile .post:nth-child(odd) {
+        transform: rotate(-4deg);
+      }
+      .came .pile .post:nth-child(even) {
+        transform: rotate(3deg) translateY(1px);
+      }
+      .came b {
+        font: 640 15px / 1 var(--narrow);
+        color: var(--ink);
+      }
+      .came .fail b {
+        color: var(--fail);
+      }
+      /* The lead Proposal is the top postcard of a pile. The edges above it are the rest. */
+      .stack {
+        position: relative;
+        margin: 10px 14px 0;
+      }
+      .stack .edge {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        top: -6px;
+        height: 20px;
+        border-radius: var(--r-lg) var(--r-lg) 0 0;
+        background: var(--raised);
+        box-shadow: var(--card-shadow);
+        opacity: 0.8;
+      }
+      .stack .edge + .edge {
+        left: 24px;
+        right: 24px;
+        top: -11px;
+        opacity: 0.55;
+      }
+      .card {
+        z-index: 1;
+      }
+      .card .env-body {
+        padding: 14px 16px 12px;
+      }
+      .card .corner {
+        top: 12px;
+        right: 12px;
+        width: 150px;
+        height: 50px;
+      }
+      .card .corner .post {
+        --stamp-w: 24px;
+      }
+      .card .corner .postmark {
+        width: 92px;
+        left: -18px;
+        top: 12px;
+      }
+      .of {
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .kicker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 14px 0 8px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .card .env-title {
+        font-size: 18px;
+        line-height: 1.28;
+      }
+      .gist {
+        margin: 6px 0 10px;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .gist code {
+        font-size: 12.5px;
+        color: var(--ink);
+      }
+      .from {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        font-size: var(--t-sm);
+        color: var(--muted);
+      }
+      .from span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .from b {
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .thread-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 12px -6px 0;
+        padding: 9px 10px;
+        border-radius: 9px;
+        font-size: var(--t-ui);
+        line-height: 1.35;
+        background: var(--ochre-soft);
+      }
+      .thread-note .mk,
+      .thread-note i {
+        flex: none;
+      }
+      .thread-note .link {
+        margin-left: auto;
+        flex: none;
+      }
+      /* Swipe the card, or tap a row in the thumb zone below it. */
+      .swipe {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 14px 22px 8px;
+        font-size: var(--t-sm);
+        color: var(--faint);
+      }
+      .swipe span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .swipe .mk {
+        width: 13px;
+        height: 13px;
+      }
+      /* What waits under the top card, so the pile has a known depth. */
+      .next {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 6px 14px 0;
+        padding: 10px 14px;
+        border-radius: var(--r-lg);
+        font-size: var(--t-ui);
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .next b {
+        font-weight: 560;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .next .n {
+        margin-left: auto;
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .thumb {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 84px;
+        padding: 0 14px 10px;
+      }
+      .thumb .ledger {
+        gap: 6px;
+      }
+      .thumb .ans {
+        grid-template-columns: 30px minmax(0, 1fr) auto;
+        min-height: 52px;
+        margin: 0;
+        padding: 0 14px 0 12px;
+        border-radius: 14px;
+        background: var(--raised);
+        box-shadow: var(--card-shadow), inset 0 0 0 1px var(--line-soft);
+      }
+      .thumb .ans.is-primary {
+        background: var(--violet);
+        box-shadow: var(--lift-shadow);
+      }
+      .thumb .ans.is-primary b,
+      .thumb .ans.is-primary .d {
+        color: var(--on-ink);
+      }
+      .thumb .ans.is-primary .ans-key {
+        background: var(--on-ink);
+        color: var(--violet);
+      }
+      .thumb .ans-key {
+        width: 30px;
+        height: 30px;
+      }
+      .thumb .ans-key .mk {
+        width: 16px;
+        height: 16px;
+      }
+      .thumb .ans b {
+        font-size: 15px;
+      }
+      .thumb .ans .d {
+        font-size: var(--t-sm);
+        text-align: right;
+      }
+      .thumb .haptic {
+        position: absolute;
+        right: 22px;
+        top: -24px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-kit="status"></div>
+      <header class="m-head">
+        <h1>Intake</h1>
+        <span data-postmark data-top="TRIAGE" data-mid="09:00" data-bot="29 SEP"></span>
+        <button class="icon-btn" aria-label="Search"><svg class="mk"><use href="#search" /></svg></button>
+      </header>
+      <div class="came">
+        <span class="pile">
+          <span class="post" data-src="sentry"></span><span class="post" data-src="github"></span><span class="post" data-src="gmail"></span><span class="post" data-src="stripe"></span><span class="post" data-src="intercom"></span><span class="post" data-src="posthog"></span><span class="post" data-src="grafana"></span>
+        </span>
+        <span><b>212</b> in</span>
+        <svg class="mk"><use href="#arrow-right" /></svg>
+        <span class="fail"><b>1</b> burning</span>
+        <span><b>6</b> proposals</span>
+      </div>
+
+      <div class="stack">
+        <span class="edge"></span><span class="edge"></span>
+        <article class="env env--urgent card">
+          <div class="corner">
+            <div class="stamps">
+              <span class="post" data-src="sentry"></span>
+              <span class="post" data-src="gmail"></span>
+              <span class="post" data-src="posthog"></span>
+              <span class="post" data-src="github"></span>
+            </div>
+            <span data-postmark data-waves data-top="SORTED" data-mid="09:00" data-bot="CHECKOUT"></span>
+          </div>
+          <div class="env-body">
+            <span class="of">1 of 6 · Now</span>
+            <div class="kicker">
+              <span class="rs rs--red rs--solid tilt-a"><svg class="mk"><use href="#burning" /></svg>Urgent</span>
+              <span class="proj"><i class="tag" data-p="webshop"></i>webshop</span>
+            </div>
+            <h2 class="env-title">Checkout fails for EU cards with 3-D Secure</h2>
+            <p class="gist">Since deploy #1289, the new Stripe SDK returns <code>requires_action</code> and checkout treats it as a failure.</p>
+            <div class="from">
+              <span><b>412</b> Sentry events</span><span><b>3</b> emails</span><span>conversion <b>-18%</b></span><span>deploy <b>#1289</b></span>
+            </div>
+            <div class="thread-note">
+              <i data-m="decision" class="s-attn"></i>
+              <span>Your thread on this waits on you: approve <code>git push</code></span>
+              <a class="link">Open</a>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <div class="swipe">
+        <span><svg class="mk"><use href="#arrow-right" style="transform: scaleX(-1); transform-origin: center" /></svg>Swipe to dismiss</span>
+        <span>Swipe to start<svg class="mk"><use href="#arrow-right" /></svg></span>
+      </div>
+
+      <div class="next">
+        <span class="rs rs--ochre tilt-b"><i data-m="decision" class="sm"></i>Your call</span>
+        <b>App is slow on Android</b>
+        <span class="n">+4</span>
+      </div>
+
+      <div class="thumb">
+        <span class="haptic"><svg class="mk"><use href="#haptic" /></svg>thud as the stamp lands</span>
+        <div class="ledger">
+          <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Dismiss</b><span class="d">closes it</span></button>
+          <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#task" /></svg></span><b>Accept</b><span class="d">to the backlog</span></button>
+          <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#run" /></svg></span><b>Start "Fix bug"</b><span class="d">Opus 5.5 · studio-mac</span></button>
+        </div>
+      </div>
+
+      <nav data-kit="tabbar" data-active="intake"></nav>
+      <div data-kit="home"></div>
+    </div>
+  </body>
+</html>

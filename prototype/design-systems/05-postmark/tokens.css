@@ -1,0 +1,433 @@
+/* PROTOTYPE - Postmark tokens. Every theme, every scale, one file.
+
+   The colour doctrine, in one line: SHAPE SAYS THE KIND, COLOUR SAYS WHICH ONE.
+   Colour only ever appears inside one of three shapes, so a colour is never ambiguous:
+
+   1. Rubber stamps (ink, slightly rotated) say what something became or what state it is in.
+      There are four inks and carbon, and each is a verdict:
+        violet  Hercule's own hand: agents at work, an Offer, the frank, links, focus
+        ochre   your call: waiting on you, needs a call, unsure, held, paused
+        green   it became work or it is done: -> task, attached, accepted, done, ok
+        red     act now: burning, failed, can't be reached
+        carbon  nothing to do: FYI, known, no action, idle, cancelled, skipped
+   2. Postage stamps (perforated edge, the system's mark inside) say where something came from.
+      Each Connection has its own stamp colour; the denomination printed on it is a count.
+   3. Sorting tags (a label with a punched hole) say which project something belongs to.
+
+   Today's token names are kept where the meaning holds, so adoption is a swap:
+   --bg --surface --raised --ink --muted --faint --line --line-soft --attn --fail --live --ok. */
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("fonts/archivo-wght.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo Narrow";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("fonts/archivo-narrow-wght.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("fonts/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+/* ---------- Scales shared by every theme ---------- */
+:root {
+  /* Archivo carries the interface; Archivo Narrow is the stamp and label face (it is what a
+     rubber stamp or a postage denomination is set in); Plex Mono is the typewriter, used for
+     ids, branches, commands and times - never for prose. */
+  --sans: "Archivo", -apple-system, system-ui, sans-serif;
+  --narrow: "Archivo Narrow", "Archivo", -apple-system, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --w-body: 400;
+  --w-emph: 560;
+  --w-urgent: 660;
+  --w-stamp: 640;
+
+  /* Type: modest titles (18px max), hierarchy from numerals. */
+  --t-micro: 10px;
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-ui: 12.5px;
+  --t-body: 13.5px;
+  --t-md: 14.5px;
+  --t-lg: 16px;
+  --t-title: 18px;
+  --t-num: 26px;
+  --t-num-lg: 34px;
+  --lh-tight: 1.2;
+  --lh-ui: 1.4;
+  --lh-prose: 1.6;
+  --track-stamp: 0.07em;
+
+  /* Spacing, on a 4px base with 2 and 6 for fine work. */
+  --s-1: 2px;
+  --s-2: 4px;
+  --s-3: 6px;
+  --s-4: 8px;
+  --s-5: 12px;
+  --s-6: 16px;
+  --s-7: 20px;
+  --s-8: 24px;
+  --s-9: 32px;
+  --s-10: 40px;
+
+  /* Shape: stationery is crisp. Stamps are nearly square; paper gets a small radius;
+     only the composer and sheets are soft. */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 14px;
+  --r-sheet: 22px;
+  --r-pill: 999px;
+
+  /* Perforation: the hole radius and pitch used by dividers, tear-offs and postage stamps. */
+  --perf-r: 1.6px;
+  --perf-pitch: 7px;
+
+  /* Motion. The thunk is the one flourish: a stamp lands (1.15 -> 1, a small turn, 140ms).
+     Everything else slides like paper and settles. */
+  --ease-paper: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-thunk: cubic-bezier(0.3, 1.5, 0.5, 1);
+  --m-fast: 120ms;
+  --m-thunk: 140ms;
+  --m-slide: 260ms;
+  --m-glass: 240ms;
+
+  /* Glass: the composer, popovers, the palette, the desktop sidebar and mobile sheets. */
+  --glass-blur: blur(18px) saturate(1.5);
+  --glass-strength: 74%;
+  --glass-thin: 52%;
+
+  /* Ink texture for rubber stamps: sparse pinholes where the ink did not take. */
+  --ink-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' seed='11'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -5 3.9'/></filter><rect width='100%' height='100%' filter='url(%23f)'/></svg>");
+}
+
+/* ---------- Manila: light, flagship. Warm off-white paper, carbon-violet ink. ---------- */
+:root,
+:root[data-theme="light"],
+:root[data-theme="manila"],
+.theme-manila {
+  color-scheme: light;
+  --bg: oklch(95.4% 0.018 84);
+  --surface: oklch(97.6% 0.011 86);
+  --raised: oklch(99.4% 0.005 88);
+  --sunk: oklch(92.6% 0.022 82);
+  --ink: oklch(22.5% 0.02 292);
+  --muted: oklch(44% 0.02 288);
+  --faint: oklch(56.5% 0.018 288);
+  --line: oklch(35% 0.04 70 / 0.16);
+  --line-soft: oklch(35% 0.04 70 / 0.085);
+  --hole: oklch(86% 0.028 80);
+
+  --violet: oklch(47% 0.2 293);
+  --ochre: oklch(66% 0.15 72);
+  --ochre-text: oklch(51.5% 0.12 64);
+  --green: oklch(51% 0.13 155);
+  --red: oklch(54.5% 0.205 27);
+  --carbon: oklch(44% 0.02 288);
+  --on-ink: oklch(99% 0.006 88);
+
+  --card-shadow: 0 1px 0 oklch(40% 0.05 70 / 0.08), 0 1px 3px oklch(40% 0.05 70 / 0.06);
+  --lift-shadow: 0 1px 0 oklch(40% 0.05 70 / 0.08), 0 6px 18px -4px oklch(35% 0.05 60 / 0.16),
+    0 2px 5px oklch(35% 0.05 60 / 0.06);
+  --float-shadow: 0 18px 50px -12px oklch(30% 0.05 60 / 0.28), 0 3px 10px oklch(30% 0.05 60 / 0.1);
+  --scrim: oklch(25% 0.03 70 / 0.26);
+
+  /* Postage stamps: the colour field, the mark printed on it, and the stamp's paper margin. */
+  --stamp-paper: oklch(99.8% 0.004 88);
+  --stamp-mark: oklch(99% 0.008 88);
+  --stamp-edge: oklch(35% 0.05 65 / 0.42);
+  --stamp-shade: oklch(35% 0.05 60 / 0.16);
+  --src-github: oklch(30% 0.02 285);
+  --src-gmail: oklch(61% 0.17 40);
+  --src-sentry: oklch(52% 0.17 358);
+  --src-posthog: oklch(60% 0.14 122);
+  --src-intercom: oklch(56% 0.1 178);
+  --src-grafana: oklch(57% 0.12 236);
+  --src-stripe: oklch(47% 0.17 268);
+  --src-cron: oklch(50% 0.14 330);
+  --src-slack: oklch(42% 0.12 318);
+  --src-discord: oklch(52% 0.09 256);
+  --src-web: var(--violet);
+
+  /* Sorting tags: one hue per project. */
+  --proj-webshop: oklch(64% 0.16 52);
+  --proj-payments: oklch(55% 0.1 208);
+  --proj-ops: oklch(57% 0.12 140);
+
+  /* The self-drawn desktop behind the window (glance.html, vibrancy under the sidebar). */
+  --wall-a: oklch(84% 0.07 60);
+  --wall-b: oklch(78% 0.08 320);
+  --wall-c: oklch(86% 0.06 150);
+}
+
+/* ---------- Newsprint: light. Grey-white newsprint, black ink, no warmth. ---------- */
+:root[data-theme="newsprint"],
+.theme-newsprint {
+  color-scheme: light;
+  --bg: oklch(94.6% 0.0025 100);
+  --surface: oklch(97.2% 0.002 100);
+  --raised: oklch(99.5% 0 0);
+  --sunk: oklch(91.8% 0.003 100);
+  --ink: oklch(19% 0.004 280);
+  --muted: oklch(42% 0.005 280);
+  --faint: oklch(55% 0.005 280);
+  --line: oklch(20% 0 0 / 0.15);
+  --line-soft: oklch(20% 0 0 / 0.08);
+  --hole: oklch(85% 0.003 100);
+
+  --violet: oklch(46% 0.21 292);
+  --ochre: oklch(68% 0.15 74);
+  --ochre-text: oklch(50% 0.12 64);
+  --green: oklch(50% 0.14 152);
+  --red: oklch(53% 0.21 26);
+  --carbon: oklch(42% 0.005 280);
+  --on-ink: oklch(99.5% 0 0);
+
+  --card-shadow: 0 1px 0 oklch(20% 0 0 / 0.07), 0 1px 3px oklch(20% 0 0 / 0.05);
+  --lift-shadow: 0 1px 0 oklch(20% 0 0 / 0.07), 0 6px 18px -4px oklch(20% 0 0 / 0.14),
+    0 2px 5px oklch(20% 0 0 / 0.05);
+  --float-shadow: 0 18px 50px -12px oklch(20% 0 0 / 0.26), 0 3px 10px oklch(20% 0 0 / 0.08);
+  --scrim: oklch(20% 0 0 / 0.24);
+
+  --stamp-paper: oklch(99.5% 0 0);
+  --stamp-mark: oklch(99.5% 0 0);
+  --stamp-edge: oklch(35% 0.05 65 / 0.42);
+  --stamp-shade: oklch(35% 0.05 60 / 0.16);
+  --src-github: oklch(26% 0.01 285);
+  --src-gmail: oklch(60% 0.18 40);
+  --src-sentry: oklch(51% 0.18 358);
+  --src-posthog: oklch(58% 0.14 124);
+  --src-intercom: oklch(54% 0.1 178);
+  --src-grafana: oklch(55% 0.13 236);
+  --src-stripe: oklch(46% 0.18 268);
+  --src-cron: oklch(49% 0.15 330);
+  --src-slack: oklch(40% 0.12 318);
+  --src-discord: oklch(50% 0.09 256);
+  --src-web: var(--violet);
+
+  --proj-webshop: oklch(63% 0.17 50);
+  --proj-payments: oklch(54% 0.1 208);
+  --proj-ops: oklch(55% 0.12 140);
+
+  --wall-a: oklch(86% 0.02 250);
+  --wall-b: oklch(80% 0.04 30);
+  --wall-c: oklch(88% 0.02 120);
+}
+
+/* ---------- Carbon: dark, flagship. Carbon-paper black with a hint of violet (hue 305,
+   chroma 0.012 - violet-red, never navy). Inks brighten so they read on black. ---------- */
+:root[data-theme="dark"],
+:root[data-theme="carbon"],
+.theme-carbon {
+  color-scheme: dark;
+  --bg: oklch(17.6% 0.012 305);
+  --surface: oklch(20.8% 0.013 305);
+  --raised: oklch(24.6% 0.014 305);
+  --sunk: oklch(15.4% 0.011 305);
+  --ink: oklch(93.5% 0.01 300);
+  --muted: oklch(75% 0.014 300);
+  --faint: oklch(60% 0.014 300);
+  --line: oklch(93% 0.02 300 / 0.13);
+  --line-soft: oklch(93% 0.02 300 / 0.07);
+  --hole: oklch(12.5% 0.01 305);
+
+  --violet: oklch(73% 0.15 296);
+  --ochre: oklch(81% 0.135 78);
+  --ochre-text: oklch(82% 0.13 78);
+  --green: oklch(76% 0.14 156);
+  --red: oklch(69% 0.185 25);
+  --carbon: oklch(75% 0.014 300);
+  --on-ink: oklch(18% 0.012 305);
+
+  --card-shadow: 0 1px 0 oklch(100% 0 0 / 0.035) inset, 0 1px 2px oklch(0% 0 0 / 0.4);
+  --lift-shadow: 0 1px 0 oklch(100% 0 0 / 0.05) inset, 0 8px 22px -6px oklch(0% 0 0 / 0.6),
+    0 2px 5px oklch(0% 0 0 / 0.35);
+  --float-shadow: 0 1px 0 oklch(100% 0 0 / 0.06) inset, 0 22px 60px -14px oklch(0% 0 0 / 0.75),
+    0 4px 12px oklch(0% 0 0 / 0.4);
+  --scrim: oklch(8% 0.01 305 / 0.55);
+
+  --stamp-paper: oklch(31% 0.014 305);
+  --stamp-mark: oklch(17% 0.012 305);
+  --stamp-edge: oklch(0% 0 0 / 0.55);
+  --stamp-shade: oklch(0% 0 0 / 0.35);
+  --src-github: oklch(84% 0.01 290);
+  --src-gmail: oklch(74% 0.15 45);
+  --src-sentry: oklch(70% 0.16 358);
+  --src-posthog: oklch(78% 0.14 122);
+  --src-intercom: oklch(76% 0.11 178);
+  --src-grafana: oklch(74% 0.11 236);
+  --src-stripe: oklch(70% 0.14 272);
+  --src-cron: oklch(72% 0.13 330);
+  --src-slack: oklch(68% 0.12 318);
+  --src-discord: oklch(72% 0.08 256);
+  --src-web: var(--violet);
+
+  --proj-webshop: oklch(76% 0.15 55);
+  --proj-payments: oklch(74% 0.1 208);
+  --proj-ops: oklch(76% 0.12 140);
+
+  --wall-a: oklch(34% 0.09 310);
+  --wall-b: oklch(28% 0.07 20);
+  --wall-c: oklch(30% 0.06 160);
+}
+
+/* ---------- Oxide: dark. Red-oxide primer, crisp: deep oxblood ground (hue 22), cream ink. ---------- */
+:root[data-theme="oxide"],
+.theme-oxide {
+  color-scheme: dark;
+  --bg: oklch(18.2% 0.024 22);
+  --surface: oklch(21.6% 0.027 22);
+  --raised: oklch(25.6% 0.03 22);
+  --sunk: oklch(15.8% 0.02 22);
+  --ink: oklch(94.5% 0.014 70);
+  --muted: oklch(77% 0.024 50);
+  --faint: oklch(62% 0.03 35);
+  --line: oklch(94% 0.03 50 / 0.13);
+  --line-soft: oklch(94% 0.03 50 / 0.07);
+  --hole: oklch(13% 0.02 22);
+
+  --violet: oklch(75% 0.13 300);
+  --ochre: oklch(82% 0.14 80);
+  --ochre-text: oklch(83% 0.13 80);
+  --green: oklch(78% 0.14 150);
+  --red: oklch(71% 0.19 30);
+  --carbon: oklch(77% 0.024 50);
+  --on-ink: oklch(18% 0.024 22);
+
+  --card-shadow: 0 1px 0 oklch(100% 0 0 / 0.035) inset, 0 1px 2px oklch(0% 0 0 / 0.4);
+  --lift-shadow: 0 1px 0 oklch(100% 0 0 / 0.05) inset, 0 8px 22px -6px oklch(0% 0 0 / 0.6),
+    0 2px 5px oklch(0% 0 0 / 0.35);
+  --float-shadow: 0 1px 0 oklch(100% 0 0 / 0.06) inset, 0 22px 60px -14px oklch(0% 0 0 / 0.75),
+    0 4px 12px oklch(0% 0 0 / 0.4);
+  --scrim: oklch(8% 0.02 22 / 0.55);
+
+  --stamp-paper: oklch(32% 0.03 22);
+  --stamp-mark: oklch(18% 0.024 22);
+  --stamp-edge: oklch(0% 0 0 / 0.55);
+  --stamp-shade: oklch(0% 0 0 / 0.35);
+  --src-github: oklch(86% 0.015 60);
+  --src-gmail: oklch(76% 0.14 50);
+  --src-sentry: oklch(72% 0.15 355);
+  --src-posthog: oklch(80% 0.13 122);
+  --src-intercom: oklch(78% 0.1 178);
+  --src-grafana: oklch(76% 0.1 236);
+  --src-stripe: oklch(72% 0.13 272);
+  --src-cron: oklch(74% 0.12 330);
+  --src-slack: oklch(70% 0.11 318);
+  --src-discord: oklch(74% 0.07 256);
+  --src-web: var(--violet);
+
+  --proj-webshop: oklch(78% 0.14 62);
+  --proj-payments: oklch(76% 0.09 208);
+  --proj-ops: oklch(78% 0.11 140);
+
+  --wall-a: oklch(32% 0.08 30);
+  --wall-b: oklch(26% 0.06 350);
+  --wall-c: oklch(30% 0.05 80);
+}
+
+/* ---------- Bottle: dark. Deep bottle-green glass, cool cream ink. ---------- */
+:root[data-theme="bottle"],
+.theme-bottle {
+  color-scheme: dark;
+  --bg: oklch(18.4% 0.024 168);
+  --surface: oklch(21.8% 0.026 168);
+  --raised: oklch(25.8% 0.028 168);
+  --sunk: oklch(15.8% 0.02 168);
+  --ink: oklch(94.5% 0.014 140);
+  --muted: oklch(78% 0.022 155);
+  --faint: oklch(63% 0.028 162);
+  --line: oklch(94% 0.03 150 / 0.13);
+  --line-soft: oklch(94% 0.03 150 / 0.07);
+  --hole: oklch(13% 0.02 168);
+
+  --violet: oklch(76% 0.13 300);
+  --ochre: oklch(83% 0.14 82);
+  --ochre-text: oklch(84% 0.13 82);
+  --green: oklch(80% 0.16 148);
+  --red: oklch(72% 0.18 27);
+  --carbon: oklch(78% 0.022 155);
+  --on-ink: oklch(18% 0.024 168);
+
+  --card-shadow: 0 1px 0 oklch(100% 0 0 / 0.035) inset, 0 1px 2px oklch(0% 0 0 / 0.4);
+  --lift-shadow: 0 1px 0 oklch(100% 0 0 / 0.05) inset, 0 8px 22px -6px oklch(0% 0 0 / 0.6),
+    0 2px 5px oklch(0% 0 0 / 0.35);
+  --float-shadow: 0 1px 0 oklch(100% 0 0 / 0.06) inset, 0 22px 60px -14px oklch(0% 0 0 / 0.75),
+    0 4px 12px oklch(0% 0 0 / 0.4);
+  --scrim: oklch(8% 0.02 168 / 0.55);
+
+  --stamp-paper: oklch(32% 0.03 168);
+  --stamp-mark: oklch(18% 0.024 168);
+  --stamp-edge: oklch(0% 0 0 / 0.55);
+  --stamp-shade: oklch(0% 0 0 / 0.35);
+  --src-github: oklch(86% 0.012 150);
+  --src-gmail: oklch(77% 0.14 48);
+  --src-sentry: oklch(73% 0.15 358);
+  --src-posthog: oklch(82% 0.13 115);
+  --src-intercom: oklch(80% 0.1 190);
+  --src-grafana: oklch(77% 0.1 236);
+  --src-stripe: oklch(73% 0.13 272);
+  --src-cron: oklch(75% 0.12 330);
+  --src-slack: oklch(71% 0.11 318);
+  --src-discord: oklch(75% 0.07 256);
+  --src-web: var(--violet);
+
+  --proj-webshop: oklch(79% 0.14 60);
+  --proj-payments: oklch(78% 0.09 210);
+  --proj-ops: oklch(80% 0.12 130);
+
+  --wall-a: oklch(30% 0.07 170);
+  --wall-b: oklch(26% 0.05 120);
+  --wall-c: oklch(32% 0.06 200);
+}
+
+/* ---------- Semantic aliases every theme derives from its inks ----------
+   The .theme-* classes scope a theme to one element, so a picker can preview every theme at once;
+   the aliases are listed again for them because a custom property resolves where it is declared. */
+:root,
+.theme-manila,
+.theme-newsprint,
+.theme-carbon,
+.theme-oxide,
+.theme-bottle {
+  --accent: var(--violet);
+  --live: var(--violet);
+  --attn: var(--ochre-text);
+  --ok: var(--green);
+  --fail: var(--red);
+  --focus: var(--violet);
+
+  --violet-soft: color-mix(in oklch, var(--violet) 12%, transparent);
+  --ochre-soft: color-mix(in oklch, var(--ochre) 16%, transparent);
+  --green-soft: color-mix(in oklch, var(--green) 12%, transparent);
+  --red-soft: color-mix(in oklch, var(--red) 11%, transparent);
+
+  --glass: color-mix(in oklch, var(--raised) var(--glass-strength), transparent);
+  --glass-side: color-mix(in oklch, var(--bg) 70%, transparent);
+  --glass-edge: color-mix(in oklch, var(--ink) 9%, transparent);
+}

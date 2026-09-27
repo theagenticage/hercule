@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Office · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="win">
+  <aside class="side" data-side="office"></aside>
+  <main class="main">
+    <header class="topbar">
+      <i data-i="cube" class="t-glyph"></i>
+      <h1>Office</h1><span class="crumb only-1x">3 runners · 16 of 22 desks</span><span class="crumb only-10x">9 runners · 80 of 86 desks</span>
+      <div class="tools">
+        <span class="seg of-switch"><button data-view="list"><i data-i="list"></i>List</button><button class="is-on" data-view="office"><i data-i="cube"></i>Office</button></span>
+        <label class="ask"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="grow">Ask Ada about the Office</span><kbd class="kbd">&#8997;Space</kbd></label>
+      </div>
+    </header>
+
+    <section class="pane of-pane" id="office" data-view="office">
+      <div class="of-head">
+        <div class="nums only-1x">
+          <span class="n"><b>23</b>live sessions</span>
+          <span class="n is-live"><b>8</b>working</span>
+          <span class="n is-attn"><b>3</b>waiting on you</span>
+          <span class="n is-quiet"><b>1</b>paused</span>
+          <span class="n is-quiet"><b>11</b>idle</span>
+        </div>
+        <div class="nums only-10x">
+          <span class="n"><b>140</b>live sessions</span>
+          <span class="n is-live"><b>52</b>working</span>
+          <span class="n is-attn"><b>11</b>waiting on you</span>
+          <span class="n is-quiet"><b>3</b>paused</span>
+          <span class="n is-quiet"><b>74</b>idle</span>
+        </div>
+        <div class="of-legend">
+          <span><i data-m="working"></i>working</span>
+          <span class="c-attn"><i data-m="q"></i>waiting on you</span>
+          <span><i data-m="paused"></i>paused</span>
+          <span><i data-m="queued"></i>idle</span>
+          <span class="lg-sep"></span>
+          <span><i class="room"></i>webshop</span>
+          <span><i class="room" data-p="payments-api"></i>payments-api</span>
+          <span><i class="room" data-p="ops"></i>ops</span>
+        </div>
+      </div>
+      <div class="of-stage" id="stage"></div>
+      <div class="of-list" id="list"></div>
+    </section>
+  </main>
+</div>
+<script>
+/* The Office: each runner is a room, each live session a desk, each assistant an orb at the front desk.
+ * The scene is an isometric SVG built from the fixture below, and the List view renders the same fixture.
+ * ?state=10x swaps in nine runners and 140 live sessions; ?view=list opens the List view. */
+document.addEventListener("DOMContentLoaded", function () {
+  var TEN = document.documentElement.dataset.state === "10x";
+  var pane = document.getElementById("office");
+  var stage = document.getElementById("stage");
+
+  /* ---------- fixture ---------- */
+  // A desk is [column, row, session]; a waiting session carries the id of its decision card.
+  function s(t, p, st, d, w, id) { return { t: t, p: p, s: st, d: d, w: w, id: id }; }
+  var ONE = [
+    { name: "studio-mac", kind: "Rogier's desktop · reserved", cap: 6, cols: 3, at: [0, 0], desks: [
+      [2, 0, s("Migrate ops dashboards", "ops", "waiting", "Keep the old Grafana folder?", "pi · qwen3-coder", "graf")],
+      [1, 0, s("Upgrade Postgres to 17", "ops", "idle", "idle 2h", "Codex · gpt-5.4")],
+      [0, 1, s("Fix 3-D Secure checkout for EU cards", "webshop", "waiting", "git push", "Claude Code · Opus 5.5", "3ds")],
+      [1, 1, s("Translate checkout copy (DE)", "webshop", "working", "14m", "Claude Code · Sonnet 5")],
+      [0, 0, s("Status page wording", "ops", "idle", "idle 50m", "Claude Code · Haiku 4.5")],
+    ] },
+    { name: "build-box-1", kind: "Linux server", cap: 8, cols: 4, at: [5.3, -6.4], desks: [
+      [0, 0, s("Investigate backup timeouts", "ops", "working", "6m", "Codex · gpt-5.4")],
+      [1, 0, s("Label new issues", "webshop", "paused", "bound reached", "Claude Code · Haiku 4.5")],
+      [2, 0, s("Refactor cart totals", "webshop", "working", "22m", "Claude Code · Sonnet 5")],
+      [3, 0, s("Webhook retry backoff", "payments-api", "working", "3m", "Claude Code · Opus 5.5")],
+      [0, 1, s("Refund flow tests", "payments-api", "working", "12m", "Codex · gpt-5.4")],
+      [1, 1, s("Payout report for September", "payments-api", "working", "17m", "Claude Code · Sonnet 5")],
+      [2, 1, s("Payout reconciliation", "payments-api", "working", "31m", "Codex · gpt-5.4")],
+      [3, 1, s("Bump Stripe SDK to v14.2", "webshop", "idle", "idle 1h", "Claude Code · Sonnet 5")],
+    ] },
+    { name: "build-box-2", kind: "Linux server", cap: 8, cols: 4, at: [11.7, -12.8], desks: [
+      [1, 1, s("Ship release v2.15", "payments-api", "waiting", "Publish to npm", "Claude Code · Sonnet 5", "npm")],
+      [0, 0, s("Add iDEAL research", "payments-api", "idle", "idle 1h", "Codex · gpt-5.4")],
+      [2, 0, s("Rate limits for Kiteworks", "payments-api", "working", "8m", "Claude Code · Sonnet 5")],
+    ] },
+  ];
+  var CARDS = {
+    "3ds": { title: "Fix 3-D Secure checkout", ask: "Run <code>git push</code> to fix/3ds-eu?", yes: "Allow once", no: "Deny", desc: "Pushes 3 commits; asks again next time", href: "session-active.html" },
+    graf: { title: "Migrate ops dashboards", ask: "Keep the old Grafana folder?", yes: "Keep it", no: "Delete it", desc: "The agent leaves ops-legacy in place" },
+    npm: { title: "Ship release v2.15", ask: "Publish payments-api 2.15.0 to npm?", yes: "Allow once", no: "Deny", desc: "Publishes 2.15.0, then the Run continues" },
+  };
+
+  // At 10x, per runner: [name, capacity, columns, occupied, waiting, paused, idle]; the rest are working.
+  // Rows run back to front; the two 16-desk cloud runners share the middle row.
+  var TEN_ROWS = [
+    [["build-box-3", 8, 4, 8, 0, 1, 2], ["build-box-4", 8, 4, 7, 1, 0, 2], ["build-box-5", 8, 4, 8, 1, 0, 1]],
+    [["cloud-1", 16, 4, 16, 3, 0, 1], ["build-box-6", 8, 4, 5, 0, 0, 2], ["cloud-2", 16, 4, 14, 3, 1, 2]],
+    [["studio-mac", 6, 3, 6, 2, 0, 1], ["build-box-1", 8, 4, 8, 0, 1, 1], ["build-box-2", 8, 4, 8, 1, 0, 2]],
+  ];
+  var PROJECTS = ["webshop", "payments-api", "ops"];
+  function buildTenRooms() {
+    var seed = 11, rooms = [], y = 0;
+    function random() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    TEN_ROWS.forEach(function (row) {
+      var depth = 0;
+      row.forEach(function (r, i) {
+        var states = [], k;
+        for (k = 0; k < r[4]; k++) states.push("waiting");
+        for (k = 0; k < r[5]; k++) states.push("paused");
+        for (k = 0; k < r[6]; k++) states.push("idle");
+        while (states.length < r[3]) states.push("working");
+        for (k = states.length - 1; k > 0; k--) { var j = Math.floor(random() * (k + 1)), t = states[k]; states[k] = states[j]; states[j] = t; }
+        rooms.push({
+          name: r[0], cap: r[1], cols: r[2], at: [i * 12.9, y],
+          kind: r[0] === "studio-mac" ? "Rogier's desktop · reserved" : r[0].indexOf("cloud") === 0 ? "cloud runner" : "Linux server",
+          desks: states.map(function (st, n) { return [n % r[2], Math.floor(n / r[2]), s("", PROJECTS[Math.floor(random() * 3)], st)]; }),
+        });
+        depth = Math.max(depth, Math.ceil(r[1] / r[2]));
+      });
+      y += depth * 2.6 + 0.3 + 3.2;
+    });
+    return rooms;
+  }
+  var ROOMS = TEN ? buildTenRooms() : ONE;
+
+  /* ---------- geometry ---------- */
+  // World units: a desk cell is 2.3 by 2.6. Screen = isometric projection scaled by u pixels per unit.
+  var CELL_X = 2.3, CELL_Y = 2.6, C = Math.cos(Math.PI / 6);
+  ROOMS.forEach(function (r) {
+    r.rows = Math.ceil(r.cap / r.cols);
+    r.x = r.at[0]; r.y = r.at[1];
+    r.W = r.cols * CELL_X + 0.5; r.H = r.rows * CELL_Y + 0.3;
+  });
+  // The front desk stands in front of the rooms, where you walk in.
+  var FRONT = TEN ? { x: 16.3, y: 32.3, w: 5.4, d: 1.4 } : { x: 16.3, y: 4.1, w: 4.6, d: 1.4 };
+  var ASSISTANTS = TEN
+    ? [["milo", "idle", -2.4], ["juno", "asleep", 1.5], ["four", "working", 2.5]]
+    : [["milo", "idle", -1.9], ["juno", "asleep", 1.9]];
+
+  // The lobby is the floor the front desk stands on.
+  function lobby() { return { x: FRONT.x - 1.3, y: FRONT.y - 1.1, w: FRONT.w + 2.6, d: FRONT.d + 2.4 }; }
+
+  var u = 1, O = [0, 0];
+  function P(x, y, z) { return [O[0] + (x - y) * C * u, O[1] + (x + y) * 0.5 * u - (z || 0) * u]; }
+  function fitScene() {
+    var pts = [];
+    ROOMS.forEach(function (r) { pts.push([r.x, r.y, 1.2], [r.x + r.W, r.y, 1.2], [r.x, r.y + r.H, -0.4], [r.x + r.W, r.y + r.H, -1.6]); });
+    var L = lobby();
+    pts.push([L.x, L.y + L.d, -0.3], [L.x + L.w, L.y + L.d, -0.3], [L.x + L.w, L.y, -0.3]);
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    pts.forEach(function (p) {
+      var X = (p[0] - p[1]) * C, Y = (p[0] + p[1]) * 0.5 - p[2];
+      minX = Math.min(minX, X); maxX = Math.max(maxX, X); minY = Math.min(minY, Y); maxY = Math.max(maxY, Y);
+    });
+    var W = stage.clientWidth, H = stage.clientHeight;
+    var top = TEN ? 20 : 170, bottom = 44, side = 40;
+    u = Math.min((W - side * 2) / (maxX - minX), (H - top - bottom) / (maxY - minY), 34);
+    O = [W / 2 - ((minX + maxX) / 2) * u, top + (H - top - bottom - (maxY - minY) * u) / 2 - minY * u];
+  }
+
+  /* ---------- drawing ---------- */
+  function f(n) { return n.toFixed(1); }
+  function poly(pts, style) { return '<path style="' + style + '" d="M' + pts.map(function (p) { return f(p[0]) + " " + f(p[1]); }).join("L") + 'Z"/>'; }
+  // Draws the three faces of a box a viewer sees: the face toward +y (left), toward +x (right), and the top.
+  function box(x, y, w, d, z, h, top, left, right) {
+    var z1 = z + h;
+    return poly([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z1), P(x, y + d, z1)], "fill:" + left) +
+      poly([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z1), P(x + w, y, z1)], "fill:" + right) +
+      poly([P(x, y, z1), P(x + w, y, z1), P(x + w, y + d, z1), P(x, y + d, z1)], "fill:" + top);
+  }
+  function mix(a, pct, b) { return "color-mix(in oklch, " + a + " " + pct + "%, " + b + ")"; }
+  var HUE = { webshop: "var(--project-webshop)", "payments-api": "var(--project-payments-api)", ops: "var(--project-ops)", ada: "var(--voice-ada)", milo: "var(--voice-milo)", juno: "var(--voice-juno)", four: "var(--voice-4)" };
+  function buildDefs() {
+    var d = "";
+    Object.keys(HUE).forEach(function (k) {
+      var v = HUE[k];
+      d += '<radialGradient id="o-' + k + '" cx=".36" cy=".3" r=".8"><stop offset="0" style="stop-color:' + mix(v, 30, "white") + '"/><stop offset=".55" style="stop-color:' + v + '"/><stop offset="1" style="stop-color:' + mix(v, 75, "black") + '"/></radialGradient>';
+      d += '<radialGradient id="h-' + k + '"><stop offset="0" style="stop-color:' + v + ';stop-opacity:.45"/><stop offset="1" style="stop-color:' + v + ';stop-opacity:0"/></radialGradient>';
+    });
+    d += '<mask id="crescent" maskContentUnits="objectBoundingBox"><rect width="1" height="1" fill="white"/><circle cx=".78" cy=".24" r=".42" fill="black"/></mask>';
+    return "<defs>" + d + "</defs>";
+  }
+  // Draws a presence orb: project or voice color, and a state you can read without the color.
+  function drawOrb(X, Y, r, hue, state) {
+    var o = "";
+    if (state === "working" || state === "waiting") o += '<circle cx="' + f(X) + '" cy="' + f(Y) + '" r="' + f(r * 2.3) + '" fill="url(#h-' + (state === "waiting" ? "ada" : hue) + ')"/>';
+    var dim = state === "idle" || state === "paused";
+    o += '<circle class="of-orb' + (dim ? " is-dim" : "") + '" cx="' + f(X) + '" cy="' + f(Y) + '" r="' + f(r) + '" fill="url(#o-' + hue + ')"' + (state === "asleep" ? ' mask="url(#crescent)"' : "") + "/>";
+    if (state !== "asleep") o += '<ellipse cx="' + f(X - r * 0.3) + '" cy="' + f(Y - r * 0.4) + '" rx="' + f(r * 0.32) + '" ry="' + f(r * 0.18) + '" fill="white" opacity="' + (dim ? 0.3 : 0.65) + '" transform="rotate(-30 ' + f(X - r * 0.3) + " " + f(Y - r * 0.4) + ')"/>';
+    if (state === "working") o += '<circle class="of-swirl" cx="' + f(X) + '" cy="' + f(Y) + '" r="' + f(r * 0.6) + '" stroke-width="' + f(Math.max(1, r * 0.2)) + '" stroke-dasharray="' + f(r * 0.9) + " " + f(r * 3) + '"/>';
+    if (state === "waiting") o += '<circle class="of-ping" cx="' + f(X) + '" cy="' + f(Y) + '" r="' + f(r * 1.6) + '"/>';
+    return o;
+  }
+
+  var waiting = [], roomLabels = [];
+  function drawDesk(dx, dy, se, room) {
+    var w = 1.75, d = 0.95, out = "";
+    if (!se) return '<g class="of-desk is-free"><title>' + room.name + ": free desk</title>" + box(dx, dy, w, d, 0, 0.5, "var(--of-free)", "var(--of-free-l)", "var(--of-free-r)") + "</g>";
+    var hue = HUE[se.p], dim = se.s === "idle" || se.s === "paused";
+    out += box(dx, dy, w, d, 0, 0.5, mix(hue, dim ? 20 : 40, "var(--raised)"), mix(hue, dim ? 26 : 52, "var(--of-shade-l)"), mix(hue, dim ? 22 : 44, "var(--of-shade-r)"));
+    var screen = se.s === "waiting" ? "var(--accent)" : se.s === "working" ? mix(hue, 60, "white") : "var(--of-screen-off)";
+    out += box(dx + 0.32, dy + 0.1, 1.1, 0.1, 0.5, 0.62, "var(--of-monitor)", screen, "var(--of-monitor)");
+    var at = P(dx + w / 2, dy + d + 0.55, 0.95), ground = P(dx + w / 2, dy + d + 0.55, 0);
+    out += '<ellipse class="of-shadow" cx="' + f(ground[0]) + '" cy="' + f(ground[1]) + '" rx="' + f(u * 0.28) + '" ry="' + f(u * 0.14) + '"/>';
+    out += drawOrb(at[0], at[1], u * 0.3, se.p, se.s);
+    if (se.s === "waiting") waiting.push({ X: at[0], Y: at[1], id: se.id });
+    if (se.s === "paused") out += '<g class="of-badge" transform="translate(' + f(at[0] + u * 0.24) + " " + f(at[1] - u * 0.36) + ')"><circle r="' + f(u * 0.2) + '"/><path d="M' + f(-u * 0.06) + " " + f(-u * 0.08) + "v" + f(u * 0.16) + "M" + f(u * 0.06) + " " + f(-u * 0.08) + "v" + f(u * 0.16) + '"/></g>';
+    var said = se.s === "waiting" ? "waiting on you: " + se.d : se.s === "working" ? "working " + se.d : se.s === "paused" ? "paused: " + se.d : se.d;
+    var tip = se.t ? se.t + " · " + se.p + " · " + said + " · " + se.w : se.p + " · " + se.s;
+    return '<g class="of-desk"><title>' + tip + "</title>" + out + "</g>";
+  }
+
+  function drawScene() {
+    fitScene();
+    var floors = "", desks = [];
+    ROOMS.forEach(function (r) {
+      floors += box(r.x, r.y, r.W, r.H, -0.3, 0.3, "var(--of-floor)", "var(--of-floor-l)", "var(--of-floor-r)");
+      // Two low glass walls stand along the back edges of the floor.
+      floors += poly([P(r.x, r.y, 0), P(r.x + r.W, r.y, 0), P(r.x + r.W, r.y, 1.1), P(r.x, r.y, 1.1)], "fill:var(--of-glass-r);stroke:var(--of-glass-edge);stroke-width:.75");
+      floors += poly([P(r.x, r.y, 0), P(r.x, r.y + r.H, 0), P(r.x, r.y + r.H, 1.1), P(r.x, r.y, 1.1)], "fill:var(--of-glass-l);stroke:var(--of-glass-edge);stroke-width:.75");
+      var used = {};
+      r.desks.forEach(function (d) { used[d[0] + "," + d[1]] = d[2]; });
+      for (var j = 0; j < r.rows; j++) for (var i = 0; i < r.cols; i++) {
+        if (j * r.cols + i >= r.cap) continue;
+        var dx = r.x + 0.35 + i * CELL_X, dy = r.y + 0.2 + j * CELL_Y;
+        desks.push({ depth: dx + dy, svg: drawDesk(dx, dy, used[i + "," + j], r) });
+      }
+      roomLabels.push({ r: r, at: P(r.x + r.W, r.y + r.H, -0.3) });
+    });
+    desks.sort(function (a, b) { return a.depth - b.depth; });
+
+    var F = FRONT, L = lobby();
+    var front = box(L.x, L.y, L.w, L.d, -0.3, 0.3, "var(--of-lobby)", "var(--of-floor-l)", "var(--of-floor-r)");
+    front += box(F.x, F.y, F.w, F.d, 0, 0.8, "var(--of-front)", "var(--of-front-l)", "var(--of-front-r)");
+    front += poly([P(F.x, F.y + F.d, 0.52), P(F.x + F.w, F.y + F.d, 0.52), P(F.x + F.w, F.y + F.d, 0.44), P(F.x, F.y + F.d, 0.44)], "fill:var(--accent)");
+    front += box(F.x - 0.12, F.y - 0.12, F.w + 0.24, F.d + 0.24, 0.8, 0.1, "var(--of-front)", "var(--of-shade-l)", "var(--of-shade-r)");
+    ASSISTANTS.forEach(function (a) {
+      var at = P(F.x + F.w / 2 + a[2], F.y + F.d / 2, 1.25);
+      front += drawOrb(at[0], at[1], u * 0.3, a[0], a[1]);
+    });
+    var ada = P(F.x + F.w / 2, F.y + F.d / 2, 1.9);
+    front += drawOrb(ada[0], ada[1], u * 0.6, "ada", "working");
+
+    // Ada's paths: dotted lines from the front desk to every desk that waits on you.
+    var paths = "";
+    waiting.forEach(function (w) {
+      var dx = w.X - ada[0], dy = w.Y - ada[1], len = Math.hypot(dx, dy);
+      var sx = ada[0] + (dx / len) * u * 0.8, sy = ada[1] + (dy / len) * u * 0.8;
+      var mx = (sx + w.X) / 2, my = Math.min(sy, w.Y) - Math.abs(sx - w.X) * 0.12 - u * 1.2;
+      paths += '<path class="of-path" d="M' + f(sx) + " " + f(sy) + "Q" + f(mx) + " " + f(my) + " " + f(w.X) + " " + f(w.Y - u * 0.4) + '"/>';
+    });
+
+    stage.innerHTML = '<svg class="of-svg" width="' + stage.clientWidth + '" height="' + stage.clientHeight + '" role="img" aria-label="The Office">' + buildDefs() +
+      floors + desks.map(function (d) { return d.svg; }).join("") + front + paths + "</svg>";
+    placeOverlays(ada);
+  }
+
+  /* ---------- HTML overlays: room labels, decision cards, Ada's line ---------- */
+  function placeOverlays(ada) {
+    var h = "";
+    roomLabels.forEach(function (l) {
+      var r = l.r, used = r.desks.length, full = used >= r.cap;
+      var q = r.desks.filter(function (d) { return d[2].s === "waiting"; }).length;
+      h += '<div class="of-room' + (full ? " is-full" : "") + '" style="left:' + f(l.at[0]) + "px;top:" + f(l.at[1] + 7) + 'px">' +
+        "<b>" + r.name + "</b>" + (TEN ? "" : '<span class="num">' + used + "/" + r.cap + (full ? " · at cap" : "") + "</span>") +
+        (TEN && q ? '<em class="of-q"><i data-m="q"></i>' + q + "</em>" : "") + "</div>";
+    });
+    if (TEN) {
+      h += '<div class="of-top">' +
+        '<div class="of-card is-bundle"><div class="of-card-h"><i data-m="q"></i><b>7 releases want to publish to npm</b></div>' +
+        '<p class="of-card-ask">Same command, same registry, on cloud-1, cloud-2 and build-box-2.</p>' +
+        '<div class="of-card-a"><button class="btn btn-sm btn-accent">Allow all 7</button><button class="btn btn-sm">One by one</button><button class="btn btn-sm btn-quiet">Deny all</button></div>' +
+        '<p class="of-card-d">Publishes 7 packages once each; each Run continues</p></div>' +
+        "</div>" +
+        '<div class="of-top is-right"><a class="of-card is-rest" href="intake.html"><i data-m="q"></i><span class="grow"><b>4 more questions</b><small>studio-mac 2 · build-box-4 · build-box-5</small></span><i data-i="right"></i></a></div>';
+      var below = P(FRONT.x + FRONT.w + 1.3, FRONT.y + FRONT.d + 1.3, -0.3);
+      h += '<p class="of-say is-below" style="left:' + f(ada[0]) + "px;top:" + f(below[1] + 12) + 'px"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="voice">Seven of the eleven are one npm question.</span></p>';
+      h += '<p class="of-foot"><i data-m="queued"></i>60 idle sessions have no desk; the next message resumes each one in place · 6 desks free</p>';
+    } else {
+      // The cards float in a row above the floor, ordered left to right like the desks they hang from.
+      var order = waiting.slice().sort(function (a, b) { return a.X - b.X; });
+      var cardW = 262, gap = 18, total = order.length * cardW + (order.length - 1) * gap;
+      var left0 = Math.max(24, Math.min(stage.clientWidth - total - 24, (order[0].X + order[order.length - 1].X) / 2 - total / 2));
+      order.forEach(function (w, k) {
+        var c = CARDS[w.id], left = left0 + k * (cardW + gap);
+        h += '<div class="of-card" style="left:' + f(left) + "px;width:" + cardW + 'px">' +
+          '<div class="of-card-h"><i data-m="q"></i><b>' + c.title + "</b></div>" +
+          '<p class="of-card-ask">' + c.ask + "</p>" +
+          '<div class="of-card-a"><a class="btn btn-sm btn-accent" href="' + (c.href || "#") + '">' + c.yes + '</a><button class="btn btn-sm btn-quiet">' + c.no + "</button></div>" +
+          '<p class="of-card-d">' + c.desc + "</p></div>";
+        w.cardX = left + cardW / 2;
+      });
+      h += '<p class="of-say" style="right:' + f(stage.clientWidth - P(FRONT.x - 0.9, FRONT.y + FRONT.d + 1.3, 0)[0]) + "px;top:" + f(ada[1]) + 'px"><i class="orb" data-v="ada" data-p="working" style="--size:12px"></i><span class="voice">Three desks wait on you. I marked the way.</span></p>';
+      h += '<p class="of-foot"><i data-m="queued"></i>7 idle sessions have no desk; the next message resumes each one in place</p>';
+    }
+    stage.insertAdjacentHTML("beforeend", h);
+    if (!TEN) {
+      // Tethers hang each card from its desk.
+      var card = stage.querySelector(".of-card"), bottom = card.offsetTop + card.offsetHeight, lines = "";
+      waiting.forEach(function (w) {
+        var top = w.Y - u * 0.6;
+        lines += '<path class="of-tether" d="M' + f(w.X) + " " + f(top) + "C" + f(w.X) + " " + f(top - 60) + " " + f(w.cardX) + " " + f(bottom + 50) + " " + f(w.cardX) + " " + f(bottom + 2) + '"/>' +
+          '<circle class="of-knot" cx="' + f(w.cardX) + '" cy="' + f(bottom + 2) + '" r="2.5"/>';
+      });
+      stage.querySelector("svg").insertAdjacentHTML("beforeend", lines);
+    }
+    window.Concierge.expand(stage);
+  }
+
+  /* ---------- the List view: the same rooms as rows ---------- */
+  function renderList() {
+    var rank = { waiting: 0, working: 1, paused: 2, idle: 3 };
+    var mark = { waiting: "q", working: "working", paused: "paused", idle: "queued" };
+    var h = "";
+    ROOMS.forEach(function (r) {
+      var used = r.desks.length, full = used >= r.cap;
+      h += '<section class="ol-room"><header class="ol-h"><i data-i="machine"></i><b>' + r.name + '</b><span class="faint">' + r.kind + "</span>" +
+        '<span class="ol-cap' + (full ? " is-full" : "") + '"><span class="meter"><i style="--v:' + (used / r.cap) * 100 + '%"></i></span><span class="num">' + used + " of " + r.cap + (full ? " · at cap" : "") + "</span></span></header>";
+      if (TEN) {
+        var n = { working: 0, waiting: 0, paused: 0, idle: 0 };
+        r.desks.forEach(function (d) { n[d[2].s]++; });
+        h += '<div class="ol-sum"><span><i data-m="working"></i>' + n.working + " working</span>" + (n.waiting ? '<span class="c-attn"><i data-m="q"></i>' + n.waiting + " waiting on you</span>" : "") +
+          (n.paused ? '<span><i data-m="paused"></i>' + n.paused + " paused</span>" : "") + '<span class="faint"><i data-m="queued"></i>' + n.idle + " idle</span></div>";
+      } else {
+        r.desks.slice().sort(function (a, b) { return rank[a[2].s] - rank[b[2].s]; }).forEach(function (d) {
+          var se = d[2];
+          h += '<a class="ol-row' + (se.s === "waiting" ? " is-attn" : "") + '" href="' + (se.id === "3ds" ? "session-active.html" : "#") + '"><i data-m="' + mark[se.s] + '"></i><span class="ol-t">' + se.t + '</span><span class="proj"><i class="room" data-p="' + se.p + '"></i>' + se.p + '</span><span class="ol-w">' + se.w + '</span><span class="ol-s">' +
+            (se.s === "waiting" ? se.d : se.s === "working" ? "working · " + se.d : se.s === "paused" ? "paused · " + se.d : se.d) + "</span></a>";
+        });
+        if (r.cap > used) h += '<div class="ol-free">' + (r.cap - used) + " free desk" + (r.cap - used > 1 ? "s" : "") + "</div>";
+      }
+      h += "</section>";
+    });
+    h += '<p class="ol-off"><i data-m="queued"></i>' + (TEN ? "60" : "7") + " idle sessions have no desk; the next message resumes each one in place</p>";
+    var list = document.getElementById("list");
+    list.innerHTML = '<div class="ol">' + h + "</div>";
+    window.Concierge.expand(list);
+  }
+
+  // The scene is measured from the stage, so it is drawn the first time the stage is visible.
+  var drawn = false;
+  function showView(view) {
+    pane.dataset.view = view;
+    document.querySelectorAll(".of-switch [data-view]").forEach(function (b) { b.classList.toggle("is-on", b.dataset.view === view); });
+    if (view === "office" && !drawn) { drawScene(); drawn = true; }
+  }
+  renderList();
+  showView(new URLSearchParams(location.search).get("view") === "list" ? "list" : "office");
+  document.querySelectorAll(".of-switch [data-view]").forEach(function (b) {
+    b.addEventListener("click", function () { showView(b.dataset.view); });
+  });
+});
+</script>
+</body>
+</html>

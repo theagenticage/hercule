@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" data-theme="daylight" data-favicon="wait3 work8 pause1 idle11" data-favicon-center="3">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Appearance · Settings · Hercule</title>
+    <script src="../shell.js" defer></script>
+    <script src="../halo.js" defer></script>
+  </head>
+  <body>
+    <div class="win">
+      <aside class="side" data-side="settings" data-current="appearance"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1>Appearance</h1>
+          <span class="when">on this Mac</span>
+        </header>
+
+        <div class="set-pane">
+          <div class="set-col">
+            <div class="section-title">Theme
+              <span class="title-ctl">Follow macOS: Daylight by day, Eclipse by night<button class="switch" role="switch" aria-checked="false" aria-label="Follow macOS"></button></span>
+            </div>
+            <div class="themes">
+              <button class="theme-card" data-set-theme="daylight" aria-pressed="false">
+                <span class="pv" data-theme="daylight">
+                  <span class="sb"><i></i><i></i><i></i><i></i></span>
+                  <span class="body">
+                    <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="52" data-still></span>
+                    <span class="bars"><i class="w"></i><i class="g"></i><i></i></span>
+                  </span>
+                </span>
+                <span class="nm">Daylight <span class="faint">light</span><i data-icon="check"></i></span>
+              </button>
+              <button class="theme-card" data-set-theme="porcelain" aria-pressed="false">
+                <span class="pv" data-theme="porcelain">
+                  <span class="sb"><i></i><i></i><i></i><i></i></span>
+                  <span class="body">
+                    <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="52" data-still></span>
+                    <span class="bars"><i class="w"></i><i class="g"></i><i></i></span>
+                  </span>
+                </span>
+                <span class="nm">Porcelain <span class="faint">light</span><i data-icon="check"></i></span>
+              </button>
+              <button class="theme-card" data-set-theme="eclipse" aria-pressed="false">
+                <span class="pv" data-theme="eclipse">
+                  <span class="sb"><i></i><i></i><i></i><i></i></span>
+                  <span class="body">
+                    <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="52" data-still></span>
+                    <span class="bars"><i class="w"></i><i class="g"></i><i></i></span>
+                  </span>
+                </span>
+                <span class="nm">Eclipse <span class="faint">dark</span><i data-icon="check"></i></span>
+              </button>
+              <button class="theme-card" data-set-theme="umber" aria-pressed="false">
+                <span class="pv" data-theme="umber">
+                  <span class="sb"><i></i><i></i><i></i><i></i></span>
+                  <span class="body">
+                    <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="52" data-still></span>
+                    <span class="bars"><i class="w"></i><i class="g"></i><i></i></span>
+                  </span>
+                </span>
+                <span class="nm">Umber <span class="faint">dark</span><i data-icon="check"></i></span>
+              </button>
+              <button class="theme-card" data-set-theme="orchid" aria-pressed="false">
+                <span class="pv" data-theme="orchid">
+                  <span class="sb"><i></i><i></i><i></i><i></i></span>
+                  <span class="body">
+                    <span data-halo="wait3 work8 pause1 idle11" data-notch="0" data-center="3" data-size="52" data-still></span>
+                    <span class="bars"><i class="w"></i><i class="g"></i><i></i></span>
+                  </span>
+                </span>
+                <span class="nm">Orchid <span class="faint">dark</span><i data-icon="check"></i></span>
+              </button>
+            </div>
+            <div class="section-title">Color and marks</div>
+            <div class="set-row">
+              <span class="l">Color means state</span>
+              <span class="legend">
+                <span><span data-halo="work4" data-size="20" data-still></span><b>moving</b></span>
+                <span><span data-halo="wait4" data-size="20" data-still></span><b>your move</b></span>
+                <span><span data-halo="fail4" data-size="20" data-still></span><b>broke</b></span>
+                <span><span data-halo="pause4" data-size="20" data-still></span><b>paused</b></span>
+                <span><span data-halo="idle4" data-size="20" data-still></span><b>at rest</b></span>
+              </span>
+              <span class="ctl faint" style="font-size: var(--t-xs)">no accent to pick</span>
+            </div>
+
+            <div class="set-row">
+              <span class="l">Source marks on rows</span>
+              <span class="preview-row"><i data-brand="sentry"></i>Sentry · webshop-prod<span class="faint">·</span><i data-brand="stripe"></i>Stripe · live</span>
+              <span class="ctl"><button class="switch" role="switch" aria-checked="true" aria-label="Show source-system marks on rows"></button></span>
+            </div>
+
+            <div class="section-title">Text and spacing</div>
+            <div class="set-row">
+              <span class="l">Density</span>
+              <span class="h">Rows in Intake, sessions and lists</span>
+              <span class="ctl"><span class="seg" data-seg><button aria-pressed="false">Compact</button><button aria-pressed="true">Regular</button><button aria-pressed="false">Roomy</button></span></span>
+            </div>
+            <div class="set-row">
+              <span class="l">Font size</span>
+              <span class="h">Transcripts and rows · 13.5 px</span>
+              <span class="ctl"><span class="seg" data-seg>
+                <button aria-pressed="false" style="font-size: 11.5px">Aa</button><button aria-pressed="true" style="font-size: 13.5px">Aa</button><button aria-pressed="false" style="font-size: 15.5px">Aa</button><button aria-pressed="false" style="font-size: 17px">Aa</button>
+              </span></span>
+            </div>
+
+            <div class="section-title">Motion and glass</div>
+            <div class="set-row">
+              <span class="l">Reduce motion</span>
+              <span class="h">Halos stop sweeping and shimmering; state stays in shape and color</span>
+              <span class="ctl"><span class="faint" style="font-size: var(--t-xs)">follows macOS</span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce motion"></button></span>
+            </div>
+            <div class="set-row">
+              <span class="l">Reduce transparency</span>
+              <span class="h">The composer, sheets and popovers turn solid</span>
+              <span class="ctl"><span class="faint" style="font-size: var(--t-xs)">follows macOS</span><button class="switch" role="switch" aria-checked="false" aria-label="Reduce transparency"></button></span>
+            </div>
+
+            <div class="section-title">Halo</div>
+            <div class="set-row">
+              <span class="l">Menu bar halo</span>
+              <span class="h">What the ring beside the clock counts</span>
+              <span class="ctl"><span class="seg" data-seg><button aria-pressed="true">All sessions</button><button aria-pressed="false">Intake</button><button aria-pressed="false">Off</button></span></span>
+            </div>
+            <div class="set-row">
+              <span class="l">Dock badge</span>
+              <span class="h">The number on the app icon</span>
+              <span class="ctl"><span class="seg" data-seg><button aria-pressed="true">Waiting on you</button><button aria-pressed="false">Intake</button><button aria-pressed="false">None</button></span></span>
+            </div>
+            <div class="set-row">
+              <span class="l">Glow when it's your move</span>
+              <span class="h">Sodium segments light up on dark themes</span>
+              <span class="ctl"><button class="switch" role="switch" aria-checked="true" aria-label="Glow when it's your move"></button></span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

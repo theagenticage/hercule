@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>Glance · menu bar, quick panel, notifications · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../brands.js" defer></script>
+    <script src="../kit.js" defer></script>
+    <style>
+      /* The desktop: a wallpaper Hercule does not own, with Hercule's four desktop-only
+         surfaces floating over another app. */
+      .desk {
+        position: relative;
+        width: 1440px;
+        height: 900px;
+        overflow: hidden;
+        background:
+          radial-gradient(60% 80% at 8% 0%, var(--wall-a), transparent 72%),
+          radial-gradient(55% 70% at 100% 100%, var(--wall-b), transparent 70%),
+          radial-gradient(45% 55% at 70% 20%, var(--wall-c), transparent 70%),
+          linear-gradient(160deg, color-mix(in oklch, var(--wall-a) 40%, var(--bg)), color-mix(in oklch, var(--wall-b) 45%, var(--bg)));
+      }
+
+      /* ---------- Menu bar ---------- */
+      .menubar {
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 20;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        padding: 0 10px 0 18px;
+        font-size: 13px;
+        color: var(--ink);
+        background: color-mix(in oklch, var(--bg) 55%, transparent);
+        -webkit-backdrop-filter: blur(24px) saturate(1.6);
+        backdrop-filter: blur(24px) saturate(1.6);
+        box-shadow: inset 0 -0.5px 0 var(--line);
+      }
+      .mb-left {
+        display: flex;
+        gap: 18px;
+      }
+      .mb-left b {
+        font-weight: 700;
+      }
+      .mb-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mb-item {
+        height: 22px;
+        min-width: 28px;
+        padding: 0 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        border-radius: 5px;
+        color: var(--ink);
+      }
+      .mb-item .mk {
+        width: 15px;
+        height: 15px;
+      }
+      .mb-item.is-open {
+        background: color-mix(in oklch, var(--ink) 12%, transparent);
+      }
+      .mb-hercule b {
+        font: 700 12.5px / 1 var(--narrow);
+        font-variant-numeric: tabular-nums;
+      }
+      .mb-hercule .mb-mark {
+        width: 16px;
+        height: 16px;
+      }
+      .mb-batt {
+        width: 25px;
+        height: 12px;
+        border-radius: 3.5px;
+        box-shadow: inset 0 0 0 1.2px color-mix(in oklch, var(--ink) 55%, transparent);
+        padding: 2px;
+        display: flex;
+      }
+      .mb-batt i {
+        width: 72%;
+        border-radius: 1.5px;
+        background: var(--ink);
+      }
+      .mb-clock {
+        padding: 0 8px 0 6px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- The other app: an editor on the fix Hercule's agent just made ---------- */
+      .editor {
+        position: absolute;
+        left: 40px;
+        top: 58px;
+        width: 960px;
+        height: 700px;
+        display: grid;
+        grid-template-rows: 38px 1fr 24px;
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--line), var(--lift-shadow);
+        color: var(--muted);
+      }
+      .ed-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 14px;
+        background: var(--sunk);
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+        font-size: 12px;
+      }
+      .ed-bar .traffic i {
+        background: color-mix(in oklch, var(--ink) 16%, transparent);
+      }
+      .ed-tab {
+        height: 26px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 12px;
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--ink);
+        font: 500 12px var(--mono);
+      }
+      .ed-tab + .ed-tab {
+        background: none;
+        color: var(--faint);
+      }
+      .ed-code {
+        display: grid;
+        grid-template-columns: 46px 3px 1fr;
+        align-content: start;
+        padding-top: 14px;
+        font: 400 12.5px / 21px var(--mono);
+        white-space: pre;
+      }
+      .ed-code .n {
+        text-align: right;
+        padding-right: 12px;
+        color: var(--faint);
+        opacity: 0.7;
+      }
+      .ed-code .g.add {
+        background: var(--green);
+      }
+      .ed-code .g.chg {
+        background: var(--violet);
+      }
+      .ed-code .l {
+        padding-left: 14px;
+        color: var(--ink);
+      }
+      .ed-code .k {
+        color: var(--violet);
+      }
+      .ed-code .s {
+        color: var(--green);
+      }
+      .ed-code .c {
+        color: var(--faint);
+      }
+      .ed-code .f {
+        color: color-mix(in oklch, var(--ochre-text) 85%, var(--ink));
+      }
+      .ed-status {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 14px;
+        font: 400 11px var(--mono);
+        color: var(--faint);
+        background: var(--sunk);
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .ed-status span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .ed-status .mk {
+        width: 12px;
+        height: 12px;
+      }
+
+      /* ---------- Shared glass for Hercule's floating surfaces ---------- */
+      .float {
+        position: absolute;
+        z-index: 10;
+        background: color-mix(in oklch, var(--raised) 80%, transparent);
+        -webkit-backdrop-filter: blur(28px) saturate(1.7);
+        backdrop-filter: blur(28px) saturate(1.7);
+        box-shadow: inset 0 0 0 1px var(--glass-edge), var(--float-shadow);
+      }
+
+      /* ---------- Quick panel (global hotkey) ---------- */
+      .quick {
+        left: 104px;
+        top: 150px;
+        width: 604px;
+        border-radius: 18px;
+        padding: 0 20px 14px;
+      }
+      .q-head {
+        height: 50px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 -4px;
+      }
+      .q-head .logo {
+        width: 24px;
+        height: 24px;
+        transform: rotate(-8deg);
+      }
+      .q-head .title {
+        font-size: 13.5px;
+        font-weight: 640;
+      }
+      .q-head .spacer {
+        flex: 1;
+      }
+      .q-stack {
+        display: flex;
+        gap: 6px;
+        margin: 0 -8px 14px;
+      }
+      .q-env {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 9px;
+        font-size: 12.5px;
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .q-env span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .q-env kbd {
+        margin-left: auto;
+      }
+      .q-env.is-on {
+        color: var(--ink);
+        font-weight: 600;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1.5px var(--attn), var(--card-shadow);
+      }
+      .q-who {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .q-who b {
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 640;
+      }
+      .q-who .mono {
+        font-size: 11.5px;
+        color: var(--faint);
+      }
+      .q-ask {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .q-cmd {
+        margin-top: 8px;
+        padding: 9px 12px;
+        border-radius: 8px;
+        background: var(--sunk);
+        font: 500 13px var(--mono);
+        color: var(--ink);
+      }
+      .q-facts {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: 10px 0 12px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .q-facts .plus {
+        color: var(--green);
+        font: 600 12px var(--mono);
+      }
+      .q-facts .minus {
+        color: var(--red);
+        font: 600 12px var(--mono);
+      }
+      .quick .ans {
+        grid-template-columns: 22px 160px minmax(0, 1fr) auto;
+      }
+      .q-foot {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-top: 10px;
+        padding-top: 11px;
+        font-size: 11.5px;
+        color: var(--faint);
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .q-foot span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .q-foot .right {
+        margin-left: auto;
+      }
+
+      /* ---------- Menu bar extra, opened ---------- */
+      .extra {
+        left: 747px;
+        top: 32px;
+        width: 304px;
+        border-radius: 12px;
+        padding: 6px;
+        font-size: 13px;
+      }
+      .x-head {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+        padding: 10px 10px 12px;
+      }
+      .x-head .num {
+        font: 700 var(--t-num) / 0.9 var(--narrow);
+        letter-spacing: -0.01em;
+      }
+      .x-head small {
+        display: block;
+        margin-top: 4px;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .x-tally {
+        margin-left: auto;
+        display: grid;
+        gap: 3px;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .x-tally span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .x-tally b {
+        min-width: 14px;
+        text-align: right;
+        color: var(--ink);
+        font: 700 12px var(--narrow);
+      }
+      .extra .perf {
+        margin: 2px 10px;
+      }
+      .extra .label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 10px 6px;
+      }
+      .x-wait {
+        display: grid;
+        grid-template-columns: 18px 1fr auto;
+        align-items: center;
+        column-gap: 9px;
+        padding: 6px 10px;
+        border-radius: 7px;
+      }
+      .x-wait:hover,
+      .x-wait.is-on {
+        background: color-mix(in oklch, var(--attn) 12%, transparent);
+      }
+      .x-wait b {
+        display: block;
+        font-weight: 600;
+        font-size: 12.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .x-wait small {
+        display: block;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .x-fleet {
+        display: grid;
+        grid-template-columns: 84px 1fr auto;
+        align-items: center;
+        column-gap: 10px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+      .x-fleet .mono {
+        font-size: 11.5px;
+      }
+      .slots {
+        display: flex;
+        gap: 3px;
+      }
+      .slots i {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        box-shadow: inset 0 0 0 1.2px var(--line);
+      }
+      .slots i.used {
+        background: var(--violet);
+        box-shadow: none;
+      }
+      .x-fleet .rs {
+        --tilt: -3deg;
+        font-size: 9.5px;
+      }
+      .x-fleet .cap {
+        color: var(--faint);
+        font: 600 11.5px var(--narrow);
+      }
+      .x-asst {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        padding: 4px 10px 10px;
+      }
+      .x-asst > span {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .x-asst b {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .x-asst small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .x-intake {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        align-items: center;
+        column-gap: 9px;
+        padding: 8px 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .x-intake b {
+        color: var(--ink);
+      }
+      .x-intake b {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .x-intake small {
+        display: block;
+        font-size: 11.5px;
+      }
+      .x-menu {
+        padding-top: 4px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        margin-top: 4px;
+      }
+      .x-menu .pop-row {
+        height: 28px;
+        padding: 0 10px;
+        color: var(--ink);
+      }
+      .x-menu kbd {
+        margin-left: auto;
+      }
+
+      /* ---------- Native notifications ---------- */
+      .notes {
+        position: absolute;
+        z-index: 12;
+        right: 12px;
+        top: 38px;
+        width: 344px;
+        display: grid;
+        gap: 10px;
+      }
+      .note {
+        position: static;
+        border-radius: 16px;
+        padding: 12px 12px 0;
+        font-size: 12.5px;
+      }
+      .n-top {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        column-gap: 10px;
+      }
+      .n-icon {
+        position: relative;
+        width: 34px;
+        height: 34px;
+      }
+      .n-icon > svg {
+        width: 34px;
+        height: 34px;
+      }
+      .n-icon .seal {
+        width: 34px;
+        height: 34px;
+        font-size: 15px;
+      }
+      .n-icon .badge {
+        position: absolute;
+        right: -4px;
+        bottom: -4px;
+        width: 18px;
+        height: 18px;
+        filter: drop-shadow(0 1px 1px oklch(0% 0 0 / 0.2));
+      }
+      .n-meta {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 3px;
+      }
+      .n-meta .rs {
+        --tilt: -2deg;
+        font-size: 9.5px;
+        padding: 2px 4px 1px;
+      }
+      .n-title {
+        font-weight: 650;
+        font-size: 13px;
+        text-wrap: balance;
+      }
+      .n-body {
+        color: var(--muted);
+        line-height: 1.38;
+        text-wrap: pretty;
+      }
+      .n-code {
+        display: block;
+        margin-top: 5px;
+        font: 500 11.5px var(--mono);
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .n-kind {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .n-time {
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .n-acts {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        margin: 11px -12px 0;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .n-acts button {
+        height: 36px;
+        text-align: center;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--violet);
+      }
+      .n-acts button + button {
+        box-shadow: inset 1px 0 0 var(--line-soft);
+      }
+      .n-acts button.quiet {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .n-more {
+        position: relative;
+        height: 12px;
+        margin: -10px 14px 0;
+        border-radius: 0 0 14px 14px;
+        background: color-mix(in oklch, var(--raised) 60%, transparent);
+        -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(20px);
+        box-shadow: inset 0 0 0 1px var(--glass-edge);
+      }
+      .n-group {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 6px 0;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: color-mix(in oklch, var(--ink) 70%, transparent);
+      }
+
+      /* ---------- Dock ---------- */
+      .dockbar {
+        position: absolute;
+        z-index: 8;
+        left: 50%;
+        bottom: 8px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        height: 74px;
+        padding: 8px 10px 0;
+        border-radius: 22px;
+        background: color-mix(in oklch, var(--bg) 42%, transparent);
+        -webkit-backdrop-filter: blur(26px) saturate(1.6);
+        backdrop-filter: blur(26px) saturate(1.6);
+        box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink) 10%, transparent), 0 10px 30px -10px oklch(0% 0 0 / 0.25);
+      }
+      .app {
+        position: relative;
+        width: 56px;
+        height: 56px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        color: #fff;
+        box-shadow: inset 0 0 0 0.5px oklch(0% 0 0 / 0.15), 0 2px 5px oklch(0% 0 0 / 0.15);
+      }
+      .app .mk {
+        width: 26px;
+        height: 26px;
+      }
+      .app--files {
+        background: linear-gradient(oklch(80% 0.06 230), oklch(62% 0.09 240));
+      }
+      .app--code {
+        background: linear-gradient(oklch(34% 0.02 260), oklch(22% 0.02 260));
+        font: 700 17px var(--mono);
+      }
+      .app--term {
+        background: linear-gradient(oklch(30% 0 0), oklch(16% 0 0));
+        font: 600 14px var(--mono);
+        place-items: start;
+        padding: 8px 9px;
+      }
+      .app--web {
+        background: linear-gradient(oklch(96% 0.01 90), oklch(86% 0.02 90));
+        color: oklch(55% 0.13 160);
+      }
+      .app--cal {
+        background: oklch(98% 0 0);
+        color: oklch(25% 0 0);
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        padding-top: 7px;
+      }
+      .app--cal small {
+        font: 700 9.5px var(--narrow);
+        letter-spacing: 0.08em;
+        color: oklch(58% 0.19 25);
+      }
+      .app--cal b {
+        font: 400 27px / 1 var(--sans);
+      }
+      .app--hercule {
+        background: none;
+        box-shadow: none;
+      }
+      .app--hercule > svg {
+        width: 56px;
+        height: 56px;
+        filter: drop-shadow(0 2px 3px oklch(0% 0 0 / 0.18));
+      }
+      .app--memo {
+        background: linear-gradient(oklch(97% 0.04 95), oklch(90% 0.09 95));
+        color: oklch(45% 0.08 80);
+      }
+      .dock-sep {
+        width: 1px;
+        height: 50px;
+        margin: 0 3px 3px;
+        background: color-mix(in oklch, var(--ink) 16%, transparent);
+      }
+      .app--trash {
+        background: color-mix(in oklch, var(--ink) 8%, transparent);
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink) 12%, transparent);
+      }
+      .running::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -7px;
+        width: 4px;
+        height: 4px;
+        margin-left: -2px;
+        border-radius: 50%;
+        background: color-mix(in oklch, var(--ink) 70%, transparent);
+      }
+      /* The dock badge: a red stamp, perforated, tilted, instead of the round system badge. */
+      .dock-stamp {
+        position: absolute;
+        right: -9px;
+        top: -8px;
+        transform: rotate(8deg);
+        --c: var(--red);
+        --pw: 20px;
+        --ph: 24px;
+      }
+      .dock-stamp .post-face {
+        background: var(--red);
+        color: #fff;
+        font: 700 14px / 1 var(--narrow);
+        display: grid;
+        place-items: center;
+      }
+
+      /* ---------- Annotations: what each surface is ---------- */
+      .anno {
+        position: absolute;
+        z-index: 30;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 24px;
+        padding: 0 9px 0 5px;
+        border-radius: 12px;
+        font: 600 11.5px / 1 var(--sans);
+        color: var(--bg);
+        background: var(--ink);
+        box-shadow: 0 4px 12px -4px oklch(0% 0 0 / 0.35);
+        white-space: nowrap;
+      }
+      .anno b {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font: 700 10.5px var(--narrow);
+        background: var(--bg);
+        color: var(--ink);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="desk">
+      <header class="menubar">
+        <div class="mb-left"><b>Code</b><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></div>
+        <div class="mb-right">
+          <span class="mb-item mb-hercule is-open" title="Hercule: 3 waiting on you"><svg class="mb-mark"><use href="#menubar-mark" /></svg><b>3 waiting</b></span>
+          <span class="mb-item"><svg class="mk"><use href="#machine" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#phone" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#shield" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#pulse" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#clock" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#mic" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#bolt" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#moon" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#key" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#calendar" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#globe" /></svg></span>
+          <span class="mb-item"><span class="mb-batt"><i></i></span></span>
+          <span class="mb-item"><svg class="mk"><use href="#search" /></svg></span>
+          <span class="mb-item"><svg class="mk"><use href="#filter" /></svg></span>
+          <span class="mb-item mb-clock">Tue 29 Sep 09:41</span>
+        </div>
+      </header>
+
+      <section class="editor" aria-label="Another app: a code editor">
+        <div class="ed-bar">
+          <span class="traffic"><i></i><i></i><i></i></span>
+          <span class="ed-tab">payment.ts</span><span class="ed-tab">3ds-modal.tsx</span>
+        </div>
+        <div class="ed-code">
+<span class="n">1</span><span class="g"></span><span class="l"><span class="k">import</span> { confirmPayment } <span class="k">from</span> <span class="s">"@stripe/stripe-js"</span>;</span>
+<span class="n">2</span><span class="g add"></span><span class="l"><span class="k">import</span> { openThreeDSModal } <span class="k">from</span> <span class="s">"./3ds-modal"</span>;</span>
+<span class="n">3</span><span class="g"></span><span class="l"><span class="k">import type</span> { PaymentResult } <span class="k">from</span> <span class="s">"./types"</span>;</span>
+<span class="n">4</span><span class="g"></span><span class="l"> </span>
+<span class="n">5</span><span class="g"></span><span class="l"><span class="c">// Stripe SDK v14 returns requires_action for cards that need 3-D Secure.</span></span>
+<span class="n">6</span><span class="g chg"></span><span class="l"><span class="k">export async function</span> <span class="f">handlePaymentResult</span>(result: PaymentResult) {</span>
+<span class="n">7</span><span class="g"></span><span class="l">  <span class="k">if</span> (result.status === <span class="s">"succeeded"</span>) {</span>
+<span class="n">8</span><span class="g"></span><span class="l">    <span class="k">return</span> <span class="f">showReceipt</span>(result.paymentIntent);</span>
+<span class="n">9</span><span class="g"></span><span class="l">  }</span>
+<span class="n">10</span><span class="g add"></span><span class="l">  <span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {</span>
+<span class="n">11</span><span class="g add"></span><span class="l">    <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);</span>
+<span class="n">12</span><span class="g add"></span><span class="l">  }</span>
+<span class="n">13</span><span class="g"></span><span class="l">  <span class="k">return</span> <span class="f">showDeclined</span>(result.error);</span>
+<span class="n">14</span><span class="g"></span><span class="l">}</span>
+<span class="n">15</span><span class="g"></span><span class="l"> </span>
+<span class="n">16</span><span class="g"></span><span class="l"><span class="k">export function</span> <span class="f">showDeclined</span>(error?: StripeError) {</span>
+<span class="n">17</span><span class="g"></span><span class="l">  track(<span class="s">"checkout_declined"</span>, { code: error?.code });</span>
+<span class="n">18</span><span class="g"></span><span class="l">  <span class="k">return</span> { kind: <span class="s">"declined"</span>, message: <span class="s">"Card declined"</span> };</span>
+<span class="n">19</span><span class="g"></span><span class="l">}</span>
+<span class="n">20</span><span class="g"></span><span class="l"> </span>
+<span class="n">21</span><span class="g"></span><span class="l"><span class="k">export function</span> <span class="f">showReceipt</span>(intent: PaymentIntent) {</span>
+<span class="n">22</span><span class="g"></span><span class="l">  <span class="k">return</span> { kind: <span class="s">"paid"</span>, amount: intent.amount };</span>
+<span class="n">23</span><span class="g"></span><span class="l">}</span>
+</div>
+        <div class="ed-status">
+          <span><svg class="mk"><use href="#branch" /></svg>fix/3ds-eu-cards</span><span>webshop</span><span>Ln 11, Col 48</span><span style="margin-left: auto">TypeScript</span>
+        </div>
+      </section>
+
+      <!-- 1. Quick panel: summoned anywhere with Option-Space, answers without switching apps -->
+      <section class="float quick" aria-label="Quick panel">
+        <div class="q-head">
+          <svg class="logo"><use href="#logo" /></svg>
+          <span class="title">Waiting on you</span>
+          <span class="rs rs--ochre tilt-b">3 open</span>
+          <span class="spacer"></span>
+          <kbd>⌥ Space</kbd>
+          <kbd>esc</kbd>
+        </div>
+        <div class="q-stack">
+          <div class="q-env is-on"><i data-m="decision" class="s-attn"></i><span>Fix 3-D Secure checkout</span><kbd>1</kbd></div>
+          <div class="q-env"><i data-m="decision" class="s-attn"></i><span>Ship release v2.15</span><kbd>2</kbd></div>
+          <div class="q-env"><i data-m="decision" class="s-attn"></i><span>Migrate ops dashboards</span><kbd>3</kbd></div>
+        </div>
+        <div class="q-who">
+          <i class="tag" data-p="webshop"></i><b>Fix 3-D Secure checkout for EU cards</b>
+          <span class="mono">Opus 5.5 · studio-mac</span>
+        </div>
+        <div class="q-ask">Run a command?</div>
+        <div class="q-cmd">git push -u origin fix/3ds-eu-cards</div>
+        <div class="q-facts">
+          <span>3 changed files <span class="plus">+48</span> <span class="minus">-12</span></span>
+          <span class="rs rs--green tilt-a"><svg class="mk"><use href="#done" /></svg>24 passed</span>
+        </div>
+        <div class="ledger">
+          <button class="ans ans--no"><span class="ans-key"><svg class="mk"><use href="#x" /></svg></span><b>Deny</b><span class="d">The agent is told no and carries on</span><kbd>N</kbd></button>
+          <button class="ans ans--ok"><span class="ans-key"><svg class="mk"><use href="#shield" /></svg></span><b>Always allow git push</b><span class="d">Adds a Grant to this thread's profile</span><kbd>⇧⏎</kbd></button>
+          <button class="ans ans--go is-primary"><span class="ans-key"><svg class="mk"><use href="#check" /></svg></span><b>Allow once</b><span class="d">Runs this push, asks again next time</span><kbd>⏎</kbd></button>
+        </div>
+        <div class="q-foot">
+          <span><kbd>⇥</kbd>next</span>
+          <span><kbd>⌘O</kbd>open the thread</span>
+          <span class="right">Answered here, stamped in the thread</span>
+        </div>
+      </section>
+
+      <!-- 2. Menu bar extra, open -->
+      <section class="float extra" aria-label="Hercule in the menu bar">
+        <div class="x-head">
+          <div>
+            <div class="num">23</div>
+            <small>live sessions</small>
+          </div>
+          <div class="x-tally">
+            <span><b>8</b><i data-m="working" class="s-live sm"></i>working</span>
+            <span><b>3</b><i data-m="decision" class="s-attn sm"></i>waiting on you</span>
+            <span><b>12</b><i data-m="idle" class="s-faint sm"></i>idle</span>
+          </div>
+        </div>
+        <div class="perf"></div>
+        <div class="label">Waiting on you</div>
+        <div class="x-wait is-on"><i data-m="decision" class="s-attn"></i><span><b>Fix 3-D Secure checkout</b><small>Run git push?</small></span><kbd>1</kbd></div>
+        <div class="x-wait"><i data-m="decision" class="s-attn"></i><span><b>Ship release v2.15</b><small>Publish to npm?</small></span><kbd>2</kbd></div>
+        <div class="x-wait"><i data-m="decision" class="s-attn"></i><span><b>Migrate ops dashboards</b><small>Keep the old Grafana folder?</small></span><kbd>3</kbd></div>
+        <div class="label">Fleet</div>
+        <div class="x-fleet">
+          <span class="mono">studio-mac</span>
+          <span class="slots" data-used="5" data-cap="6"></span>
+          <span class="cap">5/6</span>
+        </div>
+        <div class="x-fleet">
+          <span class="mono">build-box-1</span>
+          <span class="slots" data-used="8" data-cap="8"></span>
+          <span class="rs rs--ochre">At cap</span>
+        </div>
+        <div class="x-fleet">
+          <span class="mono">build-box-2</span>
+          <span class="slots" data-used="3" data-cap="8"></span>
+          <span class="cap">3/8</span>
+        </div>
+        <div class="label">Assistants</div>
+        <div class="x-asst">
+          <span><span class="seal is-working">A</span><span><b>Ada</b><small>working</small></span></span>
+          <span><span class="seal">M</span><span><b>Milo</b><small>idle</small></span></span>
+          <span><span class="seal is-asleep">J</span><span><b>Juno</b><small>asleep</small></span></span>
+        </div>
+        <div class="perf"></div>
+        <div class="x-intake"><i data-m="burning" class="s-fail"></i><span><b>Intake</b><small>1 burning · 6 proposals · next triage 11:00</small></span></div>
+        <div class="x-menu">
+          <div class="pop-row">Open Hercule<kbd>⌘O</kbd></div>
+          <div class="pop-row">Quick panel<kbd>⌥ Space</kbd></div>
+          <div class="pop-row">Pause notifications for 1 hour</div>
+        </div>
+      </section>
+
+      <!-- 3. Native notifications, each carrying its answers -->
+      <section class="notes" aria-label="Notifications">
+        <div class="n-group"><span>Hercule</span><span>Show less</span></div>
+        <article class="float note">
+          <div class="n-top">
+            <span class="n-icon"><svg><use href="#appicon" /></svg></span>
+            <div>
+              <div class="n-meta"><span class="rs rs--ochre">Request</span><span class="n-title">Fix 3-D Secure checkout</span></div>
+              <div class="n-body">Run a command?</div>
+              <code class="n-code">git push -u origin fix/3ds-eu-cards</code>
+            </div>
+            <span class="n-time">now</span>
+          </div>
+          <div class="n-acts"><button>Allow once</button><button class="quiet">Deny</button></div>
+        </article>
+        <article class="float note">
+          <div class="n-top">
+            <span class="n-icon"><svg><use href="#appicon" /></svg></span>
+            <div>
+              <div class="n-meta"><span class="rs rs--red rs--solid">Urgent</span><span class="n-kind">Proposal · webshop</span></div>
+              <div class="n-title">Checkout fails for EU cards with 3-D Secure</div>
+              <div class="n-body">412 events, 188 users since deploy #1289</div>
+            </div>
+            <span class="n-time">9:00</span>
+          </div>
+          <div class="n-acts"><button>Start "Fix bug"</button><button class="quiet">Dismiss</button></div>
+        </article>
+        <article class="float note">
+          <div class="n-top">
+            <span class="n-icon"><span class="seal is-working">A</span><svg class="badge"><use href="#appicon" /></svg></span>
+            <div>
+              <div class="n-meta"><span class="rs rs--violet">Ada</span><span class="n-title">Web chat</span></div>
+              <div class="n-body">Morning Rogier. One urgent thing…</div>
+            </div>
+            <span class="n-time">9:00</span>
+          </div>
+          <div class="n-acts"><button>Reply</button></div>
+        </article>
+        <div class="n-more" title="2 more from Hercule: Ship release v2.15, Migrate ops dashboards"></div>
+      </section>
+
+      <!-- 4. The dock, with Hercule's badge drawn as a stamp -->
+      <nav class="dockbar" aria-label="Dock">
+        <span class="app app--files running"><svg class="mk"><use href="#folder-plus" /></svg></span>
+        <span class="app app--code running">&lt;/&gt;</span>
+        <span class="app app--term running">&gt;_</span>
+        <span class="app app--web"><svg class="mk"><use href="#globe" /></svg></span>
+        <span class="app app--cal"><small>TUE</small><b>29</b></span>
+        <span class="app app--memo"><svg class="mk"><use href="#compose" /></svg></span>
+        <span class="app app--hercule running"><svg><use href="#appicon" /></svg><span class="post dock-stamp" data-src="github"><span class="post-face">3</span></span></span>
+        <span class="dock-sep"></span>
+        <span class="app app--trash"><svg class="mk"><use href="#minus" /></svg></span>
+      </nav>
+
+      <span class="anno" style="left: 104px; top: 116px"><b>1</b>⌥ Space from any app · answer and go back</span>
+      <span class="anno" style="left: 604px; top: 36px"><b>2</b>Menu bar extra</span>
+      <span class="anno" style="left: 1098px; top: 470px"><b>3</b>Notifications carry the answers</span>
+      <span class="anno" style="left: 842px; top: 796px"><b>4</b>Dock badge · a stamp</span>
+    </div>
+    <script>
+      // Fills each runner's slot strip: one square per slot, filled while a session holds it.
+      document.querySelectorAll(".slots[data-cap]").forEach((el) => {
+        const used = Number(el.dataset.used);
+        el.innerHTML = Array.from({ length: Number(el.dataset.cap) }, (_, i) => `<i class="${i < used ? "used" : ""}"></i>`).join("");
+        el.title = `${used} of ${el.dataset.cap} slots in use`;
+      });
+    </script>
+  </body>
+</html>

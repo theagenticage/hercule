@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" data-theme="sand">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, height=900" />
+    <title>Ada · Tide · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../tide.js" defer></script>
+    <style>
+      .bar-title { align-items: center; gap: 10px; }
+      .bar-role { font-size: var(--fs-md); color: var(--muted); }
+      .split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 320px; }
+      .body { position: relative; min-height: 0; }
+      .body::before {
+        content: ""; position: absolute; left: 0; right: 0; top: 0; height: 18px; z-index: 2; pointer-events: none;
+        background: linear-gradient(var(--bg), transparent);
+      }
+      .tx { --tx-pad: 196px; }
+      .tx-col { width: 712px; margin-left: calc(50% - 392px); }
+      .composer { max-width: 640px; }
+      .composer.is-shrunk { max-width: 520px; }
+    </style>
+  </head>
+  <body class="desk">
+    <aside class="side" data-side="threads" data-active="ada"></aside>
+    <main class="main">
+      <header class="bar">
+        <div class="bar-title">
+          <span class="av av-ada working" aria-hidden="true">A</span>
+          <h1 class="page-title">Ada</h1>
+          <span class="bar-role">personal assistant</span>
+          <span class="chip"><i data-m="working" class="live"></i>working</span>
+        </div>
+        <div class="bar-end">
+          <span class="chip"><i data-m="webchat"></i>Web chat</span>
+          <span class="chip"><i data-b="slack"></i>Slack DM</span>
+          <a class="icon-btn" href="settings-assistants.html" aria-label="Ada's settings"><i data-m="settings"></i></a>
+          <button class="icon-btn" aria-label="More"><i data-m="more"></i></button>
+        </div>
+      </header>
+
+      <div class="split">
+        <div class="body">
+          <div class="tx" data-transcript data-scrolled-by="220">
+            <div class="tx-col">
+              <div class="tx-axis" aria-hidden="true"></div>
+
+              <div class="tx-day"><span>Yesterday</span></div>
+              <div class="tx-row">
+                <time>22:14</time>
+                <div class="notice" role="note">
+                  <i data-m="notice"></i>
+                  <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span>
+                  <small>Notice · from Hercule, not from Ada</small>
+                </div>
+              </div>
+
+              <div class="tx-day"><span>Today</span></div>
+              <div class="tx-row">
+                <time>07:00</time>
+                <button class="quiet-line"><i data-m="heartbeat"></i>2 quiet check-ins<span class="t-mono">07:00 · 08:00 · nothing to say</span><i data-m="chev-right"></i></button>
+              </div>
+
+              <div class="tx-row beat">
+                <time>09:00</time>
+                <i data-m="heartbeat" class="beat-m" aria-hidden="true"></i>
+                <div class="prose">
+                  <div class="beat-tag">heartbeat · 09:00</div>
+                  <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push.</p>
+                  <p>Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p>
+                </div>
+              </div>
+
+              <div class="tx-row is-you">
+                <time>09:20</time>
+                <p class="bubble">Remind me Friday to renew the SSL cert for ops.</p>
+              </div>
+
+              <div class="tx-row">
+                <time>09:20</time>
+                <div class="prose">
+                  <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+                  <div class="reminder-chip"><i data-m="reminder"></i><span>Renew the SSL cert for ops<span class="when">Fri 2 Oct · 09:00 · Web chat</span></span><button class="btn btn-sm btn-ghost">Change</button></div>
+                </div>
+              </div>
+
+              <div class="tx-row is-you">
+                <time>09:38</time>
+                <p class="bubble">What's the status of the backup job?</p>
+              </div>
+
+              <div class="tx-row streaming">
+                <time>09:38</time>
+                <div class="prose" aria-live="polite">
+                  <p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret-live" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer" data-composer>
+              <div class="card-c">
+                <div class="c-input" role="textbox" tabindex="0" aria-label="Message Ada">Queued until the turn finishes…</div>
+                <div class="c-row">
+                  <button class="icon-btn" aria-label="Attach"><i data-m="plus"></i></button>
+                  <button class="c-pill"><i data-b="anthropic"></i>Claude Code<span class="acct">·</span>Sonnet 5</button>
+                  <span class="c-spacer"></span>
+                  <button class="icon-btn c-hide-shrunk" aria-label="Voice"><i data-m="mic"></i></button>
+                  <button class="stop-btn"><i data-m="stop"></i>Stop</button>
+                  <button class="c-send" disabled aria-label="Send"><i data-m="send"></i></button>
+                </div>
+              </div>
+              <div class="lip">
+                <i data-m="webchat"></i><span>Web chat</span>
+                <span class="c-spacer"></span>
+                <i data-m="rotate"></i><span>context 41%</span><span class="faint">· rotates at 70%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ada's day: what she has done and will do, on one time axis. -->
+        <aside class="day-rail" aria-label="Ada's day">
+          <section>
+            <div class="label">Heartbeats<span class="n">every 1h · 07-23</span></div>
+            <div class="beats" data-beats></div>
+            <div class="rail-fact"><i data-m="heartbeat"></i><span>next heartbeat <b class="mono">10:00</b> · Web chat</span></div>
+          </section>
+          <section>
+            <div class="label">Reminders<span class="n">3</span></div>
+            <div class="rem-list">
+              <div class="rem"><time>Thu 1 Oct<br />16:00</time><b>Call the accountant</b><small>once</small></div>
+              <div class="rem is-new"><time>Fri 2 Oct<br />09:00</time><b>Renew the SSL cert for ops</b><small>once · set today 09:20</small></div>
+              <div class="rem"><time>Mon 5 Oct<br />08:30</time><b>Weekly revenue summary</b><small>every Monday</small></div>
+            </div>
+          </section>
+          <section>
+            <div class="label">Memory<span class="n">core note</span></div>
+            <div class="meter" role="img" aria-label="Core note: 1,284 of 4,000 characters"><i style="width: 32%"></i></div>
+            <div class="meter-row"><span><b class="mono">1,284</b> of 4,000 characters</span><span>7 topics</span></div>
+            <div class="topics-mini"><span>work-style</span><span>webshop</span><span>payments-api</span><span>ops</span><span>customers</span><span>family</span><span>reading</span></div>
+          </section>
+          <section>
+            <div class="label">Context<span class="n">this Conversation</span></div>
+            <div class="meter" role="img" aria-label="Context 41% used; rotates at 70%"><i style="width: 41%"></i><span class="mark" style="left: 70%"></span></div>
+            <div class="meter-row"><span><b class="mono">41%</b> used</span><span>rotates at 70% · daily 04:00</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

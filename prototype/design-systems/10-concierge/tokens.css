@@ -1,0 +1,334 @@
+/* Concierge - tokens.
+ *
+ * COLOR DOCTRINE: color is voice.
+ *   - Large color always tells you WHO is speaking or working:
+ *       Ada, the primary Assistant ........ persimmon (--accent / --voice-ada)
+ *       every other Assistant ............. its own voice hue (--voice-milo, --voice-juno, --voice-4)
+ *       a Session ......................... the hue of the project room it works in (--project-*)
+ *       Hercule itself (core, receipts) ... ink. The system never speaks in color.
+ *   - State is SHAPE first, at mark scale only (12px marks, words beside them):
+ *       for you  ? persimmon   Ada brings every decision to you, so "needs you" is her color
+ *       working  equalizer, jade (--live)
+ *       failed   cross, crimson (--fail)
+ *       done     check, emerald (--ok) - also diff additions and passing tests
+ *       queued / paused / cancelled / skipped - ink marks, no hue
+ *   - Source systems (GitHub, Sentry...) are provenance, not voices: monochrome marks in ink.
+ *
+ * Theme keys: linen (= light, flagship), porcelain, espresso (= dark, flagship), velvet, charcoal.
+ * Any element may carry data-theme; theme previews use this.
+ */
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("fonts/newsreader-latin-wght.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/inter-latin-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-latin-wght.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
+/* ---------- theme-independent tokens ---------- */
+:root {
+  /* type */
+  --font-voice: "Newsreader", "Iowan Old Style", Georgia, serif; /* assistants speaking. Upright only. */
+  --font-ui: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  --t-fine: 11px;     /* fine print, describe descriptions */
+  --t-meta: 12px;     /* metadata, describe lines, captions */
+  --t-ui: 13px;       /* controls, rows */
+  --t-body: 14px;     /* agent prose, body */
+  --t-voice: 17px;    /* Ada's voice (serif runs small; 17 reads like 15 sans) */
+  --t-title: 15px;    /* object titles on cards */
+  --t-page: 18px;     /* page titles; never above 20 on desktop */
+  --t-num: 26px;      /* hierarchy comes from numerals, not headings */
+  --t-num-lg: 38px;
+
+  --lh-ui: 1.4;
+  --lh-voice: 1.5;
+
+  /* spacing, 4px base */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px;
+
+  /* shape: soft, like well-set notes */
+  --r-xs: 4px;
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;   /* notes, the composer card */
+  --r-xl: 20px;   /* sheets, panels */
+  --r-pill: 999px;
+
+  /* motion: calm. Text arrives in phrases, cards settle, the orb breathes. */
+  --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-quick: 140ms;
+  --dur-glass: 280ms;   /* composer shrink / restore */
+  --dur-settle: 460ms;  /* a decision card settling into a message */
+  --dur-phrase: 520ms;  /* one phrase of Ada's voice arriving */
+  --dur-breathe: 5.2s;  /* the orb, idle or listening */
+  --dur-swirl: 3.8s;    /* the orb, working */
+
+  /* glass */
+  --glass-blur: 22px;
+  --glass-saturate: 1.5;
+
+  /* density */
+  --row-h: 34px;
+  --col: 780px;       /* the conversation / thread column */
+}
+
+/* ---------- Linen: warm paper, flagship light ---------- */
+:root,
+[data-theme="linen"],
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(95.4% 0.014 78);
+  --surface: oklch(97.3% 0.010 80);
+  --raised: oklch(99.4% 0.004 85);
+  --sunk: oklch(92.6% 0.016 76);
+  --ink: oklch(23.5% 0.02 50);
+  --muted: oklch(45.5% 0.022 55);
+  --faint: oklch(58.5% 0.02 62);
+  --line: oklch(30% 0.03 55 / 0.13);
+  --line-soft: oklch(30% 0.03 55 / 0.07);
+
+  --accent: oklch(62% 0.165 48);          /* Ada: persimmon, fills and the orb */
+  --accent-ink: oklch(52.5% 0.16 43);     /* Ada's color at text size */
+  --accent-soft: oklch(62% 0.165 48 / 0.11);
+  --on-accent: oklch(99% 0.01 60);
+
+  --attn: var(--accent-ink);              /* "needs you" is Ada's color */
+  --attn-soft: var(--accent-soft);
+  --live: oklch(52% 0.1 172);
+  --fail: oklch(50.5% 0.175 22);
+  --fail-soft: oklch(50.5% 0.175 22 / 0.09);
+  --ok: oklch(51% 0.12 155);
+
+  --voice-ada: var(--accent);
+  --voice-milo: oklch(53.5% 0.15 292);    /* iris */
+  --voice-juno: oklch(54.5% 0.16 345);    /* orchid */
+  --voice-4: oklch(56% 0.1 198);          /* teal, the fourth assistant at 10x */
+
+  --project-webshop: oklch(66% 0.145 82); /* marigold */
+  --project-payments-api: oklch(56% 0.11 218); /* lagoon */
+  --project-ops: oklch(56% 0.1 128);      /* moss */
+
+  --glass: oklch(99.4% 0.004 85 / 0.72);
+  --glass-strong: oklch(99.4% 0.004 85 / 0.86);
+  --glass-edge: oklch(100% 0 0 / 0.7);
+  --side-glass: oklch(96% 0.014 75 / 0.64);
+  --wallpaper-a: oklch(80% 0.09 55 / 0.55);
+  --wallpaper-b: oklch(82% 0.06 330 / 0.45);
+  --scrim: oklch(25% 0.03 50 / 0.28);
+
+  --shadow-note: 0 0 0 0.5px oklch(30% 0.03 55 / 0.10), 0 1px 2px oklch(30% 0.04 55 / 0.06), 0 10px 28px -14px oklch(30% 0.05 50 / 0.26);
+  --shadow-lift: 0 0 0 0.5px oklch(30% 0.03 55 / 0.10), 0 2px 6px oklch(30% 0.04 55 / 0.07), 0 24px 56px -20px oklch(30% 0.06 50 / 0.34);
+  --shadow-window: 0 0 0 0.5px oklch(20% 0.02 50 / 0.3), 0 30px 80px -20px oklch(20% 0.04 50 / 0.45);
+}
+
+/* ---------- Porcelain: cool white, quieter light ---------- */
+[data-theme="porcelain"] {
+  color-scheme: light;
+  --bg: oklch(96.4% 0.003 190);
+  --surface: oklch(98.2% 0.002 190);
+  --raised: oklch(100% 0 0);
+  --sunk: oklch(93.8% 0.004 190);
+  --ink: oklch(22% 0.008 230);
+  --muted: oklch(45% 0.01 220);
+  --faint: oklch(58% 0.01 210);
+  --line: oklch(25% 0.01 220 / 0.12);
+  --line-soft: oklch(25% 0.01 220 / 0.065);
+
+  --accent: oklch(61% 0.17 45);
+  --accent-ink: oklch(52% 0.165 40);
+  --accent-soft: oklch(61% 0.17 45 / 0.1);
+  --on-accent: oklch(99% 0.01 60);
+  --attn: var(--accent-ink);
+  --attn-soft: var(--accent-soft);
+  --live: oklch(51% 0.1 175);
+  --fail: oklch(50% 0.18 22);
+  --fail-soft: oklch(50% 0.18 22 / 0.08);
+  --ok: oklch(50% 0.12 155);
+
+  --voice-ada: var(--accent);
+  --voice-milo: oklch(53% 0.16 292);
+  --voice-juno: oklch(55% 0.17 345);
+  --voice-4: oklch(55% 0.1 198);
+  --project-webshop: oklch(65% 0.15 80);
+  --project-payments-api: oklch(54% 0.11 218);
+  --project-ops: oklch(54% 0.1 128);
+
+  --glass: oklch(100% 0 0 / 0.7);
+  --glass-strong: oklch(100% 0 0 / 0.86);
+  --glass-edge: oklch(100% 0 0 / 0.8);
+  --side-glass: oklch(96% 0.004 190 / 0.62);
+  --wallpaper-a: oklch(84% 0.05 60 / 0.5);
+  --wallpaper-b: oklch(86% 0.03 180 / 0.5);
+  --scrim: oklch(25% 0.01 220 / 0.24);
+
+  --shadow-note: 0 0 0 0.5px oklch(25% 0.01 220 / 0.11), 0 1px 2px oklch(25% 0.01 220 / 0.05), 0 10px 28px -14px oklch(25% 0.02 220 / 0.2);
+  --shadow-lift: 0 0 0 0.5px oklch(25% 0.01 220 / 0.11), 0 2px 6px oklch(25% 0.01 220 / 0.06), 0 24px 56px -20px oklch(25% 0.02 220 / 0.28);
+  --shadow-window: 0 0 0 0.5px oklch(20% 0.01 220 / 0.25), 0 30px 80px -20px oklch(20% 0.02 220 / 0.35);
+}
+
+/* ---------- Espresso: warm brown-black, flagship dark ---------- */
+[data-theme="espresso"],
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(18.6% 0.012 55);
+  --surface: oklch(21.6% 0.013 56);
+  --raised: oklch(25.2% 0.015 58);
+  --sunk: oklch(16.4% 0.011 55);
+  --ink: oklch(93.5% 0.014 80);
+  --muted: oklch(74% 0.02 72);
+  --faint: oklch(59% 0.018 66);
+  --line: oklch(92% 0.03 75 / 0.12);
+  --line-soft: oklch(92% 0.03 75 / 0.065);
+
+  --accent: oklch(71% 0.16 52);
+  --accent-ink: oklch(76% 0.145 55);
+  --accent-soft: oklch(71% 0.16 52 / 0.15);
+  --on-accent: oklch(20% 0.03 50);
+  --attn: var(--accent-ink);
+  --attn-soft: var(--accent-soft);
+  --live: oklch(78% 0.11 172);
+  --fail: oklch(71% 0.15 24);
+  --fail-soft: oklch(71% 0.15 24 / 0.13);
+  --ok: oklch(78% 0.13 155);
+
+  --voice-ada: var(--accent);
+  --voice-milo: oklch(72% 0.13 292);
+  --voice-juno: oklch(73% 0.14 345);
+  --voice-4: oklch(75% 0.1 198);
+  --project-webshop: oklch(79% 0.13 84);
+  --project-payments-api: oklch(73% 0.1 218);
+  --project-ops: oklch(74% 0.1 128);
+
+  --glass: oklch(25.2% 0.015 58 / 0.7);
+  --glass-strong: oklch(25.2% 0.015 58 / 0.86);
+  --glass-edge: oklch(95% 0.03 70 / 0.1);
+  --side-glass: oklch(21% 0.014 55 / 0.62);
+  --wallpaper-a: oklch(42% 0.1 45 / 0.5);
+  --wallpaper-b: oklch(34% 0.07 345 / 0.5);
+  --scrim: oklch(8% 0.01 50 / 0.5);
+
+  --shadow-note: 0 0 0 0.5px oklch(95% 0.03 70 / 0.09), inset 0 0.5px 0 oklch(95% 0.03 70 / 0.06), 0 12px 30px -14px oklch(5% 0.01 50 / 0.7);
+  --shadow-lift: 0 0 0 0.5px oklch(95% 0.03 70 / 0.11), inset 0 0.5px 0 oklch(95% 0.03 70 / 0.07), 0 26px 60px -18px oklch(4% 0.01 50 / 0.8);
+  --shadow-window: 0 0 0 0.5px oklch(95% 0.03 70 / 0.14), 0 30px 80px -16px oklch(3% 0.01 50 / 0.8);
+}
+
+/* ---------- Velvet: plum, the evening theme ---------- */
+[data-theme="velvet"] {
+  color-scheme: dark;
+  --bg: oklch(19.5% 0.03 340);
+  --surface: oklch(22.8% 0.034 340);
+  --raised: oklch(26.6% 0.037 340);
+  --sunk: oklch(17% 0.027 340);
+  --ink: oklch(94% 0.014 350);
+  --muted: oklch(75.5% 0.03 345);
+  --faint: oklch(61% 0.035 342);
+  --line: oklch(92% 0.04 345 / 0.13);
+  --line-soft: oklch(92% 0.04 345 / 0.07);
+
+  --accent: oklch(73% 0.15 55);
+  --accent-ink: oklch(78% 0.135 60);
+  --accent-soft: oklch(73% 0.15 55 / 0.16);
+  --on-accent: oklch(22% 0.04 40);
+  --attn: var(--accent-ink);
+  --attn-soft: var(--accent-soft);
+  --live: oklch(80% 0.1 172);
+  --fail: oklch(73% 0.14 20);
+  --fail-soft: oklch(73% 0.14 20 / 0.14);
+  --ok: oklch(80% 0.12 155);
+
+  --voice-ada: var(--accent);
+  --voice-milo: oklch(75% 0.12 292);
+  --voice-juno: oklch(77% 0.13 350);
+  --voice-4: oklch(77% 0.09 198);
+  --project-webshop: oklch(81% 0.12 86);
+  --project-payments-api: oklch(76% 0.09 218);
+  --project-ops: oklch(77% 0.09 128);
+
+  --glass: oklch(26.6% 0.037 340 / 0.7);
+  --glass-strong: oklch(26.6% 0.037 340 / 0.86);
+  --glass-edge: oklch(95% 0.04 345 / 0.1);
+  --side-glass: oklch(21.5% 0.032 340 / 0.62);
+  --wallpaper-a: oklch(44% 0.1 40 / 0.45);
+  --wallpaper-b: oklch(40% 0.12 330 / 0.55);
+  --scrim: oklch(8% 0.02 340 / 0.5);
+
+  --shadow-note: 0 0 0 0.5px oklch(95% 0.04 345 / 0.09), inset 0 0.5px 0 oklch(95% 0.04 345 / 0.06), 0 12px 30px -14px oklch(6% 0.03 340 / 0.7);
+  --shadow-lift: 0 0 0 0.5px oklch(95% 0.04 345 / 0.11), inset 0 0.5px 0 oklch(95% 0.04 345 / 0.07), 0 26px 60px -18px oklch(5% 0.03 340 / 0.8);
+  --shadow-window: 0 0 0 0.5px oklch(95% 0.04 345 / 0.14), 0 30px 80px -16px oklch(4% 0.02 340 / 0.8);
+}
+
+/* ---------- Charcoal: neutral graphite, no tint at all ---------- */
+[data-theme="charcoal"] {
+  color-scheme: dark;
+  --bg: oklch(19.5% 0.002 80);
+  --surface: oklch(22.6% 0.002 80);
+  --raised: oklch(26.2% 0.003 80);
+  --sunk: oklch(17.2% 0.002 80);
+  --ink: oklch(94% 0.003 80);
+  --muted: oklch(74% 0.004 80);
+  --faint: oklch(59% 0.004 80);
+  --line: oklch(94% 0.003 80 / 0.12);
+  --line-soft: oklch(94% 0.003 80 / 0.065);
+
+  --accent: oklch(72% 0.16 50);
+  --accent-ink: oklch(77% 0.14 54);
+  --accent-soft: oklch(72% 0.16 50 / 0.15);
+  --on-accent: oklch(20% 0.03 50);
+  --attn: var(--accent-ink);
+  --attn-soft: var(--accent-soft);
+  --live: oklch(79% 0.1 172);
+  --fail: oklch(72% 0.15 24);
+  --fail-soft: oklch(72% 0.15 24 / 0.13);
+  --ok: oklch(79% 0.12 155);
+
+  --voice-ada: var(--accent);
+  --voice-milo: oklch(73% 0.13 292);
+  --voice-juno: oklch(74% 0.14 345);
+  --voice-4: oklch(75% 0.1 198);
+  --project-webshop: oklch(80% 0.13 84);
+  --project-payments-api: oklch(74% 0.1 218);
+  --project-ops: oklch(75% 0.1 128);
+
+  --glass: oklch(26.2% 0.003 80 / 0.7);
+  --glass-strong: oklch(26.2% 0.003 80 / 0.86);
+  --glass-edge: oklch(100% 0 0 / 0.09);
+  --side-glass: oklch(21.5% 0.002 80 / 0.62);
+  --wallpaper-a: oklch(40% 0.08 50 / 0.45);
+  --wallpaper-b: oklch(35% 0.02 80 / 0.5);
+  --scrim: oklch(5% 0 0 / 0.5);
+
+  --shadow-note: 0 0 0 0.5px oklch(100% 0 0 / 0.09), inset 0 0.5px 0 oklch(100% 0 0 / 0.05), 0 12px 30px -14px oklch(0% 0 0 / 0.7);
+  --shadow-lift: 0 0 0 0.5px oklch(100% 0 0 / 0.11), inset 0 0.5px 0 oklch(100% 0 0 / 0.06), 0 26px 60px -18px oklch(0% 0 0 / 0.8);
+  --shadow-window: 0 0 0 0.5px oklch(100% 0 0 / 0.14), 0 30px 80px -16px oklch(0% 0 0 / 0.8);
+}
+
+/* Ada's color can be chosen in Appearance. The accent is her voice, so it moves as one.
+ * Only hues no project, state or other voice uses are offered: cobalt sits in the one wide gap
+ * of the wheel (between lagoon and iris), and graphite takes color out of her voice entirely. */
+[data-accent="cobalt"] { --accent: oklch(55% 0.16 262); --accent-ink: oklch(49% 0.16 262); --accent-soft: oklch(55% 0.16 262 / 0.1); }
+[data-accent="graphite"] { --accent: oklch(36% 0.012 60); --accent-ink: oklch(30% 0.012 60); --accent-soft: oklch(36% 0.012 60 / 0.08); }
+:is([data-theme="espresso"], [data-theme="dark"], [data-theme="velvet"], [data-theme="charcoal"])[data-accent="cobalt"] { --accent: oklch(68% 0.14 262); --accent-ink: oklch(76% 0.12 262); --accent-soft: oklch(68% 0.14 262 / 0.16); }
+:is([data-theme="espresso"], [data-theme="dark"], [data-theme="velvet"], [data-theme="charcoal"])[data-accent="graphite"] { --accent: oklch(86% 0.01 70); --accent-ink: oklch(90% 0.01 70); --accent-soft: oklch(86% 0.01 70 / 0.12); --on-accent: oklch(22% 0.01 60); }
+
+/* Density and size choices from Appearance. */
+[data-density="compact"] { --row-h: 28px; }
+[data-text="small"] { --t-ui: 12.5px; --t-body: 13px; --t-voice: 16px; }
+[data-text="large"] { --t-ui: 14px; --t-body: 15px; --t-voice: 18.5px; }

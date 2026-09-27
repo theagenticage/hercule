@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <title>(3) Ada · Hercule</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='w' x1='0' x2='1'%3E%3Cstop offset='0' stop-color='#5fe0b4'/%3E%3Cstop offset='.55' stop-color='#5cc8e6'/%3E%3Cstop offset='1' stop-color='#b48cf5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='#241a33'/%3E%3Crect x='6.5' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Crect x='20' y='6' width='5.5' height='20' rx='2.75' fill='#f3eefb'/%3E%3Cpath d='M12 18.2c1.4-3.2 2.8-3.2 4-1.3s2.6 1.9 4-1.3' fill='none' stroke='url%28#w%29' stroke-width='2.8' stroke-linecap='round'/%3E%3Ccircle cx='26' cy='6' r='5.2' fill='#f4b43c' stroke='#241a33' stroke-width='1.6'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+    <script src="../composer.js"></script>
+  </head>
+  <body>
+    <div class="win web has-rail">
+      <div class="field">
+        <i class="calm" style="--x: 52%; --y: 70%; --w: 1000px; --h: 720px; --o: 0.9"></i>
+        <i class="own" style="--x: 86%; --y: 8%; --w: 760px; --h: 520px; --o: 0.65"></i>
+        <i class="wait" style="--x: 3%; --y: 30%; --w: 360px; --o: 0.45"></i>
+        <i class="calm" style="--x: 30%; --y: -8%; --w: 600px; --h: 340px; --o: 0.5"></i>
+      </div>
+
+      <aside class="wrail glass" aria-label="Hercule">
+        <a class="wr-logo" title="Hercule"><svg><use href="#logo" /></svg></a>
+        <a class="wr-item" title="Threads · 2 waiting on you"><svg class="i"><use href="#m-session" /></svg>Threads<i class="orb wait"></i></a>
+        <a class="wr-item" title="Intake · 9, 1 burning"><svg class="i"><use href="#m-intake" /></svg>Intake<b class="wr-n burn"><span class="not-swarm">9</span><span class="only-swarm">74</span></b></a>
+        <a class="wr-item" title="Check-in · 3 waiting on you"><svg class="i"><use href="#m-checkin" /></svg>Check-in<b class="wr-n wait"><span class="not-swarm">3</span><span class="only-swarm">9</span></b></a>
+        <a class="wr-item"><svg class="i"><use href="#m-tasks" /></svg>Tasks</a>
+        <a class="wr-item"><svg class="i"><use href="#m-run" /></svg>Runs</a>
+        <a class="wr-item"><svg class="i"><use href="#m-workflow" /></svg>Workflows</a>
+        <span class="wr-sep"></span>
+        <a class="wr-item"><svg class="i"><use href="#m-fleet" /></svg>Fleet</a>
+        <a class="wr-item" title="Connections · Discord reconnecting"><svg class="i"><use href="#m-connections" /></svg>Connections<i class="orb wait"></i></a>
+
+        <div class="wr-avs" aria-label="Assistants">
+          <span class="av work" aria-current="page" title="Ada · working">A<span class="badge"><svg class="i"><use href="#m-working" /></svg></span></span>
+          <span class="av idle" title="Milo · idle">M</span>
+          <span class="av sleep" title="Juno · asleep">J<span class="badge"><svg class="i"><use href="#m-asleep" /></svg></span></span>
+        </div>
+        <span class="wr-sep"></span>
+        <div class="wr-foot">
+          <a class="wr-item"><svg class="i"><use href="#m-settings" /></svg>Settings</a>
+          <span class="av me" title="Rogier">R</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Ada</h1>
+          <span class="st work bar-st"><svg class="i"><use href="#m-working" /></svg>working</span>
+          <span class="bar-meta">personal assistant</span>
+          <span class="spacer"></span>
+          <span class="src chan"><svg class="i s14"><use href="#m-globe" /></svg>Web chat</span>
+          <span class="src chan"><svg class="brand"><use href="#b-slack" /></svg>Slack DM</span>
+          <button class="btn sm quiet copy-link" title="Copy link to Ada's Conversation"><svg class="i s14"><use href="#m-link" /></svg>Copy link</button>
+          <button class="icon-btn" title="More"><svg class="i"><use href="#m-more" /></svg></button>
+        </header>
+
+        <div class="thread">
+          <div class="scroll" data-transcript data-scrolled-by="300" style="--pad-bottom: 140px">
+            <div class="col convo">
+              <div class="day">Yesterday</div>
+              <div class="notice">
+                <span class="disc wait sm"><svg class="i s12"><use href="#m-notice" /></svg></span>
+                <p>Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept.</p>
+                <span class="stamp">22:14</span>
+              </div>
+
+              <div class="day">Today</div>
+              <button class="worked quiet-check"><svg class="i s14"><use href="#m-heartbeat" /></svg><b>2 quiet check-ins ›</b><span class="what">07:00 · 08:00 · nothing mattered</span></button>
+
+              <div class="turn-ada">
+                <div class="who-line"><span class="av sm work">A</span><b>Ada</b><span class="hb"><svg class="i s12"><use href="#m-heartbeat" /></svg>heartbeat</span><span class="stamp">09:00</span></div>
+                <div class="msg-agent">
+                  <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p>
+                  <div class="refs">
+                    <a class="ref glass-thin lit wait"><svg class="i s14" style="color: var(--attn)"><use href="#m-decision" /></svg>Fix 3-D Secure checkout<span class="faint">waiting on you</span></a>
+                    <a class="ref glass-thin"><svg class="i s14" style="color: var(--accent)"><use href="#m-offer" /></svg>Draft a reply to Marta<span class="faint">Offer</span></a>
+                  </div>
+                </div>
+              </div>
+
+              <div class="msg-user">
+                <div class="bubble glass">Remind me Friday to renew the SSL cert for ops.</div>
+                <span class="stamp">09:20</span>
+              </div>
+
+              <div class="turn-ada">
+                <div class="who-line"><span class="av sm work">A</span><b>Ada</b><span class="stamp">09:20</span></div>
+                <div class="msg-agent">
+                  <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+                  <div class="refs">
+                    <span class="ref reminder glass-thin"><svg class="i s14"><use href="#m-reminder" /></svg><b>Fri 2 Oct · 09:00</b>Renew the SSL cert for ops<button class="ref-x" title="Cancel reminder"><svg class="i s12"><use href="#m-close" /></svg></button></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="msg-user">
+                <div class="bubble glass">What's the status of the backup job?</div>
+                <span class="stamp">09:38</span>
+              </div>
+
+              <div class="turn-ada">
+                <div class="who-line"><span class="av sm work">A</span><b>Ada</b><span class="st work"><svg class="i"><use href="#m-working" /></svg></span><span class="stamp">09:38</span></div>
+                <div class="msg-agent">
+                  <p>Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret"></span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <div class="card glass-strong">
+                <textarea class="input" rows="1" placeholder="Queued until the turn finishes…"></textarea>
+                <div class="c-row">
+                  <button class="icon-btn" title="Attach"><svg class="i"><use href="#m-plus" /></svg></button>
+                  <span class="sel static"><svg class="i s14"><use href="#m-globe" /></svg>Web chat</span>
+                  <span class="grow"></span>
+                  <button class="sel model"><svg class="brand"><use href="#b-claude" /></svg>Sonnet 5<svg class="i chev"><use href="#m-chev-d" /></svg></button>
+                  <button class="icon-btn" title="Voice"><svg class="i"><use href="#m-mic" /></svg></button>
+                  <button class="stop"><svg class="i s12"><use href="#m-stop" /></svg>Stop</button>
+                  <button class="send off" title="Send  ⏎"><svg class="i"><use href="#m-arrow-up" /></svg></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="rail glass">
+        <div class="rail-id">
+          <span class="av xl work">A</span>
+          <div>
+            <div class="rail-name">Ada</div>
+            <div class="rail-sub"><svg class="brand"><use href="#b-claude" /></svg>Claude Code · Sonnet 5</div>
+          </div>
+        </div>
+
+        <section class="rail-sec">
+          <div class="rail-h"><svg class="i s14" style="color: var(--live)"><use href="#m-working" /></svg>Now<span class="aside">since 09:38</span></div>
+          <p class="rail-now">Answering you · reading Milo's Run</p>
+          <a class="rem run"><svg class="i s14" style="color: var(--live)"><use href="#m-run" /></svg><span>Investigate backup timeouts</span><b class="num">6m</b></a>
+        </section>
+
+        <section class="rail-sec">
+          <div class="rail-h"><svg class="i s14"><use href="#m-heartbeat" /></svg>Heartbeat<span class="aside">every hour · next 10:00</span></div>
+          <div class="beats" aria-label="Heartbeat, 07:00 to 23:00">
+            <i class="quiet" title="07:00 quiet"></i><i class="quiet" title="08:00 quiet"></i><i class="spoke" title="09:00 spoke"></i><i class="next" title="10:00 next"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <div class="beats-axis"><span>07</span><span>12</span><span>17</span><span>23</span></div>
+        </section>
+
+        <section class="rail-sec">
+          <div class="rail-h"><svg class="i s14"><use href="#m-reminder" /></svg>Reminders<span class="aside">3</span></div>
+          <div class="rem"><b class="num">Thu 16:00</b><span>Call the accountant</span></div>
+          <div class="rem new"><b class="num">Fri 09:00</b><span>Renew the SSL cert for ops</span></div>
+          <div class="rem"><b class="num">Mon 08:30</b><span>Weekly revenue summary</span><svg class="i s12 faint"><use href="#m-refresh" /></svg></div>
+        </section>
+
+        <section class="rail-sec">
+          <div class="rail-h"><svg class="i s14"><use href="#m-memory" /></svg>Memory<span class="aside">7 topics</span></div>
+          <div class="core">
+            <span>Core note</span><span class="num faint">1,284 / 4,000</span>
+            <span class="meter"><i style="--v: 32%; --mc: var(--accent-light)"></i></span>
+          </div>
+          <div class="topics">
+            <span class="topic">work-style</span><span class="topic hot">webshop</span><span class="topic">payments-api</span><span class="topic hot">ops</span><span class="topic">customers</span><span class="topic">family</span><span class="topic">reading</span>
+          </div>
+          <p class="rail-note">Used this turn: <b>ops</b> · <b>webshop</b></p>
+        </section>
+
+        <div class="rail-foot">
+          <span class="faint">Context 41% · rotates at 70%</span>
+          <button class="btn sm quiet">Start fresh</button>
+        </div>
+      </aside>
+    </div>
+  </body>
+</html>

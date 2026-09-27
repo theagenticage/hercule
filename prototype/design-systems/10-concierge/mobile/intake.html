@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" data-theme="linen">
+<head>
+<script src="../../shared/page.js"></script>
+<meta charset="utf-8">
+<title>Intake · Hercule</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<script src="../kit.js" defer></script>
+</head>
+<body>
+<div class="phone" data-tab="intake">
+  <header class="m-head">
+    <div><h1>Intake</h1><span class="sub only-1x">212 events since 18:20 · next triage 11:00</span><span class="sub only-10x">2,640 events since 18:20 · next triage 11:00</span></div>
+    <span class="end"><span class="m-btn"><i data-i="search"></i></span></span>
+  </header>
+  <div class="m-body" data-scrolled-at="#today">
+    <div class="mi">
+      <p class="mi-say"><i class="orb" data-v="ada" data-p="working" style="--size:20px"></i>
+        <span class="voice only-1x">One thing is burning and two need your call. The rest can wait.</span>
+        <span class="voice only-10x">Three things are burning. Nine need your call; I bundled them.</span>
+      </p>
+      <div class="mi-nums only-1x"><span class="is-attn"><b>1</b>burning</span><span><b>6</b>proposals</span><span class="is-attn"><b>2</b>need a call</span><span><b>3</b>FYI</span></div>
+      <div class="mi-nums only-10x"><span class="is-attn"><b>3</b>burning</span><span><b>60</b>proposals</span><span class="is-attn"><b>9</b>need a call</span><span><b>41</b>FYI</span></div>
+      <nav class="mi-topics">
+        <a class="is-on" href="#">All</a>
+        <a href="#">Checkout <em class="only-1x">2</em><em class="only-10x">19</em></a>
+        <a href="#">Infrastructure <em class="only-1x">2</em><em class="only-10x">17</em></a>
+        <a href="#">Customers <em class="only-1x">3</em><em class="only-10x">15</em></a>
+        <a href="#">Releases <em class="only-1x">2</em><em class="only-10x">9</em></a>
+      </nav>
+
+      <div class="only-1x">
+        <section class="mi-lane">
+          <h3 class="mi-lane-h"><i data-m="q" class="c-attn"></i>Now<em>1</em></h3>
+          <article class="mlead">
+            <a class="mlead-b" href="decision.html">
+              <div>
+                <div class="dc-head"><span class="kind">Proposal</span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span>urgent</span><span class="dot-sep"></span><span class="proj"><i class="room"></i>webshop</span></div>
+                <h3>Checkout fails for EU cards with <span class="nw">3-D Secure</span></h3>
+                <div class="from"><span><i data-b="sentry"></i><b>412</b> errors</span><span><i data-b="gmail"></i><b>3</b> emails</span><span><i data-b="github"></i><b>#1289</b></span></div>
+              </div>
+              <div class="mlead-fig"><b>&minus;18%</b><small>EU checkout<br>conversion</small></div>
+            </a>
+            <a class="dc-live" href="session-active.html"><i data-m="session" style="color:var(--project-webshop)"></i><span>Your Thread is <b class="c-attn">waiting on you</b></span><span class="dc-live-go">Open<i data-i="arrow"></i></span></a>
+            <div class="mlead-go">
+              <a href="decision.html">Details</a>
+              <a class="is-primary" href="decision.html">Start “Fix bug”</a>
+            </div>
+          </article>
+        </section>
+
+        <section class="mi-lane">
+          <h3 class="mi-lane-h"><i data-m="q" class="c-attn"></i>Needs a call<em>2</em><small>triage could not decide</small></h3>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>App is slow on Android</b><small><i data-b="intercom"></i>Intercom<span class="dot-sep"></span>7 conversations<span class="dot-sep"></span>which project?</small></span><span class="mrow-r">Sun</span></a>
+          <a class="mrow" href="#"><i data-m="held"></i><span><b>“Label new issues” held 34 events</b><small><i data-b="github"></i>breaker tripped at 34 / 20 per hour</small></span><span class="mrow-r">08:14</span></a>
+        </section>
+
+        <section class="mi-lane" id="today">
+          <h3 class="mi-lane-h"><i data-m="queued"></i>Today<em>4</em><small><i data-i="swipe"></i>swipe to answer</small></h3>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>Nightly backup job timing out on <span class="nw">ops-db</span></b><small><span class="room" data-p="ops"></span>ops<span class="dot-sep"></span>3 nights in a row</small></span><span class="mrow-r"><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span>04:12</span></a>
+          <a class="mrow" href="#"><i data-m="offer"></i><span><b>Draft a reply to Marta at Brightline</b><small><i data-b="gmail"></i>Customers<span class="dot-sep"></span>invoice INV-2291</small></span><span class="mrow-r">08:31</span></a>
+          <!-- Mid-swipe: dragging right past the threshold takes the suggested answer. -->
+          <div class="mswipe">
+            <span class="mswipe-act"><i data-i="bolt"></i><span><small>Start</small>Investigate</span></span>
+            <a class="mrow" href="#"><i data-m="q"></i><span><b>Stripe webhook retries rising</b><small><span class="room" data-p="payments-api"></span>payments-api<span class="dot-sep"></span>since v2.14.0</small></span><span class="mrow-r"><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span>07:48</span></a>
+          </div>
+          <a class="mrow" href="#"><i data-m="offer"></i><span><b>Merge 4 dependency bumps</b><small><i data-b="github"></i>Releases<span class="dot-sep"></span>all green, patch versions only</small></span><span class="mrow-r">06:02</span></a>
+          <p class="mswipe-note"><span class="haptic"><i data-i="haptic"></i>tick at the threshold</span>right takes it, left dismisses</p>
+        </section>
+
+        <section class="mi-lane">
+          <h3 class="mi-lane-h"><i data-m="queued"></i>When you can<em>2</em></h3>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>SSL certificate for status.acme.dev expires in 12 days</b><small><span class="room" data-p="ops"></span>ops<span class="dot-sep"></span>Cron</small></span><span class="mrow-r"><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span>00:00</span></a>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>Add iDEAL as a payment method</b><small><span class="room"></span>webshop<span class="dot-sep"></span>5 requests</small></span><span class="mrow-r"><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span>Mon</span></a>
+        </section>
+
+        <a class="mi-fyi" href="#"><i data-m="fyi"></i><span><b>3 FYI</b> · 1 attached<small>v2.14.0 published · sign-ups +9% · €18,240 payout Thursday</small></span><i data-i="right"></i></a>
+        <p class="mi-end"><b>198</b> handled quietly · next triage 11:00</p>
+      </div>
+
+      <div class="only-10x">
+        <section class="mi-lane">
+          <h3 class="mi-lane-h"><i data-m="q" class="c-attn"></i>Now<em>3</em><small>each has a session on it</small></h3>
+          <a class="mrow" href="decision.html"><i data-m="q"></i><span><b>Checkout fails for EU cards with <span class="nw">3-D Secure</span></b><small><span class="room"></span>webshop<span class="dot-sep"></span><span class="c-fail">&minus;18%</span> EU conversion</small></span><span class="mrow-r"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span class="c-attn">git push</span></span></a>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>Payout webhooks rejected by the ledger service</b><small><span class="room" data-p="payments-api"></span>payments-api<span class="dot-sep"></span>1,212 rejected</small></span><span class="mrow-r"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span class="c-live">Fix bug · 4m</span></span></a>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>Disk at 94% on build-box-4</b><small><span class="room" data-p="ops"></span>ops<span class="dot-sep"></span>94% used</small></span><span class="mrow-r"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><span class="c-live">Milo · 2m</span></span></a>
+        </section>
+        <section class="mi-lane">
+          <h3 class="mi-lane-h"><i data-m="q" class="c-attn"></i>Bundles<em>9 calls · 61 items</em><small>one answer each</small></h3>
+          <div class="mswipe">
+            <span class="mswipe-act"><i data-i="check"></i><span><small>Merge</small>all 14</span></span>
+            <a class="mrow" href="#"><i data-m="offer"></i><span><b>Merge 14 dependency bumps</b><small><i data-b="github"></i>5 repos<span class="dot-sep"></span>all green</small></span><span class="mrow-r"><span class="mrow-n">14</span></span></a>
+          </div>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>23 conversations about slow mobile checkout</b><small><i data-b="intercom"></i>Unsure<span class="dot-sep"></span>which project?</small></span><span class="mrow-r"><span class="mrow-n">23</span></span></a>
+          <a class="mrow" href="#"><i data-m="held"></i><span><b>3 tripped breakers</b><small><i data-b="github"></i>212 events held</small></span><span class="mrow-r"><span class="mrow-n">212</span></span></a>
+          <a class="mrow" href="#"><i data-m="q"></i><span><b>18 low proposals in ops</b><small><span class="room" data-p="ops"></span>ops<span class="dot-sep"></span>accept all in one answer</small></span><span class="mrow-r"><span class="mrow-n">18</span></span></a>
+          <p class="mswipe-note"><span class="haptic"><i data-i="haptic"></i>one tick per item merged</span>a bundle answers in one swipe</p>
+        </section>
+        <a class="mi-fyi" href="#"><i data-m="fyi"></i><span><b>5 more bundles</b> · 41 FYI<small>release notes, sign-ups, payouts and 38 more</small></span><i data-i="right"></i></a>
+        <p class="mi-end"><b>2,512</b> of 2,640 handled quietly</p>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

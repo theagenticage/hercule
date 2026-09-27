@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) Settings · Providers · Hercule</title>
+<link rel="icon" href="../favicon.svg">
+<script src="../console.js" defer></script>
+<style>
+  /* In the browser, Settings drops the app sidebar: the settings index takes its
+     place, and the body gets the full width for the provider-by-machine table. */
+  .pv-pane { flex: 1 1 0; }
+  .pv { padding: 16px 28px 28px; }
+  .pv .sec { margin-top: 22px; }
+  .pv .sec:first-child { margin-top: 0; }
+
+  /* A provider instance: one account of a provider. Two lines: who it is and how
+     much of its window is used, then the defaults new work starts with. */
+  .inst { display: grid; grid-template-columns: 22px minmax(0, 1fr) 270px; column-gap: 12px; row-gap: 8px; padding: 10px 10px; margin: 0 -10px; border-radius: 8px; border-top: 1px solid var(--line-soft); }
+  .inst:first-of-type { border-top: 0; }
+  .inst.is-cursor { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); border-top-color: transparent; }
+  .inst.is-cursor + .inst { border-top-color: transparent; }
+  .inst > .brand, .inst > .glyph { width: 18px; height: 18px; margin-top: 1px; color: var(--ink); }
+  .inst .id { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; }
+  .inst .id b { font-size: 14px; font-weight: var(--w-strong); }
+  .inst .id .acct { font: 450 11.5px / 1 var(--font-mono); color: var(--muted); }
+  .inst .id .auth { display: inline-flex; align-items: center; gap: 5px; font: 450 11px / 1 var(--font-mono); color: var(--ok); }
+  .inst .id .auth .mk { width: 10px; height: 10px; }
+  .inst .use { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px; row-gap: 6px; white-space: nowrap; font: 450 11px / 1 var(--font-mono); color: var(--muted); }
+  .inst .use .bar { grid-column: 1 / -1; height: 5px; }
+  .inst .use .bar > i { background: var(--live); }
+  .inst .use b { color: var(--ink); font-weight: 560; }
+  .inst .use.none { align-self: center; color: var(--faint); text-align: right; display: block; }
+  .inst .defaults { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12.5px; color: var(--ink); }
+  .inst .defaults .lbl { font: 450 11px / 1 var(--font-mono); color: var(--faint); margin-right: 6px; }
+  .models { display: inline-flex; align-items: center; gap: 4px; }
+  .model { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--line-soft); font-size: 12px; color: var(--muted); }
+  .model.is-default { color: var(--ink); border-color: color-mix(in oklab, var(--accent) 50%, transparent); background: var(--accent-soft); }
+  .model.is-default small { font: 500 10px / 1 var(--font-mono); color: var(--accent); }
+
+  /* Provider instance by machine: what each machine's Capability Snapshot reports. */
+  .mx { display: grid; grid-template-columns: 170px repeat(3, minmax(0, 1fr)); }
+  .mx > * { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px; border-top: 1px solid var(--line-soft); font-size: 12.5px; white-space: nowrap; }
+  .mx > .h { min-height: 42px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; border-top: 0; font-weight: var(--w-emph); color: var(--ink); }
+  .mx > .h small { font: 450 10.5px / 1 var(--font-mono); font-weight: 450; color: var(--faint); }
+  .mx > .h small.tone-attn { color: var(--attn); }
+  .mx > .h:first-child { padding-left: 0; }
+  .mx > .rh { padding-left: 0; font-weight: var(--w-emph); color: var(--ink); }
+  .mx > .rh .brand, .mx > .rh .mk { width: 13px; height: 13px; color: var(--ink); }
+  .mx .ok { color: var(--ok); font: 450 11.5px / 1 var(--font-mono); }
+  .mx .ok .mk { width: 11px; height: 11px; }
+  .mx .ok span { color: var(--muted); }
+  .mx .no { color: var(--faint); font: 450 11.5px / 1 var(--font-mono); }
+  .mx .no .act { height: 22px; margin-left: auto; }
+  .mx > :nth-child(4n+2), .mx > :nth-child(4n+3), .mx > :nth-child(4n+4) { border-left: 1px solid var(--line-soft); }
+
+  /* Access modes: the fixed four, in order from asking most to asking least. */
+  .am { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; column-gap: 16px; align-items: center; min-height: 31px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .am:first-of-type { border-top: 0; }
+  .am code { font-size: 11.5px; background: none; border: 0; padding: 0; color: var(--ink); }
+  .am .means { color: var(--muted); }
+  .am .who { font: 450 11px / 1.3 var(--font-mono); color: var(--faint); text-align: right; white-space: nowrap; }
+  .am .who.tone-attn { color: var(--attn); }
+  .am-rail { display: flex; align-items: center; gap: 6px; margin: 2px 0 8px; font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .am-rail i { flex: 1; height: 1px; background: var(--line); }
+  .am-rail .mk { width: 9px; height: 9px; margin-left: -8px; color: var(--line); }
+  .pv .note { display: flex; gap: 8px; margin-top: 10px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+  .pv .note .mk { flex: none; width: 12px; height: 12px; margin-top: 2px; color: var(--attn); }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="webapp no-side">
+  <header class="webbar" data-webbar></header>
+
+  <main class="main">
+    <section class="pane set-pane">
+      <header class="pane-head"><span class="pane-num">1</span><span class="pane-title">Settings</span><span class="pane-actions"><span class="hint"><kbd>g</kbd><kbd>s</kbd></span></span></header>
+      <div class="pane-body" data-settings-nav data-active="providers"></div>
+    </section>
+
+    <section class="pane pv-pane is-focus">
+      <header class="pane-head">
+        <span class="pane-num">2</span><span class="pane-title">Providers</span><span class="pane-sub">the agent programs, the accounts they run under, and where</span>
+        <span class="pane-actions"><button class="act" type="button"><svg class="mk"><use href="#c-plus"/></svg>Add account<kbd>a</kbd></button></span>
+      </header>
+      <div class="pane-body" data-list>
+        <div class="pv">
+          <div class="sec">Provider instances <span class="n">3 accounts · 3 providers</span></div>
+
+          <div class="inst is-cursor" data-row>
+            <svg class="brand"><use href="#b-claude"/></svg>
+            <div class="id"><b>Claude Code</b><span class="acct">rogier@personal</span><span class="auth"><svg class="mk"><use href="#m-done"/></svg>logged in</span></div>
+            <div class="use"><span><b>61%</b> of the 5-hour window</span><span>resets 11:00</span><span class="bar"><i style="width:61%"></i></span></div>
+            <div class="defaults">
+              <span><span class="lbl">models</span><span class="models"><span class="model is-default">Opus 5.5<small>default</small></span><span class="model">Sonnet 5</span><span class="model">Haiku 4.5</span></span></span>
+              <span><span class="lbl">effort</span>high</span>
+              <span><span class="lbl">access</span>auto-accept-edits</span>
+            </div>
+          </div>
+
+          <div class="inst" data-row>
+            <svg class="brand"><use href="#b-openai"/></svg>
+            <div class="id"><b>Codex</b><span class="acct">work</span><span class="auth"><svg class="mk"><use href="#m-done"/></svg>logged in</span></div>
+            <div class="use none">usage not reported</div>
+            <div class="defaults">
+              <span><span class="lbl">models</span><span class="models"><span class="model is-default">gpt-5.4<small>default</small></span><span class="model">gpt-5.4-mini</span></span></span>
+              <span><span class="lbl">effort</span>medium</span>
+              <span><span class="lbl">access</span>auto-accept-edits</span>
+            </div>
+          </div>
+
+          <div class="inst" data-row>
+            <svg class="mk glyph"><use href="#g-chip"/></svg>
+            <div class="id"><b>pi</b><span class="acct">local · llama.cpp</span><span class="auth"><svg class="mk"><use href="#m-done"/></svg>model loaded</span></div>
+            <div class="use none">local · no usage limit</div>
+            <div class="defaults">
+              <span><span class="lbl">models</span><span class="models"><span class="model is-default">qwen3-coder 30b<small>default</small></span></span></span>
+              <span><span class="lbl">effort</span><span class="faint">not offered</span></span>
+              <span><span class="lbl">access</span>approval-required</span>
+            </div>
+          </div>
+
+          <div class="sec">On which machines <span class="n">what each machine reports, checked hourly</span></div>
+          <div class="mx">
+            <span class="h">&nbsp;</span>
+            <span class="h">studio-mac<small>5 of 6 · this Mac</small></span>
+            <span class="h">build-box-1<small class="tone-attn">8 of 8 · at cap</small></span>
+            <span class="h">build-box-2<small>3 of 8</small></span>
+
+            <span class="rh"><svg class="brand"><use href="#b-claude"/></svg>Claude Code</span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 3 models</span></span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 3 models</span></span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 3 models</span></span>
+
+            <span class="rh"><svg class="brand"><use href="#b-openai"/></svg>Codex</span>
+            <span class="no">not installed<button class="act is-line" type="button"><kbd>i</kbd>Install</button></span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 2 models</span></span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· 2 models</span></span>
+
+            <span class="rh"><svg class="mk"><use href="#g-chip"/></svg>pi</span>
+            <span class="ok"><svg class="mk"><use href="#m-done"/></svg>ready <span>· qwen3-coder</span></span>
+            <span class="no">no local model</span>
+            <span class="no">no local model</span>
+          </div>
+
+          <div class="sec">Access modes <span class="n">how much an agent may do without asking</span></div>
+          <div class="am-rail"><span>asks the most</span><i></i><svg class="mk"><use href="#c-right"/></svg><span>asks nothing</span></div>
+          <div class="am"><code>approval-required</code><span class="means">Asks before every action with a side effect.</span><span class="who">all 3 · default for pi</span></div>
+          <div class="am"><code>auto-accept-edits</code><span class="means">Edits files without asking. Asks for the rest.</span><span class="who">all 3 · default for Claude Code, Codex</span></div>
+          <div class="am"><code>auto</code><span class="means">The provider's own reviewer judges routine actions.</span><span class="who tone-attn">runs as auto-accept-edits on pi</span></div>
+          <div class="am"><code>full-access</code><span class="means">Does everything without asking. Assistants run this way.</span><span class="who">all 3</span></div>
+          <p class="note"><svg class="mk"><use href="#m-urgent"/></svg><span>When a provider lacks a mode, the session runs one step less permissive, never more. The composer and the session both show the mode it actually runs with.</span></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-compact data-mode="NAV" data-context="Settings · Providers · Claude Code" data-keys="j k:move|⏎:edit|i:install|a:add account|esc:back"></footer>
+</div>
+</body>
+</html>

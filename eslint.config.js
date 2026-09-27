@@ -183,6 +183,8 @@ export default tseslint.config(
       "apps/web/src/routeTree.gen.ts",
       "apps/runner/src/providers/codex/generated/**",
       "/hercule",
+      // Throwaway design prototypes: hand-written HTML, never shipped.
+      "prototype/**",
     ],
   },
   js.configs.recommended,

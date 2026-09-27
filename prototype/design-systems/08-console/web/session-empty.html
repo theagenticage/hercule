@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>(3) New thread · Hercule</title>
+<link rel="icon" href="../favicon.svg">
+<script src="../console.js" defer></script>
+<style>
+  .draft { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 76px 32px 32px; }
+  .draft-col { width: min(640px, 100%); }
+  .draft h1 { display: flex; align-items: center; gap: 10px; font-size: var(--fs-display); font-weight: var(--w-strong); letter-spacing: -0.01em; line-height: 1.3; }
+  .draft h1 .prompt { width: 14px; height: 14px; color: var(--accent); }
+  .draft .line { margin: 8px 0 22px 24px; font-size: 13.5px; color: var(--muted); }
+  .draft .line code { font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .projects { display: flex; align-items: center; gap: 14px; margin: 0 0 12px 24px; font: 450 11px / 1 var(--font-mono); color: var(--faint); }
+  .projects .hint { gap: 6px; }
+  .projects .is-on .proj { text-decoration: underline; text-decoration-color: var(--hue); text-underline-offset: 4px; text-decoration-thickness: 2px; }
+  .draft .composer-card .composer-input { min-height: 76px; font-size: 15px; }
+  .starts { margin-top: 30px; }
+  .starts .sec { font: 600 11px / 1 var(--font-mono); color: var(--faint); letter-spacing: 0.02em; }
+  .start { display: grid; grid-template-columns: 26px 88px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; height: 40px; padding: 0 12px 0 8px; border-radius: 8px; font-size: 13.5px; color: var(--ink); }
+  .start + .start { box-shadow: 0 -1px 0 var(--line-soft); }
+  .start:hover { background: var(--surface); }
+  .start .verb-tag { font: 560 11.5px / 1 var(--font-mono); color: var(--accent); }
+  .start .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .start .from { display: inline-flex; align-items: center; gap: 8px; font: 450 11px / 1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+  .start .from .brand { width: 12px; height: 12px; }
+  .start .from .tone-fail { font-weight: 600; }
+
+  /* The browser can only tell you something waits if you let this tab notify you. */
+  .web-note { display: flex; align-items: center; gap: 10px; margin-top: 26px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+  .web-note .mk { color: var(--attn); }
+  .web-note .act { margin-left: auto; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="webapp">
+  <header class="webbar" data-webbar></header>
+  <nav class="side" data-side="threads" data-active="new"></nav>
+
+  <main class="main">
+    <section class="pane is-focus">
+      <header class="thread-chrome">
+        <span class="pane-num">1</span>
+        <span class="crumb">webshop /</span>
+        <a class="ttab is-on" href="#"><svg class="mk tone-idle"><use href="#c-plus"/></svg>New thread</a>
+        <span class="stamp quiet" style="margin-left:4px">draft · nothing runs until you send</span>
+      </header>
+
+      <div class="draft">
+        <div class="draft-col">
+          <h1><svg class="mk prompt"><use href="#c-caret"/></svg>What should the agent do in webshop?</h1>
+          <p class="line">It gets its own worktree of webshop, on a new branch from <code>main</code>.</p>
+
+          <div class="projects" aria-label="Project">
+            <span>project</span>
+            <span class="hint is-on"><kbd>1</kbd><span class="proj webshop">webshop</span></span>
+            <span class="hint"><kbd>2</kbd><span class="proj payments-api">payments-api</span></span>
+            <span class="hint"><kbd>3</kbd><span class="proj ops">ops</span></span>
+            <span style="margin-left:auto">with <kbd>alt</kbd> while typing</span>
+          </div>
+
+          <div class="composer-card card-glass">
+            <div class="composer-input"><span class="cursor" style="margin-right:2px"></span><span class="ph">Say what you want done…</span></div>
+            <div class="composer-row">
+              <button class="c-btn" type="button" title="Attach files or images"><svg class="mk"><use href="#c-plus"/></svg></button>
+              <button class="c-sel ink" type="button"><svg class="mk" style="color:var(--accent)"><use href="#g-lock"/></svg>auto-accept edits<svg class="mk"><use href="#c-down"/></svg></button>
+              <button class="c-sel" type="button"><span class="lbl">effort</span>high<svg class="mk"><use href="#c-down"/></svg></button>
+              <span class="c-spacer"></span>
+              <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Claude Code <span class="acct">·</span> Opus 5.5</span>
+              <button class="c-btn" type="button" title="Voice"><svg class="mk"><use href="#c-mic"/></svg></button>
+              <button class="send is-accent" type="button" title="Start"><svg class="mk"><use href="#c-send"/></svg></button>
+            </div>
+          </div>
+          <div class="composer-lip">
+            <span class="br"><svg class="mk"><use href="#g-branch"/></svg>New worktree</span>
+            <span class="rule"></span>
+            <span>from main</span>
+            <span class="rule"></span>
+            <span class="br"><svg class="mk"><use href="#g-runner"/></svg>studio-mac</span>
+            <span class="faint">5 of 6 slots</span>
+          </div>
+
+          <div class="starts">
+            <div class="sec">start from what is waiting in webshop <span class="n tab-hint"><kbd>tab</kbd>to move here</span></div>
+            <a class="start" href="#"><kbd>1</kbd><span class="verb-tag">Fix</span><span class="title">Checkout fails for EU cards with 3-D Secure</span><span class="from"><span class="tone-fail">urgent</span>Proposal · Intake</span></a>
+            <a class="start" href="#"><kbd>2</kbd><span class="verb-tag">Fix</span><span class="title">Cart total rounding on discounts</span><span class="from"><svg class="brand"><use href="#b-sentry"/></svg>Task · 2 new events</span></a>
+            <a class="start" href="#"><kbd>3</kbd><span class="verb-tag">Investigate</span><span class="title">App is slow on Android</span><span class="from"><svg class="brand"><use href="#b-intercom"/></svg>7 conversations</span></a>
+          </div>
+
+          <div class="web-note">
+            <svg class="mk"><use href="#g-bell"/></svg>
+            <span>This tab can tell you when something waits on you, even in the background.</span>
+            <button class="act is-line" type="button"><kbd>n</kbd>Turn on</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status" data-status data-compact data-mode="TYPE" data-context="Draft · webshop" data-keys="⏎:start|⇧ ⏎:new line|tab:starting points|esc:discard"></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>Fix 3-D Secure checkout · Hercule</title>
+<script src="../console.js" defer></script>
+<style>
+  .m-head .proj { font-size: 11px; }
+  .made-from { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 9px; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+  .made-from .mk { color: var(--accent); }
+  .made-from b { color: var(--ink); font-weight: var(--w-emph); }
+  .agent-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); }
+  .agent-mark .brand { width: 10px; height: 10px; color: var(--ink); }
+  .m-thread pre.code { margin-top: 10px; font-size: 11.5px; }
+  .m-thread pre.code > code { padding: 9px 12px; }
+  .m-thread .changes li { grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; padding: 0 10px; font-size: 11.5px; }
+  .m-thread .changes > header { height: 40px; padding: 0 6px 0 12px; }
+  .m-thread .changes > header .m-btn { margin-left: auto; height: 30px; font-size: 12.5px; }
+  .m-thread .worked .what { white-space: nowrap; }
+  .m-queued .m-btn { height: 30px; font-size: 12.5px; }
+  .m-req { position: relative; }
+  .m-voice-opts .ctx { font: 450 11px / 1 var(--font-mono); color: var(--faint); padding: 0 6px; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="phone">
+  <div class="sb" data-sb></div>
+  <div class="m-status" data-mstatus data-mode="DECIDE" data-context="Request · git push"></div>
+
+  <header class="m-head">
+    <a class="m-back" href="#" title="Threads"><svg class="mk"><use href="#c-back"/></svg></a>
+    <div class="m-title">
+      <b>Fix 3-D Secure checkout</b>
+      <small><span class="proj webshop">webshop</span><span>fix/3ds-eu-cards · studio-mac</span></small>
+    </div>
+    <button class="m-btn is-line" type="button"><span class="plus">+48</span><span class="minus">−12</span></button>
+  </header>
+
+  <div class="m-stage">
+    <div class="m-scroll" data-composer="#dock" data-scrolled-to=".msg-user">
+      <div class="m-thread">
+        <div class="made-from">
+          <svg class="mk"><use href="#g-proposal"/></svg>
+          <span>Started 09:02 from the Proposal <b>Checkout fails for EU cards</b></span>
+        </div>
+
+        <div class="msg-user">
+          <div class="msg-meta">Rogier · 09:02</div>
+          <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+        </div>
+
+        <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked <b>2m 14s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="r"></i><i class="x"></i></span><span class="what">6 reads · 1 command</span></div>
+
+        <div class="msg-agent">
+          <div class="msg-meta"><span class="agent-mark"><svg class="brand"><use href="#b-claude"/></svg></span>Claude Code · Opus 5.5 · 09:04</div>
+          <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> treats that as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+          <pre class="code"><header><svg class="mk"><use href="#g-file"/></svg>src/checkout/payment.ts</header><code><span class="k">if</span> <span class="p">(</span>result<span class="p">.</span>status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span>
+  <span class="k">return</span> <span class="f">openThreeDSModal</span><span class="p">(</span>result<span class="p">.</span>clientSecret<span class="p">);</span>
+<span class="p">}</span></code></pre>
+        </div>
+
+        <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+
+        <div class="worked"><svg class="mk"><use href="#c-right"/></svg><span>Worked <b>4m 51s</b></span><span class="cells"><i class="r"></i><i class="r"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="e"></i><i class="x"></i><i class="e"></i><i class="x"></i></span><span class="what">3 edits · 3 commands</span></div>
+
+        <div class="changes">
+          <header>Changed files <span class="plus">+48</span><span class="minus">−12</span><button class="m-btn" type="button">Diff<svg class="mk" style="width:12px;height:12px"><use href="#c-right"/></svg></button></header>
+          <ul>
+            <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.ts</span><span><span class="plus">+21</span> <span class="minus">−9</span></span></li>
+            <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>payment.test.ts</span><span><span class="plus">+19</span> <span class="minus">−0</span></span></li>
+            <li><svg class="mk"><use href="#g-file"/></svg><span><span class="dir">src/checkout/</span>3ds-modal.tsx</span><span><span class="plus">+8</span> <span class="minus">−3</span></span></li>
+          </ul>
+        </div>
+
+        <div class="testline"><span class="ok"><svg class="mk"><use href="#m-done"/></svg>24 passed</span><span>pnpm test checkout</span><span class="faint">· 3.8s</span></div>
+
+        <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+      </div>
+    </div>
+
+    <div class="m-dock" id="dock">
+      <div class="m-queued card-glass">
+        <svg class="mk"><use href="#m-queued"/></svg>
+        <span class="q-text">Also check the Apple Pay path</span>
+        <span class="q-state">queued</span>
+        <button class="m-btn" type="button">Steer</button>
+      </div>
+
+      <div class="m-req card-glass" role="group" aria-label="Request">
+        <span class="hap" style="top:-10px; right:14px">haptic · warning, as it arrives</span>
+        <div class="m-req-head">
+          <svg class="mk"><use href="#m-decision"/></svg>
+          <div>
+            <div class="m-req-title">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+            <div class="m-req-note">Auto-accept edits covers file edits only. Pushing needs your OK.</div>
+          </div>
+        </div>
+        <div class="m-ledger">
+          <button class="m-ans is-primary" type="button"><kbd>y</kbd><span><b>Allow once</b><small>Runs this one command</small></span></button>
+          <button class="m-ans" type="button"><kbd>a</kbd><span><b>Always allow git push</b><small>Adds a Grant for this thread</small></span></button>
+          <button class="m-ans" type="button"><kbd>n</kbd><span><b>Deny</b><small>The agent is told no and keeps going</small></span></button>
+        </div>
+        <span class="hap" style="bottom:128px; right:14px">haptic · success, on the answer</span>
+        <div class="m-req-mini"><svg class="mk"><use href="#m-decision"/></svg><span>Waits on you:</span><b>git push</b><span class="tap"><kbd>y</kbd><kbd>a</kbd><kbd>n</kbd></span></div>
+      </div>
+
+      <div class="m-voice card-glass">
+        <div class="m-voice-row">
+          <button class="c-btn" type="button" title="Attach"><svg class="mk"><use href="#c-plus"/></svg></button>
+          <span class="ph">Say what's next</span>
+          <button class="mic" type="button" title="Hold to talk"><svg class="mk"><use href="#c-mic"/></svg></button>
+        </div>
+        <div class="m-voice-opts">
+          <button class="c-sel ink" type="button"><svg class="mk" style="color:var(--accent)"><use href="#g-lock"/></svg>auto-accept edits<svg class="mk"><use href="#c-down"/></svg></button>
+          <span class="ctx">41%</span>
+          <span class="pill"><svg class="brand"><use href="#b-claude"/></svg>Opus 5.5</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="home"></div>
+</div>
+</body>
+</html>

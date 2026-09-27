@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../system.css">
+<meta charset="utf-8">
+<title>? Fix 3-D Secure checkout for EU cards · Hercule</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 7.5C4 6.12 5.12 5 6.5 5h6.2c.9 0 1.6.5 2 1.2l.8 1.3H25.5C26.88 7.5 28 8.62 28 10v15.5c0 1.38-1.12 2.5-2.5 2.5h-19A2.5 2.5 0 0 1 4 25.5z' fill='%231f1b16'/%3E%3Cpath d='M11 12.6v10.6M21 12.6v10.6' stroke='%23f4f1ea' stroke-width='3.1'/%3E%3Cpath d='M12.3 17.9h7.4' stroke='%2322a55a' stroke-width='3.1'/%3E%3Ccircle cx='26' cy='7' r='5.5' fill='%23f0a020' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .thread .col { max-width: 760px; padding-top: 14px; padding-bottom: 360px; }
+  .composer { padding: 0 28px 14px; }
+  .composer-inner { max-width: 760px; }
+  .opener { display: flex; align-items: center; gap: 10px; }
+  .worked .tail { color: var(--faint); }
+  .files-head .num { font-size: var(--fs-ui); }
+  .files-row .path { color: var(--ink); }
+  .files-foot .mono { color: var(--muted); font-size: 11.5px; }
+  .agent-end { display: flex; align-items: center; gap: 8px; margin-top: 18px; font-size: var(--fs-small); color: var(--hold-text); font-weight: 560; }
+  .dock-q .ask { grid-row: 1 / 3; align-self: start; margin-top: 2px; }
+  .ph { color: var(--faint); font-size: var(--fs-read); padding-left: 6px; }
+  .tchrome { padding: 0 14px 0 22px; border-bottom: 1px solid var(--line-soft); height: 48px; }
+  .tchrome .crumb { font-size: var(--fs-body); }
+  .ttab { height: 28px; font-size: var(--fs-ui); }
+  .wside .side-scroll { padding-bottom: 8px; }
+  .wside .pgroup:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<script src="../marks.js"></script>
+<div class="web">
+  <header class="whead">
+    <a class="logo"><svg><use href="#logo"/></svg>Hercule</a>
+    <nav class="wnav">
+      <a>Intake <span class="dot-count">12</span></a>
+      <a aria-current="page">Threads <span class="count">4</span></a>
+      <a>Assistants <span class="count">3</span></a>
+      <a>Check-in <span class="count">3</span></a>
+      <a>Tasks <span class="count">18</span></a>
+      <a>Runs <span class="count">4</span></a>
+      <a>Workflows</a>
+      <a>Fleet</a>
+    </nav>
+    <div class="tools">
+      <div class="wsearch"><svg class="i i--s"><use href="#i-search"/></svg>Search or jump to<span class="key key--s">⌘K</span></div>
+      <div class="pulse"><span class="eq"><i></i><i></i><i></i></span><span><b>23</b> live · 3 wait</span></div>
+      <button class="iconbtn" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
+      <span class="avatar">R</span>
+    </div>
+  </header>
+
+  <div class="wbody">
+    <aside class="wside" aria-label="Threads">
+      <a class="newrow"><svg class="i i--s"><use href="#i-edit"/></svg>New thread<span class="key key--s">C</span></a>
+      <div class="side-scroll">
+        <div class="pgroup"><span class="proj proj--webshop">webshop</span><span class="count">2</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="wsl">fix/3ds-eu-cards · studio-mac</div>
+        <div class="tlist">
+          <a class="trow" aria-current="page"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Fix 3-D Secure checkout for EU cards</span><span class="age hold">32s</span><span class="sub">Opus 5.5 · +48 -12</span></a>
+          <a class="trow"><span class="eq"><i></i><i></i><i></i></span><span class="t">Refactor cart totals</span><span class="age">22m</span><span class="sub">Sonnet 5</span></a>
+        </div>
+        <div class="pgroup"><span class="proj proj--payments">payments-api</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="wsl">hercule/run-7c2 · build-box-2</div>
+        <div class="tlist">
+          <a class="trow"><svg class="m faint"><use href="#m-idle"/></svg><span class="t">Add iDEAL research</span><span class="age">1h</span><span class="sub">gpt-5.4</span></a>
+        </div>
+        <div class="pgroup"><span class="proj proj--ops">ops</span><span class="count">1</span><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span></div>
+        <div class="wsl">ops · studio-mac</div>
+        <div class="tlist">
+          <a class="trow"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span><span class="t">Migrate ops dashboards</span><span class="age hold">11m</span><span class="sub">qwen3-coder</span></a>
+        </div>
+        <a class="all-sessions"><svg class="m"><use href="#m-session"/></svg>All sessions<span class="count">23</span><svg class="i i--s faint"><use href="#i-chev-r"/></svg></a>
+      </div>
+    </aside>
+
+    <main class="wmain">
+      <header class="tchrome">
+        <span class="crumb">webshop /</span>
+        <a class="ttab" aria-current="page"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Fix 3-D Secure checkout for EU cards</a>
+        <a class="ttab"><span class="eq"><i></i><i></i><i></i></span>Refactor cart totals</a>
+        <div class="tools">
+          <button class="pillbtn"><svg class="i"><use href="#i-link"/></svg>Copy link</button>
+          <button class="iconbtn" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button>
+        </div>
+      </header>
+
+      <div class="thread" id="thread">
+        <div class="col">
+          <div class="opener">
+            <span class="stamp">Tue 09:02</span>
+            <span class="origin kind-proposal">from <a class="mini"><svg class="m"><use href="#m-task"/></svg>Checkout fails for EU cards with 3-D Secure<svg class="i"><use href="#i-arrow-r"/></svg></a></span>
+          </div>
+
+          <div class="bubble-row">
+            <div class="bubble">Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+          </div>
+
+          <div class="worked">Worked for 2m 14s <svg class="i"><use href="#i-chev-r"/></svg><span class="tail">read 6 files · ran 1 command</span></div>
+
+          <div class="prose">
+            <p>Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.</p>
+          </div>
+          <div class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</div>
+
+          <div class="prose"><p>I wrote a failing test first, then the fix.</p></div>
+
+          <div class="worked">Worked for 4m 51s <svg class="i"><use href="#i-chev-r"/></svg><span class="tail">edited 3 files · ran 2 commands</span></div>
+
+          <div class="files">
+            <div class="files-head"><svg class="i i--s"><use href="#i-diff"/></svg>3 changed files <span class="plus num">+48</span><span class="minus num">-12</span>
+              <span class="actions"><button class="btn btn--ghost btn--s">Show files</button><button class="btn btn--s">Open diff</button></span></div>
+            <div class="files-row"><span class="path">src/checkout/payment.ts</span><span class="plus">+21</span><span class="minus">-9</span></div>
+            <div class="files-row"><span class="path">src/checkout/payment.test.ts</span><span class="plus">+19</span><span class="minus">-0</span></div>
+            <div class="files-row"><span class="path">src/checkout/3ds-modal.tsx</span><span class="plus">+8</span><span class="minus">-3</span></div>
+            <div class="files-foot"><svg class="m go"><use href="#m-done"/></svg><span class="go">24 passed</span><span class="mono">pnpm test checkout</span></div>
+          </div>
+
+          <div class="prose"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+          <div class="agent-end"><span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>Waiting on you · 32s</div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="queued"><svg class="m hold"><use href="#m-queued"/></svg><span class="q">Also check the Apple Pay path</span><span class="stamp">queued · runs next</span>
+            <span class="end"><button class="btn btn--ghost btn--s"><svg class="i i--s"><use href="#i-steer"/></svg>Steer</button><button class="btn btn--ghost btn--s">Cancel</button></span></div>
+          <div class="dock kind-request">
+            <span class="ktab"><svg class="m"><use href="#m-ask"/></svg>Request</span>
+            <div class="dock-q">
+              <span class="ask"><svg class="m"><use href="#m-ask"/></svg></span>
+              <span class="t">Run <code>git push</code>?</span>
+              <span class="who">Claude Code · 32s</span>
+              <span class="s">git push -u origin fix/3ds-eu-cards</span>
+              <span class="dock-keys"><span class="key key--s">D</span><span class="key key--s">A</span><span class="key key--s">Y</span></span>
+            </div>
+            <div class="verbs">
+              <button class="verb verb--nogo"><span class="key">D</span><span class="v">Deny</span><span class="d">The agent is told no</span></button>
+              <button class="verb verb--go"><span class="key">A</span><span class="v">Always allow git push</span><span class="d">Adds a Grant for this thread</span></button>
+              <button class="verb verb--go is-primary"><span class="key">Y</span><span class="v">Allow once</span><span class="d">Runs this one push</span></button>
+            </div>
+          </div>
+          <div class="cm-card">
+            <textarea class="cm-text" placeholder="Queued until the turn finishes…" aria-label="Message"></textarea>
+            <div class="cm-row">
+              <button class="cm-pick" aria-label="Attach"><svg class="i"><use href="#i-plus"/></svg></button>
+              <span class="ph show-scrolled">Reply…</span>
+              <button class="cm-pick hide-scrolled"><svg class="i i--s"><use href="#i-lock"/></svg>Auto-accept edits</button>
+              <span class="grow"></span>
+              <button class="cm-pick hide-scrolled">high<svg class="i chev"><use href="#i-chev-d"/></svg></button>
+              <button class="pill"><svg class="b"><use href="#b-claude"/></svg>Opus 5.5</button>
+              <button class="cm-pick hide-scrolled" aria-label="Voice"><svg class="i"><use href="#i-mic"/></svg></button>
+              <button class="cm-stop"><svg class="i i--s"><use href="#i-stop"/></svg>Stop</button>
+              <button class="cm-send" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+            </div>
+          </div>
+          <div class="lip">
+            <span><svg class="i"><use href="#i-worktree"/></svg>fix/3ds-eu-cards</span>
+            <span><svg class="i"><use href="#i-branch"/></svg><span class="mono">fix/3ds-eu-cards</span> from main</span>
+            <span class="end"><svg class="i"><use href="#i-machine"/></svg>studio-mac</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+  // The composer shrinks and turns see-through while the transcript scrolls away from the end.
+  // It restores at the bottom or when it gets focus. ?state=scrolled holds the shrunk state.
+  (function () {
+    var root = document.documentElement;
+    var thread = document.getElementById("thread");
+    var forced = root.dataset.state === "scrolled";
+    thread.scrollTop = thread.scrollHeight - (forced ? thread.clientHeight + 480 : 0);
+    if (forced) return;
+    var restore = function () { delete root.dataset.state; };
+    thread.addEventListener("scroll", function () {
+      var fromEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      if (fromEnd < 24) restore(); else root.dataset.state = "scrolled";
+    }, { passive: true });
+    document.querySelector(".composer").addEventListener("focusin", restore);
+  })();
+</script>
+</body>
+</html>

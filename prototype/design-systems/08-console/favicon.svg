@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The favicon: the Hercule mark on the Phosphor ground, plus a yellow dot when
+       something waits on you. The tab title carries the count: "(3) Intake · Hercule". -->
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#0b140f"/>
+  <rect x="7" y="7" width="4" height="18" rx="0.5" fill="#dfeee1"/>
+  <rect x="18" y="7" width="4" height="18" rx="0.5" fill="#dfeee1"/>
+  <rect x="12.25" y="11.5" width="4.5" height="8" rx="0.5" fill="#fd55c4"/>
+  <circle cx="26" cy="6" r="5.5" fill="#f7d13f" stroke="#0b140f" stroke-width="2"/>
+</svg>

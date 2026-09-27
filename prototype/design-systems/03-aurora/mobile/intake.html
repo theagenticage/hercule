@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en" data-theme="dawn">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Intake · Hercule</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <script src="../marks.js"></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="field">
+        <i class="burn" style="--x: 30%; --y: 34%; --w: 560px; --h: 520px; --o: 0.85"></i>
+        <i class="wait" style="--x: 96%; --y: 70%; --w: 420px; --o: 0.6"></i>
+        <i class="calm" style="--x: 10%; --y: 102%; --w: 520px; --h: 380px; --o: 0.6"></i>
+        <i class="own" style="--x: 100%; --y: 0%; --w: 360px; --o: 0.5"></i>
+      </div>
+      <div class="statusbar"><span class="sb-time">9:41</span><span class="icons"><svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg><svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M1.3 4.3a10 10 0 0 1 13.4 0"/><path d="M3.9 7.1a6.2 6.2 0 0 1 8.2 0"/><circle cx="8" cy="10.2" r="1.3" fill="currentColor" stroke="none"/></svg><svg width="27" height="13" viewBox="0 0 27 13" aria-hidden="true"><rect x="0.5" y="0.5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="16" height="9" rx="2.4" fill="currentColor"/><path d="M25 4.3v4.4a2.3 2.3 0 0 0 0-4.4z" fill="currentColor" opacity="0.45"/></svg></span></div>
+      <div class="island"></div>
+      <header class="ph-head">
+        <h1 class="ph-title">Intake</h1>
+        <span class="ph-when"><svg class="i s12"><use href="#m-clock" /></svg>triaged 09:00 · next 11:00</span>
+        <button class="ph-btn glass-thin" title="Topic"><svg class="i"><use href="#m-filter" /></svg></button>
+        <button class="ph-btn glass-thin" title="Search"><svg class="i"><use href="#m-search" /></svg></button>
+      </header>
+
+      <div class="ph-scroll">
+        <div class="tally ph-tally">
+          <div class="n burn"><b>1</b><span>burning</span></div>
+          <div class="n"><b>6</b><span>proposals</span></div>
+          <div class="n wait"><b>2</b><span>need a call</span></div>
+          <div class="n"><b>3</b><span>FYI</span></div>
+          <div class="n quiet"><b>198</b><span>handled quietly</span></div>
+        </div>
+
+        <article class="lead ph-lead glass-strong lit burn">
+          <header class="lead-top">
+            <span class="st burn"><svg class="i"><use href="#m-burning" /></svg>Burning</span>
+            <span class="faint">Proposal</span>
+            <span class="spacer grow"></span>
+            <span class="faint">08:52</span>
+          </header>
+          <h2 class="lead-title">Checkout fails for EU cards with 3-D Secure</h2>
+          <div class="lead-meta">
+            <span class="prio" data-level="4"><i></i><i></i><i></i><i></i></span><span>Urgent</span>
+            <span class="dot-sep"></span><span>Checkout</span>
+            <span class="dot-sep"></span><span class="proj webshop">webshop</span>
+          </div>
+          <div class="ph-evs" aria-label="Made from">
+            <span class="ph-ev" title="Sentry · 412 events, 188 users"><svg class="brand"><use href="#b-sentry" /></svg><b>412</b></span>
+            <span class="ph-ev" title="Gmail · 3 customer emails"><svg class="brand"><use href="#b-gmail" /></svg><b>3</b></span>
+            <span class="ph-ev" title="PostHog · EU checkout conversion"><svg class="brand"><use href="#b-posthog" /></svg><b style="color: var(--fail)">−18%</b></span>
+            <span class="ph-ev" title="GitHub · deploy #1289"><svg class="brand"><use href="#b-github" /></svg><b>#1289</b></span>
+          </div>
+          <div class="ph-ledger">
+            <button class="ph-ans go"><b>Start "Fix bug"</b><span>New worktree · Claude Code · Opus 5.5</span><svg class="i"><use href="#m-arrow-r" /></svg></button>
+            <div class="pair">
+              <button class="ph-ans"><b>Accept</b><span>Adds a Task</span></button>
+              <button class="ph-ans"><b>Dismiss</b><span>Closes it</span></button>
+            </div>
+          </div>
+        </article>
+
+        <section class="ph-lane">
+          <div class="lane-h"><svg class="i s14" style="color: var(--attn)"><use href="#m-decision" /></svg>Needs a call <span class="n">2</span></div>
+          <div class="item call">
+            <span class="disc wait sm"><svg class="i s12"><use href="#m-decision" /></svg></span>
+            <div class="item-body">
+              <div class="item-t"><span class="tt">App is slow on Android</span></div>
+              <div class="item-m"><span class="src"><svg class="brand"><use href="#b-intercom" /></svg>Intercom</span><span class="dot-sep"></span>which project?</div>
+            </div>
+            <div class="answers">
+              <button class="chip-ans no">Not work</button>
+              <button class="chip-ans">Both</button>
+              <button class="chip-ans"><i class="pdot payments"></i>payments-api</button>
+              <button class="chip-ans"><i class="pdot webshop"></i>webshop</button>
+            </div>
+          </div>
+          <div class="item call">
+            <span class="disc wait sm"><svg class="i s12"><use href="#m-paused" /></svg></span>
+            <div class="item-body">
+              <div class="item-t"><span class="tt">"Label new issues" held 34 events</span></div>
+              <div class="item-m"><span class="src"><svg class="brand"><use href="#b-github" /></svg>GitHub</span><span class="dot-sep"></span>bound 20/h tripped 08:14</div>
+            </div>
+            <div class="answers">
+              <button class="chip-ans no">Keep held</button>
+              <button class="chip-ans">Raise to 50/h</button>
+              <button class="chip-ans">Release 34</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="ph-lane">
+          <div class="lane-h"><svg class="i s14" style="color: var(--muted)"><use href="#m-sun" /></svg>Today <span class="n">4</span>
+      <span class="haptic ph-note" style="; --px: 8px; --py: calc(100% + 16px)"><svg class="i"><use href="#m-haptic" /></svg>rigid tick at the threshold · success on release</span></div>
+          <div class="ph-swipe">
+            <div class="ph-swipe-under"><svg class="i"><use href="#m-run" /></svg>Investigate</div>
+            <div class="item" style="--dx: 122px">
+              <span class="prio" data-level="3"><i></i><i></i><i></i><i></i></span>
+              <div class="item-body">
+                <div class="item-t"><span class="tt">Nightly backup job timing out</span></div>
+                <div class="item-m"><span class="src"><svg class="brand"><use href="#b-grafana" /></svg></span><span class="proj ops">ops</span></div>
+              </div>
+              <span></span>
+            </div>
+          </div>
+          <div class="item">
+            <svg class="i s14 offer-mark"><use href="#m-offer" /></svg>
+            <div class="item-body">
+              <div class="item-t"><span class="tt">Draft a reply to Marta at Brightline</span></div>
+              <div class="item-m"><span class="src"><svg class="brand"><use href="#b-gmail" /></svg>Customers</span><span class="dot-sep"></span>invoice INV-2291</div>
+            </div>
+            <button class="chip-ans suggest">Draft reply</button>
+          </div>
+          <div class="item">
+            <span class="prio" data-level="2"><i></i><i></i><i></i><i></i></span>
+            <div class="item-body">
+              <div class="item-t"><span class="tt">Stripe webhook retries rising</span></div>
+              <div class="item-m"><span class="src"><svg class="brand"><use href="#b-stripe" /></svg></span><span class="proj payments">payments-api</span></div>
+            </div>
+            <button class="chip-ans suggest">Investigate</button>
+          </div>
+        </section>
+      </div>
+      <nav class="tabbar five glass-strong" aria-label="Hercule">
+        <a class="tab" aria-current="page"><svg class="i"><use href="#m-intake" /></svg>Intake<b class="badge">9</b></a>
+        <a class="tab"><svg class="i"><use href="#m-checkin" /></svg>Check-in<b class="badge wait">3</b></a>
+        <a class="tab"><svg class="i"><use href="#m-session" /></svg>Threads</a>
+        <a class="tab"><svg class="i"><use href="#m-assistant" /></svg>Assistants</a>
+        <a class="tab"><svg class="i"><use href="#m-settings" /></svg>Settings</a>
+      </nav>
+      <div class="homebar"></div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The favicon while something waits on Rogier: the logomark with an amber station ring. -->
+  <style>
+    .a { stroke: #d33a2c; }
+    .b { stroke: #1f1c19; }
+    .c { fill: #fdfcfa; stroke: #1f1c19; }
+    .w { fill: #fdfcfa; stroke: #b97d12; }
+    @media (prefers-color-scheme: dark) {
+      .a { stroke: #f0654f; }
+      .b { stroke: #f2efe9; }
+      .c { fill: #26231f; stroke: #f2efe9; }
+      .w { fill: #26231f; stroke: #f0b64a; }
+    }
+  </style>
+  <path class="a" d="M7 7v20" stroke-width="4.6" stroke-linecap="round" fill="none"/>
+  <path class="b" d="M20.5 13v14" stroke-width="4.6" stroke-linecap="round" fill="none"/>
+  <rect class="c" x="3" y="14" width="21.5" height="8" rx="4" stroke-width="2.2"/>
+  <circle class="w" cx="24.5" cy="7.5" r="5.2" stroke-width="3.2"/>
+</svg>
