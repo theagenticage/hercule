@@ -183,12 +183,25 @@ type StartedRecord =
       readonly input: Schema.Json;
       readonly workspaceStep?: WorkspaceStepToStart;
     }
-  | { readonly _tag: "ended" }
-  | { readonly _tag: "waitsForRunner" };
+  | typeof ENDED
+  | typeof WAITS_FOR_RUNNER;
 
-const ENDED: StartedRecord = { _tag: "ended" };
+const ENDED = { _tag: "ended" } as const;
 
-const WAITS_FOR_RUNNER: StartedRecord = { _tag: "waitsForRunner" };
+const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
+
+/**
+ * Where a workspace step of a run is to run, or why it does not start now:
+ *
+ * - `placed`: on this runner, in this workspace of the run;
+ * - `ended`: the step and its run have failed;
+ * - `waitsForRunner`: no runner can take the run now, and the step stays
+ *   pending.
+ */
+type WorkspaceStepPlacement =
+  | { readonly _tag: "placed"; readonly runnerId: string; readonly workspaceId: string }
+  | typeof ENDED
+  | typeof WAITS_FOR_RUNNER;
 
 /**
  * What executing one step record did, as its child fiber reports it to the
@@ -492,20 +505,13 @@ export const makeRunEngine = Effect.gen(function* () {
     action: string,
     input: Schema.Json,
     at: string,
-  ): Effect.Effect<
-    | { readonly _tag: "placed"; readonly runnerId: string; readonly workspaceId: string }
-    | StartedRecord,
-    SqlError
-  > =>
+  ): Effect.Effect<WorkspaceStepPlacement, SqlError> =>
     Effect.gen(function* () {
       const policy = run.plan.workspace;
+      // Validation at `run.start` refuses a plan with a workspace action and
+      // no workspace, and a run's plan never changes after that.
       if (policy === undefined) {
-        const noWorkspace: EngineStepError = {
-          code: "validation",
-          message: `The action ${action} runs in the run's workspace, and the run's workflow has no workspace.`,
-        };
-        yield* writeStepFailure(run.id, record, noWorkspace, "step-failed", at);
-        return ENDED;
+        return yield* Effect.die(`run ${run.id} has a workspace step and no workspace policy`);
       }
       const refused = findWorkspaceStepError(policy, action, input);
       if (refused !== undefined) {
