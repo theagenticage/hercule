@@ -39,7 +39,10 @@ export function Turn({
         </div>
       )}
       {turn.assistantText === "" && !live ? null : (
-        <div className="w-full text-row text-ink">
+        // Until the first word streams into the tail, the prose is hidden, so
+        // the flex gap above it does not count. The divider under the turn
+        // then sits at the same height while the turn runs and after it ends.
+        <div className="w-full text-row text-ink has-[>span:only-child:empty]:hidden">
           <Markdown text={turn.assistantText} />
           {/* The tail is plain text while the agent writes, so its whitespace
               is kept as sent; the finished prose is rendered as markdown. */}

@@ -70,13 +70,15 @@ function Profile(): JSX.Element {
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={submit}>
-        <FormCard
-          label="Profile"
-          fine="Schedules, ages and every time on screen are read in this zone."
-        >
+        {/* The note sits under the field it explains and Save ends the card,
+            as on Settings > Assistants. */}
+        <FormCard label="Profile">
           <Row label="Timezone" htmlFor="timezone">
             <TimezoneField value={timezone} onChange={setTimezone} />
           </Row>
+          <p className="text-fine text-faint">
+            Schedules, ages and every time on screen are read in this zone.
+          </p>
           <div className="flex items-center gap-3 pt-2">
             <Button type="submit" variant="form" disabled={saving || !hasChanges}>
               Save

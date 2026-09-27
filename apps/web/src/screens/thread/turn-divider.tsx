@@ -58,7 +58,11 @@ export function TurnDivider({
     <div>
       <button type="button" onClick={() => setOpen((was) => !was)} className={style}>
         {reading}
-        <span aria-hidden="true">{open ? "⌄" : "›"}</span>
+        {/* One glyph, turned when the list is open, so the chevron keeps
+            its baseline, as the pulse's chevron does. */}
+        <span aria-hidden="true" className={cn("transition-transform", open && "rotate-90")}>
+          ›
+        </span>
       </button>
       {open ? (
         <ul className="mt-1 flex flex-col gap-0.5 font-mono text-fine text-muted">

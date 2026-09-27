@@ -91,6 +91,9 @@ export function ThemeSelector(): JSX.Element {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2.5 py-[5px] text-row text-muted hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live">
+        {/* An empty marker column, as on the nav items without a glyph, so
+            "Theme" starts where "Marks" and every other sidebar label start. */}
+        <span aria-hidden="true" className="w-3 shrink-0" />
         Theme <span className="ml-auto text-fine text-faint">{LABELS[choice]}</span>
       </PopoverTrigger>
       <PopoverContent

@@ -68,7 +68,8 @@ export function InPlaceQuestion({
   if (stacked) {
     return (
       <div className="flex flex-col gap-1.5 text-row text-muted">
-        <p>{question}</p>
+        {/* Pretty wrapping keeps the last line from holding a single word. */}
+        <p className="text-pretty">{question}</p>
         <div className="flex items-center gap-1.5">{buttons}</div>
       </div>
     );

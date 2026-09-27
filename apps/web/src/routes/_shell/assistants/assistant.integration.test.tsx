@@ -264,7 +264,9 @@ const isSend = (call: Call): boolean =>
   call.method === "POST" && call.path === `/api/v1/conversations/${WEB.id}/messages`;
 
 describe("Assistant conversation: an empty conversation", () => {
-  it("shows the Assistants crumb, the assistant's name and the presence word asleep", async () => {
+  // The empty conversation has no session yet, so there is no presence to
+  // show: "asleep" would promise a session to resume.
+  it("shows the Assistants crumb and the assistant's name, with no presence word before the first session", async () => {
     await openConversation();
 
     const crumb = await waitFor(() => {
@@ -275,8 +277,7 @@ describe("Assistant conversation: an empty conversation", () => {
       return found;
     });
     const chrome = readPageText(crumb.parentElement);
-    expect(chrome).toMatch(/^Assistants(?: \/)? Ada\b/);
-    expect(chrome).toContain("asleep");
+    expect(chrome).toMatch(/^Assistants(?: \/)? Ada$/);
   });
 
   it("explains how to start above the composer, which is addressed to the assistant", async () => {

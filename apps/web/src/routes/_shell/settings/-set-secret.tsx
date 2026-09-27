@@ -59,10 +59,7 @@ export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.E
 
   return (
     <form onSubmit={submit}>
-      <FormCard
-        label="Set secret"
-        fine="A value is never read back. Setting a name that already exists rotates it."
-      >
+      <FormCard label="Set secret">
         <Field id="secret-owner-kind" label="Owner kind">
           <Select
             id="secret-owner-kind"
@@ -110,7 +107,12 @@ export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.E
             }}
           />
         </Field>
-        <div className="flex items-center gap-3 pt-1">
+        {/* The note sits under the fields it explains and the button ends
+            the card, as on every settings card with a Save. */}
+        <p className="text-fine text-faint">
+          A value is never read back. Setting a name that already exists rotates it.
+        </p>
+        <div className="flex items-center gap-3 pt-2">
           <Button type="submit" variant="form" disabled={set.isPending}>
             Set secret
           </Button>

@@ -874,6 +874,21 @@ describe("the Threads face's Assistants group", () => {
     expect(readDotClasses(getAssistantRow(BOB))).not.toMatch(/\bbg-/);
   });
 
+  // "asleep" would promise a session to resume, and an assistant that has
+  // never run has none. The empty marker column keeps the name in line.
+  it("draws no dot for an assistant with no session yet, and keeps its name in line", async () => {
+    await renderApp({
+      path: "/",
+      api: stubApi(withAssistants([ADA, BOB], [THREAD, ADA_SESSION])).fetch,
+      token: "held",
+    });
+
+    await getThreadsNav().findByText("Assistants");
+    const row = getAssistantRow(BOB);
+    expect(row.querySelector("[data-presence]")).toBeNull();
+    expect(row.firstElementChild?.className).toMatch(/\bw-3\b/);
+  });
+
   it("opens the assistant's conversation when its row is clicked", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp({

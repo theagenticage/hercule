@@ -138,8 +138,10 @@ export function ConversationScreen({
       <ConversationChrome name={assistant.name} presence={decideAssistantPresence(current)} />
       <ContentColumn className="gap-5">
         {/* The messages take the height the composer leaves, so the empty
-            hint is centred in that space, not in the whole column. */}
-        <div className="flex flex-1 flex-col gap-5">
+            hint is centred in that space, not in the whole column. Their
+            bottom padding and the column gap leave 40px above the composer,
+            as on the session view. */}
+        <div className="flex flex-1 flex-col gap-5 pb-5">
           {messages.hasNextPage ? (
             <div className="flex items-center justify-center gap-2">
               <Button

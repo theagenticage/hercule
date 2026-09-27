@@ -9,6 +9,9 @@ import { PresenceDot } from "./presence-dot";
  * assistant's name, and the channel it is reached on. The row links to the
  * assistant's conversation. It has the thread row's size and marker column, so the
  * names line up with the thread titles above them.
+ *
+ * An assistant with no session yet has no presence, so its marker column
+ * stays empty rather than showing a dot that would claim a state.
  */
 export function AssistantRow({
   assistantId,
@@ -18,7 +21,7 @@ export function AssistantRow({
 }: {
   readonly assistantId: string;
   readonly name: string;
-  readonly presence: AssistantPresence;
+  readonly presence: AssistantPresence | null;
   /** Whether the open screen is this assistant's conversation or one of its sessions. */
   readonly selected: boolean;
 }): JSX.Element {
@@ -34,7 +37,7 @@ export function AssistantRow({
       )}
     >
       <span className="flex w-3 shrink-0 justify-center">
-        <PresenceDot presence={presence} />
+        {presence === null ? null : <PresenceDot presence={presence} />}
       </span>
       <span className="min-w-0 flex-1 truncate text-ink">{name}</span>{" "}
       {/* The web is the only channel so far. */}

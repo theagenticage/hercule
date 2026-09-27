@@ -6,20 +6,26 @@ import { Label } from "../primitives/label";
  * What a screen shows when it has nothing to show yet: a headline, a lead
  * sentence about what will appear here, any actions (`children`), and fine
  * print with further detail.
+ *
+ * It sits a little below the screen's header by default. A settings screen
+ * passes `className="mt-0"`, so its empty state starts under the settings
+ * tabs where the cards of the other settings screens start.
  */
 export function EmptyState({
   headline,
   lead,
   fine,
+  className,
   children,
 }: {
   readonly headline: string;
   readonly lead?: string | undefined;
   readonly fine?: ReactNode;
+  readonly className?: string;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="mt-[4vh] flex max-w-[560px] flex-col gap-3.5">
+    <div className={cn("mt-[4vh] flex max-w-[560px] flex-col gap-3.5", className)}>
       <h2 className="text-[17px] font-emph tracking-[-0.01em] text-balance text-ink">{headline}</h2>
       {lead === undefined ? null : <p className="max-w-[52ch] text-row text-muted">{lead}</p>}
       {children}

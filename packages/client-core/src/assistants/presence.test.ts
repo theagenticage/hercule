@@ -65,8 +65,8 @@ describe("decideAssistantPresence", () => {
     expect(decideAssistantPresence(session)).toBe("asleep");
   });
 
-  it("is asleep when the assistant has no session yet", () => {
-    expect(decideAssistantPresence(null)).toBe("asleep");
+  it("has no presence when the assistant has no session yet", () => {
+    expect(decideAssistantPresence(null)).toBeNull();
   });
 
   it("is unavailable when the session has exited and cannot be resumed", () => {

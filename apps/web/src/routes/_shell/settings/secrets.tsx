@@ -33,6 +33,7 @@ function Secrets(): JSX.Element {
     <div className="flex flex-col gap-7">
       {secrets.length === 0 ? (
         <EmptyState
+          className="mt-0"
           headline="No secrets are stored."
           lead="Secrets are the tokens and keys connections and workflows use. Hercule keeps their values out of every read and shows only where each one is used."
         />

@@ -123,30 +123,37 @@ export function ThreadScreen({
         }
       />
       <ContentColumn className="gap-6">
-        {turns.map((turn, index) => {
-          // Only the last turn of a busy session can still be running.
-          //
-          // - An earlier turn with no `turn.completed` was abandoned by an
-          //   interrupt.
-          // - An unfinished last turn on an idle or exited session was
-          //   abandoned by the runner.
-          //
-          // Neither is running, so both show as finished with no duration,
-          // rather than as working since they were last updated.
-          const isLive = session.status === "busy" && index === lastIndex && turn.duration === null;
-          return (
-            <Turn
-              key={turn.turnId}
-              turn={turn}
-              live={isLive}
-              // The tap buffer holds one item's text at a time, so only the
-              // live last turn gets the live tail element.
-              tailRef={isLive ? tailRef : undefined}
-              stamp={stamps[index]}
-            />
-          );
-        })}
-        <div className="sticky bottom-0 mt-auto flex flex-col gap-2">
+        {/* The turns take the height the composer leaves, so the composer
+            stays at the foot of a short thread. Their bottom padding and the
+            column gap leave 40px above the composer, as on an assistant's
+            conversation. */}
+        <div className="flex flex-1 flex-col gap-6 pb-4">
+          {turns.map((turn, index) => {
+            // Only the last turn of a busy session can still be running.
+            //
+            // - An earlier turn with no `turn.completed` was abandoned by an
+            //   interrupt.
+            // - An unfinished last turn on an idle or exited session was
+            //   abandoned by the runner.
+            //
+            // Neither is running, so both show as finished with no duration,
+            // rather than as working since they were last updated.
+            const isLive =
+              session.status === "busy" && index === lastIndex && turn.duration === null;
+            return (
+              <Turn
+                key={turn.turnId}
+                turn={turn}
+                live={isLive}
+                // The tap buffer holds one item's text at a time, so only the
+                // live last turn gets the live tail element.
+                tailRef={isLive ? tailRef : undefined}
+                stamp={stamps[index]}
+              />
+            );
+          })}
+        </div>
+        <div className="sticky bottom-0 flex flex-col gap-2">
           <QueuedInputs client={client} sessionId={sessionId} />
           <div className="flex flex-col">
             {session.openRequest === null ? null : (

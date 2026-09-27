@@ -10,6 +10,7 @@ export const Route = createFileRoute("/_shell/settings/bounds")({
 function Bounds(): JSX.Element {
   return (
     <EmptyState
+      className="mt-0"
       headline="No trigger has a bound to show yet."
       lead="A spawn bound caps how often a trigger may start runs. Every workflow trigger is listed here with its bound, its current window, and whether it is paused."
     />

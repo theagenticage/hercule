@@ -50,6 +50,11 @@ function Count({
   );
 }
 
+/**
+ * One item of the orchestration nav. Every item keeps the 12px marker column,
+ * empty on the items that carry no glyph, so all labels start at one x: the x
+ * of the thread titles, the assistant names and the foot rows.
+ */
 function NavLink({
   item,
   active,
@@ -65,16 +70,14 @@ function NavLink({
       to={item.to}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-control px-2.5 py-[5px] text-row",
+        "flex items-center gap-2 rounded-control px-2.5 py-[5px] text-row",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
         active ? "bg-line-soft font-emph text-ink" : "text-muted hover:bg-line-soft",
       )}
     >
-      {Glyph === undefined ? null : (
-        <span className={cn("flex w-3.5 justify-center", active ? "text-ink" : "text-faint")}>
-          <Glyph className="size-[13px]" />
-        </span>
-      )}
+      <span className={cn("flex w-3 shrink-0 justify-center", active ? "text-ink" : "text-faint")}>
+        {Glyph === undefined ? null : <Glyph className="size-[13px]" />}
+      </span>
       {item.label}
       <Count
         value={item.count === undefined ? undefined : counts[item.count]}
