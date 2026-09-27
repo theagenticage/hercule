@@ -149,7 +149,7 @@ export function RunPage({
                   // instead of sitting on an inline line box that lifts it.
                   <span className="ml-1.5 flex shrink-0">
                     <Checkbox
-                      label="Delete the run's workspace too"
+                      label="Delete workspace"
                       checked={deletesWorkspace}
                       onChange={(event) => {
                         setDeletesWorkspace(event.target.checked);

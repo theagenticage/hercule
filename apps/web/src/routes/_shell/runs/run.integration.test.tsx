@@ -932,7 +932,7 @@ describe("A run's page > what happens to its workspace", () => {
   };
 
   const getWorkspaceCheckbox = (): HTMLInputElement =>
-    screen.getByRole("checkbox", { name: "Delete the run's workspace too" });
+    screen.getByRole("checkbox", { name: "Delete workspace" });
 
   it("asks on cancel whether to delete the workspace too, ticked by default, and says until when a kept one is kept", async () => {
     const user = userEvent.setup();
