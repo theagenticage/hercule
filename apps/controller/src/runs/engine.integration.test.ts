@@ -489,8 +489,9 @@ describe("a run interrupted by a restart", () => {
       });
       await runEffect(
         harness.sql`
-          INSERT INTO run_steps (run_id, step_id, iteration, status, created_at, started_at)
-          VALUES (unhex(replace(${WAITING_RUN_ID}, '-', '')), 'pause', 1, 'running', ${startedAt}, ${startedAt})`,
+          INSERT INTO run_steps (run_id, step_id, iteration, status, input, created_at, started_at)
+          VALUES (unhex(replace(${WAITING_RUN_ID}, '-', '')), 'pause', 1, 'running',
+                  ${JSON.stringify({ seconds: 60 })}, ${startedAt}, ${startedAt})`,
       );
 
       const rebootedAt = Date.now();
@@ -524,8 +525,13 @@ describe("a run interrupted by a restart", () => {
       });
       await runEffect(
         harness.sql`
-          INSERT INTO run_steps (run_id, step_id, iteration, status, created_at, started_at)
-          VALUES (unhex(replace(${REPEATED_RUN_ID}, '-', '')), 'create', 1, 'running', ${at}, ${at})`,
+          INSERT INTO run_steps (run_id, step_id, iteration, status, input, created_at, started_at)
+          VALUES (unhex(replace(${REPEATED_RUN_ID}, '-', '')), 'create', 1, 'running',
+                  ${JSON.stringify({
+                    title: "Fix login",
+                    description: "Filed by a run.",
+                    provenance: [{ ref: "test:ticket:79" }],
+                  })}, ${at}, ${at})`,
       );
 
       await harness.reboot();

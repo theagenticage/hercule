@@ -639,7 +639,7 @@ export const makeRunEngine = Effect.gen(function* () {
             yield* writeStepFailure(runId, record, error, failureReason, at);
             return ENDED;
           }
-          const { input } = prepared.success;
+          const input = prepared.success;
           if (!runsInWorkspace(step.action)) {
             yield* runs.startStep(runId, record, input, at);
             return { _tag: "started", run, startedAt: at, input } as const;
@@ -700,6 +700,15 @@ export const makeRunEngine = Effect.gen(function* () {
     Effect.catchCause(
       Effect.gen(function* () {
         if (record.status === "running") {
+          // `startStep` stores the input of every record it starts, so a
+          // running record without one is a bug. The run fails with
+          // `controller-error` below rather than calling the action with an
+          // input it was never checked against.
+          if (record.input === undefined) {
+            return yield* Effect.die(
+              `step ${record.stepId} of run ${run.id} is running with no input stored`,
+            );
+          }
           yield* executeStep(run, record, record.input);
           return "executed" as const;
         }

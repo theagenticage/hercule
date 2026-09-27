@@ -104,12 +104,6 @@ export interface InputFailure {
   readonly failureReason: FailureReason;
 }
 
-/** A step's input, prepared: its params rendered from the run and checked against the action's input schema. */
-export interface PreparedInput {
-  /** The input, encoded with the action's input schema, as the step record stores it. */
-  readonly input: Schema.Json;
-}
-
 /**
  * Returns the input or the output schema of an action in the catalog, or
  * `undefined` when the action is not in the catalog. The catalog holds any
@@ -309,7 +303,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const prepareInput = (
       run: Run,
       step: ActionStep,
-    ): Effect.Effect<Result.Result<PreparedInput, InputFailure>> =>
+    ): Effect.Effect<Result.Result<Schema.Json, InputFailure>> =>
       Effect.gen(function* () {
         const rendered = yield* Effect.result(
           renderTemplates(step.params ?? {}, buildRunContext(run)),
@@ -344,14 +338,12 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "step-failed",
           });
         }
-        return Result.succeed({ input: Schema.encodeSync(schema)(decoded.success) });
+        return Result.succeed(Schema.encodeSync(schema)(decoded.success));
       });
 
     /**
      * Executes one running step record of a run with the input stored on it,
-     * and records how the record ended. A record that stores no input was
-     * started before inputs were stored, so its input is prepared again here.
-     * A failure of the step fails the run. This effect itself fails only with
+     * and records how the record ended. A failure of the step fails the run. This effect itself fails only with
      * a database error, which is the controller's failure rather than the
      * step's. Does nothing more once the step record has ended some other
      * way, for example because the run was cancelled.
@@ -364,7 +356,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const executeStep = (
       run: Run,
       attempt: Required<StepRecordKey>,
-      storedInput: Schema.Json | undefined,
+      input: Schema.Json,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const step = findActionStep(run, attempt.stepId);
@@ -379,21 +371,6 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             buildActionUnavailableError(step.action),
             "step-failed",
           );
-        }
-        let input: Schema.Json;
-        if (storedInput === undefined) {
-          const prepared = yield* prepareInput(run, step);
-          if (Result.isFailure(prepared)) {
-            return yield* failRun(
-              run.id,
-              attempt,
-              prepared.failure.error,
-              prepared.failure.failureReason,
-            );
-          }
-          input = prepared.success.input;
-        } else {
-          input = storedInput;
         }
         // The stored input was encoded with this schema, so it decodes; a
         // failure means the catalog entry changed since, and the step fails

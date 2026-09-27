@@ -107,7 +107,7 @@ export interface PinnedRunningStep {
   readonly workspaceId: string;
   /** The id of the step's action in the run's plan. */
   readonly action: string;
-  /** The step's input as stored when the record started; absent for a record started before inputs were stored. */
+  /** The step's input as stored when the record started. Every action step's record stores one. */
   readonly input?: Schema.Json;
   /** The run's workspace policy, from its plan. */
   readonly workspacePolicy: WorkspacePolicy;
