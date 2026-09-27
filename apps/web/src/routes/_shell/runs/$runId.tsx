@@ -1,7 +1,8 @@
 import { useEffect, useRef, type JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  describeReruns,
   describeRunnerWait,
   describeRunWorkspace,
   formatWorkspaceLabel,
@@ -16,6 +17,7 @@ import {
   resourcesQuery,
   runQuery,
   runnerQuery,
+  runsQuery,
   settingsQuery,
   workflowActionsQuery,
   workspaceQuery,
@@ -30,10 +32,10 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   // The list is the default and leaves the address without it.
   validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
     search["steps"] === "timeline" ? { steps: "timeline" } : {},
-  // Loads the run, the runner and workspace it is pinned to, and the action
-  // catalog before the page renders, so the page never waits on them. The
-  // catalog tells which steps run in the workspace, and so which ones wait
-  // for a runner.
+  // Loads the run, the runner and workspace it is pinned to, the run's
+  // re-runs, and the action catalog before the page renders, so the page
+  // never waits on them. The catalog tells which steps run in the workspace,
+  // and so which ones wait for a runner.
   loader: async ({ context: { client, queryClient }, params }) => {
     const [run] = await Promise.all([
       queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {
@@ -42,6 +44,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
         throw isNotFound(error) ? notFound() : error;
       }),
       queryClient.ensureQueryData(workflowActionsQuery(client)),
+      queryClient.ensureInfiniteQueryData(runsQuery(client, { originalRunId: params.runId })),
     ]);
     const { runnerId, workspaceId } = run;
     await Promise.all([
@@ -61,7 +64,8 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
  * Renders a run's page, kept current by two topics:
  *
  * - `run`: the run engine publishes the run's id on it after every change to
- *   the run or to one of its step records;
+ *   the run or to one of its step records, and a new run's id when one
+ *   starts, which may be a re-run of this run;
  * - `runner`: the run's runner going offline or coming back changes what a
  *   running step shows.
  *
@@ -104,6 +108,11 @@ function RunScreen(): JSX.Element {
   }).data;
   const resources = useQuery({ ...resourcesQuery(client), enabled: workspace !== undefined }).data;
   const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
+  // Only the first page is read: the header links the newest few re-runs and
+  // counts the rest.
+  const [rerunsPage = { items: [] }] = useSuspenseInfiniteQuery(
+    runsQuery(client, { originalRunId: runId }),
+  ).data.pages;
 
   return (
     <RunPage
@@ -120,6 +129,7 @@ function RunScreen(): JSX.Element {
       }
       workspaceReading={describeRunWorkspace(run, workspace, timezone)}
       runnerWait={describeRunnerWait(run, runner, actions, timezone)}
+      reruns={describeReruns(rerunsPage)}
       timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>

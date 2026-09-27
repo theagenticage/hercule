@@ -244,7 +244,7 @@ export const subscription = HttpApiGroup.make("subscription")
     HttpApiEndpoint.post("create", "/subscriptions", {
       payload: SubscriptionCreateInput,
       success: SubscriptionCreated,
-      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("cancel", "/subscriptions/:id", {
       params: { id: Id },

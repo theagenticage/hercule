@@ -24,14 +24,14 @@ import type { LiveMessage } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLog, AuditLogLayer, PlatformEventsLayer } from "../events";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { LiveTopics, LiveTopicsLayer, type LiveQueue } from "./topics";
 
 type Deps = TaskService | AuditLog | LiveTopics | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
-  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(LiveTopicsLayer),
   Layer.provideMerge(TestDatabase),
 );

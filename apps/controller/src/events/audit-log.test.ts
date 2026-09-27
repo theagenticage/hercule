@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { withTransaction } from "../db/client";
-import { AuditLog, AuditLogLayer, SECURITY_KINDS } from "./audit-log";
+import { AUDIT_KINDS, AuditLog, AuditLogLayer, SECURITY_KINDS } from "./audit-log";
 
 const layer = AuditLogLayer.pipe(Layer.provideMerge(TestDatabase));
 
@@ -147,5 +147,17 @@ describe("the security kinds", () => {
       "secret.rotated",
       "secret.deleted",
     ]);
+  });
+});
+
+describe("the audit kinds", () => {
+  it("leaves out task.created and task.updated, which the event router matches, and keeps task.deleted", () => {
+    // Triggers and subscriptions listen for a task's creation and its
+    // updates, and the router never reads an audit kind, so those two kinds
+    // are written as platform events. Nothing may wait on `task.deleted` yet,
+    // so it is still an audit entry only (spec 09, Platform events).
+    expect(AUDIT_KINDS).not.toContain("task.created");
+    expect(AUDIT_KINDS).not.toContain("task.updated");
+    expect(AUDIT_KINDS).toContain("task.deleted");
   });
 });

@@ -91,10 +91,10 @@ describe("a run of built-in actions", () => {
         ["test:ticket:79", undefined, `run:${runId}`],
         [undefined, runId, `run:${runId}`],
       ]);
-      expect((await harness.audit("task.created")).map((entry) => entry.actor)).toEqual([
+      expect((await harness.platformEvents("task.created")).map((entry) => entry.actor)).toEqual([
         `run:${runId}`,
       ]);
-      expect((await harness.audit("task.updated")).map((entry) => entry.actor)).toEqual([
+      expect((await harness.platformEvents("task.updated")).map((entry) => entry.actor)).toEqual([
         `run:${runId}`,
       ]);
     });

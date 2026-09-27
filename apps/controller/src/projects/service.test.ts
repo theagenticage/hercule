@@ -6,7 +6,7 @@ import { MAX_PROJECT_NAME_LENGTH } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLog, AuditLogLayer, PlatformEventsLayer } from "../events";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput } from "./index";
 
@@ -14,7 +14,7 @@ type Deps = ProjectService | TaskService | AuditLog | SqlClient.SqlClient;
 
 const layer = ProjectServiceLayer.pipe(
   Layer.provideMerge(TaskServiceLayer),
-  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );
 

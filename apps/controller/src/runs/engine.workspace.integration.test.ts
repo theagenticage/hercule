@@ -16,7 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
 import { AfterCommit, mintUuid, uuidToString, withTransaction } from "../db";
-import { EventKindsLayer } from "../events";
+import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { buildWorkspaceActionCapability } from "@hercule/protocol";
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
@@ -98,6 +98,7 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
     ),
     Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(RunExecutorLayer),
+    Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(workspaceSteps),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(buildPluginStack()),

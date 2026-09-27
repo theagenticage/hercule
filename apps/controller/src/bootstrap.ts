@@ -43,7 +43,7 @@ import {
   ConnectionTypesLayer,
 } from "./connections";
 import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
-import { AuditLog, AuditLogLayer } from "./events";
+import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
@@ -234,6 +234,7 @@ export type ControllerServices =
   | ControllerIdentity
   | Secrets
   | AuditLog
+  | PlatformEvents
   | Settings
   | PermissionProfiles
   | SessionTokens
@@ -288,6 +289,7 @@ export const bootWith = <A, E>(
       UsersLayer,
       CredentialsLayer,
       AuditLogLayer,
+      PlatformEventsLayer,
       JoinTokensLayer,
     ).pipe(
       Layer.provideMerge(

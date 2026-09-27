@@ -127,6 +127,7 @@ const COMMANDS: Record<string, string> = {
   "eventKind.query": "event-kind list",
 
   "run.start": "run start",
+  "run.rerun": "run rerun",
   "run.query": "run list",
   "run.read": "run read",
   "run.cancel": "run cancel",
@@ -270,6 +271,8 @@ const RESOLVES: Record<string, string> = {
   "run.query workflowId": "workflow.query",
   "run.read id": "run.query",
   "run.cancel id": "run.query",
+  "run.rerun id": "run.query",
+  "run.query originalRunId": "run.query",
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",

@@ -127,18 +127,24 @@ export const buildRecordingNotifier = (
  *
  * A test about what one request does by itself passes an interval longer than
  * any test, so the tick never runs, and the test sees only the request's own
- * work.
+ * work. A test that needs a workflow action of its own, such as one that holds
+ * a run until the test releases it, passes that action's plugin in
+ * `additionalPlugins`.
  */
 export const withPipeline = (
   body: (arranged: Arranged) => Promise<void>,
-  options: {
+  {
+    additionalPlugins = [],
+    ...options
+  }: {
     readonly expressionBudget?: Duration.Duration;
     readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
     readonly eventRoutingInterval?: Duration.Duration;
+    readonly additionalPlugins?: ReadonlyArray<Plugin>;
   } = {},
 ): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: buildPlugins(),
+    plugins: [...buildPlugins(), ...additionalPlugins],
     facts: FACTS,
     models: MODELS,
     eventRoutingInterval: TICK,

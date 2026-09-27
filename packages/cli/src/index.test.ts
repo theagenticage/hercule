@@ -1358,7 +1358,7 @@ describe("the run commands", () => {
       inputs: { title: "Fix login" },
     });
     expect(io.stdout).toEqual(runIo.stdout);
-    expect(io.stdout.join("\n")).toContain(`hercule run read ${RUN_ID}`);
+    expect(io.stdout.join("\n")).toContain(`hercule subscription create run:${RUN_ID}`);
   });
 
   it("prints run list as a table with the status, the workflow, who started it and its age", async () => {

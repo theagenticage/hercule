@@ -1,15 +1,18 @@
 import { useMemo, useState, type JSX } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
   isRunLive,
+  listRerunChoices,
   queryKeys,
   type HerculeClient,
+  type RerunsReading,
   type RunnerWait,
   type RunWorkspaceReading,
 } from "@hercule/client-core";
-import type { Run, Runner } from "@hercule/contract";
+import type { RerunMode, Run, Runner } from "@hercule/contract";
 import {
   Button,
   Checkbox,
@@ -57,17 +60,20 @@ const PAGE_PADDING = 32;
  * While the run is live, one clock ticks for the whole page, so the header,
  * the graph and the steps count the same time.
  *
- * The page owns two actions, each with the question shown before it is done:
+ * The page owns three actions, each with the question shown before it is done:
  *
  * - Cancel, while the run is live. When the run's ephemeral workspace exists,
  *   the question also asks whether to delete it, and deleting is the default.
  * - Delete workspace, while a failed or kept run's workspace is kept for
  *   inspection.
+ * - Re-run, once the run has ended. The question asks which workflow the new
+ *   run follows, and the page then goes to the new run.
  *
  * While a question shows, its button is hidden instead of unmounted, so the
  * focus can return to it when the question is declined. On a wide page the
- * question sits beside the title; on a narrow one it has a row of its own
- * below the header's lines.
+ * cancel and delete questions sit beside the title; on a narrow one they have
+ * a row of their own below the header's lines. The re-run question always has
+ * that row, because it explains each choice, and every word of it matters.
  */
 export function RunPage({
   client,
@@ -76,6 +82,7 @@ export function RunPage({
   workspaceLabel,
   workspaceReading,
   runnerWait,
+  reruns,
   timezone,
   stepsView,
   onStepsViewChange,
@@ -90,15 +97,22 @@ export function RunPage({
   readonly workspaceReading: RunWorkspaceReading;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
+  /** The runs that re-ran this one, as the header links them. */
+  readonly reruns: RerunsReading;
   readonly timezone: string;
   readonly stepsView: StepsView;
   readonly onStepsViewChange: (view: StepsView) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const isLive = isRunLive(run.status);
   const now = useTickingClock(isLive);
-  const [asking, setAsking] = useState<"cancel" | "delete-workspace" | undefined>(undefined);
+  const [asking, setAsking] = useState<"cancel" | "delete-workspace" | "rerun" | undefined>(
+    undefined,
+  );
   const [deletesWorkspace, setDeletesWorkspace] = useState(true);
+  const rerunChoices = listRerunChoices(run);
+  const [rerunChoice, setRerunChoice] = useState(rerunChoices[0]);
   const { workspaceId } = run;
   const { observeElement: observePage, width: pageWidth } = useElementWidth();
 
@@ -116,6 +130,15 @@ export function RunPage({
     // The controller marks the workspace deleted before it answers, so the
     // refetch already reads when it was deleted.
     onSuccess: (_, id) => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(id) }),
+  });
+
+  const rerun = useMutation({
+    mutationFn: (mode: RerunMode) =>
+      client.run.rerun({ params: { id: run.id }, payload: { mode } }),
+    onSuccess: async ({ runId }) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
+      await navigate({ to: "/runs/$runId", params: { runId } });
+    },
   });
 
   // The run stays the same object until a refetch changes it, so the graph,
@@ -164,6 +187,9 @@ export function RunPage({
   const deleteQuestion =
     workspaceId === undefined ? null : (
       <InPlaceQuestion
+        // Its own key, because it can replace the re-run question in the
+        // same place.
+        key="delete-workspace"
         stacked={stacksQuestion}
         question="Delete the run's workspace?"
         declineLabel="Keep it"
@@ -177,6 +203,41 @@ export function RunPage({
         }}
       />
     );
+  const rerunQuestion = (
+    <InPlaceQuestion
+      key="rerun"
+      stacked
+      question="Re-run with the same inputs?"
+      declineLabel="Cancel"
+      acceptLabel="Re-run"
+      onDecline={() => {
+        setAsking(undefined);
+      }}
+      onAccept={() => {
+        setAsking(undefined);
+        rerun.mutate(rerunChoice.mode);
+      }}
+    >
+      {rerunChoices.length === 1 ? null : (
+        <SegmentedControl
+          aria-label="Re-run"
+          className="w-auto self-start"
+          value={rerunChoice.mode}
+          onValueChange={(next) => {
+            const picked = rerunChoices.find((choice) => choice.mode === next);
+            if (picked !== undefined) setRerunChoice(picked);
+          }}
+        >
+          {rerunChoices.map((choice) => (
+            <SegmentedControlItem key={choice.mode} value={choice.mode} className="px-3">
+              {choice.label}
+            </SegmentedControlItem>
+          ))}
+        </SegmentedControl>
+      )}
+      <p className="text-meta text-pretty">{rerunChoice.explanation}</p>
+    </InPlaceQuestion>
+  );
 
   return (
     <div ref={observePage} className="flex min-h-0 flex-1 flex-col pb-28">
@@ -186,15 +247,18 @@ export function RunPage({
         workspaceLabel={workspaceLabel}
         workspaceNote={workspaceReading.note}
         now={now}
+        reruns={reruns}
         timezone={timezone}
         question={
-          !stacksQuestion
-            ? undefined
-            : asking === "cancel"
-              ? cancelQuestion
-              : asking === "delete-workspace"
-                ? deleteQuestion
-                : undefined
+          asking === "rerun"
+            ? rerunQuestion
+            : !stacksQuestion
+              ? undefined
+              : asking === "cancel"
+                ? cancelQuestion
+                : asking === "delete-workspace"
+                  ? deleteQuestion
+                  : undefined
         }
       >
         {cancel.error === null ? null : (
@@ -207,6 +271,11 @@ export function RunPage({
             {`Not deleted: ${readErrorMessage(deleteWorkspace.error)}`}
           </span>
         )}
+        {rerun.error === null ? null : (
+          <span role="alert" className="min-w-0 truncate text-fine text-fail">
+            {`Not re-run: ${readErrorMessage(rerun.error)}`}
+          </span>
+        )}
         {!isLive ? null : (
           <>
             {asking === "cancel" && !stacksQuestion ? cancelQuestion : null}
@@ -214,6 +283,7 @@ export function RunPage({
               hidden={asking === "cancel"}
               aria-disabled={cancel.isPending}
               onClick={() => {
+                if (cancel.isPending) return;
                 cancel.reset();
                 setDeletesWorkspace(true);
                 setAsking("cancel");
@@ -230,6 +300,7 @@ export function RunPage({
               hidden={asking === "delete-workspace"}
               aria-disabled={deleteWorkspace.isPending}
               onClick={() => {
+                if (deleteWorkspace.isPending) return;
                 deleteWorkspace.reset();
                 setAsking("delete-workspace");
               }}
@@ -237,6 +308,22 @@ export function RunPage({
               Delete workspace
             </Button>
           </>
+        )}
+        {isLive ? null : (
+          <Button
+            hidden={asking === "rerun"}
+            aria-disabled={rerun.isPending}
+            onClick={() => {
+              // A second re-run while the first is still starting would
+              // start a second run.
+              if (rerun.isPending) return;
+              rerun.reset();
+              setRerunChoice(rerunChoices[0]);
+              setAsking("rerun");
+            }}
+          >
+            Re-run
+          </Button>
         )}
       </RunHeader>
       <div className="@container flex flex-col gap-6 px-8 pt-5">

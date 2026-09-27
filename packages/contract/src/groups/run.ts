@@ -293,8 +293,8 @@ export const Run = Schema.Union(
        * `plan.edges`, in the same order, zeros included.
        */
       edgeTraversals: Schema.Array(Schema.Int),
-      /** The run this run is a re-run of, when `run.rerun` started it. */
-      rerunOf: Schema.optionalKey(Id),
+      /** The run this run re-runs, when `run.rerun` started it. */
+      originalRunId: Schema.optionalKey(Id),
       createdAt: Timestamp,
     },
     {
@@ -351,7 +351,7 @@ export const RunFilter = Schema.Struct({
    */
   actor: Schema.optionalKey(Actor),
   /** Only the re-runs of this run. */
-  rerunOf: Schema.optionalKey(Id),
+  originalRunId: Schema.optionalKey(Id),
 });
 
 export type RunFilter = Schema.Schema.Type<typeof RunFilter>;
@@ -517,7 +517,7 @@ export const run = HttpApiGroup.make("run")
     }),
     /**
      * Starts a new run with the inputs of a run that has ended, and returns
-     * its id at once. The new run records the old one in `rerunOf`. Fails
+     * its id at once. The new run records the old one in `originalRunId`. Fails
      * with `invalid_state` for a run that has not ended, and for a `re-stamp`
      * of a run with no stored workflow to re-stamp from; with `validation`
      * when the new run cannot start, as for `run.start`; and with

@@ -1,7 +1,8 @@
 /**
  * Tests for a run's page at `/runs/$runId`: the header, the inputs, the run
  * graph with each step's state on it, the steps below it as a list or a
- * timeline, Cancel, and live updates.
+ * timeline, Cancel, Re-run and the runs on either side of a re-run, and live
+ * updates.
  *
  * The stub controller holds one run at a time. A test replaces it, as the run
  * engine would change it, and pushes the change on the `run` topic.
@@ -9,10 +10,11 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describeActor } from "@hercule/client-core";
+import { describeActor, toIdTail } from "@hercule/client-core";
 import { buildCheckout, buildRunner, buildWorkspace } from "@hercule/client-core/threads/testing";
 import type {
   Run,
+  RunSummary,
   RunnerDetail,
   StepStatus,
   WorkflowDefinition,
@@ -319,20 +321,41 @@ const EDGE_EXPRESSION_ERROR_RUN: Run = {
 /* The stub controller.                                                      */
 /* ------------------------------------------------------------------------ */
 
+/** Returns a completed run of the starter workflow with `id`, as the run list shows it. */
+const buildRerunSummary = (id: string): RunSummary => ({
+  id,
+  workflowId: WORKFLOW_ID,
+  workflowName: WORKFLOW_NAME,
+  origin: { kind: "manual", actor: "user" },
+  status: "completed",
+  createdAt: T0,
+  startedAt: T0,
+  finishedAt: addSeconds(T0, 14),
+});
+
 /**
  * Renders the run's page against a stub controller that holds `run`. The
  * run's workflow is gone from the controller in every test, which the page
  * must not need: everything it shows comes from the run.
+ * - `reruns` are the runs that re-ran it, newest first, which the run list
+ *   returns for `originalRunId`. By default there are none.
  * - `overrides` replaces the handler of a route, or adds a route.
  *
  * Returns the app, the stubbed API, and `hold`, which replaces the run the
- * controller holds from now on.
+ * controller holds from now on, and `holdReruns`, which replaces its re-runs.
  */
 const openRunPage = async (
   run: Run,
-  { overrides = {} }: { readonly overrides?: Readonly<Record<string, Handler>> } = {},
+  {
+    reruns = [],
+    overrides = {},
+  }: {
+    readonly reruns?: readonly RunSummary[];
+    readonly overrides?: Readonly<Record<string, Handler>>;
+  } = {},
 ) => {
   let held = run;
+  let heldReruns = reruns;
   const api = stubApi({
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": {
@@ -351,6 +374,11 @@ const openRunPage = async (
     },
     "GET /api/v1/workflows": { body: { items: [] } },
     "GET /api/v1/workflow-actions": { body: [] },
+    "GET /api/v1/runs": (call) => ({
+      body: {
+        items: new URLSearchParams(call.search).get("originalRunId") === held.id ? heldReruns : [],
+      },
+    }),
     ...overrides,
   });
   const app = await renderApp({ path: `/runs/${run.id}`, api: api.fetch, token: "held" });
@@ -359,6 +387,9 @@ const openRunPage = async (
     api,
     hold: (next: Run): void => {
       held = next;
+    },
+    holdReruns: (next: readonly RunSummary[]): void => {
+      heldReruns = next;
     },
   };
 };
@@ -421,13 +452,24 @@ const listStepRows = (stepId: string): readonly HTMLElement[] =>
 const listCancels = (api: { readonly calls: readonly Call[] }, id: string): readonly Call[] =>
   api.calls.filter((call) => call.method === "POST" && call.path === `/api/v1/runs/${id}/cancel`);
 
-/** Sends an `updated` push for the run with `id` on the `run` topic, once the page has subscribed. */
-const pushRunUpdate = async (live: LiveStub, id: string): Promise<void> => {
+/** Returns the `run.rerun` requests the page made. */
+const listReruns = (api: { readonly calls: readonly Call[] }, id: string): readonly Call[] =>
+  api.calls.filter((call) => call.method === "POST" && call.path === `/api/v1/runs/${id}/rerun`);
+
+/**
+ * Sends a push for the run with `id` on the `run` topic, once the page has
+ * subscribed: `updated` by default, or `created` for a run that just started.
+ */
+const pushRunUpdate = async (
+  live: LiveStub,
+  id: string,
+  kind: "created" | "updated" = "updated",
+): Promise<void> => {
   await waitFor(() => {
     expect(live.topics()).toContain("run");
   });
   act(() => {
-    live.push("run", { _tag: "invalidate", ids: [id], kind: "updated" });
+    live.push("run", { _tag: "invalidate", ids: [id], kind });
   });
 };
 
@@ -1048,5 +1090,227 @@ describe("A run's page > the output", () => {
     await findPageHeader();
 
     expect(screen.queryByRole("region", { name: "Output" })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Re-running a run, and the runs on either side of a re-run.               */
+/* ------------------------------------------------------------------------ */
+
+/** The run that re-running the completed run starts. */
+const RERUN: Run = {
+  ...COMPLETED_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000021",
+  originalRunId: COMPLETED_RUN.id,
+};
+
+/** A completed run of a workflow that was sent with `run.start` and never stored. */
+const SENT_WORKFLOW_RUN: Run = {
+  ...COMPLETED_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000022",
+  workflowId: null,
+};
+
+/** Returns the question's row: the element that holds the Re-run question and its buttons. */
+const findRerunQuestion = async (): Promise<HTMLElement> => {
+  const question = await screen.findByText("Re-run with the same inputs?");
+  const row = question.parentElement;
+  if (row === null) throw new Error("the re-run question has no row");
+  return row;
+};
+
+/** Returns the header's link to run `id`, named by its id's tail. */
+const getHeaderRunLink = (header: HTMLElement, id: string): HTMLElement =>
+  within(header).getByRole("link", { name: `run ${toIdTail(id)}` });
+
+describe("A run's page > Re-run", () => {
+  it.each([
+    { run: COMPLETED_RUN, status: "completed" },
+    { run: FAILED_RUN, status: "failed" },
+    { run: CANCELLED_RUN, status: "cancelled" },
+  ])("offers Re-run on a $status run", async ({ run }) => {
+    await openRunPage(run);
+    expect(within(await findPageHeader()).getByRole("button", { name: "Re-run" })).toBeDefined();
+  });
+
+  it("offers no Re-run while the run is running", async () => {
+    await openRunPage(RUNNING_RUN);
+    expect(within(await findPageHeader()).queryByRole("button", { name: "Re-run" })).toBeNull();
+  });
+
+  it("asks which workflow the new run follows, from the current workflow by default, and explains each choice", async () => {
+    const user = userEvent.setup();
+    const { api } = await openRunPage(COMPLETED_RUN);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+
+    const question = await findRerunQuestion();
+    const current = within(question).getByRole("radio", { name: "From the current workflow" });
+    const asItRan = within(question).getByRole("radio", { name: "As it ran" });
+    expect(current.getAttribute("aria-checked")).toBe("true");
+    expect(readPageText(question)).toContain("the workflow as it is saved now");
+
+    await user.click(asItRan);
+
+    expect(asItRan.getAttribute("aria-checked")).toBe("true");
+    expect(readPageText(question)).toContain("as it was frozen when the run started");
+    // Nothing is re-run until the question is answered.
+    expect(listReruns(api, COMPLETED_RUN.id)).toEqual([]);
+  });
+
+  it("puts the focus on Cancel when the question shows, and back on Re-run after Cancel", async () => {
+    const user = userEvent.setup();
+    const { api } = await openRunPage(COMPLETED_RUN);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    const decline = within(await findRerunQuestion()).getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(decline);
+
+    await user.click(decline);
+
+    expect(screen.queryByText("Re-run with the same inputs?")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Re-run" }));
+    expect(listReruns(api, COMPLETED_RUN.id)).toEqual([]);
+  });
+
+  it("re-runs from the current workflow on confirm, and goes to the new run, which links back", async () => {
+    const user = userEvent.setup();
+    const { api, router } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: { body: { runId: RERUN.id } },
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
+      },
+    });
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    await user.click(within(await findRerunQuestion()).getByRole("button", { name: "Re-run" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/runs/${RERUN.id}`);
+    });
+    expect(listReruns(api, COMPLETED_RUN.id).map((call) => call.body)).toEqual([
+      { mode: "re-stamp" },
+    ]);
+    const header = await findPageHeader();
+    await waitFor(() => {
+      expect(getHeaderRunLink(header, COMPLETED_RUN.id).getAttribute("href")).toBe(
+        `/runs/${COMPLETED_RUN.id}`,
+      );
+    });
+  });
+
+  it("re-runs as it ran when that is picked", async () => {
+    const user = userEvent.setup();
+    const { api } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: { body: { runId: RERUN.id } },
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
+      },
+    });
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    const question = await findRerunQuestion();
+    await user.click(within(question).getByRole("radio", { name: "As it ran" }));
+    await user.click(within(question).getByRole("button", { name: "Re-run" }));
+
+    await waitFor(() => {
+      expect(listReruns(api, COMPLETED_RUN.id).map((call) => call.body)).toEqual([
+        { mode: "replay" },
+      ]);
+    });
+  });
+
+  it("offers a run of a workflow that was never stored only a re-run as it ran, and says why", async () => {
+    const user = userEvent.setup();
+    const { api } = await openRunPage(SENT_WORKFLOW_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${SENT_WORKFLOW_RUN.id}/rerun`]: { body: { runId: RERUN.id } },
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
+      },
+    });
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    const question = await findRerunQuestion();
+    expect(within(question).queryAllByRole("radio")).toEqual([]);
+    expect(readPageText(question)).toContain("never saved");
+
+    await user.click(within(question).getByRole("button", { name: "Re-run" }));
+
+    await waitFor(() => {
+      expect(listReruns(api, SENT_WORKFLOW_RUN.id).map((call) => call.body)).toEqual([
+        { mode: "replay" },
+      ]);
+    });
+  });
+
+  it("stays on the run and says why when the controller refuses the re-run", async () => {
+    const user = userEvent.setup();
+    const { router } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", "The run's workflow was deleted."),
+        },
+      },
+    });
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Re-run" }));
+    await user.click(within(await findRerunQuestion()).getByRole("button", { name: "Re-run" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Not re-run");
+    expect(alert.textContent).toContain("The run's workflow was deleted.");
+    expect(router.state.location.pathname).toBe(`/runs/${COMPLETED_RUN.id}`);
+  });
+});
+
+describe("A run's page > the runs on either side of a re-run", () => {
+  it("links the run this run is a re-run of", async () => {
+    await openRunPage(RERUN);
+
+    const header = await findPageHeader();
+    expect(readPageText(header)).toContain(`re-run of run ${toIdTail(COMPLETED_RUN.id)}`);
+    expect(getHeaderRunLink(header, COMPLETED_RUN.id).getAttribute("href")).toBe(
+      `/runs/${COMPLETED_RUN.id}`,
+    );
+  });
+
+  it("links the runs that re-ran this run, newest first, and counts the rest past three", async () => {
+    const ids = [1, 2, 3, 4, 5].map((n) => `0199c0ff-3333-7000-8000-00000000000${String(n)}`);
+    const { api } = await openRunPage(COMPLETED_RUN, { reruns: ids.map(buildRerunSummary) });
+
+    const header = await findPageHeader();
+    const tails = ids.map(toIdTail);
+    expect(readPageText(header)).toContain(
+      `re-run as run ${tails[0] ?? ""}, run ${tails[1] ?? ""}, run ${tails[2] ?? ""} and 2 more`,
+    );
+    for (const id of ids.slice(0, 3)) {
+      expect(getHeaderRunLink(header, id).getAttribute("href")).toBe(`/runs/${id}`);
+    }
+    expect(
+      api.calls.some(
+        (call) =>
+          call.path === "/api/v1/runs" &&
+          new URLSearchParams(call.search).get("originalRunId") === COMPLETED_RUN.id,
+      ),
+    ).toBe(true);
+  });
+
+  it("shows no such line for a run that is not a re-run and was not re-run", async () => {
+    await openRunPage(COMPLETED_RUN);
+
+    expect(readPageText(await findPageHeader())).not.toContain("re-run");
+  });
+
+  it("links a re-run that starts while the page is open, when it is pushed on the run topic", async () => {
+    const { live, holdReruns } = await openRunPage(COMPLETED_RUN);
+    await findPageHeader();
+
+    holdReruns([buildRerunSummary(RERUN.id)]);
+    await pushRunUpdate(live, RERUN.id, "created");
+
+    await waitFor(async () => {
+      expect(readPageText(await findPageHeader())).toContain(`re-run as run ${toIdTail(RERUN.id)}`);
+    });
   });
 });

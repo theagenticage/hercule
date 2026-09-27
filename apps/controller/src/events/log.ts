@@ -103,7 +103,7 @@ export const readPipelineEventsAfter = (
 
 /**
  * Returns the pipeline event at a position, or none. Returns none for an audit
- * entry too, because an entry about what Hercule itself did is never routed.
+ * entry too, because an audit entry is never routed.
  */
 export const readPipelineEvent = (
   sql: SqlClient.SqlClient,

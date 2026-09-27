@@ -7,15 +7,38 @@
  * for the tick's result.
  */
 import { describe, expect, it, vi } from "vitest";
-import { createProfile, at, waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
+import type { Task } from "@hercule/contract";
+import { post, send } from "../../http/testing";
+import {
+  buildCreateStep,
+  buildHeldAction,
+  buildHeldStep,
+  requestCancel,
+  startRun,
+  waitForHeldExecutions,
+  waitForRunToFinish,
+  type HeldAction,
+} from "../../runs/testing";
+import {
+  createProfile,
+  at,
+  spawnAgentWithGrants,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+  type Agent,
+  type Arranged,
+} from "../../sessions/testing";
+import { createWorkflowOrFail } from "../../workflows/testing";
 import {
   BURST,
   buildPayload,
+  endPromptTurn,
   waitUntilCaughtUp,
   emitManualEvent,
   KIND,
   readMatchedInputRows,
   REF,
+  waitForFrameCarrying,
   waitForMatchedInputRows,
   runEffect,
   storeCondition,
@@ -155,6 +178,176 @@ describe("the event pipeline's tick", () => {
         (found) => found.length >= 1,
       );
       expect(rows.map((row) => row.event_id)).toEqual([eventId]);
+    });
+  });
+});
+
+/**
+ * Runs `body` against `withPipeline`'s controller with the held action's
+ * plugin installed too, so a test can keep a run running until it chooses how
+ * the run ends. The held step is released however `body` ends, so a failed
+ * test does not leave a run waiting.
+ */
+const withHeldRunPipeline = (
+  held: HeldAction,
+  body: (arranged: Arranged) => Promise<void>,
+): Promise<void> =>
+  withPipeline(
+    async (arranged) => {
+      try {
+        await body(arranged);
+      } finally {
+        held.release();
+      }
+    },
+    { additionalPlugins: [held.plugin] },
+  );
+
+/**
+ * Starts a run whose one step waits until the test releases it, and returns
+ * the run's id once the step has started.
+ */
+const startHeldRun = async (arranged: Arranged, held: HeldAction): Promise<string> => {
+  const base = arranged.harness.base;
+  const workflow = await createWorkflowOrFail(base, arranged.token, {
+    definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
+  });
+  const runId = await startRun(base, arranged.token, workflow.id);
+  await waitForHeldExecutions(held, 1);
+  return runId;
+};
+
+/**
+ * Spawns an idle session subscribed to the run, and returns it with its
+ * subscription's id. The session is idle, so a matched input is delivered to
+ * it at once.
+ */
+const subscribeIdleAgentToRun = async (
+  arranged: Arranged,
+  runId: string,
+): Promise<{ readonly agent: Agent; readonly subscriptionId: string }> => {
+  const agent = await spawnAgentWithGrants(arranged, "run-watchers", [
+    "subscription.write",
+    "subscription.read",
+    "run.read",
+  ]);
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/subscriptions",
+    { target: { kind: "run", runId } },
+    agent.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  const { subscriptionId } = (await response.json()) as { subscriptionId: string };
+  await endPromptTurn(arranged, agent);
+  return { agent, subscriptionId };
+};
+
+/**
+ * The events the controller emits about its own state are pipeline events,
+ * unlike audit entries: the router matches them against subscriptions.
+ */
+describe("the platform events in the pipeline", () => {
+  it("writes a matched input for task.created and task.updated, in the order they happened", async () => {
+    await withPipeline(async (arranged) => {
+      const agent = await spawnSubscriber(arranged, "subscribers");
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      // No target kind waits on a task yet, so the condition is written into
+      // the row the router reads.
+      await storeCondition(arranged.harness, subscriptionId, 'event.kind.startsWith("task.")');
+
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/tasks",
+        { title: "Fix the lid", description: "" },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const task = (await created.json()) as Task;
+      const updated = await send("PATCH", arranged.harness.base, `/api/v1/tasks/${task.id}`, {
+        body: { status: "done" },
+        token: arranged.token,
+      });
+      expect(updated.status, await updated.clone().text()).toBe(200);
+
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (found) => found.length >= 2,
+      );
+      const createdEvent = (await arranged.harness.platformEvents("task.created"))[0]!;
+      const updatedEvent = (await arranged.harness.platformEvents("task.updated"))[0]!;
+      expect(rows.map((row) => row.event_id)).toEqual([createdEvent.id, updatedEvent.id]);
+      expect(rows[0]!.text).toContain("task.created");
+      expect(rows[0]!.text).toContain(task.id);
+      expect(rows[1]!.text).toContain("task.updated");
+      expect(rows[1]!.text).toContain('"new": "done"');
+    });
+  });
+
+  it("delivers a run's run.completed to the session subscribed to that run, and no other run's ending", async () => {
+    const held = buildHeldAction();
+    await withHeldRunPipeline(held, async (arranged) => {
+      const base = arranged.harness.base;
+      const runId = await startHeldRun(arranged, held);
+      const { agent, subscriptionId } = await subscribeIdleAgentToRun(arranged, runId);
+
+      // Another run ends first. Its run.completed is in the log, and the
+      // subscription must not match it.
+      const other = await createWorkflowOrFail(base, arranged.token, {
+        definition: { name: "One task", steps: [buildCreateStep("create")] },
+      });
+      const otherRunId = await startRun(base, arranged.token, other.id);
+      expect((await waitForRunToFinish(base, arranged.token, otherRunId)).status).toBe("completed");
+
+      held.release();
+      expect((await waitForRunToFinish(base, arranged.token, runId)).status).toBe("completed");
+
+      const frame = await waitForFrameCarrying(arranged, `"runId": "${runId}"`);
+      expect(frame.sessionId).toBe(agent.session.id);
+      expect(frame.input.text).toMatch(/^run\.completed\n/);
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (found) => found[0]?.status === "delivered",
+      );
+      const ended = (await arranged.harness.platformEvents("run.completed")).find(
+        (event) => event.payload["runId"] === runId,
+      );
+      expect(ended, "the run's run.completed").toBeDefined();
+      // The run ended on its own, when its last step returned.
+      expect(ended!.actor).toBeNull();
+      expect(rows.map((row) => row.event_id)).toEqual([ended!.id]);
+
+      // The other run's ending was read by the router, and matched nothing.
+      await waitUntilCaughtUp(arranged.harness);
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toHaveLength(1);
+    });
+  });
+
+  it("delivers run.cancelled to the session subscribed to a run the user cancels", async () => {
+    const held = buildHeldAction();
+    await withHeldRunPipeline(held, async (arranged) => {
+      const base = arranged.harness.base;
+      const runId = await startHeldRun(arranged, held);
+      const { agent, subscriptionId } = await subscribeIdleAgentToRun(arranged, runId);
+
+      const response = await requestCancel(base, arranged.token, runId);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const frame = await waitForFrameCarrying(arranged, `"runId": "${runId}"`);
+      expect(frame.sessionId).toBe(agent.session.id);
+      expect(frame.input.text).toMatch(/^run\.cancelled\n/);
+      const cancelled = await arranged.harness.platformEvents("run.cancelled");
+      expect(cancelled).toHaveLength(1);
+      // The user's request ended the run, so the event carries the user.
+      expect(cancelled[0]!.actor).toBe("user");
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (found) => found[0]?.status === "delivered",
+      );
+      expect(rows.map((row) => row.event_id)).toEqual([cancelled[0]!.id]);
     });
   });
 });

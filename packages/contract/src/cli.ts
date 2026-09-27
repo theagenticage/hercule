@@ -911,7 +911,11 @@ export const CLI = {
   "subscription.create": {
     command: "subscription create",
     help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can hold a subscription, and the calling session becomes the holder.",
-    examples: [{ args: ["github:pr:o/r#87"] }, { args: ["gmail:thread:19b2c"] }],
+    examples: [
+      { args: ["github:pr:o/r#87"] },
+      { args: ["gmail:thread:19b2c"] },
+      { args: ["run:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+    ],
     fields: {
       target: {
         positional: true,
@@ -921,7 +925,10 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "this version has no runs, no session platform events and no Permission Requests, so only a ref target can be waited on",
+        "the run has already ended, so nothing more will arrive about it; or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run",
+      not_found: "no run has the id in a run:<id> target",
+      forbidden:
+        "a run target needs the run.read grant, because the events about a run describe it",
       validation: "a user credential holds no subscription; call this on a session token",
     },
   },
@@ -1225,8 +1232,8 @@ export const CLI = {
         flag: "actor",
         help: "Only runs started by this actor: user, session:<id>, or run:<id> for the runs a run started.",
       },
-      rerunOf: {
-        flag: "rerun-of",
+      originalRunId: {
+        flag: "original-run",
         help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
         resolves: "run.query",
       },
@@ -1265,7 +1272,7 @@ export const CLI = {
   },
   "run.rerun": {
     command: "run rerun",
-    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the old run froze instead, exactly as it ran. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the old one as the run it re-runs; list the re-runs of a run with `hercule run list --rerun-of <id>`.",
+    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the old run froze instead, exactly as it ran. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the old one as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
     examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--mode", "replay"] }],
     fields: {
       id: {

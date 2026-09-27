@@ -122,6 +122,7 @@ import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { CurrentActor, requireGrant, type RunActor } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
+import { PlatformEvents } from "../events";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
@@ -133,6 +134,7 @@ import {
   listCapableRunners,
   listWorkspaceActionIds,
 } from "./runner-capabilities";
+import { buildRunEndedEvent, readEndingActor } from "./run-events";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -338,6 +340,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const runs = yield* runRepository;
   const executor = yield* RunExecutor;
   const workspaceSteps = yield* WorkspaceSteps;
+  const platformEvents = yield* PlatformEvents;
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
@@ -348,7 +351,7 @@ export const makeRunEngine = Effect.gen(function* () {
   // A new run is handed to the Run Executor through a function the engine
   // defines below, which itself calls `start` for the `run.start` action, so
   // the reference is passed as a function.
-  const start = yield* makeRunStart((runId) => executeInBackground(runId));
+  const { start, rerun } = yield* makeRunStart((runId) => executeInBackground(runId));
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -358,6 +361,10 @@ export const makeRunEngine = Effect.gen(function* () {
    *
    * A run that had a workspace releases its lease on it here, with the
    * retention its ending calls for (`decideRetention`).
+   *
+   * The run's platform event (`run.completed`, `run.failed` or
+   * `run.cancelled`) is emitted here too, in the same transaction, so every
+   * way a run ends emits exactly one event, and only if the ending commits.
    *
    * Once the transaction has committed, the workspace steps whose records
    * were running are settled with the run's runner (see
@@ -374,9 +381,13 @@ export const makeRunEngine = Effect.gen(function* () {
       const wasRunning = yield* runs.cancelUnfinishedSteps(runId, at);
       yield* runs.finish(runId, outcome, at);
       // `finish` leaves a run that has already ended alone, and so does this:
-      // releasing again would replace the retention its real ending chose.
-      if (isUnfinished(run.status) && run.workspaceId !== undefined) {
-        yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
+      // releasing again would replace the retention its real ending chose,
+      // and a second event would report an ending that did not happen.
+      if (isUnfinished(run.status)) {
+        if (run.workspaceId !== undefined) {
+          yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
+        }
+        yield* platformEvents.emit(buildRunEndedEvent(run, outcome, at, yield* readEndingActor));
       }
       yield* settleWorkspaceSteps(run, wasRunning);
     });
@@ -1040,6 +1051,9 @@ export const makeRunEngine = Effect.gen(function* () {
 
   return {
     start,
+
+    /** `run.rerun`: starts a new run that re-runs an ended one (see `start.ts`). */
+    rerun,
 
     /**
      * `run.cancel`: cancels a pending or running run and returns it.

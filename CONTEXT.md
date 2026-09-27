@@ -56,6 +56,18 @@ _Avoid_: bound, assigned, sticky
 The executable content a run executes: triggers, graph, actions. Frozen at run start; immutable thereafter. Usually stamped from a workflow, but may be generated ad-hoc by an agent and never stored.
 _Avoid_: recipe, definition (for this), workflow instance
 
+**Re-run**:
+A new run started from a run that has ended, with the ended run's resolved inputs. The ended run is the new run's original run, and the new run names it in `originalRunId`. Always the whole run, in one of two modes: Re-stamp or Replay. The ended run is never changed or resumed.
+_Avoid_: retry (nothing in a run is retried; a re-run starts over from the entry steps), resume, "re-run failed steps" (partial re-run is post-v1)
+
+**Re-stamp**:
+The default Re-run mode: the new run's plan is stamped from the workflow as it is stored now, so a fix made since takes effect. A run with no stored workflow, because its workflow was sent with `run.start` or has been deleted since, cannot be re-stamped, only replayed.
+_Avoid_: refresh, rebuild
+
+**Replay**:
+The Re-run mode that starts the ended run's frozen Execution Plan again. The new run is meant to do what the ended one was meant to do; its agents and the outside world may still answer differently.
+_Avoid_: re-execute; bare "replay" for a live topic or a runner outbox catching up after a reconnect (say cursor replay, outbox replay)
+
 **Run Executor**:
 The port through which the runs domain hands a run's execution to be carried out apart from the request that started it, and stops it when the run is cancelled. The runs domain describes the run's execution as an effect and never decides where it runs; the controller daemon implements the port with one fiber per run. "The run's execution" is that effect, never a name for the run itself.
 _Avoid_: the run's scheduler (the Scheduler is the core component that fires `cron.tick` and scheduled wakes)
@@ -325,7 +337,7 @@ An origin of external events. GitHub and Gmail are event-source plugins in v1; c
 _Avoid_: integration, provider
 
 **Platform Event**:
-An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`). Flows through the same pipeline as external events.
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`). Flows through the same pipeline as external events and is routed like them, so triggers and subscriptions can wait on it. An audit entry sits in the same log but is never routed, and is not a platform event.
 _Avoid_: internal event, system event
 
 **Core Kind**:

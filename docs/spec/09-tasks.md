@@ -130,6 +130,8 @@ For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving th
 
 Task mutations emit platform events into the one persisted event pipeline ([./08](./08-events-and-connections.md)). They are the trigger surface for work workflows. The actor of the mutation is carried once, on the event envelope's `actor` field ([./08](./08-events-and-connections.md)); the payloads below do not duplicate it.
 
+*(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* Until this change, `task.created` and `task.updated` were written as audit entries. The event router never evaluates audit entries, so no trigger or subscription could see them. They are platform events now: routed, with the actor still on the envelope and the payloads unchanged, in the same log. `task.deleted` is still written as an audit entry only, so nothing can wait on it yet ([./08](./08-events-and-connections.md) section 2).
+
 **`task.created`** carries a full snapshot:
 
 ```ts

@@ -337,6 +337,7 @@ const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
     const runs = yield* RunService;
     return handlers
       .handle("start", ({ payload }) => withApiErrors(runs.start(payload)))
+      .handle("rerun", ({ params, payload }) => withApiErrors(runs.rerun(params.id, payload)))
       .handle("query", ({ query }) => withApiErrors(runs.query(query)))
       .handle("read", ({ params }) => withApiErrors(runs.read(params.id)))
       .handle("cancel", ({ params, payload }) => withApiErrors(runs.cancel(params.id, payload)));
@@ -644,7 +645,9 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
-  SubscriptionServiceLayer,
+  // A run target is checked against its run, so the subscription service
+  // reads runs.
+  SubscriptionServiceLayer.pipe(Layer.provide(RunLayers)),
   EventKindsOperationLayer,
   RunLayers,
   LiveTopicsLayer,

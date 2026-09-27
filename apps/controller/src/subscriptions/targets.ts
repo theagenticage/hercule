@@ -18,10 +18,11 @@ const quoteAsCelString = (value: string): string => JSON.stringify(value);
 /**
  * Returns the CEL source that matches the events a target waits on.
  *
- * Three of the four expansions read a platform event that this version does
- * not emit yet. They are written out because workflows and Permission Requests
- * will depend on them, and because `subscription.create` rejects those target
- * kinds by name rather than storing a condition that can never match.
+ * The session and request expansions read platform events that this version
+ * does not emit yet. They are written out because workflows and Permission
+ * Requests will depend on them, and because `subscription.create` rejects
+ * those target kinds by name rather than storing a condition that can never
+ * match.
  */
 export const expandTarget = (target: SubscriptionTarget): string => {
   switch (target.kind) {

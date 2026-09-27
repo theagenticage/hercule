@@ -47,6 +47,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { validateExpression } from "../expressions";
+import { isUnfinished, RunService } from "../runs";
 import { expandTarget } from "./targets";
 import { subscriptionRepository, type StoredSubscription } from "./repository";
 
@@ -85,10 +86,7 @@ export const buildHolderEndedReason = (sessionId: string): string =>
   `cannot be picked up again`;
 
 /** The reason each target kind that this version cannot wait on is rejected. */
-const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
-  run:
-    "no run.* platform events are emitted yet, so a run target would never match; " +
-    "follow the run with run.read, or wait on an External Ref instead",
+const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref" | "run">, string> = {
   session:
     "no session.* platform events are emitted yet, so a session target would never match; " +
     "wait on an External Ref instead",
@@ -96,6 +94,14 @@ const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, s
     "no Permission Requests exist yet, so there is no decision to wait for; " +
     "wait on an External Ref instead",
 };
+
+/**
+ * Returns the reason a run target is refused when its run has already ended.
+ * A run emits one event, when it ends, so nothing would ever arrive.
+ */
+const buildEndedRunReason = (status: string): string =>
+  `the run has already ended (${status}), so no event about it will arrive; ` +
+  "read the run with run.read instead";
 
 /**
  * The messages for two errors: a user credential registering a subscription,
@@ -147,16 +153,23 @@ type CommonError = Unauthenticated | Forbidden | Validation | SqlError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const subscriptions = yield* subscriptionRepository;
+  const runs = yield* RunService;
 
   return {
     /**
      * Registers a subscription for the calling session and returns its id.
-     * Fails with `Validation` if the caller is not a session, and with
-     * `InvalidState` for a target kind this version cannot wait on.
+     * Fails with:
+     *
+     * - `Validation` if the caller is not a session;
+     * - `InvalidState` for a session or a request target, which this version
+     *   cannot wait on, and for a run target whose run has already ended;
+     * - `NotFound` for a run target that names no run;
+     * - `Forbidden` for a run target when the caller lacks `run.read`,
+     *   because the events about a run describe the run.
      */
     create: (
       input: SubscriptionCreateInput,
-    ): Effect.Effect<{ readonly subscriptionId: string }, CommonError | InvalidState> =>
+    ): Effect.Effect<{ readonly subscriptionId: string }, CommonError | InvalidState | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.create");
         const { target } = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
@@ -168,7 +181,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        if (target.kind !== "ref") {
+        if (target.kind === "session" || target.kind === "request") {
           return yield* Effect.fail(createInvalidStateError(ABSENT_TARGET_REASON[target.kind]));
         }
         const condition = expandTarget(target);
@@ -185,6 +198,15 @@ const make = Effect.gen(function* () {
         const subscriptionId = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Checked in the transaction that writes the subscription, so the
+            // run cannot end, and emit its one event, between the check and
+            // the write.
+            if (target.kind === "run") {
+              const run = yield* runs.read(target.runId);
+              if (!isUnfinished(run.status)) {
+                return yield* Effect.fail(createInvalidStateError(buildEndedRunReason(run.status)));
+              }
+            }
             const at = yield* nowIso;
             return yield* subscriptions.insert({
               holder: { kind: "session", id: actor.sessionId },
@@ -288,5 +310,5 @@ export class SubscriptionService extends Context.Service<
 export const SubscriptionServiceLayer: Layer.Layer<
   SubscriptionService,
   never,
-  SqlClient.SqlClient
+  SqlClient.SqlClient | RunService
 > = Layer.effect(SubscriptionService)(make);
