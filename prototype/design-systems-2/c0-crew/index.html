@@ -1,0 +1,2346 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="../shared/book.js" defer></script>
+    <meta charset="utf-8" />
+    <title>Crew · Hercule design system 07</title>
+    <style>
+      /* The book scrolls; the screen pages do not. */
+      html,
+      body {
+        height: auto;
+        overflow: visible;
+      }
+      body {
+        font-size: var(--t-14);
+        line-height: 1.55;
+      }
+      /* Today's baseline, in the book's own light or dark. */
+      :root {
+        --bl-shell: url(../shared/baseline/app-shell-light.png);
+        --bl-intake: url(../shared/baseline/intake-view-light.png);
+      }
+      [data-theme="cocoa"],
+      [data-theme="dark"],
+      [data-theme="pine"],
+      [data-theme="plum"] {
+        --bl-shell: url(../shared/baseline/app-shell-dark.png);
+        --bl-intake: url(../shared/baseline/intake-view-dark.png);
+      }
+      .bk {
+        width: min(1200px, 100% - 64px);
+        margin: 0 auto;
+      }
+      .bk p {
+        margin: 0;
+      }
+
+      /* ---------- Top bar ---------- */
+      .bk-top {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        height: 56px;
+        background: var(--glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+      }
+      .bk-top .bk {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 100%;
+      }
+      .bk-brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: var(--t-16);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .bk-brand small {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-regular);
+        letter-spacing: 0;
+      }
+      .bk-links {
+        display: flex;
+        gap: 2px;
+        margin-left: 14px;
+      }
+      .bk-links a {
+        padding: 5px 9px;
+        border-radius: var(--r-sm);
+        color: var(--muted);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+        transition: background var(--dur-1), color var(--dur-1);
+      }
+      .bk-links a:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .bk-switch {
+        display: flex;
+        gap: 2px;
+        margin-left: auto;
+        padding: 3px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--ink) 6%, transparent);
+      }
+      .bk-switch button {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 12px 0 6px;
+        border-radius: var(--r-pill);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        transition: background var(--dur-2), color var(--dur-2);
+      }
+      .bk-switch button:hover {
+        color: var(--ink);
+      }
+      .bk-switch button[aria-pressed="true"] {
+        background: var(--raised);
+        color: var(--ink);
+        box-shadow: var(--shadow-1);
+      }
+      .bk-sw {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--bg) 0 52%, var(--who) 52%);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+      }
+
+      /* ---------- Sections ---------- */
+      .bk-sec {
+        padding: 72px 0 8px;
+        scroll-margin-top: 56px;
+      }
+      .bk-h {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 28px;
+        max-width: 900px;
+      }
+      .bk-kick {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-h h2 {
+        margin: 0;
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.02em;
+        text-wrap: balance;
+      }
+      .bk-lede {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: var(--t-16);
+        line-height: 1.5;
+      }
+      .bk h3 {
+        margin: 0;
+        font-size: var(--t-16);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .bk-sub {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 56px 0 18px;
+      }
+      .bk-sub p {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+
+      /* ---------- Hero ---------- */
+      .bk-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 600px;
+        gap: 48px;
+        align-items: center;
+        padding: 64px 0 24px;
+      }
+      .bk-hero h1 {
+        margin: 22px 0 6px;
+        font-size: 48px;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+      }
+      .bk-thesis {
+        color: var(--muted);
+        font-size: var(--t-20);
+        font-weight: var(--w-medium);
+        letter-spacing: -0.01em;
+      }
+      .bk-brief {
+        margin-top: 22px !important;
+        max-width: 520px;
+        font-size: 15px;
+        line-height: 1.62;
+      }
+      .bk-brief b {
+        font-weight: var(--w-bold);
+      }
+      .bk-brief .you {
+        color: var(--you-ink);
+      }
+      .bk-floor {
+        position: relative;
+        height: 384px;
+        border-radius: var(--r-xl);
+        overflow: hidden;
+        background: linear-gradient(180deg, var(--room-wall) 0 40%, var(--room-floor) 40% 100%);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+      }
+      .bk-floor::before {
+        /* skirting board where wall meets floor */
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 40%;
+        height: 5px;
+        background: color-mix(in oklab, var(--room-wood) 55%, var(--room-wall));
+      }
+      .bk-window {
+        position: absolute;
+        top: 26px;
+        left: 40px;
+        width: 140px;
+        height: 96px;
+        border-radius: 10px;
+        background: linear-gradient(165deg, var(--room-sun), color-mix(in oklab, var(--room-sun) 45%, var(--room-wall)));
+        box-shadow: inset 0 0 0 5px var(--room-desk), 0 1px 0 var(--line), 0 6px 14px -8px var(--room-shade);
+      }
+      .bk-window::after {
+        content: "";
+        position: absolute;
+        inset: 5px auto 5px 50%;
+        width: 4px;
+        margin-left: -2px;
+        background: var(--room-desk);
+      }
+      .bk-sunpatch {
+        position: absolute;
+        top: calc(40% + 5px);
+        left: 34px;
+        width: 200px;
+        height: 90px;
+        background: linear-gradient(180deg, color-mix(in oklab, var(--room-sun) 70%, transparent), transparent);
+        transform: skewX(-24deg);
+        opacity: 0.8;
+      }
+      .bk-rug {
+        position: absolute;
+        left: 50%;
+        bottom: 22px;
+        width: 548px;
+        height: 132px;
+        transform: translateX(-50%);
+        border-radius: 50%;
+        background: color-mix(in oklab, var(--proj-webshop) 80%, transparent);
+        box-shadow: inset 0 0 0 6px color-mix(in oklab, var(--proj-webshop) 60%, var(--room-floor));
+      }
+      .bk-plant {
+        position: absolute;
+        right: 40px;
+        top: 50px;
+        width: 60px;
+        height: 110px;
+      }
+      .bk-plant i {
+        position: absolute;
+        border-radius: 50%;
+        background: var(--room-plant);
+      }
+      .bk-plant b {
+        position: absolute;
+        left: 14px;
+        bottom: 0;
+        width: 32px;
+        height: 34px;
+        border-radius: 5px 5px 10px 10px;
+        background: var(--room-wood);
+        box-shadow: inset 0 -6px 0 color-mix(in oklab, var(--room-shade) 18%, transparent);
+      }
+      .bk-row {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+      }
+      .bk-row--back {
+        top: 106px;
+        left: 196px;
+        right: 110px;
+        justify-content: space-between;
+      }
+      .bk-row--back .bk-p {
+        width: 96px;
+      }
+      .bk-row--front {
+        top: 222px;
+        gap: 16px;
+      }
+      .bk-p {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 120px;
+        text-align: center;
+        line-height: 1.25;
+      }
+      .bk-p .cr {
+        position: relative;
+        z-index: 1;
+      }
+      .bk-p s {
+        width: 56%;
+        height: 9px;
+        margin-top: -7px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, color-mix(in oklab, var(--room-shade) 34%, transparent), transparent);
+      }
+      .bk-row--back .bk-p s {
+        width: 50%;
+        height: 7px;
+      }
+      .bk-p b {
+        margin-top: 5px;
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-p span {
+        color: var(--muted);
+        font-size: var(--t-11);
+      }
+      .bk-p span.you {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+
+      /* ---------- Why ---------- */
+      .bk-why {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 520px;
+        gap: 64px;
+        align-items: start;
+      }
+      .bk-why-text {
+        display: grid;
+        gap: 14px;
+        font-size: 15px;
+        line-height: 1.62;
+      }
+      .bk-trades {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-trades li {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-14);
+      }
+      .bk-trades li::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        margin: 9px 0 0 4px;
+        border-radius: 50%;
+        background: var(--faint);
+      }
+      .bk-scale {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        padding: 26px 28px 18px;
+        border-radius: var(--r-xl);
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .bk-scale figure {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+      }
+      .bk-scale figcaption {
+        display: grid;
+        text-align: center;
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        line-height: 1.3;
+      }
+      .bk-scale figcaption span {
+        color: var(--faint);
+        font-weight: var(--w-regular);
+      }
+
+      /* ---------- 1000x ---------- */
+      .bk-pair {
+        padding: 36px 0 40px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bk-q {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 560px) 1fr;
+        align-items: baseline;
+        gap: 4px 0;
+        margin-bottom: 22px;
+      }
+      .bk-q p {
+        grid-column: 2;
+        color: var(--muted);
+      }
+      .bk-qn {
+        grid-row: span 2;
+        color: var(--faint);
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: var(--t-13);
+      }
+      .bk-gain {
+        grid-column: 3;
+        grid-row: 1;
+        justify-self: end;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 26px;
+        padding: 0 11px;
+        border-radius: var(--r-pill);
+        background: var(--sunken);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .bk-gain b {
+        color: var(--ink);
+      }
+      .bk-vs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 40px;
+        align-items: start;
+      }
+      .bk-vs--beside > div {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 0 20px;
+        align-items: end;
+      }
+      .bk-vs--beside .bk-lab {
+        grid-column: 1 / -1;
+      }
+      .bk-vs--stack {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 28px;
+      }
+      .bk-lab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-lab::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin: 0 4px;
+        border-radius: 50%;
+        background: var(--faint);
+      }
+      .bk-lab--crew::before {
+        display: none;
+      }
+      .bk-lab--crew {
+        color: var(--ink);
+      }
+      .bk-say {
+        margin-top: 12px !important;
+        max-width: 48ch;
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.5;
+      }
+      .bk-vs--beside .bk-say {
+        margin-top: 0 !important;
+        max-width: 24ch;
+      }
+      .bk-crop {
+        --k: 1;
+        display: block;
+        width: calc(var(--w) * var(--k) * 1px);
+        height: calc(var(--h) * var(--k) * 1px);
+        background-image: var(--img);
+        background-repeat: no-repeat;
+        background-size: calc(1440px * var(--k)) calc(900px * var(--k));
+        background-position: calc(var(--x) * var(--k) * -1px) calc(var(--y) * var(--k) * -1px);
+        border-radius: var(--r-md);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+      }
+      .bk-crop--shell {
+        --img: var(--bl-shell);
+      }
+      .bk-crop--intake {
+        --img: var(--bl-intake);
+      }
+      .bk-crop--navy {
+        --img: url(../shared/baseline/app-shell-dark.png);
+      }
+      .bk-plate {
+        position: relative;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .bk-plate .side {
+        width: 283px;
+        height: 390px;
+        padding-top: 10px;
+      }
+      .bk-plate .side .side-h:first-of-type {
+        padding-top: 14px;
+      }
+      /* the lead Proposal, trimmed to a column */
+      .bk-lead {
+        padding: 16px 18px 10px;
+      }
+      .bk-lead-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .bk-lead h4 {
+        margin: 8px 0 12px;
+        font-size: var(--t-16);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .bk-facts {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin: 0 -18px 10px;
+        border-top: 1px solid var(--line-soft);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bk-fact {
+        display: grid;
+        gap: 2px;
+        padding: 9px 12px 10px 18px;
+        min-width: 0;
+      }
+      .bk-fact + .bk-fact {
+        box-shadow: inset 1px 0 0 var(--line-soft);
+      }
+      .bk-fact > span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .bk-fact b {
+        font-size: var(--t-16);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .bk-fact b small {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .bk-lead .ans {
+        grid-template-columns: 134px 1fr auto;
+      }
+      .bk-answer {
+        padding: 22px 24px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+      .bk-answer .msg {
+        width: min(760px, 100%);
+      }
+      .bk-answer .msg-body p {
+        font-size: var(--t-14);
+      }
+      .bk-roster {
+        display: grid;
+        gap: 1px;
+        width: 100%;
+      }
+      .bk-roster .who-row {
+        padding-right: 12px;
+      }
+      .bk-roster .who-sub {
+        color: var(--muted);
+      }
+      .bk-roster .who-sub.you-ink {
+        color: var(--you-ink);
+      }
+      .bk-roster .proj {
+        font-size: var(--t-12);
+      }
+
+      /* ---------- The system ---------- */
+      .bk-rules {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-rule {
+        display: grid;
+        grid-template-rows: 64px auto 1fr;
+        gap: 6px;
+        padding: 18px 20px 20px;
+      }
+      .bk-rule-see {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .bk-rule p {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-gray {
+        filter: grayscale(1);
+      }
+      .bk-themes {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-theme {
+        display: grid;
+        gap: 10px;
+        text-align: left;
+      }
+      .bk-mini {
+        position: relative;
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        height: 150px;
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        transition: box-shadow var(--dur-2);
+      }
+      .bk-theme[aria-pressed="true"] .bk-mini {
+        box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink), var(--shadow-2);
+      }
+      .bk-mini-side {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 8px;
+        background: color-mix(in oklab, var(--bg) 78%, transparent);
+        box-shadow: 1px 0 0 var(--line-soft);
+      }
+      .bk-mini-side > span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+      }
+      .bk-mini-side b {
+        flex: 1;
+        height: 5px;
+        border-radius: 3px;
+        background: color-mix(in oklab, var(--ink) 16%, transparent);
+      }
+      .bk-mini-side b.you {
+        background: color-mix(in oklab, var(--you-ink) 55%, transparent);
+      }
+      .bk-mini-card {
+        align-self: center;
+        display: grid;
+        gap: 8px;
+        margin: 0 10px;
+        padding: 10px 10px 10px;
+        border-radius: var(--r-md);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+        line-height: 1.3;
+      }
+      .bk-mini-card code {
+        font-size: 10px;
+      }
+      .bk-mini-card .btn {
+        height: 22px;
+        padding: 0 8px;
+        font-size: var(--t-11);
+        border-radius: 7px;
+      }
+      .bk-mini-card > span:last-child {
+        display: flex;
+        gap: 5px;
+      }
+      .bk-mini-dots {
+        position: absolute;
+        right: 10px;
+        bottom: 9px;
+        display: flex;
+        gap: 4px;
+      }
+      .bk-mini-dots i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--c);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 14%, transparent);
+      }
+      .bk-theme-name {
+        display: grid;
+        line-height: 1.3;
+      }
+      .bk-theme-name b {
+        font-size: var(--t-14);
+      }
+      .bk-theme-name span {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .bk-cols {
+        display: grid;
+        gap: 40px;
+        align-items: start;
+      }
+      .bk-cols--2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .bk-cols--3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .bk-cols h3 + p {
+        margin: 4px 0 18px;
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-spec {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 18px;
+      }
+      .bk-specimen {
+        display: grid;
+        grid-template-columns: 112px 1fr;
+        gap: 18px;
+        align-items: center;
+      }
+      .bk-aa {
+        font-size: 80px;
+        line-height: 0.9;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.04em;
+      }
+      .bk-aa--mono {
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-weight: 500;
+        font-size: 68px;
+        letter-spacing: -0.02em;
+      }
+      .bk-specimen b {
+        display: block;
+        font-size: var(--t-16);
+      }
+      .bk-specimen p {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-code {
+        margin-top: 6px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: var(--t-12);
+        color: var(--ink);
+      }
+      .bk-scale-t {
+        display: grid;
+        gap: 0;
+      }
+      .bk-scale-t > div {
+        display: grid;
+        grid-template-columns: 1fr 64px 150px;
+        gap: 16px;
+        align-items: baseline;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bk-scale-t code {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .bk-scale-t small {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .bk-radii {
+        display: flex;
+        gap: 14px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+      .bk-radii figure {
+        display: grid;
+        gap: 6px;
+        justify-items: center;
+        margin: 0;
+        color: var(--muted);
+        font-size: var(--t-11);
+      }
+      .bk-radii i {
+        width: 48px;
+        height: 48px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .bk-shadows {
+        display: flex;
+        gap: 16px;
+        margin-top: 22px;
+      }
+      .bk-shadows span {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        height: 64px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        color: var(--muted);
+        font-size: var(--t-12);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--sh);
+      }
+      .bk-glass {
+        position: relative;
+        height: 168px;
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .bk-glass-faces {
+        position: absolute;
+        top: 58px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+      }
+      .bk-glass .composer-card {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 56px;
+        padding: 0 10px 0 16px;
+        color: var(--faint);
+      }
+      .bk-glass .composer-card span {
+        flex: 1;
+      }
+      .bk-motion {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-motion > div {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+      }
+      .bk-motion code {
+        font-size: var(--t-12);
+        color: var(--muted);
+      }
+      .bk-motion p {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-dur {
+        margin-top: 42px;
+        height: 6px;
+        width: calc(var(--ms) * 0.6px);
+        border-radius: var(--r-pill);
+        background: var(--ink);
+      }
+      .bk-dur--spring {
+        background: linear-gradient(90deg, var(--ink), color-mix(in oklab, var(--ink) 30%, transparent));
+      }
+      .bk-live {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        height: 48px;
+      }
+      .bk-marks {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px 16px;
+      }
+      .bk-marks span,
+      .bk-icons span {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .bk-marks svg,
+      .bk-icons svg {
+        color: var(--ink);
+      }
+      .bk-icons {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 14px 0;
+        margin-top: 4px;
+        color: var(--ink);
+      }
+      .bk-icons span {
+        justify-content: center;
+      }
+      .bk-brands {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px 20px;
+        color: var(--ink);
+      }
+      .bk-schem {
+        display: flex;
+        gap: 36px;
+        align-items: center;
+      }
+      .bk-desk {
+        position: relative;
+        width: 460px;
+        height: 288px;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+        font-size: var(--t-11);
+        color: var(--muted);
+      }
+      .bk-desk > i {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        font-style: normal;
+        line-height: 1.2;
+        text-align: center;
+      }
+      .bk-desk .s {
+        inset: 0 auto 0 0;
+        width: 81px;
+        background: color-mix(in oklab, var(--bg) 70%, transparent);
+        box-shadow: 1px 0 0 var(--line);
+      }
+      .bk-desk .b {
+        top: 0;
+        left: 81px;
+        right: 0;
+        height: 17px;
+        box-shadow: 0 1px 0 var(--line-soft);
+      }
+      .bk-desk .c {
+        top: 17px;
+        bottom: 0;
+        left: 149px;
+        width: 243px;
+        background: repeating-linear-gradient(180deg, transparent 0 14px, color-mix(in oklab, var(--ink) 7%, transparent) 14px 18px);
+        background-size: 100% 18px;
+        background-clip: content-box;
+        padding: 18px 0 70px;
+        align-content: start;
+      }
+      .bk-desk .k {
+        bottom: 12px;
+        left: 149px;
+        width: 243px;
+        height: 42px;
+        border-radius: 12px;
+        background: var(--glass);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+        color: var(--ink);
+      }
+      .bk-phone {
+        position: relative;
+        width: 134px;
+        height: 288px;
+        border-radius: 22px;
+        overflow: hidden;
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+        font-size: var(--t-11);
+        color: var(--muted);
+      }
+      .bk-phone > i {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: grid;
+        place-items: center;
+        font-style: normal;
+        text-align: center;
+        line-height: 1.2;
+      }
+      .bk-phone .t {
+        bottom: 0;
+        height: 30px;
+        background: var(--glass);
+        box-shadow: 0 -1px 0 var(--line);
+      }
+      .bk-phone .z {
+        bottom: 30px;
+        height: 96px;
+        background: linear-gradient(0deg, color-mix(in oklab, var(--you) 22%, transparent), transparent);
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .bk-notes {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-notes li {
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        gap: 12px;
+        align-items: baseline;
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-notes b {
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Signature ---------- */
+      .bk-sig {
+        display: grid;
+        grid-template-columns: 360px minmax(0, 1fr);
+        gap: 56px;
+        align-items: start;
+      }
+      .bk-hero-face {
+        display: grid;
+        place-items: center;
+        height: 240px;
+        border-radius: var(--r-xl);
+        background: var(--wallpaper);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .bk-parts {
+        display: grid;
+        gap: 10px;
+        margin: 18px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-parts li {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 10px;
+        align-items: center;
+        font-size: var(--t-13);
+      }
+      .bk-parts li > span {
+        color: var(--muted);
+      }
+      .bk-parts b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .bk-parts em {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        font-style: normal;
+      }
+      .bk-parts .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--who);
+        box-shadow: inset 0 0 0 1.5px var(--who-shade);
+      }
+      .bk-parts .dot--you {
+        background: var(--you);
+        box-shadow: none;
+      }
+      .bk-anat {
+        display: grid;
+        gap: 26px;
+      }
+      .bk-anat-row {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 16px;
+        align-items: center;
+      }
+      .bk-anat-row > span {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-anat-row > span small {
+        display: block;
+        font-weight: var(--w-regular);
+        color: var(--faint);
+      }
+      .bk-line {
+        display: flex;
+        gap: 18px;
+        align-items: flex-end;
+      }
+      .bk-line figure {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        margin: 0;
+        color: var(--muted);
+        font-size: var(--t-11);
+      }
+      .bk-poses {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: 10px 0;
+        justify-items: center;
+        text-align: center;
+      }
+      .bk-poses span {
+        color: var(--muted);
+        font-size: var(--t-11);
+        line-height: 1.25;
+        align-self: end;
+      }
+      .bk-poses span.you {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .bk-poses .bk-small {
+        display: flex;
+        gap: 4px;
+      }
+
+      /* ---------- Logo ---------- */
+      .bk-logos {
+        display: grid;
+        grid-template-columns: 300px repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-logo {
+        display: grid;
+        grid-template-rows: 1fr auto;
+        gap: 14px;
+        min-height: 220px;
+        padding: 22px;
+        border-radius: var(--r-xl);
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .bk-logo--wall {
+        background: var(--wallpaper);
+      }
+      .bk-logo > div {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+      }
+      .bk-logo p {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .bk-logo p b {
+        display: block;
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+      .bk-lockup {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+      }
+      .bk-favs {
+        display: grid !important;
+        gap: 14px;
+        justify-items: center;
+      }
+      .bk-favs > span {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .bk-tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        max-width: 250px;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 10px 10px 0 0;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .bk-tab span {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ---------- Frames ---------- */
+      .bk .f {
+        --f-chrome: var(--sunken);
+        --f-chrome-ink: var(--muted);
+        --f-shadow: 0 1px 2px oklch(0.2 0.03 60 / 0.12), 0 18px 44px -14px oklch(0.2 0.03 60 / 0.34);
+      }
+      .bk .f-url {
+        background: color-mix(in oklab, var(--raised) 80%, transparent);
+      }
+      .bk .f--web .f-browser {
+        border-bottom-color: var(--line-soft);
+      }
+      .bk {
+        --book-ink: var(--ink);
+        --book-muted: var(--muted);
+      }
+      .bk .f-caption {
+        color: var(--book-ink);
+      }
+      .bk .f-caption > span {
+        font-weight: var(--w-bold);
+      }
+      .bk .f-caption small {
+        font-weight: var(--w-regular);
+        color: var(--book-muted);
+        opacity: 1;
+        font-size: var(--t-13);
+      }
+      .bk-grid {
+        display: grid;
+        gap: 44px 32px;
+      }
+      .bk-grid--2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .bk-grid--4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .bk-grid--3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .bk .bk-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 56px 0 20px;
+      }
+      .bk .bk-h + .bk-group {
+        margin-top: 0;
+      }
+      .bk-group small {
+        color: var(--faint);
+        font-size: var(--t-13);
+        font-weight: var(--w-regular);
+      }
+
+      /* ---------- Office and 10x ---------- */
+      .bk-points {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 26px 32px;
+        margin: 36px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-points li {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 12px;
+        align-items: start;
+        font-size: var(--t-13);
+        color: var(--muted);
+      }
+      .bk-points li b {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--ink);
+        font-size: var(--t-14);
+      }
+      .bk-nums {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin: 40px 0 0;
+      }
+      .bk-num {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 20px;
+        align-items: baseline;
+        padding: 20px 22px;
+      }
+      .bk-num > b {
+        grid-row: span 2;
+        font-size: 40px;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        font-variant-numeric: tabular-nums;
+      }
+      .bk-num > span {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-num > p {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        font-size: var(--t-14);
+        font-weight: var(--w-medium);
+      }
+      .bk-num .you-ink {
+        font-weight: var(--w-bold);
+      }
+      /* The roster beside the phone, sized so the two devices stand the same height. */
+      .bk-office-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 270px;
+        gap: 40px;
+        align-items: start;
+        margin-top: 44px;
+      }
+      .bk-points .icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+        color: var(--ink);
+      }
+
+      /* ---------- Adopt ---------- */
+      .bk-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--t-13);
+      }
+      .bk-table th {
+        white-space: nowrap;
+        padding: 0 12px 10px 0;
+        text-align: left;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        border-bottom: 1px solid var(--line);
+      }
+      .bk-table td {
+        padding: 9px 12px 9px 0;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: middle;
+      }
+      .bk-table td:last-child {
+        color: var(--muted);
+      }
+      .bk-table code {
+        font-size: var(--t-12);
+      }
+      .bk-pairsw {
+        display: flex;
+        gap: 4px;
+      }
+      .bk-c {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: linear-gradient(var(--c) 0 0), var(--b, var(--bg));
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 14%, transparent);
+      }
+      .bk-arrow {
+        color: var(--faint);
+      }
+      .bk-steps {
+        display: grid;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+      }
+      .bk-steps li {
+        display: grid;
+        grid-template-columns: 26px 220px minmax(0, 1fr) 340px;
+        gap: 18px;
+        align-items: start;
+        padding: 16px 0;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-steps li::before {
+        counter-increment: step;
+        content: counter(step);
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--bg);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-steps b {
+        color: var(--ink);
+        font-size: var(--t-14);
+        line-height: 24px;
+      }
+      .bk-steps code {
+        display: grid;
+        gap: 2px;
+        color: var(--ink);
+        font-size: var(--t-12);
+        line-height: 1.6;
+      }
+
+      /* ---------- Spec ---------- */
+      .bk-asks {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 48px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-asks li {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 12px;
+        padding: 16px 0;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .bk-asks li b {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--ink);
+        font-size: var(--t-14);
+      }
+      .bk-asks code {
+        font-size: var(--t-12);
+      }
+      .bk-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 80px;
+        padding: 28px 0 56px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <div class="bk">
+        <span class="bk-brand"><i data-logo="26"></i>Crew <small>Hercule · design system 07</small></span>
+        <nav class="bk-links">
+          <a href="#why">Why</a><a href="#better">Better</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#ten">10x</a><a href="#adopt">Adopt</a><a href="#spec">Spec</a>
+        </nav>
+        <div class="bk-switch" role="group" aria-label="Theme">
+          <button data-theme-option="studio"><i class="bk-sw" data-theme="studio" style="--hue: var(--hue-iris)"></i>Studio</button>
+          <button data-theme-option="sunroom"><i class="bk-sw" data-theme="sunroom" style="--hue: var(--hue-peach)"></i>Sunroom</button>
+          <button data-theme-option="cocoa"><i class="bk-sw" data-theme="cocoa" style="--hue: var(--hue-teal)"></i>Cocoa</button>
+          <button data-theme-option="pine"><i class="bk-sw" data-theme="pine" style="--hue: var(--hue-lime)"></i>Pine</button>
+          <button data-theme-option="plum"><i class="bk-sw" data-theme="plum" style="--hue: var(--hue-orchid)"></i>Plum</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- 1. Hero -->
+      <section class="bk-hero">
+        <div>
+          <span class="app-icon" data-theme="studio" style="--size: 84px"><i data-logo="64"></i></span>
+          <h1>Crew</h1>
+          <p class="bk-thesis">Your agents are colleagues.</p>
+          <p class="bk-brief">
+            Hercule runs a crowd of agents, and today each one is a line of grey text. Crew gives every session, workflow and Assistant a <b>face</b>: a small character drawn from its name and a hue, whose <b>pose is its state</b>. Focused eyes mean working. A raised
+            <span class="you">marigold hand</span> means it waits on you. Closed eyes, asleep. A bandage, failed. Color always means who; marigold always means you. You read the room the way you read an office: in one glance, before a single word.
+          </p>
+        </div>
+        <div class="bk-floor" aria-label="The crew, in a group photo">
+          <span class="bk-window"></span>
+          <span class="bk-sunpatch"></span>
+          <span class="bk-plant"><i style="left: 6px; top: 12px; width: 30px; height: 30px"></i><i style="left: 24px; top: 0; width: 32px; height: 32px"></i><i style="left: 12px; top: 34px; width: 36px; height: 36px"></i><b></b></span>
+          <span class="bk-rug"></span>
+          <div class="bk-row bk-row--back">
+            <div class="bk-p"><i data-face="Triage" data-pose="idle" data-size="54"></i><s></s><b>Triage</b><span>idle · workflow</span></div>
+            <div class="bk-p"><i data-face="Milo" data-pose="idle" data-size="54"></i><s></s><b>Milo</b><span>idle · Slack #ops</span></div>
+            <div class="bk-p"><i data-face="Juno" data-pose="asleep" data-size="54"></i><s></s><b>Juno</b><span>asleep</span></div>
+          </div>
+          <div class="bk-row bk-row--front">
+            <div class="bk-p"><i data-face="Ada" data-pose="working" data-size="76"></i><s></s><b>Ada</b><span>heartbeat</span></div>
+            <div class="bk-p"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="76"></i><s></s><b>Fix 3&#8209;D Secure checkout</b><span class="you">waiting on you</span></div>
+            <div class="bk-p"><i data-face="Refactor cart totals" data-pose="working" data-size="76"></i><s></s><b>Refactor cart totals</b><span>working · 22m</span></div>
+            <div class="bk-p"><i data-face="Label new issues" data-pose="paused" data-size="76"></i><s></s><b>Label new issues</b><span>paused</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Why this one -->
+      <section class="bk-sec" id="why">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Investigate" data-pose="idle" data-size="22"></i>Why this one</span>
+          <h2>Most redesigns make rows prettier. Crew changes what a row is.</h2>
+        </header>
+        <div class="bk-why">
+          <div class="bk-why-text">
+            <p>People spot a face, a raised hand or a slumped posture faster than any icon or word, and Hercule's hard question is exactly that: which of 23 colleagues needs me right now? A face also scales from 16px in a list to a whole office, so one idea carries the sidebar, the lock screen and the 3D floor.</p>
+            <p style="color: var(--ink); font-weight: var(--w-bold); font-size: var(--t-14)">What it trades away</p>
+            <ul class="bk-trades">
+              <li>It is the most opinionated of the ten. Some will find characters too playful for an ops tool, so the poses must stay calm and professional forever.</li>
+              <li>Eight hues cannot keep 140 colleagues apart. Shape, accessory and name do the rest, and at swarm scale faces give way to counts.</li>
+              <li>A character system is an illustration practice to maintain, not a token swap.</li>
+            </ul>
+          </div>
+          <div class="bk-scale" aria-label="One face at five sizes">
+            <figure><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="16"></i><figcaption>16<span>list</span></figcaption></figure>
+            <figure><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="24"></i><figcaption>24<span>web rows</span></figcaption></figure>
+            <figure><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i><figcaption>30<span>sidebar</span></figcaption></figure>
+            <figure><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="48"></i><figcaption>48<span>lock screen</span></figcaption></figure>
+            <figure><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="84"></i><figcaption>84<span>office</span></figcaption></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. 1000x better -->
+      <section class="bk-sec" id="better">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Triage" data-pose="idle" data-size="22"></i>Why it's 1000x better than today</span>
+          <h2>Five questions you ask Hercule all day, answered by looking instead of reading.</h2>
+          <p class="bk-lede">Today has good bones: the thread shape, the permission dock, the calm. It spends your attention on parsing. Each pair below is the same moment, today and in Crew.</p>
+        </header>
+
+        <div class="bk-pair">
+          <div class="bk-q">
+            <span class="bk-qn">1</span>
+            <h3>Who needs me?</h3>
+            <span class="bk-gain">read 6 rows <span class="bk-arrow">→</span> <b>1 glance</b></span>
+            <p>The single most important fact in Hercule is who waits on you. Today it is a 9px glyph. In Crew it is a colleague with a raised hand, first in the sidebar, with the question under its name.</p>
+          </div>
+          <div class="bk-vs bk-vs--beside">
+            <div>
+              <span class="bk-lab">Today</span>
+              <span class="bk-crop bk-crop--shell" style="--x: 0; --y: 135; --w: 236; --h: 325; --k: 1.2"></span>
+              <p class="bk-say">A yellow "?" among grey glyphs. You read the rows to find the one that waits.</p>
+            </div>
+            <div>
+              <span class="bk-lab bk-lab--crew"><i data-logo="16"></i>Crew</span>
+              <div class="bk-plate">
+                <div class="side">
+                  <nav class="nav">
+                    <a class="nav-row"><i data-i="office"></i><span>Office</span><b class="count">23</b></a>
+                    <a class="nav-row"><i data-i="intake"></i><span>Intake</span><b class="count count--you">9</b></a>
+                    <a class="nav-row"><i data-i="threads"></i><span>Threads</span></a>
+                  </nav>
+                  <div class="side-h"><span>Waiting on you</span><b class="count count--you">3</b></div>
+                  <div class="side-list">
+                    <a class="who-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i><span class="who-text"><span class="who-name">Fix 3&#8209;D Secure checkout</span><span class="who-sub">Run git push?</span></span></a>
+                    <a class="who-row"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="30"></i><span class="who-text"><span class="who-name">Migrate ops dashboards</span><span class="who-sub">Keep the old Grafana folder?</span></span></a>
+                    <a class="who-row"><i data-face="Ship release" data-pose="waiting" data-size="30"></i><span class="who-text"><span class="who-name">Ship release v2.15</span><span class="who-sub">Publish to npm?</span></span></a>
+                  </div>
+                  <div class="side-h"><span>Assistants</span></div>
+                  <div class="side-list">
+                    <a class="who-row who-row--flat"><i data-face="Ada" data-pose="working" data-size="26"></i><span class="who-text"><span class="who-name">Ada</span></span><span class="who-state">heartbeat</span></a>
+                    <a class="who-row who-row--flat"><i data-face="Juno" data-pose="asleep" data-size="26"></i><span class="who-text"><span class="who-name">Juno</span></span><span class="who-state">asleep</span></a>
+                  </div>
+                </div>
+              </div>
+              <p class="bk-say">Whoever waits raises a marigold hand, at the top, with the question as its sub-line.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bk-pair">
+          <div class="bk-q">
+            <span class="bk-qn">2</span>
+            <h3>What happens if I click?</h3>
+            <span class="bk-gain">guess <span class="bk-arrow">→</span> <b>know, then ↩</b></span>
+            <p>Today's lead card ends in three equal text links, so every answer is a small guess. Crew's answers are buttons with a key, each saying what it does, and the workflow you would start shows its face on the button.</p>
+          </div>
+          <div class="bk-vs">
+            <div>
+              <span class="bk-lab">Today</span>
+              <span class="bk-crop bk-crop--intake" style="--x: 222; --y: 160; --w: 834; --h: 350; --k: 0.6954"></span>
+              <p class="bk-say">Start Bugfix, Later, Dismiss: three links of equal weight, and none says what it will do.</p>
+            </div>
+            <div>
+              <span class="bk-lab bk-lab--crew"><i data-logo="16"></i>Crew</span>
+              <article class="card bk-lead">
+                <div class="bk-lead-top">
+                  <span class="chip chip--fail">Urgent</span>
+                  <span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span>
+                  <span class="proj proj--webshop">webshop</span><span>· Checkout</span>
+                </div>
+                <h4>Checkout fails for EU cards with 3&#8209;D Secure</h4>
+                <div class="bk-facts">
+                  <div class="bk-fact"><span><i data-brand="sentry" data-size="12"></i>Sentry</span><b>412 <small>events</small></b></div>
+                  <div class="bk-fact"><span><i data-brand="gmail" data-size="12"></i>Gmail</span><b>3 <small>emails</small></b></div>
+                  <div class="bk-fact"><span><i data-brand="posthog" data-size="12"></i>PostHog</span><b>-18% <small>EU</small></b></div>
+                  <div class="bk-fact"><span><i data-brand="github" data-size="12"></i>GitHub</span><b>#1289 <small>deploy</small></b></div>
+                </div>
+                <div class="ledger">
+                  <button class="ans"><span class="btn btn--who btn--sm" style="--hue: var(--hue-iris)"><i data-face="Fix bug" data-pose="idle" data-size="20"></i>Start "Fix bug"</span><span class="ans-desc">Starts Fix bug on webshop in a new worktree</span><kbd>↩</kbd></button>
+                  <button class="ans"><span class="btn btn--sm">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+                  <button class="ans"><span class="btn btn--sm">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd>D</kbd></button>
+                </div>
+              </article>
+              <p class="bk-say">The colleague you would start is on the button. Every answer says what it does, and has a key.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bk-pair">
+          <div class="bk-q">
+            <span class="bk-qn">3</span>
+            <h3>Can I answer from here?</h3>
+            <span class="bk-gain">open the thread <span class="bk-arrow">→</span> <b>answer in place</b></span>
+            <p>Today a waiting thread is a row that says "decision wanted"; you open it to learn the question. In Crew the question docks on the composer in marigold, the three answers under it, so the answer is one key away.</p>
+          </div>
+          <div class="bk-vs bk-vs--stack">
+            <div>
+              <span class="bk-lab">Today</span>
+              <span class="bk-crop bk-crop--shell" style="--x: 254; --y: 150; --w: 1154; --h: 90; --k: 1.0399"></span>
+              <p class="bk-say">"decision wanted" tells you that there is a question, not what it is.</p>
+            </div>
+            <div>
+              <span class="bk-lab bk-lab--crew"><i data-logo="16"></i>Crew</span>
+              <div class="bk-plate bk-answer">
+                <div class="msg" style="--hue: var(--hue-peach)">
+                  <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="idle" data-size="34"></i>
+                  <div class="msg-body">
+                    <p>All 24 checkout tests pass, including the new 3&#8209;D Secure case. The fix is on <code>fix/3ds-eu-cards</code>; I need to push the branch to open the pull request.</p>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="dock">
+                    <div class="dock-q">
+                      <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i>
+                      <span>Run <code>git push -u origin fix/3ds-eu-cards</code>?</span>
+                    </div>
+                    <div class="ledger">
+                      <button class="ans"><span class="btn btn--you btn--sm">Allow once</span><span class="ans-desc">Pushes the branch this one time</span><kbd>↩</kbd></button>
+                      <button class="ans"><span class="btn btn--sm">Always allow git push</span><span class="ans-desc">Adds a Grant for git push in webshop</span><kbd>⌥↩</kbd></button>
+                      <button class="ans"><span class="btn btn--sm">Deny</span><span class="ans-desc">Tells the agent no; the branch stays local</span><kbd>esc</kbd></button>
+                    </div>
+                  </div>
+                  <div class="composer-card">
+                    <textarea class="composer-input" rows="1" placeholder="Reply or steer…" aria-label="Reply or steer"></textarea>
+                    <div class="composer-row">
+                      <button class="icon-btn" title="Attach"><i data-i="plus"></i></button>
+                      <button class="pick"><i data-i="shield" data-size="14"></i>Auto-accept edits</button>
+                      <button class="pick"><i data-i="sliders" data-size="14"></i>High</button>
+                      <span class="spacer"></span>
+                      <button class="pick pick--pill"><i data-brand="claude" data-size="13"></i>Claude Code · Opus 5.5</button>
+                      <button class="icon-btn" title="Dictate"><i data-i="mic"></i></button>
+                      <button class="send send--off" title="Send"><i data-i="send"></i></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="bk-say">The question and its answers dock on the composer. ↩ allows once; the face keeps its hand up until you do.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bk-pair">
+          <div class="bk-q">
+            <span class="bk-qn">4</span>
+            <h3>What is everyone doing?</h3>
+            <span class="bk-gain">a word per row <span class="bk-arrow">→</span> <b>a pose per face</b></span>
+            <p>Today state is a grey word at the far edge of each row. In Crew it is the pose on the face: you see who types, who sleeps and who is stuck before you read a single name. It still reads in grayscale.</p>
+          </div>
+          <div class="bk-vs">
+            <div>
+              <span class="bk-lab">Today</span>
+              <span class="bk-crop bk-crop--shell" style="--x: 254; --y: 255; --w: 554; --h: 205; --k: 1.0469"></span>
+              <p class="bk-say">"running 12m", "idle", "idle": you learn the state only by reading to the end of each line.</p>
+            </div>
+            <div>
+              <span class="bk-lab bk-lab--crew"><i data-logo="16"></i>Crew</span>
+              <div class="bk-roster">
+                <a class="who-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i><span class="who-text"><span class="who-name">Fix 3&#8209;D Secure checkout for EU cards</span><span class="who-sub you-ink">Run git push?</span></span><span class="proj proj--webshop">webshop</span></a>
+                <a class="who-row"><i data-face="Refactor cart totals" data-pose="working" data-size="30"></i><span class="who-text"><span class="who-name">Refactor cart totals</span><span class="who-sub">editing cart.ts · 22m</span></span><span class="proj proj--webshop">webshop</span></a>
+                <a class="who-row"><i data-face="Ada" data-pose="working" data-size="30"></i><span class="who-text"><span class="who-name">Ada</span><span class="who-sub">heartbeat · reading 4 new events</span></span><span class="who-state">Assistant</span></a>
+                <a class="who-row"><i data-face="Label new issues" data-pose="paused" data-size="30"></i><span class="who-text"><span class="who-name">Label new issues</span><span class="who-sub">paused · breaker tripped 08:14</span></span><span class="proj proj--ops">ops</span></a>
+                <a class="who-row"><i data-face="Milo" data-pose="idle" data-size="30"></i><span class="who-text"><span class="who-name">Milo</span><span class="who-sub">idle · Slack #ops</span></span><span class="who-state">Assistant</span></a>
+              </div>
+              <p class="bk-say">Hands on keys, a raised palm, a pause badge, open idle eyes. The pose carries the state.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bk-pair">
+          <div class="bk-q">
+            <span class="bk-qn">5</span>
+            <h3>Dark that isn't navy</h3>
+            <span class="bk-gain">navy <span class="bk-arrow">→</span> <b>warm brown-black</b></span>
+            <p>Today's dark mode is grey tinted at hue 265: navy, tiring over a working day, and nothing in it has a color of its own. Crew's dark flagship, Cocoa, is a warm brown-black where the colleagues and the marigold carry the color.</p>
+          </div>
+          <div class="bk-vs">
+            <div>
+              <span class="bk-lab">Today</span>
+              <span class="bk-crop bk-crop--navy" style="--x: 0; --y: 0; --w: 1440; --h: 900; --k: 0.4028"></span>
+              <p class="bk-say">One dark theme, blue-grey neutrals, color only at dot scale.</p>
+            </div>
+            <div>
+              <span class="bk-lab bk-lab--crew"><i data-logo="16"></i>Crew</span>
+              <figure data-frame="desktop" data-src="desktop/office.html" data-theme="cocoa" data-caption="Office in Cocoa" data-note="Three dark themes: Cocoa, Pine, Plum. None of them blue."></figure>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. The system -->
+      <section class="bk-sec" id="system">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Fix bug" data-pose="idle" data-size="22"></i>The system</span>
+          <h2>Color means who. Marigold means you. State is a pose.</h2>
+          <p class="bk-lede">Three rules carry the whole system. Everything else is kept quiet so the crew can be loud.</p>
+        </header>
+
+        <div class="bk-rules">
+          <div class="card bk-rule">
+            <div class="bk-rule-see" id="bk-wheel"></div>
+            <h3>Color is who</h3>
+            <p>Eight hues, one per colleague. A face, its name ink and its row tint use that hue and nothing else.</p>
+          </div>
+          <div class="card bk-rule">
+            <div class="bk-rule-see">
+              <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="40"></i><b class="count count--you">3</b><span class="btn btn--you btn--sm">Allow once</span><i data-you="28"></i>
+            </div>
+            <h3>Marigold is you</h3>
+            <p>The one reserved warm color: a raised palm, a count, the answer you would give, and you. Nothing else is marigold.</p>
+          </div>
+          <div class="card bk-rule">
+            <div class="bk-rule-see">
+              <i data-face="Add iDEAL research" data-pose="failed" data-size="40"></i><span class="chip chip--fail">Turn failed</span><span class="fail-ink" style="font-size: var(--t-12)">exit 1 · provider timeout</span>
+            </div>
+            <h3>Tomato is hurt</h3>
+            <p>A bandage and a red badge, only when something broke. Never used for emphasis.</p>
+          </div>
+          <div class="card bk-rule">
+            <div class="bk-rule-see bk-gray">
+              <i data-face="Refactor cart totals" data-pose="working" data-size="36"></i><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="36"></i><i data-face="Milo" data-pose="idle" data-size="36"></i><i data-face="Juno" data-pose="asleep" data-size="36"></i><i data-face="Add iDEAL research" data-pose="failed" data-size="36"></i><i data-face="Label new issues" data-pose="paused" data-size="36"></i>
+            </div>
+            <h3>State is a pose</h3>
+            <p>Eyes, hands and posture carry state, so it survives grayscale and color-blind eyes. Shown here with the color removed.</p>
+          </div>
+          <div class="card bk-rule">
+            <div class="bk-rule-see"><span class="proj proj--webshop">webshop</span><span class="proj proj--payments">payments-api</span><span class="proj proj--ops">ops</span></div>
+            <h3>Places are rugs</h3>
+            <p>Projects get quiet floor tints, never a hue, so rooms never compete with the people in them.</p>
+          </div>
+          <div class="card bk-rule">
+            <div class="bk-rule-see"><span class="mono"><span class="plus">+48</span> <span class="minus">-12</span></span><span class="chip chip--ok">✓ 24 passed</span><span class="toggle" role="switch" aria-checked="true" aria-label="On"></span></div>
+            <h3>Green is for code</h3>
+            <p>Added lines and passing tests keep the code convention. A switch that is on is ink, not green.</p>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Themes</h3><p>Five rooms, one crew. Every colleague keeps its hue in every theme; only the light changes. Pick one to switch the whole book.</p></div>
+        <div class="bk-themes">
+          <button class="bk-theme" data-theme-option="studio">
+            <span class="bk-mini" data-theme="studio">
+              <span class="bk-mini-side"><span><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b class="you"></b></span><span><i data-face="Ada" data-pose="working" data-size="20"></i><b></b></span><span><i data-face="Milo" data-pose="idle" data-size="20"></i><b></b></span><span><i data-face="Juno" data-pose="asleep" data-size="20"></i><b></b></span></span>
+              <span class="bk-mini-card"><span>Run <code>git push</code>?</span><span><span class="btn btn--you">Allow once</span><span class="btn">Deny</span></span></span>
+              <span class="bk-mini-dots"><i style="--c: var(--ink)"></i><i style="--c: var(--you)"></i><i style="--c: var(--fail)"></i><i style="--c: var(--proj-webshop)"></i></span>
+            </span>
+            <span class="bk-theme-name"><b>Studio</b><span>Light · flagship · <code>light</code></span></span>
+          </button>
+          <button class="bk-theme" data-theme-option="sunroom">
+            <span class="bk-mini" data-theme="sunroom">
+              <span class="bk-mini-side"><span><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b class="you"></b></span><span><i data-face="Ada" data-pose="working" data-size="20"></i><b></b></span><span><i data-face="Milo" data-pose="idle" data-size="20"></i><b></b></span><span><i data-face="Juno" data-pose="asleep" data-size="20"></i><b></b></span></span>
+              <span class="bk-mini-card"><span>Run <code>git push</code>?</span><span><span class="btn btn--you">Allow once</span><span class="btn">Deny</span></span></span>
+              <span class="bk-mini-dots"><i style="--c: var(--ink)"></i><i style="--c: var(--you)"></i><i style="--c: var(--fail)"></i><i style="--c: var(--proj-webshop)"></i></span>
+            </span>
+            <span class="bk-theme-name"><b>Sunroom</b><span>Light · warm peach paper</span></span>
+          </button>
+          <button class="bk-theme" data-theme-option="cocoa">
+            <span class="bk-mini" data-theme="cocoa">
+              <span class="bk-mini-side"><span><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b class="you"></b></span><span><i data-face="Ada" data-pose="working" data-size="20"></i><b></b></span><span><i data-face="Milo" data-pose="idle" data-size="20"></i><b></b></span><span><i data-face="Juno" data-pose="asleep" data-size="20"></i><b></b></span></span>
+              <span class="bk-mini-card"><span>Run <code>git push</code>?</span><span><span class="btn btn--you">Allow once</span><span class="btn">Deny</span></span></span>
+              <span class="bk-mini-dots"><i style="--c: var(--ink)"></i><i style="--c: var(--you)"></i><i style="--c: var(--fail)"></i><i style="--c: var(--proj-webshop)"></i></span>
+            </span>
+            <span class="bk-theme-name"><b>Cocoa</b><span>Dark · flagship · <code>dark</code></span></span>
+          </button>
+          <button class="bk-theme" data-theme-option="pine">
+            <span class="bk-mini" data-theme="pine">
+              <span class="bk-mini-side"><span><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b class="you"></b></span><span><i data-face="Ada" data-pose="working" data-size="20"></i><b></b></span><span><i data-face="Milo" data-pose="idle" data-size="20"></i><b></b></span><span><i data-face="Juno" data-pose="asleep" data-size="20"></i><b></b></span></span>
+              <span class="bk-mini-card"><span>Run <code>git push</code>?</span><span><span class="btn btn--you">Allow once</span><span class="btn">Deny</span></span></span>
+              <span class="bk-mini-dots"><i style="--c: var(--ink)"></i><i style="--c: var(--you)"></i><i style="--c: var(--fail)"></i><i style="--c: var(--proj-webshop)"></i></span>
+            </span>
+            <span class="bk-theme-name"><b>Pine</b><span>Dark · green-black</span></span>
+          </button>
+          <button class="bk-theme" data-theme-option="plum">
+            <span class="bk-mini" data-theme="plum">
+              <span class="bk-mini-side"><span><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b class="you"></b></span><span><i data-face="Ada" data-pose="working" data-size="20"></i><b></b></span><span><i data-face="Milo" data-pose="idle" data-size="20"></i><b></b></span><span><i data-face="Juno" data-pose="asleep" data-size="20"></i><b></b></span></span>
+              <span class="bk-mini-card"><span>Run <code>git push</code>?</span><span><span class="btn btn--you">Allow once</span><span class="btn">Deny</span></span></span>
+              <span class="bk-mini-dots"><i style="--c: var(--ink)"></i><i style="--c: var(--you)"></i><i style="--c: var(--fail)"></i><i style="--c: var(--proj-webshop)"></i></span>
+            </span>
+            <span class="bk-theme-name"><b>Plum</b><span>Dark · violet-red</span></span>
+          </button>
+        </div>
+
+        <div class="bk-sub"><h3>Type</h3><p>A friendly grotesque with character for the crew, a warm monospace for code. Titles stay modest; numbers carry the size.</p></div>
+        <div class="bk-cols bk-cols--2">
+          <div class="bk-spec">
+            <div class="bk-specimen">
+              <span class="bk-aa">Aa</span>
+              <div><b>Bricolage Grotesque</b><p>UI and titles · variable · 400 regular, 520 medium, 640 bold · OFL</p></div>
+            </div>
+            <div class="bk-specimen">
+              <span class="bk-aa bk-aa--mono">Aa</span>
+              <div><b>Recursive, mono and a little casual</b><p>Code, commands, paths, stamps · OFL</p>
+                <p class="bk-code"><span>git push -u origin fix/3ds-eu-cards</span><span class="plus">+48</span><span class="minus">-12</span></p>
+              </div>
+            </div>
+          </div>
+          <div class="bk-scale-t">
+            <div><span style="font-size: 26px; font-weight: 640; letter-spacing: -0.02em">412 events</span><code>--t-num</code><small>headline numbers</small></div>
+            <div><span style="font-size: 20px; font-weight: 640; letter-spacing: -0.01em">Fix 3&#8209;D Secure checkout</span><code>--t-20</code><small>largest desktop title</small></div>
+            <div><span style="font-size: 18px; font-weight: 640">Intake</span><code>--t-18</code><small>page titles</small></div>
+            <div><span style="font-size: 16px; font-weight: 640">-18% conversion, EU</span><code>--t-16</code><small>lead facts, mobile body</small></div>
+            <div><span style="font-size: 14px">Found it. Stripe now returns requires_action.</span><code>--t-14</code><small>transcript prose</small></div>
+            <div><span style="font-size: 13px">Starts Fix bug on webshop in a new worktree</span><code>--t-13</code><small>UI body</small></div>
+            <div><span style="font-size: 12px; color: var(--you-ink)">Keep the old Grafana folder?</span><code>--t-12</code><small>sub-lines, labels</small></div>
+            <div><span style="font-size: 11px; color: var(--muted)" class="mono">09:04 · build-box-1</span><code>--t-11</code><small>stamps</small></div>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Shape, depth and glass</h3><p>Chunky, soft corners like a toy set. Depth only for layers that float; glass only where something lies beneath.</p></div>
+        <div class="bk-cols bk-cols--3">
+          <div>
+            <div class="bk-radii">
+              <figure><i style="border-radius: 6px"></i>6 · xs</figure>
+              <figure><i style="border-radius: 9px"></i>9 · sm</figure>
+              <figure><i style="border-radius: 12px"></i>12 · md</figure>
+              <figure><i style="border-radius: 16px"></i>16 · lg</figure>
+              <figure><i style="border-radius: 22px"></i>22 · xl</figure>
+            </div>
+            <p style="margin-top: 14px; color: var(--muted); font-size: var(--t-13)">Rows 12, cards 16, sheets and the composer 20 to 22. Pills for counts and chips.</p>
+          </div>
+          <div>
+            <div class="bk-shadows">
+              <span style="--sh: var(--shadow-1)">1 · cards</span>
+              <span style="--sh: var(--shadow-2)">2 · popovers</span>
+              <span style="--sh: var(--shadow-3)">3 · composer</span>
+            </div>
+            <p style="margin-top: 14px; color: var(--muted); font-size: var(--t-13)">Three steps, warm-tinted, never grey. One level of containment: a card never holds a card.</p>
+          </div>
+          <div>
+            <div class="bk-glass">
+              <div class="bk-glass-faces"><i data-face="Refactor cart totals" data-pose="working" data-size="52"></i><i data-face="Ada" data-pose="idle" data-size="52"></i><i data-face="Triage" data-pose="idle" data-size="52"></i><i data-face="Juno" data-pose="asleep" data-size="52"></i><i data-face="Fix bug" data-pose="idle" data-size="52"></i></div>
+              <div class="composer-card"><span>Reply or steer…</span><span class="send send--off" style="flex: none"><i data-i="send"></i></span></div>
+            </div>
+            <p style="margin-top: 14px; color: var(--muted); font-size: var(--t-13)">Glass, blurred 18px, on the composer, sidebar and sheets. With reduced transparency it turns solid.</p>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Motion</h3><p>The interface moves fast and plainly. Only the characters get a little spring, and only while something is happening.</p></div>
+        <div class="bk-motion">
+          <div><span class="bk-dur" style="--ms: 120"></span><code>--dur-1 · 120ms</code><p>Hover and press. Rows, buttons, answers.</p></div>
+          <div><span class="bk-dur" style="--ms: 200"></span><code>--dur-2 · 200ms</code><p>Toggles, segments, a theme switch.</p></div>
+          <div><span class="bk-dur" style="--ms: 320"></span><code>--dur-3 · 320ms</code><p>The composer shrinking to glass, sheets, the dock.</p></div>
+          <div>
+            <div class="bk-live"><i data-face="Refactor cart totals" data-pose="working" data-size="44"></i><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="44"></i><i data-face="Juno" data-pose="asleep" data-size="44"></i></div>
+            <code>--ease-spring · characters only</code>
+            <p>Hands tap, a palm waves, z's drift. With reduced motion everything holds still; the pose still carries the state.</p>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Marks and icons</h3><p>One family on a 16px grid, 1.5px strokes with round ends. State marks for lists where no face fits; source marks always mono.</p></div>
+        <div class="bk-cols bk-cols--2" style="gap: 56px">
+          <div>
+            <div class="bk-marks">
+              <span><i data-i="m-working" data-size="18"></i>working</span>
+              <span><i data-i="m-decision" data-size="18"></i>decision</span>
+              <span><i data-i="m-queued" data-size="18"></i>queued</span>
+              <span><i data-i="m-paused" data-size="18"></i>paused</span>
+              <span><i data-i="m-done" data-size="18"></i>done</span>
+              <span><i data-i="m-failed" data-size="18"></i>failed</span>
+              <span><i data-i="m-cancelled" data-size="18"></i>cancelled</span>
+              <span><i data-i="m-skipped" data-size="18"></i>skipped</span>
+              <span><i data-i="tasks" data-size="18"></i>Task</span>
+              <span><i data-i="runs" data-size="18"></i>Run</span>
+              <span><i data-i="threads" data-size="18"></i>Thread</span>
+              <span><i data-i="workflows" data-size="18"></i>Workflow</span>
+            </div>
+            <div class="bk-brands" id="bk-brands" style="margin-top: 26px"></div>
+          </div>
+          <div class="bk-icons" id="bk-icons"></div>
+        </div>
+
+        <div class="bk-sub"><h3>Layout and density</h3><p>A centered column for reading, a glass sidebar of places and people, and the composer floating at the foot.</p></div>
+        <div class="bk-schem">
+          <div class="bk-desk">
+            <i class="s">sidebar<br />252</i>
+            <i class="b">bar 52</i>
+            <i class="c">column 760</i>
+            <i class="k">composer · 18 from the edge</i>
+          </div>
+          <div class="bk-phone">
+            <i style="top: 16px">status 54</i>
+            <i style="top: 120px">one column</i>
+            <i class="z">thumb zone<br />answers live here</i>
+            <i class="t">tab bar 83</i>
+          </div>
+          <ul class="bk-notes" style="flex: 1">
+            <li><b>42 / 34</b>Row heights: with a face, and flat.</li>
+            <li><b>4px</b>The grid. Gaps are 8, 12, 16, 24 and 32.</li>
+            <li><b>13 / 14</b>UI body and transcript prose.</li>
+            <li><b>1 level</b>Containment: a card never holds a card. Separate with space, tone and hairlines.</li>
+            <li><b>1440</b>Desktop at 1440 by 900; web at 1280 by 800; mobile at 390 by 844.</li>
+          </ul>
+        </div>
+
+        <div class="bk-sub"><h3>The signature: a colleague</h3><p>Every character is drawn from its name. Four parts vary; the pose changes with state.</p></div>
+        <div class="bk-sig">
+          <div>
+            <div class="bk-hero-face"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="170"></i></div>
+            <ul class="bk-parts" style="--hue: var(--hue-peach)">
+              <li><em><span class="dot"></span></em><span><b>Hue</b> peach, 52°, one of eight</span></li>
+              <li><em><i data-look="peach,round,none" data-size="24"></i></em><span><b>Body</b> round, one of four</span></li>
+              <li><em><i data-i="sparkle" data-size="16"></i></em><span><b>Accessory</b> a tuft, one of five</span></li>
+              <li><em><i data-i="hand" data-size="16"></i></em><span><b>Pose</b> waiting on you: brows up, a raised hand</span></li>
+              <li><em><span class="dot dot--you"></span></em><span><b>Palm</b> marigold, the only you-color a character wears</span></li>
+            </ul>
+          </div>
+          <div class="bk-anat">
+            <div class="bk-anat-row"><span>Bodies<small>four shapes</small></span><div class="bk-line" id="bk-bodies"></div></div>
+            <div class="bk-anat-row"><span>Accessories<small>five, plus three for Assistants</small></span><div class="bk-line" id="bk-accs"></div></div>
+            <div class="bk-anat-row"><span>Poses<small>eight states, three colleagues</small></span><div class="bk-poses" id="bk-poses"></div></div>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Logo and app icon</h3><p>Three colleagues shoulder to shoulder make an H. The middle one raises a marigold hand.</p></div>
+        <div class="bk-logos">
+          <div class="bk-logo bk-logo--wall">
+            <div>
+              <span class="app-icon" data-theme="studio" style="--size: 128px"><i data-logo="96"></i><b class="app-icon-badge">3</b></span>
+            </div>
+            <p><b>App icon</b>A warm tile. The dock badge is marigold, not system red, because it counts what waits on you.</p>
+          </div>
+          <div class="bk-logo">
+            <div><i data-logo="72"></i><i data-logo="72" data-mono></i></div>
+            <p><b>Mark</b>In color, and with the bar in ink for places that allow one accent only.</p>
+          </div>
+          <div class="bk-logo">
+            <div><span class="bk-lockup"><i data-logo="40"></i>Hercule</span></div>
+            <p><b>Lockup</b>Bricolage Grotesque at 700, tight. The mark always sits left.</p>
+          </div>
+          <div class="bk-logo">
+            <div class="bk-favs">
+              <span><img data-fav="idle" width="32" height="32" alt="Favicon" /><img data-fav="waiting" width="32" height="32" alt="Favicon with a marigold dot" /><img data-fav="waiting" width="16" height="16" alt="Favicon at 16px" /></span>
+              <span class="bk-tab"><img data-fav="waiting" width="16" height="16" alt="" /><span>(3) Fix 3&#8209;D Secure checkout · waiting on you</span><i data-i="close" data-size="12"></i></span>
+            </div>
+            <p><b>Favicon</b>The web's one ambient signal: a marigold dot when someone waits on you.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Screens -->
+      <section class="bk-sec" id="screens">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Milo" data-pose="idle" data-size="22"></i>Screens</span>
+          <h2>Twenty-two screens, one crew</h2>
+          <p class="bk-lede">The same colleagues in the same poses on the Mac, in the browser and on the phone. Every frame is live; switch the theme at the top.</p>
+        </header>
+
+        <h3 class="bk-group"><i data-i="laptop" data-size="18"></i>Desktop app <small>macOS · 1440 by 900</small></h3>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="Home. Rooms are projects, desks are sessions, and your desk holds the queue."></figure>
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="Triage did the reading. One lead Proposal; every answer says what it does."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Fix 3&#8209;D Secure checkout for EU cards" data-note="The question docks on the composer in marigold. ↩ allows once."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="The same thread, scrolled back" data-note="The composer shrinks to glass so the transcript reads beneath it."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-caption="New thread in webshop" data-note="Where it will run, one sentence, and the composer. Nothing else."></figure>
+          <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Ada" data-note="An Assistant's conversation, with heartbeats, reminders and a failed turn told plainly."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes previewed live, density, and the Office or the list as home."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants" data-note="Ada's face, provider, access mode and how she replies, on one page."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Where work comes from. Discord reconnecting is the one warning."></figure>
+          <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="At a glance" data-note="Outside the app: menu bar, hotkey panel, notifications and a marigold dock badge."></figure>
+        </div>
+
+        <h3 class="bk-group"><i data-i="globe" data-size="18"></i>Web <small>any browser · 1280 by 800</small></h3>
+        <div class="bk-grid bk-grid--3">
+          <figure data-frame="web" data-src="web/session-active.html" data-url="hercule.home.arpa/threads/fix-3ds-eu-cards" data-caption="Thread" data-note="The tab title counts what waits on you, and the favicon wears a marigold dot."></figure>
+          <figure data-frame="web" data-src="web/intake.html" data-url="hercule.home.arpa/intake" data-caption="Intake" data-note="A reader: j and k walk the Proposals, the answer keys stay the same."></figure>
+          <figure data-frame="web" data-src="web/decision.html" data-url="hercule.home.arpa/intake/checkout-fails-eu-cards" data-caption="Decision" data-note="One Proposal, what it was made from, and answers that work from anywhere."></figure>
+          <figure data-frame="web" data-src="web/session-empty.html" data-url="hercule.home.arpa/threads/new" data-caption="New thread" data-note="Start from scratch, or from the Proposals and Tasks that want a thread."></figure>
+          <figure data-frame="web" data-src="web/assistant.html" data-url="hercule.home.arpa/assistants/ada" data-caption="Ada" data-note="The conversation, with the other Assistants a click away."></figure>
+          <figure data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Settings · Providers" data-note="Harnesses, plan windows, and which machine is at cap."></figure>
+        </div>
+
+        <h3 class="bk-group"><i data-i="chat" data-size="18"></i>Mobile <small>iPhone · 390 by 844</small></h3>
+        <div class="bk-grid bk-grid--4">
+          <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="A colleague asks; Allow once without unlocking."></figure>
+          <figure data-frame="mobile" data-src="mobile/office.html" data-caption="Office" data-note="Rooms on top, then who needs you."></figure>
+          <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="Swipe right to start, left to dismiss."></figure>
+          <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="Decision" data-note="Made from 4 sources; answers at thumb height."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="Thread" data-note="The question docks above the keyboard."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="New thread" data-note="Say it out loud, or start from Intake."></figure>
+          <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Ada" data-note="Voice first; the record stays in line."></figure>
+          <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings" data-note="One list of domains; appearance in a sheet."></figure>
+        </div>
+      </section>
+
+      <!-- 6. The office -->
+      <section class="bk-sec" id="office">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Juno" data-pose="idle" data-size="22"></i>The office</span>
+          <h2>The office is the home screen, not a toy on the side.</h2>
+          <p class="bk-lede">It shows the same colleagues, in the same poses, as the sidebar and the list. The office adds one thing words cannot: where everyone is.</p>
+        </header>
+        <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="Monday 09:14. 8 working, 3 waiting on you, 12 idle."></figure>
+        <ul class="bk-points">
+          <li><span class="icon"><i data-i="office" data-size="18"></i></span><span><b>Rooms are projects</b>Each room's floor is the project's rug: webshop, payments-api, ops. You find a colleague by place.</span></li>
+          <li><span class="icon"><i data-i="terminal" data-size="18"></i></span><span><b>A desk is a session</b>The screen shows the turn; the character types while it works and slumps when it is idle.</span></li>
+          <li><span class="icon"><i data-i="hand" data-size="18"></i></span><span><b>Your desk holds the queue</b>Whoever waits on you lines up at your desk, and the decision card answers the first of 3 without leaving the floor.</span></li>
+          <li><span class="icon"><i data-i="server" data-size="18"></i></span><span><b>Racks are machines</b>Each lit slot is a running session. A machine at cap shows it, so placement is visible.</span></li>
+          <li><span class="icon"><i data-i="heart" data-size="18"></i></span><span><b>Lounge and bench</b>Assistants sit in the lounge; idle workflows wait on the window bench until an event calls them.</span></li>
+          <li><span class="icon"><i data-i="list" data-size="18"></i></span><span><b>The list is first class</b>One toggle turns the floor into a roster: Waiting on you, Working, Idle, with answers inline. On a phone the roster is the Office, under a plan of the rooms.</span></li>
+        </ul>
+        <div class="bk-office-row">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-state="list" data-caption="Office · List" data-note="The roster: sorted by who needs you, then by what they are doing."></figure>
+          <figure data-frame="mobile" data-src="mobile/office.html" data-caption="Office on the phone" data-note="A floor plan of rugs, then the roster. The head of the queue answers in place." data-max-scale="0.65"></figure>
+        </div>
+      </section>
+
+      <!-- 7. At 10x -->
+      <section class="bk-sec" id="ten">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Fix bug" data-pose="working" data-size="22"></i>At 10x</span>
+          <h2>140 colleagues and 31,000 events a day. Faces give way to counts; your queue never does.</h2>
+        </header>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-state="swarm" data-caption="Office with a swarm" data-note="Desks group by workflow: Fix bug ×9. The bench says 73 idle."></figure>
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-state="swarm" data-caption="Intake with a swarm" data-note="Topic piles take one answer for many: Start Fix bug on 9."></figure>
+        </div>
+        <div class="bk-nums">
+          <div class="card bk-num">
+            <b>140</b><span>colleagues live</span>
+            <p><span>52 working</span><span class="you-ink">10 waiting on you</span><span>78 idle</span></p>
+          </div>
+          <div class="card bk-num">
+            <b>31,000</b><span>events in a day</span>
+            <p><span>60 Proposals</span><span class="you-ink">9 need a call</span><span>30.7k handled quietly</span></p>
+          </div>
+        </div>
+        <ul class="bk-points">
+          <li><span class="icon"><i data-i="crew" data-size="18"></i></span><span><b>Faces give way to counts</b>Nine sessions of one workflow share one desk marked ×9. Idle colleagues become a number on the bench.</span></li>
+          <li><span class="icon"><i data-i="hand" data-size="18"></i></span><span><b>Waiting on you never hides</b>The queue shows three faces and "+7 more"; the decision card counts "1 of 10" and walks them with ↩.</span></li>
+          <li><span class="icon"><i data-i="intake" data-size="18"></i></span><span><b>Answer in batches</b>Intake piles Proposals by Topic. Checkout holds 19; one answer starts Fix bug on 9 of them.</span></li>
+          <li><span class="icon"><i data-i="fleet" data-size="18"></i></span><span><b>Machines show slots</b>"131 of 150 slots · 2 at cap". The racks say where room is left, not who sits where.</span></li>
+          <li><span class="icon"><i data-i="filter" data-size="18"></i></span><span><b>Triage stays in front</b>30,660 events end as no action, and the receipt says so in one line instead of hiding them.</span></li>
+          <li><span class="icon"><i data-i="palette" data-size="18"></i></span><span><b>Hue is not identity</b>Eight hues repeat by design. Shape, accessory and name keep neighbours apart; the name is always one hover away.</span></li>
+        </ul>
+      </section>
+
+      <!-- 8. Adopting it -->
+      <section class="bk-sec" id="adopt">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Refactor cart totals" data-pose="idle" data-size="22"></i>Adopting it</span>
+          <h2>Today's names keep their meaning, so most of the move is a swap.</h2>
+        </header>
+        <table class="bk-table">
+          <thead>
+            <tr><th style="width: 150px">Today</th><th style="width: 90px">light, dark</th><th style="width: 36px"></th><th style="width: 250px">Crew</th><th style="width: 90px">Studio, Cocoa</th><th>What changes</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>--bg</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(94.5% 0.0156 265)"></i><i class="bk-c" style="--c: oklch(20% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--bg</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--bg)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--bg)"></i></span></td>
+              <td>Warm white by day, brown-black by night. Hue 265 is gone from every neutral.</td>
+            </tr>
+            <tr>
+              <td><code>--surface</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(96.7% 0.0125 265)"></i><i class="bk-c" style="--c: oklch(22.2% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--surface</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--surface)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--surface)"></i></span></td>
+              <td>The main pane. The sidebar is glass over the wallpaper instead.</td>
+            </tr>
+            <tr>
+              <td><code>--raised</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(100% 0.0078 265)"></i><i class="bk-c" style="--c: oklch(25.5% 0.0259 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--raised</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--raised)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--raised)"></i></span></td>
+              <td>Cards and popovers, with a warm shadow step.</td>
+            </tr>
+            <tr>
+              <td><code>--ink</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(23% 0.01 265)"></i><i class="bk-c" style="--c: oklch(90% 0.008 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--ink</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--ink)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--ink)"></i></span></td>
+              <td>Warm near-black; a switch that is on uses it too.</td>
+            </tr>
+            <tr>
+              <td><code>--muted</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(48% 0.0156 265)"></i><i class="bk-c" style="--c: oklch(68% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--muted</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--muted)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--muted)"></i></span></td>
+              <td>Same role.</td>
+            </tr>
+            <tr>
+              <td><code>--faint</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(66% 0.0156 265)"></i><i class="bk-c" style="--c: oklch(50% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--faint</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--faint)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--faint)"></i></span></td>
+              <td>Same role.</td>
+            </tr>
+            <tr>
+              <td><code>--line</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(23% 0.01 265 / 0.1); --b: oklch(94.5% 0.0156 265)"></i><i class="bk-c" style="--c: oklch(90% 0.0288 265 / 0.1); --b: oklch(20% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--line</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--line)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--line)"></i></span></td>
+              <td>Opaque, so hairlines never stack darker over glass.</td>
+            </tr>
+            <tr>
+              <td><code>--line-soft</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: oklch(23% 0.01 265 / 0.055); --b: oklch(94.5% 0.0156 265)"></i><i class="bk-c" style="--c: oklch(90% 0.0288 265 / 0.06); --b: oklch(20% 0.0288 265)"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--line-soft</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--line-soft)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--line-soft)"></i></span></td>
+              <td>Same role.</td>
+            </tr>
+            <tr>
+              <td><code>--attn</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: #8a6116"></i><i class="bk-c" style="--c: #d0a147"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--you</code> fill · <code>--you-ink</code> text</td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--you)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--you)"></i></span></td>
+              <td>Attention becomes "addressed to you". <code>--attn</code> stays as an alias of <code>--you-ink</code>.</td>
+            </tr>
+            <tr>
+              <td><code>--fail</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: #a34e46"></i><i class="bk-c" style="--c: #cf7b71"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--fail</code> · <code>--fail-ink</code> · <code>--fail-tint</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--fail)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--fail)"></i></span></td>
+              <td>Tomato, split into fill, text and tint.</td>
+            </tr>
+            <tr>
+              <td><code>--live</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: #48717f"></i><i class="bk-c" style="--c: #7fa8b8"></i></span></td>
+              <td class="bk-arrow">→</td><td>the working pose</td>
+              <td><span class="bk-pairsw"><i data-face="Refactor cart totals" data-pose="working" data-size="24"></i></span></td>
+              <td>Live is no longer a color: it is hands on keys. <code>--live</code> aliases <code>--ok</code> until call sites move.</td>
+            </tr>
+            <tr>
+              <td><code>--ok</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: #48745a"></i><i class="bk-c" style="--c: #7fae8e"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--ok</code> · <code>--ok-tint</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--ok)"></i><i class="bk-c" data-theme="cocoa" style="--c: var(--ok)"></i></span></td>
+              <td>Only added lines and passing tests.</td>
+            </tr>
+            <tr>
+              <td><code>--project-*</code> dots</td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: #7d7ab0"></i><i class="bk-c" style="--c: #a67f92"></i></span></td>
+              <td class="bk-arrow">→</td><td><code>--proj-webshop</code> · <code>-payments</code> · <code>-ops</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" data-theme="studio" style="--c: var(--proj-webshop)"></i><i class="bk-c" data-theme="studio" style="--c: var(--proj-ops)"></i></span></td>
+              <td>Dots become rugs: quiet floor tints for places, drawn as a small tile.</td>
+            </tr>
+            <tr>
+              <td class="faint">new</td>
+              <td></td>
+              <td class="bk-arrow">→</td><td><code>--hue-*</code> · <code>--who*</code></td>
+              <td><span class="bk-pairsw"><i class="bk-c" style="--c: var(--who); --hue: var(--hue-iris)"></i><i class="bk-c" style="--c: var(--who); --hue: var(--hue-teal)"></i></span></td>
+              <td>The crew wheel. Set <code>--hue</code> on an element and <code>--who</code>, <code>--who-ink</code>, <code>--who-tint</code> follow.</td>
+            </tr>
+            <tr>
+              <td class="faint">new</td>
+              <td></td>
+              <td class="bk-arrow">→</td><td><code>--glass*</code> · <code>--room-*</code> · <code>--r-*</code> · <code>--dur-*</code></td>
+              <td></td>
+              <td>Glass for the composer and sidebar, the office's furniture, radii and motion.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="bk-sub"><h3>The first five changes</h3><p>In this order, each shippable alone.</p></div>
+        <ol class="bk-steps">
+          <li><b>Tokens and themes</b><span>Replace the token block with <code style="display: inline">tokens.css</code>, keeping old names as aliases, and self-host the two fonts. The theme row offers the five themes and System.</span><code><span>packages/ui/src/styles.css</span><span>packages/ui/src/theme/</span></code></li>
+          <li><b>A Face component</b><span>The character generator as a component that takes a name, a look, a pose and a size. Redraw the marks in the same stroke, and the logo as three colleagues. client-core decides the pose from the session's state.</span><code><span>packages/ui/src/marks/marks.tsx</span><span>packages/ui/src/marks/logo.tsx</span></code></li>
+          <li><b>Places and people</b><span>The sidebar becomes the nav, Waiting on you with faces and questions, and Assistants. The pulse becomes your own row at the foot.</span><code><span>apps/web/src/shell/sidebar.tsx</span><span>apps/web/src/shell/pulse.tsx</span></code></li>
+          <li><b>The docked question</b><span>The permission question docks on the composer as a marigold ledger with keys. The composer turns to glass and shrinks while you scroll back.</span><code><span>apps/web/src/screens/composer/</span><span>apps/web/src/screens/in-place-question.tsx</span></code></li>
+          <li><b>The Office as home</b><span>Home opens on the Office, with its List view one toggle away. Thread rows become who-rows; project dots become rugs.</span><code><span>apps/web/src/routes/_shell/index.tsx</span><span>apps/web/src/screens/thread-row.tsx</span><span>apps/web/src/screens/project-dot.tsx</span></code></li>
+        </ol>
+      </section>
+
+      <!-- 9. What this asks of the spec -->
+      <section class="bk-sec" id="spec">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Label new issues" data-pose="idle" data-size="22"></i>What this design asks the spec to change</span>
+          <h2>Seven changes, none to the domain's meaning.</h2>
+        </header>
+        <ul class="bk-asks">
+          <li><span class="bk-qn">1</span><span><b>Home is the Office, not Sessions</b>Spec 14 says "Home is Sessions". The All sessions lanes survive as the Office's List view, so nothing is lost; the default changes.</span></li>
+          <li><span class="bk-qn">2</span><span><b>The sidebar shows places and people</b>Nav, Waiting on you and Assistants, instead of the Threads and Hercule faces behind a segmented switch (spec 14, App shell).</span></li>
+          <li><span class="bk-qn">3</span><span><b>A stored look</b>An optional <code>look { hue, shape, accessory }</code> on workflows and Assistants, so a rename keeps the face. Without it the look is derived from the name.</span></li>
+          <li><span class="bk-qn">4</span><span><b>A Run wears its workflow's face</b>A session a workflow started draws that workflow's character. The data exists; the rule needs writing down.</span></li>
+          <li><span class="bk-qn">5</span><span><b>Five themes and System</b>The theme row lists Studio, Sunroom, Cocoa, Pine, Plum and System, instead of Light, Dark and System. Still per browser.</span></li>
+          <li><span class="bk-qn">6</span><span><b>Batch answers on a Topic pile</b>"Start Fix bug on 9" needs a rule: one operation, or nine Bound Actions sharing one approval (spec 10).</span></li>
+          <li><span class="bk-qn">7</span><span><b>Answered anywhere clears everywhere</b>ADR 0027 already resolves a decision wherever it is answered. The desktop app's notifications and dock badge must be withdrawn the same moment.</span></li>
+        </ul>
+        <footer class="bk-foot"><i data-logo="20"></i>Crew · Hercule design system 07 · prototype, not product code</footer>
+      </section>
+    </main>
+
+    <script src="brands.js"></script>
+    <script src="crew.js"></script>
+    <script>
+      (function () {
+        var root = document.documentElement;
+
+        // The tab carries the marigold dot, like the web app does when someone waits on you.
+        var icon = document.createElement("link");
+        icon.rel = "icon";
+        icon.href = Crew.favicon(true);
+        document.head.appendChild(icon);
+        document.querySelectorAll("[data-fav]").forEach(function (img) {
+          img.src = Crew.favicon(img.dataset.fav === "waiting");
+        });
+
+        // Custom looks: data-look="hue,shape,accessory" draws a face that is not a named colleague.
+        function drawLook(el) {
+          var p = el.dataset.look.split(",");
+          el.outerHTML = Crew.face(el.dataset.name || "A " + p[1] + " colleague", { look: { hue: p[0], shape: p[1], acc: p[2] }, pose: el.dataset.pose || "idle", size: Number(el.dataset.size) || 44 });
+        }
+        document.querySelectorAll("[data-look]").forEach(drawLook);
+
+        function fig(inner, label) {
+          return "<figure>" + inner + "<span>" + label + "</span></figure>";
+        }
+        var HUES = ["lime", "mint", "teal", "sky", "iris", "grape", "orchid", "peach"];
+        document.getElementById("bk-wheel").innerHTML = HUES.map(function (h) {
+          return Crew.face(h, { look: { hue: h, shape: "round", acc: "none" }, pose: "idle", size: 34 });
+        }).join("");
+        document.getElementById("bk-bodies").innerHTML = ["round", "bean", "dome", "square"].map(function (s, i) {
+          return fig(Crew.face(s, { look: { hue: ["sky", "iris", "orchid", "lime"][i], shape: s, acc: "none" }, size: 52 }), s);
+        }).join("");
+        document.getElementById("bk-accs").innerHTML =
+          ["none", "antenna", "tuft", "ears", "glasses"].map(function (a) {
+            return fig(Crew.face(a, { look: { hue: "mint", shape: "round", acc: a }, size: 52 }), a);
+          }).join("") +
+          fig(Crew.face("Ada", { size: 52 }), "bun · Ada") +
+          fig(Crew.face("Milo", { size: 52 }), "phones · Milo") +
+          fig(Crew.face("Juno", { size: 52 }), "sprout · Juno");
+
+        var POSES = ["working", "waiting", "idle", "asleep", "failed", "paused", "done", "away"];
+        var WHO = ["Fix 3-D Secure checkout for EU cards", "Ada", "Label new issues"];
+        var cells = [];
+        WHO.forEach(function (name) {
+          POSES.forEach(function (pose) {
+            cells.push("<span>" + Crew.face(name, { pose: pose, size: 44 }) + "</span>");
+          });
+        });
+        POSES.forEach(function (pose) {
+          cells.push('<span class="bk-small bk-gray">' + Crew.face("Refactor cart totals", { pose: pose, size: 20 }) + Crew.face("Triage", { pose: pose, size: 16 }) + "</span>");
+        });
+        POSES.forEach(function (pose) {
+          cells.push('<span class="' + (pose === "waiting" ? "you" : "") + '">' + Crew.poseWord(pose) + "</span>");
+        });
+        document.getElementById("bk-poses").innerHTML = cells.join("");
+
+        var ICONS = ["office", "intake", "checkin", "threads", "runs", "workflows", "tasks", "fleet", "connections", "bell", "settings", "search",
+          "plus", "check", "close", "mic", "send", "stop", "branch", "worktree", "laptop", "server", "clock", "sparkle",
+          "shield", "bolt", "key", "lock", "globe", "filter", "memory", "alarm", "hand", "calendar", "terminal", "diff"];
+        document.getElementById("bk-icons").innerHTML = ICONS.map(function (n) {
+          return '<span title="' + n + '">' + Crew.icon(n, 18) + "</span>";
+        }).join("");
+        var BRANDS = ["github", "gmail", "sentry", "posthog", "intercom", "stripe", "grafana", "slack", "discord", "linear", "pagerduty", "datadog", "googlecalendar", "anthropic", "claude", "openai", "pi", "cron", "web"];
+        document.getElementById("bk-brands").innerHTML = BRANDS.map(function (n) {
+          return '<span title="' + n + '">' + Crew.brand(n, 18) + "</span>";
+        }).join("");
+
+        // book.js builds lazy frames. Load them all eagerly, so a full-page shot shows every screen,
+        // and turn the light/dark aliases into the flagship names so the switcher marks them.
+        document.addEventListener("DOMContentLoaded", function () {
+          var alias = { light: "studio", dark: "cocoa" }[root.dataset.theme];
+          document.querySelectorAll("[data-frame] iframe").forEach(function (f) {
+            f.loading = "eager";
+          });
+          if (alias) window.HerculeBook.setTheme(alias);
+          document.querySelectorAll("[data-frame]").forEach(function (f) {
+            if (f._refresh && (!alias || f.dataset.theme)) f._refresh();
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

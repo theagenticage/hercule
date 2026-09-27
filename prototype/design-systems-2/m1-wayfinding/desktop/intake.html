@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="intake"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Intake</h1>
+          <div class="tabs" role="tablist" aria-label="Topics">
+            <button role="tab" aria-selected="true">All</button>
+            <button role="tab" aria-selected="false">Checkout</button>
+            <button role="tab" aria-selected="false">Infrastructure</button>
+            <button role="tab" aria-selected="false">Customers</button>
+            <button role="tab" aria-selected="false">Releases</button>
+          </div>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Manage topics"><i data-i="sliders"></i></button>
+            <button class="icon-btn" aria-label="Search Intake"><i data-i="search"></i></button>
+            <button class="pill-btn"><i data-i="play"></i>Triage now</button>
+          </div>
+        </header>
+
+        <div class="intake">
+          <div class="intake-main">
+            <div class="headline when-today">
+              <span class="burning"><b>1</b>burning</span><span><b>5</b>proposals</span><span><b>2</b>offers</span><span><b>2</b>need a call</span
+              ><span><b>3</b>FYI</span><span class="quiet"><b>167</b>handled quietly</span>
+            </div>
+            <div class="headline when-swarm">
+              <span class="burning"><b>3</b>burning</span><span><b>60</b>proposals</span><span><b>14</b>offers</span><span><b>9</b>need a call</span
+              ><span><b>31</b>FYI</span><span class="quiet"><b>2,299</b>handled quietly</span>
+            </div>
+
+            <!-- What came in since the last visit: each Connection is a line into Triage, and each
+                 outcome a line out of it. At 10x the same lines carry ten times the events; only
+                 their weight and their numerals change. -->
+            <figure class="mapband" aria-label="What came in since yesterday 18:20">
+              <svg class="netmap when-today" data-netmap width="720" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27"></svg>
+              <svg
+                class="netmap when-swarm"
+                data-netmap
+                width="720"
+                height="200"
+                data-labelw="124"
+                data-outw="124"
+                data-row="21"
+                data-top="28"
+                data-outrow="27"
+                data-when="09:00 · 3m 12s · next 11:00"
+                data-in="sentry:1720 github:480 gmail:200 stripe:140 intercom:100 posthog:40 grafana:30 cron:10"
+                data-out="60 proposals:60:wait;14 offers:14:wait;6 unsure:6:wait;310 held:310:paused;12 attached:12:done;31 FYI:31:idle;2,287 no action:2287:end"
+              ></svg>
+            </figure>
+
+            <!-- The lead Proposal: what it is, then one row per source it was made from, then its answers. -->
+            <article class="lead" aria-label="Lead Proposal">
+              <div class="lead-top">
+                <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b class="fail">urgent</b></span>
+                <span>Checkout</span>
+                <span>webshop</span>
+                <span>first seen 08:52</span>
+                <span class="grow"></span>
+                <span class="stamp stamp--attn"><i data-mk="wait"></i>Proposal</span>
+              </div>
+              <h2>Checkout fails for EU cards with 3-D Secure</h2>
+              <p class="gist">
+                Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+                <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+              </p>
+
+              <div class="mf" aria-label="Made from">
+                <div class="mf-row" data-line="sentry">
+                  <i class="ln"></i><span class="src"><i data-brand="sentry"></i>Sentry<span class="faint m">webshop-prod</span></span>
+                  <span class="ev"><code>PaymentError: authentication_required</code></span><span class="n"><b>412</b> · <b>188</b> users</span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="gmail">
+                  <i class="ln"></i><span class="src"><i data-brand="gmail"></i>Gmail<span class="faint m">rogier@personal</span></span>
+                  <span class="ev">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span><span class="n"><b>3</b> emails</span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="posthog">
+                  <i class="ln"></i><span class="src"><i data-brand="posthog"></i>PostHog<span class="faint m">webshop</span></span>
+                  <span class="ev">checkout conversion, EU only, since 14:10 yesterday</span><span class="n"><b class="fail">-18%</b></span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="github">
+                  <i class="ln"></i><span class="src"><i data-brand="github"></i>GitHub<span class="faint m">rogier/webshop</span></span>
+                  <span class="ev">deploy <b class="ink">#1289</b> "Upgrade Stripe SDK to v14"</span><span class="n">14:02 yesterday</span><i class="ln ln--out"></i>
+                </div>
+                <i class="mf-cap" aria-hidden="true"></i>
+              </div>
+
+              <div class="answers" role="group" aria-label="Answers">
+                <div class="ans"><button class="btn btn--primary">Start "Fix bug"</button><span class="desc">Starts Fix bug on webshop in a new worktree</span><kbd>&#9166;</kbd></div>
+                <div class="ans"><button class="btn">Accept</button><span class="desc">Adds it to the backlog as a Task</span><kbd>A</kbd></div>
+                <div class="ans"><button class="btn btn--quiet">Dismiss</button><span class="desc">Closes the Proposal</span><kbd>D</kbd></div>
+              </div>
+              <div class="lead-foot">
+                <i data-i="reply"></i>I can also draft a reply to the 3 customers once the fix ships.
+                <button class="btn btn--sm">Yes, after the fix</button>
+              </div>
+            </article>
+
+            <h2 class="sec-head">Needs a call<span class="n when-today">2</span><span class="n when-swarm">9</span></h2>
+            <div class="irow">
+              <i data-strip="intercom"></i>
+              <div>
+                <div class="irow-title"><span>App is slow on Android</span><span class="stamp">Unsure</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="intercom"></i>Intercom</span><span>7 conversations since Sunday</span><span>Which project is this?</span></div>
+              </div>
+              <div class="irow-acts">
+                <div class="seg"><button>webshop</button><button>payments-api</button><button>Both</button><button>Not work</button></div>
+              </div>
+            </div>
+            <div class="irow">
+              <i data-strip="github"></i>
+              <div>
+                <div class="irow-title"><span>34 events held</span><span class="stamp stamp--attn">Breaker</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="github"></i>GitHub</span><span>"Label new issues" tripped its Spawn Bound of 20/h at 08:14</span></div>
+              </div>
+              <div class="irow-acts">
+                <button class="btn btn--sm">Release all 34</button><button class="btn btn--sm">Raise to 50/h</button><button class="btn btn--primary btn--sm">Keep held</button>
+              </div>
+            </div>
+            <a class="side-all more when-swarm" href="#">7 more, by events<i data-i="chev-r"></i></a>
+
+            <h2 class="sec-head">Today<span class="n when-today">4</span><span class="n when-swarm">20</span></h2>
+            <div class="irow">
+              <i data-strip="grafana"></i>
+              <div>
+                <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+                <div class="irow-meta">
+                  <span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>hits its 2h limit at 04:00, 3 nights running</span>
+                </div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--primary btn--sm">Start "Investigate"</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="gmail"></i>
+              <div>
+                <div class="irow-title"><span>Draft a reply to Marta at Brightline</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="gmail"></i>Gmail</span><span>Customers</span><span>wants invoice INV-2291 in the company name</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--quiet btn--sm">Not now</button><button class="btn btn--primary btn--sm">Draft reply</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="stripe sentry"></i>
+              <div>
+                <div class="irow-title"><span>Stripe webhook retries rising</span></div>
+                <div class="irow-meta">
+                  <span><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="stripe"></i>Stripe</span><span>payments-api</span><span>+ 2 Sentry events</span>
+                </div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--primary btn--sm">Start "Investigate"</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="github"></i>
+              <div>
+                <div class="irow-title"><span>Merge 4 dependency bumps</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="github"></i>GitHub</span><span>webshop</span><span>all green, patch versions only</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Review first</button><button class="btn btn--primary btn--sm">Merge all 4</button></div>
+            </div>
+            <a class="side-all more when-swarm" href="#">16 more for today<i data-i="chev-r"></i></a>
+
+            <h2 class="sec-head">When you can<span class="n when-today">2</span><span class="n when-swarm">53</span></h2>
+            <div class="irow">
+              <i data-strip="cron"></i>
+              <div>
+                <div class="irow-title"><span>SSL certificate for status.acme.dev expires in 12 days</span></div>
+                <div class="irow-meta"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="cron"></i>Cron</span><span>ops</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--primary btn--sm">Start "Fix bug"</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="intercom"></i>
+              <div>
+                <div class="irow-title"><span>Add iDEAL as a payment method</span></div>
+                <div class="irow-meta"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="intercom"></i>Intercom</span><span>webshop</span><span>5 requests</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--quiet btn--sm">Dismiss</button><button class="btn btn--primary btn--sm">Accept</button></div>
+            </div>
+            <a class="side-all more when-swarm" href="#">51 more when you can<i data-i="chev-r"></i></a>
+
+            <h2 class="sec-head">Nothing to decide</h2>
+            <div class="quietline">
+              <span class="lbl"><i data-mk="done"></i></span><b>Attached</b>1 Sentry event<span class="sep"></span>Task "Cart total rounding on discounts"
+            </div>
+            <div class="quietline">
+              <span class="lbl"><i data-mk="idle"></i></span><b>FYI</b>payments-api v2.14.0 released<span class="sep"></span>sign-ups
+              <b class="ok">+9%</b> week over week<span class="sep"></span>Stripe payout <b>€18,240</b> on Thursday
+            </div>
+            <div class="quietline">
+              <span class="lbl"><i class="end-bar"></i></span><b class="when-today">166</b><b class="when-swarm">2,287</b>no action: known, noise or duplicates
+              <button class="btn btn--quiet btn--sm" style="margin-left: auto">Show</button>
+            </div>
+          </div>
+
+          <aside class="rail">
+            <section class="rail-sec">
+              <h3>Running now<span class="aside when-today">8 working · 3 waiting</span><span class="aside when-swarm">70 working · 11 waiting</span></h3>
+              <div class="board">
+                <a class="board-row" href="session-active.html">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Fix 3-D Secure checkout for EU cards</div><div class="sub">Thread · webshop · studio-mac</div></div>
+                  <div class="st attn">git push?<small>09:40</small></div>
+                </a>
+                <div class="board-row">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Ship release v2.15</div><div class="sub">Run · payments-api · build-box-2</div></div>
+                  <div class="st attn">publish to npm?<small>09:31</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Migrate ops dashboards</div><div class="sub">Thread · ops · studio-mac</div></div>
+                  <div class="st attn">a question<small>09:24</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work"></i>
+                  <div><div class="t">Refactor cart totals</div><div class="sub">Thread · webshop · build-box-1</div></div>
+                  <div class="st live">working<small>22m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work"></i>
+                  <div><div class="t">Investigate backup timeouts</div><div class="sub">Run · ops · build-box-1</div></div>
+                  <div class="st live">working<small>6m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work"></i>
+                  <div><div class="t">Webhook retry backoff</div><div class="sub">Run · payments-api · build-box-1</div></div>
+                  <div class="st live">working<small>3m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="paused"></i>
+                  <div><div class="t">Label new issues</div><div class="sub">Run · webshop · build-box-1</div></div>
+                  <div class="st muted">paused<small>bound tripped</small></div>
+                </div>
+              </div>
+              <a class="side-all when-today" href="office.html" style="margin-top: 6px; padding: 0">5 more working · 4 idle<i data-i="chev-r"></i></a>
+              <a class="side-all when-swarm" href="office.html?state=swarm" style="margin-top: 6px; padding: 0">8 more waiting · 67 working · 5 paused · 53 idle<i data-i="chev-r"></i></a>
+            </section>
+            <section class="rail-sec when-swarm">
+              <h3>Fleet<span class="aside">140 of 150 slots</span></h3>
+              <div class="fleet-bars">
+                <span class="nm">studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-4</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+              </div>
+              <a class="side-all" href="office.html?state=swarm" style="margin-top: 6px; padding: 0">6 more runners · 98 of 108 slots<i data-i="chev-r"></i></a>
+            </section>
+            <section class="rail-sec when-today">
+              <h3>Fleet<span class="aside">16 of 22 slots</span></h3>
+              <div class="fleet-bars">
+                <span class="nm">studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="v">5 of 6</span>
+                <span class="nm">build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-2</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span><span class="v">3 of 8</span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Connections<span class="aside">10 of 11 running</span></h3>
+              <a class="conn-icons" href="settings-connections.html" aria-label="11 Connections, Discord reconnecting">
+                <i data-brand="sentry"></i><i data-brand="github"></i><i data-brand="stripe"></i><i data-brand="gmail"></i><i data-brand="cron"></i><i
+                  data-brand="posthog"></i><i data-brand="intercom"></i><i data-brand="grafana"></i><i data-brand="slack"></i><i
+                  data-brand="webchat"></i><span class="down"><i data-brand="discord"></i><i data-mk="fail"></i></span>
+              </a>
+              <p class="linebar-note"><i data-brand="discord"></i><b>Discord</b> reconnecting since 09:12<span class="faint"> · Juno can't be reached</span></p>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

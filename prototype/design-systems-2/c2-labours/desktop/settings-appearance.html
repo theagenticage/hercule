@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <style>
+      /* Theme previews: each tile is a tiny app drawn in its own theme. */
+      .themes {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+      }
+      .tp {
+        display: grid;
+        gap: 8px;
+        text-align: left;
+      }
+      .tp-art {
+        position: relative;
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        height: 96px;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        transition: box-shadow var(--dur-2), transform var(--dur-2) var(--ease-out);
+      }
+      .tp:hover .tp-art {
+        transform: translateY(-1px);
+      }
+      .tp[aria-pressed="true"] .tp-art {
+        box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
+      }
+      .tp-side {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 12px 6px;
+        background: color-mix(in oklab, var(--bg) 80%, transparent);
+      }
+      .tp-side i {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .tp-side i:first-child {
+        background: var(--faint);
+      }
+      .tp-main {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 10px 10px 0;
+        background: var(--surface);
+        box-shadow: -1px 0 0 var(--line-soft);
+      }
+      .tp-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .tp-line {
+        flex: 1;
+        height: 5px;
+        border-radius: 3px;
+        background: var(--line);
+      }
+      .tp-line--you {
+        flex: none;
+        width: 12px;
+        background: var(--you);
+      }
+      .tp-comp {
+        margin-top: auto;
+        height: 16px;
+        border-radius: 7px 7px 0 0;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .tp-name {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding-left: 2px;
+      }
+      .tp-name b {
+        font-weight: var(--w-medium);
+      }
+      .tp-name span {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .tp-name .chip {
+        height: 18px;
+        margin-left: auto;
+        padding: 0 6px;
+        font-size: var(--t-11);
+      }
+      .pair {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .pair .field {
+        height: 30px;
+        min-width: 116px;
+        font-size: var(--t-13);
+      }
+      .sizes button {
+        min-width: 40px;
+        justify-content: center;
+      }
+      .sizes button:nth-child(1) {
+        font-size: 12px;
+      }
+      .sizes button:nth-child(2) {
+        font-size: 13px;
+      }
+      .sizes button:nth-child(3) {
+        font-size: 14px;
+      }
+      .sizes button:nth-child(4) {
+        font-size: 15px;
+      }
+      /* The Marks preview shows the same Intake line with and without source marks. */
+      .marks-demo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .marks-demo .srcs {
+        display: inline-flex;
+        gap: 5px;
+        color: var(--ink);
+      }
+      .set-row .seg {
+        flex: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="settings"></aside>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings /</span>
+          <h1 class="title" style="margin-left: -6px">Appearance</h1>
+          <span class="spacer"></span>
+          <span class="time">Saved on this Mac</span>
+        </header>
+
+        <div class="settings">
+          <nav data-setnav="appearance"></nav>
+          <div class="set-body">
+            <div class="set-col">
+              <section class="set-sec">
+                <h2>Theme</h2>
+                <p>Two light themes and three dark ones. Every colleague keeps its colors in every theme.</p>
+                <div class="themes">
+                  <button class="tp" aria-pressed="true">
+                    <span class="tp-art" data-theme="marble">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Marble</b><span>light</span><span class="chip">by day</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="terracotta">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Terracotta</b><span>light</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="nemea">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Nemea</b><span>dark</span><span class="chip">by night</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="symposium">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Symposium</b><span>dark</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="hesperides">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Hesperides</b><span>dark</span></span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="set-sec">
+                <div class="set-row">
+                  <div class="set-label"><b>Follow the system</b><span>Switches with macOS: Marble by day, Nemea by night.</span></div>
+                  <div class="pair">
+                    <span class="field field--select"><i data-i="sun" data-size="14"></i>Marble</span>
+                    <span class="field field--select"><i data-i="moon" data-size="14"></i>Nemea</span>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="true" aria-label="Follow the system"></button>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Glass</b><span>How much shows through the sidebar, the header pills and the composer. 0% is solid.</span></div>
+                  <input class="range" type="range" min="0" max="100" step="5" aria-label="Glass" data-glass-slider />
+                  <output class="range-value"></output>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Density</b><span>Compact fits 30% more rows in Intake and the roster.</span></div>
+                  <div class="seg" data-seg><button aria-pressed="true">Comfortable</button><button aria-pressed="false">Compact</button></div>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Text size</b><span>Transcripts follow; titles stay modest.</span></div>
+                  <div class="seg sizes" data-seg><button aria-pressed="false">Aa</button><button aria-pressed="true">Aa</button><button aria-pressed="false">Aa</button><button aria-pressed="false">Aa</button></div>
+                </div>
+              </section>
+
+              <section class="set-sec">
+                <h2>The office</h2>
+                <p>How the office shows the crew, and how much the crew moves.</p>
+                <div class="set-row">
+                  <div class="set-label"><b>Show the office as</b><span>The courtyard shows who is where; the list sorts them by who needs you.</span></div>
+                  <div class="seg" data-seg><button aria-pressed="true"><i data-i="office" data-size="14"></i>Courtyard</button><button aria-pressed="false"><i data-i="list" data-size="14"></i>List</button></div>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Reduce motion</b><span>Colleagues hold still. Poses and badges stay, so state still reads.</span></div>
+                  <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce motion"></button>
+                </div>
+                <div class="set-row">
+                  <div class="set-label">
+                    <b>Marks</b>
+                    <span class="marks-demo">Shows where things came from on rows <span class="srcs"><i data-brand="sentry" data-size="13"></i><i data-brand="gmail" data-size="13"></i><i data-brand="posthog" data-size="13"></i><i data-brand="github" data-size="13"></i></span></span>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="true" aria-label="Marks"></button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // The selected theme follows the page's own theme, so a frame shown in Nemea has Nemea selected.
+      (function () {
+        var t = document.documentElement.dataset.theme;
+        t = t === "light" ? "marble" : t === "dark" ? "nemea" : t;
+        document.querySelectorAll(".tp").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.querySelector(".tp-art").dataset.theme === t));
+        });
+      })();
+    </script>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

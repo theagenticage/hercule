@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>New thread · Hercule</title>
+    <style>
+      .m-nav {
+        border-bottom: 0;
+      }
+      .cancel {
+        padding-left: 12px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .nav-t {
+        justify-self: center;
+        font-size: 15px;
+        font-weight: var(--w-bold);
+      }
+      .projects {
+        display: flex;
+        gap: 8px;
+        padding: 4px 20px 0;
+        flex: none;
+      }
+      .projects button {
+        display: inline-flex;
+        align-items: center;
+        height: 36px;
+        padding: 0 14px 0 10px;
+        border-radius: var(--r-pill);
+        background: var(--sunken);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .projects button.is-on {
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-1);
+      }
+      .setup {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        gap: 6px;
+        height: 30px;
+        margin: 10px 20px 0;
+        padding: 0 10px;
+        border-radius: var(--r-pill);
+        box-shadow: inset 0 0 0 1px var(--line);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        flex: none;
+      }
+      .setup .ic:last-child {
+        color: var(--faint);
+      }
+
+      .hello {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 0 32px;
+        text-align: center;
+      }
+      .newbie {
+        display: grid;
+        place-items: center;
+        width: 76px;
+        height: 76px;
+        border-radius: 50%;
+        border: 2px dashed var(--line);
+        color: var(--faint);
+      }
+      .hello h1 {
+        margin: 4px 0 0;
+        font-size: 22px;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .hello p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.45;
+      }
+
+      .from {
+        padding: 0 12px 12px;
+        flex: none;
+      }
+      .from .m-lane {
+        padding: 0 8px 8px;
+      }
+      .sug {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        gap: 1px 12px;
+        align-items: center;
+        min-height: 58px;
+        padding: 8px 12px 8px 10px;
+        border-radius: 16px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .sug + .sug {
+        margin-top: 6px;
+      }
+      .sug > .cr {
+        grid-row: span 2;
+      }
+      .sug b {
+        font-size: 14px;
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sug small {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .sug .ic {
+        grid-row: span 2;
+        color: var(--faint);
+      }
+
+      /* Voice first: the mic is the biggest thing within thumb reach; typing is one tap away. */
+      .voice {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        padding: 14px 28px 4px;
+        flex: none;
+      }
+      .v-side {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        color: var(--muted);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .v-side span:first-child {
+        display: grid;
+        place-items: center;
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        background: var(--sunken);
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: var(--w-bold);
+      }
+      .v-mic {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 84px;
+        height: 84px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--bg);
+        box-shadow: 0 0 0 8px color-mix(in oklab, var(--ink) 8%, transparent), var(--shadow-3);
+      }
+      .v-label {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 0 40px;
+        color: var(--muted);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+        flex: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <header class="m-nav">
+        <a class="cancel" href="intake.html">Cancel</a>
+        <span class="nav-t">New thread</span>
+        <span></span>
+      </header>
+
+      <div class="projects">
+        <button class="is-on"><span class="proj proj--webshop">webshop</span></button>
+        <button><span class="proj proj--payments">payments-api</span></button>
+        <button><span class="proj proj--ops">ops</span></button>
+      </div>
+      <button class="setup"><i data-brand="claude" data-size="13"></i>Opus 5.5 · studio-mac · Auto-accept edits<i data-i="chev-d" data-size="13"></i></button>
+
+      <div class="hello">
+        <span class="newbie"><i data-i="sparkle" data-size="28"></i></span>
+        <h1>What should we work on?</h1>
+        <p>Say it the way you would to a colleague. A new one joins webshop in its own worktree.</p>
+      </div>
+
+      <div class="from">
+        <div class="m-lane">Or start from Intake</div>
+        <a class="sug" href="decision.html"><i data-face="Fix bug" data-pose="idle" data-size="34"></i><b>Checkout fails for EU cards</b><i data-i="chev-r" data-size="16"></i><small><span class="fail-ink">Urgent</span> · Fix bug suggested</small></a>
+        <a class="sug" href="#"><i data-face="Draft reply" data-pose="idle" data-size="34"></i><b>Draft a reply to Marta at Brightline</b><i data-i="chev-r" data-size="16"></i><small>Offer · Draft reply</small></a>
+      </div>
+
+      <div class="voice">
+        <button class="v-side"><span>Aa</span><span>Type instead</span></button>
+        <button class="v-mic" title="Hold to talk"><i data-i="mic" data-size="34"></i></button>
+        <button class="v-side"><span><i data-i="plus" data-size="20"></i></span><span>Photo or file</span></button>
+      </div>
+      <div class="v-label">Hold to talk, let go to send<span class="haptic"><i data-i="wave" data-size="11"></i>soft on press · rigid on send</span></div>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

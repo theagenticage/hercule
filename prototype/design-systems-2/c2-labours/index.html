@@ -1,0 +1,2383 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="../shared/book.js" defer></script>
+    <meta charset="utf-8" />
+    <title>Crew Labours · Hercule design systems</title>
+    <link rel="icon" href="data:," />
+    <style>
+      /* PROTOTYPE - the Crew Labours design book. It is styled with the design's own tokens and
+         components; everything here is book-only layout. */
+
+      /* The screen pages fill one window and never scroll; the book is a long page. */
+      html,
+      body {
+        height: auto;
+        overflow: visible;
+      }
+      /* The book's own colours, captured once on <body>. A frame pinned to another theme gets
+         that theme's tokens on its <figure>, and its caption and chrome must keep the book's. */
+      body {
+        --page-ink: var(--ink);
+        --page-muted: var(--muted);
+        --page-surface: var(--surface);
+        --page-line: var(--line);
+        font-size: 14px;
+        line-height: 1.55;
+        /* Today's app, shot as it runs now, in the matching light or dark. */
+        --bl-shell: url(../shared/baseline/app-shell-light.png);
+        --bl-intake: url(../shared/baseline/intake-view-light.png);
+      }
+      [data-theme="nemea"] body,
+      [data-theme="dark"] body,
+      [data-theme="symposium"] body,
+      [data-theme="hesperides"] body {
+        --bl-shell: url(../shared/baseline/app-shell-dark.png);
+        --bl-intake: url(../shared/baseline/intake-view-dark.png);
+      }
+      section[id],
+      [id^="s-"],
+      [id^="pair-"],
+      h3[id],
+      div[id] {
+        scroll-margin-top: 72px;
+      }
+      a {
+        color: var(--accent-ink);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      p {
+        margin: 0;
+      }
+
+      /* Frames: chrome in the book's own tones, captions in the book's ink. */
+      .f {
+        --f-chrome: color-mix(in oklab, var(--page-ink) 8%, var(--page-surface));
+        --f-chrome-ink: var(--page-muted);
+        --f-shadow: 0 0 0 1px color-mix(in oklab, var(--page-line) 80%, transparent), 0 1px 2px oklch(0.3 0.03 60 / 0.08),
+          0 20px 44px -20px oklch(0.25 0.03 60 / 0.4);
+        color: var(--page-ink);
+      }
+      .f .f-caption {
+        color: var(--page-ink);
+        font-weight: var(--w-medium);
+      }
+      .f .f-caption small {
+        font-weight: var(--w-regular);
+        color: var(--page-muted);
+        opacity: 1;
+        font-size: 12.5px;
+        line-height: 1.45;
+        margin-top: 3px;
+        max-width: 62ch;
+      }
+      .f .f-caption a {
+        color: var(--page-muted);
+        opacity: 1;
+      }
+
+      /* ---------- The sticky toolbar ---------- */
+      .bk-top {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 56px;
+        padding: 0 24px;
+        background: var(--glass);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+        /* The knot's crossing gap is painted in the toolbar's own colour. */
+        --logo-ground: var(--glass-tint);
+      }
+      .bk-brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+      }
+      .bk-brand:hover {
+        text-decoration: none;
+      }
+      .bk-nav {
+        display: flex;
+        margin-left: 6px;
+      }
+      .bk-nav a {
+        padding: 5px 6px;
+        border-radius: var(--r-pill);
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .bk-nav a:hover {
+        background: var(--hover);
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .bk-spacer {
+        flex: 1;
+      }
+      .bk-themes button {
+        gap: 7px;
+        padding: 0 11px 0 8px;
+      }
+      /* A swatch shows the theme's ground and its courtyard wall, drawn with that theme's tokens. */
+      .bk-sw {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--bg) 50%, var(--court-wall) 50%);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--page-ink) 22%, transparent);
+      }
+      .bk-glass {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .bk-glass input {
+        width: 84px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .bk-glass output {
+        min-width: 34px;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      @media (max-width: 1400px) {
+        .bk-nav {
+          display: none;
+        }
+      }
+
+      /* ---------- Page structure ---------- */
+      .bk {
+        width: min(1200px, 100% - 64px);
+        margin: 0 auto;
+      }
+      .bk-sec {
+        padding-top: 104px;
+      }
+      /* The meander: a small Greek key, used in the book and the brand only, never as UI chrome. */
+      /* The border repeats with "round" so it always ends on a whole key, never a cut one. */
+      .bk-meander {
+        height: 10px;
+        background: color-mix(in oklab, var(--ink) 22%, transparent);
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M0 9.4H12M1.5 9.4V.6h9v6h-6V3.4h3'/%3E%3C/svg%3E")
+          0 0 / 12px 10px round;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10' fill='none' stroke='black' stroke-width='1.2'%3E%3Cpath d='M0 9.4H12M1.5 9.4V.6h9v6h-6V3.4h3'/%3E%3C/svg%3E")
+          0 0 / 12px 10px round;
+      }
+      .bk-kick {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: var(--w-button);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .bk-kick b {
+        color: var(--terra);
+        font-weight: var(--w-bold);
+      }
+      .bk-kick .bk-meander {
+        flex: 1;
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        text-wrap: balance;
+      }
+      h2 {
+        max-width: 860px;
+        margin: 16px 0 12px;
+        font-size: 31px;
+        line-height: 1.15;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.018em;
+      }
+      h3 {
+        font-size: 18px;
+        line-height: 1.3;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.008em;
+      }
+      h4 {
+        font-size: 12px;
+        font-weight: var(--w-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .bk-lede {
+        max-width: 780px;
+        margin-bottom: 36px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.55;
+        text-wrap: pretty;
+      }
+      .bk-sub {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin: 64px 0 20px;
+      }
+      .bk-sub p {
+        color: var(--muted);
+      }
+      .bk-note {
+        max-width: 760px;
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      .g2,
+      .g3,
+      .g4 {
+        display: grid;
+        gap: 44px 32px;
+        align-items: start;
+      }
+      .g2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .g3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .g4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .bk-cards {
+        display: grid;
+        gap: 16px;
+        align-items: stretch;
+      }
+      .bk-card {
+        padding: 20px 22px;
+        background: var(--raised);
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .bk-card h3 {
+        font-size: 15px;
+        margin-bottom: 6px;
+      }
+      .bk-card p {
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      .bk-list {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .bk-list li + li {
+        margin-top: 6px;
+      }
+      .bk-list li::marker {
+        color: var(--faint);
+      }
+
+      /* ---------- Hero ---------- */
+      .bk-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 600px;
+        gap: 48px;
+        align-items: center;
+        padding: 64px 0 56px;
+      }
+      .bk-family {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        color: var(--muted);
+        font-weight: var(--w-medium);
+      }
+      .bk-hero h1 {
+        margin: 26px 0 8px;
+        font-size: 60px;
+        line-height: 1;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.03em;
+      }
+      .bk-thesis {
+        font-size: 22px;
+        line-height: 1.3;
+        color: var(--terra);
+        font-weight: var(--w-medium);
+        letter-spacing: -0.01em;
+      }
+      .bk-brief {
+        margin-top: 22px;
+        max-width: 520px;
+        font-size: 15.5px;
+        line-height: 1.6;
+        text-wrap: pretty;
+      }
+      .bk-facts {
+        display: grid;
+        grid-template-columns: repeat(2, auto);
+        justify-content: start;
+        gap: 14px 40px;
+        margin: 30px 0 0;
+      }
+      .bk-facts dt {
+        color: var(--faint);
+        font-size: 11.5px;
+        font-weight: var(--w-button);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .bk-facts dd {
+        margin: 2px 0 0;
+        font-weight: var(--w-medium);
+      }
+
+      /* The hero stage: the cast in the courtyard, drawn with the office's own tokens. */
+      .bk-stage {
+        position: relative;
+        width: 600px;
+        height: 444px;
+        overflow: hidden;
+        border-radius: var(--r-xl);
+        background: var(--court-floor);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+      }
+      .st-wall {
+        position: absolute;
+        inset: 0 0 auto;
+        height: 196px;
+        background: var(--court-wall);
+      }
+      .st-arch {
+        position: absolute;
+        top: 36px;
+        width: 100px;
+        height: 160px;
+        border-radius: 50px 50px 0 0;
+        background: linear-gradient(180deg, var(--court-sun), color-mix(in oklab, var(--court-sun) 55%, var(--court-wall)));
+        box-shadow: 0 0 0 5px var(--court-stone);
+      }
+      .st-plinth {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 196px;
+        height: 18px;
+        background: var(--court-stone);
+        box-shadow: 0 1px 0 color-mix(in oklab, var(--court-shade) 16%, transparent);
+      }
+      .st-plinth .bk-meander {
+        position: absolute;
+        inset: 4px 0 auto;
+        background: color-mix(in oklab, var(--court-wall) 70%, var(--court-shade));
+        opacity: 0.55;
+      }
+      .st-floor {
+        position: absolute;
+        inset: 214px 0 0;
+        background-image: linear-gradient(var(--court-tile) 1.5px, transparent 1.5px),
+          linear-gradient(90deg, var(--court-tile) 1.5px, transparent 1.5px);
+        background-size: 50px 50px;
+        background-position: -1px 24px;
+      }
+      .st-tree {
+        position: absolute;
+        left: 14px;
+        top: 112px;
+      }
+      .st-amph {
+        position: absolute;
+        left: 536px;
+        top: 330px;
+      }
+      .st-hero {
+        position: absolute;
+        isolation: isolate;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 150px;
+        margin-left: -75px;
+        text-align: center;
+        line-height: 1.3;
+      }
+      /* A soft shadow under each hero's feet puts it on the floor. */
+      .st-hero::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        top: calc(var(--sz) - 7px);
+        width: calc(var(--sz) * 0.78);
+        height: 11px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, color-mix(in oklab, var(--court-shade) 26%, transparent), transparent);
+      }
+      .st-hero b {
+        margin-top: 5px;
+        font-size: 12.5px;
+      }
+      .st-hero span {
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .st-hero--back {
+        width: 104px;
+        margin-left: -52px;
+      }
+      .st-hero .you-ink {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+
+      /* ---------- Tables ---------- */
+      .bk-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+      .bk-table th {
+        padding: 0 14px 10px 0;
+        color: var(--faint);
+        font-size: 11.5px;
+        font-weight: var(--w-button);
+        letter-spacing: 0.06em;
+        text-align: left;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .bk-table td {
+        padding: 11px 14px 11px 0;
+        vertical-align: top;
+        border-top: 1px solid var(--line-soft);
+        text-wrap: pretty;
+      }
+      .bk-table td:last-child,
+      .bk-table th:last-child {
+        padding-right: 0;
+      }
+      .bk-table .bk-group td {
+        padding-top: 26px;
+        border-top: 0;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .bk-table .n {
+        width: 30px;
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .bk-said {
+        width: 290px;
+        color: var(--muted);
+      }
+      /* text-wrap on every cell would switch nowrap back off, hence the longer selector. */
+      .bk-table td.bk-see {
+        width: 180px;
+        white-space: nowrap;
+      }
+      .bk-see a {
+        display: block;
+        font-weight: var(--w-medium);
+      }
+      .bk-table .num-cell {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .bk-table code {
+        font-size: 12.5px;
+      }
+
+      /* ---------- Before and after ---------- */
+      .bk-pair {
+        margin-top: 64px;
+      }
+      .bk-pair-head {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+        margin: 10px 0 22px;
+      }
+      .bk-pair-head p {
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      .bk-pair-head b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+
+      /* ---------- Why this one ---------- */
+      .bk-why p {
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      /* ---------- Why it beats today ---------- */
+      .bk-q {
+        padding: 44px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bk-q:first-of-type {
+        border-top: 0;
+        padding-top: 8px;
+      }
+      .bk-q-head {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        gap: 0 8px;
+        align-items: baseline;
+        max-width: 860px;
+      }
+      .bk-q-n {
+        grid-row: span 3;
+        color: var(--terra);
+        font-size: var(--t-num);
+        font-weight: var(--w-bold);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .bk-gain {
+        margin-top: 2px;
+        color: var(--accent-ink);
+        font-weight: var(--w-medium);
+      }
+      .bk-q-head p:last-child {
+        margin-top: 8px;
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      .bk-q-cols {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+        margin-top: 26px;
+        align-items: start;
+      }
+      .bk-q-cols > div {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .bk-col-h {
+        color: var(--faint);
+        font-size: 11.5px;
+        font-weight: var(--w-button);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .bk-cap {
+        color: var(--muted);
+        font-size: 13px;
+        text-wrap: pretty;
+      }
+      /* A crop of today's app, from a 1440 x 900 shot: --x, --y, --w and --h pick the part, --k scales it. */
+      .bk-crop {
+        display: block;
+        width: calc(var(--w) * var(--k) * 1px);
+        height: calc(var(--h) * var(--k) * 1px);
+        background: var(--img) no-repeat;
+        background-size: calc(1440px * var(--k)) calc(900px * var(--k));
+        background-position: calc(var(--x) * var(--k) * -1px) calc(var(--y) * var(--k) * -1px);
+        border-radius: var(--r-md);
+        box-shadow: 0 0 0 1px var(--line), var(--shadow-1);
+      }
+      .bk-crop--navy {
+        --img: url(../shared/baseline/intake-view-dark.png);
+      }
+      /* A crop of a live Labours page: the script puts the page in a scaled iframe inside. */
+      .bk-live {
+        position: relative;
+        display: block;
+        flex: none;
+        overflow: hidden;
+        width: calc(var(--w) * var(--k) * 1px);
+        height: calc(var(--h) * var(--k) * 1px);
+        border-radius: var(--r-md);
+        background: var(--bg);
+        box-shadow: var(--shadow-1);
+      }
+      .bk-live iframe {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1440px;
+        height: 900px;
+        border: 0;
+        transform-origin: 0 0;
+        transform: scale(var(--k)) translate(calc(var(--x) * -1px), calc(var(--y) * -1px));
+        pointer-events: none;
+      }
+      .bk-live::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        box-shadow: inset 0 0 0 1px var(--line);
+        pointer-events: none;
+      }
+
+      /* ---------- The system ---------- */
+      .bk-rules {
+        counter-reset: rule;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-rules li {
+        counter-increment: rule;
+        padding: 18px 20px 20px;
+        background: var(--raised);
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .bk-rules li::before {
+        content: counter(rule, upper-roman);
+        display: block;
+        margin-bottom: 6px;
+        color: var(--terra);
+        font-weight: var(--w-bold);
+      }
+      .bk-rules b {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 15px;
+      }
+      .bk-rules span {
+        color: var(--muted);
+      }
+      .bk-sample {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        margin-bottom: 14px;
+      }
+      .bk-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--c);
+      }
+
+      /* Theme cards: each card is drawn in its own theme. */
+      .bk-theme {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        text-align: left;
+        background: var(--bg);
+        color: var(--ink);
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+        transition: box-shadow var(--dur-2) var(--ease-out);
+      }
+      .bk-theme[aria-pressed="true"] {
+        box-shadow: 0 0 0 2px var(--accent), var(--shadow-2);
+      }
+      .bk-pv {
+        position: relative;
+        display: grid;
+        grid-template-columns: 54px 1fr;
+        height: 132px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bk-pv-side {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 14px 10px;
+        background: var(--side-fill);
+        box-shadow: inset -1px 0 0 var(--line-soft);
+      }
+      .bk-pv-side i {
+        height: 5px;
+        border-radius: 3px;
+        background: color-mix(in oklab, var(--ink) 16%, transparent);
+      }
+      .bk-pv-side i:first-child {
+        width: 70%;
+        background: var(--you);
+      }
+      .bk-pv-main {
+        position: relative;
+        background: var(--court-floor);
+        background-image: linear-gradient(var(--court-tile) 1px, transparent 1px),
+          linear-gradient(90deg, var(--court-tile) 1px, transparent 1px);
+        background-size: 26px 26px;
+      }
+      .bk-pv-main .cr {
+        position: absolute;
+        left: 18px;
+        top: 20px;
+      }
+      .bk-pv-main .count--you {
+        position: absolute;
+        left: 64px;
+        top: 29px;
+      }
+      .bk-pv-main .btn {
+        position: absolute;
+        left: 14px;
+        bottom: 14px;
+      }
+      .bk-theme-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 14px 14px;
+      }
+      .bk-theme-text b {
+        font-size: 14.5px;
+      }
+      .bk-theme-text small {
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.4;
+      }
+
+      /* Type specimen. */
+      .bk-type {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: 32px;
+      }
+      .bk-card .bk-type-big,
+      .bk-card .bk-nums,
+      .bk-weights p > span:first-child {
+        color: var(--ink);
+      }
+      .bk-type-big {
+        font-size: 44px;
+        line-height: 1.05;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.025em;
+      }
+      .bk-weights {
+        display: grid;
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .bk-weights p {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .bk-weights p > span:first-child {
+        font-size: 17px;
+      }
+      .bk-weights small {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .bk-nums {
+        font-size: var(--t-num);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .bk-sizes {
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+        margin-top: 14px;
+        color: var(--muted);
+      }
+      .bk-code {
+        margin-top: 18px;
+        padding: 12px 14px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: 12.5px;
+      }
+
+      /* Glass. */
+      .bk-glass-rule {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 44px;
+      }
+      .bk-zoom {
+        display: grid;
+        grid-template-columns: 132px 820px minmax(0, 1fr);
+        gap: 24px;
+        align-items: center;
+        padding: 18px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bk-zoom:first-of-type {
+        border-top: 0;
+      }
+      .bk-zoom b {
+        display: block;
+        font-size: 15px;
+      }
+      .bk-zoom small,
+      .bk-zoom p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Button material, shown at three fixed levels over a scrap of transcript. */
+      .bk-material {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-mat {
+        position: relative;
+        overflow: hidden;
+        height: 150px;
+        border-radius: var(--r-lg);
+        background: var(--surface);
+        color: var(--ink);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      /* Transcript text runs behind a floating glass bar of buttons, the way the dock floats over a
+         thread. At 0 the bar and its buttons are solid; at 100% the words show
+         through, blurred past reading, and the buttons turn from matte stone to glazed ceramic.
+         The numbers line up: four 22px lines of text, and the 44px bar covers exactly the second and
+         third, so no line is ever cut in half at 0. */
+      .bk-mat-under {
+        position: absolute;
+        inset: 14px 16px auto;
+        height: 88px;
+        overflow: hidden;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 22px;
+      }
+      .bk-mat-bar {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        top: 36px;
+        height: 44px;
+        box-sizing: border-box;
+        display: flex;
+        gap: 6px;
+        padding: 6px;
+        border-radius: var(--r-pill);
+        background: var(--glass);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 0 0 1px var(--glass-ring), var(--shadow-2);
+      }
+      .bk-mat-label {
+        position: absolute;
+        left: 16px;
+        bottom: 12px;
+        font-weight: var(--w-medium);
+      }
+      .bk-mat-label small {
+        color: var(--muted);
+        font-weight: var(--w-regular);
+      }
+      .bk-doctrine td:nth-child(2) {
+        width: 210px;
+      }
+      .bk-doctrine td:first-child {
+        width: 130px;
+        font-weight: var(--w-bold);
+      }
+      .bk-doctrine td:last-child {
+        width: 300px;
+        color: var(--muted);
+      }
+      .bk-ledgers {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 28px;
+      }
+      .bk-ledgers .bk-card {
+        padding: 16px 14px 14px;
+      }
+      .bk-ledgers h3 {
+        margin: 0 4px 10px;
+      }
+      .bk-ledgers h3 small {
+        display: block;
+        color: var(--muted);
+        font-size: 12.5px;
+        font-weight: var(--w-regular);
+      }
+
+      /* Marks, icons and source marks. */
+      .bk-marks {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .bk-marks .bk-card {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 2px 12px;
+        align-items: center;
+        padding: 16px 18px;
+      }
+      .bk-marks .bk-card > :first-child {
+        grid-row: span 2;
+      }
+      .bk-marks .bk-card b {
+        font-size: 14px;
+      }
+      .bk-marks .bk-card p {
+        font-size: 13px;
+      }
+      .bk-icons {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 4px;
+        margin-top: 20px;
+      }
+      .bk-icon {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        padding: 14px 4px 10px;
+        border-radius: var(--r-md);
+        color: var(--ink);
+      }
+      .bk-icon small {
+        color: var(--faint);
+        font-size: 11px;
+      }
+      .bk-icon:hover {
+        background: var(--hover);
+      }
+      .bk-brands {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 22px;
+        margin-top: 12px;
+      }
+      .bk-brands span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 0;
+        color: var(--muted);
+      }
+      .bk-brands .br,
+      .bk-brands .ic {
+        color: var(--ink);
+      }
+
+      /* The cast. */
+      .bk-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 22px 28px;
+      }
+      .bk-fig {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        min-width: 64px;
+        text-align: center;
+      }
+      .bk-fig small {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .bk-fig b {
+        font-size: 12.5px;
+        font-weight: var(--w-medium);
+      }
+      .bk-poses {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .bk-poses th {
+        padding: 0 0 8px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: var(--w-medium);
+        text-align: center;
+      }
+      .bk-poses th:first-child {
+        text-align: left;
+      }
+      .bk-poses td {
+        padding: 8px 0;
+        text-align: center;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bk-poses td:first-child {
+        text-align: left;
+        font-weight: var(--w-medium);
+      }
+
+      /* Logo. */
+      .bk-logo {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr 1fr;
+        gap: 16px;
+      }
+      .bk-logo .bk-card {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .bk-lockup {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 32px;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.02em;
+        --logo-ground: var(--raised);
+      }
+      .bk-show {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        min-height: 124px;
+      }
+      .bk-fav {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      /* ---------- Office and 10x ---------- */
+      .bk-points {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 40px;
+      }
+      .bk-points .bk-card p {
+        font-size: 13.5px;
+      }
+      .bk-office-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 256px;
+        gap: 40px;
+        align-items: start;
+        margin-top: 44px;
+      }
+      .bk-stats {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 40px;
+      }
+      .bk-stat {
+        padding: 16px 18px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .bk-stat b {
+        display: block;
+        font-size: var(--t-num);
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .bk-stat span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* ---------- Adopting it ---------- */
+      .bk-c {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        margin-right: 4px;
+        vertical-align: middle;
+        border-radius: 6px;
+        background: var(--c);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--page-ink) 14%, transparent);
+      }
+      .bk-adopt td:nth-child(1) {
+        width: 150px;
+      }
+      .bk-adopt td:nth-child(2),
+      .bk-adopt td:nth-child(3) {
+        width: 76px;
+      }
+      .bk-adopt td:nth-child(4) {
+        width: 190px;
+      }
+      .bk-adopt td:nth-child(5) {
+        width: 88px;
+      }
+      .bk-adopt td:last-child {
+        color: var(--muted);
+      }
+      .bk-steps {
+        counter-reset: step;
+        display: grid;
+        gap: 0;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-steps li {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 44px minmax(0, 380px) minmax(0, 1fr);
+        gap: 16px;
+        padding: 16px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bk-steps li::before {
+        content: counter(step);
+        color: var(--terra);
+        font-size: 20px;
+        font-weight: var(--w-bold);
+        line-height: 1.2;
+      }
+      .bk-steps b {
+        display: block;
+      }
+      /* A repo path is read as one unit, so it never breaks at a hyphen. */
+      .bk-steps code,
+      .bk-note code {
+        white-space: nowrap;
+      }
+      .bk-steps code {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .bk-steps p {
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+
+      /* ---------- Footer ---------- */
+      .bk-foot {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        margin-top: 120px;
+        padding-bottom: 56px;
+        color: var(--faint);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="bk-top" aria-label="Book">
+      <a class="bk-brand" href="#top"><i data-logo="22"></i>Crew Labours</a>
+      <span class="bk-nav">
+        <a href="#changed">Changed</a><a href="#why">Why</a><a href="#today">Today</a><a href="#system">System</a
+        ><a href="#screens">Screens</a><a href="#office">Office</a><a href="#ten">10x</a><a href="#adopt">Adopt</a
+        ><a href="#spec">Spec</a>
+      </span>
+      <span class="bk-spacer"></span>
+      <span class="seg bk-themes" role="group" aria-label="Theme">
+        <button data-theme-option="marble"><i class="bk-sw" data-theme="marble"></i>Marble</button>
+        <button data-theme-option="terracotta"><i class="bk-sw" data-theme="terracotta"></i>Terracotta</button>
+        <button data-theme-option="nemea"><i class="bk-sw" data-theme="nemea"></i>Nemea</button>
+        <button data-theme-option="symposium"><i class="bk-sw" data-theme="symposium"></i>Symposium</button>
+        <button data-theme-option="hesperides"><i class="bk-sw" data-theme="hesperides"></i>Hesperides</button>
+      </span>
+      <label class="bk-glass"
+        >Glass <input type="range" min="0" max="100" step="5" value="50" data-glass-control aria-label="Glass level" /><output
+          data-glass-value
+        ></output
+      ></label>
+    </nav>
+
+    <main>
+      <!-- ================================================================ Hero -->
+      <header class="bk bk-hero" id="top">
+        <div>
+          <p class="bk-family">
+            <span class="app-icon" style="--size: 40px"><i data-logo="28"></i></span>Crew, iteration 2
+          </p>
+          <h1>Crew Labours</h1>
+          <p class="bk-thesis">Small heroes, twelve labours a day.</p>
+          <p class="bk-brief">
+            Crew's colleagues become small sturdy heroes, after the Hercules in Hercule. Threads come first; the office is a
+            sunlit courtyard under System, with an aqueduct for the event flow when you want it. Waiting on you sits on top of
+            every sidebar. One olive button marks the suggested answer, gold only ever means you, and every answer lines up in
+            one column. Glass is one number, 50% by default, used only on layers that float over content.
+          </p>
+          <dl class="bk-facts">
+            <div><dt>Default glass</dt><dd>50%</dd></div>
+            <div><dt>Themes</dt><dd>5, plus Follow the system</dd></div>
+            <div><dt>Type</dt><dd>Bricolage Grotesque, Recursive for code</dd></div>
+            <div><dt>Home</dt><dd>Threads</dd></div>
+          </dl>
+        </div>
+
+        <div class="bk-stage" role="img" aria-label="The cast standing in the courtyard">
+          <div class="st-wall">
+            <span class="st-arch" style="left: 55px"></span><span class="st-arch" style="left: 185px"></span
+            ><span class="st-arch" style="left: 315px"></span><span class="st-arch" style="left: 445px"></span>
+          </div>
+          <div class="st-plinth"><span class="bk-meander"></span></div>
+          <div class="st-floor"></div>
+          <svg class="st-tree" viewBox="0 0 112 310" width="112" height="310" aria-hidden="true">
+            <path d="M56 250V200c0-22-8-34-14-52M56 206c3-22 12-36 18-52" fill="none" stroke="var(--court-wood)" stroke-width="7" stroke-linecap="round" />
+            <g fill="var(--court-leaf)">
+              <ellipse cx="38" cy="126" rx="30" ry="21" />
+              <ellipse cx="76" cy="116" rx="30" ry="23" />
+              <ellipse cx="56" cy="88" rx="33" ry="27" />
+              <ellipse cx="26" cy="154" rx="19" ry="13" />
+              <ellipse cx="86" cy="150" rx="21" ry="13" />
+            </g>
+            <g fill="var(--court-sun)" opacity=".35">
+              <ellipse cx="46" cy="78" rx="12" ry="7" transform="rotate(-20 46 78)" />
+              <ellipse cx="80" cy="108" rx="10" ry="6" transform="rotate(-20 80 108)" />
+              <ellipse cx="30" cy="120" rx="9" ry="5" transform="rotate(-20 30 120)" />
+            </g>
+            <rect x="22" y="238" width="68" height="13" rx="3" fill="color-mix(in oklab, var(--court-roof) 82%, var(--court-shade))" />
+            <path d="M27 251h58l-7 55H34z" fill="var(--court-roof)" />
+            <path d="M31 268h50" stroke="color-mix(in oklab, var(--court-roof) 80%, var(--court-shade))" stroke-width="2.5" />
+          </svg>
+          <svg class="st-amph" viewBox="0 0 54 94" width="54" height="94" aria-hidden="true">
+            <path d="M19 14c-9 0-12 9-6 16M35 14c9 0 12 9 6 16" fill="none" stroke="color-mix(in oklab, var(--court-roof) 82%, var(--court-shade))" stroke-width="3.2" stroke-linecap="round" />
+            <path d="M19 6h16v6c0 3 3 5 6 8 7 7 9 16 9 26 0 18-9 34-15 44H19C13 80 4 64 4 46c0-10 2-19 9-26 3-3 6-5 6-8z" fill="var(--court-roof)" />
+            <rect x="15" y="2" width="24" height="6" rx="2.5" fill="color-mix(in oklab, var(--court-roof) 82%, var(--court-shade))" />
+            <path d="M6.5 42h41M7.5 52h39" stroke="color-mix(in oklab, var(--court-roof) 78%, var(--court-shade))" stroke-width="2.5" />
+          </svg>
+
+          <div class="st-hero st-hero--back" style="left: 190px; top: 190px; --sz: 60px">
+            <i data-face="Triage" data-pose="idle" data-size="60"></i><b>Triage</b><span>sorts every event</span>
+          </div>
+          <div class="st-hero st-hero--back" style="left: 294px; top: 190px; --sz: 60px">
+            <i data-face="Ada" data-pose="working" data-size="60"></i><b>Ada</b><span>personal assistant</span>
+          </div>
+          <div class="st-hero st-hero--back" style="left: 398px; top: 190px; --sz: 60px">
+            <i data-face="Milo" data-pose="idle" data-size="60"></i><b>Milo</b><span>ops assistant</span>
+          </div>
+          <div class="st-hero st-hero--back" style="left: 502px; top: 190px; --sz: 60px">
+            <i data-face="Juno" data-pose="asleep" data-size="60"></i><b>Juno</b><span>support assistant</span>
+          </div>
+          <div class="st-hero" style="left: 196px; top: 296px; --sz: 76px">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="76"></i><b>Fix 3-D Secure checkout</b
+            ><span class="you-ink">a thread, waiting on you</span>
+          </div>
+          <div class="st-hero" style="left: 340px; top: 296px; --sz: 76px">
+            <i data-face="Fix bug" data-pose="working" data-size="76"></i><b>Fix bug</b><span>a workflow, working</span>
+          </div>
+          <div class="st-hero" style="left: 470px; top: 296px; --sz: 76px">
+            <i data-face="Ship release" data-pose="idle" data-size="76"></i><b>Ship release</b><span>a workflow, idle</span>
+          </div>
+        </div>
+      </header>
+      <div class="bk"><div class="bk-meander"></div></div>
+
+      <!-- ================================================================ I. What changed -->
+      <section class="bk bk-sec" id="changed">
+        <p class="bk-kick"><b>I</b>What changed<span class="bk-meander"></span></p>
+        <h2>Every point you made about Crew, and where to see the answer.</h2>
+        <p class="bk-lede">
+          Rogier, this is every point of your feedback that touches Crew: the general ones, the Aurora ones, Crew's good and bad
+          points, and the Metro points that hold for any design. Each row links to the place in this book that shows it.
+        </p>
+
+        <table class="bk-table">
+          <thead>
+            <tr><th>#</th><th>You said</th><th>What Labours does</th><th>See it</th></tr>
+          </thead>
+          <tbody>
+            <tr class="bk-group"><td colspan="4">In general</td></tr>
+            <tr>
+              <td class="n">1</td>
+              <td class="bk-said">Glass that I can toggle, maybe with a slider. Subtle, not a macOS Tahoe disaster.</td>
+              <td>
+                Glass is one number from 0 to 100%, 50% by default. It moves the sidebar, the header pills, the composer, the
+                dock, menus, sheets, the tab bar and the buttons together. At 0 everything is solid and still looks finished.
+              </td>
+              <td class="bk-see"><a href="#glass">Glass</a><a href="#s-appearance">Appearance</a></td>
+            </tr>
+            <tr>
+              <td class="n">2</td>
+              <td class="bk-said">Aurora's colour wash distracts from the content.</td>
+              <td>
+                Glass shows the content under it and nothing else: no gradients or blobs put there to feed it, not even on the
+                phone's lock screen. The window ground is a near-neutral tonal step.
+              </td>
+              <td class="bk-see"><a href="#glass">Glass</a><a href="#s-lock">Lock screen</a></td>
+            </tr>
+
+            <tr class="bk-group"><td colspan="4">From Aurora</td></tr>
+            <tr>
+              <td class="n">3</td>
+              <td class="bk-said">The thread header row with floating pills, and tabs for the threads of one workspace.</td>
+              <td>
+                The thread opens with a project crumb, the threads of this workspace as tabs with a state mark each, a + for a
+                new thread here, and a Changes +48 -12 | Commit pill. The pills float; the transcript fades out before it reaches them.
+              </td>
+              <td class="bk-see"><a href="#pair-session">Thread, before and after</a></td>
+            </tr>
+            <tr>
+              <td class="n">4</td>
+              <td class="bk-said">Aurora's Hercule sidebar is the cleanest, without its blooming colours.</td>
+              <td>
+                Threads | Hercule at the top. Work and System as small quiet labels, one outline icon per row, counts in one
+                right-aligned column. No connecting lines and no glow.
+              </td>
+              <td class="bk-see"><a href="#pair-intake">Intake, before and after</a></td>
+            </tr>
+            <tr>
+              <td class="n">5</td>
+              <td class="bk-said">Glowy colours wash out what sits next to them, like the threads in the sidebar.</td>
+              <td>
+                Nothing glows. Colour stays small and means one thing each: olive for the suggested step, gold for what waits on
+                you, brick for failure. Thread titles stay in full ink.
+              </td>
+              <td class="bk-see"><a href="#colour">Colour</a></td>
+            </tr>
+            <tr>
+              <td class="n">6</td>
+              <td class="bk-said">The burning glow in Intake drowns out everything else.</td>
+              <td>A burning Proposal gets the word Urgent in a light brick tint and four brick priority bars. No bloom.</td>
+              <td class="bk-see"><a href="#s-intake">Intake</a></td>
+            </tr>
+
+            <tr class="bk-group"><td colspan="4">Crew, what worked</td></tr>
+            <tr>
+              <td class="n">7</td>
+              <td class="bk-said">The office is probably the prettiest.</td>
+              <td>
+                Kept and carried further: a sunlit classical courtyard with a portico per project, a colonnade wing per machine,
+                Triage's fountain in the middle and your desk with the three that wait on you.
+              </td>
+              <td class="bk-see"><a href="#office">Office</a></td>
+            </tr>
+            <tr>
+              <td class="n">8</td>
+              <td class="bk-said">The cuteness of the creatures.</td>
+              <td>The same round faces, blush and poses, now on two sturdy feet and carrying one prop at most.</td>
+              <td class="bk-see"><a href="#cast">The cast</a></td>
+            </tr>
+            <tr>
+              <td class="n">9</td>
+              <td class="bk-said">"Waiting on you" in the sidebar is good.</td>
+              <td>
+                On top of both sidebar tabs, above everything: threads and runs alike, each with its question in one line.
+              </td>
+              <td class="bk-see"><a href="#today">Why it beats today</a></td>
+            </tr>
+            <tr>
+              <td class="n">10</td>
+              <td class="bk-said">The Hercule sidebar is clean and easy on the eyes.</td>
+              <td>Kept, now with Work and System labels. The Office is a first-class row under System.</td>
+              <td class="bk-see"><a href="#pair-intake">Intake, before and after</a></td>
+            </tr>
+            <tr>
+              <td class="n">11</td>
+              <td class="bk-said">Intake is clean, but the buttons don't line up across rows.</td>
+              <td>
+                Every answer fills one 188px column, so the eye can draw a straight line through them. The olive answer always
+                comes first, and each answer has its key and a line saying what it does.
+              </td>
+              <td class="bk-see"><a href="#s-intake">Intake</a><a href="#buttons">Buttons</a></td>
+            </tr>
+
+            <tr class="bk-group"><td colspan="4">Crew, what didn't</td></tr>
+            <tr>
+              <td class="n">12</td>
+              <td class="bk-said">Threads first, like t3-code, before users discover the rest.</td>
+              <td>
+                Home is Threads. The Threads tab lists threads by project, with the assistants below. A new thread starts from
+                one question: what should the agent do?
+              </td>
+              <td class="bk-see"><a href="#pair-session">Thread, before and after</a><a href="#s-session-empty">New thread</a></td>
+            </tr>
+            <tr>
+              <td class="n">13</td>
+              <td class="bk-said">The buttons are kiddy, and I can't see what their colours mean.</td>
+              <td>
+                Four kinds of button, one meaning each: olive for the suggested answer, neutral for other answers that act,
+                quiet text for declining, brick text for destroying. Gold is never a button.
+              </td>
+              <td class="bk-see"><a href="#buttons">Buttons</a></td>
+            </tr>
+            <tr>
+              <td class="n">14</td>
+              <td class="bk-said">Try the glass treatment on the buttons.</td>
+              <td>
+                Full pills whose material follows the glass level: matte stone at 0, glazed ceramic with a lit top edge at 100%.
+              </td>
+              <td class="bk-see"><a href="#material">Button material</a></td>
+            </tr>
+            <tr>
+              <td class="n">15</td>
+              <td class="bk-said">The creatures don't feel like Hercule.</td>
+              <td>
+                Each one is a small Hercules. Triage wears the Nemean lion's hood, Ada a laurel wreath, Milo a helmet, Juno a
+                feather; workflows carry a club, a shield, a sprig or a headband. The mark is the Hercules knot.
+              </td>
+              <td class="bk-see"><a href="#cast">The cast</a><a href="#logo">Logo</a></td>
+            </tr>
+
+            <tr class="bk-group"><td colspan="4">From the Metro notes, true for any design</td></tr>
+            <tr>
+              <td class="n">16</td>
+              <td class="bk-said">Too many kinds of icon to learn.</td>
+              <td>One outline icon family on a 16px grid, and six state marks, each explained once.</td>
+              <td class="bk-see"><a href="#marks">Marks and icons</a></td>
+            </tr>
+            <tr>
+              <td class="n">17</td>
+              <td class="bk-said">No monospace in the UI.</td>
+              <td>
+                Bricolage Grotesque everywhere, counts and meta lines included. Recursive only for code, commands, diffs and
+                file paths.
+              </td>
+              <td class="bk-see"><a href="#type">Type</a></td>
+            </tr>
+            <tr>
+              <td class="n">18</td>
+              <td class="bk-said">A theme must not make settings harder to understand.</td>
+              <td>Settings are plain rows: a label, one line of help, a control. No decoration.</td>
+              <td class="bk-see"><a href="#s-providers">Providers</a></td>
+            </tr>
+            <tr>
+              <td class="n">19</td>
+              <td class="bk-said">The event streams in the office take all the attention.</td>
+              <td>The aqueduct is off by default, and quiet when on: thin channels and small droplets, under the people.</td>
+              <td class="bk-see"><a href="#office">Office</a></td>
+            </tr>
+            <tr>
+              <td class="n">20</td>
+              <td class="bk-said">An option in Crew that brings in the event flow.</td>
+              <td>
+                An Event flow switch in the office toolbar. Aqueducts carry each source's events into Triage's fountain, where
+                they are sorted.
+              </td>
+              <td class="bk-see"><a href="#office">Office</a></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="bk-pair" id="pair-session">
+          <h3>A thread</h3>
+          <div class="bk-pair-head">
+            <p><b>Round 1.</b> Seven places first, then Waiting on you, and no threads in the sidebar. A gold Allow once in a yellow dock; the question set in mono.</p>
+            <p><b>Labours.</b> A Threads tab with Waiting on you on top and threads by project. Header pills with a Changes pill, and a glass dock with one olive answer.</p>
+          </div>
+          <div class="g2">
+            <figure data-frame="desktop" data-c0 data-src="../c0-crew/desktop/session-active.html" data-caption="Crew · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Crew Labours"></figure>
+          </div>
+        </div>
+
+        <div class="bk-pair" id="pair-intake">
+          <h3>Intake</h3>
+          <div class="bk-pair-head">
+            <p><b>Round 1.</b> A violet Start button, a cyan one lower down, buttons as wide as their labels, and the receipt in mono.</p>
+            <p><b>Labours.</b> One olive answer per group, in a 188px column that every answer fills. The receipt in the UI face, Work and System labels in the sidebar.</p>
+          </div>
+          <div class="g2">
+            <figure data-frame="desktop" data-c0 data-src="../c0-crew/desktop/intake.html" data-caption="Crew · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Crew Labours"></figure>
+          </div>
+        </div>
+
+        <div class="bk-pair" id="pair-office">
+          <h3>The office</h3>
+          <div class="bk-pair-head">
+            <p><b>Round 1.</b> An isometric room with rugs, opened as the home screen.</p>
+            <p><b>Labours.</b> A courtyard under System. Triage is the fountain, each project has a portico, each machine a colonnade wing, and your desk holds the three that wait on you.</p>
+          </div>
+          <div class="g2">
+            <figure data-frame="desktop" data-c0 data-src="../c0-crew/desktop/office.html" data-caption="Crew · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Crew Labours"></figure>
+          </div>
+        </div>
+
+        <div class="bk-pair" id="pair-appearance">
+          <h3>Appearance</h3>
+          <div class="bk-pair-head">
+            <p><b>Round 1.</b> Five rooms, and Reduce transparency as the only glass setting.</p>
+            <p><b>Labours.</b> Five themes named from the myths, Follow the system, and Glass as one slider at 50%.</p>
+          </div>
+          <div class="g2">
+            <figure data-frame="desktop" data-c0 data-src="../c0-crew/desktop/settings-appearance.html" data-caption="Crew · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Crew Labours"></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ II. Why this one -->
+      <section class="bk bk-sec" id="why">
+        <p class="bk-kick"><b>II</b>Why this one<span class="bk-meander"></span></p>
+        <h2>The crew you liked, given the name's other root.</h2>
+        <div class="g3 bk-why">
+          <div class="bk-card">
+            <h3>Over the original</h3>
+            <p>
+              Round 1 had the prettiest office and the cutest crew, but it opened on the office, spoke in five button colours and
+              gave the crew no link to the name. Labours keeps the crew, the office and Waiting on you, and adds threads first,
+              one olive answer in one column, and a Hercules in every figure.
+            </p>
+          </div>
+          <div class="bk-card">
+            <h3>Over Bureau</h3>
+            <p>
+              Bureau reads Hercule as Poirot: lacquer, brass, Deco type, tubes and raised rectangles. Labours reads it as
+              Hercules: stone, olive and terracotta, a courtyard with an aqueduct, and full pills whose material comes from the
+              glass level.
+            </p>
+          </div>
+          <div class="bk-card">
+            <h3>What it trades away</h3>
+            <p>
+              Hercules is the name's second root, not Poirot, and a myth invites theme-park kitsch, so each area gets one or two
+              classical cues at most. The heroes are a touch less playful than round 1's creatures.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ III. Why it beats today -->
+      <section class="bk bk-sec" id="today">
+        <p class="bk-kick"><b>III</b>Why it beats today<span class="bk-meander"></span></p>
+        <h2>Five questions you ask Hercule all day, answered by looking instead of reading.</h2>
+        <p class="bk-lede">Today's app on the left, as it runs now. Labours on the right, live.</p>
+
+        <article class="bk-q">
+          <div class="bk-q-head">
+            <span class="bk-q-n">1</span>
+            <h3>Who needs me right now?</h3>
+            <p class="bk-gain">Found at a glance, on every page.</p>
+            <p>
+              Today the three items that wait on you are rows in the main column, in the same weight as everything else. In
+              Labours they sit on top of both sidebar tabs, with a gold mark and the question in one line.
+            </p>
+          </div>
+          <div class="bk-q-cols">
+            <div>
+              <p class="bk-col-h">Today</p>
+              <span class="bk-crop" style="--img: var(--bl-shell); --x: 258; --y: 56; --w: 720; --h: 180; --k: 0.8"></span>
+              <p class="bk-cap">Waiting on you is a heading in the page, reachable only from this screen.</p>
+            </div>
+            <div>
+              <p class="bk-col-h">Labours</p>
+              <span class="bk-live" data-live="desktop/session-active.html" data-title="Waiting on you in the sidebar" style="--x: 0; --y: 110; --w: 264; --h: 160; --k: 1.6"></span>
+              <p class="bk-cap">The top of the sidebar, on a thread's page. The same three show on the Hercule tab.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="bk-q">
+          <div class="bk-q-head">
+            <span class="bk-q-n">2</span>
+            <h3>What happens if I click?</h3>
+            <p class="bk-gain">Every answer says what it does.</p>
+            <p>
+              Today Start Bugfix, Later and Dismiss look alike. In Labours the suggested answer is the one olive pill, every
+              answer fills one column, and each carries a line saying what the click does, plus its key.
+            </p>
+          </div>
+          <div class="bk-q-cols">
+            <div>
+              <p class="bk-col-h">Today</p>
+              <span class="bk-crop" style="--img: var(--bl-intake); --x: 228; --y: 330; --w: 836; --h: 186; --k: 0.69"></span>
+              <p class="bk-cap">Three answers, three equal buttons, no word on what each one starts.</p>
+            </div>
+            <div>
+              <p class="bk-col-h">Labours</p>
+              <span class="bk-live" data-live="desktop/intake.html" data-title="The lead Proposal in Intake" style="--x: 288; --y: 198; --w: 868; --h: 418; --k: 0.665"></span>
+              <p class="bk-cap">Start "Fix bug" names who does the work, where, on which machine.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="bk-q">
+          <div class="bk-q-head">
+            <span class="bk-q-n">3</span>
+            <h3>Can I answer from here?</h3>
+            <p class="bk-gain">Answer without opening the app.</p>
+            <p>
+              Today a row reads "Runner drain command" and you open it to learn the question. In Labours the question and its
+              answers come to you: the ⌥ Space quick panel, the menu bar, notifications and the lock screen. Answered anywhere
+              clears everywhere.
+            </p>
+          </div>
+          <div class="bk-q-cols">
+            <div>
+              <p class="bk-col-h">Today</p>
+              <span class="bk-crop" style="--img: var(--bl-shell); --x: 0; --y: 205; --w: 236; --h: 42; --k: 2"></span>
+              <p class="bk-cap">A title in the sidebar. The question itself is one click away.</p>
+            </div>
+            <div>
+              <p class="bk-col-h">Labours</p>
+              <span class="bk-live" data-live="desktop/glance.html" data-title="The quick panel and the menu bar extra" style="--x: 72; --y: 0; --w: 1008; --h: 700; --k: 0.5794"></span>
+              <p class="bk-cap">The knot in the menu bar with a gold 3, the ⌥ Space quick panel with the full ledger, and the menu bar extra.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="bk-q">
+          <div class="bk-q-head">
+            <span class="bk-q-n">4</span>
+            <h3>What is everyone doing?</h3>
+            <p class="bk-gain">Read from across the room.</p>
+            <p>
+              Today the crew is a list of tiny glyphs. In Labours every colleague is a figure whose pose is its state: working at a
+              desk, waiting at yours, paused, idle in the lounge, asleep.
+            </p>
+          </div>
+          <div class="bk-q-cols">
+            <div>
+              <p class="bk-col-h">Today</p>
+              <span class="bk-crop" style="--img: var(--bl-shell); --x: 0; --y: 140; --w: 236; --h: 310; --k: 1.25"></span>
+              <p class="bk-cap">State lives in a glyph a few pixels wide.</p>
+            </div>
+            <div>
+              <p class="bk-col-h">Labours</p>
+              <span class="bk-live" data-live="desktop/office.html" data-title="The office courtyard" style="--x: 330; --y: 240; --w: 820; --h: 400; --k: 0.712"></span>
+              <p class="bk-cap">The three that wait on you stand at your desk; the assistants rest in the lounge; Triage sits at the fountain.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="bk-q">
+          <div class="bk-q-head">
+            <span class="bk-q-n">5</span>
+            <h3>Can dark be something other than navy?</h3>
+            <p class="bk-gain">Three darks, none of them blue.</p>
+            <p>
+              Today's dark is blue-violet. Labours has Nemea (olive-black, the default by night), Symposium (deep wine) and
+              Hesperides (bronze evening).
+            </p>
+          </div>
+          <div class="bk-q-cols">
+            <div>
+              <p class="bk-col-h">Today</p>
+              <span class="bk-crop bk-crop--navy" style="--x: 0; --y: 0; --w: 1440; --h: 900; --k: 0.4056"></span>
+              <p class="bk-cap">Intake in today's dark.</p>
+            </div>
+            <div>
+              <p class="bk-col-h">Labours</p>
+              <figure data-frame="desktop" data-theme="nemea" data-src="desktop/office.html" data-caption="The office in Nemea"></figure>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ================================================================ IV. The system -->
+      <section class="bk bk-sec" id="system">
+        <p class="bk-kick"><b>IV</b>The system<span class="bk-meander"></span></p>
+        <h2>One number for glass, one meaning per colour, one column for answers.</h2>
+        <p class="bk-lede">Six rules carry the whole design. Everything below follows from them.</p>
+        <ol class="bk-rules">
+          <li><b>Threads first</b><span>A new user meets a place to run threads. The office, Intake and the rest are one tab away.</span></li>
+          <li><b>Colour means one thing</b><span>Olive is the suggested step, gold is you, brick is failure. Nothing glows.</span></li>
+          <li><b>One filled button</b><span>The suggested answer is the only olive pill in a group, and always comes first.</span></li>
+          <li><b>Glass only floats</b><span>Only layers over content are glass, and one number sets how much.</span></li>
+          <li><b>Who, then what</b><span>A hue and a prop say who a colleague is. A pose and a mark say what it is doing.</span></li>
+          <li><b>One face for the UI</b><span>Bricolage Grotesque everywhere. Recursive only where the text is code.</span></li>
+        </ol>
+
+        <div class="bk-sub" id="colour"><h3>Colour</h3><p>Areas of colour stay small next to text.</p></div>
+        <div class="bk-cards g4">
+          <div class="bk-card">
+            <div class="bk-sample"><span class="btn btn--go btn--sm">Start "Fix bug"</span></div>
+            <h3>Olive · the suggested step</h3>
+            <p>The one answer we suggest, focus rings and selection. The olive wreath goes to whoever finished the job.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-sample"><i data-mark="waiting" data-size="18"></i><b class="count count--you">3</b><span class="you-ink">Waiting on you</span></div>
+            <h3>Gold · waiting on you</h3>
+            <p>The mark, the count and a thin line. Never a button fill, so "waits on you" never looks like "press this".</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-sample"><i data-mark="failed" data-size="18"></i><span class="chip chip--fail">Urgent</span><span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span></div>
+            <h3>Brick · failure</h3>
+            <p>Failed work, urgency, and buttons that destroy something. Nothing else is red.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-sample" style="--logo-ground: var(--raised)"><i data-logo="30"></i><span class="bk-dot" style="--c: var(--terra); width: 18px; height: 18px"></span></div>
+            <h3>Terracotta · the brand</h3>
+            <p>The knot, the app icon and the pots in the courtyard. Never a state.</p>
+          </div>
+          <div class="bk-card" style="grid-column: span 2">
+            <div class="bk-sample" data-hues></div>
+            <h3>Hues · who</h3>
+            <p>Seven hues for colleagues only, kept away from gold, brick and olive. A hue says who, never what state.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-sample"><span class="proj proj--webshop">webshop</span><span class="proj proj--payments">payments-api</span><span class="proj proj--ops">ops</span></div>
+            <h3>Tesserae · projects</h3>
+            <p>A small, low-chroma square beside a project's name, like a mosaic tile.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-sample"><span class="ok-ink num">+48</span><span class="fail-ink num">-12</span><span class="chip chip--ok">24 passed</span></div>
+            <h3>Green · diffs and tests</h3>
+            <p>Added lines and passing tests keep the code convention. Green never marks a button.</p>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Themes</h3><p>Two light, three dark, none of them blue. Follow the system picks Marble by day and Nemea by night.</p></div>
+        <div class="bk-cards" style="grid-template-columns: repeat(5, minmax(0, 1fr))">
+          <button class="bk-theme" data-theme-option="marble" data-theme="marble">
+            <span class="bk-pv"><span class="bk-pv-side"><i></i><i></i><i></i><i></i></span><span class="bk-pv-main"><i data-face="Ada" data-pose="working" data-size="38"></i><b class="count count--you">3</b><span class="btn btn--go btn--sm">Allow once</span></span></span>
+            <span class="bk-theme-text"><b>Marble</b><small>Light, the default by day. Warm white stone and near-black ink.</small></span>
+          </button>
+          <button class="bk-theme" data-theme-option="terracotta" data-theme="terracotta">
+            <span class="bk-pv"><span class="bk-pv-side"><i></i><i></i><i></i><i></i></span><span class="bk-pv-main"><i data-face="Milo" data-pose="idle" data-size="38"></i><b class="count count--you">3</b><span class="btn btn--go btn--sm">Allow once</span></span></span>
+            <span class="bk-theme-text"><b>Terracotta</b><small>Light. Warm clay, for a softer page.</small></span>
+          </button>
+          <button class="bk-theme" data-theme-option="nemea" data-theme="nemea">
+            <span class="bk-pv"><span class="bk-pv-side"><i></i><i></i><i></i><i></i></span><span class="bk-pv-main"><i data-face="Triage" data-pose="idle" data-size="38"></i><b class="count count--you">3</b><span class="btn btn--go btn--sm">Allow once</span></span></span>
+            <span class="bk-theme-text"><b>Nemea</b><small>Dark, the default by night. Olive-black, the lion's valley.</small></span>
+          </button>
+          <button class="bk-theme" data-theme-option="symposium" data-theme="symposium">
+            <span class="bk-pv"><span class="bk-pv-side"><i></i><i></i><i></i><i></i></span><span class="bk-pv-main"><i data-face="Juno" data-pose="idle" data-size="38"></i><b class="count count--you">3</b><span class="btn btn--go btn--sm">Allow once</span></span></span>
+            <span class="bk-theme-text"><b>Symposium</b><small>Dark. Deep wine, for the evening.</small></span>
+          </button>
+          <button class="bk-theme" data-theme-option="hesperides" data-theme="hesperides">
+            <span class="bk-pv"><span class="bk-pv-side"><i></i><i></i><i></i><i></i></span><span class="bk-pv-main"><i data-face="Fix bug" data-pose="working" data-size="38"></i><b class="count count--you">3</b><span class="btn btn--go btn--sm">Allow once</span></span></span>
+            <span class="bk-theme-text"><b>Hesperides</b><small>Dark. Bronze evening light.</small></span>
+          </button>
+        </div>
+
+        <div class="bk-sub" id="type"><h3>Type</h3><p>One UI face, sturdy and friendly. Mono only where the text is code.</p></div>
+        <div class="bk-type">
+          <div class="bk-card">
+            <p class="bk-type-big">Fix 3-D Secure checkout for EU cards</p>
+            <div class="bk-weights">
+              <p><span style="font-weight: 400">Regular 400</span><small>Transcript prose and help text</small></p>
+              <p><span style="font-weight: 520">Medium 520</span><small>Labels, names and meta lines</small></p>
+              <p><span style="font-weight: 590">Button 590</span><small>Every button: sturdy, not shouty</small></p>
+              <p><span style="font-weight: 640">Bold 640</span><small>Titles and headline numbers</small></p>
+            </div>
+          </div>
+          <div class="bk-card">
+            <p class="bk-nums">3 · 16 live · 2,418</p>
+            <p class="bk-note" style="margin-top: 6px">
+              Counts, ages and meta lines are set in Bricolage with tabular figures, never in mono. Headline numerals are 26px.
+            </p>
+            <p class="bk-sizes"><span style="font-size: 11px">11</span><span style="font-size: 12px">12</span><span style="font-size: 13px">13</span><span style="font-size: 14px">14</span><span style="font-size: 16px">16</span><span style="font-size: 18px">18</span><span style="font-size: 20px">20</span><span style="font-size: 26px">26</span></p>
+            <p class="bk-code">git push -u origin fix/3ds-eu-cards</p>
+            <p class="bk-note" style="margin-top: 8px">Recursive, for code blocks, commands, diffs and file paths only.</p>
+          </div>
+        </div>
+
+        <!-- Glass -->
+        <div class="bk-sub" id="glass"><h3>Glass</h3><p>One number, 0 to 100%, 50% by default. Set per browser in Appearance.</p></div>
+        <div class="bk-glass-rule">
+          <div class="bk-card">
+            <h3>What may be glass</h3>
+            <ul class="bk-list">
+              <li>Layers that float over content: the header pills, the composer and its dock, the queued row, menus, the quick panel, sheets, the phone's tab bar, and the office's floating card.</li>
+              <li>The desktop sidebar, over the window ground.</li>
+              <li>Buttons, as a material: stone at 0, ceramic at 100%.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <h3>What never is</h3>
+            <ul class="bk-list">
+              <li>Rows, cards and the transcript. They are content; glass shows content.</li>
+              <li>Decoration. Nothing sits under glass just to be seen through it: no gradients, no blobs.</li>
+              <li>Unreadable text. Text surfaces stay at least 74% opaque (70% for the shrunk composer), so text keeps 4.5:1.</li>
+              <li>Reduced transparency: when the system asks for it, the level is 0 whatever the slider says.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="g3">
+          <figure data-frame="desktop" data-src="desktop/session-active.html?glass=0" data-state="scrolled" data-caption="0% · solid" data-note="Everything is opaque; the composer still shrinks while you scroll."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html?glass=0.5" data-state="scrolled" data-caption="50% · the default" data-note="The transcript shows softly under the composer and fades out before the header pills."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html?glass=1" data-state="scrolled" data-caption="100% · the most glass" data-note="Still something to ship: 74% opaque at the least, blur 26px."></figure>
+        </div>
+
+        <div style="margin-top: 40px">
+          <div class="bk-zoom">
+            <div><b>0%</b><small>solid</small></div>
+            <span class="bk-live" data-live="desktop/session-active.html" data-state="scrolled" data-glass="0" data-title="The shrunk composer at glass 0" style="--x: 440; --y: 770; --w: 820; --h: 130; --k: 1"></span>
+            <p>A solid pill, 760px wide. The last message stops at its edge.</p>
+          </div>
+          <div class="bk-zoom">
+            <div><b>50%</b><small>the default</small></div>
+            <span class="bk-live" data-live="desktop/session-active.html" data-state="scrolled" data-glass="0.5" data-title="The shrunk composer at glass 50%" style="--x: 440; --y: 770; --w: 820; --h: 130; --k: 1"></span>
+            <p>85% opaque with a 19px blur. The message under it reads as a shape, not as text.</p>
+          </div>
+          <div class="bk-zoom">
+            <div><b>100%</b><small>the most</small></div>
+            <span class="bk-live" data-live="desktop/session-active.html" data-state="scrolled" data-glass="1" data-title="The shrunk composer at glass 100%" style="--x: 440; --y: 770; --w: 820; --h: 130; --k: 1"></span>
+            <p>70% opaque, 26px blur and a lit top edge. It narrows to 560px so more of the transcript shows.</p>
+          </div>
+        </div>
+
+        <h4 style="margin: 36px 0 12px">The derived tokens</h4>
+        <table class="bk-table">
+          <thead>
+            <tr><th>Token</th><th>What it is</th><th>0%</th><th>50%</th><th>100%</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--glass</code></td><td>Fill of text surfaces: the glass tint at this opacity</td><td class="num-cell">100%</td><td class="num-cell">87%</td><td class="num-cell">74%</td></tr>
+            <tr><td><code>--glass-thin</code></td><td>Fill of the shrunk composer</td><td class="num-cell">100%</td><td class="num-cell">85%</td><td class="num-cell">70%</td></tr>
+            <tr><td><code>--glass-blur</code></td><td>Backdrop blur</td><td class="num-cell">12px</td><td class="num-cell">19px</td><td class="num-cell">26px</td></tr>
+            <tr><td><code>--glass-sat</code></td><td>Backdrop saturation</td><td class="num-cell">1</td><td class="num-cell">1.125</td><td class="num-cell">1.25</td></tr>
+            <tr><td><code>--glass-edge</code></td><td>The light hairline on top</td><td class="num-cell">0%</td><td class="num-cell">50%</td><td class="num-cell">100%</td></tr>
+            <tr><td><code>--glass-ring</code></td><td>The outline, in the line colour</td><td class="num-cell">100%</td><td class="num-cell">77.5%</td><td class="num-cell">55%</td></tr>
+            <tr><td><code>--side-fill</code></td><td>The desktop sidebar over the window ground</td><td class="num-cell">100%</td><td class="num-cell">80%</td><td class="num-cell">60%</td></tr>
+            <tr><td><code>--btn-fill</code></td><td>Button material: share of matte stone, the rest glaze</td><td class="num-cell">100%</td><td class="num-cell">50%</td><td class="num-cell">0%</td></tr>
+            <tr><td><code>--btn-ring</code></td><td>Button outline, in ink</td><td class="num-cell">0%</td><td class="num-cell">6%</td><td class="num-cell">12%</td></tr>
+            <tr><td><code>--btn-accent-top</code></td><td>Light on the olive button's top</td><td class="num-cell">+0%</td><td class="num-cell">+11%</td><td class="num-cell">+22%</td></tr>
+            <tr><td>Button blur</td><td>What a button blurs behind it</td><td class="num-cell">0</td><td class="num-cell">5px</td><td class="num-cell">10px</td></tr>
+          </tbody>
+        </table>
+
+        <!-- Buttons -->
+        <div class="bk-sub" id="buttons"><h3>Buttons</h3><p>Full pills, one weight, four kinds. The kind is the meaning.</p></div>
+        <div class="bk-material" id="material">
+          <div class="bk-mat" data-follow-theme style="--glass-level: 0">
+            <p class="bk-mat-under">Tests pass. I kept the fix to the 3-D Secure path; the old card flow is untouched. The Stripe SDK update is its own commit, so you can revert it alone. Ready to push the branch and open a pull request.</p>
+            <div class="bk-mat-bar"><span class="btn btn--go">Allow once</span><span class="btn">Always allow git push</span><span class="btn btn--quiet">Deny</span></div>
+            <p class="bk-mat-label">0% <small>· matte stone</small></p>
+          </div>
+          <div class="bk-mat" data-follow-theme style="--glass-level: 0.5">
+            <p class="bk-mat-under">Tests pass. I kept the fix to the 3-D Secure path; the old card flow is untouched. The Stripe SDK update is its own commit, so you can revert it alone. Ready to push the branch and open a pull request.</p>
+            <div class="bk-mat-bar"><span class="btn btn--go">Allow once</span><span class="btn">Always allow git push</span><span class="btn btn--quiet">Deny</span></div>
+            <p class="bk-mat-label">50% <small>· the default</small></p>
+          </div>
+          <div class="bk-mat" data-follow-theme style="--glass-level: 1">
+            <p class="bk-mat-under">Tests pass. I kept the fix to the 3-D Secure path; the old card flow is untouched. The Stripe SDK update is its own commit, so you can revert it alone. Ready to push the branch and open a pull request.</p>
+            <div class="bk-mat-bar"><span class="btn btn--go">Allow once</span><span class="btn">Always allow git push</span><span class="btn btn--quiet">Deny</span></div>
+            <p class="bk-mat-label">100% <small>· glazed ceramic</small></p>
+          </div>
+        </div>
+        <p class="bk-note" style="margin-top: 14px">
+          The same floating bar over a transcript at three levels. The buttons carry the change: matte stone at 0, a lighter
+          glaze with a lit top edge and a thin ring at 100%. The bar under them goes from solid to 74% opaque, blurred past
+          reading. A quiet button has no material, only its label. The pill keeps its shape; only what it is made of changes.
+        </p>
+
+        <h4 style="margin: 36px 0 12px">Which answer gets which look</h4>
+        <table class="bk-table bk-doctrine">
+          <thead>
+            <tr><th>Kind</th><th>Looks</th><th>Use it for</th><th>Never</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Suggested</td>
+              <td><span class="btn btn--go btn--sm">Allow once</span></td>
+              <td>The answer Triage or the agent suggests, or the one that moves the work forward. One per group, always first.</td>
+              <td>Two in one group. Anything that destroys.</td>
+            </tr>
+            <tr>
+              <td>Acting</td>
+              <td><span class="btn btn--sm">Always allow git push</span></td>
+              <td>Every other answer that does something: Accept, Keep, Open thread.</td>
+              <td>A colour of its own.</td>
+            </tr>
+            <tr>
+              <td>Quiet</td>
+              <td><span class="btn btn--quiet btn--sm">Deny</span></td>
+              <td>Answers that decline or close: Dismiss, Deny, Not now.</td>
+              <td>A fill. Saying no should never compete with the answer that acts.</td>
+            </tr>
+            <tr>
+              <td>Destroy</td>
+              <td><span class="btn btn--danger btn--sm">Delete</span></td>
+              <td>Answers that remove something for good, like deleting the old Grafana folder.</td>
+              <td>A brick fill, or the suggested place without a second look.</td>
+            </tr>
+            <tr>
+              <td>Waiting on you</td>
+              <td><i data-mark="waiting" data-size="16"></i> <b class="count count--you">3</b></td>
+              <td>Pointing at a decision: the mark, the count, a thin gold line.</td>
+              <td>A button. Gold means "this waits on you", never "press this".</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="bk-ledgers">
+          <div class="bk-card">
+            <h3>Run git push -u origin fix/3ds-eu-cards?<small>In a thread's dock</small></h3>
+            <div class="ledger">
+              <button class="ans" tabindex="-1"><span class="btn btn--go btn--sm">Allow once</span><span class="ans-desc">Pushes the branch this one time</span><kbd>↩</kbd></button>
+              <button class="ans" tabindex="-1"><span class="btn btn--sm">Always allow git push</span><span class="ans-desc">Adds a Grant for git push in webshop</span><kbd>⌥↩</kbd></button>
+              <button class="ans" tabindex="-1"><span class="btn btn--quiet btn--sm">Deny</span><span class="ans-desc">Tells the agent no; the branch stays local</span><kbd>esc</kbd></button>
+            </div>
+          </div>
+          <div class="bk-card">
+            <h3>Checkout fails for EU cards with 3-D Secure<small>In Intake</small></h3>
+            <div class="ledger">
+              <button class="ans" tabindex="-1"><span class="btn btn--go btn--sm">Start "Fix bug"</span><span class="ans-desc">Starts Fix bug on webshop in a new worktree</span><kbd>↩</kbd></button>
+              <button class="ans" tabindex="-1"><span class="btn btn--sm">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans" tabindex="-1"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd>D</kbd></button>
+            </div>
+          </div>
+        </div>
+        <p class="bk-note" style="margin-top: 14px">
+          Every button fills the same 188px column, whatever its label, so the answers line up in every row and every place: the
+          dock, Intake, the quick panel, a decision page.
+        </p>
+
+        <div class="bk-sub"><h3>Shape, depth and motion</h3></div>
+        <div class="bk-cards g3">
+          <div class="bk-card">
+            <h3>Shape</h3>
+            <p>Soft rectangles for surfaces, from 6 to 22px radius. Full pills for everything you press, so a pill always means "you can press this".</p>
+          </div>
+          <div class="bk-card">
+            <h3>Depth</h3>
+            <p>One level of containment at most, separated by space, tone and hairlines. Shadows are soft and warm; glass layers add a light top edge.</p>
+          </div>
+          <div class="bk-card">
+            <h3>Motion</h3>
+            <p>120, 200 and 320ms with a plain ease-out. Only the characters get a little spring: the working tap, the waiting wave, the sleeping z. Reduce motion stops them.</p>
+          </div>
+        </div>
+
+        <div class="bk-sub" id="marks"><h3>State marks and icons</h3><p>Six marks, used the same way everywhere. One outline icon family.</p></div>
+        <div class="bk-marks">
+          <div class="bk-card"><i data-mark="working" data-size="22"></i><b>Working</b><p>An agent is at work. The arc turns.</p></div>
+          <div class="bk-card"><i data-mark="waiting" data-size="22"></i><b>Waiting on you</b><p>Gold, with a question mark.</p></div>
+          <div class="bk-card"><i data-mark="done" data-size="22"></i><b>Done</b><p>Finished, with a check.</p></div>
+          <div class="bk-card"><i data-mark="failed" data-size="22"></i><b>Failed</b><p>Brick, with an exclamation mark.</p></div>
+          <div class="bk-card"><i data-mark="paused" data-size="22"></i><b>Paused</b><p>Stopped by you or by a limit.</p></div>
+          <div class="bk-card"><i data-mark="idle" data-size="22"></i><b>Idle</b><p>Nothing is happening, asleep included.</p></div>
+          <div class="bk-card"><i data-i="clock" data-size="22"></i><b>Queued</b><p>Not a state: the clock icon.</p></div>
+          <div class="bk-card"><span class="faint" style="font-size: 12px">word</span><b>Cancelled</b><p>A word, not a mark.</p></div>
+        </div>
+        <div class="bk-icons" data-icon-grid></div>
+        <h4 style="margin: 28px 0 0">Source marks</h4>
+        <div class="bk-brands" data-brand-row></div>
+        <p class="bk-note" style="margin-top: 8px">Monochrome in ink. A source never gets its brand colour, because colour means who or what state.</p>
+
+        <!-- The cast -->
+        <div class="bk-sub" id="cast"><h3>The cast</h3><p>Small sturdy heroes: a body, a hue and at most one prop. The pose is the state.</p></div>
+        <div class="g2" style="gap: 16px; align-items: stretch">
+          <div class="bk-card">
+            <h4 style="margin-bottom: 18px">Four bodies</h4>
+            <div class="bk-row" data-cast-bodies></div>
+          </div>
+          <div class="bk-card">
+            <h4 style="margin-bottom: 18px">Seven hues</h4>
+            <div class="bk-row" data-cast-hues style="gap: 22px 14px"></div>
+          </div>
+          <div class="bk-card" style="grid-column: span 2">
+            <h4 style="margin-bottom: 4px">One prop at most</h4>
+            <p class="bk-note" style="margin-bottom: 18px">
+              Four props any hero may carry. Five more belong to one colleague each, so each stays that colleague's sign. A Run wears its workflow's prop.
+            </p>
+            <div class="bk-row" data-cast-props></div>
+          </div>
+          <div class="bk-card" style="grid-column: span 2">
+            <h4 style="margin-bottom: 14px">Eight poses</h4>
+            <table class="bk-poses" data-cast-poses></table>
+          </div>
+          <div class="bk-card" style="grid-column: span 2">
+            <h4 style="margin-bottom: 18px">Sizes</h4>
+            <div class="bk-row" data-cast-sizes></div>
+          </div>
+        </div>
+
+        <!-- Logo -->
+        <div class="bk-sub" id="logo"><h3>Logo</h3><p>The Hercules knot: two loops, terracotta and ink, each passing over the other once.</p></div>
+        <div class="bk-logo">
+          <div class="bk-card">
+            <div class="bk-show"><span class="bk-lockup"><i data-logo="46"></i>Hercule</span></div>
+            <p class="bk-note">The knot of classical jewellery ties two strands into one, as Hercule ties events, colleagues and you together.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-show">
+              <span class="app-icon" style="--size: 112px"><i data-logo="80"></i><span class="app-icon-badge">3</span></span>
+            </div>
+            <p class="bk-note">The app icon stays marble in every theme. Its badge is gold, because it counts what waits on you.</p>
+          </div>
+          <div class="bk-card">
+            <div class="bk-show">
+              <span class="bk-fav"><img data-favicon="off" width="32" height="32" alt="Favicon" />Tab</span>
+              <span class="bk-fav"><img data-favicon="on" width="32" height="32" alt="Favicon with a gold dot" />Waiting</span>
+            </div>
+            <p class="bk-note">A gold dot on the favicon when something waits on you, so it shows from any other tab.</p>
+          </div>
+        </div>
+        <div class="bk-card" style="margin-top: 16px; display: grid; grid-template-columns: 200px 1fr; gap: 24px; align-items: center">
+          <div class="bk-meander" style="background: var(--terra)"></div>
+          <p class="bk-note">The meander is the one ornament. It appears in the brand and in this book only, never as UI chrome.</p>
+        </div>
+
+        <div class="bk-sub"><h3>Layout and density</h3></div>
+        <div class="bk-cards g3">
+          <div class="bk-card">
+            <h3>Window</h3>
+            <p>A 264px glass sidebar, a reading column of at most 760px, and the composer floating at its foot.</p>
+          </div>
+          <div class="bk-card">
+            <h3>Density</h3>
+            <p>Comfortable by default. Compact fits 30% more rows in Intake and the roster.</p>
+          </div>
+          <div class="bk-card">
+            <h3>Platforms</h3>
+            <p>The desktop app adds the menu bar, the ⌥ Space quick panel and the dock badge. The phone adds the lock screen and swipes.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ V. Screens -->
+      <section class="bk bk-sec" id="screens">
+        <p class="bk-kick"><b>V</b>Screens<span class="bk-meander"></span></p>
+        <h2>All 22 screens, plus the scrolled thread and the phone's office.</h2>
+        <p class="bk-lede">Every frame is the live page. Switch the theme or move Glass in the toolbar and they all follow.</p>
+
+        <h4 style="margin-bottom: 20px">Desktop · 1440 x 900</h4>
+        <div class="g2">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Office" data-note="The courtyard: who works, who waits on you, who is paused, and Juno asleep. Courtyard or List at the top; Event flow off."></figure>
+          <figure id="s-intake" data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="5 proposals, 1 burning. The lead one is marked by the word Urgent and four brick bars; its three answers fill one column."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Thread" data-note="Header pills with this workspace's two threads and the Changes pill. The dock asks to run git push, with Allow once in olive."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="Thread, scrolled" data-note="The transcript fades out before the header pills and runs under the shrunk composer."></figure>
+          <figure id="s-session-empty" data-frame="desktop" data-src="desktop/session-empty.html" data-caption="New thread" data-note="What should the agent do in webshop? It gets its own worktree, on a new branch from main. Or start from Intake."></figure>
+          <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Assistant · Ada" data-note="Yesterday's failed turn told plainly, two quiet check-ins, the 09:00 heartbeat and a reminder set for Friday."></figure>
+          <figure id="s-appearance" data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes, Follow the system, and Glass as one slider: 0% is solid."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants" data-note="Ada's provider, access mode, reply mode, a heartbeat every hour from 07:00 to 23:00, and where she listens."></figure>
+          <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="2,418 events in 24 hours from 8 event sources and 3 channels. Discord reconnecting since 09:12, said in words."></figure>
+          <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="At a glance" data-note="The knot in the menu bar with a gold 3, the ⌥ Space quick panel, the menu bar extra, notifications and the dock tile."></figure>
+        </div>
+
+        <h4 style="margin: 64px 0 20px">Web · 1280 x 800</h4>
+        <div class="g2">
+          <figure data-frame="web" data-src="web/session-active.html" data-url="hercule.home.arpa/threads/fix-3ds-eu-cards" data-caption="Thread" data-note="The same thread in a browser tab. The top bar carries the places and 3 waiting."></figure>
+          <figure data-frame="web" data-src="web/intake.html" data-url="hercule.home.arpa/intake" data-caption="Intake" data-note="The list, with the lead Proposal open beside it."></figure>
+          <figure data-frame="web" data-src="web/decision.html" data-url="hercule.home.arpa/intake/checkout-fails-eu-cards" data-caption="Decision" data-note="Where a link from Slack lands: one Proposal as a page, made by Triage at 09:00 from 4 sources."></figure>
+          <figure data-frame="web" data-src="web/session-empty.html" data-url="hercule.home.arpa/threads/new" data-caption="New thread" data-note="The same first question, in a browser tab."></figure>
+          <figure data-frame="web" data-src="web/assistant.html" data-url="hercule.home.arpa/assistants/ada" data-caption="Assistants" data-note="Ada answering, Milo idle in Slack #ops, and Juno told plainly that Discord is reconnecting."></figure>
+          <figure id="s-providers" data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Settings · Providers" data-note="Claude Code at 61% of its 5-hour window, Codex usage not reported, pi on studio-mac. Plain rows per machine."></figure>
+        </div>
+
+        <h4 style="margin: 64px 0 20px">Phone · 390 x 844</h4>
+        <div class="g4">
+          <figure id="s-lock" data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="A Live Activity for the git push question, then Ship release and the ops dashboards, each answerable here."></figure>
+          <figure data-frame="mobile" data-src="mobile/office.html" data-caption="Office" data-note="3 waiting on you, 8 working, 1 paused, 4 idle, by project."></figure>
+          <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="Swipe right to start, left to dismiss."></figure>
+          <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="Decision" data-note="Made from 4 sources; Triage suggests Fix bug."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="Thread" data-note="The diff card, tests passed, and the git push question with Allow once."></figure>
+          <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="New thread" data-note="What should we work on? Hold to talk, let go to send."></figure>
+          <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Ada" data-note="A voice note at 09:20, answered with a reminder for Friday 2 October at 09:00."></figure>
+          <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings" data-note="The Appearance sheet: five themes, Follow the system, Glass and Reduce motion."></figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ VI. Office -->
+      <section class="bk bk-sec" id="office">
+        <p class="bk-kick"><b>VI</b>The office<span class="bk-meander"></span></p>
+        <h2>A sunlit courtyard where the people and the decisions are the subject.</h2>
+        <p class="bk-lede">
+          The office lives under System in the Hercule tab, beside a plain list of the same people. All 16 live sessions are
+          here, and the three that wait on you stand at your desk.
+        </p>
+        <figure data-frame="desktop" data-src="desktop/office.html" data-caption="The office, event flow off" data-note="The default. One or two classical cues per area: a portico, a colonnade, pots and a fountain."></figure>
+
+        <div class="g2" style="margin-top: 44px">
+          <figure data-frame="desktop" data-src="desktop/office.html?flow=on" data-caption="Event flow on" data-note="Aqueducts bring each source's events into Triage's fountain: 212 events since 18:20. Thin channels, small droplets, under the people."></figure>
+          <figure data-frame="desktop" data-src="desktop/office.html" data-state="list" data-caption="List" data-note="The same people as a roster. A first-class view, not a fallback."></figure>
+        </div>
+
+        <div class="bk-office-row">
+          <div class="bk-cards g2">
+            <div class="bk-card"><h3>Porticos per project</h3><p>webshop, payments-api and ops each get a portico with their desks. Amphorae count the Tasks: 10, 8 and 5.</p></div>
+            <div class="bk-card"><h3>A wing per machine</h3><p>A colonnade wing each: studio-mac 5 of 6, build-box-1 8 of 8 and at cap, build-box-2 3 of 8.</p></div>
+            <div class="bk-card"><h3>The fountain is Triage</h3><p>Triage sits at the fountain in its lion hood and sorts the events. Next run at 11:00.</p></div>
+            <div class="bk-card"><h3>Your desk</h3><p>The three that wait on you stand at it, with the question in a bubble: "Run git push?"</p></div>
+            <div class="bk-card"><h3>The lounge</h3><p>The assistants rest here between turns: Milo idle, Ada working, Juno asleep.</p></div>
+            <div class="bk-card"><h3>The floating card</h3><p>A glass card answers the waiting ones in turn, "1 of 3", without leaving the courtyard.</p></div>
+          </div>
+          <figure data-frame="mobile" data-src="mobile/office.html" data-caption="On the phone" data-note="Counts first, then who waits on you."></figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ VII. At 10x -->
+      <section class="bk bk-sec" id="ten">
+        <p class="bk-kick"><b>VII</b>At 10x<span class="bk-meander"></span></p>
+        <h2>The same screens with 140 live sessions and 31,000 events a day.</h2>
+        <p class="bk-lede">Nothing new to learn at scale: figures group, counts grow, and similar answers are given once for a whole pile.</p>
+        <div class="bk-stats">
+          <div class="bk-stat"><b>140</b><span>live: 70 working, 10 waiting, 2 paused, 58 idle</span></div>
+          <div class="bk-stat"><b>31,000</b><span>events in 24 hours; 30.7k handled quietly</span></div>
+          <div class="bk-stat"><b>60</b><span>proposals, 3 burning, 18 offers, 9 need a call</span></div>
+          <div class="bk-stat"><b>131 of 150</b><span>slots on 9 machines, 2 at cap</span></div>
+          <div class="bk-stat"><b>180</b><span>Tasks; 4 assistants</span></div>
+        </div>
+        <div class="g2">
+          <figure data-frame="desktop" data-src="desktop/office.html" data-state="swarm" data-caption="Office at 10x" data-note="Desks show a workflow once with ×N. Your desk shows three and +7 more; the floating card reads 1 of 10."></figure>
+          <figure data-frame="desktop" data-src="desktop/intake.html" data-state="swarm" data-caption="Intake at 10x" data-note="Topic piles you answer at once: Start &quot;Fix bug&quot; on 9, Accept 6 as Tasks, Draft 12 replies, Merge all 23."></figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ VIII. Adopting it -->
+      <section class="bk bk-sec" id="adopt">
+        <p class="bk-kick"><b>VIII</b>Adopting it<span class="bk-meander"></span></p>
+        <h2>What changes in the code, and where to start.</h2>
+        <p class="bk-lede">Today's tokens on the left, as they are in the app now. Labours' tokens on the right, in Marble and Nemea.</p>
+        <table class="bk-table bk-adopt">
+          <thead>
+            <tr><th>Today</th><th>Light</th><th>Dark</th><th>Labours</th><th>Marble · Nemea</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--bg</code></td><td><i class="bk-c" style="--c: oklch(94.5% 0.0156 265)"></i></td><td><i class="bk-c" style="--c: oklch(20% 0.0288 265)"></i></td><td><code>--bg</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--bg)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--bg)"></i></td><td>Warm stone and olive-black instead of blue-violet.</td></tr>
+            <tr><td><code>--surface</code></td><td><i class="bk-c" style="--c: oklch(96.7% 0.0125 265)"></i></td><td><i class="bk-c" style="--c: oklch(22.2% 0.0288 265)"></i></td><td><code>--surface</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--surface)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--surface)"></i></td><td>Same role.</td></tr>
+            <tr><td><code>--raised</code></td><td><i class="bk-c" style="--c: oklch(100% 0.0078 265)"></i></td><td><i class="bk-c" style="--c: oklch(25.5% 0.0259 265)"></i></td><td><code>--raised</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--raised)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--raised)"></i></td><td>Same role; a new <code>--sunken</code> sits below the surface.</td></tr>
+            <tr><td><code>--ink</code></td><td><i class="bk-c" style="--c: oklch(23% 0.01 265)"></i></td><td><i class="bk-c" style="--c: oklch(90% 0.008 265)"></i></td><td><code>--ink</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--ink)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--ink)"></i></td><td>Same role.</td></tr>
+            <tr><td><code>--muted</code></td><td><i class="bk-c" style="--c: oklch(48% 0.0156 265)"></i></td><td><i class="bk-c" style="--c: oklch(68% 0.0288 265)"></i></td><td><code>--muted</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--muted)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--muted)"></i></td><td>Same role.</td></tr>
+            <tr><td><code>--faint</code></td><td><i class="bk-c" style="--c: oklch(66% 0.0156 265)"></i></td><td><i class="bk-c" style="--c: oklch(50% 0.0288 265)"></i></td><td><code>--faint</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--faint)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--faint)"></i></td><td>Darker, so faint text keeps 4.5:1.</td></tr>
+            <tr><td><code>--line</code></td><td><i class="bk-c" style="--c: oklch(23% 0.01 265 / 0.1)"></i></td><td><i class="bk-c" style="--c: oklch(90% 0.0288 265 / 0.1)"></i></td><td><code>--line</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--line)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--line)"></i></td><td>Solid instead of see-through, so it reads the same on glass.</td></tr>
+            <tr><td><code>--line-soft</code></td><td><i class="bk-c" style="--c: oklch(23% 0.01 265 / 0.055)"></i></td><td><i class="bk-c" style="--c: oklch(90% 0.0288 265 / 0.06)"></i></td><td><code>--line-soft</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--line-soft)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--line-soft)"></i></td><td>Solid, as above.</td></tr>
+            <tr><td><code>--attn</code></td><td><i class="bk-c" style="--c: #8a6116"></i></td><td><i class="bk-c" style="--c: #d0a147"></i></td><td><code>--you-ink</code>, <code>--you</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--you)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--you)"></i></td><td>Split in two: <code>--you</code> for the mark and count, <code>--you-ink</code> for text. <code>--attn</code> stays as an alias.</td></tr>
+            <tr><td><code>--fail</code></td><td><i class="bk-c" style="--c: #a34e46"></i></td><td><i class="bk-c" style="--c: #cf7b71"></i></td><td><code>--fail</code>, <code>--fail-ink</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--fail)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--fail)"></i></td><td>Brick. Also the text of destroying buttons.</td></tr>
+            <tr><td><code>--live</code></td><td><i class="bk-c" style="--c: #48717f"></i></td><td><i class="bk-c" style="--c: #7fa8b8"></i></td><td>retired</td><td><i class="bk-c" data-theme="marble" style="--c: var(--ok)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--ok)"></i></td><td>Working is a turning mark, not a colour. Kept as an alias of <code>--ok</code> until the last use is gone.</td></tr>
+            <tr><td><code>--ok</code></td><td><i class="bk-c" style="--c: #48745a"></i></td><td><i class="bk-c" style="--c: #7fae8e"></i></td><td><code>--ok</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--ok)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--ok)"></i></td><td>Diffs and tests only.</td></tr>
+            <tr><td><code>--project-ops</code></td><td><i class="bk-c" style="--c: #a67f92"></i></td><td><i class="bk-c" style="--c: #bd93a8"></i></td><td><code>--proj-ops</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--proj-ops)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--proj-ops)"></i></td><td>One tessera colour per project, lower in chroma.</td></tr>
+            <tr><td><code>--project-hercule</code></td><td><i class="bk-c" style="--c: #7d7ab0"></i></td><td><i class="bk-c" style="--c: #9490c9"></i></td><td><code>--proj-&lt;name&gt;</code></td><td><i class="bk-c" data-theme="marble" style="--c: var(--proj-payments)"></i><i class="bk-c" data-theme="nemea" style="--c: var(--proj-payments)"></i></td><td>Named per project, from one recipe.</td></tr>
+          </tbody>
+        </table>
+        <p class="bk-note" style="margin-top: 16px">
+          New token groups: <code>--accent*</code> (olive), <code>--terra</code>, <code>--hue-*</code> and <code>--who*</code>
+          (characters), <code>--glass*</code> and <code>--side-fill</code>, <code>--btn-*</code>, <code>--court-*</code> (the
+          office) and <code>--char-*</code>.
+        </p>
+
+        <h4 style="margin: 44px 0 12px">The first five changes</h4>
+        <ol class="bk-steps">
+          <li>
+            <span><b>Tokens and themes</b><code>packages/ui/src/styles.css</code><code>packages/ui/src/theme/</code></span>
+            <p>The five themes plus Follow the system, the derived glass and button tokens, and the glass level as one custom property set from Appearance.</p>
+          </li>
+          <li>
+            <span><b>Marks and logo</b><code>packages/ui/src/marks/marks.tsx</code><code>packages/ui/src/marks/logo.tsx</code></span>
+            <p>The six state marks, the Hercules knot, and the characters drawn from a stored look.</p>
+          </li>
+          <li>
+            <span><b>Buttons and answers</b><code>packages/ui/src/primitives/button.tsx</code><code>packages/ui/src/primitives/segmented-control.tsx</code><code>apps/web/src/screens/in-place-question.tsx</code></span>
+            <p>Four kinds of button, and the answer ledger with its fixed column, a line per answer and its key.</p>
+          </li>
+          <li>
+            <span><b>Sidebar</b><code>apps/web/src/shell/sidebar.tsx</code><code>apps/web/src/shell/threads-face.tsx</code><code>apps/web/src/shell/nav.ts</code><code>apps/web/src/shell/pulse.tsx</code></span>
+            <p>Waiting on you on top of both faces, Work and System labels, an outline icon on every row, the Office under System.</p>
+          </li>
+          <li>
+            <span><b>Composer and rows</b><code>apps/web/src/screens/composer/</code><code>apps/web/src/screens/thread-row.tsx</code><code>apps/web/src/screens/project-dot.tsx</code></span>
+            <p>The floating glass composer that shrinks while you scroll, meta lines in the UI face, and project tesserae.</p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ================================================================ IX. Spec changes -->
+      <section class="bk bk-sec" id="spec">
+        <p class="bk-kick"><b>IX</b>Spec changes<span class="bk-meander"></span></p>
+        <h2>What this design asks the spec to change.</h2>
+        <p class="bk-lede">
+          Home is already Sessions in spec 14, so threads first needs no change. The office's event flow only draws events the
+          controller already records.
+        </p>
+        <ol class="bk-steps">
+          <li><span><b>Waiting on you on both faces</b></span><p>A section on top of the Threads and the Hercule face alike, threads and runs together, the question in one line.</p></li>
+          <li><span><b>Labels and icons in the Hercule nav</b><code>spec 14, app shell</code></span><p>Work and System as small labels, the Office as a row under System, and an outline icon on every row. The spec pins "the four entity items carry their glyph, the rest none".</p></li>
+          <li><span><b>Meta lines and counts in the UI face</b><code>spec 14, design language</code></span><p>The spec sets ids, refs, ages and counts in IBM Plex Mono. Labours keeps mono for code, commands, diffs and paths only.</p></li>
+          <li><span><b>One filled button for the suggested answer</b><code>spec 14, design language</code></span><p>This conflicts with the spec: decision affordances are "quiet text-only ghost buttons, never filled buttons on monitoring surfaces", and semantic hues are "never fills, chips, stripes or washes". Labours asks for one olive fill per group.</p></li>
+          <li><span><b>Six state marks</b></span><p>Working, waiting on you, done, failed, paused and idle. Queued is the clock icon; cancelled is a word.</p></li>
+          <li><span><b>A stored look for colleagues</b><code>spec 12 §1</code></span><p>An Assistant and a workflow each keep a look: hue, body and prop. A Run wears its workflow's look. Spec 12 has no field for it today.</p></li>
+          <li><span><b>Themes and glass</b></span><p>Five themes plus Follow the system, and a glass level kept per browser.</p></li>
+          <li><span><b>Batch answers on a Topic pile</b><code>spec 10 §7.4</code></span><p>At 10x, one answer for a pile of similar Proposals: Start "Fix bug" on 9, Accept 6 as Tasks.</p></li>
+          <li><span><b>Answered anywhere clears everywhere</b><code>ADR 0027, spec 10 §7.7</code></span><p>Already the rule; restated because the quick panel, the menu bar, notifications and the lock screen all rely on it.</p></li>
+        </ol>
+      </section>
+
+      <footer class="bk bk-foot">
+        <div class="bk-meander"></div>
+        <p>Crew Labours · Hercule design systems · a prototype, not product code</p>
+      </footer>
+    </main>
+
+    <script src="brands.js"></script>
+    <script src="crew.js"></script>
+    <script>
+      // The book's own wiring. It runs before shared/book.js, which builds the frames and owns the
+      // theme and glass controls; this script adds what book.js does not know about:
+      // - the light and dark aliases, mapped to Marble and Nemea so a theme button shows as pressed;
+      // - the cast, icon and source mark specimens, drawn with Crew's own functions;
+      // - live crops of pages (a scaled iframe showing one part of a page), which follow the theme and glass;
+      // - round 1's frames, which only know light and dark, and the button panels pinned to a glass level.
+      (function () {
+        "use strict";
+        var DARK = ["nemea", "symposium", "hesperides", "dark"];
+        var ALIAS = { light: "marble", dark: "nemea" };
+        var root = document.documentElement;
+        var params = new URLSearchParams(location.search);
+        var theme = params.get("theme") || localStorage.getItem("ds-theme:" + location.pathname) || root.dataset.theme;
+        theme = ALIAS[theme] || theme;
+        root.dataset.theme = theme;
+        params.set("theme", theme);
+        history.replaceState(null, "", "?" + params + location.hash);
+
+        // null until the reader moves the slider, as in book.js: the pages then show their own default.
+        var storedGlass = params.has("glass") ? params.get("glass") : localStorage.getItem("ds-glass:" + location.pathname);
+        var glass = storedGlass === null ? null : Number(storedGlass);
+
+        document.querySelector("link[rel=icon]").href = Crew.favicon(false);
+        document.querySelectorAll("[data-favicon]").forEach(function (img) {
+          img.src = Crew.favicon(img.dataset.favicon === "on");
+        });
+
+        /* ---------- Specimens ---------- */
+        var ICONS = (
+          "search plus compose close check chev-r chev-l chev-d chev-ud office list intake checkin threads runs workflows " +
+          "tasks fleet connections bell settings mic send stop branch worktree laptop server clock sparkle sliders shield bolt " +
+          "external more popout editor moon sun key lock globe filter heart memory alarm hand question pause play calendar " +
+          "eye terminal file diff link people mail chat user palette plug cpu id bound puzzle system arrow undo hash wave aqueduct"
+        ).split(" ");
+        var BRANDS = "github gmail sentry posthog intercom grafana stripe slack discord anthropic claude openai linear pagerduty datadog googlecalendar pi cron web".split(" ");
+        var HUES = ["iris", "teal", "orchid", "sky", "peach", "mint", "grape"];
+        var POSES = ["working", "waiting", "idle", "asleep", "failed", "paused", "done", "away"];
+
+        function fill(selector, html) {
+          document.querySelector(selector).innerHTML = html;
+        }
+        function figure(svg, name, detail) {
+          return '<span class="bk-fig">' + svg + "<b>" + name + "</b>" + (detail ? "<small>" + detail + "</small>" : "") + "</span>";
+        }
+        function look(hue, shape, prop) {
+          return { hue: hue, shape: shape, prop: prop };
+        }
+
+        fill("[data-icon-grid]", ICONS.map(function (n) {
+          return '<span class="bk-icon">' + Crew.icon(n, 20) + "<small>" + n + "</small></span>";
+        }).join(""));
+        fill("[data-brand-row]", BRANDS.map(function (n) {
+          return "<span>" + Crew.brand(n, 18) + n + "</span>";
+        }).join(""));
+        fill("[data-hues]", HUES.map(function (h) {
+          return Crew.face(h, { pose: "idle", size: 30, look: look(h, "round", "none") });
+        }).join(""));
+        fill("[data-cast-bodies]", ["round", "bean", "dome", "square"].map(function (s) {
+          return figure(Crew.face(s, { pose: "idle", size: 64, look: look("iris", s, "none") }), s);
+        }).join(""));
+        fill("[data-cast-hues]", HUES.map(function (h) {
+          return figure(Crew.face(h, { pose: "idle", size: 52, look: look(h, "bean", "none") }), h);
+        }).join(""));
+        fill("[data-cast-props]",
+          [
+            ["none", "none", "any hero"],
+            ["headband", "headband", "any hero"],
+            ["sprig", "laurel sprig", "any hero"],
+            ["club", "club", "any hero"],
+          ].map(function (p) {
+            return figure(Crew.face(p[0], { pose: "idle", size: 64, look: look("peach", "square", p[0]) }), p[1], p[2]);
+          }).join("") +
+          [
+            ["Triage", "lion hood"],
+            ["Ada", "laurel wreath"],
+            ["Milo", "helmet"],
+            ["Juno", "feather"],
+            ["Ship release", "shield"],
+          ].map(function (c) {
+            return figure(Crew.face(c[0], { pose: "idle", size: 64 }), c[1], c[0] + " only");
+          }).join(""));
+        fill("[data-cast-poses]",
+          "<tr><th></th>" + POSES.map(function (p) { return "<th>" + Crew.poseWord(p) + "</th>"; }).join("") + "</tr>" +
+          ["Ada", "Triage", "Fix bug"].map(function (name) {
+            return "<tr><td>" + name + "</td>" + POSES.map(function (p) {
+              return "<td>" + Crew.face(name, { pose: p, size: 48 }) + "</td>";
+            }).join("") + "</tr>";
+          }).join(""));
+        fill("[data-cast-sizes]", [16, 20, 28, 44, 76].map(function (s) {
+          return figure(Crew.face("Ada", { pose: "working", size: s }), s + "px", { 16: "marks in lists", 20: "rows and ledgers", 28: "the sidebar", 44: "the office", 76: "the office, close" }[s]);
+        }).join(""));
+
+        /* ---------- Live crops ---------- */
+        var crops = Array.prototype.slice.call(document.querySelectorAll("[data-live]"));
+        function hasPinnedGlass(el) {
+          return "glass" in el.dataset;
+        }
+        function buildCropUrl(el) {
+          var q = new URLSearchParams({ theme: theme });
+          if (el.dataset.state) q.set("state", el.dataset.state);
+          var level = hasPinnedGlass(el) ? el.dataset.glass : glass;
+          if (level !== null) q.set("glass", String(level));
+          return el.dataset.live + "?" + q;
+        }
+        crops.forEach(function (el) {
+          var frame = document.createElement("iframe");
+          frame.loading = "lazy";
+          frame.tabIndex = -1;
+          frame.title = el.dataset.title;
+          // A lazy crop may load after the slider moved, from a URL with the old level.
+          frame.addEventListener("load", function () {
+            if (glass !== null && !hasPinnedGlass(el)) frame.contentWindow.postMessage({ glass: glass }, "*");
+          });
+          el.appendChild(frame);
+        });
+
+        /** Moves round 1's frames, the pinned button panels and the live crops to theme t. */
+        function followTheme(t) {
+          theme = t;
+          document.querySelectorAll("[data-c0]").forEach(function (fig) {
+            fig.dataset.theme = DARK.indexOf(t) >= 0 ? "dark" : "light";
+            if (fig._refresh) fig._refresh();
+          });
+          document.querySelectorAll("[data-follow-theme]").forEach(function (el) {
+            el.dataset.theme = t;
+          });
+          crops.forEach(function (el) {
+            el.querySelector("iframe").src = buildCropUrl(el);
+          });
+        }
+
+        // These listeners are added before book.js adds its own, so they run first on the same event.
+        document.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-theme-option]");
+          if (b) followTheme(b.dataset.themeOption);
+        });
+        document.addEventListener("input", function (e) {
+          if (!e.target.matches("[data-glass-control]")) return;
+          glass = Number(e.target.value) / 100;
+          crops.forEach(function (el) {
+            if (!hasPinnedGlass(el)) el.querySelector("iframe").contentWindow.postMessage({ glass: glass }, "*");
+          });
+        });
+
+        followTheme(theme);
+      })();
+    </script>
+  </body>
+</html>

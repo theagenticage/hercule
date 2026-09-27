@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Office · Hercule</title>
+    <script>
+      // The Office opens as the courtyard; ?state=list opens the roster instead.
+      document.documentElement.dataset.view = document.documentElement.dataset.state === "list" ? "list" : "courtyard";
+      // The event flow layer is off by default; ?flow=on shows it, so the book can show both states.
+      document.documentElement.dataset.flow = new URLSearchParams(location.search).get("flow") === "on" ? "on" : "off";
+    </script>
+    <style>
+      .sum {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .sum span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .sum b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+      }
+      .sum .sum-you,
+      .sum .sum-you b {
+        color: var(--you-ink);
+      }
+
+      /* The event flow switch: a label and a small switch, in the bar only while the courtyard shows. */
+      .flow-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        margin-left: 4px;
+        padding: 0 6px 0 10px;
+        border-radius: var(--r-pill);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .flow-switch:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .flow-switch[aria-checked="true"] {
+        color: var(--ink);
+      }
+      .flow-switch .toggle {
+        width: 28px;
+        height: 16px;
+      }
+      .flow-switch .toggle::after {
+        top: 2px;
+        left: 2px;
+        width: 12px;
+        height: 12px;
+      }
+      .flow-switch[aria-checked="true"] .toggle {
+        background: var(--accent);
+      }
+      .flow-switch[aria-checked="true"] .toggle::after {
+        background: var(--accent-fg);
+        transform: translateX(12px);
+      }
+      html[data-view="list"] .flow-switch {
+        display: none;
+      }
+
+      /* ---------- the courtyard ---------- */
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        background: var(--surface);
+      }
+      html[data-view="list"] .stage,
+      html[data-view="courtyard"] .roster {
+        display: none;
+      }
+      [data-office] {
+        position: absolute;
+        inset: 0;
+        /* two shades the tokens leave to the scene: trestle legs, and laptops */
+        --court-leg: color-mix(in oklab, var(--court-wood) 78%, var(--court-shade));
+        --court-metal: color-mix(in oklab, var(--court-desk) 70%, var(--court-shade));
+      }
+      .floor {
+        position: absolute;
+        inset: 0;
+      }
+      /* Every box is one colour, shaded by which way each face looks: the sun stands behind the
+         viewer's left shoulder, so faces towards +y are lit and faces towards +x are in half shade. */
+      .bx .t {
+        fill: var(--c);
+      }
+      .bx .l {
+        fill: color-mix(in oklab, var(--c) 86%, var(--court-shade));
+      }
+      .bx .r {
+        fill: color-mix(in oklab, var(--c) 74%, var(--court-shade));
+      }
+      .bx polygon {
+        stroke: color-mix(in oklab, var(--c) 82%, var(--court-shade));
+        stroke-width: 0.5;
+        stroke-linejoin: round;
+      }
+      .slab polygon {
+        stroke: none;
+      }
+      .slab .t {
+        fill: var(--court-floor);
+      }
+      .slab-alt {
+        fill: var(--court-tile);
+      }
+      .joints {
+        stroke: color-mix(in oklab, var(--court-floor) 88%, var(--court-shade));
+        stroke-width: 0.75;
+      }
+      .ao {
+        fill: var(--court-shade);
+        opacity: 0.06;
+      }
+      .shadow {
+        fill: var(--court-shade);
+        opacity: 0.12;
+      }
+      .wall {
+        fill: var(--court-wall);
+      }
+      .stoa-shade {
+        fill: var(--court-shade);
+        opacity: 0.09;
+      }
+      .wall-end {
+        fill: color-mix(in oklab, var(--court-wall) 76%, var(--court-shade));
+      }
+      .wall-top {
+        fill: color-mix(in oklab, var(--court-wall) 90%, var(--court-sun));
+      }
+      .wall-word {
+        font-family: var(--font-ui);
+        font-weight: 760;
+        letter-spacing: -0.02em;
+        fill: color-mix(in oklab, var(--ink) 70%, transparent);
+      }
+
+      /* the aqueduct */
+      .aq-face {
+        fill: color-mix(in oklab, var(--court-stone) 80%, var(--court-shade));
+      }
+      .aq-end {
+        fill: color-mix(in oklab, var(--court-stone) 88%, var(--court-shade));
+      }
+      .arch-reveal {
+        fill: color-mix(in oklab, var(--court-stone) 64%, var(--court-shade));
+      }
+      .arch-sky {
+        fill: var(--court-sun);
+      }
+      .specus-bed {
+        fill: color-mix(in oklab, var(--court-stone) 76%, var(--court-shade));
+      }
+      .water,
+      .basin-water {
+        fill: var(--court-water);
+      }
+      .drop {
+        fill: color-mix(in oklab, var(--court-water) 70%, var(--court-shade));
+      }
+      .stream {
+        stroke: var(--court-water);
+        stroke-linecap: round;
+        opacity: 0.9;
+      }
+      .ripple {
+        fill: none;
+        stroke: color-mix(in oklab, var(--court-water) 60%, var(--court-stone));
+        stroke-width: 1;
+      }
+      .ripple--2 {
+        opacity: 0.55;
+      }
+      /* The flow layer is drawn once and shown only while the switch is on. */
+      html:not([data-flow="on"]) .flow,
+      html[data-flow="on"] .calm {
+        display: none;
+      }
+      /* Droplets drift slowly down the channels. They hold still for anyone who asks for less motion. */
+      @media (prefers-reduced-motion: no-preference) {
+        .drop {
+          animation: drift 3.2s linear infinite;
+        }
+        .drop--in {
+          animation-name: drift-in;
+        }
+      }
+      @keyframes drift {
+        to {
+          transform: translate(var(--dx), var(--dy));
+        }
+      }
+      @keyframes drift-in {
+        0%,
+        100% {
+          opacity: 0;
+        }
+        20%,
+        75% {
+          opacity: 1;
+        }
+        100% {
+          transform: translate(var(--dx), var(--dy));
+        }
+      }
+
+      /* columns, cylinders and banners */
+      .cyl-side {
+        fill: color-mix(in oklab, var(--c) 88%, var(--court-shade));
+      }
+      .cyl-shade {
+        fill: url(#office-cyl);
+      }
+      .cyl-top {
+        fill: var(--c);
+        stroke: color-mix(in oklab, var(--c) 84%, var(--court-shade));
+        stroke-width: 0.5;
+      }
+      .banner {
+        fill: oklch(var(--char-l) calc(var(--char-c) * 0.85) var(--hue));
+      }
+      .tiles {
+        stroke: color-mix(in oklab, var(--court-roof) 78%, var(--court-shade));
+        stroke-width: 0.75;
+      }
+
+      /* the project areas */
+      .area {
+        fill: color-mix(in oklab, var(--tessera) 34%, var(--court-floor));
+      }
+      .area-edge {
+        fill: color-mix(in oklab, var(--tessera) 6%, var(--court-floor));
+      }
+      .inscription {
+        font-family: var(--font-ui);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        fill: color-mix(in oklab, var(--ink) 40%, transparent);
+      }
+      .inscription-tasks {
+        font-weight: 500;
+      }
+      .inscription--you {
+        fill: var(--you-ink);
+      }
+
+      /* olive trees, pots and amphorae */
+      .pot {
+        fill: color-mix(in oklab, var(--terra) 88%, var(--court-shade));
+      }
+      .pot-rim {
+        fill: var(--terra);
+      }
+      .soil {
+        fill: color-mix(in oklab, var(--court-wood) 50%, var(--court-shade));
+      }
+      .trunk {
+        fill: none;
+        stroke: color-mix(in oklab, var(--court-wood) 72%, var(--court-shade));
+        stroke-linecap: round;
+      }
+      .crown--0 {
+        fill: var(--court-leaf);
+      }
+      .crown--1 {
+        fill: color-mix(in oklab, var(--court-leaf) 84%, var(--court-shade));
+      }
+      .crown--2 {
+        fill: color-mix(in oklab, var(--court-leaf) 82%, white);
+      }
+      .amphora {
+        fill: var(--terra);
+      }
+      .amphora-side {
+        fill: color-mix(in oklab, var(--terra) 78%, var(--court-shade));
+      }
+      .amphora-handle {
+        fill: none;
+        stroke: color-mix(in oklab, var(--terra) 84%, var(--court-shade));
+        stroke-width: 0.05;
+        stroke-linecap: round;
+      }
+
+      /* the exedra */
+      .ex-top {
+        fill: var(--court-stone);
+        stroke: color-mix(in oklab, var(--court-stone) 84%, var(--court-shade));
+        stroke-width: 0.5;
+      }
+      .ex-face {
+        fill: color-mix(in oklab, var(--court-stone) 82%, var(--court-shade));
+        stroke: color-mix(in oklab, var(--court-stone) 82%, var(--court-shade));
+        stroke-width: 0.5;
+      }
+      .ex-end {
+        fill: color-mix(in oklab, var(--court-stone) 76%, var(--court-shade));
+      }
+
+      /* desks, laptops and stools */
+      .stool {
+        fill: var(--court-wood);
+      }
+      .stool--side {
+        fill: color-mix(in oklab, var(--court-wood) 76%, var(--court-shade));
+      }
+      .screen {
+        fill: var(--court-screen);
+        stroke: var(--court-metal);
+        stroke-width: 2;
+      }
+      .screen--lit {
+        fill: oklch(0.93 0.05 var(--hue));
+      }
+      .screen--away {
+        fill: color-mix(in oklab, var(--you) 22%, var(--court-screen));
+      }
+      .screen-dot {
+        fill: var(--you);
+      }
+      .code-line {
+        fill: oklch(0.62 0.15 var(--hue) / 0.75);
+      }
+      .lid {
+        fill: color-mix(in oklab, var(--court-metal) 86%, var(--court-shade));
+      }
+
+      /* ---------- labels over the courtyard ---------- */
+      .tags {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .tag {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 2px 8px 3px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--raised) 90%, transparent);
+        box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-soft);
+        font-size: var(--t-11);
+        line-height: 1.35;
+        white-space: nowrap;
+        pointer-events: auto;
+      }
+      .tag b {
+        font-weight: var(--w-bold);
+      }
+      .tag span {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .tag--side {
+        transform: translate(0, -50%);
+      }
+      .tag--quiet {
+        opacity: 0.86;
+      }
+      .tag--wing span.cap {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .tag--bench span + b {
+        margin-left: 4px;
+      }
+      .tag--desk {
+        align-items: center;
+        padding-left: 3px;
+      }
+      /* a Connection's count, where its feeder meets the aqueduct */
+      .tag--src {
+        align-items: center;
+        gap: 4px;
+        padding: 2px 7px 2px 6px;
+        color: var(--muted);
+      }
+      .tag--src span {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      /* A queued colleague's question, speaking up and to the right so no bubble covers a face.
+         Gold points at the decision; the head of the queue is the one to answer first. */
+      .tag--ask {
+        transform: translate(-18px, -100%);
+        margin-top: -6px;
+        padding: 5px 11px;
+        border-radius: 12px 12px 12px 4px;
+        background: var(--raised);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--you);
+      }
+      .tag--ask::after {
+        content: "";
+        position: absolute;
+        left: 12px;
+        bottom: -5px;
+        width: 9px;
+        height: 9px;
+        background: inherit;
+        box-shadow: 1.5px 1.5px 0 0 var(--you);
+        transform: rotate(45deg);
+        border-radius: 0 0 2px 0;
+      }
+      .tag--ask.is-first {
+        background: var(--you);
+        color: var(--face-ink);
+        box-shadow: var(--shadow-2);
+      }
+      .tag--ask.is-first::after {
+        box-shadow: none;
+      }
+      .tag--wait {
+        min-width: 24px;
+        justify-content: center;
+        padding: 3px 7px;
+        color: var(--you-ink);
+      }
+      .tag--more {
+        color: var(--you-ink);
+        font-weight: var(--w-bold);
+      }
+
+      /* ---------- the answer card for the head of the queue ---------- */
+      .next {
+        position: absolute;
+        left: 22px;
+        bottom: 22px;
+        width: 364px;
+        padding: 14px 14px 12px;
+        border-radius: var(--r-xl);
+        background: var(--glass);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 0 0 1px var(--glass-ring), var(--shadow-3);
+      }
+      .next-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .next-h .who-text {
+        line-height: 1.3;
+      }
+      .next-h .who-name {
+        font-size: var(--t-13);
+      }
+      .next-h .who-state {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .next-h .proj {
+        font-size: var(--t-12);
+      }
+      .next-q {
+        margin: 10px 0 12px;
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .next-q code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--sunken);
+        font-size: 12px;
+      }
+      .next-a {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .next-of {
+        font-size: var(--t-11);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+
+      /* ---------- the roster ---------- */
+      .roster {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 272px;
+        overflow: hidden;
+      }
+      .roster-main {
+        overflow: auto;
+        padding: 22px 32px 40px 36px;
+      }
+      .lane + .lane {
+        margin-top: 26px;
+      }
+      .lane-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 6px;
+        padding-left: 4px;
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+      }
+      .lane-h .faint {
+        font-weight: var(--w-regular);
+        font-size: var(--t-12);
+      }
+      .r-row {
+        position: relative;
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr) 112px 160px 52px 176px;
+        align-items: center;
+        gap: 14px;
+        min-height: 56px;
+        padding: 6px 10px 6px 4px;
+        border-radius: var(--r-lg);
+      }
+      /* The divider is a straight hairline from the text column on; a border on the rounded row
+         would curl up at both ends. */
+      .r-row + .r-row::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 56px;
+        right: 10px;
+        height: 1px;
+        background: var(--line-soft);
+      }
+      .r-row:hover {
+        background: var(--hover);
+      }
+      .r-main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.35;
+      }
+      .r-main b {
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-line code {
+        font-size: 11.5px;
+      }
+      .r-ask {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .r-where {
+        display: flex;
+        flex-direction: column;
+        font-size: var(--t-12);
+        color: var(--muted);
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .r-where span:last-child {
+        color: var(--faint);
+      }
+      .r-time {
+        color: var(--faint);
+        font-size: var(--t-12);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      /* Answers sit in two fixed columns, the answer that moves the work first, so every row's
+         first answer lines up under the one above it. */
+      .r-act {
+        display: grid;
+        grid-template-columns: 92px 72px;
+        justify-content: end;
+        gap: 6px;
+      }
+      .r-act .btn {
+        width: 100%;
+      }
+      .r-act .btn:only-child {
+        grid-column: 1 / -1;
+        justify-self: end;
+        width: auto;
+      }
+      .r-asleep {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        margin-top: 4px;
+        padding: 6px 10px 6px 6px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .r-asleep b {
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+      .rail {
+        padding: 22px 22px 22px 20px;
+        box-shadow: inset 1px 0 0 var(--line-soft);
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+        overflow: hidden;
+      }
+      .rail-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .m-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 10px;
+        align-items: center;
+        font-size: var(--t-12);
+      }
+      .m-row b {
+        font-weight: var(--w-medium);
+        font-size: var(--t-13);
+      }
+      .m-row .meter {
+        grid-column: 1 / -1;
+      }
+      .m-row .meter i {
+        background: var(--ink);
+        opacity: 0.7;
+      }
+      .p-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-12);
+        color: var(--muted);
+      }
+      .p-row .proj {
+        flex: 1;
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="office"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Office</h1>
+          <div class="seg" data-seg role="group" aria-label="View">
+            <button data-view="courtyard" aria-pressed="true"><i data-i="office" data-size="14"></i>Courtyard</button>
+            <button data-view="list" aria-pressed="false"><i data-i="list" data-size="14"></i>List</button>
+          </div>
+          <span class="spacer"></span>
+          <div class="sum">
+            <span><i data-face="Refactor cart totals" data-pose="working" data-size="20"></i><b data-swarm="70">8</b> working</span>
+            <span class="sum-you"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><b data-swarm="10">3</b> waiting on you</span>
+            <span><i data-face="Label new issues" data-pose="paused" data-size="20"></i><b data-swarm="2">1</b> paused</span>
+            <span><i data-face="Add iDEAL research" data-pose="idle" data-size="20"></i><b data-swarm="58">4</b> idle</span>
+          </div>
+          <button class="flow-switch" role="switch" aria-checked="false" data-flow-switch><i data-i="aqueduct" data-size="14"></i>Event flow<span class="toggle"></span></button>
+          <button class="btn btn--sm"><i data-i="plus" data-size="14"></i>New thread</button>
+        </header>
+
+        <div class="stage">
+          <div data-office></div>
+          <div class="next" role="dialog" aria-label="First in your queue">
+            <div class="next-h">
+              <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="34"></i>
+              <span class="who-text"><span class="who-name">Fix 3&#8209;D Secure checkout for EU cards</span><span class="who-state"><span class="proj proj--webshop">webshop</span><span>waiting 10m</span></span></span>
+              <span class="next-of">1 of <span data-swarm="10">3</span></span>
+            </div>
+            <div class="next-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+            <div class="next-a">
+              <span class="btn btn--go btn--sm">Allow once</span>
+              <span class="btn btn--quiet btn--sm">Deny</span>
+              <span class="spacer"></span>
+              <a class="btn btn--quiet btn--sm" href="session-active.html">Open thread<i data-i="arrow" data-size="13"></i></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="roster">
+          <div class="roster-main">
+            <section class="lane">
+              <h2 class="lane-h">Waiting on you <b class="count count--you">3</b><span class="faint">oldest 10m</span></h2>
+              <div class="r-row">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Fix 3&#8209;D Secure checkout for EU cards</b><span class="r-line r-ask">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>studio-mac</span></span>
+                <span class="r-time">10m</span>
+                <div class="r-act"><span class="btn btn--go btn--sm">Allow once</span><span class="btn btn--quiet btn--sm">Deny</span></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Migrate ops dashboards</b><span class="r-line r-ask">Keep the old Grafana folder?</span></div>
+                <span class="proj proj--ops">ops</span>
+                <span class="r-where"><span>Thread · pi</span><span>studio-mac</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"><span class="btn btn--sm">Keep</span><span class="btn btn--danger btn--sm">Delete</span></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ship release v2.15" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Ship release v2.15</b><span class="r-line r-ask">Publish payments-api 2.15.0 to npm?</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Run · Ship release</span><span>build-box-2</span></span>
+                <span class="r-time">2m</span>
+                <div class="r-act"><span class="btn btn--go btn--sm">Allow once</span><span class="btn btn--quiet btn--sm">Deny</span></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Working <b class="count">8</b></h2>
+              <div class="r-row">
+                <i data-face="Refactor cart totals" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Refactor cart totals</b><span class="r-line">Running <code>pnpm test cart</code></span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">22m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Cart total rounding on discounts" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Cart total rounding on discounts</b><span class="r-line">Step 2 of 4 · Write the fix</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Run · Fix bug</span><span>build-box-1</span></span>
+                <span class="r-time">14m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Rotate staging secrets" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Rotate staging secrets</b><span class="r-line">Updating the staging keys in the vault</span></div>
+                <span class="proj proj--ops">ops</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">11m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Payout report for September" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Payout report for September</b><span class="r-line">Summing payouts per merchant</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Thread · Codex</span><span>build-box-1</span></span>
+                <span class="r-time">9m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Investigate backup timeouts" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Investigate backup timeouts</b><span class="r-line">Reading the <code>pg_dump</code> logs on ops-db</span></div>
+                <span class="proj proj--ops">ops</span>
+                <span class="r-where"><span>Run · Investigate</span><span>build-box-1</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Webhook retry backoff" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Webhook retry backoff</b><span class="r-line">Step 3 of 4 · Run the tests</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Run · Fix bug</span><span>build-box-1</span></span>
+                <span class="r-time">3m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Draft reply to Jonas at Kiteworks</b><span class="r-line">Step 1 of 2 · Read the conversation</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Run · Draft reply</span><span>build-box-2</span></span>
+                <span class="r-time">1m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ada" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Ada</b><span class="r-line">Answering your backup question in Web chat</span></div>
+                <span class="r-where"><span>Assistant</span></span>
+                <span class="r-where"><span>Claude Code · Sonnet 5</span><span>studio-mac</span></span>
+                <span class="r-time">now</span>
+                <div class="r-act"></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Paused <b class="count">1</b></h2>
+              <div class="r-row">
+                <i data-face="Label new issues" data-pose="paused" data-size="38"></i>
+                <div class="r-main"><b>Label new issues</b><span class="r-line">Held by its Spawn Bound (20 per hour) since 08:14</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Run · Label new issues</span><span>build-box-1</span></span>
+                <span class="r-time">1h 27m</span>
+                <div class="r-act"><a class="btn btn--sm" href="intake.html">See in Intake</a></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Idle <b class="count">4</b></h2>
+              <div class="r-row">
+                <i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Read the Stripe v14 changelog</b><span class="r-line">Finished its turn: "Three breaking changes touch checkout."</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>studio-mac</span></span>
+                <span class="r-time">20m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Milo" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Milo</b><span class="r-line">Listening in Slack #ops</span></div>
+                <span class="r-where"><span>Assistant</span></span>
+                <span class="r-where"><span>Codex · gpt-5.4</span><span>studio-mac</span></span>
+                <span class="r-time"></span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Add iDEAL research" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Add iDEAL research</b><span class="r-line">Finished its turn: "Three ways to add iDEAL, compared."</span></div>
+                <span class="proj proj--payments">payments-api</span>
+                <span class="r-where"><span>Thread · Codex</span><span>build-box-2</span></span>
+                <span class="r-time">1h</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Tidy checkout CSS" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Tidy checkout CSS</b><span class="r-line">Finished its turn: "Removed 14 unused rules."</span></div>
+                <span class="proj proj--webshop">webshop</span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">2h</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-asleep">
+                <i data-face="Juno" data-pose="asleep" data-size="30"></i>
+                <span><b>Juno</b> is asleep and holds no session. A message in Discord #support wakes it.</span>
+              </div>
+            </section>
+          </div>
+
+          <aside class="rail">
+            <section>
+              <h2 class="section-h">Machines</h2>
+              <div class="rail-list">
+                <div class="m-row"><b>studio-mac</b><span class="muted">5 of 6</span><span class="meter"><i style="width: 83.3%"></i></span></div>
+                <div class="m-row"><b>build-box-1</b><span><b style="font-size: 12px">8 of 8</b> <span class="muted">· at cap</span></span><span class="meter"><i style="width: 100%"></i></span></div>
+                <div class="m-row"><b>build-box-2</b><span class="muted">3 of 8</span><span class="meter"><i style="width: 37.5%"></i></span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Projects</h2>
+              <div class="rail-list">
+                <div class="p-row"><span class="proj proj--webshop">webshop</span><span>6 live</span></div>
+                <div class="p-row"><span class="proj proj--payments">payments-api</span><span>5 live</span></div>
+                <div class="p-row"><span class="proj proj--ops">ops</span><span>3 live</span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Poses</h2>
+              <div class="rail-list">
+                <div class="p-row"><i data-face="Refactor cart totals" data-pose="working" data-size="24"></i>Working: eyes down, typing</div>
+                <div class="p-row"><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i>Waiting on you: hand up</div>
+                <div class="p-row"><i data-face="Label new issues" data-pose="paused" data-size="24"></i>Paused: held by a bound</div>
+                <div class="p-row"><i data-face="Add iDEAL research" data-pose="idle" data-size="24"></i>Idle: looking up</div>
+                <div class="p-row"><i data-face="Juno" data-pose="asleep" data-size="24"></i>Asleep: unloaded until needed</div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+    <script src="../office.js"></script>
+    <script>
+      // The switch shows or hides the flow layer, and keeps ?flow= in the address so a reload keeps the choice.
+      (function () {
+        var root = document.documentElement;
+        var flowSwitch = document.querySelector("[data-flow-switch]");
+        flowSwitch.setAttribute("aria-checked", String(root.dataset.flow === "on"));
+        flowSwitch.addEventListener("click", function () {
+          var on = root.dataset.flow !== "on";
+          root.dataset.flow = on ? "on" : "off";
+          flowSwitch.setAttribute("aria-checked", String(on));
+          var url = new URL(location.href);
+          url.searchParams.set("flow", root.dataset.flow);
+          history.replaceState(null, "", url);
+        });
+      })();
+    </script>
+  </body>
+</html>

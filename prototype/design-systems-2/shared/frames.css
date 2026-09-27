@@ -1,0 +1,115 @@
+/* PROTOTYPE - neutral device chrome for design books and the compare page (see book.js).
+   The chrome stays neutral so it never competes with the design inside it. A book may
+   override --f-chrome, --f-chrome-ink and --f-shadow to sit better on its own background. */
+.f {
+  --f-chrome: #e9e9eb;
+  --f-chrome-ink: #6b6b70;
+  --f-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 18px 50px -12px rgb(0 0 0 / 0.35);
+  /* Derived from the chrome ink, so a book that sets a dark chrome gets a dark URL field too. */
+  --f-url: color-mix(in srgb, var(--f-chrome-ink) 12%, transparent);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.f-device {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--f-shadow);
+  background: var(--f-chrome);
+}
+.f-viewport {
+  position: relative;
+  overflow: hidden;
+}
+.f-viewport iframe {
+  border: 0;
+  display: block;
+  transform-origin: 0 0;
+  background: transparent;
+}
+
+/* Web: a neutral browser, 40px tall at scale 1, scaled with the page. */
+.f--web .f-browser {
+  height: calc(40px * var(--f-scale, 1));
+  display: flex;
+  align-items: center;
+  gap: calc(14px * var(--f-scale, 1));
+  padding: 0 calc(14px * var(--f-scale, 1));
+  font: calc(12.5px * var(--f-scale, 1)) / 1 -apple-system, system-ui, sans-serif;
+  color: var(--f-chrome-ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--f-chrome-ink) 16%, transparent);
+}
+.f-dots {
+  display: flex;
+  gap: calc(7px * var(--f-scale, 1));
+}
+.f-dots i {
+  width: calc(11px * var(--f-scale, 1));
+  height: calc(11px * var(--f-scale, 1));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--f-chrome-ink) 30%, transparent);
+}
+.f-nav {
+  letter-spacing: 0.2em;
+  opacity: 0.6;
+  font-size: calc(16px * var(--f-scale, 1));
+}
+.f-url {
+  flex: 1;
+  max-width: 62%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(6px * var(--f-scale, 1));
+  height: calc(26px * var(--f-scale, 1));
+  border-radius: calc(7px * var(--f-scale, 1));
+  background: var(--f-url);
+  transform: translateX(calc(-40px * var(--f-scale, 1)));
+}
+.f-url svg {
+  width: calc(10px * var(--f-scale, 1));
+  height: calc(10px * var(--f-scale, 1));
+}
+
+/* Mobile: a phone bezel. */
+.f--mobile .f-device {
+  padding: calc(12px * var(--f-scale, 1));
+  border-radius: calc(58px * var(--f-scale, 1));
+  background: #1b1b1d;
+  box-shadow:
+    inset 0 0 0 calc(2px * var(--f-scale, 1)) #3a3a3d,
+    var(--f-shadow);
+}
+.f--mobile .f-viewport {
+  border-radius: calc(46px * var(--f-scale, 1));
+}
+
+.f-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.f-caption small {
+  display: block;
+  opacity: 0.65;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.f-caption a {
+  flex: none;
+  color: inherit;
+  opacity: 0.6;
+  text-decoration: none;
+  font-size: 12px;
+}
+.f-caption a:hover {
+  opacity: 1;
+}

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="night-service">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../mobile.css" />
+    <meta charset="utf-8" />
+    <title>Lock screen · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone lock">
+      <!-- On the lock screen the status bar shows the carrier where the time would be, because the
+           large clock below already shows the time. -->
+      <div class="statusbar" data-statusbar="KPN"></div>
+
+      <!-- The Dynamic Island with the Live Activity folded into it: what waits, and how many. -->
+      <div class="lock-island theme-scope" data-theme="night-service" role="img" aria-label="3 waiting on you">
+        <i data-mk="wait"></i><span>3</span>
+      </div>
+
+      <div class="lock-top">
+        <i data-i="lock"></i>
+        <div class="lock-date">Tuesday 29 September</div>
+        <div class="lock-clock">9:41</div>
+      </div>
+
+      <div class="lock-list">
+        <!-- The Live Activity follows the Thread you last opened: the mini departures board, then its
+             question with the two answers that can be given from here. -->
+        <section class="activity glass" aria-label="Hercule Live Activity">
+          <div class="activity-head">
+            <i data-appicon="22"></i>
+            <div data-flow="mini"></div>
+          </div>
+          <div class="activity-q">
+            <div class="activity-title">
+              <span>Fix 3-D Secure checkout for EU cards</span><span class="when">1 of 3 waiting</span>
+            </div>
+            <div class="activity-ask">
+              Run this command?
+              <code>git push -u origin fix/3ds-eu-cards</code>
+            </div>
+            <div class="activity-acts">
+              <button class="btn btn--primary">Allow once</button>
+              <button class="btn btn--quiet">Deny</button>
+              <span class="diff"><span class="plus">+48</span><span class="minus">-12</span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="notification glass" aria-label="Notification">
+          <i data-appicon="38"></i>
+          <div>
+            <div class="notification-app"><b class="notification-title">Ship release v2.15</b><span>9:31</span></div>
+            <p>Publish payments-api 2.15.0 to npm?</p>
+            <div class="notification-acts">
+              <button class="btn btn--primary btn--sm">Allow once</button>
+              <button class="btn btn--quiet btn--sm">Deny</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="notification glass" aria-label="Notification">
+          <i data-appicon="38"></i>
+          <div>
+            <div class="notification-app"><b class="notification-title">Migrate ops dashboards</b><span>9:24</span></div>
+            <p>Keep the old Grafana folder?</p>
+            <div class="notification-acts">
+              <button class="btn btn--primary btn--sm">Keep</button>
+              <button class="btn btn--danger btn--sm">Delete</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="notification glass" aria-label="Notification">
+          <i data-appicon="38"></i>
+          <div>
+            <div class="notification-app"><b class="notification-title">Ada · Check-in</b><span>9:00</span></div>
+            <p class="clamp">Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- The flashlight and camera belong to iOS, so they are drawn here rather than taken from
+           Hercule's icon set. -->
+      <span class="lock-corner lock-corner--left glass" aria-label="Flashlight">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3h8v4l-2 3v11h-4V10L8 7z" /><path d="M12 13v2" stroke-linecap="round" />
+        </svg>
+      </span>
+      <span class="lock-corner lock-corner--right glass" aria-label="Camera">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 8h4l2-3h6l2 3h4v11H3z" /><circle cx="12" cy="13" r="3.5" />
+        </svg>
+      </span>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../mobile.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Check-in · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone phone--tabbed" data-glass-host>
+      <div class="transcript" data-glass data-scrolled-by="300" style="--turns-end: 196px">
+        <div class="col turns">
+          <div class="stamp-line">Yesterday</div>
+          <!-- A notice is Hercule speaking, not Ada, so it sits centred and carries no avatar. -->
+          <div class="notice">
+            <i data-mk="fail"></i><span>Ada's turn failed: the provider timed out. Your message was kept.</span><span class="faint">22:14</span>
+          </div>
+
+          <div class="stamp-line">Today</div>
+          <button class="worked"><span><b>2 quiet check-ins</b></span><span class="faint">07:00 · 08:00</span><i data-i="chev-r" class="faint"></i></button>
+
+          <div class="msg-from"><span class="avatar avatar--asst">A</span><b>Ada</b><span class="faint">09:00 · check-in</span></div>
+          <section class="checkin card-flow" aria-label="Check-in at 09:00">
+            <div class="checkin-head"><b>Overnight</b><span class="faint">167 more handled quietly</span></div>
+            <div data-flow="compact"></div>
+          </section>
+          <div class="msg-agent">
+            <p>
+              Morning Rogier. One thing is burning: EU card payments with 3-D Secure have failed since yesterday's deploy. Your fix waits on your OK to
+              push. Marta at Brightline wants her invoice in the company name; I can draft the reply.
+            </p>
+            <div class="refs">
+              <a class="ref" href="session-active.html"><i data-mk="wait"></i>Fix 3-D Secure checkout<span class="attn">waiting on you</span></a>
+              <a class="ref" href="decision.html"><i data-brand="gmail" style="color: var(--ln-gmail)"></i>Reply to Marta<span class="faint">Offer</span></a>
+            </div>
+          </div>
+
+          <div class="msg-user">What's the status of the backup job?</div>
+          <div class="msg-time">09:38</div>
+
+          <div class="msg-from"><span class="avatar avatar--asst">A</span><b>Ada</b><span class="live">writing</span></div>
+          <!-- Ada has only begun this reply, so the whole Check-in above it still fits on the screen. -->
+          <div class="msg-agent">
+            <p>Milo has been on it since 09:35. So far:<span class="caret"></span></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="statusbar" data-statusbar></div>
+      <header class="topbar">
+        <div class="top-seg glass" role="tablist" aria-label="Assistants">
+          <button role="tab" aria-selected="true"><i data-mk="work"></i>Ada</button>
+          <button role="tab" aria-selected="false"><i data-mk="idle"></i>Milo</button>
+          <button role="tab" aria-selected="false"><i data-mk="idle"></i>Juno</button>
+        </div>
+        <span class="grow"></span>
+        <span class="top-pill glass" aria-label="Next check-in at 10:00"><i data-i="clock"></i>10:00</span>
+      </header>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="reply">
+            <div class="when-full">
+              <div class="ta"><span class="ph">Message Ada…</span></div>
+              <div class="reply-row">
+                <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+                <span class="grow"></span>
+                <button class="icon-btn" aria-label="Dictate"><i data-i="mic"></i></button>
+                <button class="stop"><i></i>Stop</button>
+                <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+              </div>
+            </div>
+            <div class="reply-mini when-shrunk">
+              <span class="grow">Message Ada…</span>
+              <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <nav class="tabbar glass" data-tabbar="assistants" aria-label="Sections"></nav>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

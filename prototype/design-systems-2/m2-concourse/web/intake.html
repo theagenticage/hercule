@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(5) Intake · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="intake" data-web></aside>
+
+      <main class="main">
+        <div class="pane" data-scrolled-to="330">
+          <div class="intake">
+            <div class="ilist">
+              <article class="lead card-flow" aria-label="Burning Proposal">
+                <div class="lead-top">
+                  <span class="burn"><i data-mk="wait"></i>Burning</span>
+                  <span>Checkout</span>
+                  <span class="dot-sep">webshop</span>
+                  <span class="dot-sep">first seen 08:52</span>
+                  <span class="grow"></span>
+                  <span class="kind">Proposal</span>
+                </div>
+                <h2>Checkout fails for EU cards with 3-D Secure</h2>
+                <p class="gist prose">
+                  Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+                  <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+                </p>
+                <div class="made" aria-label="Made from">
+                  <div class="made-h">Made from 4 Connections</div>
+                  <div class="made-row">
+                    <span class="made-src"><i data-brand="sentry" style="color: var(--ln-sentry)"></i>Sentry<span class="acct">webshop-prod</span></span>
+                    <span class="made-ev"><code>PaymentError: authentication_required</code></span>
+                    <span class="made-n"><b>412</b> events · <b>188</b> users</span>
+                  </div>
+                  <div class="made-row">
+                    <span class="made-src"><i data-brand="gmail" style="color: var(--ln-gmail)"></i>Gmail<span class="acct">rogier@personal</span></span>
+                    <span class="made-ev">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span>
+                    <span class="made-n"><b>3</b> emails</span>
+                  </div>
+                  <div class="made-row">
+                    <span class="made-src"><i data-brand="posthog" style="color: var(--ln-posthog)"></i>PostHog<span class="acct">webshop</span></span>
+                    <span class="made-ev">EU checkout conversion since 14:10 yesterday</span>
+                    <span class="made-n"><b class="fail">-18%</b></span>
+                  </div>
+                  <div class="made-row">
+                    <span class="made-src"><i data-brand="github" style="color: var(--ln-github)"></i>GitHub<span class="acct">rogier/webshop</span></span>
+                    <span class="made-ev">Deploy #1289 "Upgrade Stripe SDK to v14"</span>
+                    <span class="made-n">14:02 yesterday</span>
+                  </div>
+                </div>
+                <div class="answers" role="group" aria-label="Answers">
+                  <div class="ans">
+                    <button class="btn btn--primary">Start "Fix bug"</button><span class="desc">Runs Fix bug in a new worktree; ends in a pull request</span><kbd>&#9166;</kbd>
+                  </div>
+                  <div class="ans">
+                    <button class="btn">Accept</button><span class="desc">Adds it to the backlog as a Task</span><kbd>A</kbd>
+                  </div>
+                  <div class="ans">
+                    <button class="btn btn--quiet">Dismiss</button><span class="desc">Closes the Proposal</span><kbd>D</kbd>
+                  </div>
+                </div>
+                <div class="lead-foot">
+                  <i data-i="reply"></i><span class="prose">I can also draft a reply to the 3 customers once the fix ships.</span>
+                  <button class="btn btn--sm">Yes, after the fix</button>
+                </div>
+              </article>
+              <a class="more-link when-swarm" href="#">3 more burning<i data-i="chev-r"></i></a>
+
+              <h2 class="sec-head">Needs a call<span class="n when-today">2</span><span class="n when-swarm">9</span></h2>
+              <div class="irow">
+                <i data-brand="intercom" style="color: var(--ln-intercom)"></i>
+                <div>
+                  <div class="irow-title"><span>App is slow on Android</span><span class="chip">Unsure</span></div>
+                  <div class="irow-meta">Which project is this? · Intercom · 7 conversations since Sunday</div>
+                </div>
+                <div class="seg span-acts" role="group" aria-label="Which project">
+                  <button>webshop</button><button>payments-api</button><button>Both</button><button>Not work</button>
+                </div>
+              </div>
+              <div class="irow">
+                <i data-brand="github" style="color: var(--ln-github)"></i>
+                <div>
+                  <div class="irow-title"><span>"Label new issues" is held</span></div>
+                  <div class="irow-meta">GitHub · a bot opened 34 issues · Spawn Bound 20/h tripped at 08:14</div>
+                </div>
+                <button class="btn btn--sm">Keep held</button><button class="btn btn--sm">Raise to 50/h</button><button class="btn btn--quiet btn--sm">Release all 34</button>
+              </div>
+              <a class="more-link when-swarm" href="#">7 more that need a call<i data-i="chev-r"></i></a>
+
+              <h2 class="sec-head">Today<span class="n when-today">4</span><span class="n when-swarm">30</span></h2>
+              <div class="irow">
+                <i data-brand="grafana" style="color: var(--ln-grafana)"></i>
+                <div>
+                  <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+                  <div class="irow-meta">Grafana and Cron · ops · hit its 2h limit 3 nights running</div>
+                </div>
+                <button class="btn btn--sm" aria-label="Start Investigate"><i data-i="play"></i>Investigate</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button>
+              </div>
+              <div class="irow">
+                <i data-brand="gmail" style="color: var(--ln-gmail)"></i>
+                <div>
+                  <div class="irow-title"><span>Reply to Marta at Brightline</span><span class="chip">Offer</span></div>
+                  <div class="irow-meta">Gmail · Customers · wants INV-2291 in the company name</div>
+                </div>
+                <button class="btn btn--sm">Draft reply</button><span></span><button class="btn btn--quiet btn--sm">Not now</button>
+              </div>
+              <div class="irow">
+                <i data-brand="stripe" style="color: var(--ln-stripe)"></i>
+                <div>
+                  <div class="irow-title"><span>Stripe webhook retries rising</span></div>
+                  <div class="irow-meta">Stripe and Sentry · payments-api · 3x the retries since 06:00</div>
+                </div>
+                <button class="btn btn--sm" aria-label="Start Investigate"><i data-i="play"></i>Investigate</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button>
+              </div>
+              <div class="irow">
+                <i data-brand="github" style="color: var(--ln-github)"></i>
+                <div>
+                  <div class="irow-title"><span>Merge 4 dependency bumps</span><span class="chip">Offer</span></div>
+                  <div class="irow-meta">GitHub · webshop · all green, patch versions only</div>
+                </div>
+                <button class="btn btn--sm">Merge all 4</button><button class="btn btn--sm">Review first</button><button class="btn btn--quiet btn--sm">Not now</button>
+              </div>
+              <a class="more-link when-swarm" href="#">26 more for today<i data-i="chev-r"></i></a>
+
+              <h2 class="sec-head">When you can<span class="n when-today">2</span><span class="n when-swarm">44</span></h2>
+              <div class="irow">
+                <i data-brand="cron" style="color: var(--ln-cron)"></i>
+                <div>
+                  <div class="irow-title"><span>SSL certificate expires in 12 days</span></div>
+                  <div class="irow-meta">Cron · ops · status.acme.dev, renewed by hand</div>
+                </div>
+                <button class="btn btn--sm" aria-label="Start Fix bug"><i data-i="play"></i>Fix bug</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button>
+              </div>
+              <div class="irow">
+                <i data-brand="intercom" style="color: var(--ln-intercom)"></i>
+                <div>
+                  <div class="irow-title"><span>Add iDEAL as a payment method</span></div>
+                  <div class="irow-meta">Intercom · webshop · 5 requests from Dutch customers</div>
+                </div>
+                <button class="btn btn--sm" aria-label="Start Plan"><i data-i="play"></i>Plan</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button>
+              </div>
+              <a class="more-link when-swarm" href="#">42 more when you can<i data-i="chev-r"></i></a>
+
+              <h2 class="sec-head">Nothing to decide</h2>
+              <div class="quietline"><b>Attached</b><span class="ql-text">2 Sentry events to the Task "Cart total rounding on discounts"</span></div>
+              <div class="quietline"><b>FYI</b><span class="ql-text">payments-api v2.14.0 released <span class="faint">·</span> sign-ups <b class="ok">+9%</b> week over week <span class="faint">·</span> Stripe payout <b>€18,240</b> on Thursday</span></div>
+              <div class="quietline">
+                <b class="when-today">167</b><b class="when-swarm">18,512</b><span class="ql-text">events handled quietly: known, noise or duplicates</span>
+                <button class="btn btn--quiet btn--sm">Show</button>
+              </div>
+            </div>
+
+            <aside class="rail">
+              <section>
+                <h3>Running now<span class="aside when-today">8 working · 3 waiting</span><span class="aside when-swarm">52 working · 11 waiting</span></h3>
+                <a class="run-row" href="session-active.html">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Fix 3-D Secure checkout for EU cards</div><div class="sub">Thread · webshop · studio-mac</div></div>
+                  <div class="st attn">git push?<small>09:40</small></div>
+                </a>
+                <div class="run-row">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Ship release v2.15</div><div class="sub">Run · payments-api · build-box-2</div></div>
+                  <div class="st attn">publish to npm?<small>09:31</small></div>
+                </div>
+                <div class="run-row">
+                  <i data-mk="wait"></i>
+                  <div><div class="t">Migrate ops dashboards</div><div class="sub">Thread · ops · studio-mac</div></div>
+                  <div class="st attn">a question<small>09:24</small></div>
+                </div>
+                <div class="run-row">
+                  <i data-mk="work"></i>
+                  <div><div class="t">Refactor cart totals</div><div class="sub">Thread · webshop · build-box-1</div></div>
+                  <div class="st live">working<small>22m</small></div>
+                </div>
+                <div class="run-row">
+                  <i data-mk="work"></i>
+                  <div><div class="t">Investigate backup timeouts</div><div class="sub">Run · ops · build-box-1</div></div>
+                  <div class="st live">working<small>6m</small></div>
+                </div>
+                <div class="run-row">
+                  <i data-mk="paused"></i>
+                  <div><div class="t">Label new issues</div><div class="sub">Run · webshop · build-box-1</div></div>
+                  <div class="st muted">paused<small>bound tripped</small></div>
+                </div>
+                <a class="more-link when-today" href="../desktop/office.html">6 more working · 4 idle<i data-i="chev-r"></i></a>
+                <a class="more-link when-swarm" href="../desktop/office.html?state=swarm">8 more waiting · 50 more working · 71 idle<i data-i="chev-r"></i></a>
+              </section>
+
+              <section>
+                <h3>Fleet<span class="aside when-today">16 of 22 slots</span><span class="aside when-swarm">140 of 150 slots</span></h3>
+                <div class="slots when-today">
+                  <span>studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="v">5 of 6</span>
+                  <span>build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v">full</span>
+                  <span>build-box-2</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span><span class="v">3 of 8</span>
+                </div>
+                <div class="slots when-swarm">
+                  <span>studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v">full</span>
+                  <span>build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v">full</span>
+                  <span>build-box-4</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="v">17 of 18</span>
+                </div>
+                <a class="more-link when-swarm" href="../desktop/office.html?state=swarm">6 more runners · 99 of 108 slots<i data-i="chev-r"></i></a>
+              </section>
+
+              <section>
+                <h3>Connections<span class="aside">10 of 11 running</span></h3>
+                <p class="rail-note"><span class="fail">Discord reconnecting since 09:12.</span> Juno can't be reached until it is back.</p>
+              </section>
+            </aside>
+          </div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Intake</h1>
+          <div class="th-tabs" role="tablist" aria-label="Topics">
+            <button class="th-tab" role="tab" aria-selected="true"><span>All</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><span>Checkout</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><span>Infrastructure</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><span>Customers</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><span>Releases</span></button>
+          </div>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Manage topics"><i data-i="sliders"></i></button>
+            <button class="icon-btn" aria-label="Search Intake"><i data-i="search"></i></button>
+            <div class="pair"><button><i data-i="play"></i>Triage now</button></div>
+          </div>
+        </header>
+
+        <div class="board-float glass" data-flow="full"></div>
+      </main>
+    </div>
+  </body>
+</html>

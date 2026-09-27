@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Office · Hercule</title>
+    <style>
+      /* On a phone the Office is the roster, topped by a plan of the courtyard small enough to read in one glance. */
+      .receipt {
+        display: flex;
+        gap: 6px;
+        padding: 0 20px 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        flex: none;
+        box-shadow: 0 1px 0 var(--line-soft);
+      }
+      .receipt b {
+        font-weight: var(--w-bold);
+      }
+
+      /* The courtyard in plan: one paved plot per project, bordered in its color the way the desktop
+         courtyard marks it on the floor, with the colleagues standing on it in their poses. The
+         fourth plot holds the assistants. */
+      .plan {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 14px 12px 2px;
+      }
+      .plot {
+        display: grid;
+        grid-template-rows: 1fr auto;
+        gap: 6px;
+        height: 84px;
+        padding: 12px 12px 9px;
+        border-radius: 16px;
+        background: var(--court-floor);
+        box-shadow: inset 0 0 0 5px var(--court-floor), inset 0 0 0 6.5px color-mix(in oklab, var(--tessera) 70%, transparent);
+        color: var(--ink);
+      }
+      /* The assistants belong to no project, so their plot has a plain stone border. */
+      .plot--exedra {
+        --tessera: var(--line);
+      }
+      .plot .stack > * + * {
+        margin-left: -6px;
+      }
+      .plot .stack .cr {
+        --badge-ring: var(--court-floor);
+      }
+      .plot .stack-more {
+        background: color-mix(in oklab, var(--ink) 8%, transparent);
+        color: var(--muted);
+        font-size: var(--t-11);
+        font-weight: var(--w-bold);
+      }
+      .plot-name {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .plot-name span {
+        color: var(--muted);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .list .m-lane {
+        padding: 18px 8px 8px;
+      }
+      .m-lane .count {
+        margin-left: -2px;
+      }
+      .m-lane .faint {
+        margin-left: auto;
+        font-weight: var(--w-regular);
+      }
+      .list {
+        padding: 0 12px 20px;
+      }
+
+      /* The head of the queue: the question and its answers, one thumb away. */
+      .ask {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        gap: 2px 12px;
+        align-items: center;
+        padding: 14px 14px 14px;
+        border-radius: 20px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+      }
+      .ask > .cr {
+        grid-row: span 2;
+      }
+      .ask-t {
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ask-where {
+        grid-column: 2 / 4;
+        display: flex;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .ask-q {
+        grid-column: 1 / -1;
+        margin: 10px 0 0;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+      .ask-q code {
+        font-size: 13px;
+      }
+      .ask-go {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .ask-go .btn {
+        height: 46px;
+        font-size: 15px;
+      }
+
+      /* A colleague per row: face and pose first, then what it does, then how long. */
+      .row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 1px 12px;
+        align-items: center;
+        min-height: 62px;
+        padding: 9px 8px;
+      }
+      .row + .row,
+      .ask + .row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .ask + .row {
+        margin-top: 6px;
+        box-shadow: none;
+      }
+      .row > .cr {
+        grid-row: span 2;
+      }
+      .row b {
+        font-weight: var(--w-medium);
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row small {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Inline, so the rug swatch and its name share the line's baseline with the text after them. */
+      .row small .proj {
+        display: inline;
+        font-size: var(--t-12);
+      }
+      .row small .proj::before {
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      .row .when {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-variant-numeric: tabular-nums;
+      }
+      .row .k {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .row .k code {
+        font-size: 11.5px;
+      }
+      .fold {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 8px 8px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .fold b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .fold .spacer {
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <div class="m-title">
+        <h1>Office</h1>
+      </div>
+      <div class="receipt"><b class="you-ink">3 waiting on you</b>·<span>8 working</span>·<span>1 paused</span>·<span>4 idle</span></div>
+
+      <div class="m-body">
+        <div class="plan" role="list" aria-label="Projects">
+          <a class="plot proj--webshop" role="listitem" href="#">
+            <span class="stack"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i><i data-face="Refactor cart totals" data-pose="working" data-size="30"></i><i data-face="Cart total rounding on discounts" data-pose="working" data-size="30"></i><i data-face="Label new issues" data-pose="paused" data-size="30"></i><span class="stack-more">+2</span></span>
+            <span class="plot-name">webshop<span>6 live</span></span>
+          </a>
+          <a class="plot proj--payments" role="listitem" href="#">
+            <span class="stack"><i data-face="Ship release v2.15" data-pose="waiting" data-size="30"></i><i data-face="Webhook retry backoff" data-pose="working" data-size="30"></i><i data-face="Payout report for September" data-pose="working" data-size="30"></i><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="30"></i><span class="stack-more">+1</span></span>
+            <span class="plot-name">payments-api<span>5 live</span></span>
+          </a>
+          <a class="plot proj--ops" role="listitem" href="#">
+            <span class="stack"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="30"></i><i data-face="Investigate backup timeouts" data-pose="working" data-size="30"></i><i data-face="Rotate staging secrets" data-pose="working" data-size="30"></i></span>
+            <span class="plot-name">ops<span>3 live</span></span>
+          </a>
+          <a class="plot plot--exedra" role="listitem" href="#">
+            <span class="stack"><i data-face="Ada" data-pose="working" data-size="30"></i><i data-face="Milo" data-pose="idle" data-size="30"></i><i data-face="Juno" data-pose="asleep" data-size="30"></i></span>
+            <span class="plot-name">Assistants<span>2 live</span></span>
+          </a>
+        </div>
+
+        <div class="list">
+          <div class="m-lane">Waiting on you <b class="count count--you">3</b><span class="faint">oldest 10m</span></div>
+          <div class="ask">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="40"></i>
+            <a class="ask-t" href="session-active.html">Fix 3&#8209;D Secure checkout</a>
+            <span class="when faint">10m</span>
+            <span class="ask-where"><span class="proj proj--webshop">webshop</span>·<span>Claude Code</span></span>
+            <p class="ask-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+            <div class="ask-go">
+              <button class="btn btn--go">Allow once</button>
+              <button class="btn btn--quiet">Deny</button>
+            </div>
+          </div>
+          <a class="row" href="#"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="36"></i><b>Migrate ops dashboards</b><span class="when">6m</span><small><span class="k">Keep the old Grafana folder?</span></small></a>
+          <a class="row" href="#"><i data-face="Ship release v2.15" data-pose="waiting" data-size="36"></i><b>Ship release v2.15</b><span class="when">2m</span><small><span class="k">Publish payments-api 2.15.0 to npm?</span></small></a>
+
+          <div class="m-lane">Working <b class="count">8</b></div>
+          <a class="row" href="#"><i data-face="Refactor cart totals" data-pose="working" data-size="36"></i><b>Refactor cart totals</b><span class="when">22m</span><small><span class="proj proj--webshop">webshop</span> · running <code>pnpm test cart</code></small></a>
+          <a class="row" href="#"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="36"></i><b>Cart total rounding on discounts</b><span class="when">14m</span><small><span class="proj proj--webshop">webshop</span> · Fix bug, step 2 of 4</small></a>
+          <a class="row" href="#"><i data-face="Rotate staging secrets" data-pose="working" data-size="36"></i><b>Rotate staging secrets</b><span class="when">11m</span><small><span class="proj proj--ops">ops</span> · updating the staging keys</small></a>
+          <a class="row" href="#"><i data-face="Payout report for September" data-pose="working" data-size="36"></i><b>Payout report for September</b><span class="when">9m</span><small><span class="proj proj--payments">payments-api</span> · summing payouts per merchant</small></a>
+          <div class="fold">
+            <span class="stack"><i data-face="Investigate backup timeouts" data-pose="working" data-size="28"></i><i data-face="Webhook retry backoff" data-pose="working" data-size="28"></i><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="28"></i><i data-face="Ada" data-pose="working" data-size="28"></i></span>
+            <span><b>4 more</b> working</span>
+            <span class="spacer"></span>
+            <i data-i="chev-d" data-size="16"></i>
+          </div>
+
+          <div class="m-lane">Paused <b class="count">1</b></div>
+          <a class="row" href="intake.html"><i data-face="Label new issues" data-pose="paused" data-size="36"></i><b>Label new issues</b><span class="when">1h 27m</span><small><span class="proj proj--webshop">webshop</span> · held by its Spawn Bound at 08:14</small></a>
+
+          <div class="m-lane">Idle <b class="count">4</b></div>
+          <a class="row" href="#"><i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="36"></i><b>Read the Stripe v14 changelog</b><span class="when">20m</span><small><span class="proj proj--webshop">webshop</span> · Claude Code · Sonnet 5</small></a>
+          <a class="row" href="#"><i data-face="Add iDEAL research" data-pose="idle" data-size="36"></i><b>Add iDEAL research</b><span class="when">1h</span><small><span class="proj proj--payments">payments-api</span> · Codex · gpt-5.4</small></a>
+          <a class="row" href="#"><i data-face="Tidy checkout CSS" data-pose="idle" data-size="36"></i><b>Tidy checkout CSS</b><span class="when">2h</span><small><span class="proj proj--webshop">webshop</span> · Claude Code · Haiku 4.5</small></a>
+          <a class="row" href="#"><i data-face="Milo" data-pose="idle" data-size="36"></i><b>Milo</b><span class="when"></span><small>Assistant · Slack #ops</small></a>
+        </div>
+      </div>
+
+      <nav data-tabbar="office"></nav>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

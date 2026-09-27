@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Proposal · Checkout fails for EU cards · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="statusbar" data-statusbar="9:41"></div>
+
+      <!-- Behind the sheet: Intake, dimmed. -->
+      <header class="m-head" aria-hidden="true">
+        <h1>Intake</h1>
+        <span class="sub">09:00 · next 11:00</span>
+        <span class="grow"></span>
+        <span class="m-icon"><i data-i="search"></i></span>
+        <span class="m-icon"><i data-i="sliders"></i></span>
+      </header>
+      <nav class="m-topics" aria-hidden="true">
+        <button aria-pressed="true">All</button><button>Checkout</button><button>Infrastructure</button><button>Customers</button>
+      </nav>
+      <main class="m-body" aria-hidden="true">
+        <section class="m-band">
+          <div class="m-band-rows">
+            <span class="m-band-cap"></span>
+            <div class="m-band-row" data-line="sentry" style="--w: 6.3px"><span class="m-band-ln"></span><i data-brand="sentry"></i><span class="nm">Sentry</span><b>130</b></div>
+            <div class="m-band-row" data-line="github" style="--w: 5.1px"><span class="m-band-ln"></span><i data-brand="github"></i><span class="nm">GitHub</span><b>38</b></div>
+            <div class="m-band-row" data-line="gmail" style="--w: 4.3px"><span class="m-band-ln"></span><i data-brand="gmail"></i><span class="nm">Gmail</span><b>17</b></div>
+          </div>
+        </section>
+      </main>
+      <nav class="tabbar" data-tabbar="intake" aria-hidden="true"></nav>
+
+      <div class="m-scrim"></div>
+
+      <!-- The decision: one Proposal as a bottom sheet. What it was made from, then the answers,
+           each with one line on what it does. -->
+      <section class="m-sheet sheet m-sheet--decision" role="dialog" aria-label="Proposal: Checkout fails for EU cards with 3-D Secure">
+        <div class="grabber"></div>
+        <div class="m-sheet-body">
+          <div class="ds-head">
+            <span class="stamp stamp--attn"><i data-mk="wait"></i>Proposal</span>
+            <span class="attn">waiting on you</span>
+            <span class="grow"></span>
+            <button class="m-icon" aria-label="Close"><i data-i="close"></i></button>
+          </div>
+          <div class="ds-meta">
+            <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span> <b class="fail">urgent</b></span>
+            <span>Checkout</span>
+            <span>webshop</span>
+            <span>first seen 08:52</span>
+          </div>
+          <h1 class="ds-title">Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="ds-gist">Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+          <h2 class="ds-sec"><i data-strip="sentry gmail posthog github" data-size="s"></i>Made from</h2>
+          <div class="ds-srcs">
+            <div class="ds-src" data-line="sentry"><span class="swatch"></span><i data-brand="sentry"></i><span class="ev"><b>Sentry</b>PaymentError, 188 users</span><span class="n">412</span></div>
+            <div class="ds-src" data-line="gmail"><span class="swatch"></span><i data-brand="gmail"></i><span class="ev"><b>Gmail</b>"Card declined at checkout"</span><span class="n">3</span></div>
+            <div class="ds-src" data-line="posthog"><span class="swatch"></span><i data-brand="posthog"></i><span class="ev"><b>PostHog</b>EU checkout conversion</span><span class="n fail">-18%</span></div>
+            <div class="ds-src" data-line="github"><span class="swatch"></span><i data-brand="github"></i><span class="ev"><b>GitHub</b>deploy #1289, yesterday</span><span class="n">14:02</span></div>
+          </div>
+
+          <h2 class="ds-sec">Your answer</h2>
+          <div class="ds-answers">
+            <div class="ds-ans"><a class="m-btn m-btn--ink" href="session-active.html">Start "Fix bug"</a><span>Fixes it in a new worktree and opens a pull request</span></div>
+            <div class="ds-ans"><button class="m-btn">Accept as a Task</button><span>Keeps it for later; nothing runs</span></div>
+            <div class="ds-ans"><button class="m-btn m-btn--quiet">Dismiss</button><span>Closes the Proposal; nothing runs</span></div>
+          </div>
+
+          <label class="ds-then">
+            <i data-i="reply" class="icon"></i>
+            <span class="grow">Draft a reply to the 3 customers once the fix ships</span>
+            <span class="toggle" role="switch" aria-checked="true"></span>
+          </label>
+        </div>
+      </section>
+
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

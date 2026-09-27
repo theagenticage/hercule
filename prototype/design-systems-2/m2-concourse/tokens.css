@@ -1,0 +1,431 @@
+/* Metro Concourse - tokens.
+   PROTOTYPE. Every theme is a block on :root[data-theme]; .theme-scope[data-theme] applies one theme
+   to a subtree, for the previews in Appearance and the book. "light" is Enamel and "dark" is Night
+   Service; the aliases share the flagship blocks, so they can never drift apart.
+
+   The concourse, in one sentence each:
+   - The window ground is one quiet, neutral color. Everything in the flow (messages, rows, cards)
+     sits on it, solid.
+   - Only floating layers are glass: the sidebar panel, the header pills, the composer, the
+     departures board, menus and sheets. Anything seen through the glass is content.
+   - A hue belongs to a Connection (the Sentry segment on the departures board). Hercule's own line
+     is ink. Chrome is never tinted, and no dark theme is blue.
+   - State is one of six marks plus a word. State colors appear on words and marks only. */
+
+@font-face {
+  font-family: "Overpass";
+  src: url("fonts/overpass-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+  /* Overpass draws the middle dot hard against the next word; the system font's dot is centred,
+     and "·" is the separator on every screen. */
+  unicode-range: U+0000-00B6, U+00B8-FFFF;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/inter-latin-wght.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Overpass Mono";
+  src: url("fonts/overpass-mono-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* Type. Signs you scan are Overpass; sentences you read are Inter; code is Overpass Mono. */
+  --font: "Overpass", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Overpass Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --t-2xs: 10.5px;
+  --t-xs: 11.5px;
+  --t-s: 12.5px;
+  --t-m: 13.5px;
+  --t-base: 14.5px;
+  --t-l: 16px;
+  --t-xl: 19px;
+  --t-board: 22px; /* the numerals on the departures board */
+  --lh: 1.45;
+  --lh-body: 1.6;
+  --lh-tight: 1.2;
+  --w-regular: 420;
+  --w-medium: 560;
+  --w-bold: 720;
+
+  /* Space: a 4px rhythm */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Shape: enamel signs have soft corners */
+  --r-xs: 4px;
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-float: 16px; /* every floating glass panel */
+  --r-sheet: 22px;
+  --r-pill: 999px;
+
+  /* Lines: the departures board's Connection segments and Hercule's ink line */
+  --line-w: 3px;
+
+  /* Motion: trains run on a timetable, not a spring */
+  --ease: cubic-bezier(0.3, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.1, 0.7, 0.2, 1);
+  --t-fast: 120ms;
+  --t-mid: 220ms;
+  --t-slow: 420ms;
+  --train-period: 3.2s;
+
+  /* Glass. One number drives the whole material: 0 is solid, 1 is the most glass Concourse allows.
+     page.js overrides it with ?glass=, a posted { glass } message, or the Appearance slider. */
+  --glass-level: 0.6;
+}
+
+/* ------------------------------------------------------------------ Glass, derived from the level
+   Declared on every theme scope, not only on :root: a custom property resolves where it is
+   declared, so a theme preview must derive its glass from its own theme's colors.
+
+   - Fill: the text-bearing fill never drops below 70% (at level 1), so text on glass keeps its
+     contrast whatever scrolls under it.
+   - Blur 14 to 6px, saturation 1 to 1.25: more glass is clearer glass. At level 1 the text behind
+     shows as soft grey lines you cannot read; a heavier blur would average it away, and the slider
+     would change nothing you can see. Never a color bloom.
+     At level 0 system.css drops the blur altogether, so a solid panel costs nothing to draw.
+   - The rim is a light hairline inside the edge, brighter along the top; it strengthens with the
+     level, because a solid panel needs less of it to read as a panel. */
+:root,
+.theme-scope {
+  --glass: color-mix(in oklab, var(--glass-base) calc(100% - 30% * var(--glass-level)), transparent);
+  --glass-blur: calc(14px - 8px * var(--glass-level));
+  --glass-sat: calc(1 + 0.25 * var(--glass-level));
+  --rim: color-mix(in oklab, var(--glass-rim) calc(55% + 45% * var(--glass-level)), transparent);
+  --rim-top: color-mix(in oklab, var(--glass-rim-top) calc(35% + 65% * var(--glass-level)), transparent);
+  --glass-shadow: inset 0 0 0 1px var(--rim), inset 0 1px 0 var(--rim-top), 0 0 0 1px var(--edge), var(--shadow-2);
+  --glass-shadow-high: inset 0 0 0 1px var(--rim), inset 0 1px 0 var(--rim-top), 0 0 0 1px var(--edge), var(--shadow-3);
+}
+
+/* ------------------------------------------------------------------ Enamel (light, flagship) */
+:root,
+:root[data-theme="enamel"],
+:root[data-theme="light"],
+.theme-scope[data-theme="enamel"] {
+  color-scheme: light;
+  --bg: oklch(96.2% 0.003 85); /* the window ground */
+  --surface: oklch(99.4% 0.001 85); /* cards in the flow */
+  --raised: oklch(100% 0 0); /* solid menus and popovers */
+  --sunken: oklch(93.4% 0.004 85); /* wells: code, inputs, tracks */
+  --ink: oklch(21% 0.008 60);
+  --muted: oklch(42% 0.008 60);
+  --faint: oklch(50% 0.008 60);
+  --line: oklch(21% 0.008 60 / 0.12);
+  --line-soft: oklch(21% 0.008 60 / 0.065);
+  --hover: oklch(21% 0.008 60 / 0.045);
+  --selected: oklch(21% 0.008 60 / 0.075);
+
+  --accent: oklch(21% 0.008 60); /* black enamel */
+  --knob: oklch(100% 0 0); /* the fill of a neutral button, a switch knob, the chosen segment */
+  --accent-ink: oklch(99% 0.002 85);
+  --focus: oklch(62% 0.17 60);
+
+  /* State: words and marks only */
+  --attn: oklch(52% 0.125 68);
+  --attn-soft: oklch(80% 0.1 80 / 0.2);
+  --fail: oklch(51% 0.17 28);
+  --live: oklch(50% 0.11 162);
+  --ok: oklch(49% 0.1 150);
+
+  /* One hue per Connection */
+  --ln-sentry: oklch(50% 0.2 302);
+  --ln-gmail: oklch(57% 0.21 27);
+  --ln-posthog: oklch(77% 0.16 78);
+  --ln-github: oklch(55% 0.14 152);
+  --ln-stripe: oklch(53% 0.19 268);
+  --ln-intercom: oklch(62% 0.11 195);
+  --ln-grafana: oklch(66% 0.18 48);
+  --ln-cron: oklch(50% 0.07 58);
+  --ln-slack: oklch(50% 0.16 345);
+  --ln-discord: oklch(62% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+
+  --glass-base: oklch(99.7% 0.001 85);
+  --glass-rim: oklch(100% 0 0 / 0.9);
+  --glass-rim-top: oklch(100% 0 0);
+  --edge: oklch(21% 0.008 60 / 0.1);
+  --scrim: oklch(21% 0.008 60 / 0.24);
+
+  --shadow-1: 0 1px 1px oklch(21% 0.01 60 / 0.04), 0 1px 3px oklch(21% 0.01 60 / 0.05);
+  --shadow-2: 0 1px 2px oklch(21% 0.01 60 / 0.05), 0 10px 28px -10px oklch(21% 0.01 60 / 0.18);
+  --shadow-3: 0 2px 4px oklch(21% 0.01 60 / 0.06), 0 24px 60px -14px oklch(21% 0.01 60 / 0.3);
+
+  --syn-key: oklch(48% 0.16 302);
+  --syn-string: oklch(48% 0.12 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Tile (light, cream) */
+:root[data-theme="tile"],
+.theme-scope[data-theme="tile"] {
+  color-scheme: light;
+  --bg: oklch(94% 0.014 86);
+  --surface: oklch(98% 0.008 88);
+  --raised: oklch(99.3% 0.005 88);
+  --sunken: oklch(91.4% 0.016 86);
+  --ink: oklch(24% 0.02 65);
+  --muted: oklch(41% 0.022 65);
+  --faint: oklch(49% 0.022 65);
+  --line: oklch(24% 0.02 65 / 0.14);
+  --line-soft: oklch(24% 0.02 65 / 0.075);
+  --hover: oklch(24% 0.02 65 / 0.05);
+  --selected: oklch(24% 0.02 65 / 0.085);
+
+  --accent: oklch(43% 0.085 165); /* platform-trim green */
+  --knob: oklch(99.6% 0.004 88); /* the fill of a neutral button, a switch knob, the chosen segment */
+  --accent-ink: oklch(98% 0.01 88);
+  --focus: oklch(55% 0.12 165);
+
+  --attn: oklch(50% 0.12 62);
+  --attn-soft: oklch(78% 0.1 75 / 0.24);
+  --fail: oklch(49% 0.16 28);
+  --live: oklch(47% 0.1 162);
+  --ok: oklch(46% 0.1 150);
+
+  --ln-sentry: oklch(48% 0.19 302);
+  --ln-gmail: oklch(55% 0.2 27);
+  --ln-posthog: oklch(74% 0.16 76);
+  --ln-github: oklch(52% 0.13 152);
+  --ln-stripe: oklch(50% 0.18 268);
+  --ln-intercom: oklch(58% 0.11 195);
+  --ln-grafana: oklch(63% 0.18 46);
+  --ln-cron: oklch(46% 0.07 58);
+  --ln-slack: oklch(47% 0.16 345);
+  --ln-discord: oklch(58% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+
+  --glass-base: oklch(99.2% 0.006 88);
+  --glass-rim: oklch(100% 0.01 88 / 0.85);
+  --glass-rim-top: oklch(100% 0 0);
+  --edge: oklch(24% 0.02 65 / 0.12);
+  --scrim: oklch(24% 0.02 65 / 0.26);
+
+  --shadow-1: 0 1px 1px oklch(30% 0.03 65 / 0.05), 0 1px 3px oklch(30% 0.03 65 / 0.06);
+  --shadow-2: 0 1px 2px oklch(30% 0.03 65 / 0.06), 0 10px 28px -10px oklch(30% 0.03 65 / 0.2);
+  --shadow-3: 0 2px 4px oklch(30% 0.03 65 / 0.07), 0 24px 60px -14px oklch(30% 0.03 65 / 0.32);
+
+  --syn-key: oklch(45% 0.15 302);
+  --syn-string: oklch(45% 0.11 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Night Service (dark, flagship)
+   Crisp, not washed: a neutral ground, glass a step lighter than it, a light hairline inside every
+   floating edge and a dark one outside it. */
+:root[data-theme="night-service"],
+:root[data-theme="dark"],
+.theme-scope[data-theme="night-service"] {
+  color-scheme: dark;
+  --bg: oklch(17.4% 0.003 70);
+  --surface: oklch(21% 0.003 70);
+  --raised: oklch(24.5% 0.004 70);
+  --sunken: oklch(15.2% 0.003 70);
+  --ink: oklch(95% 0.005 85);
+  --muted: oklch(77% 0.005 80);
+  --faint: oklch(68% 0.005 80);
+  --line: oklch(94% 0.005 85 / 0.11);
+  --line-soft: oklch(94% 0.005 85 / 0.06);
+  --hover: oklch(94% 0.005 85 / 0.055);
+  --selected: oklch(94% 0.005 85 / 0.09);
+
+  --accent: oklch(94% 0.01 85); /* enamel white */
+  --knob: oklch(33% 0.004 70); /* the fill of a neutral button, a switch knob, the chosen segment */
+  --accent-ink: oklch(18% 0.004 70);
+  --focus: oklch(80% 0.14 75);
+
+  --attn: oklch(81% 0.13 78);
+  --attn-soft: oklch(81% 0.13 78 / 0.12);
+  --fail: oklch(72% 0.15 28);
+  --live: oklch(78% 0.12 165);
+  --ok: oklch(77% 0.11 152);
+
+  --ln-sentry: oklch(68% 0.17 302);
+  --ln-gmail: oklch(67% 0.19 27);
+  --ln-posthog: oklch(84% 0.15 85);
+  --ln-github: oklch(70% 0.15 152);
+  --ln-stripe: oklch(67% 0.16 272);
+  --ln-intercom: oklch(75% 0.11 195);
+  --ln-grafana: oklch(74% 0.16 52);
+  --ln-cron: oklch(66% 0.07 62);
+  --ln-slack: oklch(68% 0.16 345);
+  --ln-discord: oklch(74% 0.12 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+
+  --glass-base: oklch(25.5% 0.004 70);
+  --glass-rim: oklch(100% 0 0 / 0.08);
+  --glass-rim-top: oklch(100% 0 0 / 0.16);
+  --edge: oklch(0% 0 0 / 0.42);
+  --scrim: oklch(8% 0.003 70 / 0.5);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.25), 0 0 0 1px oklch(94% 0.005 85 / 0.04);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.3), 0 14px 36px -10px oklch(0% 0 0 / 0.55);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.3), 0 28px 70px -12px oklch(0% 0 0 / 0.7);
+
+  --syn-key: oklch(76% 0.13 302);
+  --syn-string: oklch(78% 0.12 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Underground (dark, warm black)
+   A warm black, like a tiled tunnel at night, with a pale brass accent. The warmth is in the
+   ground's hue, not in any wash or gradient. The accent is kept pale so the filled button never
+   reads as the amber of waiting. */
+:root[data-theme="underground"],
+.theme-scope[data-theme="underground"] {
+  color-scheme: dark;
+  --bg: oklch(16.4% 0.009 55);
+  --surface: oklch(19.8% 0.01 55);
+  --raised: oklch(23.4% 0.011 55);
+  --sunken: oklch(14.4% 0.008 55);
+  --ink: oklch(94% 0.014 80);
+  --muted: oklch(77% 0.018 75);
+  --faint: oklch(68% 0.018 70);
+  --line: oklch(93% 0.014 80 / 0.11);
+  --line-soft: oklch(93% 0.014 80 / 0.06);
+  --hover: oklch(93% 0.014 80 / 0.055);
+  --selected: oklch(93% 0.014 80 / 0.09);
+
+  --accent: oklch(88% 0.045 82); /* pale brass */
+  --knob: oklch(31.5% 0.011 55); /* the fill of a neutral button, a switch knob, the chosen segment */
+  --accent-ink: oklch(18% 0.015 55);
+  --focus: oklch(80% 0.11 78);
+
+  --attn: oklch(82% 0.13 80);
+  --attn-soft: oklch(82% 0.13 80 / 0.12);
+  --fail: oklch(72% 0.15 30);
+  --live: oklch(78% 0.11 160);
+  --ok: oklch(77% 0.1 150);
+
+  --ln-sentry: oklch(67% 0.16 305);
+  --ln-gmail: oklch(66% 0.18 28);
+  --ln-posthog: oklch(84% 0.15 88);
+  --ln-github: oklch(69% 0.14 150);
+  --ln-stripe: oklch(66% 0.15 275);
+  --ln-intercom: oklch(74% 0.1 195);
+  --ln-grafana: oklch(73% 0.16 52);
+  --ln-cron: oklch(66% 0.08 62);
+  --ln-slack: oklch(67% 0.15 345);
+  --ln-discord: oklch(73% 0.11 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+
+  --glass-base: oklch(24.5% 0.011 55);
+  --glass-rim: oklch(100% 0.01 80 / 0.08);
+  --glass-rim-top: oklch(100% 0.02 80 / 0.16);
+  --edge: oklch(0% 0 0 / 0.45);
+  --scrim: oklch(8% 0.008 55 / 0.55);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.3), 0 0 0 1px oklch(93% 0.014 80 / 0.04);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.35), 0 14px 36px -10px oklch(0% 0 0 / 0.6);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.35), 0 28px 70px -12px oklch(0% 0 0 / 0.72);
+
+  --syn-key: oklch(76% 0.12 305);
+  --syn-string: oklch(78% 0.11 150);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Signal (dark, near-black, high-vis) */
+:root[data-theme="signal"],
+.theme-scope[data-theme="signal"] {
+  color-scheme: dark;
+  --bg: oklch(12.6% 0.002 100);
+  --surface: oklch(16% 0.002 100);
+  --raised: oklch(19.6% 0.003 100);
+  --sunken: oklch(10.8% 0.002 100);
+  --ink: oklch(96.5% 0.004 100);
+  --muted: oklch(78% 0.004 100);
+  --faint: oklch(68% 0.004 100);
+  --line: oklch(96% 0.004 100 / 0.12);
+  --line-soft: oklch(96% 0.004 100 / 0.065);
+  --hover: oklch(96% 0.004 100 / 0.06);
+  --selected: oklch(96% 0.004 100 / 0.095);
+
+  --accent: oklch(91% 0.2 118); /* high-vis signal yellow */
+  --knob: oklch(29% 0.003 100); /* the fill of a neutral button, a switch knob, the chosen segment */
+  --accent-ink: oklch(15% 0.01 118);
+  --focus: oklch(91% 0.2 118);
+
+  --attn: oklch(80% 0.14 68); /* amber, kept apart from the yellow accent so waiting never reads as a button */
+  --attn-soft: oklch(80% 0.14 68 / 0.12);
+  --fail: oklch(72% 0.17 28);
+  --live: oklch(82% 0.14 165);
+  --ok: oklch(80% 0.13 150);
+
+  --ln-sentry: oklch(70% 0.19 302);
+  --ln-gmail: oklch(68% 0.21 27);
+  --ln-posthog: oklch(86% 0.16 85);
+  --ln-github: oklch(73% 0.17 152);
+  --ln-stripe: oklch(68% 0.18 272);
+  --ln-intercom: oklch(78% 0.12 195);
+  --ln-grafana: oklch(75% 0.18 50);
+  --ln-cron: oklch(68% 0.08 62);
+  --ln-slack: oklch(70% 0.18 345);
+  --ln-discord: oklch(76% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+
+  --glass-base: oklch(20.5% 0.003 100);
+  --glass-rim: oklch(100% 0 0 / 0.085);
+  --glass-rim-top: oklch(100% 0 0 / 0.17);
+  --edge: oklch(0% 0 0 / 0.55);
+  --scrim: oklch(4% 0 0 / 0.6);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.4), 0 0 0 1px oklch(96% 0.004 100 / 0.05);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.4), 0 14px 36px -10px oklch(0% 0 0 / 0.65);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.4), 0 28px 70px -12px oklch(0% 0 0 / 0.78);
+
+  --syn-key: oklch(78% 0.14 302);
+  --syn-string: oklch(80% 0.13 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* Density and font size, set by Settings > Appearance */
+:root[data-density="compact"] {
+  --s-3: 10px;
+  --s-4: 13px;
+}
+:root[data-size="large"] {
+  --t-s: 13.5px;
+  --t-m: 14.5px;
+  --t-base: 15.5px;
+}
+
+/* Reduce transparency turns the glass fully solid. !important beats the inline level page.js sets,
+   because the person's system setting outranks a slider. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-level: 0 !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-mid: 0ms;
+    --t-slow: 0ms;
+  }
+}

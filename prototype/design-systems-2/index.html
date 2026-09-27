@@ -1,0 +1,269 @@
+<!doctype html>
+<!-- PROTOTYPE - the round-2 gallery: Metro and Crew, each as its original and two iterations.
+     Opens from disk or via `pnpm design-systems-2`. -->
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hercule - design systems, round 2</title>
+    <script src="designs.js"></script>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f4f2;
+        --card: #ffffff;
+        --ink: #18181a;
+        --muted: #66666c;
+        --line: rgb(0 0 0 / 0.09);
+        --chip: rgb(0 0 0 / 0.05);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+      }
+      :root[data-theme="dark"] {
+        --bg: #121213;
+        --card: #1b1b1d;
+        --ink: #ececee;
+        --muted: #9a9aa2;
+        --line: rgb(255 255 255 / 0.08);
+        --chip: rgb(255 255 255 / 0.06);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      a {
+        color: inherit;
+      }
+      .wrap {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 40px 40px 80px;
+      }
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 32px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0 0 4px;
+        letter-spacing: -0.01em;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 720px;
+      }
+      .tools {
+        display: flex;
+        gap: 8px;
+        flex: none;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 32px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        text-decoration: none;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .btn[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--bg);
+        border-color: var(--ink);
+      }
+      .family {
+        margin-top: 40px;
+      }
+      .family h2 {
+        font-size: 17px;
+        font-weight: 600;
+        margin: 0 0 2px;
+      }
+      .family > p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px;
+      }
+      .step {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .card.original .step::after {
+        content: " · round 1, unchanged";
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .thumb {
+        position: relative;
+        aspect-ratio: 1440 / 900;
+        overflow: hidden;
+        background: var(--chip);
+        border-bottom: 1px solid var(--line);
+        display: block;
+      }
+      .thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .thumb iframe {
+        position: absolute;
+        inset: 0;
+        width: 1440px;
+        height: 900px;
+        border: 0;
+        transform-origin: 0 0;
+        pointer-events: none;
+      }
+      .meta {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 14px 18px 6px;
+      }
+      .meta .title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .num {
+        font: 12px/1 ui-monospace, "SF Mono", Menlo, monospace;
+        color: var(--muted);
+      }
+      .name {
+        font-size: 17px;
+        font-weight: 600;
+      }
+      .thesis {
+        color: var(--muted);
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: auto;
+        padding: 10px 18px 18px;
+      }
+      .links a {
+        font-size: 12.5px;
+        text-decoration: none;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background: var(--chip);
+      }
+      .links a:first-child {
+        background: var(--ink);
+        color: var(--bg);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div>
+          <h1>Hercule - design systems, round 2</h1>
+          <p>
+            Metro and Crew, the two systems picked from round 1, each shown as its original and two
+            iterations on Rogier's feedback. Every book has a glass slider: drag it to see each
+            system from fully solid to the most glass it allows.
+          </p>
+        </div>
+        <div class="tools">
+          <button class="btn" data-set-theme="light">Light</button>
+          <button class="btn" data-set-theme="dark">Dark</button>
+          <a class="btn" href="compare.html">Compare screens &rarr;</a>
+          <a class="btn" href="shared/BRIEF-2.md">Brief</a>
+          <a class="btn" href="../design-systems/index.html">Round 1</a>
+        </div>
+      </header>
+      <div id="families"></div>
+    </div>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var params = new URLSearchParams(location.search);
+        var theme = params.get("theme") || localStorage.getItem("ds2-gallery-theme") || "dark";
+        root.dataset.theme = theme;
+        var families = document.getElementById("families");
+
+        function liveThumb(thumb, id) {
+          var iframe = document.createElement("iframe");
+          iframe.loading = "lazy";
+          iframe.tabIndex = -1;
+          iframe.src = id + "/desktop/intake.html?theme=" + theme;
+          thumb.innerHTML = "";
+          thumb.appendChild(iframe);
+          new ResizeObserver(function () {
+            iframe.style.transform = "scale(" + thumb.clientWidth / 1440 + ")";
+          }).observe(thumb);
+        }
+
+        window.FAMILIES.forEach(function (family) {
+          var section = document.createElement("section");
+          section.className = "family";
+          section.innerHTML = "<h2>" + family.name + "</h2><p>" + family.note + '</p><div class="grid"></div>';
+          var grid = section.querySelector(".grid");
+          window.DESIGNS.filter(function (d) {
+            return d.family === family.id;
+          }).forEach(function (d) {
+            var card = document.createElement("article");
+            card.className = "card" + (d.step === "Original" ? " original" : "");
+            card.innerHTML =
+              '<a class="thumb" href="' + d.id + '/index.html?theme=' + theme + '"><img alt=""></a>' +
+              '<div class="meta"><div class="title"><span class="name">' + d.name + '</span>' +
+              '<span class="step">' + d.step + '</span></div><span class="thesis">' + d.thesis + "</span></div>" +
+              '<div class="links">' +
+              '<a href="' + d.id + '/index.html?theme=' + theme + '">Open the book</a>' +
+              '<a href="' + d.id + '/desktop/intake.html?theme=' + theme + '">Intake</a>' +
+              '<a href="' + d.id + '/desktop/session-active.html?theme=' + theme + '">Session</a>' +
+              '<a href="' + d.id + '/desktop/office.html?theme=' + theme + '">Office</a>' +
+              '<a href="' + d.id + '/mobile/intake.html?theme=' + theme + '">Mobile</a></div>';
+            var thumb = card.querySelector(".thumb");
+            var img = thumb.querySelector("img");
+            img.onerror = function () {
+              liveThumb(thumb, d.id);
+            };
+            img.src = d.id + "/cover-" + theme + ".png";
+            grid.appendChild(card);
+          });
+          families.appendChild(section);
+        });
+
+        document.querySelectorAll("[data-set-theme]").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.dataset.setTheme === theme));
+          b.onclick = function () {
+            localStorage.setItem("ds2-gallery-theme", b.dataset.setTheme);
+            location.search = "?theme=" + b.dataset.setTheme;
+          };
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Fleet · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+    <script src="../office.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="fleet"></aside>
+
+      <main class="main">
+        <!-- The Office tab: the Fleet as people at desks, with glass panels floating over it. -->
+        <div class="office">
+          <div class="of-stage">
+            <svg id="office-scene" class="office-scene" width="1160" height="900" viewBox="0 0 1160 900" role="img" aria-label="The office: a room per runner, the Intake mailroom and the Triage counter, with a person at a desk for every session"></svg>
+            <div class="of-tags" data-office-tags></div>
+          </div>
+
+          <div class="of-board glass" data-flow="compact"></div>
+
+          <!-- The one decision you can answer from here: the person at the Fix 3-D Secure desk has
+               a hand up. -->
+          <div class="of-pop glass when-today" role="dialog" aria-label="Fix 3-D Secure checkout for EU cards">
+            <div class="of-pop-h">
+              <i data-mk="wait"></i>
+              <div>
+                <b>Fix 3-D Secure checkout</b>
+                <span>waiting on you · studio-mac</span>
+              </div>
+              <kbd>&#8997;Space</kbd>
+            </div>
+            <p class="prose">Push the fix branch to origin?</p>
+            <code>git push -u origin fix/3ds-eu-cards</code>
+            <div class="of-pop-a">
+              <button class="btn btn--primary btn--sm">Allow once</button>
+              <button class="btn btn--quiet btn--sm">Deny</button>
+              <a class="of-open" href="session-active.html">Open<i data-i="chev-r"></i></a>
+            </div>
+          </div>
+
+          <div class="of-key glass">
+            <div class="of-key-h">Event flow</div>
+            <p class="prose">Each color is one Connection's events, waiting for Triage. Triage sends Proposals to Intake and work to the desks.</p>
+          </div>
+
+          <a class="of-floors glass when-today" href="office.html?state=swarm">
+            <span><b>3 runners, one floor</b><small>16 of 22 slots</small></span>
+            <span class="of-10x">At 10x<i data-i="chev-r"></i></span>
+          </a>
+          <a class="of-floors glass when-swarm" href="office.html">
+            <span><b>9 runners, a floor each</b><small>140 of 150 slots</small></span>
+            <span class="of-10x">Today<i data-i="chev-r"></i></span>
+          </a>
+        </div>
+
+        <!-- The List tab: the same sessions, one table per runner. -->
+        <div class="pane fleet-list">
+          <div class="set set--wide" data-fleet-list></div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Fleet</h1>
+          <div class="th-tabs" role="tablist" aria-label="View">
+            <button class="th-tab" role="tab" aria-selected="false" data-view="list"><i data-i="list"></i><span>List</span></button>
+            <button class="th-tab" role="tab" aria-selected="true" data-view="office"><i data-i="office"></i><span>Office</span></button>
+          </div>
+          <div class="actions">
+            <span class="fleet-count when-today">
+              <span><i data-mk="work"></i><b>8</b> working</span>
+              <span><i data-mk="wait"></i><b>3</b> waiting</span>
+              <span><i data-mk="paused"></i><b>1</b> paused</span>
+              <span><i data-mk="idle"></i><b>4</b> idle</span>
+            </span>
+            <span class="fleet-count when-swarm">
+              <span><i data-mk="work"></i><b>52</b> working</span>
+              <span><i data-mk="wait"></i><b>11</b> waiting</span>
+              <span><i data-mk="paused"></i><b>6</b> paused</span>
+              <span><i data-mk="idle"></i><b>71</b> idle</span>
+            </span>
+            <label class="flow-switch">Event flow<button class="toggle" role="switch" aria-checked="false" data-flow-switch></button></label>
+            <button class="icon-btn" aria-label="Search sessions"><i data-i="search"></i></button>
+          </div>
+        </header>
+      </main>
+    </div>
+    <script>
+      // ?flow=on draws the event flow into the office: the events coming in through the wall,
+      // Triage, and the branches to Intake and to the desks Triage sent work to. The switch in the
+      // header turns it on and off live. It is off by default, so the room belongs to the people.
+      // The attribute is data-flow-lines, not data-flow: metro.js draws a departures board into
+      // every [data-flow].
+      (function () {
+        var root = document.documentElement;
+        var params = new URLSearchParams(location.search);
+        var flowSwitch = document.querySelector("[data-flow-switch]");
+        function showFlow(on) {
+          root.dataset.flowLines = on ? "on" : "off";
+          flowSwitch.setAttribute("aria-checked", String(on));
+        }
+        showFlow(params.get("flow") === "on");
+        flowSwitch.addEventListener("click", function () {
+          showFlow(flowSwitch.getAttribute("aria-checked") !== "true");
+        });
+
+        // ?view=list opens the List tab; the tabs switch between the two views.
+        var tabs = document.querySelectorAll("[data-view]");
+        function showView(view) {
+          root.dataset.view = view;
+          tabs.forEach(function (t) {
+            t.setAttribute("aria-selected", String(t.dataset.view === view));
+          });
+        }
+        showView(params.get("view") === "list" ? "list" : "office");
+        tabs.forEach(function (t) {
+          t.addEventListener("click", function () {
+            showView(t.dataset.view);
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

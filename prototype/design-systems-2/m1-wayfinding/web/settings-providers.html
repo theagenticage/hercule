@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <!-- On the web, Settings takes the whole left column: the settings list replaces the app
+         sidebar, and "Back to threads" returns it. -->
+    <div class="window window--web">
+      <aside class="sidebar set-side">
+        <div class="side-top" style="height: 52px; padding: 0 12px 0 18px">
+          <span class="logo-row"><span data-logo="20"></span><b style="font-size: 15px; letter-spacing: -0.01em">Hercule</b></span>
+        </div>
+        <a class="set-back" href="session-active.html"><i data-i="back"></i>Back to threads</a>
+        <nav class="set-nav" data-setnav="providers" aria-label="Settings"></nav>
+      </aside>
+
+      <main class="main">
+        <header class="chrome">
+          <span class="crumb">Settings /</span>
+          <h1>Providers</h1>
+          <div class="actions">
+            <button class="pill-btn"><i data-i="rotate"></i>Checked 1m ago</button>
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="set-body">
+          <div class="pv">
+            <div class="rec-head">
+              <div>
+                <h2>Providers</h2>
+                <p class="set-lede">The agent tools sessions run on. Each signs in to one account and is installed per machine.</p>
+              </div>
+              <button class="btn"><i data-i="plus"></i>Add a provider</button>
+            </div>
+
+            <section class="pv-card" aria-label="Claude Code">
+              <header class="pv-head">
+                <i data-brand="claude"></i><b>Claude Code</b><span>Anthropic · rogier@personal</span>
+                <button class="btn btn--quiet btn--sm">Edit</button>
+              </header>
+              <dl class="pv-facts">
+                <dt>Models</dt>
+                <dd><b>Opus 5.5</b><span class="faint">default</span> · Sonnet 5 · Haiku 4.5</dd>
+                <dt>New threads</dt>
+                <dd>Opus 5.5 · effort high · <b>auto-accept edits</b></dd>
+                <dt>Usage</dt>
+                <dd><span class="meter"><i style="width: 61%"></i></span><b>61%</b> of the 5-hour window · resets 11:00</dd>
+                <dt>Machines</dt>
+                <dd class="pv-machines">
+                  <span><i data-i="machine"></i>studio-mac</span><span>2.1.283</span><span>signed in</span>
+                  <span><i data-i="server"></i>build-box-1</span><span>2.1.283</span><span>signed in</span>
+                  <span><i data-i="server"></i>build-box-2</span><span>2.1.283</span><span>signed in</span>
+                </dd>
+              </dl>
+            </section>
+
+            <section class="pv-card" aria-label="Codex">
+              <header class="pv-head">
+                <i data-brand="openai"></i><b>Codex</b><span>OpenAI · work</span>
+                <button class="btn btn--quiet btn--sm">Edit</button>
+              </header>
+              <dl class="pv-facts">
+                <dt>Models</dt>
+                <dd><b>gpt-5.4</b><span class="faint">default</span> · gpt-5.4-mini</dd>
+                <dt>New threads</dt>
+                <dd>gpt-5.4 · effort medium · <b>auto</b></dd>
+                <dt>Usage</dt>
+                <dd class="faint">Usage not reported</dd>
+                <dt>Machines</dt>
+                <dd class="pv-machines">
+                  <span class="is-off"><i data-i="machine"></i>studio-mac</span><span class="faint">-</span><span class="faint">not installed · <a href="#">Install</a></span>
+                  <span><i data-i="server"></i>build-box-1</span><span>0.157.1</span><span>signed in</span>
+                  <span><i data-i="server"></i>build-box-2</span><span>0.157.1</span><span>signed in</span>
+                </dd>
+              </dl>
+            </section>
+
+            <section class="pv-card" aria-label="pi">
+              <header class="pv-head">
+                <i data-brand="pi"></i><b>pi</b><span>local · llama.cpp</span>
+                <button class="btn btn--quiet btn--sm">Edit</button>
+              </header>
+              <dl class="pv-facts">
+                <dt>Models</dt>
+                <dd><b>qwen3-coder 30b</b><span class="faint">default</span></dd>
+                <dt>New threads</dt>
+                <dd>qwen3-coder 30b · thinking off · <b>approval required</b></dd>
+                <dt>Usage</dt>
+                <dd class="faint">Local, no usage</dd>
+                <dt>Machines</dt>
+                <dd class="pv-machines">
+                  <span><i data-i="machine"></i>studio-mac</span><span>0.85.1</span><span>ready, no sign-in needed</span>
+                  <span class="is-off"><i data-i="server"></i>build-box-1</span><span class="faint">-</span><span class="faint">not installed · <a href="#">Install</a></span>
+                  <span class="is-off"><i data-i="server"></i>build-box-2</span><span class="faint">-</span><span class="faint">not installed · <a href="#">Install</a></span>
+                </dd>
+              </dl>
+              <p class="pv-note">pi has no auto mode. A thread set to auto runs here as auto-accept edits, and its header says so.</p>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

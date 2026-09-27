@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="settings"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Settings</h1>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="settings">
+          <nav class="set-nav" data-setnav="assistants" aria-label="Settings"></nav>
+          <div class="set-body">
+            <div class="set-inner set-inner--wide">
+              <div class="tabs asst-tabs" role="tablist" aria-label="Assistants">
+                <button role="tab" aria-selected="true"><i data-mk="work"></i>Ada</button>
+                <button role="tab" aria-selected="false"><i data-mk="idle"></i>Milo</button>
+                <button role="tab" aria-selected="false"><i data-mk="idle"></i>Juno</button>
+                <button class="tab-end"><i data-i="plus"></i>New Assistant</button>
+              </div>
+
+              <div class="rec-head">
+                <div>
+                  <h2>Ada</h2>
+                  <div class="rec-sub">
+                    personal assistant<span class="presence live"><i data-mk="work" class="live"></i>working</span><span class="faint">check-in at 09:00</span>
+                  </div>
+                </div>
+                <div class="row-flex">
+                  <button class="btn"><i data-i="rotate"></i>Start fresh</button>
+                  <a class="btn btn--primary" href="assistant.html"><i data-i="thread"></i>Open Conversation</a>
+                </div>
+              </div>
+
+              <div class="rec">
+                <div class="rec-fields">
+                  <div class="rf">
+                    <span class="rf-k">Provider</span>
+                    <span class="rf-v"><button class="field select rf-pick"><i data-brand="claude"></i>Claude Code · Sonnet 5</button></span>
+                  </div>
+                  <div class="rf">
+                    <span class="rf-k">Access mode</span>
+                    <span class="rf-v"><button class="field select rf-pick"><i data-i="shield"></i>Full access</button><span class="faint">file-edit tools removed</span></span>
+                  </div>
+                  <div class="rf">
+                    <span class="rf-k">Reply mode</span>
+                    <span class="rf-v">
+                      <span class="seg" role="group" aria-label="Reply mode"><button aria-pressed="true">Turn end</button><button aria-pressed="false">Segments</button></span>
+                      <span class="faint rf-note">One message when the turn ends</span>
+                    </span>
+                  </div>
+                  <div class="rf rf--tall">
+                    <span class="rf-k">Check-ins</span>
+                    <span class="rf-v rf-col">
+                      <span>Every hour, 07:00 to 23:00, to <i class="bullet bullet--s" style="--c: var(--ln-webchat)"></i>Web chat</span>
+                      <span class="hb-line" aria-label="Today's check-ins">
+                        <i class="d"></i><i class="d"></i><i class="d s"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                      </span>
+                      <span class="hb-lbl"><span>07:00</span><span class="ink">next 10:00</span><span>23:00</span></span>
+                    </span>
+                  </div>
+                  <div class="rf rf--tall">
+                    <span class="rf-k">Rotation</span>
+                    <span class="rf-v rf-col">
+                      <span>At 70% of context or 200k tokens, and daily at 04:00</span>
+                      <span class="ctx" aria-label="Context used: 41%">
+                        <span class="ctx-bar"><i style="width: 41%"></i><b style="left: 70%"></b></span>
+                        <span class="faint">41% · 82k</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div class="rf rf--tall">
+                    <span class="rf-k">Channels</span>
+                    <span class="rf-v rf-col rf-binds">
+                      <span><i class="bullet" style="--c: var(--ln-webchat)"></i><b>Web chat</b><span class="faint">always</span></span>
+                      <span><i class="bullet" style="--c: var(--ln-slack)"></i><b>Slack · acme-hq</b><span class="faint">DM with Rogier</span></span>
+                      <button class="btn btn--quiet btn--sm"><i data-i="plus"></i>Bind a channel</button>
+                    </span>
+                  </div>
+                  <div class="rf rf--tall">
+                    <span class="rf-k">Reminders</span>
+                    <span class="rf-v rf-col">
+                      <ul class="rm-list rm-list--rec">
+                        <li><span class="rm-d">Thu 1 Oct</span><b class="rm-t">16:00</b><span>Call the accountant</span></li>
+                        <li><span class="rm-d">Fri 2 Oct</span><b class="rm-t">09:00</b><span>Renew the SSL cert for ops</span></li>
+                        <li><span class="rm-d">Mon 5 Oct</span><b class="rm-t">08:30</b><span>Send the September revenue summary</span></li>
+                      </ul>
+                    </span>
+                  </div>
+                </div>
+
+                <section class="mem" aria-label="Memory">
+                  <div class="mem-head"><h3>Memory</h3><span class="faint">7 topics of 24</span></div>
+                  <div class="mem-core">
+                    <span>Core note</span><span class="faint">1,284 of 4,000</span>
+                    <span class="mem-bar"><i style="width: 32.1%"></i></span>
+                  </div>
+                  <p class="core-note">
+                    Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in
+                    English, Dutch and German…
+                  </p>
+                  <ul class="topics">
+                    <li><b>work-style</b><span>Prefers short answers; decides fast; hates long preambles</span><span class="sz">1.2k</span></li>
+                    <li><b>webshop</b><span>Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span><span class="sz">3.4k</span></li>
+                    <li><b>payments-api</b><span>Owns webhooks + payouts; v2.x; publish via npm</span><span class="sz">2.1k</span></li>
+                    <li><b>ops</b><span>Backups nightly 04:00 to B2; certs on status.acme.dev</span><span class="sz">1.8k</span></li>
+                    <li><b>customers</b><span>Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span><span class="sz">2.7k</span></li>
+                    <li><b>family</b><span>School run Tue/Thu; no meetings before 09:30</span><span class="sz">0.6k</span></li>
+                    <li><b>reading</b><span>Wants summaries of the weekly Rust + Postgres newsletters</span><span class="sz">0.9k</span></li>
+                  </ul>
+                  <p class="mem-foot faint">Each topic holds up to 12,000 characters. Ada writes them; you can edit any.</p>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

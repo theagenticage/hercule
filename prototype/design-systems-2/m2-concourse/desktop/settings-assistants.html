@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="settings" data-current="assistants"></aside>
+
+      <main class="main">
+        <div class="pane">
+          <div class="set set--wide set-split">
+            <div>
+              <p class="set-lede prose">
+                Ada is your personal assistant. She checks in every hour, keeps her own memory, and reaches you on Web chat and Slack.
+              </p>
+
+              <h2 class="set-h">Agent</h2>
+              <div class="set-card">
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Provider</div>
+                    <div class="set-help">Where Ada's session runs and which model thinks for her.</div>
+                  </div>
+                  <button class="field select"><i data-brand="claude"></i>Claude Code · Sonnet 5</button>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Access mode</div>
+                    <div class="set-help">Ada edits files on her own and asks before anything else.</div>
+                  </div>
+                  <button class="field select"><i data-i="shield"></i>Auto-accept edits</button>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Replies</div>
+                    <div class="set-help">One message per turn, or each part as she writes it.</div>
+                  </div>
+                  <div class="seg" role="group" aria-label="Replies">
+                    <button aria-pressed="true">When the turn ends</button><button aria-pressed="false">As she writes</button>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Start fresh</div>
+                    <div class="set-help">At 70% of the context or 200k tokens, and daily at 04:00. Memory carries over.</div>
+                    <div class="ctx" aria-label="Context used: 41%, starts fresh at 70%">
+                      <span class="ctx-bar"><i style="width: 41%"></i><b style="left: 70%"></b></span><span class="faint">41% used</span>
+                    </div>
+                  </div>
+                  <button class="btn">Start fresh now</button>
+                </div>
+              </div>
+
+              <h2 class="set-h">Check-ins</h2>
+              <div class="set-card">
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Schedule</div>
+                    <div class="set-help">Ada only writes when there is something to report. Today 07:00 and 08:00 were quiet, 09:00 spoke.</div>
+                    <div class="hours" aria-hidden="true">
+                      <i class="q"></i><i class="q"></i><i class="s"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                    </div>
+                    <div class="hours-lbl"><span>07:00</span><span class="ink">next 10:00</span><span>23:00</span></div>
+                  </div>
+                  <button class="field select">Every hour, 07:00 to 23:00</button>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Sends to</div>
+                    <div class="set-help">Where check-ins and reminders land.</div>
+                  </div>
+                  <button class="field select"><i data-brand="webchat"></i>Web chat</button>
+                </div>
+              </div>
+
+              <h2 class="set-h">Channels</h2>
+              <div class="set-card">
+                <div class="set-row">
+                  <div class="who">
+                    <i data-brand="webchat"></i>
+                    <div>
+                      <div class="set-label">Web chat</div>
+                      <div class="set-help">Built in. Always on.</div>
+                    </div>
+                  </div>
+                  <span></span>
+                </div>
+                <div class="set-row">
+                  <div class="who">
+                    <i data-brand="slack" style="color: var(--ln-slack)"></i>
+                    <div>
+                      <div class="set-label">Slack DM</div>
+                      <div class="set-help">acme-hq, with Rogier. Shares the Conversation with Web chat.</div>
+                    </div>
+                  </div>
+                  <button class="btn btn--quiet btn--sm">Unbind</button>
+                </div>
+                <div class="set-row set-row--add">
+                  <button class="btn btn--quiet btn--sm"><i data-i="plus"></i>Bind a channel</button>
+                </div>
+              </div>
+            </div>
+
+            <section class="memory" aria-label="Memory">
+              <h2 class="set-h">Memory<span class="aside">24 topics</span></h2>
+              <div class="set-card">
+                <div class="mem-core">
+                  <div class="mem">
+                    <span class="set-label">Core note</span><span class="faint">1,284 of 4,000 characters</span>
+                    <span class="mem-bar"><i style="width: 32%"></i></span>
+                  </div>
+                  <p class="prose core-note">
+                    Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in
+                    English, Dutch and German.
+                  </p>
+                </div>
+                <ul class="topics">
+                  <li><b>work-style</b><span class="faint">1.2k</span><span class="prose">Short answers. Decides fast. No long preambles.</span></li>
+                  <li><b>webshop</b><span class="faint">3.4k</span><span class="prose">Stripe checkout; EU customers, mostly NL and DE.</span></li>
+                  <li><b>payments-api</b><span class="faint">2.1k</span><span class="prose">Webhooks and payouts; v2.x, published to npm.</span></li>
+                  <li><b>ops</b><span class="faint">1.8k</span><span class="prose">Backups nightly at 04:00; certificates for status.acme.dev.</span></li>
+                  <li><b>customers</b><span class="faint">2.7k</span><span class="prose">Marta at Brightline (invoices), Jonas at Kiteworks (API limits).</span></li>
+                  <li><b>family</b><span class="faint">0.6k</span><span class="prose">School run on Tuesday and Thursday; no meetings before 09:30.</span></li>
+                </ul>
+                <a class="set-more" href="#">All 24 topics<i data-i="chev-r"></i></a>
+              </div>
+              <p class="set-note">Ada writes her memory herself. You can read and edit every topic.</p>
+            </section>
+          </div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Assistants</h1>
+          <div class="th-tabs" role="tablist" aria-label="Assistants">
+            <button class="th-tab" role="tab" aria-selected="true"><i data-mk="work"></i><span>Ada</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><i data-mk="idle"></i><span>Milo</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><i data-mk="idle"></i><span>Juno</span></button>
+          </div>
+          <button class="icon-btn" aria-label="New Assistant"><i data-i="plus"></i></button>
+          <div class="actions">
+            <a class="btn btn--sm" href="assistant.html"><i data-i="history"></i>Open Check-in</a>
+            <button class="icon-btn" aria-label="More"><i data-i="more"></i></button>
+          </div>
+        </header>
+      </main>
+    </div>
+  </body>
+</html>

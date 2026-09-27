@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../mobile.css" />
+    <meta charset="utf-8" />
+    <title>Checkout fails for EU cards with 3-D Secure · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <!-- Where a tap on a notification or a link in Slack lands: one Proposal as a page. -->
+    <div class="phone">
+      <div class="pane" data-scrolled-to="380">
+        <article class="prop">
+          <div class="prop-from"><i data-brand="slack" style="color: var(--ln-slack)"></i>Opened from Ada's 09:00 message in Slack</div>
+          <div class="lead-top">
+            <span class="burn"><i data-mk="wait"></i>Burning</span><span>Checkout</span><span class="dot-sep">webshop</span
+            ><span class="dot-sep">first seen 08:52</span>
+          </div>
+          <h1>Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="gist prose">
+            Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+            <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+          </p>
+
+          <div class="made">
+            <div class="made-h">Made from 4 Connections</div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="sentry" style="color: var(--ln-sentry)"></i>Sentry<span class="acct">webshop-prod</span></span>
+              <span class="made-ev"><code>PaymentError: authentication_required</code></span>
+              <span class="made-n"><b>412</b> events · <b>188</b> users</span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="gmail" style="color: var(--ln-gmail)"></i>Gmail<span class="acct">rogier@personal</span></span>
+              <span class="made-ev">"Card declined at checkout" and 2 more</span>
+              <span class="made-n"><b>3</b> emails</span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="posthog" style="color: var(--ln-posthog)"></i>PostHog<span class="acct">webshop</span></span>
+              <span class="made-ev">EU checkout conversion since 14:10 yesterday</span>
+              <span class="made-n"><b class="fail">-18%</b></span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="github" style="color: var(--ln-github)"></i>GitHub<span class="acct">rogier/webshop</span></span>
+              <span class="made-ev">Deploy #1289 "Upgrade Stripe SDK to v14"</span>
+              <span class="made-n">14:02 yesterday</span>
+            </div>
+          </div>
+
+          <section class="decide card-flow" aria-label="Answers">
+            <div class="answers">
+              <div class="ans">
+                <button class="btn btn--primary">Start "Fix bug"</button><span class="desc">Runs Fix bug in a new worktree of webshop</span>
+              </div>
+              <!-- The suggested answer shows the stops it would make, on Hercule's ink line. -->
+              <ol class="route" aria-label="What Start Fix bug does">
+                <li><b>Run</b><span>Fix bug</span></li>
+                <li><b>Thread</b><span>Opus 5.5 on studio-mac</span></li>
+                <li><b>Pull request</b><span>for your review</span></li>
+              </ol>
+              <div class="ans">
+                <button class="btn">Accept</button><span class="desc">Adds it to the backlog as a Task</span>
+              </div>
+              <div class="ans">
+                <button class="btn btn--quiet">Dismiss</button><span class="desc">Closes the Proposal</span>
+              </div>
+            </div>
+            <div class="lead-foot">
+              <i data-i="reply"></i><span class="prose">I can also draft a reply to the 3 customers once the fix ships.</span>
+              <button class="btn btn--sm">Yes, after the fix</button>
+            </div>
+          </section>
+
+          <a class="prop-next" href="intake.html">
+            <span><b>4</b> more Proposals · <b>2</b> need a call</span>
+            <span class="grow"></span>
+            <span class="m">Open Intake</span><i data-i="chev-r"></i>
+          </a>
+        </article>
+      </div>
+
+      <div class="statusbar" data-statusbar></div>
+      <header class="topbar">
+        <a class="top-btn glass" href="intake.html" aria-label="Back to Intake"><i data-i="chev-l"></i></a>
+        <span class="grow"></span>
+        <span class="top-pill glass"><i data-mk="wait"></i>Proposal 1 of 5</span>
+        <span class="grow"></span>
+        <button class="top-btn glass" aria-label="More"><i data-i="more"></i></button>
+      </header>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

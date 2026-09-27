@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Intake · Hercule</title>
+    <style>
+      .tri {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 34px;
+        padding: 0 12px 0 5px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      /* The headline counts as one sentence, so it wraps like text on a narrow screen. */
+      .receipt {
+        margin: 0;
+        padding: 0 20px 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        flex: none;
+      }
+      .receipt b {
+        font-weight: var(--w-bold);
+      }
+      .topics {
+        display: flex;
+        gap: 6px;
+        padding: 0 20px 10px;
+        overflow: hidden;
+        flex: none;
+        box-shadow: 0 1px 0 var(--line-soft);
+      }
+      .topics span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 32px;
+        padding: 0 12px;
+        border-radius: var(--r-pill);
+        background: var(--sunken);
+        color: var(--muted);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .topics span.is-on {
+        background: var(--ink);
+        color: var(--bg);
+      }
+      .list {
+        padding: 0 12px 20px;
+      }
+      .m-lane {
+        padding-left: 8px;
+      }
+      .m-lane span {
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+
+      /* The lead: the one burning thing, answerable with one thumb without opening it. */
+      .lead {
+        display: grid;
+        gap: 6px;
+        padding: 14px 14px 12px;
+        border-radius: 20px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+      }
+      .lead-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .lead-top .spacer {
+        flex: 1;
+      }
+      .lead-t {
+        font-size: 17px;
+        font-weight: var(--w-bold);
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+      }
+      .lead-s {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .lead-go {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .lead-go .btn {
+        height: 46px;
+        font-size: 15px;
+      }
+
+      .row {
+        position: relative;
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 1px 12px;
+        align-items: center;
+        min-height: 62px;
+        padding: 9px 8px;
+        background: var(--bg);
+      }
+      .row + .row,
+      .swipe + .row,
+      .row + .swipe .row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .row .mk {
+        grid-row: span 2;
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 11px;
+        background: var(--sunken);
+      }
+      .row b {
+        font-weight: var(--w-medium);
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row small {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row .k {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+
+      /* A row mid-swipe: dragging right reveals the suggested answer. It takes the go color, the
+         same as the suggested answer's button; the face beside it shows who would do the work. */
+      .swipe {
+        position: relative;
+        overflow: hidden;
+        border-radius: 14px;
+      }
+      .swipe-under {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding-left: 14px;
+        background: var(--accent);
+        color: var(--accent-fg);
+        font-size: 14px;
+        font-weight: var(--w-bold);
+      }
+      .swipe .row {
+        transform: translateX(186px);
+        border-radius: 14px 0 0 14px;
+        box-shadow: -8px 0 20px -10px oklch(0 0 0 / 0.35);
+      }
+      .swipe-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px 2px;
+        color: var(--faint);
+        font-size: var(--t-11);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <div class="m-title">
+        <h1>Intake</h1>
+        <span class="spacer"></span>
+        <button class="tri" title="Triage sorted at 09:00; next at 11:00"><i data-face="Triage" data-pose="idle" data-size="26"></i>sorted 09:00</button>
+      </div>
+      <p class="receipt"><b class="you-ink">5&nbsp;proposals</b>, <b class="fail-ink">1&nbsp;burning</b> · 2&nbsp;offers · <b class="you-ink">2&nbsp;need a&nbsp;call</b> · 3&nbsp;FYI · 167&nbsp;handled&nbsp;quietly</p>
+      <div class="topics">
+        <span class="is-on">All 9</span>
+        <span><i data-i="hash" data-size="13"></i>Checkout</span>
+        <span><i data-i="hash" data-size="13"></i>Customers</span>
+        <span><i data-i="hash" data-size="13"></i>Infrastructure</span>
+      </div>
+
+      <div class="m-body">
+        <div class="list">
+          <div class="m-lane">Now <span>1</span></div>
+          <div class="lead">
+            <div class="lead-top">
+              <i data-brand="sentry" data-size="14"></i>
+              <span class="chip chip--fail">Urgent</span>
+              <span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span>
+              <span class="spacer"></span>
+              <span>4 sources · 09:00</span>
+            </div>
+            <a class="lead-t" href="decision.html">Checkout fails for EU cards with 3&#8209;D Secure</a>
+            <span class="lead-s">webshop · -18% EU checkout since deploy #1289</span>
+            <div class="lead-go">
+              <button class="btn btn--go">Start "Fix bug"</button>
+              <a class="btn" href="decision.html">Open</a>
+            </div>
+          </div>
+
+          <div class="m-lane">Needs a call <span>2</span></div>
+          <a class="row" href="#"><span class="mk"><i data-brand="intercom" data-size="17"></i></span><b>App is slow on Android</b><span></span><small><span class="k">Unsure</span> · which project is it?</small></a>
+          <a class="row" href="#"><span class="mk"><i data-face="Label new issues" data-pose="paused" data-size="30"></i></span><b>Label new issues held 34 events</b><span></span><small><span class="k">Breaker tripped</span> · 20 per hour at 08:14</small></a>
+
+          <div class="m-lane">Today <span>4</span></div>
+          <div class="swipe">
+            <div class="swipe-under"><i data-face="Investigate" data-pose="idle" data-size="30"></i>Start "Investigate"</div>
+            <a class="row" href="#"><span class="mk"><i data-brand="grafana" data-size="16"></i></span><b>Nightly backup job timing out</b><span class="bars" data-p="3"><i></i><i></i><i></i><i></i></span><small>ops · 3 nights in a row</small></a>
+          </div>
+          <div class="swipe-note"><span class="haptic"><i data-i="wave" data-size="11"></i>tick at the threshold</span>Swipe right to start · left to dismiss</div>
+          <a class="row" href="#"><span class="mk"><i data-brand="gmail" data-size="17"></i></span><b>Draft a reply to Marta at Brightline</b><span></span><small>Offer · invoice INV-2291 in the company name</small></a>
+          <a class="row" href="#"><span class="mk"><i data-brand="stripe" data-size="16"></i></span><b>Stripe webhook retries rising</b><span class="bars" data-p="2"><i></i><i></i><i></i><i></i></span><small>payments-api · first seen 07:40</small></a>
+          <a class="row" href="#"><span class="mk"><i data-brand="github" data-size="17"></i></span><b>Merge 4 dependency bumps</b><span></span><small>Offer · webshop · all green, patch versions</small></a>
+
+          <div class="m-lane">When you can <span>2</span></div>
+          <a class="row" href="#"><span class="mk"><i data-i="clock" data-size="17"></i></span><b>SSL certificate expires in 12 days</b><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><small>ops · status.acme.dev</small></a>
+          <a class="row" href="#"><span class="mk"><i data-brand="intercom" data-size="17"></i></span><b>Add iDEAL as a payment method</b><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><small>webshop · 5 requests</small></a>
+        </div>
+      </div>
+
+      <nav data-tabbar="intake"></nav>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

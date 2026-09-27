@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../mobile.css" />
+    <meta charset="utf-8" />
+    <title>Fix 3-D Secure checkout for EU cards · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone" data-glass-host>
+      <div class="transcript" data-glass data-scrolled-by="420" style="--turns-end: 424px">
+        <div class="col turns">
+          <a class="from card-flow" href="decision.html">
+            <i data-mk="done"></i>
+            <span class="grow">
+              <span class="from-title">Checkout fails for EU cards with 3-D Secure</span>
+              <span class="from-meta">Proposal · started Fix bug at 09:02</span>
+            </span>
+            <span class="from-brands"><i data-brand="sentry" style="color: var(--ln-sentry)"></i><i data-brand="gmail" style="color: var(--ln-gmail)"></i><i data-brand="posthog" style="color: var(--ln-posthog)"></i><i data-brand="github" style="color: var(--ln-github)"></i></span>
+          </a>
+          <div class="stamp-line">Today 09:02 · Claude Code · Opus 5.5 · high · auto-accept edits</div>
+          <div class="msg-user">
+            Checkout fails for EU cards that need 3-D Secure since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.
+          </div>
+          <div class="msg-time">09:02</div>
+
+          <button class="worked">
+            <span>Worked for <b>2m 14s</b></span><span class="faint">6 reads · 1 command</span><i data-i="chev-r" class="faint"></i>
+          </button>
+
+          <div class="msg-agent">
+            <p>
+              Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>status: 'requires_action'</code> for cards that need 3-D
+              Secure. <code>handlePaymentResult</code> in <code>src/checkout/payment.ts</code> only handles <code>succeeded</code> and treats
+              everything else as a failure, so we show "Card declined" instead of opening the 3-D Secure modal.
+            </p>
+            <div class="codeblock"><span class="k">if</span> <span class="p">(</span>result.status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span>
+  <span class="k">return</span> openThreeDSModal<span class="p">(</span>result.clientSecret<span class="p">);</span>
+<span class="p">}</span></div>
+          </div>
+
+          <div class="msg-agent">
+            <p>I wrote a failing test first, then the fix. The test pays with an EU card that asks for 3-D Secure and expects the modal:</p>
+            <div class="codeblock"><span class="k">it</span><span class="p">(</span><span class="s">"opens 3-D Secure when the card requires action"</span><span class="p">,</span> <span class="k">async</span> <span class="p">() =&gt; {</span>
+  mockConfirm<span class="p">({</span> status<span class="p">:</span> <span class="s">"requires_action"</span><span class="p">,</span> clientSecret<span class="p">:</span> <span class="s">"pi_3Q_secret"</span> <span class="p">});</span>
+  <span class="k">await</span> pay<span class="p">(</span>euCard<span class="p">);</span>
+  expect<span class="p">(</span>openThreeDSModal<span class="p">).</span>toHaveBeenCalledWith<span class="p">(</span><span class="s">"pi_3Q_secret"</span><span class="p">);</span>
+<span class="p">});</span></div>
+          </div>
+
+          <button class="worked">
+            <span>Worked for <b>4m 51s</b></span><span class="faint">3 edits · 6 reads · 3 commands</span><i data-i="chev-r" class="faint"></i>
+          </button>
+
+          <section class="files" aria-label="Changed files">
+            <div class="files-head">
+              <b>3 changed files</b><span class="plus">+48</span><span class="minus">-12</span>
+              <span class="grow"></span>
+              <button class="btn btn--sm">Open diff</button>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/payment.ts</code><span><span class="plus">+21</span> <span class="minus">-9</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/payment.test.ts</code><span><span class="plus">+19</span> <span class="minus">-0</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/3ds-modal.tsx</code><span><span class="plus">+8</span> <span class="minus">-3</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span>
+            </div>
+            <div class="files-foot"><i data-mk="done"></i><b class="ok">24 passed</b><code>pnpm test checkout</code></div>
+          </section>
+
+          <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </div>
+
+      <div class="statusbar" data-statusbar></div>
+      <header class="topbar">
+        <a class="top-btn glass" href="intake.html" aria-label="Back"><i data-i="chev-l"></i></a>
+        <div class="top-heading">
+          <b>Fix 3-D Secure checkout for EU cards</b>
+          <span>webshop · <code>fix/3ds-eu-cards</code> · studio-mac</span>
+        </div>
+        <button class="top-btn glass" aria-label="More"><i data-i="more"></i></button>
+      </header>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="dock">
+            <div class="when-full">
+              <div class="dock-head">
+                <i data-mk="wait"></i>
+                <div class="dock-title">Run this command?</div>
+                <span class="dock-meta">asked 09:40</span>
+                <div class="dock-subject">git push -u origin fix/3ds-eu-cards</div>
+              </div>
+              <div class="answers">
+                <div class="ans">
+                  <button class="btn btn--primary">Allow once</button><span class="desc">Pushes the branch now, and asks again next time</span>
+                </div>
+                <div class="ans">
+                  <button class="btn">Always allow git push</button><span class="desc">Adds a Grant for git push to this thread</span>
+                </div>
+                <div class="ans">
+                  <button class="btn btn--quiet">Deny</button><span class="desc">The agent is told no and keeps the branch local</span>
+                </div>
+              </div>
+              <div class="queued">
+                <i data-mk="idle"></i><span class="what">Also check the Apple Pay path</span><span class="tag">queued · runs next</span>
+                <button class="btn btn--sm"><i data-i="steer"></i>Steer now</button>
+                <button class="btn btn--quiet btn--sm">Cancel</button>
+              </div>
+            </div>
+            <div class="dock-mini when-shrunk">
+              <i data-mk="wait"></i><code class="grow">git push -u origin fix/3ds-eu-cards</code>
+              <button class="btn btn--primary btn--sm">Allow once</button><button class="btn btn--quiet btn--sm">Deny</button>
+            </div>
+          </div>
+
+          <div class="reply">
+            <div class="when-full">
+              <div class="ta"><span class="ph">Queued until the turn finishes…</span></div>
+              <div class="reply-row">
+                <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+                <button class="pick"><i data-brand="claude"></i>Opus 5.5 · High<i data-i="chev" class="chev"></i></button>
+                <span class="grow"></span>
+                <button class="icon-btn" aria-label="Dictate"><i data-i="mic"></i></button>
+                <button class="stop"><i></i>Stop</button>
+                <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+              </div>
+            </div>
+            <div class="reply-mini when-shrunk">
+              <span class="grow">Reply…</span><span class="faint">1 queued</span>
+              <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

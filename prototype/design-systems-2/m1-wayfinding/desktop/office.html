@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <script>
+      // The event flow is a quiet layer unless the address asks for it with ?flow=on. It is read
+      // here, before the first paint, so the office never flashes from one look to the other.
+      document.documentElement.dataset.flow = new URLSearchParams(location.search).get("flow") === "on" ? "on" : "off";
+    </script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Fleet · Office · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+    <script src="../office.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="fleet"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Fleet</h1>
+          <div class="seg seg--view" role="group" aria-label="View">
+            <button aria-pressed="false"><i data-i="list"></i>List</button><button aria-pressed="true"><i data-i="office"></i>Office</button>
+          </div>
+          <label class="flow-switch"><button class="toggle" role="switch" aria-checked="false" data-flow-toggle></button>Event flow</label>
+          <div class="actions">
+            <span class="fleet-count when-today">
+              <span><i data-mk="work"></i><b>8</b> working</span>
+              <span class="attn"><i data-mk="wait"></i><b>3</b> waiting on you</span>
+              <span><i data-mk="paused"></i><b>1</b> paused</span>
+              <span><i data-mk="idle"></i><b>4</b> idle</span>
+            </span>
+            <span class="fleet-count when-swarm">
+              <span><i data-mk="work"></i><b>70</b> working</span>
+              <span class="attn"><i data-mk="wait"></i><b>11</b> waiting on you</span>
+              <span><i data-mk="paused"></i><b>6</b> paused</span>
+              <span><i data-mk="idle"></i><b>53</b> idle</span>
+            </span>
+            <button class="icon-btn" aria-label="Search sessions"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="office">
+          <svg id="office-scene" class="office-scene" width="1176" height="848" viewBox="0 0 1176 848" role="img" aria-label="The office: three runner rooms, the mailroom and the Assistants' lounge"></svg>
+
+          <!-- Today: the key, and the one decision open at the Fix 3-D Secure desk. -->
+          <div class="of-key when-today">
+            <div class="of-key-row">
+              <span><i data-mk="work"></i>working</span>
+              <span><i data-mk="wait"></i>waiting on you</span>
+              <span><i data-mk="paused"></i>paused</span>
+              <span><i data-mk="idle"></i>idle</span>
+            </div>
+            <div class="of-key-row">
+              <span><i class="of-swatch" style="background: var(--zone-webshop)"></i>webshop</span>
+              <span><i class="of-swatch" style="background: var(--zone-payments)"></i>payments-api</span>
+              <span><i class="of-swatch" style="background: var(--zone-ops)"></i>ops</span>
+              <span class="faint">the rug under a desk is its project</span>
+            </div>
+            <p class="when-quiet">The grey lines are where work came from. Point at a desk or at a source on the wall to see its lines in color.</p>
+            <p class="when-flow">Every line is in its Connection's color, from its source on the wall through Triage to the desk doing the work.</p>
+          </div>
+
+          <div class="of-pop when-today" role="dialog" aria-label="Fix 3-D Secure checkout for EU cards">
+            <div class="of-pop-h">
+              <i data-mk="wait"></i>
+              <b>Fix 3-D Secure checkout for EU cards</b>
+              <kbd>&#8997;Space</kbd>
+              <span class="of-pop-q"><span class="attn">Run this command?</span><span class="faint">09:40</span></span>
+            </div>
+            <code>git push -u origin fix/3ds-eu-cards</code>
+            <div class="of-pop-a">
+              <button class="btn btn--primary btn--sm">Allow once</button>
+              <button class="btn btn--quiet btn--sm">Deny</button>
+              <a class="btn btn--quiet btn--sm of-open" href="session-active.html">Open<i data-i="chev-r"></i></a>
+            </div>
+          </div>
+
+          <a class="of-floors when-today" href="office.html?state=swarm">
+            <span class="of-stack"><i class="on"></i></span>
+            <span><b>Floor 1 of 1</b><small>3 runners · 16 live sessions</small></span>
+            <span class="of-10x">At 10x<i data-i="chev-r"></i></span>
+          </a>
+
+          <!-- At 10x: the building. One floor per runner, the Triage line climbing the core. -->
+          <div class="of-key when-swarm">
+            <div class="of-key-h">At 10x</div>
+            <p>Each floor is a runner. The core line stops at every floor with its waiting count, so you see where you are needed before you see who.</p>
+          </div>
+          <a class="of-floors when-swarm" href="office.html">
+            <span class="of-stack of-stack--9"><i></i><i></i><i></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span><b>9 floors</b><small>9 runners · 140 live sessions</small></span>
+            <span class="of-10x">Today<i data-i="chev-r"></i></span>
+          </a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

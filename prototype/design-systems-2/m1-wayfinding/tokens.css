@@ -1,0 +1,429 @@
+/* Metro Wayfinding - tokens.
+   PROTOTYPE. Every theme is a block on :root[data-theme]; .theme-scope[data-theme] applies one theme
+   to a subtree, for the previews in Appearance and the book. "light" is Enamel and "dark" is Night
+   Service; the aliases share the flagship blocks, so they can never drift apart.
+
+   Color doctrine, in one sentence each:
+   - A hue on a line belongs to a Connection (the Sentry line, the Gmail line). Lines are the only
+     place those hues appear, plus the brand mark beside the line's name.
+   - Hercule's own line - accepted work: Proposal, Task, Run, Session, pull request - is ink.
+   - State is one of six 12px marks (working, waiting on you, done, failed, paused, idle) and a
+     restrained word color. State colors appear only on words and marks, never on lines.
+   - Chrome is never tinted. Grounds are neutral or warm; no dark theme is blue.
+
+   Glass is one number, --glass-level, from 0 (solid) to 1 (the most glass this system allows).
+   Every glass value below is derived from it, so one slider moves them all. */
+
+@font-face {
+  font-family: "Overpass";
+  src: url("fonts/overpass-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+  /* Overpass draws the middle dot hard against the next word; the system font's dot is centred,
+     and "·" is the separator on every screen. */
+  unicode-range: U+0000-00B6, U+00B8-FFFF;
+}
+@font-face {
+  font-family: "Overpass Mono";
+  src: url("fonts/overpass-mono-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* Type */
+  --font: "Overpass", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Overpass Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --t-2xs: 10.5px;
+  --t-xs: 11.5px;
+  --t-s: 12.5px;
+  --t-m: 13.5px;
+  --t-base: 14.5px;
+  --t-l: 16px;
+  --t-xl: 19px;
+  --lh: 1.45;
+  --lh-tight: 1.2;
+  --w-regular: 420;
+  --w-medium: 560;
+  --w-bold: 720;
+  --track-sign: 0.06em; /* uppercase signage labels only */
+
+  /* Space: a 4px rhythm */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Shape: enamel signs have soft corners and no sharp edges */
+  --r-xs: 4px;
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-sheet: 22px;
+  --r-pill: 999px;
+
+  /* Lines: the one stroke weight family every diagram shares */
+  --line-w: 3px; /* a Connection line in a row glyph */
+  --line-w-map: 5px; /* the same line on a map */
+  --trunk-w: 3.5px; /* Hercule's own line */
+
+  /* Motion: trains run on a timetable, not a spring */
+  --ease: cubic-bezier(0.3, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.1, 0.7, 0.2, 1);
+  --t-fast: 120ms;
+  --t-mid: 220ms;
+  --t-slow: 420ms;
+  --train-period: 2.8s;
+  /* The knob of a switch or slider is light in every theme, like a physical switch. */
+  --knob: oklch(99% 0.002 85);
+
+  /* Glass: solid first. 0.35 keeps floating layers nearly opaque, with just enough blur to show
+     that the transcript runs on underneath. shared/page.js overrides this from ?glass= and the
+     Appearance slider. */
+  --glass-level: 0.35;
+}
+
+/* ------------------------------------------------------------------ Enamel (light, flagship) */
+:root,
+:root[data-theme="enamel"],
+:root[data-theme="light"],
+.theme-scope[data-theme="enamel"] {
+  color-scheme: light;
+  --bg: oklch(95.9% 0.004 85); /* window ground: sidebar, titlebar */
+  --surface: oklch(99.2% 0.002 85); /* the main canvas */
+  --raised: oklch(100% 0 0); /* cards, composer, popovers */
+  --sunken: oklch(93.6% 0.005 85); /* wells: code, inputs at rest */
+  --ink: oklch(21% 0.008 60);
+  --muted: oklch(42% 0.008 60);
+  --faint: oklch(54% 0.008 60);
+  --line: oklch(21% 0.008 60 / 0.13);
+  --line-soft: oklch(21% 0.008 60 / 0.065);
+  --hover: oklch(21% 0.008 60 / 0.045);
+  --selected: oklch(21% 0.008 60 / 0.07);
+
+  --accent: oklch(21% 0.008 60); /* black enamel */
+  --accent-ink: oklch(99% 0.002 85);
+  --focus: oklch(62% 0.17 60);
+
+  /* State: words and 12px marks only */
+  --attn: oklch(52% 0.125 68);
+  --attn-soft: oklch(80% 0.1 80 / 0.22);
+  --fail: oklch(51% 0.17 28);
+  --live: oklch(50% 0.11 162);
+  --ok: oklch(49% 0.1 150);
+
+  /* Lines: one hue per Connection */
+  --ln-sentry: oklch(50% 0.2 302);
+  --ln-gmail: oklch(57% 0.21 27);
+  --ln-posthog: oklch(77% 0.16 78);
+  --ln-github: oklch(55% 0.14 152);
+  --ln-stripe: oklch(53% 0.19 268);
+  --ln-intercom: oklch(62% 0.11 195);
+  --ln-grafana: oklch(66% 0.18 48);
+  --ln-cron: oklch(50% 0.07 58);
+  --ln-slack: oklch(50% 0.16 345);
+  --ln-discord: oklch(62% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+  --casing: var(--surface); /* the gap drawn around lines where they cross */
+
+  /* Zones: projects are fare zones, shaded areas on maps and floors, never chrome */
+  --zone-webshop: oklch(95.5% 0.022 85);
+  --zone-payments: oklch(95.5% 0.02 160);
+  --zone-ops: oklch(95.5% 0.02 30);
+
+  --glass-rim: oklch(21% 0.008 60 / 0.1);
+  --scrim: oklch(21% 0.008 60 / 0.28);
+
+  --shadow-1: 0 1px 1px oklch(21% 0.01 60 / 0.05), 0 1px 3px oklch(21% 0.01 60 / 0.06);
+  --shadow-2: 0 1px 2px oklch(21% 0.01 60 / 0.06), 0 8px 24px -6px oklch(21% 0.01 60 / 0.14);
+  --shadow-3: 0 2px 4px oklch(21% 0.01 60 / 0.06), 0 24px 60px -12px oklch(21% 0.01 60 / 0.3);
+
+  --syn-key: oklch(48% 0.16 302);
+  --syn-string: oklch(48% 0.12 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Tile (light, cream) */
+:root[data-theme="tile"],
+.theme-scope[data-theme="tile"] {
+  color-scheme: light;
+  --bg: oklch(92.8% 0.022 86);
+  --surface: oklch(96.6% 0.017 88);
+  --raised: oklch(98.9% 0.009 88);
+  --sunken: oklch(91% 0.024 86);
+  --ink: oklch(24% 0.02 65);
+  --muted: oklch(41% 0.022 65);
+  --faint: oklch(51% 0.022 65);
+  --line: oklch(24% 0.02 65 / 0.15);
+  --line-soft: oklch(24% 0.02 65 / 0.075);
+  --hover: oklch(24% 0.02 65 / 0.05);
+  --selected: oklch(24% 0.02 65 / 0.08);
+
+  --accent: oklch(43% 0.085 165); /* platform-trim green */
+  --accent-ink: oklch(98% 0.01 88);
+  --focus: oklch(55% 0.12 165);
+
+  --attn: oklch(50% 0.12 62);
+  --attn-soft: oklch(78% 0.1 75 / 0.25);
+  --fail: oklch(49% 0.16 28);
+  --live: oklch(47% 0.1 162);
+  --ok: oklch(46% 0.1 150);
+
+  --ln-sentry: oklch(48% 0.19 302);
+  --ln-gmail: oklch(55% 0.2 27);
+  --ln-posthog: oklch(74% 0.16 76);
+  --ln-github: oklch(52% 0.13 152);
+  --ln-stripe: oklch(50% 0.18 268);
+  --ln-intercom: oklch(58% 0.11 195);
+  --ln-grafana: oklch(63% 0.18 46);
+  --ln-cron: oklch(46% 0.07 58);
+  --ln-slack: oklch(47% 0.16 345);
+  --ln-discord: oklch(58% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+  --casing: var(--surface);
+
+  --zone-webshop: oklch(93% 0.03 85);
+  --zone-payments: oklch(93% 0.028 150);
+  --zone-ops: oklch(93% 0.028 35);
+
+  --glass-rim: oklch(24% 0.02 65 / 0.12);
+  --scrim: oklch(24% 0.02 65 / 0.3);
+
+  --shadow-1: 0 1px 1px oklch(30% 0.03 65 / 0.06), 0 1px 3px oklch(30% 0.03 65 / 0.07);
+  --shadow-2: 0 1px 2px oklch(30% 0.03 65 / 0.07), 0 8px 24px -6px oklch(30% 0.03 65 / 0.16);
+  --shadow-3: 0 2px 4px oklch(30% 0.03 65 / 0.07), 0 24px 60px -12px oklch(30% 0.03 65 / 0.32);
+
+  --syn-key: oklch(45% 0.15 302);
+  --syn-string: oklch(45% 0.11 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Night Service (dark, flagship) */
+:root[data-theme="night-service"],
+:root[data-theme="dark"],
+.theme-scope[data-theme="night-service"] {
+  color-scheme: dark;
+  --bg: oklch(18.6% 0.004 70);
+  --surface: oklch(21.4% 0.004 70);
+  --raised: oklch(25.4% 0.005 70);
+  --sunken: oklch(17.2% 0.004 70);
+  --ink: oklch(94.5% 0.006 85);
+  --muted: oklch(76% 0.006 80);
+  --faint: oklch(65% 0.006 80);
+  --line: oklch(94% 0.006 85 / 0.12);
+  --line-soft: oklch(94% 0.006 85 / 0.065);
+  --hover: oklch(94% 0.006 85 / 0.05);
+  --selected: oklch(94% 0.006 85 / 0.085);
+
+  --accent: oklch(93.5% 0.012 85); /* enamel white */
+  --accent-ink: oklch(19% 0.004 70);
+  --focus: oklch(80% 0.14 75);
+
+  --attn: oklch(81% 0.13 78);
+  --attn-soft: oklch(81% 0.13 78 / 0.13);
+  --fail: oklch(72% 0.15 28);
+  --live: oklch(78% 0.12 165);
+  --ok: oklch(77% 0.11 152);
+
+  --ln-sentry: oklch(68% 0.17 302);
+  --ln-gmail: oklch(67% 0.19 27);
+  --ln-posthog: oklch(84% 0.15 85);
+  --ln-github: oklch(70% 0.15 152);
+  --ln-stripe: oklch(67% 0.16 272);
+  --ln-intercom: oklch(75% 0.11 195);
+  --ln-grafana: oklch(74% 0.16 52);
+  --ln-cron: oklch(66% 0.07 62);
+  --ln-slack: oklch(68% 0.16 345);
+  --ln-discord: oklch(74% 0.12 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+  --casing: var(--surface);
+
+  --zone-webshop: oklch(24.5% 0.012 85);
+  --zone-payments: oklch(24.5% 0.012 160);
+  --zone-ops: oklch(24.5% 0.012 35);
+
+  --glass-rim: oklch(94% 0.006 85 / 0.1);
+  --scrim: oklch(10% 0.004 70 / 0.5);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.25), 0 0 0 1px oklch(94% 0.006 85 / 0.04);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.3), 0 10px 28px -6px oklch(0% 0 0 / 0.5);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.3), 0 28px 70px -12px oklch(0% 0 0 / 0.65);
+
+  --syn-key: oklch(76% 0.13 302);
+  --syn-string: oklch(78% 0.12 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Underground (dark, brown-black) */
+:root[data-theme="underground"],
+.theme-scope[data-theme="underground"] {
+  color-scheme: dark;
+  --bg: oklch(16% 0.013 55);
+  --surface: oklch(18.8% 0.015 55);
+  --raised: oklch(23% 0.017 55);
+  --sunken: oklch(14.6% 0.012 55);
+  --ink: oklch(93% 0.02 80);
+  --muted: oklch(76% 0.025 75);
+  --faint: oklch(65% 0.025 70);
+  --line: oklch(93% 0.02 80 / 0.12);
+  --line-soft: oklch(93% 0.02 80 / 0.065);
+  --hover: oklch(93% 0.02 80 / 0.05);
+  --selected: oklch(93% 0.02 80 / 0.085);
+
+  --accent: oklch(79% 0.12 78); /* brass */
+  --accent-ink: oklch(18% 0.02 55);
+  --focus: oklch(79% 0.12 78);
+
+  --attn: oklch(82% 0.13 80);
+  --attn-soft: oklch(82% 0.13 80 / 0.13);
+  --fail: oklch(72% 0.15 30);
+  --live: oklch(78% 0.11 160);
+  --ok: oklch(77% 0.1 150);
+
+  --ln-sentry: oklch(67% 0.16 305);
+  --ln-gmail: oklch(66% 0.18 28);
+  --ln-posthog: oklch(84% 0.15 88);
+  --ln-github: oklch(69% 0.14 150);
+  --ln-stripe: oklch(66% 0.15 275);
+  --ln-intercom: oklch(74% 0.1 195);
+  --ln-grafana: oklch(73% 0.16 52);
+  --ln-cron: oklch(66% 0.08 62);
+  --ln-slack: oklch(67% 0.15 345);
+  --ln-discord: oklch(73% 0.11 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+  --casing: var(--surface);
+
+  --zone-webshop: oklch(22.5% 0.022 80);
+  --zone-payments: oklch(22.5% 0.02 150);
+  --zone-ops: oklch(22.5% 0.022 30);
+
+  --glass-rim: oklch(93% 0.02 80 / 0.1);
+  --scrim: oklch(8% 0.01 55 / 0.55);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.3), 0 0 0 1px oklch(93% 0.02 80 / 0.04);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.35), 0 10px 28px -6px oklch(0% 0 0 / 0.55);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.35), 0 28px 70px -12px oklch(0% 0 0 / 0.7);
+
+  --syn-key: oklch(76% 0.12 305);
+  --syn-string: oklch(78% 0.11 150);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* ------------------------------------------------------------------ Signal (dark, near-black, high-vis) */
+:root[data-theme="signal"],
+.theme-scope[data-theme="signal"] {
+  color-scheme: dark;
+  --bg: oklch(12.4% 0.002 100);
+  --surface: oklch(14.8% 0.002 100);
+  --raised: oklch(19.4% 0.003 100);
+  --sunken: oklch(11% 0.002 100);
+  --ink: oklch(96.5% 0.004 100);
+  --muted: oklch(78% 0.004 100);
+  --faint: oklch(65% 0.004 100);
+  --line: oklch(96% 0.004 100 / 0.13);
+  --line-soft: oklch(96% 0.004 100 / 0.07);
+  --hover: oklch(96% 0.004 100 / 0.055);
+  --selected: oklch(96% 0.004 100 / 0.09);
+
+  --accent: oklch(91% 0.2 118); /* high-vis signal yellow */
+  --accent-ink: oklch(15% 0.01 118);
+  --focus: oklch(91% 0.2 118);
+
+  --attn: oklch(90% 0.18 108);
+  --attn-soft: oklch(90% 0.18 108 / 0.12);
+  --fail: oklch(72% 0.17 28);
+  --live: oklch(82% 0.14 165);
+  --ok: oklch(80% 0.13 150);
+
+  --ln-sentry: oklch(70% 0.19 302);
+  --ln-gmail: oklch(68% 0.21 27);
+  --ln-posthog: oklch(86% 0.16 85);
+  --ln-github: oklch(73% 0.17 152);
+  --ln-stripe: oklch(68% 0.18 272);
+  --ln-intercom: oklch(78% 0.12 195);
+  --ln-grafana: oklch(75% 0.18 50);
+  --ln-cron: oklch(68% 0.08 62);
+  --ln-slack: oklch(70% 0.18 345);
+  --ln-discord: oklch(76% 0.13 238);
+  --ln-webchat: var(--ink);
+  --trunk: var(--ink);
+  --casing: var(--surface);
+
+  --zone-webshop: oklch(19% 0.012 90);
+  --zone-payments: oklch(19% 0.012 160);
+  --zone-ops: oklch(19% 0.012 35);
+
+  --glass-rim: oklch(96% 0.004 100 / 0.1);
+  --scrim: oklch(5% 0 0 / 0.6);
+
+  --shadow-1: 0 1px 1px oklch(0% 0 0 / 0.4), 0 0 0 1px oklch(96% 0.004 100 / 0.05);
+  --shadow-2: 0 1px 2px oklch(0% 0 0 / 0.4), 0 10px 28px -6px oklch(0% 0 0 / 0.6);
+  --shadow-3: 0 2px 4px oklch(0% 0 0 / 0.4), 0 28px 70px -12px oklch(0% 0 0 / 0.75);
+
+  --syn-key: oklch(78% 0.14 302);
+  --syn-string: oklch(80% 0.13 152);
+  --syn-comment: var(--faint);
+  --syn-punctuation: var(--muted);
+}
+
+/* Density and font size, set by Settings > Appearance */
+:root[data-density="compact"] {
+  --s-3: 10px;
+  --s-4: 13px;
+}
+:root[data-size="large"] {
+  --t-s: 13.5px;
+  --t-m: 14.5px;
+  --t-base: 15.5px;
+}
+
+/* ------------------------------------------------------------------ Glass, derived from the level */
+/* Declared on every element that sets a theme, so a .theme-scope preview mixes its own colors.
+   - --glass: surfaces that carry text (header pills, composer, menus). 100% opaque at level 0,
+     78% at level 1, so text on it keeps its contrast whatever scrolls underneath.
+   - --glass-thin: the composer while the transcript scrolls, and chrome such as the tab bar.
+     Never under 70%.
+   - --glass-edge: the hairline of light along the top edge. Absent at 0.
+   - --glass-filter: the blur and a touch of saturation for what shows through. The blur starts
+     at 12px, because a lighter blur leaves what shows through legible enough to compete with the
+     text on top; it reaches 28px at level 1. At level 0 the surfaces are opaque, so the filter is
+     dropped. */
+:root,
+.theme-scope {
+  --glass: color-mix(in oklab, var(--raised) calc(100% - 22% * var(--glass-level)), transparent);
+  --glass-thin: color-mix(in oklab, var(--raised) calc(100% - 30% * var(--glass-level)), transparent);
+  --glass-blur: calc(12px + 16px * var(--glass-level));
+  --glass-sat: calc(1 + 0.3 * var(--glass-level));
+  --glass-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  --glass-edge: color-mix(in oklab, white calc(60% * var(--glass-level)), transparent);
+}
+:root[data-glass-off] {
+  --glass-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* Wins over the inline level page.js sets from ?glass= or the slider. */
+  :root {
+    --glass-level: 0 !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-mid: 0ms;
+    --t-slow: 0ms;
+  }
+}

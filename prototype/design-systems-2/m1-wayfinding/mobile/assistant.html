@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone m-convo" data-glass-host>
+      <div class="statusbar" data-statusbar="9:41"></div>
+
+      <header class="m-head">
+        <h1>Assistants</h1>
+        <span class="grow"></span>
+        <button class="m-icon" aria-label="Ada's record"><i data-i="sliders"></i></button>
+      </header>
+
+      <!-- One chip per Assistant, with its presence as a mark and a word. -->
+      <nav class="m-asst" aria-label="Assistants">
+        <button aria-pressed="true">
+          <i data-mk="work"></i><b>Ada</b><small class="live">working</small>
+        </button>
+        <button>
+          <i data-mk="idle"></i><b>Milo</b><small>idle</small>
+        </button>
+        <button>
+          <i data-mk="idle"></i><b>Juno</b><small>asleep</small>
+        </button>
+      </nav>
+      <div class="m-asst-sub">personal assistant · Sonnet 5<span class="grow"></span><i data-i="heartbeat"></i>next check-in 10:00</div>
+
+      <main class="m-body transcript" data-glass data-scrolled-by="360">
+        <div class="col turns turns--convo">
+          <div class="stamp-line">Yesterday</div>
+          <div class="notice-line notice-line--interrupted">
+            <span class="nl-rule"></span>
+            <span class="nl-body">
+              <i data-mk="fail" class="fail"></i>
+              <span><b>Ada was interrupted:</b> provider timeout after 120s. Your last message was kept.</span>
+              <span class="nl-time">22:14</span>
+            </span>
+            <span class="nl-rule"></span>
+          </div>
+
+          <div class="stamp-line">Today</div>
+          <button class="quiet-stops">
+            <i data-i="heartbeat"></i>
+            <span><b>2 quiet check-ins</b><span class="faint"> · 07:00 · 08:00</span></span>
+            <i data-i="chev" class="faint"></i>
+          </button>
+
+          <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="faint">09:00 · check-in</span></div>
+          <div class="msg-agent msg-agent--asst">
+            <p>
+              Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. Your fix is waiting on
+              your OK to push. Also, Marta at Brightline wants her invoice in the company name. I can draft that.
+            </p>
+            <div class="refs">
+              <a class="ref" href="session-active.html"
+                ><i data-mk="wait"></i>Fix 3-D Secure checkout<span class="attn"
+                  >waiting</span
+                ></a
+              >
+              <a class="ref" href="intake.html"><i data-strip="gmail" data-size="s"></i>Draft a reply to Marta<span class="faint">Offer</span></a>
+            </div>
+          </div>
+
+          <div class="msg-user">Remind me Friday to renew the SSL cert for ops.</div>
+          <div class="msg-time">09:20</div>
+
+          <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="faint">09:20</span></div>
+          <div class="msg-agent msg-agent--asst">
+            <p>Done. I'll remind you on Friday at 09:00.</p>
+            <div class="reminder">
+              <span class="rm-ic"><i data-i="alarm"></i></span>
+              <span class="rm-when">Fri 2 Oct · 09:00</span>
+              <span class="rm-what">Renew the SSL cert for ops</span>
+              <button class="btn btn--quiet btn--sm">Edit</button>
+            </div>
+          </div>
+
+          <div class="msg-user">What's the status of the backup job?</div>
+          <div class="msg-time">09:38</div>
+
+          <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="live">writing</span></div>
+          <div class="msg-agent msg-agent--asst">
+            <p>
+              Milo started an investigation at 09:35 on <span class="nw">build-box-1</span>. So far: <code>pg_dump</code> has been slower each night since the
+              <code>events</code> table passed 40&nbsp;GB<span class="stream-caret"></span>
+            </p>
+          </div>
+        </div>
+      </main>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="card">
+            <div class="m-voice when-full">
+              <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+              <span class="ph">Message Ada</span>
+              <button class="stop"><i></i>Stop</button>
+              <button class="m-mic" aria-label="Hold to talk"><i data-i="mic"></i></button>
+            </div>
+            <div class="card-mini when-shrunk">
+              <span class="grow">Message Ada</span>
+              <button class="m-mic" aria-label="Hold to talk"><i data-i="mic"></i></button>
+            </div>
+          </div>
+          <div class="lip glass-tab when-full">
+            <span><i class="bullet" style="--c: var(--ln-webchat)"></i>Web chat</span>
+            <span class="rule"></span>
+            <span>replies at turn end</span>
+            <span class="right faint">also on Slack</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="tabbar" data-tabbar="assistants"></nav>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

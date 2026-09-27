@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="statusbar" data-statusbar="9:41"></div>
+
+      <header class="m-head">
+        <h1>Settings</h1>
+        <span class="grow"></span>
+        <button class="m-icon" aria-label="Search settings"><i data-i="search"></i></button>
+        <a class="ms-me" href="#" aria-label="Profile, sign-in and devices"><span class="avatar">R</span></a>
+      </header>
+
+      <!-- The settings index: every domain as one tile, so all twelve fit above the thumb. Profile is the avatar. -->
+      <main class="m-body ms-index">
+        <nav class="ms-grid" aria-label="Settings domains">
+          <a class="ms-tile is-open" href="#"><span class="ms-ic"><i data-i="plug"></i></span><span class="ms-v"><i class="ms-dot"></i>11</span><b>Connections</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="cpu"></i></span><span class="ms-v">3</span><b>Providers</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="server"></i></span><span class="ms-v">3</span><b>Machines</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="bot"></i></span><span class="ms-v">3</span><b>Assistants</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="thread"></i></span><b>Threads</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="palette"></i></span><b>Appearance</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="id"></i></span><b>Identities</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="shield"></i></span><b>Permission profiles</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="key"></i></span><b>Secrets</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="bound"></i></span><b>Bounds</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="puzzle"></i></span><b>Plugins</b></a>
+          <a class="ms-tile" href="#"><span class="ms-ic"><i data-i="system"></i></span><b>System</b></a>
+        </nav>
+      </main>
+
+      <div class="m-scrim"></div>
+
+      <!-- One domain, opened as a sheet: every Connection is a line. Its weight is its volume
+           over 24 hours, and it runs into the default Topic it feeds. Dashed means disconnected. -->
+      <section class="m-sheet sheet m-sheet--settings" role="dialog" aria-label="Connections">
+        <div class="grabber"></div>
+        <div class="mc-head">
+          <div>
+            <h2>Connections</h2>
+            <p><b>2,418</b> events in 24h · <span class="attn">1 reconnecting</span></p>
+          </div>
+          <button class="m-icon" aria-label="Add a Connection"><i data-i="plus"></i></button>
+          <button class="m-icon" aria-label="Close"><i data-i="close"></i></button>
+        </div>
+        <div class="m-sheet-body">
+          <div class="mc-sec">Event sources<span>8</span></div>
+
+          <div class="mc-group">
+            <div class="mc-topic"><b>Checkout</b><span>1,711</span></div>
+            <div class="mc-rows">
+              <span class="mc-cap" aria-hidden="true"></span>
+              <div class="mc-row" data-line="sentry" style="--w: 8.7px"><span class="mc-ln"></span><i data-brand="sentry"></i><span class="nm"><b>Sentry</b>webshop-prod</span><span class="n">1,406</span></div>
+              <div class="mc-row" data-line="stripe" style="--w: 6.8px"><span class="mc-ln"></span><i data-brand="stripe"></i><span class="nm"><b>Stripe</b>live</span><span class="n">209</span></div>
+              <div class="mc-row" data-line="posthog" style="--w: 6px"><span class="mc-ln"></span><i data-brand="posthog"></i><span class="nm"><b>PostHog</b>webshop</span><span class="n">96</span></div>
+            </div>
+          </div>
+          <div class="mc-group">
+            <div class="mc-topic"><b>Releases</b><span>312</span></div>
+            <div class="mc-rows">
+              <span class="mc-cap" aria-hidden="true"></span>
+              <div class="mc-row" data-line="github" style="--w: 7.2px"><span class="mc-ln"></span><i data-brand="github"></i><span class="nm"><b>GitHub</b>rogier</span><span class="n">312</span></div>
+            </div>
+          </div>
+          <div class="mc-group">
+            <div class="mc-topic"><b>Customers</b><span>249</span></div>
+            <div class="mc-rows">
+              <span class="mc-cap" aria-hidden="true"></span>
+              <div class="mc-row" data-line="gmail" style="--w: 6.7px"><span class="mc-ln"></span><i data-brand="gmail"></i><span class="nm"><b>Gmail</b>rogier@personal</span><span class="n">188</span></div>
+              <div class="mc-row" data-line="intercom" style="--w: 5.6px"><span class="mc-ln"></span><i data-brand="intercom"></i><span class="nm"><b>Intercom</b>support</span><span class="n">61</span></div>
+            </div>
+          </div>
+          <div class="mc-group">
+            <div class="mc-topic"><b>Infrastructure</b><span>44</span></div>
+            <div class="mc-rows">
+              <span class="mc-cap" aria-hidden="true"></span>
+              <div class="mc-row" data-line="grafana" style="--w: 5.2px"><span class="mc-ln"></span><i data-brand="grafana"></i><span class="nm"><b>Grafana</b>ops</span><span class="n">44</span></div>
+            </div>
+          </div>
+          <div class="mc-group">
+            <div class="mc-topic mc-topic--none"><b>No default Topic</b><span>102</span></div>
+            <div class="mc-rows">
+              <span class="mc-cap mc-cap--end" aria-hidden="true"></span>
+              <div class="mc-row" data-line="cron" style="--w: 6.1px"><span class="mc-ln"></span><i data-brand="cron"></i><span class="nm"><b>Cron</b>schedules</span><span class="n">102</span></div>
+            </div>
+          </div>
+
+          <div class="mc-sec">Channels<span>3 · where Assistants reach you</span></div>
+          <div class="mc-ch" data-line="slack">
+            <span class="mc-ln"></span><i data-brand="slack"></i>
+            <span class="nm"><b>Slack</b>acme-hq</span>
+            <span class="mc-who"><i data-mk="work" class="live"></i>Ada<i data-mk="idle" class="faint"></i>Milo</span>
+          </div>
+          <div class="mc-ch mc-ch--down" data-line="discord">
+            <span class="mc-ln"></span><i data-brand="discord"></i>
+            <span class="nm"><b>Discord</b><span class="attn">reconnecting since 09:12</span></span>
+            <button class="m-btn mc-retry">Retry</button>
+          </div>
+          <div class="mc-ch" data-line="webchat">
+            <span class="mc-ln"></span><i data-brand="webchat"></i>
+            <span class="nm"><b>Web chat</b>built in</span>
+            <span class="mc-who"><i data-mk="work" class="live"></i>Ada</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

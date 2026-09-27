@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="connections"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Settings</h1>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="settings">
+          <nav class="set-nav" data-setnav="connections" aria-label="Settings"></nav>
+          <div class="set-body">
+            <div class="set-inner set-inner--wide">
+              <div class="rec-head">
+                <div>
+                  <h2>Connections</h2>
+                  <p class="set-lede">Event sources bring events in; channels are where Assistants talk to you. A Connection's color is its line on Intake and the office floor.</p>
+                </div>
+                <button class="btn btn--primary"><i data-i="plus"></i>Add a Connection</button>
+              </div>
+
+              <div class="cx-sum">
+                <div><b>2,418</b><span>events in 24h</span></div>
+                <div><b>212</b><span>since you last checked</span></div>
+                <div><b>10</b><span>healthy</span></div>
+                <div class="attn"><b>1</b><span>reconnecting</span></div>
+              </div>
+
+              <div class="cx-head">
+                <h3>Event sources<span class="faint">8</span></h3>
+                <button class="btn btn--quiet btn--sm">Manage topics</button>
+              </div>
+              <div class="cx-table">
+                <div class="cx-row cx-row--head">
+                  <span>Connection</span><span>Default Topic</span><span class="cx-n">Events in 24h</span><span>Health</span>
+                </div>
+                <div class="cx-row" data-line="sentry">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="sentry"></i><b>Sentry</b>webshop-prod</span><span>Checkout</span><span class="cx-n">1,406</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="github">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="github"></i><b>GitHub</b>rogier</span><span>Releases</span><span class="cx-n">312</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="stripe">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="stripe"></i><b>Stripe</b>live</span><span>Checkout</span><span class="cx-n">209</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="gmail">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="gmail"></i><b>Gmail</b>rogier@personal</span><span>Customers</span><span class="cx-n">188</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="cron">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="cron"></i><b>Cron</b>schedules</span><span class="faint">No default Topic</span><span class="cx-n">102</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="posthog">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="posthog"></i><b>PostHog</b>webshop</span><span>Checkout</span><span class="cx-n">96</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="intercom">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="intercom"></i><b>Intercom</b>support</span><span>Customers</span><span class="cx-n">61</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="grafana">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="grafana"></i><b>Grafana</b>ops</span><span>Infrastructure</span><span class="cx-n">44</span><span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+              </div>
+
+              <div class="cx-head">
+                <h3>Channels<span class="faint">3</span></h3>
+              </div>
+              <div class="cx-table cx-table--ch">
+                <div class="cx-row cx-row--head">
+                  <span>Connection</span><span>Assistants here</span><span>Health</span>
+                </div>
+                <div class="cx-row" data-line="slack">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="slack"></i><b>Slack</b>acme-hq</span>
+                  <span class="cx-who"><span><i data-mk="work"></i>Ada<small>DM with Rogier</small></span><span><i data-mk="idle"></i>Milo<small>#ops</small></span></span>
+                  <span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="discord">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="discord"></i><b>Discord</b>community</span>
+                  <span class="cx-who"><span><i data-mk="idle"></i>Juno<small>#support · asleep</small></span></span>
+                  <span class="cx-health attn">reconnecting since 09:12</span><button class="btn btn--sm">Retry now</button><i data-i="chev-r"></i>
+                </div>
+                <div class="cx-row" data-line="webchat">
+                  <span class="cx-name"><i class="swatch"></i><i data-brand="webchat"></i><b>Web chat</b>built in</span>
+                  <span class="cx-who"><span><i data-mk="work"></i>Ada<small>always</small></span></span>
+                  <span class="faint">healthy</span><span></span><i data-i="chev-r"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

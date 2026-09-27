@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../mobile.css" />
+    <meta charset="utf-8" />
+    <title>(5) Intake · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone phone--intake phone--tabbed">
+      <div class="pane" data-scrolled-to="420">
+        <article class="lead card-flow" aria-label="Burning Proposal">
+          <div class="lead-top">
+            <span class="burn"><i data-mk="wait"></i>Burning</span>
+            <span>webshop</span>
+            <span class="dot-sep">first seen 08:52</span>
+            <span class="grow"></span>
+            <span class="kind">Proposal</span>
+          </div>
+          <h2>Checkout fails for EU cards with 3-D Secure</h2>
+          <p class="gist prose">
+            Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+            <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+          </p>
+          <div class="made" aria-label="Made from">
+            <div class="made-h">Made from 4 Connections</div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="sentry" style="color: var(--ln-sentry)"></i>Sentry</span>
+              <span class="made-ev"><code>PaymentError</code></span>
+              <span class="made-n"><b>412</b> events</span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="gmail" style="color: var(--ln-gmail)"></i>Gmail</span>
+              <span class="made-ev">"Card declined"</span>
+              <span class="made-n"><b>3</b> emails</span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="posthog" style="color: var(--ln-posthog)"></i>PostHog</span>
+              <span class="made-ev">EU conversion</span>
+              <span class="made-n"><b class="fail">-18%</b></span>
+            </div>
+            <div class="made-row">
+              <span class="made-src"><i data-brand="github" style="color: var(--ln-github)"></i>GitHub</span>
+              <span class="made-ev">Deploy #1289</span>
+              <span class="made-n">14:02 yesterday</span>
+            </div>
+          </div>
+          <div class="answers" role="group" aria-label="Answers">
+            <div class="ans">
+              <button class="btn btn--primary">Start "Fix bug"</button><span class="desc">Runs Fix bug in a worktree; ends in a pull request</span>
+            </div>
+            <div class="ans">
+              <button class="btn">Accept</button><span class="desc">Adds it to the backlog as a Task</span>
+            </div>
+            <div class="ans">
+              <button class="btn btn--quiet">Dismiss</button><span class="desc">Closes the Proposal</span>
+            </div>
+          </div>
+          <div class="lead-foot">
+            <i data-i="reply"></i><span class="prose">I can also draft a reply to the 3 customers once the fix ships.</span>
+            <button class="btn btn--sm">Yes, after the fix</button>
+          </div>
+        </article>
+
+        <h2 class="sec-head">Needs a call<span class="n">2</span></h2>
+        <div class="irow">
+          <i data-brand="intercom" style="color: var(--ln-intercom)"></i>
+          <div>
+            <div class="irow-title"><span>App is slow on Android</span><span class="chip">Unsure</span></div>
+            <div class="irow-meta">Intercom · 7 conversations since Sunday. Which project is this?</div>
+          </div>
+          <div class="irow-acts">
+            <div class="seg" role="group" aria-label="Which project">
+              <button>webshop</button><button>payments-api</button><button>Both</button><button>Not work</button>
+            </div>
+          </div>
+        </div>
+        <div class="irow">
+          <i data-brand="github" style="color: var(--ln-github)"></i>
+          <div>
+            <div class="irow-title"><span>"Label new issues" is held</span><span class="chip">Bound tripped</span></div>
+            <div class="irow-meta">GitHub · Spawn Bound 20/h tripped at 08:14 · a bot opened 34 issues</div>
+          </div>
+          <div class="irow-acts">
+            <button class="btn btn--sm">Keep held</button><button class="btn btn--sm">Raise to 50/h</button><button class="btn btn--quiet btn--sm">Release all 34</button>
+          </div>
+        </div>
+
+        <!-- On a phone a row opens its Proposal, where the answers have room for their descriptions. -->
+        <h2 class="sec-head">Today<span class="n">4</span></h2>
+        <a class="irow" href="decision.html">
+          <i data-brand="grafana" style="color: var(--ln-grafana)"></i>
+          <div>
+            <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+            <div class="irow-meta">Grafana and Cron · ops · hits its 2h limit at 04:00, 3 nights running</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+        <a class="irow" href="decision.html">
+          <i data-brand="gmail" style="color: var(--ln-gmail)"></i>
+          <div>
+            <div class="irow-title"><span>Reply to Marta at Brightline</span><span class="chip">Offer</span></div>
+            <div class="irow-meta">Gmail · Customers · wants invoice INV-2291 in the company name</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+        <a class="irow" href="decision.html">
+          <i data-brand="stripe" style="color: var(--ln-stripe)"></i>
+          <div>
+            <div class="irow-title"><span>Stripe webhook retries rising</span></div>
+            <div class="irow-meta">Stripe and Sentry · payments-api · 3x the usual retries since 06:00</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+        <a class="irow" href="decision.html">
+          <i data-brand="github" style="color: var(--ln-github)"></i>
+          <div>
+            <div class="irow-title"><span>Merge 4 dependency bumps</span><span class="chip">Offer</span></div>
+            <div class="irow-meta">GitHub · webshop · all green, patch versions only</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+
+        <h2 class="sec-head">When you can<span class="n">2</span></h2>
+        <a class="irow" href="decision.html">
+          <i data-brand="cron" style="color: var(--ln-cron)"></i>
+          <div>
+            <div class="irow-title"><span>SSL certificate expires in 12 days</span></div>
+            <div class="irow-meta">Cron · ops · status.acme.dev, renewed by hand last June</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+        <a class="irow" href="decision.html">
+          <i data-brand="intercom" style="color: var(--ln-intercom)"></i>
+          <div>
+            <div class="irow-title"><span>Add iDEAL as a payment method</span></div>
+            <div class="irow-meta">Intercom · webshop · 5 requests from Dutch customers</div>
+          </div>
+          <i data-i="chev-r"></i>
+        </a>
+
+        <h2 class="sec-head">Nothing to decide</h2>
+        <div class="quietline"><b>Attached</b>2 Sentry events to the Task "Cart total rounding on discounts"</div>
+        <div class="quietline"><b>FYI</b>payments-api v2.14.0 released · sign-ups <b class="ok">+9%</b> week over week · Stripe payout <b>€18,240</b> on Thursday</div>
+        <div class="quietline">
+          <b>167</b>events handled quietly: known, noise or duplicates
+          <button class="btn btn--quiet btn--sm">Show</button>
+        </div>
+      </div>
+
+      <div class="statusbar" data-statusbar></div>
+      <header class="topbar">
+        <h1 class="top-title">Intake</h1>
+        <span class="grow"></span>
+        <div class="top-group glass">
+          <button aria-label="Search Intake"><i data-i="search"></i></button>
+          <button aria-label="Manage topics"><i data-i="sliders"></i></button>
+        </div>
+        <a class="top-btn glass" href="settings.html" aria-label="Settings"><span class="avatar">R</span></a>
+      </header>
+      <!-- What Triage did at 09:00, in one line of the departures board. It stays put while the
+           Proposals scroll, which fade out before they reach it. -->
+      <div class="intake-flow">
+        <div data-flow="mini"></div>
+        <p>Triage at 09:00 took 42s · 212 events since 18:20 · next 11:00</p>
+      </div>
+      <nav class="tabbar glass" data-tabbar="intake" aria-label="Sections"></nav>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

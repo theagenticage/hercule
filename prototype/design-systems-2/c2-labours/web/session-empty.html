@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) New thread · Hercule</title>
+    <style>
+      .hello {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 0 64px;
+      }
+      .hello .column {
+        width: min(700px, 100% - 48px);
+      }
+      .newbie {
+        display: grid;
+        justify-items: center;
+        gap: 14px;
+        margin-bottom: 26px;
+        text-align: center;
+      }
+      .newbie-face {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 92px;
+        height: 92px;
+        border-radius: 50%;
+        background: var(--sunken);
+      }
+      .newbie-face::after {
+        content: "";
+        position: absolute;
+        inset: -5px;
+        border-radius: 50%;
+        border: 1.5px dashed var(--line);
+      }
+      .newbie h1 {
+        margin: 0;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .newbie p {
+        margin: -6px 0 0;
+        color: var(--muted);
+      }
+      .hello .composer {
+        width: 100%;
+      }
+      .hello .lip {
+        margin-bottom: 30px;
+      }
+      .starts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .start {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+        padding: 12px 14px 13px;
+        border-radius: var(--r-lg);
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        text-align: left;
+        transition: background var(--dur-1), box-shadow var(--dur-1), transform var(--dur-2) var(--ease-out);
+      }
+      .start:hover {
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+        transform: translateY(-1px);
+      }
+      .start-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .start-top .cr {
+        margin: -3px 0;
+      }
+      .start b {
+        font-weight: var(--w-medium);
+        line-height: 1.35;
+      }
+      .starts-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="threads"></header>
+      <div class="web-split">
+        <aside data-threads="new"></aside>
+        <main class="main">
+          <div class="pills">
+            <div class="pill">
+              <span class="crumb">webshop /</span>
+              <a class="pill-tab is-on" href="session-empty.html"><i data-i="compose" data-size="14"></i><span>New thread</span></a>
+              <a class="pill-tab" href="session-active.html"><i data-mark="waiting"></i><span>Fix 3&#8209;D Secure checkout for EU cards</span></a>
+              <a class="pill-tab" href="#"><i data-mark="idle"></i><span>Read the Stripe v14 changelog</span></a>
+            </div>
+            <span class="spacer"></span>
+            <div class="pill">
+              <button class="icon-btn" title="More"><i data-i="more"></i></button>
+            </div>
+          </div>
+
+          <div class="hello">
+            <div class="column">
+              <div class="newbie">
+                <span class="newbie-face"><i data-face="New thread in webshop" data-pose="idle" data-size="68"></i></span>
+                <h1>What should the agent do in webshop?</h1>
+                <p>It gets its own worktree of webshop, on a new branch from main.</p>
+              </div>
+
+              <div class="composer">
+                <div class="composer-card">
+                  <textarea class="composer-input" rows="2" placeholder="Say what you want done…" data-autofocus></textarea>
+                  <div class="composer-row">
+                    <button class="icon-btn" title="Attach"><i data-i="plus"></i></button>
+                    <button class="pick"><i data-i="shield" data-size="14"></i>Auto-accept edits</button>
+                    <button class="pick"><i data-i="sliders" data-size="14"></i>High</button>
+                    <span class="spacer"></span>
+                    <button class="pick pick--pill"><i data-brand="claude" data-size="13"></i>Claude Code · Opus 5.5</button>
+                    <button class="icon-btn" title="Dictate"><i data-i="mic"></i></button>
+                    <button class="send send--off" title="Send"><i data-i="send"></i></button>
+                  </div>
+                </div>
+                <div class="lip">
+                  <span><i data-i="worktree" data-size="13"></i>New worktree</span>
+                  <span><i data-i="branch" data-size="13"></i>from main</span>
+                  <span class="spacer"></span>
+                  <span><i data-i="laptop" data-size="13"></i>studio-mac</span>
+                </div>
+              </div>
+
+              <div class="starts-h section-h"><i data-i="intake" data-size="14"></i>Start from Intake</div>
+              <div class="starts">
+                <button class="start">
+                  <span class="start-top"><i data-brand="sentry" data-size="14"></i><span>Proposal</span><span class="spacer"></span><span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span></span>
+                  <b>Fix: Checkout fails for EU cards with 3&#8209;D Secure</b>
+                </button>
+                <button class="start">
+                  <span class="start-top"><i data-brand="intercom" data-size="14"></i><span>Proposal · 5 requests</span><span class="spacer"></span><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span></span>
+                  <b>Add iDEAL as a payment method</b>
+                </button>
+                <button class="start">
+                  <span class="start-top"><i data-i="tasks" data-size="14"></i><span>Task · 2 new events</span></span>
+                  <b>Cart total rounding on discounts</b>
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

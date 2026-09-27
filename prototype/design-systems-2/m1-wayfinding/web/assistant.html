@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Ada · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window window--web">
+      <aside class="sidebar" data-sidebar="threads" data-current="ada" data-web></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <span class="crumb">Assistants /</span>
+          <div class="asst-id">
+            <span class="avatar avatar--ada">A</span>
+            <b>Ada</b>
+            <span class="presence live"><i data-mk="work" class="live"></i>working</span>
+            <span class="faint">personal assistant · Sonnet 5</span>
+          </div>
+          <div class="actions">
+            <button class="pill-btn"><i data-i="heartbeat"></i>Next check-in 10:00</button>
+            <a class="icon-btn" href="settings-assistants.html" aria-label="Ada's record"><i data-i="sliders"></i></a>
+            <button class="icon-btn" aria-label="More"><i data-i="more"></i></button>
+          </div>
+        </header>
+
+        <!-- Below 1360px the rail folds into this band: the check-in line, the reminders and the
+             core note stay one glance away; the rest moves to Ada's record. -->
+        <div class="band when-narrow">
+          <span class="band-h">Check-ins</span>
+          <span class="timetable timetable--band" aria-label="Check-in timetable">
+            <span class="tt done"><i></i>07</span>
+            <span class="tt done"><i></i>08</span>
+            <span class="tt done"><i></i>09</span>
+            <span class="tt next"><i></i>10</span>
+            <span class="tt"><i></i>11</span>
+          </span>
+          <span class="band-stat"><i data-i="alarm"></i><b>3</b> reminders · next <b>Thu 16:00</b></span>
+          <span class="band-stat">Core note <b>1,284</b> of 4,000</span>
+          <span class="grow"></span>
+          <span class="band-stat band-reach"
+            ><span><i class="bullet" style="--c: var(--ln-webchat)"></i>Web chat</span><span><i class="bullet" style="--c: var(--ln-slack)"></i>Slack DM</span></span
+          >
+        </div>
+
+        <div class="asst">
+          <div class="asst-main" data-glass-host>
+            <div class="transcript" data-glass data-scrolled-by="360">
+              <div class="col turns turns--convo">
+                <div class="stamp-line">Yesterday</div>
+
+                <!-- A Notice is the system speaking, not Ada: the line breaks where the turn failed. -->
+                <div class="notice-line notice-line--interrupted">
+                  <span class="nl-rule"></span>
+                  <span class="nl-body">
+                    <i data-mk="fail" class="fail"></i>
+                    <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.</span>
+                    <span class="nl-time">22:14</span>
+                  </span>
+                  <span class="nl-rule"></span>
+                </div>
+
+                <div class="stamp-line">Today</div>
+
+                <!-- Heartbeats that found nothing fold into one line. -->
+                <button class="quiet-stops">
+                  <i data-i="heartbeat"></i>
+                  <span><b>2 quiet check-ins</b><span class="faint"> · 07:00 · 08:00 · nothing to report</span></span>
+                  <i data-i="chev" class="faint"></i>
+                </button>
+
+                <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="faint">09:00 · check-in</span></div>
+                <div class="msg-agent msg-agent--asst">
+                  <p>
+                    Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy. You
+                    started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I
+                    can draft that.
+                  </p>
+                  <div class="refs">
+                    <a class="ref" href="session-active.html"
+                      ><i data-mk="wait"></i>Fix 3-D Secure checkout<span class="attn"
+                        >waiting on you</span
+                      ></a
+                    >
+                    <a class="ref" href="intake.html"><i data-strip="gmail" data-size="s"></i>Draft a reply to Marta<span class="faint">Offer</span></a>
+                  </div>
+                </div>
+
+                <div class="msg-user">Remind me Friday to renew the SSL cert for ops.</div>
+                <div class="msg-time">09:20</div>
+
+                <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="faint">09:20</span></div>
+                <div class="msg-agent msg-agent--asst">
+                  <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+                  <div class="reminder">
+                    <span class="rm-ic"><i data-i="alarm"></i></span>
+                    <span class="rm-when">Fri 2 Oct · 09:00</span>
+                    <span class="rm-what">Renew the SSL cert for ops</span>
+                    <span class="rm-to faint">to Web chat</span>
+                    <button class="btn btn--quiet btn--sm">Edit</button>
+                  </div>
+                </div>
+
+                <div class="msg-user">What's the status of the backup job?</div>
+                <div class="msg-time">09:38</div>
+
+                <div class="msg-from"><span class="avatar avatar--ada">A</span><b>Ada</b><span class="live">writing</span></div>
+                <div class="msg-agent msg-agent--asst">
+                  <p>
+                    Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each
+                    night since the table <code>events</code> passed 40&nbsp;GB<span class="stream-caret"></span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="composer">
+                <div class="card">
+                  <div class="when-full">
+                    <div class="ta"><span class="ph">Message Ada…</span></div>
+                    <div class="card-row">
+                      <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+                      <span class="grow"></span>
+                      <button class="icon-btn" aria-label="Dictate"><i data-i="mic"></i></button>
+                      <button class="stop"><i></i>Stop</button>
+                      <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+                    </div>
+                  </div>
+                  <div class="card-mini when-shrunk">
+                    <span class="grow">Message Ada…</span>
+                    <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+                  </div>
+                </div>
+                <div class="lip glass-tab when-full">
+                  <span><i class="bullet" style="--c: var(--ln-webchat)"></i>Web chat</span>
+                  <span class="rule"></span>
+                  <span>replies at turn end</span>
+                  <span class="right faint">Slack DM gets the same Conversation</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rail when-wide">
+            <section class="rail-sec">
+              <h3>Check-ins<span class="aside">every hour · 07:00 to 23:00</span></h3>
+              <div class="timetable timetable--hourly" aria-label="Check-in timetable">
+                <span class="tt done quiet"><i></i>07:00<small>quiet</small></span>
+                <span class="tt done quiet"><i></i>08:00<small>quiet</small></span>
+                <span class="tt done"><i></i>09:00<small>spoke</small></span>
+                <span class="tt next"><i></i>10:00<small>next</small></span>
+                <span class="tt"><i></i>11:00</span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Reminders<span class="aside">3</span></h3>
+              <ul class="rm-list">
+                <li><span class="rm-d">Thu 1 Oct</span><b class="rm-t">16:00</b><span>Call the accountant</span></li>
+                <li><span class="rm-d">Fri 2 Oct</span><b class="rm-t">09:00</b><span>Renew the SSL cert for ops<small class="live">new</small></span></li>
+                <li><span class="rm-d">Mon 5 Oct</span><b class="rm-t">08:30</b><span>Send the September revenue summary</span></li>
+              </ul>
+            </section>
+            <section class="rail-sec">
+              <h3>Memory<span class="aside">7 topics of 24</span></h3>
+              <div class="mem-core">
+                <span>Core note</span><span class="faint">1,284 of 4,000</span>
+                <span class="mem-bar"><i style="width: 32.1%"></i></span>
+              </div>
+              <div class="mem-used">
+                <span class="faint">Used this turn</span>
+                <span class="topic">ops</span><span class="topic">work-style</span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Reaches Rogier on</h3>
+              <div class="reach">
+                <span><i class="bullet" style="--c: var(--ln-webchat)"></i>Web chat<small>always</small></span>
+                <span><i class="bullet" style="--c: var(--ln-slack)"></i>Slack · DM<small>acme-hq</small></span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Other Assistants</h3>
+              <div class="board">
+                <div class="board-row">
+                  <i data-mk="idle"></i>
+                  <div><div class="t">Milo</div><div class="sub">ops · Slack</div></div>
+                  <div class="st faint">idle</div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="idle"></i>
+                  <div><div class="t">Juno</div><div class="sub">support · Discord</div></div>
+                  <div class="st faint">asleep<small>Discord reconnecting</small></div>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

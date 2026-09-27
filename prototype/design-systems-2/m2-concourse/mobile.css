@@ -1,0 +1,952 @@
+/* Metro Concourse - the phone.
+   PROTOTYPE. The iOS screens at 390 by 844, over tokens.css and system.css. A phone reuses the
+   window's parts (the answers, the lead card, the transcript, the composer, settings rows) and
+   adds only what a phone has and a window does not: the status bar, the floating header buttons,
+   the floating tab bar, the home indicator and the lock screen.
+
+   The glass rule is the desktop's. The tab bar, the header buttons, the composer, and on the lock
+   screen the Live Activity and the notifications are glass. Everything that scrolls is solid, and
+   fades out under the floating header instead of running through it.
+
+   Sections: phone · status bar · floating header · tab bar · pane · shared parts on a phone ·
+   Intake · a Proposal · thread · new thread · Check-in · settings · lock screen. */
+
+/* ------------------------------------------------------------------ phone */
+.phone {
+  /* A phone is held closer than a laptop, but read on the move: text sets one step larger. */
+  --t-xs: 12px;
+  --t-s: 13px;
+  --t-m: 14.5px;
+  --t-base: 15.5px;
+  --side: 16px;
+  /* Where a page's scrolling content starts, under the status bar and the floating header. */
+  --pane-top: 118px;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ------------------------------------------------------------------ status bar
+   It belongs to iOS, not to Hercule, so it keeps the system font and never takes a color. */
+.statusbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 3px 26px 0 22px;
+  font-family: -apple-system, "SF Pro Text", var(--font);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  pointer-events: none;
+}
+/* The time sits in the middle of the ear left of the Dynamic Island. */
+.statusbar > span:first-child {
+  width: 88px;
+  text-align: center;
+}
+.statusbar .island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 126px;
+  height: 37px;
+  margin-left: -63px;
+  border-radius: 19px;
+  background: #000;
+}
+.statusbar .sys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.statusbar .sys svg {
+  display: block;
+}
+.home-ind {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  z-index: 40;
+  width: 134px;
+  height: 5px;
+  margin-left: -67px;
+  border-radius: 3px;
+  background: var(--ink);
+}
+
+/* ------------------------------------------------------------------ floating header
+   No bar. The title sits on the ground; the buttons float as glass circles and capsules, and the
+   page fades out under them as it scrolls. */
+.topbar {
+  position: absolute;
+  top: 54px;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 var(--side);
+  pointer-events: none;
+}
+.topbar > * {
+  pointer-events: auto;
+}
+/* Overpass sits high in its line box, so 3px on top centres its capitals on the buttons. */
+.top-title {
+  min-width: 0;
+  padding-top: 3px;
+  font-size: 20px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+.top-title--center {
+  flex: 1;
+  font-size: var(--t-l);
+  text-align: center;
+}
+.top-btn {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--ink);
+}
+/* Two or three buttons that belong together share one capsule, as iOS groups them. */
+.top-group {
+  flex: none;
+  display: inline-flex;
+  height: 44px;
+  padding: 0 2px;
+  border-radius: 22px;
+}
+.top-group > * {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 44px;
+  color: var(--ink);
+}
+.top-btn .icon,
+.top-group .icon {
+  width: 20px;
+  height: 20px;
+}
+.top-btn .avatar {
+  width: 30px;
+  height: 30px;
+  font-size: var(--t-s);
+}
+.top-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+  font-size: var(--t-m);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.top-pill .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+/* A thread's title and where it runs, centred between the glass buttons. It sits on the ground,
+   which stays clear because the transcript fades out before it reaches the header. */
+.top-heading {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.top-heading b,
+.top-heading span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-heading b {
+  font-size: var(--t-m);
+  line-height: 19px;
+}
+.top-heading span {
+  font-size: var(--t-xs);
+  line-height: 16px;
+  color: var(--muted);
+}
+.top-heading code {
+  font-size: 11px;
+}
+/* The assistants, as a segmented capsule: the one shown is a lighter step of the glass. */
+.top-seg {
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  padding: 4px;
+  border-radius: 22px;
+}
+.top-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 18px;
+  font-size: var(--t-m);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+}
+.top-seg button[aria-selected="true"] {
+  background: var(--selected);
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* ------------------------------------------------------------------ tab bar
+   A glass capsule floating above the home indicator. The chosen tab is a lighter step of the
+   glass; the count on Intake is ink, like every other number that is not a state. */
+.tabbar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 22px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  height: 62px;
+  padding: 4px;
+  border-radius: 31px;
+}
+.tabbar a {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 27px;
+  font-size: var(--t-2xs);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+}
+.tabbar .icon {
+  width: 24px;
+  height: 24px;
+}
+.tabbar a[aria-current="page"] {
+  background: var(--selected);
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.tabbar .badge {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 6px);
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------ pane
+   One scrolling page under the floating header and the tab bar. It fades out just above where
+   its content starts, so a row scrolled up never runs under the title or a glass button, and
+   again at the bottom, so no half-cut line sits behind the home indicator. */
+.phone .pane {
+  padding: var(--pane-top) var(--side) 40px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0 calc(var(--pane-top) - 14px), #000 var(--pane-top), #000 calc(100% - 44px), transparent calc(100% - 6px));
+  mask-image: linear-gradient(to bottom, transparent 0 calc(var(--pane-top) - 14px), #000 var(--pane-top), #000 calc(100% - 44px), transparent calc(100% - 6px));
+}
+/* A page with the tab bar ends above it. Rows still show through the top half of the glass
+   tab bar, and are gone by its bottom edge, so nothing peeks out below it. */
+.phone--tabbed .pane {
+  padding-bottom: 124px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0 calc(var(--pane-top) - 14px), #000 var(--pane-top), #000 calc(100% - 64px), transparent calc(100% - 24px));
+  mask-image: linear-gradient(to bottom, transparent 0 calc(var(--pane-top) - 14px), #000 var(--pane-top), #000 calc(100% - 64px), transparent calc(100% - 24px));
+}
+.phone .sec-head {
+  margin: 26px 2px 2px;
+}
+
+/* ------------------------------------------------------------------ shared parts on a phone
+   Buttons grow to a thumb's size. Answers keep the desktop's rule: every button of a group in
+   one column of one width. Beside it, the description may take two lines, and there are no keys. */
+.phone .btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+.phone .btn--sm {
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+}
+.phone .answers {
+  grid-template-columns: var(--ans-w, 136px) minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 8px;
+}
+.phone .ans .btn {
+  height: 40px;
+  padding: 0 10px;
+  font-size: var(--t-m);
+}
+.phone .ans .desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.phone .ans kbd {
+  display: none;
+}
+.phone .seg button {
+  height: 30px;
+  padding: 0 11px;
+}
+
+/* ------------------------------------------------------------------ Intake */
+.phone--intake {
+  --pane-top: 174px;
+}
+/* Under the title: the mini departures board and when Triage ran. It sits on the ground, so its
+   interchange capsule is cut from the ground. */
+.intake-flow {
+  position: absolute;
+  top: 110px;
+  left: var(--side);
+  right: var(--side);
+  z-index: 20;
+}
+.intake-flow .board {
+  --cut: var(--bg);
+}
+.intake-flow p {
+  margin-top: 5px;
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+.phone .lead {
+  padding: 14px 16px 12px;
+}
+.phone .lead-top {
+  white-space: nowrap;
+}
+.phone .lead h2 {
+  margin-top: 10px;
+  font-size: 18px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.phone .gist {
+  margin-top: 6px;
+  font-size: var(--t-m);
+  line-height: 1.5;
+}
+.phone .made {
+  column-gap: 10px;
+  margin-top: 12px;
+}
+.phone .made-row {
+  padding: 4px 0;
+}
+.phone .made-ev code {
+  font-size: 11.5px;
+}
+.phone .lead .answers {
+  --ans-w: 136px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+/* The footer offer goes under its sentence, lined up with the text after the icon. */
+.phone .lead-foot {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.phone .lead-foot .prose {
+  flex: 1 1 calc(100% - 22px);
+  line-height: 1.4;
+}
+.phone .lead-foot .btn {
+  margin-left: 22px;
+}
+/* A row on a phone: the Connection, the title and one line of meta, and below them, where the row
+   asks for a call, its controls. A row without controls opens the Proposal. */
+.phone .irow {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  padding: 11px 0;
+}
+.phone .irow > .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+/* A phone row may take two lines of meta rather than cut the reason short. */
+.phone .irow-meta {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  line-height: 1.4;
+}
+.irow-acts {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+.phone .irow .irow-acts .btn {
+  width: auto;
+}
+.phone .quietline {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding: 8px 0;
+}
+
+/* ------------------------------------------------------------------ a Proposal as a page */
+.phone .prop {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.prop-from {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 14px;
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.prop-from .brand {
+  width: 13px;
+  height: 13px;
+}
+.phone .prop h1 {
+  margin-top: 10px;
+  font-size: 19px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.phone .prop .made {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 16px;
+}
+/* The full page has room for each source's evidence in full, on a second line under its name. */
+.phone .prop .made-row {
+  row-gap: 1px;
+  padding: 6px 0;
+}
+.phone .prop .made-ev {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding-left: 20px;
+  white-space: normal;
+}
+.phone .decide {
+  margin-top: 18px;
+  padding: 14px 16px 12px;
+}
+.phone .decide .answers {
+  --ans-w: 136px;
+}
+/* The stops of the suggested answer run the card's full width, each as wide as its words, because
+   in three equal columns "Opus 5.5 on studio-mac" would break. */
+.phone .route {
+  grid-column: 1 / -1;
+  margin: 4px 0 8px;
+}
+.phone .route li {
+  flex: 1 1 auto;
+  padding-right: 12px;
+}
+.phone .route span {
+  white-space: nowrap;
+}
+.phone .prop-next {
+  margin-top: 16px;
+}
+
+/* ------------------------------------------------------------------ thread */
+/* The transcript fades out under the header, and again behind the home indicator, so no line of
+   text shows below the floating composer. */
+.phone .transcript {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0 104px, #000 132px, #000 calc(100% - 64px), transparent calc(100% - 28px));
+  mask-image: linear-gradient(to bottom, transparent 0 104px, #000 132px, #000 calc(100% - 64px), transparent calc(100% - 28px));
+}
+.phone .col {
+  width: calc(100% - 2 * var(--side));
+}
+.phone .turns {
+  gap: 16px;
+  padding-top: 132px;
+}
+/* Code keeps its lines and scrolls sideways, as it does in every code view on a phone: wrapped
+   code breaks inside names and loses its indentation. */
+.phone .codeblock {
+  padding: 10px 12px;
+  font-size: 11.5px;
+}
+.phone .files-row {
+  grid-template-columns: minmax(0, 1fr) auto 36px;
+  gap: 12px;
+  padding: 8px 12px;
+}
+.phone .files-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.phone .files-head {
+  padding: 8px 8px 8px 12px;
+}
+.phone .files-foot {
+  padding: 8px 12px 9px;
+}
+.phone .composer-wrap {
+  padding: 0 8px 30px;
+}
+.phone .composer {
+  border-radius: var(--r-sheet);
+}
+.phone .dock {
+  padding: 14px 14px 12px;
+}
+.phone .dock-subject {
+  font-size: 12.5px;
+}
+.phone .dock .answers {
+  --ans-w: 176px;
+  margin: 12px 0 0;
+}
+/* The queued message takes its own line; beside two buttons it would be cut to a few words. */
+.phone .queued {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  margin: 12px -4px -4px;
+  padding: 8px 4px 0;
+}
+.phone .queued .what {
+  flex: 1 1 calc(100% - 20px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone .queued .tag {
+  flex: 1;
+  margin-left: 20px;
+}
+.phone .reply {
+  padding: 2px 8px 8px;
+}
+.phone .ta {
+  min-height: 44px;
+  padding: 12px 8px 6px;
+}
+.phone .send {
+  width: 32px;
+  height: 32px;
+}
+.phone .dock-mini {
+  padding: 0 8px 0 14px;
+}
+.phone .reply-mini {
+  padding: 0 8px 0 14px;
+}
+
+/* ------------------------------------------------------------------ new thread */
+.phone .draft {
+  padding: 0 var(--side);
+}
+.phone .draft-in {
+  width: 100%;
+  margin: 0;
+  padding: 122px 0 150px;
+}
+.phone .draft-h {
+  font-size: 19px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.phone .draft-sub {
+  font-family: var(--font-body);
+  font-size: var(--t-m);
+  line-height: 1.45;
+  text-wrap: balance;
+}
+/* Where the thread runs: project, runner, agent and worktree, as one list of picks. */
+.where {
+  margin-top: 22px;
+}
+.where-row {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr) 14px;
+  align-items: center;
+  column-gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px 0 14px;
+  font-size: var(--t-m);
+}
+.where-row + .where-row {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.where-row > .icon,
+.where-row > .brand {
+  justify-self: center;
+  color: var(--muted);
+}
+.where-row b {
+  font-weight: var(--w-medium);
+}
+.where-row .v {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--muted);
+}
+.where-row .v code {
+  color: var(--ink);
+}
+.where-row .chev {
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+.phone .starts {
+  margin-top: 22px;
+}
+.phone .starts-head {
+  padding: 0 0 6px;
+}
+.phone .start {
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  row-gap: 1px;
+  height: auto;
+  padding: 9px 0;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.phone .start .start-m {
+  grid-column: 2;
+}
+.phone .start > .icon {
+  grid-row: 1 / span 2;
+  grid-column: 3;
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ Check-in */
+/* The composer rides just above the tab bar, and the transcript fades out before the gap between
+   them. */
+.phone--tabbed .composer-wrap {
+  padding-bottom: 92px;
+}
+.phone--tabbed .transcript {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0 104px, #000 132px, #000 calc(100% - 132px), transparent calc(100% - 92px));
+  mask-image: linear-gradient(to bottom, transparent 0 104px, #000 132px, #000 calc(100% - 132px), transparent calc(100% - 92px));
+}
+.phone .checkin {
+  padding: 12px 14px 4px;
+}
+/* The compact board has room for four stops on a phone. The quiet count moves into the heading
+   above it, so every number the desktop board shows is still on the card. */
+.phone .checkin .b-quiet {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ settings */
+.phone .set {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.phone .set-h {
+  margin: 24px 0 8px;
+  padding: 0 4px;
+}
+.phone .set-h:first-child {
+  margin-top: 0;
+}
+.phone .set-row {
+  column-gap: 16px;
+  min-height: 52px;
+  padding: 10px 14px;
+}
+/* Five themes in rows of three: a phone is too narrow for five previews with their names. */
+.phone .themes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 10px;
+}
+.phone .theme-card {
+  gap: 7px;
+  text-align: left;
+}
+/* The slider takes the card's width under its label, with the level at its right end, where the
+   thumb points. */
+.set-row--slider {
+  row-gap: 8px;
+}
+.set-row--slider > div {
+  grid-column: 1 / -1;
+}
+.set-row--slider .range {
+  grid-row: 2;
+  grid-column: 1;
+  width: 100%;
+}
+.set-row--slider .range-out {
+  grid-row: 2;
+  grid-column: 2;
+}
+.phone .glass-sample {
+  margin: 0 14px 14px;
+}
+.phone .glass-sample .pair {
+  right: 14px;
+}
+.set-link {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 48px;
+  padding: 0 12px 0 14px;
+  font-size: var(--t-m);
+  font-weight: var(--w-medium);
+}
+.set-link > .icon {
+  color: var(--muted);
+}
+.set-link .v {
+  font-weight: var(--w-regular);
+  color: var(--muted);
+}
+.set-link .chev {
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ lock screen
+   iOS draws the lock screen; Hercule adds a Live Activity and its notifications. The wallpaper is
+   one flat color from the theme, a step below the ground, so the glass panels read against it. */
+.lock {
+  background: color-mix(in oklab, var(--sunken), var(--ink) 6%);
+}
+.lock .statusbar .island {
+  display: none;
+}
+/* The Dynamic Island with the Live Activity folded into it: a waiting mark and the count. The
+   island is always black, so it takes the night theme's colors whatever the phone's theme. */
+.lock-island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 154px;
+  height: 37px;
+  margin-left: -77px;
+  padding: 0 14px 0 13px;
+  border-radius: 19px;
+  background: #000;
+  color: var(--ink);
+  font-size: var(--t-s);
+  font-weight: var(--w-bold);
+}
+.lock-top {
+  position: absolute;
+  top: 58px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--ink);
+}
+.lock-top .icon {
+  width: 18px;
+  height: 18px;
+}
+.lock-date {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: var(--w-medium);
+}
+.lock-clock {
+  margin-top: 2px;
+  font-size: 92px;
+  font-weight: var(--w-bold);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.lock-list {
+  position: absolute;
+  top: 222px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.activity,
+.notification {
+  border-radius: var(--r-sheet);
+}
+.activity {
+  padding: 13px 16px 14px 14px;
+}
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.activity-head .appicon {
+  flex: none;
+}
+.activity-q {
+  margin-top: 12px;
+  padding-top: 11px;
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.activity-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.activity-title span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-title .when {
+  margin-left: auto;
+  color: var(--faint);
+}
+.activity-ask {
+  margin-top: 3px;
+  font-size: var(--t-base);
+  font-weight: var(--w-bold);
+}
+.activity-ask code {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: var(--w-regular);
+}
+.activity-acts,
+.notification-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+}
+.activity-acts .btn,
+.notification-acts .btn {
+  min-width: 96px;
+}
+.activity-acts .btn--quiet,
+.notification-acts .btn--quiet {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.activity-acts .diff {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.notification {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  column-gap: 11px;
+  padding: 12px 14px 13px 12px;
+}
+.notification .appicon {
+  margin-top: 1px;
+}
+.notification-app {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.notification-app span {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.notification-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-m);
+  font-weight: var(--w-bold);
+}
+.notification p {
+  font-family: var(--font-body);
+  font-size: var(--t-m);
+  line-height: 1.4;
+  font-feature-settings: "kern";
+}
+.notification p.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lock-corner {
+  position: absolute;
+  bottom: 44px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  color: var(--ink);
+}
+.lock-corner--left {
+  left: 46px;
+}
+.lock-corner--right {
+  right: 46px;
+}

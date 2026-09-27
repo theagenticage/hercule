@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="settings" data-current="appearance"></aside>
+
+      <main class="main">
+        <div class="pane">
+          <div class="set">
+            <p class="set-lede prose">How Hercule looks on this Mac. Every change applies at once.</p>
+
+            <h2 class="set-h">Theme</h2>
+            <div class="themes" role="radiogroup" aria-label="Theme">
+              <button class="theme-card" role="radio" aria-checked="true" data-pick="enamel">
+                <span class="tp theme-scope" data-theme="enamel" data-tp></span><span>Enamel<small>light</small></span>
+              </button>
+              <button class="theme-card" role="radio" aria-checked="false" data-pick="tile">
+                <span class="tp theme-scope" data-theme="tile" data-tp></span><span>Tile<small>light, warm</small></span>
+              </button>
+              <button class="theme-card" role="radio" aria-checked="false" data-pick="night-service">
+                <span class="tp theme-scope" data-theme="night-service" data-tp></span><span>Night Service<small>dark</small></span>
+              </button>
+              <button class="theme-card" role="radio" aria-checked="false" data-pick="underground">
+                <span class="tp theme-scope" data-theme="underground" data-tp></span><span>Underground<small>dark, brass</small></span>
+              </button>
+              <button class="theme-card" role="radio" aria-checked="false" data-pick="signal">
+                <span class="tp theme-scope" data-theme="signal" data-tp></span><span>Signal<small>dark, high contrast</small></span>
+              </button>
+            </div>
+
+            <h2 class="set-h">Window</h2>
+            <div class="set-card">
+              <div class="set-row">
+                <div>
+                  <div class="set-label">Match the system</div>
+                  <div class="set-help">Enamel when macOS is light, Night Service when it is dark.</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true" aria-label="Match the system"></button>
+              </div>
+              <div>
+                <div class="set-row">
+                  <div>
+                    <div class="set-label">Glass</div>
+                    <div class="set-help">How much of the page shows through the sidebar, the header and the composer. 0% is solid.</div>
+                  </div>
+                  <div class="row-flex">
+                    <input class="range" type="range" min="0" max="100" step="5" value="60" aria-label="Glass" data-glass-slider />
+                    <output class="range-out" data-glass-out>60%</output>
+                  </div>
+                </div>
+                <div class="glass-sample" aria-hidden="true">
+                  <p class="prose">
+                    Pushed <code>fix/3ds-eu-cards</code> to origin. The branch has one commit: <code>handlePaymentResult</code> now treats
+                    <code>requires_action</code> as a step to finish, not as a failure. The test for EU cards passes, and so do the 212 other
+                    checkout tests.
+                  </p>
+                  <span class="pair"><button><i data-i="diff"></i>Changes <span class="plus">+48</span><span class="minus">-12</span></button><button>Commit</button></span>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <div class="set-label">Reduce transparency</div>
+                  <div class="set-help">Makes every glass panel solid. On by itself when macOS reduces transparency.</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce transparency" data-solid></button>
+              </div>
+              <div class="set-row">
+                <div>
+                  <div class="set-label">Reduce motion</div>
+                  <div class="set-help">The working mark stops turning and the departures board holds still.</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce motion"></button>
+              </div>
+            </div>
+
+            <h2 class="set-h">Text</h2>
+            <div class="set-card">
+              <div class="set-row">
+                <div>
+                  <div class="set-label">Text size</div>
+                  <div class="set-help">Also follows the macOS text size.</div>
+                </div>
+                <div class="seg" role="group" aria-label="Text size">
+                  <button aria-pressed="false">Small</button><button aria-pressed="true">Default</button><button aria-pressed="false">Large</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div>
+                  <div class="set-label">Density</div>
+                  <div class="set-help">Compact fits more Threads in the sidebar.</div>
+                </div>
+                <div class="seg" role="group" aria-label="Density">
+                  <button aria-pressed="true">Comfortable</button><button aria-pressed="false">Compact</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Appearance</h1>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+      </main>
+    </div>
+    <script>
+      // Marks the theme the page is showing as picked, and switches the whole page on a click.
+      (function () {
+        var alias = { light: "enamel", dark: "night-service" };
+        var root = document.documentElement;
+        function markPicked() {
+          var now = alias[root.dataset.theme] || root.dataset.theme;
+          document.querySelectorAll("[data-pick]").forEach(function (b) {
+            b.setAttribute("aria-checked", String(b.dataset.pick === now));
+          });
+        }
+        document.querySelectorAll("[data-pick]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            root.dataset.theme = b.dataset.pick;
+            markPicked();
+          });
+        });
+        markPicked();
+        document.querySelectorAll("[data-tp]").forEach(function (el) {
+          el.innerHTML = '<span class="tp-side"><i></i><i></i><i></i><i></i></span><span class="tp-text"><i></i><i></i><i></i></span><span class="tp-dot"></span><span class="tp-btn"></span>';
+        });
+      })();
+
+      // Moves the whole page's glass with the slider, live. The slider also follows the level when
+      // something else sets it: ?glass= in the address, or the book posting a new level.
+      (function () {
+        var root = document.documentElement;
+        var slider = document.querySelector("[data-glass-slider]");
+        var out = document.querySelector("[data-glass-out]");
+        var solid = document.querySelector("[data-solid]");
+        function showLevel(level) {
+          if (solid.getAttribute("aria-checked") === "true") return;
+          slider.value = String(Math.round(level * 100));
+          out.textContent = slider.value + "%";
+          slider.style.setProperty("--fill", slider.value + "%");
+        }
+        slider.addEventListener("input", function () {
+          HerculePage.setGlassLevel(Number(slider.value) / 100);
+        });
+        document.addEventListener("glasschange", function (e) {
+          showLevel(e.detail);
+        });
+        // Reduce transparency keeps the slider's value, so turning it off again restores that level.
+        solid.addEventListener("click", function () {
+          var on = solid.getAttribute("aria-checked") !== "true";
+          solid.setAttribute("aria-checked", String(on));
+          slider.disabled = on;
+          HerculePage.setGlassLevel(on ? 0 : Number(slider.value) / 100);
+          if (on) out.textContent = "Solid";
+        });
+        showLevel(Number(getComputedStyle(root).getPropertyValue("--glass-level")));
+      })();
+    </script>
+  </body>
+</html>

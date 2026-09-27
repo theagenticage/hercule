@@ -1,0 +1,2522 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Metro Wayfinding · a design system for Hercule</title>
+    <link rel="icon" href="favicon.svg" />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="metro.js" defer></script>
+    <script src="../shared/book.js" defer></script>
+    <style>
+      /* The book, styled in Wayfinding's own tokens. Like the product, it keeps the map for the few
+         places it explains something and uses plain signs everywhere else. */
+      html,
+      body {
+        height: auto;
+        overflow: auto;
+      }
+      body {
+        background: var(--surface);
+        scrollbar-color: var(--line) transparent;
+      }
+      .f {
+        --f-chrome: color-mix(in oklch, var(--ink) 7%, var(--surface));
+        --f-chrome-ink: var(--muted);
+        --f-shadow: var(--shadow-2);
+      }
+      .f-caption {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .f-caption small {
+        font-weight: var(--w-regular);
+        color: var(--muted);
+        opacity: 1;
+      }
+
+      /* ---------------------------------------------------------------- top bar */
+      /* The top bar floats over the book as it scrolls, so it is the book's one glass surface. */
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 24px;
+        background: var(--glass);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 -1px 0 var(--line-soft);
+      }
+      .topbar .name {
+        font-weight: var(--w-bold);
+        font-size: var(--t-l);
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .topbar nav {
+        margin-left: auto;
+        display: flex;
+        gap: 2px;
+        font-size: var(--t-s);
+        white-space: nowrap;
+      }
+      .topbar nav a {
+        text-decoration: none;
+        color: var(--muted);
+        padding: 6px 7px;
+        border-radius: var(--r-control);
+      }
+      .topbar nav a:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .switch {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: 11px;
+        background: var(--hover);
+      }
+      .switch button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 28px;
+        padding: 0 10px 0 7px;
+        border-radius: 8px;
+        font-size: var(--t-s);
+        font-weight: var(--w-medium);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .switch button[aria-pressed="true"] {
+        background: var(--raised);
+        color: var(--ink);
+        box-shadow: var(--shadow-1);
+      }
+      .swatch-chip {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line);
+        position: relative;
+        overflow: hidden;
+        flex: none;
+      }
+      .swatch-chip::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        background: var(--accent);
+      }
+      .glass-ctl {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-s);
+        font-weight: var(--w-medium);
+        color: var(--muted);
+      }
+      .glass-ctl .range {
+        width: 88px;
+      }
+      .glass-ctl .range-out {
+        min-width: 4ch;
+        color: var(--ink);
+      }
+
+      /* ---------------------------------------------------------------- page */
+      .book {
+        max-width: 1264px;
+        margin: 0 auto;
+        padding: 0 56px 120px;
+      }
+      .sec {
+        padding-top: 104px;
+      }
+      [id] {
+        scroll-margin-top: 72px;
+      }
+      .sec[id] {
+        scroll-margin-top: -32px;
+      }
+      /* Section numbers are small enamel plates, the one sign the book repeats. */
+      .sec-h {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-bottom: 28px;
+      }
+      .sec-h .no {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        background: var(--ink);
+        color: var(--surface);
+        font: var(--w-bold) 13px/1 var(--font);
+        font-variant-numeric: tabular-nums;
+        flex: none;
+        align-self: center;
+      }
+      .sec-h h2 {
+        font-size: var(--t-xl);
+      }
+      .sec-h .lede {
+        color: var(--muted);
+        font-size: var(--t-m);
+      }
+      .sec h3 {
+        font-size: var(--t-base);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .sec h3 .aside {
+        font-weight: var(--w-regular);
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+      .sign {
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        letter-spacing: var(--track-sign);
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .prose {
+        font-size: var(--t-base);
+        line-height: 1.6;
+        color: var(--muted);
+        max-width: 62ch;
+      }
+      .prose b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .prose p + p {
+        margin-top: 12px;
+      }
+      .block {
+        margin-top: 72px;
+      }
+      .cap {
+        margin-top: 10px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .cap b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        column-gap: 36px;
+        row-gap: 44px;
+      }
+      .grid-1 {
+        margin-bottom: 44px;
+      }
+      .grid-m {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        column-gap: 24px;
+        row-gap: 44px;
+      }
+
+      /* A plain table: the change list, the glass tokens, the button roles, the token map. */
+      .tbl {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--t-s);
+        line-height: 1.45;
+      }
+      .tbl th {
+        text-align: left;
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        letter-spacing: var(--track-sign);
+        text-transform: uppercase;
+        color: var(--faint);
+        padding: 0 16px 10px 0;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      .tbl td {
+        padding: 10px 16px 10px 0;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: top;
+        color: var(--muted);
+      }
+      .tbl td:first-child {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .tbl td.n {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--w-medium);
+        width: 28px;
+      }
+      .tbl a {
+        color: var(--ink);
+        text-decoration-color: var(--line);
+        text-underline-offset: 3px;
+      }
+      .tbl a:hover {
+        text-decoration-color: currentColor;
+      }
+      .tbl code {
+        font-size: 11.5px;
+        color: var(--ink);
+      }
+      .tbl .num {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      /* ---------------------------------------------------------------- hero */
+      .hero {
+        padding-top: 72px;
+      }
+      .hero > .sign {
+        margin-bottom: 18px;
+      }
+      .hero-id {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .hero-id h1 {
+        font-size: 34px;
+        letter-spacing: -0.025em;
+        line-height: 1;
+      }
+      .hero-id .thesis {
+        font-size: var(--t-xl);
+        font-weight: var(--w-medium);
+        color: var(--muted);
+        letter-spacing: -0.01em;
+        margin-top: 8px;
+      }
+      .hero-body {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 56px;
+        margin-top: 44px;
+        align-items: start;
+      }
+      .hero-map {
+        margin: -4px 0 0;
+      }
+      .hero-map figcaption {
+        margin-top: 10px;
+        font-size: var(--t-s);
+        color: var(--faint);
+      }
+
+      /* ---------------------------------------------------------------- what changed */
+      .fb th:nth-child(2) {
+        width: 28%;
+      }
+      .fb th:last-child {
+        width: 190px;
+      }
+      .fb td:nth-child(2) {
+        color: var(--ink);
+      }
+      .compare {
+        margin-top: 56px;
+      }
+      .compare h3 {
+        margin-bottom: 6px;
+      }
+      .compare .note {
+        font-size: var(--t-m);
+        color: var(--muted);
+        max-width: 90ch;
+        margin-bottom: 20px;
+      }
+
+      /* ---------------------------------------------------------------- why this one */
+      .why {
+        display: grid;
+        grid-template-columns: 1fr 400px;
+        gap: 64px;
+        align-items: start;
+      }
+      .wl + .wl {
+        margin-top: 28px;
+      }
+      .wl .sign {
+        display: block;
+        margin-bottom: 6px;
+      }
+      .wl li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 34px;
+        font-size: var(--t-m);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .wl li .icon {
+        color: var(--muted);
+        flex: none;
+      }
+      .wl li .strip {
+        margin: 0 -2.4px;
+      }
+
+      /* ---------------------------------------------------------------- before and after */
+      .ba {
+        display: grid;
+        grid-template-columns: 400px 1fr;
+        gap: 36px;
+        align-items: start;
+      }
+      .ba + .ba {
+        margin-top: 64px;
+        padding-top: 48px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .ba--phone {
+        grid-template-columns: 400px 260px 260px;
+        justify-content: space-between;
+      }
+      .before {
+        position: relative;
+        margin: 0;
+      }
+      .before img {
+        display: block;
+        width: 100%;
+        border-radius: 8px;
+        box-shadow: var(--shadow-1);
+        filter: saturate(0.9);
+      }
+      .before .ring {
+        position: absolute;
+        border-radius: 6px;
+        box-shadow:
+          0 0 0 2px var(--attn),
+          0 0 0 6px var(--attn-soft);
+      }
+      .ba-text {
+        margin-top: 18px;
+      }
+      .ba-text .pains {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .ba-text h3 {
+        margin-bottom: 8px;
+      }
+      .ba-text dl {
+        margin: 14px 0 0;
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        row-gap: 8px;
+        font-size: var(--t-m);
+      }
+      .ba-text dt {
+        font-weight: var(--w-bold);
+      }
+      .ba-text dd {
+        margin: 0;
+        color: var(--muted);
+      }
+      .ba-text .today {
+        font-size: var(--t-m);
+        color: var(--faint);
+        margin-top: 10px;
+      }
+      .ba-after .f-caption {
+        display: none;
+      }
+      .pain {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 8px;
+        border-radius: 5px;
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px var(--line);
+        white-space: nowrap;
+      }
+
+      /* ---------------------------------------------------------------- the system: doctrine */
+      .doctrine {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 64px;
+        row-gap: 44px;
+      }
+      .rule-h {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .rule-h b {
+        font-size: var(--t-base);
+      }
+      .rule-h .n {
+        font-size: 11px;
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        color: var(--faint);
+      }
+      .rule-p {
+        font-size: var(--t-s);
+        color: var(--muted);
+        margin-top: 12px;
+        max-width: 54ch;
+      }
+      .hues {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        column-gap: 28px;
+        row-gap: 9px;
+      }
+      .hue {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: var(--t-s);
+        font-weight: var(--w-medium);
+      }
+      .hue .brand {
+        color: var(--ink);
+      }
+      .hue .hue-line {
+        width: 64px;
+        height: var(--line-w-map);
+        border-radius: 3px;
+        background: var(--c);
+        flex: none;
+      }
+      .doctrine .route-strip {
+        justify-content: flex-start;
+      }
+      .states {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        row-gap: 10px;
+        column-gap: 16px;
+        font-size: var(--t-s);
+      }
+      .states span {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: var(--w-medium);
+      }
+      .zones {
+        display: flex;
+        gap: 10px;
+      }
+      .zone {
+        flex: 1;
+        height: 76px;
+        border-radius: var(--r-card);
+        padding: 10px 12px;
+        font-size: var(--t-s);
+        font-weight: var(--w-bold);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .zone small {
+        font-weight: var(--w-regular);
+        color: var(--muted);
+        font-size: var(--t-xs);
+      }
+
+      /* ---------------------------------------------------------------- themes */
+      .theme-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .theme-tile {
+        text-align: left;
+        min-width: 0;
+        border-radius: 14px;
+        background: var(--bg);
+        color: var(--ink);
+        padding: 14px 14px 12px;
+        box-shadow:
+          inset 0 0 0 1px var(--line),
+          var(--shadow-1);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        transition: box-shadow var(--t-fast) var(--ease);
+      }
+      .theme-tile[aria-pressed="true"] {
+        box-shadow:
+          0 0 0 2px var(--surface),
+          0 0 0 4px var(--focus),
+          var(--shadow-2);
+      }
+      .theme-tile .tn {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        font-weight: var(--w-bold);
+        font-size: var(--t-m);
+      }
+      .theme-tile .tn small {
+        font-weight: var(--w-regular);
+        color: var(--faint);
+        font-size: var(--t-xs);
+      }
+      .theme-tile .canvas {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border-radius: 9px;
+        background: var(--surface);
+        padding: 8px 10px;
+      }
+      .theme-tile .trow {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 20px;
+        font-size: 11.5px;
+      }
+      .theme-tile .trow b {
+        font-weight: var(--w-medium);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+      }
+      .theme-tile .trow > span {
+        font-size: 10.5px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+      }
+      /* A 12px mark sits in the middle of the small made-from glyph's 20.8px, so the titles line up. */
+      .theme-tile .trow > .mk {
+        margin: 0 4.4px;
+      }
+      .theme-tile .sw {
+        display: flex;
+        gap: 4px;
+      }
+      .theme-tile .sw i {
+        flex: 1;
+        height: 12px;
+        border-radius: 3px;
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .theme-tile .role {
+        font-size: var(--t-xs);
+        color: var(--muted);
+      }
+
+      /* ---------------------------------------------------------------- type, shape, depth */
+      .type {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 56px;
+      }
+      .specimen {
+        font-size: 64px;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .specimen-code {
+        display: inline-block;
+        margin-top: 18px;
+        padding: 6px 10px;
+        border-radius: var(--r-control);
+        background: var(--sunken);
+        font-size: 12px;
+      }
+      .fam {
+        margin-top: 16px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .scale {
+        display: flex;
+        flex-direction: column;
+      }
+      .scale div {
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        align-items: baseline;
+        gap: 16px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .scale div:last-child {
+        border-bottom: 0;
+      }
+      .scale .lbl {
+        color: var(--faint);
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+      .numerals {
+        margin-top: 18px;
+        font-size: var(--t-l);
+        color: var(--muted);
+        display: flex;
+        gap: 14px;
+        align-items: baseline;
+        flex-wrap: wrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .numerals b {
+        font-size: 21px;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        margin-right: 4px;
+      }
+      .numerals .fail b {
+        color: var(--fail);
+      }
+      .depth {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 64px;
+        align-items: start;
+      }
+      .radii {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+      }
+      .radii div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .radii i {
+        display: block;
+        width: 52px;
+        height: 52px;
+        box-shadow: inset 0 0 0 2px var(--ink);
+      }
+      .shadows {
+        display: flex;
+        gap: 14px;
+      }
+      .shadows div {
+        flex: 1;
+        height: 64px;
+        border-radius: var(--r-card);
+        background: var(--raised);
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        color: var(--faint);
+      }
+
+      /* ---------------------------------------------------------------- glass */
+      .glass-rules {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 56px;
+        align-items: start;
+      }
+      .rules li {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 7px 0;
+        font-size: var(--t-m);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .rules li .icon {
+        flex: none;
+        align-self: center;
+        color: var(--muted);
+      }
+      .rules .never {
+        color: var(--muted);
+      }
+      .glass-frames {
+        margin-top: 44px;
+      }
+      .glass-frames .grid-2 {
+        margin-top: 44px;
+      }
+
+      /* ---------------------------------------------------------------- buttons */
+      .btn-tbl td {
+        vertical-align: middle;
+      }
+      .btn-tbl td:nth-child(2) {
+        width: 210px;
+      }
+      .btn-tbl .attn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: var(--w-medium);
+      }
+      .demo-answers {
+        margin-top: 40px;
+      }
+      .demo-answers .sign {
+        display: block;
+        margin-bottom: 8px;
+      }
+      .demo-rows {
+        margin-top: 40px;
+        padding: 6px 10px;
+        border-radius: var(--r-card);
+        background: var(--raised);
+        box-shadow:
+          inset 0 0 0 1px var(--line-soft),
+          var(--shadow-1);
+      }
+
+      /* ---------------------------------------------------------------- marks and icons */
+      .mark-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .mark-card {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        column-gap: 14px;
+        align-items: start;
+        padding: 16px;
+        border-radius: var(--r-card);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .mark-card .mk {
+        width: 24px;
+        height: 24px;
+      }
+      .mark-card b {
+        display: block;
+        font-size: var(--t-m);
+        margin-bottom: 3px;
+      }
+      .mark-card p {
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .icon-grid {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        row-gap: 22px;
+        column-gap: 8px;
+      }
+      .icon-grid span {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--t-xs);
+        color: var(--muted);
+        text-align: center;
+      }
+      .icon-grid .icon {
+        width: 20px;
+        height: 20px;
+        color: var(--ink);
+      }
+      .brand-row {
+        display: flex;
+        gap: 24px;
+        margin-top: 32px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--ink);
+        align-items: center;
+      }
+      .brand-row .brand {
+        width: 20px;
+        height: 20px;
+      }
+
+      /* ---------------------------------------------------------------- layout */
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 64px;
+        align-items: start;
+      }
+      .schematic {
+        display: grid;
+        grid-template-columns: 132px 1fr 196px;
+        height: 200px;
+        border-radius: var(--r-card);
+        overflow: hidden;
+        box-shadow:
+          inset 0 0 0 1px var(--line),
+          var(--shadow-1);
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .schematic > div {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .schematic .s-side {
+        background: var(--bg);
+      }
+      .schematic .s-main {
+        background: var(--surface);
+      }
+      .schematic .s-rail {
+        background: color-mix(in oklch, var(--bg) 55%, var(--surface));
+        border-left: 1px solid var(--line-soft);
+      }
+      .schematic i {
+        display: block;
+        height: 7px;
+        border-radius: 4px;
+        background: var(--line);
+      }
+      .schematic .w {
+        font-weight: var(--w-bold);
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .density {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 22px 28px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .density b {
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        display: block;
+        margin-bottom: 2px;
+      }
+      .anatomy .irow {
+        background: var(--raised);
+        box-shadow:
+          inset 0 0 0 1px var(--line-soft),
+          var(--shadow-1);
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+      .anatomy-key {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 24px;
+        margin-top: 16px;
+        padding: 0 14px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .anatomy-key b {
+        display: block;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+
+      /* ---------------------------------------------------------------- where the map appears */
+      .map-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
+      }
+      .map-cell {
+        display: flex;
+        flex-direction: column;
+        padding: 18px 20px 16px;
+        border-radius: var(--r-card);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .map-cell .sign {
+        margin-bottom: 14px;
+      }
+      .map-cell .show {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        min-height: 128px;
+      }
+      .map-cell .cap {
+        margin-top: 14px;
+      }
+      .strip-row {
+        display: flex;
+        align-items: center;
+        gap: 36px;
+      }
+      .strip-row > span {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: var(--t-xs);
+        color: var(--muted);
+      }
+      .map-cell .timetable {
+        width: 100%;
+        max-width: 380px;
+      }
+      .map-cell .cx-table {
+        width: 100%;
+      }
+      .map-cell .cx-row {
+        grid-template-columns: 1fr 64px 170px;
+        padding: 0 4px;
+      }
+      .of-sketch {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .not-here {
+        margin-top: 24px;
+        font-size: var(--t-m);
+        color: var(--muted);
+      }
+      .not-here b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+
+      /* ---------------------------------------------------------------- motion */
+      .motion {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 36px;
+      }
+      .stage {
+        position: relative;
+        height: 96px;
+        border-radius: var(--r-card);
+        background: var(--bg);
+        overflow: hidden;
+      }
+      .stage > svg {
+        position: absolute;
+        inset: 0;
+      }
+      .stage--mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        font-size: var(--t-m);
+        font-weight: var(--w-medium);
+      }
+      .stage--mark .mk {
+        width: 24px;
+        height: 24px;
+      }
+      /* A dot runs a busy line towards Triage, as on the phone's Intake band. */
+      .train {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--casing);
+        offset-rotate: 0deg;
+        animation: ride var(--train-period) linear infinite;
+      }
+      @keyframes ride {
+        from {
+          offset-distance: 0%;
+        }
+        to {
+          offset-distance: 100%;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .train {
+          animation: none;
+          offset-distance: 60%;
+        }
+      }
+      .timing {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .timing b {
+        display: block;
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        margin-bottom: 2px;
+      }
+
+      /* ---------------------------------------------------------------- identity */
+      .identity {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 48px;
+        align-items: start;
+      }
+      .logos {
+        display: flex;
+        align-items: flex-end;
+        gap: 22px;
+      }
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 30px;
+        font-weight: var(--w-bold);
+        font-size: 26px;
+        letter-spacing: -0.02em;
+      }
+      .icons-app {
+        display: flex;
+        align-items: flex-end;
+        gap: 18px;
+      }
+      .favs {
+        display: flex;
+        gap: 28px;
+        align-items: center;
+      }
+      .favs div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .favs img {
+        width: 48px;
+        height: 48px;
+      }
+
+      /* ---------------------------------------------------------------- screens */
+      .group {
+        margin-top: 12px;
+      }
+      .group + .group {
+        margin-top: 72px;
+      }
+      .group-h {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .group-h b {
+        font-size: var(--t-l);
+      }
+      .group-h span {
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+      .tabs-demo {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 36px;
+        margin-bottom: 44px;
+      }
+      .tabstrip {
+        display: flex;
+        gap: 2px;
+        padding: 8px 8px 0;
+        border-radius: 10px 10px 0 0;
+        background: color-mix(in oklch, var(--ink) 7%, var(--surface));
+        font: 12px/1 -apple-system, system-ui, sans-serif;
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 8px 8px 0 0;
+        color: var(--muted);
+        min-width: 0;
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .tab img,
+      .tab .brand {
+        width: 16px;
+        height: 16px;
+        flex: none;
+      }
+      .tab.on {
+        background: var(--surface);
+        color: var(--ink);
+      }
+      .tab span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tabs-demo .cap {
+        margin-top: 12px;
+      }
+
+      /* ---------------------------------------------------------------- office and 10x */
+      .office-pair {
+        margin-top: 44px;
+      }
+      .b-notes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 32px;
+        margin-top: 36px;
+      }
+      .b-notes div {
+        font-size: var(--t-m);
+        color: var(--muted);
+      }
+      .b-notes b {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        margin-bottom: 4px;
+      }
+      .rug {
+        width: 18px;
+        height: 12px;
+        border-radius: 3px;
+        background: var(--zone-webshop);
+        flex: none;
+      }
+      .tenx {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 28px;
+        margin-bottom: 40px;
+      }
+      .tenx div {
+        font-size: var(--t-m);
+        color: var(--muted);
+      }
+      .tenx .big {
+        display: block;
+        font-size: 26px;
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 6px;
+      }
+      .tenx .big small {
+        font-size: var(--t-m);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+        letter-spacing: 0;
+      }
+
+      /* ---------------------------------------------------------------- adopting */
+      .map-tbl td {
+        vertical-align: middle;
+      }
+      .map-tbl td:first-child,
+      .map-tbl td:nth-child(3) {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-weight: var(--w-regular);
+        white-space: nowrap;
+      }
+      .swatch-pair {
+        display: inline-flex;
+        gap: 3px;
+        vertical-align: middle;
+      }
+      .swatch-pair i {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        box-shadow: inset 0 0 0 1px oklch(50% 0 0 / 0.18);
+      }
+      .swatch-pair .theme-scope {
+        background: none;
+      }
+      .changes {
+        margin-top: 56px;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 22px;
+        counter-reset: ch;
+      }
+      .changes li {
+        font-size: var(--t-s);
+        color: var(--muted);
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+      }
+      .changes li::before {
+        counter-increment: ch;
+        content: counter(ch);
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        margin-bottom: 10px;
+        border-radius: 6px;
+        background: var(--ink);
+        color: var(--surface);
+        font: var(--w-bold) 12px/1 var(--font);
+      }
+      .changes b {
+        display: block;
+        color: var(--ink);
+        font-size: var(--t-m);
+        margin-bottom: 6px;
+      }
+      .changes code {
+        font-size: 11px;
+        color: var(--ink);
+      }
+
+      /* ---------------------------------------------------------------- spec */
+      .asks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 56px;
+        row-gap: 26px;
+      }
+      .asks div {
+        font-size: var(--t-m);
+        color: var(--muted);
+        padding-left: 18px;
+        border-left: 3px solid var(--line);
+      }
+      .asks b {
+        display: block;
+        color: var(--ink);
+        margin-bottom: 4px;
+      }
+      .asks code {
+        font-size: 11.5px;
+        color: var(--ink);
+      }
+      .asks .spec-ref {
+        display: block;
+        margin-top: 6px;
+        font-size: var(--t-xs);
+        color: var(--faint);
+      }
+      .colophon {
+        margin-top: 96px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <span data-logo="22"></span>
+      <span class="name">Metro Wayfinding</span>
+      <nav aria-label="Sections">
+        <a href="#changed">Changes</a><a href="#why">Why</a><a href="#better">Today</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#tenx">At 10x</a><a href="#spec">Spec</a>
+      </nav>
+      <div class="switch" role="group" aria-label="Theme">
+        <button data-theme-option="enamel"><span class="swatch-chip theme-scope" data-theme="enamel"></span>Enamel</button>
+        <button data-theme-option="tile"><span class="swatch-chip theme-scope" data-theme="tile"></span>Tile</button>
+        <button data-theme-option="night-service"><span class="swatch-chip theme-scope" data-theme="night-service"></span>Night Service</button>
+        <button data-theme-option="underground"><span class="swatch-chip theme-scope" data-theme="underground"></span>Underground</button>
+        <button data-theme-option="signal"><span class="swatch-chip theme-scope" data-theme="signal"></span>Signal</button>
+      </div>
+      <label class="glass-ctl"
+        ><span>Glass</span><input class="range" type="range" min="0" max="100" value="35" data-glass-control aria-label="Glass level" /><output class="range-out" data-glass-value></output
+      ></label>
+    </header>
+    <script>
+      // shared/book.js moves the slider but does not paint its track, so the filled part of the
+      // track follows the value here. The click listener is added after book.js has added its own,
+      // so after a reset it runs second and paints the restored value.
+      window.addEventListener("load", function () {
+        var range = document.querySelector("[data-glass-control]");
+        function paintFill() {
+          range.style.setProperty("--fill", range.value + "%");
+        }
+        range.addEventListener("input", paintFill);
+        document.addEventListener("click", paintFill);
+        paintFill();
+      });
+    </script>
+
+    <main class="book">
+      <!-- Hero -->
+      <section class="hero" aria-label="Metro Wayfinding">
+        <p class="sign">Metro, iteration 1</p>
+        <div class="hero-id">
+          <span data-logo="64"></span>
+          <div>
+            <h1>Metro Wayfinding</h1>
+            <p class="thesis">The map where it explains, plain signs everywhere else.</p>
+          </div>
+        </div>
+        <div class="hero-body">
+          <p class="prose">
+            Metro keeps its brand: enamel-sign letters, the H logo, and one colored line per Connection. <b>What changes is where the map appears.</b> It is drawn where work moves, and
+            only there: Intake's flow from sources to Triage to proposals, a Proposal's "made from" glyph, the route under a Thread, the check-in timetable, and quietly on the office floor.
+            Everything else uses plain signs: threads first in the sidebar, one outline icon set, six state marks, no monospace outside code. Glass stays on floating layers, at 35%.
+          </p>
+          <figure class="hero-map">
+            <svg class="netmap" data-netmap width="720" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27" role="img" aria-label="What came in since 18:20: 212 events on eight lines into Triage"></svg>
+            <figcaption>Intake at 09:00: 212 events on eight lines into Triage; 166 of them need nothing from you.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 1 · What changed -->
+      <section class="sec" id="changed">
+        <div class="sec-h"><span class="no">1</span><h2>What changed, and why</h2><span class="lede">Your feedback on round 1, point by point.</span></div>
+        <table class="tbl fb">
+          <thead>
+            <tr>
+              <th></th>
+              <th>You said</th>
+              <th>What Wayfinding does</th>
+              <th>Where to see it</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="n">1</td>
+              <td>Glass, but subtle, and give me a slider</td>
+              <td>One number, <code>--glass-level</code>, 35% by default. Glass only on floating layers; text surfaces stay at least 70% opaque; blur 12 to 28px.</td>
+              <td><a href="#glass">Glass</a>, the slider above, Appearance</td>
+            </tr>
+            <tr>
+              <td class="n">2</td>
+              <td>Aurora's wash and glows are too much; the burning glow drowns everything</td>
+              <td>Nothing glows. Burning is the red word "urgent" with four red priority bars; the flow diagram stays calm.</td>
+              <td><a href="#doctrine">Color doctrine</a>, Intake</td>
+            </tr>
+            <tr>
+              <td class="n">3</td>
+              <td>Aurora's header pills and tabs are good</td>
+              <td>A Thread's header is floating pills: the project, the workspace's thread tabs with their marks, open, more, and a Changes pill. The transcript scrolls under them.</td>
+              <td><a href="#pair-thread">Thread</a>, <a href="#glass">scrolled Thread</a></td>
+            </tr>
+            <tr>
+              <td class="n">4</td>
+              <td>Aurora's Hercule sidebar is the cleanest</td>
+              <td>The Hercule tab has Work and System sections, a small label each, counts in one column, no glow.</td>
+              <td>Intake, Office</td>
+            </tr>
+            <tr>
+              <td class="n">5</td>
+              <td>Crew's "Waiting on you" is good</td>
+              <td>It heads both sidebar tabs: three items, each with its question on one line and the waiting ring.</td>
+              <td>Every desktop page</td>
+            </tr>
+            <tr>
+              <td class="n">6</td>
+              <td>Crew's buttons don't line up</td>
+              <td>Row answers have fixed widths, 104 and 144px, with the suggested one rightmost. The lead card's answers share one 184px column.</td>
+              <td><a href="#buttons">Buttons</a>, Intake</td>
+            </tr>
+            <tr>
+              <td class="n">7</td>
+              <td>Button colors should mean something</td>
+              <td>One filled suggested answer; other answers that act are neutral; Dismiss, Deny and Not now are quiet; red text only when something is destroyed; the waiting color is never a fill.</td>
+              <td><a href="#buttons">Buttons</a></td>
+            </tr>
+            <tr>
+              <td class="n">8</td>
+              <td>Threads first, like t3-code</td>
+              <td>Sessions open on the Threads tab: New thread and Search, then threads grouped by project with branch and machine, Assistants below.</td>
+              <td><a href="#pair-thread">Thread</a>, New thread</td>
+            </tr>
+            <tr>
+              <td class="n">9</td>
+              <td>Metro has the strongest brand</td>
+              <td>Kept whole: the H logo, Overpass, five themes, one hue per Connection.</td>
+              <td><a href="#themes">Themes</a>, <a href="#identity">Identity</a></td>
+            </tr>
+            <tr>
+              <td class="n">10</td>
+              <td>The event flow is strong</td>
+              <td>Kept, and drawn where work moves: Intake, a Proposal, a Thread's route, check-ins, the office.</td>
+              <td><a href="#map">Where the map appears</a></td>
+            </tr>
+            <tr>
+              <td class="n">11</td>
+              <td>Intake is clean</td>
+              <td>Its layout is kept. Rows are plainer and their answers line up.</td>
+              <td><a href="#pair-intake">Intake</a></td>
+            </tr>
+            <tr>
+              <td class="n">12</td>
+              <td>Too many metro icons; the threads sidebar is weak</td>
+              <td>One 16px outline icon set and six marks. The threads sidebar is plain rows, like t3-code.</td>
+              <td><a href="#marks">Marks and icons</a></td>
+            </tr>
+            <tr>
+              <td class="n">13</td>
+              <td>No mono</td>
+              <td>Overpass for every label, count and time, with tabular numerals. Mono only inside code.</td>
+              <td><a href="#type">Type</a></td>
+            </tr>
+            <tr>
+              <td class="n">14</td>
+              <td>The Hercule sidebar is atrocious: a line, no sections</td>
+              <td>No line joins anything in a sidebar. Sections are set apart by space and a small label.</td>
+              <td>Intake, Settings</td>
+            </tr>
+            <tr>
+              <td class="n">15</td>
+              <td>The providers page is harder to read</td>
+              <td>Plain cards: models, defaults for new threads, usage, and one row per machine.</td>
+              <td><a href="#pair-providers">Providers</a></td>
+            </tr>
+            <tr>
+              <td class="n">16</td>
+              <td>In the office the streams take all the attention</td>
+              <td>The floor lines are a thin grey layer. A desk's lines take their colors when you point at it or select it; the Event flow switch colors all of them.</td>
+              <td><a href="#office">Office</a></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="compare" id="pair-thread">
+          <h3>A Thread</h3>
+          <p class="note">Round 1 drew the Thread's whole lineage as a map under the title, and the sidebar as a metro line. Now the sidebar is threads first, the header is floating pills, and the route is one quiet strip.</p>
+          <div class="grid-2">
+            <figure data-frame="desktop" data-src="../m0-metro/desktop/session-active.html" data-caption="Metro · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Metro Wayfinding"></figure>
+          </div>
+        </div>
+        <div class="compare" id="pair-intake">
+          <h3>Intake</h3>
+          <p class="note">One flow diagram at the top, the made-from glyph on each row, and nothing else drawn as a map. Answers sit in fixed columns, and only the suggested one is filled.</p>
+          <div class="grid-2">
+            <figure data-frame="desktop" data-src="../m0-metro/desktop/intake.html" data-caption="Metro · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Metro Wayfinding"></figure>
+          </div>
+        </div>
+        <div class="compare" id="pair-providers">
+          <h3>Settings · Providers</h3>
+          <p class="note">Round 1 drew ink lines through machine stations. Now each provider is a plain card: its models, what new threads use, usage, and one row per machine with its version and sign-in.</p>
+          <div class="grid-2">
+            <figure data-frame="web" data-src="../m0-metro/web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Metro · round 1"></figure>
+            <figure data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Metro Wayfinding"></figure>
+          </div>
+        </div>
+        <div class="compare" id="pair-office">
+          <h3>The office</h3>
+          <p class="note">Round 1's streams were the brightest thing on the floor. Now they are grey, and the people at their desks, and the three waiting on you, carry the scene.</p>
+          <div class="grid-2">
+            <figure data-frame="desktop" data-src="../m0-metro/desktop/office.html" data-caption="Metro · round 1"></figure>
+            <figure data-frame="desktop" data-src="desktop/office.html" data-caption="Metro Wayfinding"></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 · Why this one -->
+      <section class="sec" id="why">
+        <div class="sec-h"><span class="no">2</span><h2>Why this one</h2></div>
+        <div class="why">
+          <div class="prose">
+            <p>
+              <b>Pick Wayfinding if you liked Metro's identity but not living inside a diagram.</b> Against the original, the map now appears only where work moves: Intake's flow, a
+              Proposal's made-from glyph, the route under a Thread, the check-in timetable. Everything else is ordinary, readable software: a threads-first sidebar, one icon set, six
+              marks, no mono.
+            </p>
+            <p>Against Concourse, Wayfinding is solid first: glass at 35% and only on floating layers, and the flow is a place you visit rather than a strip on every screen.</p>
+            <p>
+              <b>What it trades away.</b> Less spectacle, so the brand leans on letters, color and the logo more than on motion. The office is quieter: grey lines until you point at a
+              desk or switch Event flow on. And at the default level the glass is barely noticeable. That is the point, but it may read as timid.
+            </p>
+          </div>
+          <div>
+            <ul class="wl">
+              <li class="sign">The map is drawn in</li>
+              <li><i data-i="intake"></i>Intake's flow diagram</li>
+              <li><i data-strip="sentry gmail posthog github" data-size="s"></i>A Proposal's made-from glyph</li>
+              <li><i data-i="thread"></i>The route strip on a Thread</li>
+              <li><i data-i="office"></i>The office floor, quietly</li>
+              <li><i data-i="checkin"></i>Check-in and Ada's check-in timetable</li>
+              <li><i data-i="plug"></i>The Connections swatch</li>
+            </ul>
+            <ul class="wl">
+              <li class="sign">Plain signs everywhere else</li>
+              <li><i data-i="sidebar"></i>Both sidebars and the header</li>
+              <li><i data-i="check"></i>Buttons, by one doctrine</li>
+              <li><i data-i="marks"></i>Six marks and one icon set</li>
+              <li><i data-i="type"></i>Overpass everywhere, mono only in code</li>
+              <li><i data-i="gear"></i>Settings and Providers</li>
+              <li><i data-i="bell"></i>The lock screen and notifications</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · Why it beats today -->
+      <section class="sec" id="better">
+        <div class="sec-h"><span class="no">3</span><h2>Why it's 1000x better than today</h2><span class="lede">Left: Hercule today. Right: the same moment in Wayfinding.</span></div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/intake-view-light.png" alt="Today's Intake: lists of grey text rows" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">monochrome</span><span class="pain">text-heavy</span><span class="pain">doesn't scale</span></div>
+              <h3>What came in overnight</h3>
+              <p class="today">Today: eleven grey rows. "212 events" is a number inside a sentence.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>212 events arrive on eight colored lines; 166 of them end quietly and you never read them.</dd>
+                <dt>Decision</dt>
+                <dd>The lead Proposal shows its four sources as lines. Its answers sit in one column, and only the suggested one is filled.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="desktop" data-theme="enamel" data-src="desktop/intake.html" data-caption="Intake"></figure>
+        </div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/app-shell-dark.png" alt="Today's app shell in the navy dark theme" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">navy dark</span><span class="pain">no identity</span><span class="pain">flat</span></div>
+              <h3>A Thread, at night</h3>
+              <p class="today">Today: a navy ground; where a session came from is grey text, or missing.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>Warm charcoal, never navy. One quiet route strip under the header: the Proposal, this Thread, the pull request to come.</dd>
+                <dt>Decision</dt>
+                <dd>Allow once is filled, Always allow is neutral, Deny is quiet, and each says what it does.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="desktop" data-theme="night-service" data-src="desktop/session-active.html" data-caption="Thread"></figure>
+        </div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/intake-view-light.png" alt="Today's lead card with three equal text links" />
+              <span class="ring" style="left: 16.2%; top: 37.2%; width: 57.4%; height: 19.4%"></span>
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">decisions not decisive</span></div>
+              <h3>A decision from a Slack link</h3>
+              <p class="today">Today: "Start Bugfix · Later · Dismiss", three text links of equal weight.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>One Proposal as a page. What it was made from is four plain rows, each with its Connection's color.</dd>
+                <dt>Decision</dt>
+                <dd>Start "Fix bug" is filled, Accept as a Task is neutral, Dismiss is quiet. Each has a line on what it does, and a key.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="web" data-theme="enamel" data-src="web/decision.html" data-url="hercule.home.arpa/intake/p_0192f3" data-caption="Decision"></figure>
+        </div>
+
+        <div class="ba ba--phone">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/app-shell-light.png" alt="Today's app shell: one desktop window" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">one form factor</span><span class="pain">static</span></div>
+              <h3>Away from the desk</h3>
+              <p class="today">Today: one window, on one machine, only while it is open.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>A Live Activity on the lock screen shows the Thread's route and its question.</dd>
+                <dt>Decision</dt>
+                <dd>Allow once from the lock screen. A Proposal opens as a sheet with three answers in thumb reach.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="mobile" data-theme="night-service" data-src="mobile/lock.html" data-caption="Lock screen"></figure>
+          <figure class="ba-after" data-frame="mobile" data-theme="night-service" data-src="mobile/decision.html" data-caption="Decision"></figure>
+        </div>
+      </section>
+
+      <!-- 4 · The system -->
+      <section class="sec" id="system">
+        <div class="sec-h"><span class="no">4</span><h2>The system</h2><span class="lede">Enamel signage: plain letters, one hue per Connection, calm grounds. The map is kept for where work moves.</span></div>
+
+        <h3 id="doctrine">Color doctrine<span class="aside">four rules; every screen follows all four</span></h3>
+        <div class="doctrine">
+          <div>
+            <div class="rule-h"><span class="n">01</span><b>A hue is a Connection</b></div>
+            <div class="hues">
+              <span class="hue"><span class="hue-line" data-line="sentry"></span><i data-brand="sentry"></i>Sentry</span>
+              <span class="hue"><span class="hue-line" data-line="stripe"></span><i data-brand="stripe"></i>Stripe</span>
+              <span class="hue"><span class="hue-line" data-line="gmail"></span><i data-brand="gmail"></i>Gmail</span>
+              <span class="hue"><span class="hue-line" data-line="intercom"></span><i data-brand="intercom"></i>Intercom</span>
+              <span class="hue"><span class="hue-line" data-line="posthog"></span><i data-brand="posthog"></i>PostHog</span>
+              <span class="hue"><span class="hue-line" data-line="grafana"></span><i data-brand="grafana"></i>Grafana</span>
+              <span class="hue"><span class="hue-line" data-line="github"></span><i data-brand="github"></i>GitHub</span>
+              <span class="hue"><span class="hue-line" data-line="slack"></span><i data-brand="slack"></i>Slack</span>
+              <span class="hue"><span class="hue-line" data-line="cron"></span><i data-brand="cron"></i>Cron</span>
+              <span class="hue"><span class="hue-line" data-line="discord"></span><i data-brand="discord"></i>Discord</span>
+            </div>
+            <p class="rule-p">A hue appears only on its Connection's line or swatch. The brand mark beside it stays monochrome.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">02</span><b>Hercule's own work is ink</b></div>
+            <nav class="route-strip" aria-label="Where this Thread came from and where it goes">
+              <span class="rs-stop"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>Proposal</b><span class="rs-sub">08:52</span></span>
+              <span class="rs-link"></span>
+              <span class="rs-stop"><i data-mk="wait"></i><b>This thread</b><span class="rs-sub attn">waiting on you</span></span>
+              <span class="rs-link rs-link--next"></span>
+              <span class="rs-stop"><i data-mk="idle"></i><b>Pull request</b><span class="rs-sub">next</span></span>
+            </nav>
+            <p class="rule-p">Where Connection lines meet, the work continues in ink: the made-from glyph ends in an ink cap, and a Thread's route strip is ink words on grey links.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">03</span><b>State is a mark and a word</b></div>
+            <div class="states">
+              <span class="live"><i data-mk="work"></i>working</span>
+              <span class="attn"><i data-mk="wait"></i>waiting on you</span>
+              <span><i data-mk="done"></i>done</span>
+              <span class="fail"><i data-mk="fail"></i>failed</span>
+              <span class="muted"><i data-mk="paused"></i>paused</span>
+              <span class="muted"><i data-mk="idle"></i>idle</span>
+            </div>
+            <p class="rule-p">Six marks say which state; the word next to them gives the detail, like asleep or queued. State colors stay on words and marks, never on a line or a button fill.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">04</span><b>Projects are places. Chrome is never tinted.</b></div>
+            <div class="zones">
+              <div class="zone" style="background: var(--zone-webshop)">webshop<small>~/code/webshop</small></div>
+              <div class="zone" style="background: var(--zone-payments)">payments-api<small>~/code/payments-api</small></div>
+              <div class="zone" style="background: var(--zone-ops)">ops<small>~/code/ops</small></div>
+            </div>
+            <p class="rule-p">A project is a name and a folder in the sidebar, and a rug in the office. Never a dot, never a tinted sidebar.</p>
+          </div>
+        </div>
+
+        <div class="block" id="themes">
+          <h3>Themes<span class="aside">click one; the book and every frame switch with it</span></h3>
+          <div class="theme-grid">
+            <button class="theme-tile theme-scope" data-theme="enamel" data-theme-option="enamel">
+              <span class="tn">Enamel<small>light · flagship</small></span>
+              <span class="canvas">
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>EU checkout</b><span class="fail">urgent</span></span>
+                <span class="trow"><i data-mk="wait"></i><b>Fix bug</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-mk="work"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">White enamel, black ink. The everyday light.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="tile" data-theme-option="tile">
+              <span class="tn">Tile<small>light</small></span>
+              <span class="canvas">
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>EU checkout</b><span class="fail">urgent</span></span>
+                <span class="trow"><i data-mk="wait"></i><b>Fix bug</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-mk="work"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Cream station tile, platform-trim green.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="night-service" data-theme-option="night-service">
+              <span class="tn">Night Service<small>dark · flagship</small></span>
+              <span class="canvas">
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>EU checkout</b><span class="fail">urgent</span></span>
+                <span class="trow"><i data-mk="wait"></i><b>Fix bug</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-mk="work"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Warm charcoal, enamel-white ink. Never navy.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="underground" data-theme-option="underground">
+              <span class="tn">Underground<small>dark</small></span>
+              <span class="canvas">
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>EU checkout</b><span class="fail">urgent</span></span>
+                <span class="trow"><i data-mk="wait"></i><b>Fix bug</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-mk="work"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Brown-black tunnel, brass fittings.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="signal" data-theme-option="signal">
+              <span class="tn">Signal<small>dark</small></span>
+              <span class="canvas">
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>EU checkout</b><span class="fail">urgent</span></span>
+                <span class="trow"><i data-mk="wait"></i><b>Fix bug</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-mk="work"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Near-black, high-vis yellow. For the night shift.</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="block type" id="type">
+          <div>
+            <h3>Type</h3>
+            <div class="specimen">Aa 0123</div>
+            <code class="specimen-code">git push -u origin fix/3ds-eu-cards</code>
+            <p class="fam">Overpass for every label, count, time and state, with tabular numerals. Overpass Mono only inside code. Both after Highway Gothic: letters built to be read at speed. Self-hosted, OFL.</p>
+          </div>
+          <div>
+            <div class="scale">
+              <div><span class="lbl">19 · title</span><span style="font-size: 19px; font-weight: 720">Checkout fails for EU cards with 3-D Secure</span></div>
+              <div><span class="lbl">16 · lead</span><span style="font-size: 16px; font-weight: 560">Fix 3-D Secure checkout for EU cards</span></div>
+              <div><span class="lbl">14.5 · body</span><span style="font-size: 14.5px">Since deploy #1289, card payments that need 3-D Secure fail at checkout.</span></div>
+              <div><span class="lbl">12.5 · meta</span><span style="font-size: 12.5px" class="muted">Thread · webshop · studio-mac · Opus 5.5 · 09:40</span></div>
+              <div><span class="lbl">10.5 · sign</span><span class="sign" style="color: var(--muted)">Waiting on you · Work · System</span></div>
+            </div>
+            <div class="numerals">
+              <span class="fail"><b>1</b>burning</span><span><b>5</b>proposals</span><span><b>2</b>offers</span><span><b>2</b>need a call</span><span><b>3</b>FYI</span><span><b>167</b>handled quietly</span>
+            </div>
+            <p class="cap">Hierarchy comes from numerals and weight. Titles stop at 19px.</p>
+          </div>
+        </div>
+
+        <div class="block depth">
+          <div>
+            <h3>Shape</h3>
+            <div class="radii">
+              <div><i style="border-radius: 4px; width: 34px; height: 34px"></i>4</div>
+              <div><i style="border-radius: 8px; width: 42px; height: 42px"></i>8</div>
+              <div><i style="border-radius: 12px"></i>12</div>
+              <div><i style="border-radius: 22px 22px 0 0; height: 60px"></i>22</div>
+              <div><i style="border-radius: 99px; width: 84px; height: 30px"></i>pill</div>
+            </div>
+            <p class="cap">Soft enamel corners: 8 for controls, 12 for cards, pills for what floats. Nothing sharp.</p>
+          </div>
+          <div>
+            <h3>Depth</h3>
+            <div class="shadows">
+              <div style="box-shadow: var(--shadow-1)">row</div>
+              <div style="box-shadow: var(--shadow-2)">card</div>
+              <div style="box-shadow: var(--shadow-3)">sheet</div>
+            </div>
+            <p class="cap">Three shadows, one surface deep. No card sits inside a card.</p>
+          </div>
+        </div>
+
+        <div class="block" id="glass">
+          <h3>Glass<span class="aside">one number, <code>--glass-level</code>; 35% by default</span></h3>
+          <div class="glass-rules">
+            <ul class="rules">
+              <li class="sign">Glass goes on what floats</li>
+              <li><i data-i="split"></i>Header pills and thread tabs</li>
+              <li><i data-i="compose"></i>The composer and the question dock</li>
+              <li><i data-i="command"></i>Menus, popovers, the quick panel</li>
+              <li><i data-i="bell"></i>Sheets and notifications</li>
+              <li><i data-i="office"></i>The office's floating panels</li>
+              <li><i data-i="home"></i>The phone's tab bar</li>
+              <li class="never"><i data-i="close"></i>Never rows, cards, the sidebar or the page</li>
+            </ul>
+            <div>
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Made from the level</th>
+                    <th>At 0</th>
+                    <th>At 35%</th>
+                    <th>At 100%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>--glass</code></td>
+                    <td>The raised color at 100% minus 22% × level. For surfaces that carry text.</td>
+                    <td class="num">solid</td>
+                    <td class="num">92%</td>
+                    <td class="num">78%</td>
+                  </tr>
+                  <tr>
+                    <td><code>--glass-thin</code></td>
+                    <td>100% minus 30% × level. The composer while the transcript scrolls, the tab bar.</td>
+                    <td class="num">solid</td>
+                    <td class="num">90%</td>
+                    <td class="num">70%</td>
+                  </tr>
+                  <tr>
+                    <td><code>--glass-blur</code></td>
+                    <td>12px plus 16px × level. Under 12px, what shows through competes with the text.</td>
+                    <td class="num">off</td>
+                    <td class="num">18px</td>
+                    <td class="num">28px</td>
+                  </tr>
+                  <tr>
+                    <td><code>--glass-sat</code></td>
+                    <td>1 plus 0.3 × level: a touch of color from below.</td>
+                    <td class="num">off</td>
+                    <td class="num">1.1</td>
+                    <td class="num">1.3</td>
+                  </tr>
+                  <tr>
+                    <td><code>--glass-edge</code></td>
+                    <td>White at 60% × level: the hairline of light along the top edge.</td>
+                    <td class="num">none</td>
+                    <td class="num">21%</td>
+                    <td class="num">60%</td>
+                  </tr>
+                  <tr>
+                    <td><code>--glass-rim</code></td>
+                    <td>A hairline around the surface, one per theme. It does not follow the level.</td>
+                    <td class="num">same</td>
+                    <td class="num">same</td>
+                    <td class="num">same</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="cap">
+                Text surfaces never drop under 70% opaque, so text keeps 4.5:1 whatever scrolls underneath. At 0 every surface is solid and the blur is dropped. Reduced transparency in the
+                system settings forces 0. The Appearance slider, <code>?glass=</code> and the slider in this book's top bar all set the one number.
+              </p>
+            </div>
+          </div>
+          <div class="glass-frames">
+            <figure data-frame="desktop" data-src="desktop/session-active.html?glass=0.35" data-state="scrolled" data-caption="The default, 35%" data-note="Scrolled up, so the transcript runs under the header pills and the composer. These three frames keep their level; every other frame follows the slider in the top bar."></figure>
+            <div class="grid-2">
+              <figure data-frame="desktop" data-src="desktop/session-active.html?glass=0" data-state="scrolled" data-caption="At 0" data-note="Solid: no blur, no light edge. The pills keep their shadow and rim."></figure>
+              <figure data-frame="desktop" data-src="desktop/session-active.html?glass=1" data-state="scrolled" data-caption="At 100%" data-note="The most this system allows: 78% opaque, 28px blur, a clear top edge."></figure>
+            </div>
+          </div>
+        </div>
+
+        <div class="block" id="buttons">
+          <h3>Buttons<span class="aside">the role picks the look; the color never picks the role</span></h3>
+          <table class="tbl btn-tbl">
+            <thead>
+              <tr>
+                <th style="width: 150px">Role</th>
+                <th>Looks like</th>
+                <th style="width: 260px">Also</th>
+                <th>Rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Suggested</td>
+                <td><button class="btn btn--primary">Start "Fix bug"</button></td>
+                <td>Allow once · Draft reply · Merge all 4</td>
+                <td>The answer Hercule expects. One per question, filled, rightmost in a row.</td>
+              </tr>
+              <tr>
+                <td>Acts</td>
+                <td><button class="btn">Accept</button></td>
+                <td>Always allow git push · Review first</td>
+                <td>Any other answer that does something. Neutral.</td>
+              </tr>
+              <tr>
+                <td>Declines</td>
+                <td><button class="btn btn--quiet">Dismiss</button></td>
+                <td>Deny · Not now</td>
+                <td>Closes the question and runs nothing. Quiet: no fill, no border.</td>
+              </tr>
+              <tr>
+                <td>Destroys</td>
+                <td><button class="btn btn--danger">Delete</button></td>
+                <td>Remove a machine · Forget a memory</td>
+                <td>Red text, and only when something is gone for good.</td>
+              </tr>
+              <tr>
+                <td>Waiting on you</td>
+                <td><span class="attn"><i data-mk="wait"></i>waiting on you</span></td>
+                <td>the favicon ring · a desk in the office</td>
+                <td>Amber is a ring and a word. It is never a fill, on a button or anywhere else.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="grid-2 demo-answers">
+            <div>
+              <span class="sign">A Proposal</span>
+              <div class="answers" role="group" aria-label="Answers to a Proposal">
+                <div class="ans"><button class="btn btn--primary">Start "Fix bug"</button><span class="desc">Starts Fix bug on webshop in a new worktree</span><kbd>&#9166;</kbd></div>
+                <div class="ans"><button class="btn">Accept</button><span class="desc">Adds it to the backlog as a Task</span><kbd>A</kbd></div>
+                <div class="ans"><button class="btn btn--quiet">Dismiss</button><span class="desc">Closes the Proposal</span><kbd>D</kbd></div>
+              </div>
+            </div>
+            <div>
+              <span class="sign">A permission question</span>
+              <div class="answers" role="group" aria-label="Answers to a permission question">
+                <div class="ans"><button class="btn btn--primary">Allow once</button><span class="desc">Pushes the branch now; asks again next time</span><kbd>&#9166;</kbd></div>
+                <div class="ans"><button class="btn">Always allow git push</button><span class="desc">Adds a Grant for git push to this thread</span><kbd>2</kbd></div>
+                <div class="ans"><button class="btn btn--quiet">Deny</button><span class="desc">The agent is told no and keeps the branch local</span><kbd>3</kbd></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="demo-rows" aria-label="Three Intake rows">
+            <div class="irow">
+              <i data-strip="grafana"></i>
+              <div>
+                <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+                <div class="irow-meta">
+                  <span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>hits its 2h limit at 04:00, 3 nights running</span>
+                </div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--primary btn--sm">Start "Investigate"</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="gmail"></i>
+              <div>
+                <div class="irow-title"><span>Draft a reply to Marta at Brightline</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="gmail"></i>Gmail</span><span>Customers</span><span>wants invoice INV-2291 in the company name</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--quiet btn--sm">Not now</button><button class="btn btn--primary btn--sm">Draft reply</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="github"></i>
+              <div>
+                <div class="irow-title"><span>Merge 4 dependency bumps</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="github"></i>GitHub</span><span>webshop</span><span>all green, patch versions only</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Review first</button><button class="btn btn--primary btn--sm">Merge all 4</button></div>
+            </div>
+          </div>
+          <p class="cap">Fixed widths with the suggested answer rightmost, so the filled buttons form one column down the page and the others one column beside it.</p>
+        </div>
+
+        <div class="block" id="marks">
+          <h3>Six marks<span class="aside">12px, one color each, always beside a word</span></h3>
+          <div class="mark-cards">
+            <div class="mark-card live">
+              <i data-mk="work"></i>
+              <div><b>working</b><p>An agent is doing something now. Its halo breathes, the only mark that moves.</p></div>
+            </div>
+            <div class="mark-card attn">
+              <i data-mk="wait"></i>
+              <div><b>waiting on you</b><p>A question needs your answer. The only amber ring in the product.</p></div>
+            </div>
+            <div class="mark-card">
+              <i data-mk="done"></i>
+              <div><b>done</b><p>Finished, and nothing is left for you. Ink, because finished work is Hercule's own.</p></div>
+            </div>
+            <div class="mark-card fail">
+              <i data-mk="fail"></i>
+              <div><b>failed</b><p>It stopped on an error. The word next to it says what failed.</p></div>
+            </div>
+            <div class="mark-card">
+              <i data-mk="paused"></i>
+              <div><b>paused</b><p>Held on purpose, by you or by a Bound. It resumes when released.</p></div>
+            </div>
+            <div class="mark-card">
+              <i data-mk="idle"></i>
+              <div><b>idle</b><p>Nothing is happening. It also stands for asleep, queued and can't be reached; the word says which.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3>Icons<span class="aside">one outline family: 16px grid, 1.4 stroke, round ends</span></h3>
+          <div class="icon-grid">
+            <span><i data-i="thread"></i>Thread</span>
+            <span><i data-i="compose"></i>New thread</span>
+            <span><i data-i="search"></i>Search</span>
+            <span><i data-i="intake"></i>Intake</span>
+            <span><i data-i="checkin"></i>Check-in</span>
+            <span><i data-i="task"></i>Task</span>
+            <span><i data-i="run"></i>Run</span>
+            <span><i data-i="workflow"></i>Workflow</span>
+            <span><i data-i="fleet"></i>Fleet</span>
+            <span><i data-i="office"></i>Office</span>
+            <span><i data-i="plug"></i>Connection</span>
+            <span><i data-i="bell"></i>Notification</span>
+            <span><i data-i="gear"></i>Settings</span>
+            <span><i data-i="bot"></i>Assistant</span>
+            <span><i data-i="memory"></i>Memory</span>
+            <span><i data-i="alarm"></i>Reminder</span>
+            <span><i data-i="branch"></i>Branch</span>
+            <span><i data-i="pr"></i>Pull request</span>
+            <span><i data-i="machine"></i>Machine</span>
+            <span><i data-i="shield"></i>Permission</span>
+            <span><i data-i="key"></i>Credential</span>
+            <span><i data-i="bound"></i>Bound</span>
+            <span><i data-i="steer"></i>Steer</span>
+            <span><i data-i="mic"></i>Voice</span>
+          </div>
+          <div class="brand-row" aria-label="Brand marks">
+            <i data-brand="sentry"></i><i data-brand="gmail"></i><i data-brand="posthog"></i><i data-brand="github"></i><i data-brand="stripe"></i><i data-brand="intercom"></i><i data-brand="grafana"></i><i data-brand="slack"></i><i data-brand="discord"></i><i data-brand="cron"></i><i data-brand="webchat"></i><i data-brand="claude"></i><i data-brand="openai"></i><i data-brand="pi"></i>
+          </div>
+          <p class="cap">Brand marks are monochrome, always in ink. A Connection's color is its line or swatch beside the mark, never the mark itself.</p>
+        </div>
+
+        <div class="block layout">
+          <div>
+            <h3>Layout<span class="aside">three panes on desktop; two at 1280 on the web</span></h3>
+            <div class="schematic">
+              <div class="s-side"><span class="w">sidebar 264</span><i style="width: 70%"></i><i style="width: 84%"></i><i style="width: 60%"></i><i style="width: 76%"></i></div>
+              <div class="s-main"><span class="w">main · 720 to 880</span><i style="height: 44px; border-radius: 6px"></i><i style="width: 90%"></i><i style="width: 70%"></i><i style="width: 80%"></i></div>
+              <div class="s-rail"><span class="w">rail 392 · Running now</span><i style="width: 88%"></i><i style="width: 72%"></i><i style="width: 80%"></i></div>
+            </div>
+          </div>
+          <div>
+            <h3>Density</h3>
+            <div class="density">
+              <div><b>4px</b>rhythm for every gap and padding</div>
+              <div><b>56 / 44 / 36</b>Intake row, list row, compact row</div>
+              <div><b>16 / 12</b>icons and marks, in px</div>
+              <div><b>104 / 144</b>row answers: others, and the suggested one</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="block anatomy">
+          <h3>A row, taken apart</h3>
+          <div class="irow">
+            <i data-strip="grafana"></i>
+            <div>
+              <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+              <div class="irow-meta">
+                <span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>hits its 2h limit at 04:00, 3 nights running</span>
+              </div>
+            </div>
+            <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--primary btn--sm">Start "Investigate"</button></div>
+          </div>
+          <div class="anatomy-key">
+            <div><b>Made-from glyph</b>its sources, one line each</div>
+            <div><b>Title</b>what it is, in one line</div>
+            <div><b>Meta</b>priority bars, source, project, why now</div>
+            <div><b>Answers</b>fixed widths, the suggested one rightmost</div>
+          </div>
+        </div>
+
+        <div class="block" id="map">
+          <h3>Where the map appears<span class="aside">six places, each where work moves</span></h3>
+          <div class="map-grid">
+            <div class="map-cell">
+              <span class="sign">Intake · the flow diagram</span>
+              <div class="show">
+                <svg class="netmap" data-netmap width="440" height="170" data-labelw="92" data-outw="96" data-row="18" data-top="16" data-outrow="24" aria-hidden="true"></svg>
+              </div>
+              <p class="cap">What came in since you last looked: each Connection a line into Triage, each outcome a line out. The one full map in the product.</p>
+            </div>
+            <div class="map-cell">
+              <span class="sign">A Proposal · made from</span>
+              <div class="show">
+                <div class="strip-row">
+                  <span><i data-strip="sentry gmail posthog github" data-size="l"></i>four sources</span>
+                  <span><i data-strip="sentry gmail posthog github"></i>in a row</span>
+                  <span><i data-strip="grafana"></i>one source</span>
+                  <span><i data-strip="gmail github"></i>two</span>
+                </div>
+              </div>
+              <p class="cap">The Connections a Proposal was made from meet in an ink cap. It heads every Intake row, so you see where it came from before you read.</p>
+            </div>
+            <div class="map-cell">
+              <span class="sign">A Thread · the route strip</span>
+              <div class="show">
+                <nav class="route-strip" aria-label="Where this Thread came from and where it goes" style="justify-content: flex-start">
+                  <span class="rs-stop"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>Proposal</b><span class="rs-sub">08:52</span></span>
+                  <span class="rs-link"></span>
+                  <span class="rs-stop"><i data-mk="wait"></i><b>This thread</b><span class="rs-sub attn">waiting on you</span></span>
+                  <span class="rs-link rs-link--next"></span>
+                  <span class="rs-stop"><i data-mk="idle"></i><b>Pull request</b><span class="rs-sub">next</span></span>
+                </nav>
+              </div>
+              <p class="cap">Where this Thread came from and where it goes next, in one line under the header. Threads you start yourself have none.</p>
+            </div>
+            <div class="map-cell">
+              <span class="sign">The office · quietly</span>
+              <div class="show">
+                <!-- A sketch of the office floor: the Triage desk on the left, three desks on project
+                     rugs on the right, each labelled with its Thread. Two floor lines are the quiet grey
+                     layer; the third has taken its Connection's color because the desk it leads to is
+                     pointed at. -->
+                <svg class="of-sketch" viewBox="0 0 460 140" role="img" aria-label="Grey floor lines from Triage to three desks; the line to the waiting desk is in Sentry's color">
+                  <rect x="0.5" y="0.5" width="459" height="139" rx="11.5" style="fill: var(--bg); stroke: var(--line-soft)" />
+                  <g style="stroke: color-mix(in oklch, var(--ink), transparent 80%)" stroke-width="3" stroke-linecap="round" fill="none">
+                    <path d="M16 60H64" />
+                    <path d="M16 80H64" />
+                    <path d="M112 64H150C178 64 178 26 206 26H230" />
+                    <path d="M112 76H150C178 76 178 114 206 114H230" />
+                  </g>
+                  <path d="M16 70H64" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" />
+                  <path d="M112 70H230" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" />
+                  <rect x="64" y="52" width="48" height="36" rx="8" style="fill: var(--raised); stroke: var(--line)" />
+                  <text x="88" y="74" text-anchor="middle" style="font: 600 10px var(--font); fill: var(--muted)">Triage</text>
+                  <rect x="230" y="10" width="216" height="32" rx="7" style="fill: var(--zone-webshop)" />
+                  <rect x="230" y="54" width="216" height="32" rx="7" style="fill: var(--zone-webshop)" />
+                  <rect x="230" y="98" width="216" height="32" rx="7" style="fill: var(--zone-payments)" />
+                  <circle cx="248" cy="26" r="3" style="fill: var(--live)" />
+                  <circle cx="248" cy="26" r="6" style="fill: var(--live)" opacity="0.3" />
+                  <circle cx="248" cy="70" r="5" style="fill: none; stroke: var(--attn)" stroke-width="2.2" />
+                  <circle cx="248" cy="114" r="4.5" style="fill: none; stroke: var(--faint)" stroke-width="1.6" />
+                  <g style="font: 600 10.5px var(--font); fill: var(--ink)">
+                    <text x="262" y="30">Refactor cart totals</text>
+                    <text x="262" y="74">Fix 3-D Secure checkout</text>
+                    <text x="262" y="118">Add iDEAL research</text>
+                  </g>
+                  <g text-anchor="end" style="font: 500 10px var(--font); fill: var(--muted)">
+                    <text x="436" y="30">webshop</text>
+                    <text x="436" y="74">webshop</text>
+                    <text x="436" y="118">payments-api</text>
+                  </g>
+                </svg>
+
+              </div>
+              <p class="cap">Floor lines are a thin grey layer. A desk's lines take their colors when you point at it; Event flow colors them all. <a href="#office">See the office</a>.</p>
+            </div>
+            <div class="map-cell">
+              <span class="sign">Check-in · the timetable</span>
+              <div class="show">
+                <div class="timetable timetable--hourly" aria-label="Check-in timetable">
+                  <span class="tt done quiet"><i></i>07:00<small>quiet</small></span>
+                  <span class="tt done quiet"><i></i>08:00<small>quiet</small></span>
+                  <span class="tt done"><i></i>09:00<small>spoke</small></span>
+                  <span class="tt next"><i></i>10:00<small>next</small></span>
+                  <span class="tt"><i></i>11:00</span>
+                </div>
+              </div>
+              <p class="cap">When Ada checks in, by the hour. A filled stop spoke, a ringed one stayed quiet, the thick ring is next.</p>
+            </div>
+            <div class="map-cell">
+              <span class="sign">Connections · the swatch</span>
+              <div class="show">
+                <div class="cx-table">
+                  <div class="cx-row" data-line="sentry"><span class="cx-name"><i class="swatch"></i><i data-brand="sentry"></i><b>Sentry</b>webshop-prod</span><span class="cx-n">1,406</span><span class="faint">healthy</span></div>
+                  <div class="cx-row" data-line="gmail"><span class="cx-name"><i class="swatch"></i><i data-brand="gmail"></i><b>Gmail</b>rogier@personal</span><span class="cx-n">188</span><span class="faint">healthy</span></div>
+                  <div class="cx-row" data-line="discord"><span class="cx-name"><i class="swatch"></i><i data-brand="discord"></i><b>Discord</b>community</span><span class="cx-n"></span><span class="cx-health attn">reconnecting since 09:12</span></div>
+                </div>
+              </div>
+              <p class="cap">A short bar in the Connection's color wherever a Connection is listed, so its color means the same thing on every screen.</p>
+            </div>
+          </div>
+          <p class="not-here">
+            <b>Not here:</b> the sidebars, settings and Providers, buttons, the lock screen and the phone's Connections sheet. They use plain rows, words and marks. A Proposal's own page
+            lists its sources as rows with a swatch, not as a map.
+          </p>
+        </div>
+
+        <div class="block">
+          <h3>Motion<span class="aside">steady, like a timetable; nothing springs</span></h3>
+          <div class="motion">
+            <div>
+              <div class="stage stage--mark"><span class="live" style="display: inline-flex; align-items: center; gap: 10px"><i data-mk="work"></i>working</span></div>
+              <p class="cap"><b>Work is under way.</b> The halo breathes once every 1.8s. It is the one thing that moves on its own.</p>
+            </div>
+            <div>
+              <div class="stage">
+                <svg width="100%" height="96" viewBox="0 0 520 96" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                  <path d="M20 30H250C290 30 300 44 340 44H400" fill="none" style="stroke: var(--ln-sentry)" stroke-width="4" stroke-linecap="round" />
+                  <path d="M20 66H250C290 66 300 52 340 52H400" fill="none" style="stroke: var(--ln-github)" stroke-width="4" stroke-linecap="round" />
+                  <rect x="396" y="36" width="18" height="24" rx="9" style="fill: var(--casing); stroke: var(--trunk)" stroke-width="3" />
+                  <text x="426" y="52" style="font: 600 12px var(--font); fill: var(--muted)">Triage</text>
+                </svg>
+                <span class="train" style="offset-path: path('M20 30H250C290 30 300 44 340 44H400')"></span>
+                <span class="train" style="offset-path: path('M20 66H250C290 66 300 52 340 52H400'); animation-delay: -1.3s"></span>
+              </div>
+              <p class="cap"><b>An event arrives.</b> On the phone's Intake band, a dot runs each busy line into Triage. The desktop flow diagram stays still.</p>
+            </div>
+          </div>
+          <div class="timing">
+            <div><b>120ms</b>hover, press</div>
+            <div><b>220ms</b>fades, such as behind the composer</div>
+            <div><b>420ms</b>the composer settling as you scroll; sheets</div>
+            <div><b>1.8s / 2.8s</b>the halo; a dot on its line. Both stop with reduced motion.</div>
+          </div>
+        </div>
+
+        <div class="block identity" id="identity">
+          <div>
+            <h3>Logo</h3>
+            <div class="logos"><span data-logo="96"></span><span data-logo="48"></span><span data-logo="24"></span><span data-logo="16"></span></div>
+            <div class="wordmark"><span data-logo="30"></span>Hercule</div>
+            <p class="cap">An H made of two lines and the interchange that joins them.</p>
+          </div>
+          <div>
+            <h3>App icon</h3>
+            <div class="icons-app"><span data-appicon="128"></span><span data-appicon="64"></span><span data-appicon="32"></span></div>
+            <p class="cap">Black enamel plate with the H. Fixed colors: the Dock has no theme.</p>
+          </div>
+          <div>
+            <h3>Favicon</h3>
+            <div class="favs">
+              <div><img src="favicon.svg" alt="" />nothing waits</div>
+              <div><img src="favicon-wait.svg" alt="" />a decision waits</div>
+            </div>
+            <p class="cap">The tab gains an amber ring and a count, so a pinned tab is a signal.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 · Screens -->
+      <section class="sec" id="screens">
+        <div class="sec-h"><span class="no">5</span><h2>Screens</h2><span class="lede">Twenty-two pages, live; the office has its own section. The theme buttons and the glass slider at the top reach every frame.</span></div>
+
+        <div class="group">
+          <div class="group-h"><b>Desktop app</b><span>1440 × 900 · macOS window, keyboard-first</span></div>
+          <div class="grid-1">
+            <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="What came in since 18:20 as one flow diagram. The lead Proposal lists what it was made from; its answers share one column, and only the suggested one is filled."></figure>
+          </div>
+          <div class="grid-2">
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Thread, waiting on you" data-note="Threads first in the sidebar, floating pills above, one quiet route strip. The question sits in the dock: Allow once filled, Deny quiet."></figure>
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="Thread, reading back" data-note="Scrolled up: the transcript runs under the pills and the composer, and shows through their glass."></figure>
+            <figure data-frame="desktop" data-src="desktop/session-empty.html" data-caption="New thread" data-note="Say what the agent should do in webshop. Where it runs is one line under the composer; starting points from Intake sit below."></figure>
+            <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Assistant · Ada" data-note="A Conversation across Web chat and Slack. Her check-ins run on an hourly timetable in the rail."></figure>
+            <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="Menu bar, quick panel, notification" data-note="Answer a decision from anywhere with ⌥Space, without switching apps. Delete is the one red answer."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes previewed on a real Intake, the Glass slider, density and text size."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants · Ada" data-note="Her channels, memory, check-ins and reply mode, as plain settings rows."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Each Connection with its color swatch, its events in 24h and its health. Discord is reconnecting since 09:12."></figure>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-h"><b>Web</b><span>1280 × 800 · zero install, shareable links</span></div>
+          <div class="tabs-demo">
+            <div>
+              <div class="tabstrip">
+                <span class="tab on"><img src="favicon-wait.svg" alt="" /><span>(3) Intake · Hercule</span></span>
+                <span class="tab"><img src="favicon-wait.svg" alt="" /><span>Decide: Checkout fails for EU cards</span></span>
+                <span class="tab"><i data-brand="github"></i><span>rogier/webshop · GitHub</span></span>
+              </div>
+              <p class="cap"><b>Three decisions wait.</b> The count leads the tab title and the favicon gains its amber ring.</p>
+            </div>
+            <div>
+              <div class="tabstrip">
+                <span class="tab on"><img src="favicon.svg" alt="" /><span>Intake · Hercule</span></span>
+                <span class="tab"><i data-brand="github"></i><span>rogier/webshop · GitHub</span></span>
+                <span class="tab"><i data-brand="sentry"></i><span>webshop-prod · Sentry</span></span>
+              </div>
+              <p class="cap"><b>Nothing waits.</b> Plain title, plain mark: a pinned tab you can ignore.</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <figure data-frame="web" data-src="web/decision.html" data-url="hercule.home.arpa/intake/p_0192f3" data-caption="Decision" data-note="Where a Slack or email link lands: one Proposal as a page. What it was made from as plain rows, three answers, and a reply to draft once the fix ships."></figure>
+            <figure data-frame="web" data-src="web/intake.html" data-url="hercule.home.arpa/intake" data-caption="Intake at 1280" data-note="The rail folds into a band of floating pills above the flow; the answers stay one keypress away."></figure>
+            <figure data-frame="web" data-src="web/session-active.html" data-url="hercule.home.arpa/threads/th_8f2c" data-caption="Thread" data-note="The same Thread in a browser tab. The link copies from the header."></figure>
+            <figure data-frame="web" data-src="web/session-empty.html" data-url="hercule.home.arpa/threads/new" data-caption="New thread" data-note="The same draft, in a browser tab."></figure>
+            <figure data-frame="web" data-src="web/assistant.html" data-url="hercule.home.arpa/assistants/ada" data-caption="Assistant · Ada" data-note="Her record and check-ins fold into one band over the Conversation."></figure>
+            <figure data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Settings · Providers" data-note="One plain card per provider: models, defaults for new threads, usage, and a row per machine."></figure>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-h"><b>Mobile</b><span>390 × 844 · one thumb</span></div>
+          <div class="grid-m">
+            <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="A Live Activity with the Thread's route and question; notifications with their answers."></figure>
+            <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="Sources as a band into Triage, the lead with what it was made from, answers full width."></figure>
+            <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="Decision" data-note="A bottom sheet with three answers in thumb reach, and the reply toggle."></figure>
+            <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="Thread" data-note="Voice first: hold to talk. The question docks above the composer."></figure>
+            <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="New thread" data-note="Say what you want done; where it runs is one tap."></figure>
+            <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Assistant · Ada" data-note="The same Conversation, in your pocket."></figure>
+            <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings · Connections" data-note="Every domain is one tile. Connections opens as a sheet: a plain list with a color swatch per Connection."></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 · The office -->
+      <section class="sec" id="office">
+        <div class="sec-h"><span class="no">6</span><h2>The office</h2><span class="lede">The Fleet as a building, drawn quietly: the people lead, the lines follow.</span></div>
+        <figure data-frame="desktop" data-theme="night-service" data-src="desktop/office.html" data-caption="Fleet · Office, in Night Service" data-note="Three runner rooms, the mailroom with the Triage desk, and the Assistants' lounge. The floor lines are grey."></figure>
+        <div class="grid-2 office-pair">
+          <figure data-frame="desktop" data-src="desktop/office.html?flow=on" data-caption="Event flow on" data-note="The switch in the corner colors every floor line with its Connection."></figure>
+          <figure data-frame="desktop" data-theme="enamel" data-src="desktop/office.html" data-caption="In Enamel" data-note="The same floor by day."></figure>
+        </div>
+        <div class="b-notes">
+          <div><b><i data-i="office"></i>A quiet layer</b>Work enters on its Connection's line, passes the Triage desk and runs to the desk doing it, in thin grey. Point at a desk and its lines take their colors.</div>
+          <div><b><i data-mk="wait"></i>The people carry the scene</b>The same six marks over every head. The three amber rings are what you look for; click a desk to answer from its popover.</div>
+          <div><b><span class="rug"></span>Rugs are projects</b>Each desk stands on its project's rug. Runners are rooms; the office is the only place machines have walls.</div>
+        </div>
+      </section>
+
+      <!-- 7 · At 10x -->
+      <section class="sec" id="tenx">
+        <div class="sec-h"><span class="no">7</span><h2>At 10x</h2><span class="lede">140 live sessions and 31,000 events a day. Lines thicken; they do not multiply.</span></div>
+        <div class="tenx">
+          <div><span class="big">1 line <small>per Connection</small></span>A line's weight grows with its events on a log scale. 31,000 events a day are still eight lines.</div>
+          <div><span class="big">60 <small>proposals</small></span>Each outcome is one count. The sections show the top of each list: Needs a call 9, Today 20, When you can 53.</div>
+          <div><span class="big">140 <small>live</small></span>Waiting on you lists what needs you first. The rest is a count: 8 more waiting · 67 working · 5 paused · 53 idle.</div>
+          <div><span class="big">9 <small>floors</small></span>The office becomes a tower, one floor per runner. Waiting desks show their amber rings through the windows.</div>
+        </div>
+        <div class="grid-2">
+          <figure data-frame="desktop" data-state="swarm" data-src="desktop/intake.html" data-caption="Intake at 10x" data-note="2,720 events since yesterday on the same eight lines; 60 proposals, still one lead."></figure>
+          <figure data-frame="desktop" data-state="swarm" data-src="desktop/office.html" data-caption="The office at 10x" data-note="Nine floors: 70 working · 11 waiting · 6 paused · 53 idle."></figure>
+        </div>
+      </section>
+
+      <!-- 8 · Adopting it -->
+      <section class="sec" id="adopt">
+        <div class="sec-h"><span class="no">8</span><h2>Adopting it</h2><span class="lede">Today's tokens in packages/ui, and what they become.</span></div>
+        <table class="tbl map-tbl">
+          <thead>
+            <tr>
+              <th style="width: 118px">Today</th>
+              <th style="width: 74px">Light · dark</th>
+              <th style="width: 150px">Wayfinding</th>
+              <th style="width: 104px">Enamel · Night</th>
+              <th>What changes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>--bg</td>
+              <td><span class="swatch-pair"><i style="background: oklch(94.5% 0.0156 265)"></i><i style="background: oklch(20% 0.0288 265)"></i></span></td>
+              <td>--bg</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--bg)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--bg)"></i></span></td>
+              <td>Window ground: sidebar and titlebar. Warm neutral; no dark theme is blue.</td>
+            </tr>
+            <tr>
+              <td>--surface</td>
+              <td><span class="swatch-pair"><i style="background: oklch(96.7% 0.0125 265)"></i><i style="background: oklch(22.2% 0.0288 265)"></i></span></td>
+              <td>--surface</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--surface)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--surface)"></i></span></td>
+              <td>The main canvas, lighter than the ground, so content leads.</td>
+            </tr>
+            <tr>
+              <td>--raised</td>
+              <td><span class="swatch-pair"><i style="background: oklch(100% 0.0078 265)"></i><i style="background: oklch(25.5% 0.0259 265)"></i></span></td>
+              <td>--raised, --sunken</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--raised)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--raised)"></i></span></td>
+              <td>Cards, and the color every glass surface is mixed from. New <code>--sunken</code> for wells: code and inputs at rest.</td>
+            </tr>
+            <tr>
+              <td>--ink</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265)"></i><i style="background: oklch(90% 0.008 265)"></i></span></td>
+              <td>--ink, --trunk</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ink)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ink)"></i></span></td>
+              <td>Text, and Hercule's own work where lines meet. <code>--trunk</code> aliases it so a theme may part them later.</td>
+            </tr>
+            <tr>
+              <td>--muted</td>
+              <td><span class="swatch-pair"><i style="background: oklch(48% 0.0156 265)"></i><i style="background: oklch(68% 0.0288 265)"></i></span></td>
+              <td>--muted</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--muted)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--muted)"></i></span></td>
+              <td>Darker in light, lighter in dark: 4.5:1 at 12.5px on every surface.</td>
+            </tr>
+            <tr>
+              <td>--faint</td>
+              <td><span class="swatch-pair"><i style="background: oklch(66% 0.0156 265)"></i><i style="background: oklch(50% 0.0288 265)"></i></span></td>
+              <td>--faint</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--faint)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--faint)"></i></span></td>
+              <td>Now readable (54% and 65%). Today's 66% and 50% fail contrast for text.</td>
+            </tr>
+            <tr>
+              <td>--line</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265 / 0.1)"></i><i style="background: oklch(90% 0.0288 265 / 0.1)"></i></span></td>
+              <td>--line</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--line)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--line)"></i></span></td>
+              <td>Hairlines, and the links of a route strip. A Connection's line is its hue, never <code>--line</code>.</td>
+            </tr>
+            <tr>
+              <td>--line-soft</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265 / 0.055)"></i><i style="background: oklch(90% 0.0288 265 / 0.06)"></i></span></td>
+              <td>--line-soft</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--line-soft)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--line-soft)"></i></span></td>
+              <td>Row separators. Unchanged in role.</td>
+            </tr>
+            <tr>
+              <td>--attn</td>
+              <td><span class="swatch-pair"><i style="background: #8a6116"></i><i style="background: #d0a147"></i></span></td>
+              <td>--attn, --attn-soft</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--attn)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--attn)"></i></span></td>
+              <td>Waiting on you: the ring and the word. Never a button fill.</td>
+            </tr>
+            <tr>
+              <td>--fail</td>
+              <td><span class="swatch-pair"><i style="background: #a34e46"></i><i style="background: #cf7b71"></i></span></td>
+              <td>--fail</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--fail)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--fail)"></i></span></td>
+              <td>Failed, urgent, and the text of a button that destroys something. Never on a line.</td>
+            </tr>
+            <tr>
+              <td>--live</td>
+              <td><span class="swatch-pair"><i style="background: #48717f"></i><i style="background: #7fa8b8"></i></span></td>
+              <td>--live</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--live)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--live)"></i></span></td>
+              <td>Green, not blue-grey: working reads as go. Always with the breathing mark.</td>
+            </tr>
+            <tr>
+              <td>--ok</td>
+              <td><span class="swatch-pair"><i style="background: #48745a"></i><i style="background: #7fae8e"></i></span></td>
+              <td>--ok</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ok)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ok)"></i></span></td>
+              <td>Done words. The done mark itself is ink.</td>
+            </tr>
+            <tr>
+              <td>--project-*</td>
+              <td><span class="swatch-pair"><i style="background: #7d7ab0"></i><i style="background: #a67f92"></i></span></td>
+              <td>--zone-*</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--zone-webshop)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--zone-payments)"></i></span></td>
+              <td>Project dots go. A project's color is a rug in the office; hue belongs to Connections.</td>
+            </tr>
+            <tr>
+              <td class="faint">new</td>
+              <td></td>
+              <td>--ln-*, --casing</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ln-sentry)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ln-gmail)"></i></span></td>
+              <td>One hue per Connection type, tuned per theme. <code>--casing</code> is the gap drawn where lines cross.</td>
+            </tr>
+            <tr>
+              <td class="faint">new</td>
+              <td></td>
+              <td>--glass-level</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--glass)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--glass)"></i></span></td>
+              <td>One number from 0 to 1, 0.35 by default. <code>--glass</code>, <code>--glass-thin</code>, the blur, the saturation and the light edge all follow from it.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <ol class="changes">
+          <li><b>Swap the tokens</b><code>packages/ui/src/styles.css</code> takes the five themes and the glass tokens; <code>light</code> and <code>dark</code> alias Enamel and Night Service. Drop <code>--project-*</code>.</li>
+          <li><b>Six marks, one icon set</b><code>packages/ui/src/marks/marks.tsx</code> draws the six marks. The icons move to one 16px outline set.</li>
+          <li><b>Made from, in one place</b>A <code>client-core</code> function returns a Proposal's sources in order. <code>&lt;MadeFrom&gt;</code> draws the glyph or the rows from it; Intake, the route strip and the office call it.</li>
+          <li><b>Answers by role</b><code>&lt;AnswerRow&gt;</code> takes a role (suggested, acts, declines, destroys), never a color. Intake, check-in and the question dock use it.</li>
+          <li><b>The shell</b><code>apps/web</code>: the Threads and Hercule sidebar tabs, Waiting on you at the top of both, the floating header pills, and the tab title and favicon signals.</li>
+        </ol>
+      </section>
+
+      <!-- 9 · Spec -->
+      <section class="sec" id="spec">
+        <div class="sec-h"><span class="no">9</span><h2>What this design asks the spec to change</h2><span class="lede">Everything else is presentation over today's operations.</span></div>
+        <div class="asks">
+          <div><b>A per-Proposal address</b>A link from Slack or email opens one Proposal as a page. The URL space has <code>/intake</code> but no address for one Proposal; add <code>/intake/&lt;proposal id&gt;</code>.<span class="spec-ref">spec 14 · URL space</span></div>
+          <div><b>Counts per Connection and outcome</b>The flow diagram needs, since you last checked, event counts per Connection and per triage outcome. Today's Intake brief has the outcome totals only.<span class="spec-ref">spec 10 · Intake · spec 11 · a read</span></div>
+          <div><b>A color per Connection type</b>Connection types are plugin-defined, so a type needs a color slot: a palette index in the plugin manifest, or a client-core fallback. Two Gmail Connections share the Gmail color and differ by name.<span class="spec-ref">spec 05 · manifest · spec 08 · Connection</span></div>
+          <div><b>One filled answer per question</b>The design language asks for quiet text-only answers everywhere. Wayfinding fills the one suggested answer, keeps the others neutral or quiet, and uses red text only for destroying something.<span class="spec-ref">spec 14 · Design language · docs/design-language.md</span></div>
+          <div><b>Mono only inside code</b>The design language sets ids, refs, ages and counts in mono. Wayfinding sets them in Overpass with tabular numerals, and keeps Overpass Mono for code.<span class="spec-ref">spec 14 · Design language</span></div>
+          <div><b>Five themes and a glass level</b>The theme row offers Light, Dark and System. Wayfinding offers five themes, with Light and Dark as aliases, and a Glass level. Both stay per browser, like the theme today.<span class="spec-ref">spec 14 · Sidebar foot, the theme row</span></div>
+          <div><b>The tab as a signal</b>Pin the tab title as "(n) screen · Hercule", n being decisions waiting, and a favicon that gains a ring while n is above zero.<span class="spec-ref">spec 14 · App shell</span></div>
+          <div><b>Mobile opens on Intake</b>Home is Sessions on desktop and web, as pinned. On a phone the first tab is Intake, because that is where decisions get made on the go.<span class="spec-ref">spec 14 · Home is Sessions</span></div>
+        </div>
+        <div class="colophon"><span data-logo="20"></span>Metro Wayfinding · Metro, iteration 1 · a prototype, not the product</div>
+      </section>
+    </main>
+  </body>
+</html>

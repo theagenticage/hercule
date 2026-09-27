@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>New thread · webshop · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="threads" data-current="draft"></aside>
+
+      <main class="main" data-glass-host>
+        <header class="chrome chrome--float">
+          <nav class="float-pill" aria-label="Threads in this workspace">
+            <span class="crumb">webshop /</span>
+            <div class="th-tabs" role="tablist">
+              <button class="th-tab" role="tab" aria-selected="true">New thread</button>
+            </div>
+          </nav>
+          <div class="actions">
+            <button class="float-pill float-pill--icon" aria-label="More"><i data-i="more"></i></button>
+          </div>
+        </header>
+
+        <div class="draft">
+          <h1 class="draft-h">What should the agent do in webshop?</h1>
+          <p class="draft-sub">It gets its own worktree of webshop, on a new branch from main.</p>
+
+          <div class="composer composer--draft">
+            <div class="card">
+              <div class="ta"><span class="caret"></span><span class="ph">Say what you want done…</span></div>
+              <div class="card-row">
+                <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+                <button class="pick"><i data-i="shield"></i>Auto-accept edits<i data-i="chev" class="chev"></i></button>
+                <span class="grow"></span>
+                <button class="pick">High<i data-i="chev" class="chev"></i></button>
+                <button class="pick pick--model"><i data-brand="claude"></i>Claude Code · Opus 5.5<i data-i="chev" class="chev"></i></button>
+                <button class="icon-btn" aria-label="Dictate"><i data-i="mic"></i></button>
+                <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+              </div>
+            </div>
+            <div class="lip glass-tab">
+              <span><i data-i="branch"></i>New worktree · from <code>main</code></span>
+              <span class="right"><i data-i="machine"></i>studio-mac<i data-i="chev" class="chev"></i></span>
+            </div>
+          </div>
+
+          <section class="starts" aria-label="Starting points from Intake">
+            <div class="starts-head">From Intake<span>for webshop</span></div>
+            <button class="start">
+              <i data-strip="sentry gmail posthog github"></i>
+              <span class="start-t"><b>Fix:</b> Checkout fails for EU cards</span>
+              <span class="start-m"><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span>urgent</span>
+              <kbd>&#8984;1</kbd>
+            </button>
+            <button class="start">
+              <i data-strip="intercom"></i>
+              <span class="start-t"><b>Look into:</b> App is slow on Android</span>
+              <span class="start-m">7 conversations</span>
+              <kbd>&#8984;2</kbd>
+            </button>
+            <button class="start">
+              <i data-strip="intercom"></i>
+              <span class="start-t"><b>Plan:</b> Add iDEAL as a payment method</span>
+              <span class="start-m">5 requests</span>
+              <kbd>&#8984;3</kbd>
+            </button>
+          </section>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

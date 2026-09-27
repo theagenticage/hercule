@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone">
+      <div class="statusbar" data-statusbar="9:41"></div>
+
+      <header class="m-head">
+        <h1>Intake</h1>
+        <span class="sub">09:00 · next 11:00</span>
+        <span class="grow"></span>
+        <button class="m-icon" aria-label="Search Intake"><i data-i="search"></i></button>
+        <button class="m-icon" aria-label="Manage topics"><i data-i="sliders"></i></button>
+      </header>
+      <nav class="m-topics" aria-label="Topics">
+        <button aria-pressed="true">All</button><button>Checkout</button><button>Infrastructure</button><button>Customers</button><button>Releases</button>
+      </nav>
+
+      <main class="m-body">
+        <!-- What came in since yesterday 18:20: each Connection is a line into the Triage stop at the
+             left. Weight grows with the event count, on a log scale. This is the page's one map. -->
+        <section class="m-band" aria-label="What came in since yesterday 18:20">
+          <div class="m-band-rows">
+            <span class="m-band-cap" aria-hidden="true"></span>
+            <div class="m-band-row" data-line="sentry" style="--w: 6.3px"><span class="m-band-ln"><i style="--d: 2.6s"></i></span><i data-brand="sentry"></i><span class="nm">Sentry</span><b>130</b></div>
+            <div class="m-band-row" data-line="github" style="--w: 5.1px"><span class="m-band-ln"><i style="--d: 3.2s; animation-delay: -1.1s"></i></span><i data-brand="github"></i><span class="nm">GitHub</span><b>38</b></div>
+            <div class="m-band-row" data-line="gmail" style="--w: 4.3px"><span class="m-band-ln"><i style="--d: 3.8s; animation-delay: -2.4s"></i></span><i data-brand="gmail"></i><span class="nm">Gmail</span><b>17</b></div>
+            <div class="m-band-row" data-line="stripe" style="--w: 4.0px"><span class="m-band-ln"></span><i data-brand="stripe"></i><span class="nm">Stripe</span><b>12</b></div>
+            <div class="m-band-row" data-line="intercom" style="--w: 3.7px"><span class="m-band-ln"></span><i data-brand="intercom"></i><span class="nm">Intercom</span><b>9</b></div>
+            <div class="m-band-row" data-line="posthog" style="--w: 2.8px"><span class="m-band-ln"></span><i data-brand="posthog"></i><span class="nm">PostHog</span><b>3</b></div>
+            <div class="m-band-row" data-line="grafana" style="--w: 2.5px"><span class="m-band-ln"></span><i data-brand="grafana"></i><span class="nm">Grafana</span><b>2</b></div>
+            <div class="m-band-row" data-line="cron" style="--w: 2px"><span class="m-band-ln"></span><i data-brand="cron"></i><span class="nm">Cron</span><b>1</b></div>
+          </div>
+          <div class="m-band-foot"><span><b>212</b> events into Triage since 18:20</span><span class="grow"></span><span>took 42s</span></div>
+        </section>
+
+        <div class="m-headline">
+          <span class="burning"><b>1</b>burning</span><span><b>5</b>proposals</span><span><b>2</b>offers</span><span><b>2</b>need a call</span><span><b>3</b>FYI</span>
+        </div>
+
+        <article class="m-lead" aria-label="Lead Proposal">
+          <div class="m-lead-top">
+            <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span> <b class="fail">urgent</b></span>
+            <span>Checkout</span>
+            <span>webshop</span>
+            <span class="stamp stamp--attn"><i data-mk="wait"></i>Proposal</span>
+          </div>
+          <h2>Checkout fails for EU cards with 3-D Secure</h2>
+          <!-- Made from: each source keeps its line color as a small swatch. -->
+          <div class="m-srcs" aria-label="Made from">
+            <span class="m-src" data-line="sentry"><i data-brand="sentry"></i><b>412</b>errors</span>
+            <span class="m-src" data-line="gmail"><i data-brand="gmail"></i><b>3</b>emails</span>
+            <span class="m-src" data-line="posthog"><i data-brand="posthog"></i><b class="fail">-18%</b>EU checkout</span>
+            <span class="m-src" data-line="github"><i data-brand="github"></i>deploy <b>#1289</b></span>
+          </div>
+          <div class="m-answers">
+            <a class="m-btn m-btn--ink" href="decision.html">Start "Fix bug"</a>
+            <button class="m-btn">Accept as a Task</button>
+            <button class="m-btn m-btn--quiet">Dismiss</button>
+          </div>
+        </article>
+
+        <h2 class="m-sec">Needs a call<span class="n">2</span></h2>
+        <div class="m-row">
+          <i data-strip="intercom"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>App is slow on Android</span><span class="stamp">Unsure</span></div>
+            <div class="m-row-m"><span class="src"><i data-brand="intercom"></i>Intercom</span><span>7 conversations</span><span>which project?</span></div>
+            <div class="m-row-a">
+              <div class="m-seg" role="group" aria-label="Which project"><button>webshop</button><button>payments-api</button><button>Both</button><button>Not work</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="m-row">
+          <i data-strip="github"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>34 events held</span><span class="stamp stamp--attn">Breaker</span></div>
+            <div class="m-row-m"><span class="src"><i data-brand="github"></i>GitHub</span><span>"Label new issues" tripped 20/h at 08:14</span></div>
+            <div class="m-row-a m-row-a--3">
+              <button class="m-btn m-btn--ink">Keep held</button><button class="m-btn">Release all 34</button><button class="m-btn">Raise to 50/h</button>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="m-sec">Today<span class="n">4</span><span class="aside">swipe right to answer · left for later</span></h2>
+        <div class="m-row">
+          <i data-strip="grafana"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>Nightly backup job timing out on ops-db</span></div>
+            <div class="m-row-m"><span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>3 nights running</span></div>
+          </div>
+        </div>
+        <div class="m-row m-row--swiped">
+          <span class="m-swipe" aria-hidden="true"><i data-i="reply"></i>Draft reply</span>
+          <i data-strip="gmail"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>Draft a reply to Marta at Brightline</span><span class="stamp">Offer</span></div>
+            <div class="m-row-m"><span class="src"><i data-brand="gmail"></i>Gmail</span><span>Customers</span><span>invoice INV-2291 in the company name</span></div>
+          </div>
+        </div>
+        <div class="m-row">
+          <i data-strip="stripe sentry"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>Stripe webhook retries rising</span></div>
+            <div class="m-row-m"><span><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="stripe"></i>Stripe</span><span>payments-api</span><span>+ 2 Sentry events</span></div>
+          </div>
+        </div>
+        <div class="m-row">
+          <i data-strip="github"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>Merge 4 dependency bumps</span><span class="stamp">Offer</span></div>
+            <div class="m-row-m"><span class="src"><i data-brand="github"></i>GitHub</span><span>webshop</span><span>all green, patch versions only</span></div>
+          </div>
+        </div>
+
+        <h2 class="m-sec">When you can<span class="n">2</span></h2>
+        <div class="m-row">
+          <i data-strip="cron"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>SSL certificate expires in 12 days</span></div>
+            <div class="m-row-m"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="cron"></i>Cron</span><span>ops</span><span>status.acme.dev</span></div>
+          </div>
+        </div>
+        <div class="m-row">
+          <i data-strip="intercom"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>Add iDEAL as a payment method</span></div>
+            <div class="m-row-m"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="intercom"></i>Intercom</span><span>webshop</span><span>5 requests</span></div>
+          </div>
+        </div>
+
+        <!-- Nothing here asks for an answer, so the rows carry a state mark instead of a glyph. -->
+        <h2 class="m-sec">Nothing to decide</h2>
+        <div class="m-row m-row--quiet">
+          <i data-mk="done"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>1 Sentry event attached</span></div>
+            <div class="m-row-m"><span>to the Task "Cart total rounding on discounts"</span></div>
+          </div>
+        </div>
+        <div class="m-row m-row--quiet">
+          <i data-mk="idle"></i>
+          <div class="m-row-body">
+            <div class="m-row-t"><span>3 FYI</span></div>
+            <div class="m-row-m"><span>v2.14.0 released</span><span>sign-ups <b class="ok">+9%</b></span><span>payout <b>€18,240</b></span></div>
+          </div>
+        </div>
+        <div class="m-end"><span class="lbl"><i class="end-bar"></i></span><span><b>166</b>no action: known, noise or duplicates</span><button class="m-btn m-btn--quiet m-btn--sm">Show</button></div>
+      </main>
+
+      <nav class="tabbar" data-tabbar="intake"></nav>
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>

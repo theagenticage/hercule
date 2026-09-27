@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Decide: Checkout fails for EU cards · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <!-- Where a link from Slack or email lands: one Proposal as a page. What it was made from,
+         then the answers, each with one line on what it does. -->
+    <div class="dz">
+      <header class="dz-bar">
+        <a class="logo-row" href="intake.html"><span data-logo="20"></span><b>Hercule</b></a>
+        <span class="dz-crumb"><a href="intake.html">Intake</a> / Proposal</span>
+        <span class="grow"></span>
+        <span class="dz-from"><i data-brand="slack"></i>Opened from Ada's 09:00 message in Slack</span>
+        <span class="avatar">R</span>
+      </header>
+
+      <main class="dz-main">
+        <section class="dz-hero">
+          <div class="lead-top">
+            <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b class="fail">urgent</b></span>
+            <span>Checkout</span>
+            <span>webshop</span>
+            <span>first seen 08:52</span>
+          </div>
+          <h1>Checkout fails for EU cards with 3-D Secure</h1>
+          <p class="dz-gist">
+            Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+            <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+          </p>
+        </section>
+
+        <section class="dz-sec" aria-labelledby="dz-made-from">
+          <h2 id="dz-made-from"><i data-strip="sentry gmail posthog github"></i>Made from 4 sources</h2>
+          <div class="dz-srcs">
+            <div class="dz-src" data-line="sentry">
+              <span class="swatch"></span><i data-brand="sentry"></i><b>Sentry</b><span class="ev"><code>PaymentError: authentication_required</code></span>
+              <span class="n"><b>412</b> events · <b>188</b> users</span>
+            </div>
+            <div class="dz-src" data-line="gmail">
+              <span class="swatch"></span><i data-brand="gmail"></i><b>Gmail</b><span class="ev">"Card declined at checkout" and 2 more</span>
+              <span class="n"><b>3</b> customer emails</span>
+            </div>
+            <div class="dz-src" data-line="posthog">
+              <span class="swatch"></span><i data-brand="posthog"></i><b>PostHog</b><span class="ev">checkout conversion, EU only</span>
+              <span class="n"><b class="fail">-18%</b> since 14:10 yesterday</span>
+            </div>
+            <div class="dz-src" data-line="github">
+              <span class="swatch"></span><i data-brand="github"></i><b>GitHub</b><span class="ev">deploy #1289 "Upgrade Stripe SDK to v14"</span>
+              <span class="n">14:02 yesterday</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="dz-sec" aria-labelledby="dz-answer">
+          <h2 id="dz-answer">Your answer<span class="attn"><i data-mk="wait"></i>waiting on you</span></h2>
+          <div class="dz-answers" role="group" aria-label="Answers">
+            <div class="ans"><button class="btn btn--primary btn--lg">Start "Fix bug"</button><span class="desc">Fixes it on webshop in a new worktree and opens a pull request</span><kbd>&#9166;</kbd></div>
+            <div class="ans"><button class="btn btn--lg">Accept as a Task</button><span class="desc">Keeps it in the backlog for later; nothing runs yet</span><kbd>A</kbd></div>
+            <div class="ans"><button class="btn btn--quiet btn--lg">Dismiss</button><span class="desc">Closes the Proposal; nothing runs</span><kbd>D</kbd></div>
+          </div>
+          <label class="dz-then">
+            <i data-i="reply"></i>
+            <span class="grow">Ada also drafts a reply to the 3 customers once the fix ships</span>
+            <span class="toggle" role="switch" aria-checked="true"></span>
+          </label>
+        </section>
+
+        <section class="dz-foot">
+          <a class="dz-next" href="intake.html">
+            <span>Also in Intake: <b>4</b> more Proposals · <b>2</b> need a call</span>
+            <span class="dz-go">Open Intake<i data-i="chev-r"></i></span>
+          </a>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

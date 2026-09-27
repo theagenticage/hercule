@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="settings" data-current="providers" data-web></aside>
+
+      <main class="main">
+        <div class="pane">
+          <div class="set set--wide">
+            <p class="set-lede prose">A provider is the agent program a Thread runs in. Each row is one account and what a new Thread starts with; the machines below run them.</p>
+
+            <h2 class="set-h">Providers<span class="aside">3 accounts on 3 machines</span></h2>
+            <div class="set-card">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th class="c-prov">Provider</th>
+                    <th class="c-model">New Threads start with</th>
+                    <th class="c-mode">Access mode</th>
+                    <th>Usage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who"><i data-brand="claude"></i><b>Claude Code</b><span class="faint">rogier@personal</span></span></td>
+                    <td>Opus 5.5 <span class="faint">· effort high</span></td>
+                    <td>Auto-accept edits</td>
+                    <td><span class="use"><span class="use-bar"><i style="width: 61%"></i></span>61% <span class="faint">· resets 11:00</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="openai"></i><b>Codex</b><span class="faint">work</span></span></td>
+                    <td>gpt-5.4 <span class="faint">· effort medium</span></td>
+                    <td>Auto</td>
+                    <td class="faint">Not reported</td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="pi"></i><b>pi</b><span class="faint">local, llama.cpp</span></span></td>
+                    <td>qwen3-coder 30b</td>
+                    <td>Approval required</td>
+                    <td class="faint">Runs locally</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="set-note"><i data-i="info"></i>pi has no Auto mode. A Thread that asks for Auto on pi runs with Auto-accept edits, and says so.</p>
+
+            <h2 class="set-h">Machines<span class="aside">16 sessions running now</span></h2>
+            <div class="set-card">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th class="c-prov">Machine</th>
+                    <th class="c-model">Sessions</th>
+                    <th>Providers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who"><i data-i="machine"></i><b>studio-mac</b><span class="faint">this Mac</span></span></td>
+                    <td>5 of 6</td>
+                    <td>Claude Code, pi<a class="tbl-link" href="#">Add Codex</a></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-i="server"></i><b>build-box-1</b></span></td>
+                    <td>8 of 8 <span class="attn">· full, the next one waits</span></td>
+                    <td>Claude Code, Codex</td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-i="server"></i><b>build-box-2</b></span></td>
+                    <td>3 of 8</td>
+                    <td>Claude Code, Codex</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h2 class="set-h">Access modes</h2>
+            <dl class="defs">
+              <div><dt>Approval required</dt><dd>Asks before every action.</dd></div>
+              <div><dt>Auto-accept edits</dt><dd>Edits files on its own; asks for the rest.</dd></div>
+              <div><dt>Auto</dt><dd>A second model reviews each step.</dd></div>
+              <div><dt>Full access</dt><dd>Allows everything. Use in a sandbox.</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Providers</h1>
+          <div class="actions">
+            <span class="chrome-note">Checked 1m ago</span>
+            <button class="icon-btn" aria-label="Check again"><i data-i="rotate"></i></button>
+            <button class="btn btn--sm"><i data-i="plus"></i>Add a provider</button>
+          </div>
+        </header>
+      </main>
+    </div>
+  </body>
+</html>

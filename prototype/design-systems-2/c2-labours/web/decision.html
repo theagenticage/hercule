@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en" data-theme="marble">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Urgent · Checkout fails for EU cards with 3&#8209;D Secure · Hercule</title>
+    <style>
+      /* One Proposal as a page: where a link from Slack or email lands. */
+      .page {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 312px;
+      }
+      .doc {
+        min-height: 0;
+        overflow: auto;
+        scrollbar-width: thin;
+      }
+      .doc-in {
+        width: min(740px, 100% - 64px);
+        margin: 0 auto;
+        padding: 18px 0 56px;
+      }
+      .came {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 22px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .came a {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .by {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .by b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .doc h1 {
+        margin: 14px 0 8px;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .gist {
+        margin: 0 0 22px;
+        font-size: var(--t-14);
+        line-height: 1.6;
+      }
+      .made-h {
+        margin-bottom: 10px;
+      }
+      .made {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 28px;
+      }
+      .ev {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 12px;
+        padding: 12px 14px 13px;
+        border-radius: var(--r-md);
+        background: var(--bg);
+      }
+      .ev-src {
+        grid-column: 1 / 3;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .ev-num {
+        font-size: var(--t-18);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .ev-num small {
+        margin-left: 4px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        letter-spacing: 0;
+      }
+      .ev-line {
+        grid-column: 1 / 3;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ev-line code {
+        font-size: 11px;
+      }
+      .ev svg {
+        grid-row: 2;
+        grid-column: 2;
+        align-self: end;
+      }
+      .ask {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        font-size: var(--t-14);
+        font-weight: var(--w-bold);
+      }
+      .ask span {
+        margin-left: auto;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-regular);
+      }
+      .doc .ans {
+        grid-template-columns: 176px 1fr auto;
+      }
+      .offer-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+
+      /* The rail: how this came to be, oldest first. */
+      .rail {
+        min-height: 0;
+        overflow: auto;
+        padding: 22px 22px 24px;
+        background: var(--bg);
+        box-shadow: -1px 0 0 var(--line-soft);
+      }
+      .hist {
+        position: relative;
+        display: grid;
+        gap: 16px;
+        margin: 12px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .hist::before {
+        content: "";
+        position: absolute;
+        left: 11px;
+        top: 12px;
+        bottom: 12px;
+        width: 1.5px;
+        background: var(--line);
+      }
+      .hist li {
+        position: relative;
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 10px;
+        align-items: start;
+        font-size: var(--t-12);
+        line-height: 1.4;
+      }
+      .hist .pin {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--raised);
+        box-shadow: 0 0 0 3px var(--bg), inset 0 0 0 1px var(--line-soft);
+      }
+      .hist li > span:last-child {
+        display: grid;
+        gap: 1px;
+        padding-top: 3px;
+      }
+      .hist b {
+        font-weight: var(--w-medium);
+      }
+      .hist time {
+        color: var(--faint);
+      }
+      .hist .is-you .pin {
+        background: var(--you);
+        color: var(--face-ink);
+      }
+      .rail .hair {
+        margin: 22px 0 16px;
+      }
+      .watch {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .watch > div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="intake"></header>
+      <div class="page">
+        <article class="doc">
+          <div class="doc-in">
+            <div class="came">
+              <a href="intake.html"><i data-i="chev-l" data-size="14"></i>Intake</a>
+              <span>·</span>
+              <i data-brand="slack" data-size="13"></i>
+              <span>You came from Ada's message in your Slack DM</span>
+            </div>
+
+            <div class="by">
+              <i data-face="Triage" data-pose="idle" data-size="30"></i>
+              <span><b>Triage</b> made this Proposal at 09:00 from 4 sources</span>
+              <span class="spacer"></span>
+              <span class="chip chip--fail">Urgent</span>
+              <span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span>
+              <span class="proj proj--webshop">webshop</span>
+            </div>
+
+            <h1>Checkout fails for EU cards with 3&#8209;D Secure</h1>
+            <p class="gist">Since deploy #1289, card payments that need 3&#8209;D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+
+            <h2 class="section-h made-h">Made from</h2>
+            <div class="made">
+              <div class="ev">
+                <span class="ev-src"><i data-brand="sentry" data-size="12"></i>Sentry · webshop-prod</span>
+                <span class="ev-num">412<small>events · 188 users</small></span>
+                <svg width="84" height="26" viewBox="0 0 84 26" aria-hidden="true"><path d="M0 24 L28 24 L34 23 L40 16 L48 12 L56 8 L64 9 L72 5 L84 2" fill="none" stroke="var(--fail)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                <span class="ev-line"><code>PaymentError: authentication_required</code></span>
+              </div>
+              <div class="ev">
+                <span class="ev-src"><i data-brand="gmail" data-size="12"></i>Gmail · rogier@personal</span>
+                <span class="ev-num">3<small>customer emails</small></span>
+                <span></span>
+                <span class="ev-line">"Card declined at checkout" · "Can't pay with my Rabobank card" · "Payment keeps failing"</span>
+              </div>
+              <div class="ev">
+                <span class="ev-src"><i data-brand="posthog" data-size="12"></i>PostHog · webshop</span>
+                <span class="ev-num fail-ink">-18%<small>checkout conversion, EU</small></span>
+                <svg width="84" height="26" viewBox="0 0 84 26" aria-hidden="true"><path d="M0 6 L10 5 L20 7 L30 5 L36 6 L42 17 L52 19 L62 18 L72 20 L84 19" fill="none" stroke="var(--fail)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                <span class="ev-line">since 14:10 yesterday · other regions flat</span>
+              </div>
+              <div class="ev">
+                <span class="ev-src"><i data-brand="github" data-size="12"></i>GitHub · rogier/webshop</span>
+                <span class="ev-num">#1289<small>deploy at 14:02 yesterday</small></span>
+                <span></span>
+                <span class="ev-line">"Upgrade Stripe SDK to v14" · 8 minutes before the drop</span>
+              </div>
+            </div>
+
+            <div class="ask"><i data-face="Triage" data-pose="idle" data-size="24"></i>What should happen?<span>Triage suggests Fix bug</span></div>
+            <div class="ledger">
+              <button class="ans"><span class="btn btn--go">Start "Fix bug"</span><span class="ans-desc"><i data-face="Fix bug" data-pose="idle" data-size="20"></i>Starts Fix bug on webshop in a new worktree <span class="faint">· Claude Code · Opus 5.5 · studio-mac</span></span><kbd>↩</kbd></button>
+              <button class="ans"><span class="btn">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+              <button class="ans"><span class="btn btn--quiet">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd>D</kbd></button>
+            </div>
+            <div class="offer-note"><i data-face="Triage" data-pose="idle" data-size="20"></i>I can also draft a reply to the 3 customers once the fix ships.<span class="spacer"></span><button class="btn btn--quiet btn--sm">Yes, after the fix</button></div>
+          </div>
+        </article>
+
+        <aside class="rail">
+          <h2 class="section-h">How it came in</h2>
+          <ol class="hist">
+            <li><span class="pin"><i data-brand="github" data-size="12"></i></span><span><b>Deploy #1289 to production</b><time>yesterday 14:02</time></span></li>
+            <li><span class="pin"><i data-brand="posthog" data-size="12"></i></span><span><b>EU checkout conversion drops</b><time>yesterday 14:10</time></span></li>
+            <li><span class="pin"><i data-brand="gmail" data-size="12"></i></span><span><b>3 customers email about declined cards</b><time>yesterday 16:40 to 21:15</time></span></li>
+            <li><span class="pin"><i data-brand="sentry" data-size="12"></i></span><span><b>Sentry issue passes 400 events</b><time>08:52</time></span></li>
+            <li><span class="pin"><i data-face="Triage" data-pose="idle" data-size="24"></i></span><span><b>Triage joins the 4 into one Proposal</b><time>09:00 · urgent</time></span></li>
+            <li><span class="pin"><i data-face="Ada" data-pose="idle" data-size="24"></i></span><span><b>Ada tells you in Slack</b><time>09:00 · "One urgent thing…"</time></span></li>
+            <li class="is-you"><span class="pin"><i data-i="hand" data-size="12"></i></span><span><b>Waiting on your answer</b><time>since 09:00 · 41m</time></span></li>
+          </ol>
+
+          <div class="hair"></div>
+          <h2 class="section-h">Answer it anywhere</h2>
+          <div class="watch">
+            <div><i data-brand="slack" data-size="14"></i>Under Ada's message in your Slack DM</div>
+            <div><i data-i="bell" data-size="14"></i>On the push on your iPhone</div>
+            <div><i data-i="check" data-size="14"></i>The first answer counts; the others update</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

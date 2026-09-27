@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>At a glance · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <!-- The Mac desktop, with Hercule in the background: the menu bar extra, the quick panel,
+         notifications and the Dock. The wallpaper is one quiet color, so the glass has nothing
+         loud to show through. -->
+    <div class="desk">
+      <!-- The menu bar. The frontmost app is Terminal; Hercule lives in the extras on the right. -->
+      <header class="menubar">
+        <span class="mb-apple" aria-hidden="true"></span>
+        <b>Terminal</b><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
+        <span class="grow"></span>
+        <button class="mb-extra is-open" aria-label="Hercule: 3 waiting on you" aria-expanded="true"><span data-logo="15"></span><b>3</b></button>
+        <span class="mb-sys" aria-hidden="true">
+          <svg viewBox="0 0 18 14" width="18" height="14"><path d="M5 12.5h8.3a3.2 3.2 0 0 0 .5-6.4A4.6 4.6 0 0 0 5 5.2a3.7 3.7 0 0 0 0 7.3z" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+          <svg viewBox="0 0 18 14" width="18" height="14"><path d="M2 5h3l4-3.3v10.6L5 9H2z" fill="currentColor" /><path d="M11.5 4.3a3.7 3.7 0 0 1 0 5.4M13.6 2.2a6.6 6.6 0 0 1 0 9.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+          <svg viewBox="0 0 16 12" width="16" height="12"><path d="M8 11.3 5.6 8.8a3.4 3.4 0 0 1 4.8 0zM3.3 6.6a6.6 6.6 0 0 1 9.4 0l-1.2 1.2a4.9 4.9 0 0 0-7 0zM1 4.3a9.9 9.9 0 0 1 14 0l-1.2 1.2a8.2 8.2 0 0 0-11.6 0z" fill="currentColor" /></svg>
+          <svg viewBox="0 0 27 13" width="25" height="12"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".45" /><rect x="2" y="2" width="15" height="9" rx="2.4" fill="currentColor" /><path d="M25 4.5v4c.8-.3 1.4-1.1 1.4-2s-.6-1.7-1.4-2z" fill="currentColor" opacity=".5" /></svg>
+          <svg viewBox="0 0 16 16" width="15" height="15"><circle cx="6.8" cy="6.8" r="4.8" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="m10.4 10.4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+          <svg viewBox="0 0 16 16" width="15" height="15"><rect x="1.5" y="3" width="13" height="4" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" /><rect x="1.5" y="9" width="13" height="4" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" /><circle cx="11.5" cy="5" r="1.2" fill="currentColor" /><circle cx="4.5" cy="11" r="1.2" fill="currentColor" /></svg>
+        </span>
+        <span class="mb-clock">Tue 29 Sep&nbsp;&nbsp;09:41</span>
+      </header>
+
+      <!-- Another app: the terminal where Rogier ran the tests himself. -->
+      <section class="other-app" aria-label="Terminal">
+        <div class="oa-bar"><div class="traffic"><i></i><i></i><i></i></div><span>webshop · zsh · 96x24</span></div>
+        <pre class="oa-body">
+<span class="faint">~/code/webshop</span> <span class="oa-br">fix/3ds-eu-cards</span> $ pnpm test checkout
+
+ <span class="ok">✓</span> src/checkout/payment.test.ts <span class="faint">(19 tests) 412ms</span>
+ <span class="ok">✓</span> src/checkout/cart.test.ts <span class="faint">(5 tests) 88ms</span>
+
+ <span class="faint">Test Files</span>  <span class="ok">2 passed</span> (2)
+      <span class="faint">Tests</span>  <span class="ok">24 passed</span> (24)
+   <span class="faint">Duration</span>  1.94s
+
+<span class="faint">~/code/webshop</span> <span class="oa-br">fix/3ds-eu-cards</span> $ <i class="oa-cursor"></i></pre>
+      </section>
+
+      <!-- The quick panel, opened with the global hotkey: answer the oldest question from any app,
+           without switching to Hercule. -->
+      <section class="qp glass" role="dialog" aria-label="Quick answer">
+        <div class="qp-field">
+          <i data-i="search"></i>
+          <span class="qp-ph">Answer, steer or jump to a Thread</span>
+          <kbd>&#8997;Space</kbd>
+        </div>
+        <div class="qp-item">
+          <div class="qp-head">
+            <i data-mk="wait"></i>
+            <div class="grow">
+              <div class="qp-title">Fix 3-D Secure checkout for EU cards</div>
+              <div class="qp-sub"><span class="attn">waiting on you</span> · webshop · studio-mac · Opus 5.5</div>
+            </div>
+            <span class="qp-when">09:40</span>
+          </div>
+          <div class="qp-ask">
+            <p class="prose">Run this command?</p>
+            <code>git push -u origin fix/3ds-eu-cards</code>
+          </div>
+          <div class="answers" role="group" aria-label="Answers">
+            <div class="ans"><button class="btn btn--primary">Allow once</button><span class="desc">Pushes now, and asks again next time</span><kbd>&#9166;</kbd></div>
+            <div class="ans"><button class="btn">Always allow git push</button><span class="desc">Adds a Grant to this Thread</span><kbd>2</kbd></div>
+            <div class="ans"><button class="btn btn--quiet">Deny</button><span class="desc">Keeps the branch local</span><kbd>3</kbd></div>
+          </div>
+        </div>
+        <div class="qp-next">
+          <span class="faint">2 more waiting</span>
+          <span class="qp-chip"><i data-mk="wait"></i>Ship release v2.15</span>
+          <span class="qp-chip"><i data-mk="wait"></i>Migrate ops dashboards</span>
+          <span class="grow"></span>
+          <kbd>tab</kbd>
+        </div>
+        <div class="qp-foot">
+          <span data-flow="mini"></span>
+          <span class="grow"></span>
+          <span class="faint">Next triage 11:00</span>
+        </div>
+      </section>
+
+      <!-- The menu bar extra's menu: what waits on Rogier, what runs, and the departures board. -->
+      <section class="mx glass" aria-label="Hercule menu">
+        <div class="mx-head">
+          <b>Waiting on you</b><span class="attn mx-n">3</span>
+          <span class="grow"></span>
+          <span class="mx-pulse"><i data-mk="work"></i>8 working</span>
+        </div>
+        <div class="mx-row mx-row--open">
+          <i data-mk="wait"></i>
+          <div class="grow">
+            <div class="mx-title">Fix 3-D Secure checkout</div>
+            <div class="mx-sub prose">Run this command?</div>
+            <code class="mx-ask">git push -u origin fix/3ds-eu-cards</code>
+            <div class="mx-acts"><button class="btn btn--primary btn--sm">Allow once</button><button class="btn btn--quiet btn--sm">Deny</button></div>
+          </div>
+          <span class="mx-t">09:40</span>
+        </div>
+        <div class="mx-row">
+          <i data-mk="wait"></i>
+          <div class="grow">
+            <div class="mx-title">Ship release v2.15</div>
+            <div class="mx-sub prose">Publish payments-api 2.15.0 to npm?</div>
+          </div>
+          <span class="mx-t">09:31</span>
+        </div>
+        <div class="mx-row">
+          <i data-mk="wait"></i>
+          <div class="grow">
+            <div class="mx-title">Migrate ops dashboards</div>
+            <div class="mx-sub prose">Keep the old Grafana folder?</div>
+          </div>
+          <span class="mx-t">09:24</span>
+        </div>
+
+        <div class="mx-sec">Intake<span class="faint">Triage at 09:00, next at 11:00</span></div>
+        <div class="mx-board" data-flow="compact"></div>
+        <div class="mx-lead">
+          <span class="burn"><i data-mk="wait"></i>Burning</span>
+          <span class="grow ellipsis">Checkout fails for EU cards</span>
+          <button class="btn btn--sm">Open</button>
+        </div>
+
+        <div class="mx-sec">Working<span class="faint">8</span></div>
+        <div class="mx-run"><i data-mk="work"></i><span class="grow ellipsis">Refactor cart totals</span><span class="mx-plat">build-box-1</span><span class="mx-el">22m</span></div>
+        <div class="mx-run"><i data-mk="work"></i><span class="grow ellipsis">Payout report for September</span><span class="mx-plat">build-box-1</span><span class="mx-el">9m</span></div>
+        <div class="mx-run"><i data-mk="work"></i><span class="grow ellipsis">Rotate staging secrets</span><span class="mx-plat">build-box-1</span><span class="mx-el">3m</span></div>
+        <div class="mx-more">Ada and 4 more · 1 paused · 4 idle</div>
+
+        <div class="mx-foot">
+          <button>Open Hercule<kbd>&#8984;O</kbd></button>
+          <button>Quick answer<kbd>&#8997;Space</kbd></button>
+          <button>Pause notifications for an hour</button>
+        </div>
+      </section>
+
+      <!-- Notifications, with the answers as the notification's own buttons. -->
+      <div class="notes">
+        <article class="nt glass">
+          <span data-appicon="38"></span>
+          <div class="nt-body">
+            <div class="nt-app">Hercule<span>now</span></div>
+            <b>Fix 3-D Secure checkout</b>
+            <p>Run this command?<code>git push -u origin fix/3ds-eu-cards</code></p>
+          </div>
+          <div class="nt-acts"><button>Allow once</button><button>Deny</button></div>
+        </article>
+        <article class="nt glass">
+          <span data-appicon="38"></span>
+          <div class="nt-body">
+            <div class="nt-app">Hercule<span>17m ago</span></div>
+            <b>Migrate ops dashboards</b>
+            <p>Keep the old Grafana folder?</p>
+          </div>
+          <div class="nt-acts"><button>Keep</button><button class="destroy">Delete</button></div>
+        </article>
+        <article class="nt nt--stack glass">
+          <span data-appicon="38"></span>
+          <div class="nt-body">
+            <div class="nt-app">Ada<span>09:00</span></div>
+            <p>Morning Rogier. One urgent thing: EU card payments that need 3-D Secure have failed since yesterday's deploy.</p>
+          </div>
+          <div class="nt-acts nt-acts--one"><button>Reply</button></div>
+        </article>
+        <div class="nt-more glass">2 more from Hercule</div>
+      </div>
+
+      <!-- The Dock. Hercule's badge counts only what waits on Rogier. -->
+      <nav class="dockbar glass" aria-label="Dock">
+        <span class="app app--files" aria-label="Files"><i></i></span>
+        <span class="app app--web" aria-label="Browser"><i></i></span>
+        <span class="app app--mail" aria-label="Mail"><i></i></span>
+        <span class="app app--cal" aria-label="Calendar"><b>29</b><small>TUE</small></span>
+        <span class="app app--term is-running" aria-label="Terminal"><i>&gt;_</i></span>
+        <span class="app app--hercule is-running" aria-label="Hercule, 3 waiting on you"><span data-appicon="52"></span><em>3</em></span>
+      </nav>
+    </div>
+  </body>
+</html>

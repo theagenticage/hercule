@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Check-in · Ada · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="checkin" data-web></aside>
+
+      <main class="main">
+        <div class="asst">
+          <div class="asst-main" data-glass-host>
+            <div class="transcript" data-glass data-scrolled-by="300" style="--turns-end: 150px">
+              <div class="col turns">
+                <div class="stamp-line">Yesterday</div>
+                <!-- A notice is Hercule speaking, not Ada, so it sits centred and carries no avatar. -->
+                <div class="notice">
+                  <i data-mk="fail"></i><span>Ada's turn failed: the provider timed out after 120s. Your message was kept.</span><span class="faint">22:14</span>
+                </div>
+
+                <div class="stamp-line">Today</div>
+                <button class="worked"><span><b>2 quiet check-ins</b></span><span class="faint">07:00 · 08:00 · nothing to report</span><i data-i="chev-r" class="faint"></i></button>
+
+                <div class="msg-from"><span class="avatar avatar--asst">A</span><b>Ada</b><span class="faint">09:00 · check-in</span></div>
+                <section class="checkin card-flow" aria-label="Check-in at 09:00">
+                  <div class="checkin-head"><b>Overnight</b><span class="faint">Triage at 09:00 read everything since 18:20</span></div>
+                  <div data-flow="compact"></div>
+                </section>
+                <div class="msg-agent">
+                  <p>
+                    Morning Rogier. One thing is burning: EU card payments that need 3-D Secure have failed since yesterday's deploy. You started a fix
+                    at 09:02 and it is waiting on your OK to push. Marta at Brightline wants her invoice in the company name; I can draft that reply.
+                  </p>
+                  <div class="refs">
+                    <a class="ref" href="session-active.html"><i data-mk="wait"></i>Fix 3-D Secure checkout<span class="attn">waiting on you</span></a>
+                    <a class="ref" href="intake.html"><i data-brand="gmail" style="color: var(--ln-gmail)"></i>Reply to Marta<span class="faint">Offer</span></a>
+                  </div>
+                </div>
+
+                <div class="msg-user">Remind me Friday to renew the SSL cert for ops.</div>
+                <div class="msg-time">09:20</div>
+
+                <div class="msg-from"><span class="avatar avatar--asst">A</span><b>Ada</b><span class="faint">09:20</span></div>
+                <!-- In the browser the reply is the reminder alone, so the 800px window still shows the whole
+                     overnight board above it. -->
+                <div class="msg-agent">
+                  <div class="reminder card-flow">
+                    <i data-i="alarm"></i><b>Fri 2 Oct · 09:00</b><span>Renew the SSL cert for ops</span><span class="faint">in Web chat</span>
+                    <button class="btn btn--quiet btn--sm">Edit</button>
+                  </div>
+                </div>
+
+                <div class="msg-user">What's the status of the backup job?</div>
+                <div class="msg-time">09:38</div>
+
+                <div class="msg-from"><span class="avatar avatar--asst">A</span><b>Ada</b><span class="live">writing</span></div>
+                <div class="msg-agent">
+                  <p>
+                    Milo started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night
+                    since the <code>events</code> table passed 40 GB<span class="caret"></span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="composer">
+                <div class="reply">
+                  <div class="when-full">
+                    <div class="ta"><span class="ph">Message Ada…</span></div>
+                    <div class="reply-row">
+                      <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+                      <span class="grow"></span>
+                      <button class="icon-btn" aria-label="Dictate"><i data-i="mic"></i></button>
+                      <button class="stop"><i></i>Stop</button>
+                      <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+                    </div>
+                  </div>
+                  <div class="reply-mini when-shrunk">
+                    <span class="grow">Message Ada…</span>
+                    <button class="send send--off" aria-label="Send"><i data-i="send"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div class="lip when-full">
+                <i data-brand="webchat"></i><span>Web chat</span><span class="dot-sep">Ada replies when her turn ends</span>
+                <span class="right">Slack DM shares this Conversation</span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rail asst-rail">
+            <section>
+              <h3>Check-ins<span class="aside">hourly, 07:00 to 23:00</span></h3>
+              <div class="tt">
+                <b>07:00</b><span class="faint">quiet</span>
+                <b>08:00</b><span class="faint">quiet</span>
+                <b>09:00</b><span>spoke · 1 burning, 1 Offer</span>
+                <b class="muted">10:00</b><span class="muted">next</span>
+              </div>
+            </section>
+            <section>
+              <h3>Reminders<span class="aside">3</span></h3>
+              <div class="rm-row"><b>Call the accountant</b><span>Thu 1 Oct · 16:00</span></div>
+              <div class="rm-row"><b>Renew the SSL cert for ops</b><span>Fri 2 Oct · 09:00 · set today</span></div>
+              <div class="rm-row"><b>Weekly revenue summary</b><span>Mondays · 08:30</span></div>
+            </section>
+            <section>
+              <h3>Memory<span class="aside">24 topics</span></h3>
+              <div class="mem">
+                <span>Core note</span><span class="faint">1,284 of 4,000 characters</span>
+                <span class="mem-bar"><i style="width: 32%"></i></span>
+              </div>
+              <div class="mem-used"><span class="faint">Read this turn</span><span class="chip">ops</span><span class="chip">work-style</span></div>
+            </section>
+            <section>
+              <h3>Reaches you on</h3>
+              <div class="reach">
+                <i data-brand="webchat"></i><span>Web chat</span><span class="faint">always</span>
+                <i data-brand="slack" style="color: var(--ln-slack)"></i><span>Slack DM</span><span class="faint">acme-hq</span>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Check-in</h1>
+          <div class="th-tabs" role="tablist" aria-label="Assistants">
+            <button class="th-tab" role="tab" aria-selected="true"><i data-mk="work"></i><span>Ada</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><i data-mk="idle"></i><span>Milo</span></button>
+            <button class="th-tab" role="tab" aria-selected="false"><i data-mk="idle"></i><span>Juno</span></button>
+          </div>
+          <div class="actions">
+            <span class="chrome-note"><i data-i="clock"></i>Next check-in 10:00</span>
+            <a class="icon-btn" href="../desktop/settings-assistants.html" aria-label="Ada's settings"><i data-i="sliders"></i></a>
+            <button class="icon-btn" aria-label="More"><i data-i="more"></i></button>
+          </div>
+        </header>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,2037 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Metro · a design system for Hercule</title>
+    <link rel="icon" href="favicon.svg" />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="metro.js" defer></script>
+    <script src="../shared/book.js" defer></script>
+    <style>
+      /* The book. It is styled in Metro's own tokens and is itself one line: the ink trunk runs down
+         the left margin and every section is a numbered station on it. */
+      html,
+      body {
+        height: auto;
+        overflow: auto;
+      }
+      body {
+        background: var(--surface);
+        scrollbar-color: var(--line) transparent;
+      }
+      .f {
+        --f-chrome: color-mix(in oklch, var(--ink) 7%, var(--surface));
+        --f-chrome-ink: var(--muted);
+        --f-shadow: var(--shadow-2);
+      }
+      .f-caption {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .f-caption small {
+        font-weight: var(--w-regular);
+        color: var(--muted);
+        opacity: 1;
+      }
+
+      /* ---------------------------------------------------------------- top bar */
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 32px;
+        background: var(--glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .topbar .name {
+        font-weight: var(--w-bold);
+        font-size: var(--t-l);
+        letter-spacing: -0.01em;
+      }
+      .topbar .sub {
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+      .topbar nav {
+        margin-left: auto;
+        display: flex;
+        gap: 2px;
+        font-size: var(--t-s);
+      }
+      .topbar nav a {
+        text-decoration: none;
+        color: var(--muted);
+        padding: 6px 8px;
+        border-radius: var(--r-control);
+      }
+      .topbar nav a:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .switch {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        margin-left: 10px;
+        border-radius: 11px;
+        background: var(--hover);
+      }
+      .switch button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 11px 0 8px;
+        border-radius: 8px;
+        font-size: var(--t-s);
+        font-weight: var(--w-medium);
+        color: var(--muted);
+      }
+      .switch button[aria-pressed="true"] {
+        background: var(--raised);
+        color: var(--ink);
+        box-shadow: var(--shadow-1);
+      }
+      .swatch-chip {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line);
+        position: relative;
+        overflow: hidden;
+        flex: none;
+      }
+      .swatch-chip::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        background: var(--accent);
+      }
+
+      /* ---------------------------------------------------------------- the book's line */
+      .book {
+        position: relative;
+        max-width: 1264px;
+        margin: 0 auto;
+        padding: 0 56px 120px 128px;
+      }
+      .book::before {
+        content: "";
+        position: absolute;
+        left: 62px;
+        width: 4px;
+        top: 186px;
+        bottom: 150px;
+        border-radius: 2px;
+        background: var(--trunk);
+      }
+      .book::after {
+        content: "";
+        position: absolute;
+        left: 52px;
+        bottom: 138px;
+        width: 24px;
+        height: 12px;
+        border-radius: 6px;
+        background: var(--trunk);
+      }
+      .sec {
+        padding-top: 104px;
+      }
+      .sec-h {
+        position: relative;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 28px;
+      }
+      .sec-h .no {
+        position: absolute;
+        left: -79px;
+        top: -4px;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 4px var(--trunk);
+        font: var(--w-bold) 12px/1 var(--mono);
+        color: var(--ink);
+      }
+      .sec-h h2 {
+        font-size: var(--t-xl);
+      }
+      .sec-h .lede {
+        color: var(--muted);
+        font-size: var(--t-m);
+      }
+      .sec h3 {
+        font-size: var(--t-base);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .sec h3 .aside {
+        font-weight: var(--w-regular);
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+      .sign {
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        letter-spacing: var(--track-sign);
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .prose {
+        font-size: var(--t-base);
+        line-height: 1.6;
+        color: var(--muted);
+        max-width: 62ch;
+      }
+      .prose b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .prose p + p {
+        margin-top: 12px;
+      }
+      .block {
+        margin-top: 64px;
+      }
+
+      /* ---------------------------------------------------------------- hero */
+      .hero {
+        position: relative;
+        padding-top: 88px;
+      }
+      .hero-merge {
+        position: absolute;
+        left: -128px;
+        top: 0;
+      }
+      .hero-id {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .hero-id h1 {
+        font-size: 34px;
+        letter-spacing: -0.025em;
+        line-height: 1;
+      }
+      .hero-id .thesis {
+        font-size: var(--t-xl);
+        font-weight: var(--w-medium);
+        color: var(--muted);
+        letter-spacing: -0.01em;
+        margin-top: 6px;
+      }
+      .hero-body {
+        display: grid;
+        grid-template-columns: 330px 1fr;
+        gap: 56px;
+        margin-top: 44px;
+        align-items: start;
+      }
+      .hero-map {
+        margin-top: -6px;
+      }
+      .hero-map figcaption {
+        margin-top: 10px;
+        font-size: var(--t-s);
+        color: var(--faint);
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      /* ---------------------------------------------------------------- why this one */
+      .why {
+        display: grid;
+        grid-template-columns: 1fr 580px;
+        gap: 64px;
+        align-items: start;
+      }
+      .why .ledger {
+        margin: 0;
+      }
+      .why-cap {
+        margin-top: 12px;
+        font-size: var(--t-s);
+        color: var(--faint);
+      }
+      .trade {
+        margin-top: 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: var(--t-m);
+      }
+      .trade li {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+      }
+      .trade li .mk {
+        vertical-align: 0;
+        position: relative;
+        top: 1px;
+      }
+
+      /* ---------------------------------------------------------------- before / after */
+      .ba {
+        display: grid;
+        grid-template-columns: 400px 1fr;
+        gap: 36px;
+        align-items: start;
+      }
+      .ba + .ba {
+        margin-top: 64px;
+        padding-top: 48px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .ba--phone {
+        grid-template-columns: 400px 260px 260px;
+        justify-content: space-between;
+      }
+      .before {
+        position: relative;
+        margin: 0;
+      }
+      .before img {
+        display: block;
+        width: 100%;
+        border-radius: 8px;
+        box-shadow: var(--shadow-1);
+        filter: saturate(0.9);
+      }
+      .before .ring {
+        position: absolute;
+        border-radius: 6px;
+        box-shadow:
+          0 0 0 2px var(--attn),
+          0 0 0 6px var(--attn-soft);
+      }
+      .ba-text {
+        margin-top: 18px;
+      }
+      .ba-text .pains {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .ba-text h3 {
+        margin-bottom: 8px;
+      }
+      .ba-text dl {
+        margin: 14px 0 0;
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        row-gap: 8px;
+        font-size: var(--t-m);
+      }
+      .ba-text dt {
+        font-weight: var(--w-bold);
+      }
+      .ba-text dd {
+        margin: 0;
+        color: var(--muted);
+      }
+      .ba-text .today {
+        font-size: var(--t-m);
+        color: var(--faint);
+        margin-top: 10px;
+      }
+      .ba-after .f-caption {
+        display: none;
+      }
+      .pain {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 8px;
+        border-radius: 5px;
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        color: var(--muted);
+        box-shadow: inset 0 0 0 1px var(--line);
+        white-space: nowrap;
+      }
+
+      /* ---------------------------------------------------------------- the system */
+      .doctrine {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 64px;
+        row-gap: 44px;
+      }
+      .rule-h {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .rule-h b {
+        font-size: var(--t-base);
+      }
+      .rule-h .n {
+        font: var(--w-bold) 11px var(--mono);
+        color: var(--faint);
+      }
+      .rule-p {
+        font-size: var(--t-s);
+        color: var(--muted);
+        margin-top: 12px;
+        max-width: 52ch;
+      }
+      .hues {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        column-gap: 28px;
+        row-gap: 9px;
+      }
+      .hue {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: var(--t-s);
+        font-weight: var(--w-medium);
+      }
+      .hue .brand {
+        color: var(--ink);
+      }
+      .hue .hue-line {
+        width: 64px;
+        height: var(--line-w-map);
+        border-radius: 3px;
+        background: var(--c);
+        flex: none;
+      }
+      .hue .tok {
+        margin-left: auto;
+        font: 10.5px var(--mono);
+        color: var(--faint);
+      }
+      .states {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        row-gap: 10px;
+        column-gap: 16px;
+        font-size: var(--t-s);
+      }
+      .states span {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: var(--w-medium);
+      }
+      .states .mk {
+        width: 16px;
+        height: 16px;
+      }
+      .zones {
+        display: flex;
+        gap: 10px;
+      }
+      .zone {
+        flex: 1;
+        height: 76px;
+        border-radius: var(--r-card);
+        padding: 10px 12px;
+        font-size: var(--t-s);
+        font-weight: var(--w-bold);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .zone small {
+        font-weight: var(--w-regular);
+        color: var(--muted);
+        font-size: var(--t-xs);
+      }
+
+      .theme-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .theme-tile {
+        text-align: left;
+        min-width: 0;
+        border-radius: 14px;
+        background: var(--bg);
+        color: var(--ink);
+        padding: 14px 14px 12px;
+        box-shadow:
+          inset 0 0 0 1px var(--line),
+          var(--shadow-1);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        transition: box-shadow var(--t-fast) var(--ease);
+      }
+      .theme-tile[aria-pressed="true"] {
+        box-shadow:
+          0 0 0 2px var(--surface),
+          0 0 0 4px var(--focus),
+          var(--shadow-2);
+      }
+      .theme-tile .tn {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        font-weight: var(--w-bold);
+        font-size: var(--t-m);
+      }
+      .theme-tile .tn small {
+        font-weight: var(--w-regular);
+        color: var(--faint);
+        font-size: var(--t-xs);
+      }
+      .theme-tile .canvas {
+        border-radius: 9px;
+        background: var(--surface);
+        padding: 10px 10px 8px;
+      }
+      .theme-tile .trow {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 11.5px;
+        margin-top: 6px;
+      }
+      .theme-tile .trow b {
+        font-weight: var(--w-medium);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+      }
+      .theme-tile .trow span {
+        font-size: 10.5px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+      }
+      .theme-tile .sw {
+        display: flex;
+        gap: 4px;
+      }
+      .theme-tile .sw i {
+        flex: 1;
+        height: 12px;
+        border-radius: 3px;
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .theme-tile .role {
+        font-size: var(--t-xs);
+        color: var(--muted);
+      }
+
+      .type {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 56px;
+      }
+      .specimen {
+        font-size: 64px;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .specimen-mono {
+        font-family: var(--mono);
+        font-size: 30px;
+        margin-top: 14px;
+        letter-spacing: -0.02em;
+      }
+      .fam {
+        margin-top: 16px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .scale {
+        display: flex;
+        flex-direction: column;
+      }
+      .scale div {
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        align-items: baseline;
+        gap: 16px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .scale div:last-child {
+        border-bottom: 0;
+      }
+      .scale code {
+        color: var(--faint);
+        font-size: 10.5px;
+      }
+      .numerals {
+        margin-top: 18px;
+        font-size: var(--t-l);
+        color: var(--muted);
+        display: flex;
+        gap: 14px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .numerals b {
+        font-size: 21px;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        margin-right: 4px;
+      }
+      .numerals b.attn,
+      .numerals b.fail {
+        color: inherit;
+      }
+
+      .depth {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.25fr;
+        gap: 48px;
+        align-items: start;
+      }
+      .radii {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+      }
+      .radii div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font: 10.5px var(--mono);
+        color: var(--faint);
+      }
+      .radii i {
+        display: block;
+        width: 52px;
+        height: 52px;
+        box-shadow: inset 0 0 0 2px var(--ink);
+      }
+      .shadows {
+        display: flex;
+        gap: 14px;
+      }
+      .shadows div {
+        flex: 1;
+        height: 64px;
+        border-radius: var(--r-card);
+        background: var(--raised);
+        display: grid;
+        place-items: center;
+        font: 10.5px var(--mono);
+        color: var(--faint);
+      }
+      .glass-demo {
+        position: relative;
+        height: 128px;
+        border-radius: var(--r-card);
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .glass-demo > svg {
+        position: absolute;
+        inset: 0;
+      }
+      .glass-demo .pane {
+        position: absolute;
+        left: 22px;
+        right: 22px;
+        bottom: 16px;
+        height: 46px;
+        border-radius: 23px;
+        background: var(--glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+        box-shadow:
+          inset 0 0 0 1px var(--glass-edge),
+          var(--shadow-2);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 8px 0 18px;
+        font-size: var(--t-m);
+        color: var(--faint);
+      }
+      .glass-demo .pane .glass-send {
+        margin-left: auto;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--accent-ink);
+        display: grid;
+        place-items: center;
+      }
+      .cap {
+        margin-top: 10px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .cap b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+
+      .motion {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 40px;
+      }
+      .stage {
+        position: relative;
+        height: 96px;
+        border-radius: var(--r-card);
+        background: var(--bg);
+        overflow: hidden;
+      }
+      .stage > svg {
+        position: absolute;
+        inset: 0;
+      }
+      .train {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--surface);
+        box-shadow: 0 0 0 2.5px var(--c);
+        offset-rotate: 0deg;
+        animation: ride var(--train-period) linear infinite;
+      }
+      @keyframes ride {
+        from {
+          offset-distance: 0%;
+          opacity: 0;
+        }
+        8% {
+          opacity: 1;
+        }
+        88% {
+          opacity: 1;
+        }
+        to {
+          offset-distance: 100%;
+          opacity: 0;
+        }
+      }
+      .points-a {
+        animation: points-on 4.2s var(--ease) infinite;
+      }
+      .points-b,
+      .points-c {
+        animation: points-off 4.2s var(--ease) infinite;
+      }
+      @keyframes points-on {
+        0%,
+        35% {
+          stroke: var(--faint);
+          stroke-width: 2px;
+          stroke-dasharray: 4 5;
+        }
+        45%,
+        92% {
+          stroke: var(--trunk);
+          stroke-width: 3.5px;
+          stroke-dasharray: none;
+        }
+        100% {
+          stroke: var(--faint);
+          stroke-width: 2px;
+          stroke-dasharray: 4 5;
+        }
+      }
+      @keyframes points-off {
+        0%,
+        35% {
+          opacity: 1;
+        }
+        45%,
+        92% {
+          opacity: 0.25;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      .points-pick {
+        animation: pick 4.2s var(--ease) infinite;
+      }
+      @keyframes pick {
+        0%,
+        35% {
+          fill: var(--casing);
+        }
+        45%,
+        92% {
+          fill: var(--trunk);
+        }
+        100% {
+          fill: var(--casing);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .train,
+        .points-a,
+        .points-b,
+        .points-c,
+        .points-pick {
+          animation: none;
+        }
+        .train {
+          offset-distance: 60%;
+        }
+      }
+      .timing {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .timing b {
+        display: block;
+        font: var(--w-bold) 13px var(--mono);
+        color: var(--ink);
+        margin-bottom: 2px;
+      }
+
+      .marks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 56px;
+      }
+      .mark-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        row-gap: 18px;
+        column-gap: 10px;
+      }
+      .mark-grid div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-s);
+      }
+      .mark-grid .mk {
+        width: 24px;
+        height: 24px;
+      }
+      .icon-grid {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        row-gap: 18px;
+        color: var(--ink);
+      }
+      .icon-grid .icon {
+        width: 20px;
+        height: 20px;
+      }
+      .brand-row {
+        display: flex;
+        gap: 22px;
+        margin-top: 26px;
+        color: var(--ink);
+        align-items: center;
+      }
+      .brand-row .brand {
+        width: 20px;
+        height: 20px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 56px;
+        align-items: start;
+      }
+      .schematic {
+        display: grid;
+        grid-template-columns: 132px 1fr 196px;
+        height: 200px;
+        border-radius: var(--r-card);
+        overflow: hidden;
+        box-shadow:
+          inset 0 0 0 1px var(--line),
+          var(--shadow-1);
+        font: 10.5px var(--mono);
+        color: var(--faint);
+      }
+      .schematic > div {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .schematic .s-side {
+        background: var(--bg);
+      }
+      .schematic .s-main {
+        background: var(--surface);
+      }
+      .schematic .s-rail {
+        background: color-mix(in oklch, var(--bg) 55%, var(--surface));
+        border-left: 1px solid var(--line-soft);
+      }
+      .schematic i {
+        display: block;
+        height: 7px;
+        border-radius: 4px;
+        background: var(--line);
+      }
+      .schematic .w {
+        font-weight: var(--w-bold);
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .anatomy {
+        position: relative;
+        border-radius: var(--r-card);
+        padding: 0;
+      }
+      .anatomy .irow {
+        border-radius: 10px;
+        background: var(--raised);
+        box-shadow: var(--shadow-1);
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+      .anatomy-key {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 16px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .anatomy-key b {
+        display: block;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        font-size: var(--t-s);
+      }
+      .density {
+        display: flex;
+        gap: 28px;
+        margin-top: 26px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .density b {
+        font: var(--w-bold) 13px var(--mono);
+        color: var(--ink);
+        display: block;
+      }
+
+      .grow-row {
+        display: grid;
+        grid-template-columns: 132px 28px 400px 28px 1fr;
+        align-items: center;
+        gap: 0;
+      }
+      .grow-row .arrow {
+        color: var(--faint);
+        justify-self: center;
+      }
+      .grow-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .grow-cell .sign {
+        margin-top: 4px;
+      }
+      .strips {
+        margin-top: 44px;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 16px;
+      }
+      .strips div {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .strips div b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+
+      .identity {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 48px;
+        align-items: start;
+      }
+      .logos {
+        display: flex;
+        align-items: flex-end;
+        gap: 22px;
+      }
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 30px;
+        font-weight: var(--w-bold);
+        font-size: 26px;
+        letter-spacing: -0.02em;
+      }
+      .wordmark--dark {
+        margin-top: 14px;
+        padding: 12px 16px;
+        border-radius: var(--r-card);
+        background: var(--bg);
+        width: max-content;
+      }
+      .icons-app {
+        display: flex;
+        align-items: flex-end;
+        gap: 18px;
+      }
+      .favs {
+        display: flex;
+        gap: 28px;
+        align-items: center;
+      }
+      .favs div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-s);
+        color: var(--muted);
+      }
+      .favs img {
+        width: 48px;
+        height: 48px;
+      }
+
+      /* ---------------------------------------------------------------- screens */
+      .group {
+        margin-top: 12px;
+      }
+      .group + .group {
+        margin-top: 72px;
+      }
+      .group-h {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .group-h b {
+        font-size: var(--t-l);
+      }
+      .group-h span {
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 36px;
+        row-gap: 44px;
+      }
+      .grid-1 {
+        margin-bottom: 44px;
+      }
+      .grid-m {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        column-gap: 24px;
+        row-gap: 44px;
+      }
+      .tabs-demo {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 36px;
+        margin-bottom: 44px;
+      }
+      .tabstrip {
+        display: flex;
+        gap: 2px;
+        padding: 8px 8px 0;
+        border-radius: 10px 10px 0 0;
+        background: color-mix(in oklch, var(--ink) 7%, var(--surface));
+        font: 12px/1 -apple-system, system-ui, sans-serif;
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 8px 8px 0 0;
+        color: var(--muted);
+        min-width: 0;
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .tab img,
+      .tab .brand {
+        width: 16px;
+        height: 16px;
+        flex: none;
+      }
+      .tab.on {
+        background: var(--surface);
+        color: var(--ink);
+      }
+      .tab span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tabs-demo .cap {
+        margin-top: 12px;
+      }
+
+      /* ---------------------------------------------------------------- office and 10x */
+      .b-notes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 32px;
+        margin-top: 32px;
+      }
+      .b-notes div {
+        font-size: var(--t-m);
+        color: var(--muted);
+      }
+      .b-notes b {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        margin-bottom: 4px;
+      }
+      .tenx {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 28px;
+        margin-bottom: 40px;
+      }
+      .tenx div {
+        font-size: var(--t-m);
+        color: var(--muted);
+      }
+      .tenx .big {
+        display: block;
+        font-size: 26px;
+        font-weight: var(--w-bold);
+        color: var(--ink);
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 6px;
+      }
+      .tenx .big small {
+        font-size: var(--t-m);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+        letter-spacing: 0;
+      }
+
+      /* ---------------------------------------------------------------- adopting */
+      table.map {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--t-s);
+      }
+      table.map th {
+        text-align: left;
+        font-size: var(--t-2xs);
+        font-weight: var(--w-bold);
+        letter-spacing: var(--track-sign);
+        text-transform: uppercase;
+        color: var(--faint);
+        padding: 0 12px 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      table.map td {
+        padding: 9px 12px 9px 0;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: middle;
+      }
+      table.map td:first-child,
+      table.map td:nth-child(3) {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+      table.map td:last-child {
+        color: var(--muted);
+      }
+      .swatch-pair {
+        display: inline-flex;
+        gap: 3px;
+        vertical-align: middle;
+      }
+      .swatch-pair i {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        box-shadow: inset 0 0 0 1px oklch(50% 0 0 / 0.18);
+      }
+      .swatch-pair.theme-scope {
+        background: none;
+      }
+      .changes {
+        margin-top: 56px;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 22px;
+        counter-reset: ch;
+      }
+      .changes li {
+        font-size: var(--t-s);
+        color: var(--muted);
+        padding-top: 16px;
+        border-top: 3.5px solid var(--trunk);
+        position: relative;
+      }
+      .changes li::before {
+        counter-increment: ch;
+        content: counter(ch);
+        position: absolute;
+        top: -13px;
+        left: 0;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 3.5px var(--trunk);
+        font: var(--w-bold) 10.5px/22px var(--mono);
+        text-align: center;
+        color: var(--ink);
+      }
+      .changes b {
+        display: block;
+        color: var(--ink);
+        font-size: var(--t-m);
+        margin-bottom: 6px;
+      }
+      .changes code {
+        font-size: 11px;
+        color: var(--ink);
+      }
+
+      .asks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 56px;
+        row-gap: 26px;
+      }
+      .asks div {
+        font-size: var(--t-m);
+        color: var(--muted);
+        padding-left: 18px;
+        border-left: 3px solid var(--line);
+      }
+      .asks b {
+        display: block;
+        color: var(--ink);
+        margin-bottom: 4px;
+      }
+      .asks .spec-ref {
+        display: block;
+        margin-top: 6px;
+        font: 11px var(--mono);
+        color: var(--faint);
+      }
+      .colophon {
+        margin-top: 96px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--faint);
+        font-size: var(--t-s);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <span data-logo="22"></span>
+      <span class="name">Metro</span>
+      <span class="sub">design direction 02 · Hercule</span>
+      <nav aria-label="Sections">
+        <a href="#why">Why</a><a href="#better">Before and after</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#tenx">At 10x</a><a href="#adopt">Adopting</a><a href="#spec">Spec</a>
+      </nav>
+      <div class="switch" role="group" aria-label="Theme">
+        <button data-theme-option="enamel"><span class="swatch-chip theme-scope" data-theme="enamel"></span>Enamel</button>
+        <button data-theme-option="tile"><span class="swatch-chip theme-scope" data-theme="tile"></span>Tile</button>
+        <button data-theme-option="night-service"><span class="swatch-chip theme-scope" data-theme="night-service"></span>Night Service</button>
+        <button data-theme-option="underground"><span class="swatch-chip theme-scope" data-theme="underground"></span>Underground</button>
+        <button data-theme-option="signal"><span class="swatch-chip theme-scope" data-theme="signal"></span>Signal</button>
+      </div>
+    </header>
+
+    <main class="book">
+      <!-- 1 · Hero -->
+      <section class="hero" aria-label="Metro">
+        <!-- Four Connection lines enter from the top and meet at an interchange; the book's ink
+             line leaves it and runs down past every section. -->
+        <svg class="hero-merge" width="128" height="200" viewBox="0 0 128 200" aria-hidden="true">
+          <path d="M18 0v70c0 22 26 26 34.6 44v32" fill="none" style="stroke: var(--casing)" stroke-width="9" />
+          <path d="M18 0v70c0 22 26 26 34.6 44v32" fill="none" style="stroke: var(--ln-sentry)" stroke-width="5" stroke-linecap="round" />
+          <path d="M42 0v70c0 22 18 26 18.2 44v32" fill="none" style="stroke: var(--casing)" stroke-width="9" />
+          <path d="M42 0v70c0 22 18 26 18.2 44v32" fill="none" style="stroke: var(--ln-gmail)" stroke-width="5" stroke-linecap="round" />
+          <path d="M86 0v70c0 22 -18 26 -18.2 44v32" fill="none" style="stroke: var(--casing)" stroke-width="9" />
+          <path d="M86 0v70c0 22 -18 26 -18.2 44v32" fill="none" style="stroke: var(--ln-github)" stroke-width="5" stroke-linecap="round" />
+          <path d="M110 0v70c0 22 -26 26 -34.6 44v32" fill="none" style="stroke: var(--casing)" stroke-width="9" />
+          <path d="M110 0v70c0 22 -26 26 -34.6 44v32" fill="none" style="stroke: var(--ln-posthog)" stroke-width="5" stroke-linecap="round" />
+          <rect x="42" y="140" width="44" height="16" rx="8" style="fill: var(--surface); stroke: var(--trunk)" stroke-width="3.5" />
+          <path d="M64 158v42" style="stroke: var(--trunk)" stroke-width="4" />
+        </svg>
+        <div class="hero-id">
+          <span data-logo="64"></span>
+          <div>
+            <h1>Metro</h1>
+            <p class="thesis">Every piece of work travels a line.</p>
+          </div>
+        </div>
+        <div class="hero-body">
+          <p class="prose">
+            Hercule's strongest idea is provenance: every Proposal knows what it was made from. <b>Metro draws it.</b> Each Connection is a colored line. Events ride their lines into the
+            Triage interchange; a Proposal is a station where lines meet; accepted work continues on Hercule's own ink line through Task, Run, Session and pull request. One diagram, from a
+            24px row glyph to a full network map, so you see where work came from and where it stands before you read a word.
+          </p>
+          <figure class="hero-map" style="margin: 0">
+            <svg class="netmap" data-netmap width="720" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27" role="img" aria-label="What came in since 18:20: 212 events on eight lines into Triage"></svg>
+            <figcaption><span>Intake at 09:00: 212 events on eight lines into Triage. 198 end quietly at the buffer stop.</span></figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 2 · Why this one -->
+      <section class="sec" id="why">
+        <div class="sec-h"><span class="no">2</span><h2>Why this one</h2></div>
+        <div class="why">
+          <div class="prose">
+            <p>
+              Pick Metro if the question you ask most is <b>"why is this here, and what happens if I say yes?"</b> Other directions show state. Metro shows state and cause in one glyph:
+              a row's strip says four sources agree on a failure, and the answer row says yes starts a Run, a Thread and a pull request. The consequence sits next to the button, so
+              decisions get faster.
+            </p>
+            <ul class="trade">
+              <li><i data-mk="cancel" class="faint"></i><span><b>It trades away text density.</b> A strip costs 26px per row; forty plain titles pack tighter than forty diagrams.</span></li>
+              <li><i data-mk="cancel" class="faint"></i><span><b>It needs discipline.</b> Hues belong to Connections alone. Break that once and the map turns into noise.</span></li>
+              <li><i data-mk="cancel" class="faint"></i><span><b>Work you start yourself is one plain ink line.</b> Metro shines brightest when events drive the day.</span></li>
+            </ul>
+          </div>
+          <div>
+            <div class="ledger" role="group" aria-label="Answers to the lead Proposal">
+              <button class="ans ans--primary">
+                <span class="pt"></span><span class="lbl">Start "Fix bug"</span><span class="desc">In a new worktree on webshop</span
+                ><span class="route"><em><i></i>Run</em><em><i></i>Thread</em><em><i></i>PR</em><kbd>&#9166;</kbd></span>
+              </button>
+              <button class="ans">
+                <span class="pt"></span><span class="lbl">Accept</span><span class="desc">Adds it to the backlog as a Task</span><span class="route"><em><i></i>Task</em><kbd>A</kbd></span>
+              </button>
+              <button class="ans">
+                <span class="pt"></span><span class="lbl">Dismiss</span><span class="desc">Closes the Proposal</span><span class="route"><span class="end"></span>ends here<kbd>D</kbd></span>
+              </button>
+            </div>
+            <p class="why-cap">Every answer draws the stations it adds to the line. You see the consequence before you press.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · Before and after -->
+      <section class="sec" id="better">
+        <div class="sec-h"><span class="no">3</span><h2>Why it's 1000x better than today</h2><span class="lede">Left: Hercule today. Right: the same moment in Metro.</span></div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/intake-view-light.png" alt="Today's Intake: lists of grey text rows" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">monochrome</span><span class="pain">text-heavy</span><span class="pain">doesn't scale</span></div>
+              <h3>What came in overnight</h3>
+              <p class="today">Today: eleven grey rows. "212 events" is a number inside a sentence.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>212 events arrive on eight colored lines. 198 end at a buffer stop you never have to read.</dd>
+                <dt>Decision</dt>
+                <dd>The lead Proposal is an interchange of four lines. Its answers show what each one adds.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="desktop" data-theme="enamel" data-src="desktop/intake.html" data-caption="Intake"></figure>
+        </div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/app-shell-dark.png" alt="Today's app shell in the navy dark theme" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">navy dark</span><span class="pain">no identity</span><span class="pain">flat</span></div>
+              <h3>A thread, at night</h3>
+              <p class="today">Today: a navy ground; where a session came from is grey text, or missing.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>Warm charcoal. The thread's line runs under the title: four sources, the Proposal, this thread, the pull request.</dd>
+                <dt>Decision</dt>
+                <dd>The station you are at is ringed amber. The question and its answers sit right above the composer.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="desktop" data-theme="night-service" data-src="desktop/session-active.html" data-caption="Thread"></figure>
+        </div>
+
+        <div class="ba">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/intake-view-light.png" alt="Today's lead card with three equal text links" />
+              <span class="ring" style="left: 16.2%; top: 37.2%; width: 57.4%; height: 19.4%"></span>
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">decisions not decisive</span></div>
+              <h3>A decision from a Slack link</h3>
+              <p class="today">Today: "Start Bugfix · Later · Dismiss", three text links of equal weight.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>One Proposal as a page: four source lines meet at the station you are asked about.</dd>
+                <dt>Decision</dt>
+                <dd>Three answer rows with keys. The primary one is heavier, and each shows its route.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="web" data-theme="enamel" data-src="web/decision.html" data-url="hercule.home.arpa/intake/p_0192f3" data-caption="Decision"></figure>
+        </div>
+
+        <div class="ba ba--phone">
+          <div>
+            <figure class="before">
+              <img src="../shared/baseline/app-shell-light.png" alt="Today's app shell: one desktop window" />
+            </figure>
+            <div class="ba-text">
+              <div class="pains"><span class="pain">one form factor</span><span class="pain">static</span></div>
+              <h3>Away from the desk</h3>
+              <p class="today">Today: one window, on one machine, only while it is open.</p>
+              <dl>
+                <dt>Attention</dt>
+                <dd>The lock screen carries the thread's line as a Live Activity: which station it is at, and for how long.</dd>
+                <dt>Decision</dt>
+                <dd>A notification answers with a thumb, bound to the same operation. A tap opens the Proposal as a sheet with three big answer rows.</dd>
+              </dl>
+            </div>
+          </div>
+          <figure class="ba-after" data-frame="mobile" data-theme="night-service" data-src="mobile/lock.html" data-caption="Lock screen"></figure>
+          <figure class="ba-after" data-frame="mobile" data-theme="night-service" data-src="mobile/decision.html" data-caption="Decision"></figure>
+        </div>
+      </section>
+
+      <!-- 4 · The system -->
+      <section class="sec" id="system">
+        <div class="sec-h"><span class="no">4</span><h2>The system</h2><span class="lede">Transit signage: enamel-sign clarity, rounded line ends, interchange rings, calm grounds.</span></div>
+
+        <h3>Color doctrine<span class="aside">four rules; every screen follows all four</span></h3>
+        <div class="doctrine">
+          <div>
+            <div class="rule-h"><span class="n">01</span><b>A hue is a Connection</b></div>
+            <div class="hues">
+              <span class="hue"><span class="hue-line" data-line="sentry"></span><i data-brand="sentry"></i>Sentry</span>
+              <span class="hue"><span class="hue-line" data-line="stripe"></span><i data-brand="stripe"></i>Stripe</span>
+              <span class="hue"><span class="hue-line" data-line="gmail"></span><i data-brand="gmail"></i>Gmail</span>
+              <span class="hue"><span class="hue-line" data-line="intercom"></span><i data-brand="intercom"></i>Intercom</span>
+              <span class="hue"><span class="hue-line" data-line="posthog"></span><i data-brand="posthog"></i>PostHog</span>
+              <span class="hue"><span class="hue-line" data-line="grafana"></span><i data-brand="grafana"></i>Grafana</span>
+              <span class="hue"><span class="hue-line" data-line="github"></span><i data-brand="github"></i>GitHub</span>
+              <span class="hue"><span class="hue-line" data-line="slack"></span><i data-brand="slack"></i>Slack</span>
+              <span class="hue"><span class="hue-line" data-line="cron"></span><i data-brand="cron"></i>Cron</span>
+              <span class="hue"><span class="hue-line" data-line="discord"></span><i data-brand="discord"></i>Discord</span>
+            </div>
+            <p class="rule-p">A line's hue appears on its line and nowhere else. The brand mark beside it stays monochrome.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">02</span><b>Hercule's own line is ink</b></div>
+            <svg width="480" height="64" viewBox="0 0 480 64" role="img" aria-label="Proposal, Task, Run, Thread, pull request on the ink line">
+              <path d="M22 20H352" style="stroke: var(--trunk)" stroke-width="3.5" />
+              <path d="M352 20H452" style="stroke: var(--faint)" stroke-width="2" stroke-dasharray="4 5" />
+              <rect x="12" y="10" width="20" height="20" rx="10" style="fill: var(--trunk)" />
+              <circle cx="132" cy="20" r="7" style="fill: var(--trunk); stroke: var(--casing)" stroke-width="2" />
+              <circle cx="242" cy="20" r="7" style="fill: var(--trunk); stroke: var(--casing)" stroke-width="2" />
+              <circle cx="352" cy="20" r="13" style="fill: var(--attn-soft)" />
+              <circle cx="352" cy="20" r="8" style="fill: var(--casing); stroke: var(--attn)" stroke-width="3.2" />
+              <circle cx="452" cy="20" r="6" style="fill: var(--casing); stroke: var(--faint)" stroke-width="2" />
+              <g style="font: 600 12px var(--font); fill: var(--ink)">
+                <text x="12" y="52">Proposal</text>
+                <text x="132" y="52" text-anchor="middle">Task</text>
+                <text x="242" y="52" text-anchor="middle">Run</text>
+                <text x="352" y="52" text-anchor="middle">Thread</text>
+                <text x="452" y="52" text-anchor="middle" style="fill: var(--faint)">PR</text>
+              </g>
+            </svg>
+            <p class="rule-p">Accepted work, and every provider, runs on ink. A Proposal is the station where colored lines hand over to it.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">03</span><b>State is a shape first, a word color second</b></div>
+            <div class="states">
+              <span class="attn"><i data-mk="wait" class="attn"></i>waiting on you</span>
+              <span class="live"><i data-mk="work" class="live"></i>working</span>
+              <span><i data-mk="done"></i>done</span>
+              <span class="fail"><i data-mk="fail" class="fail"></i>failed</span>
+              <span class="attn"><i data-mk="held" class="attn"></i>paused</span>
+              <span class="muted"><i data-mk="idle" class="faint"></i>idle</span>
+              <span class="muted"><i data-mk="asleep" class="faint"></i>asleep</span>
+              <span class="muted"><i data-mk="unreachable" class="faint"></i>can't be reached</span>
+              <span class="muted"><i data-mk="queued" class="faint"></i>queued</span>
+            </div>
+            <p class="rule-p">Open ring waits, filled dot works, cross fails. State colors live on words and 12px marks. They never touch a line.</p>
+          </div>
+          <div>
+            <div class="rule-h"><span class="n">04</span><b>Projects are zones. Chrome is never tinted.</b></div>
+            <div class="zones">
+              <div class="zone" style="background: var(--zone-webshop)">webshop<small>fare zone 1</small></div>
+              <div class="zone" style="background: var(--zone-payments)">payments-api<small>fare zone 2</small></div>
+              <div class="zone" style="background: var(--zone-ops)">ops<small>fare zone 3</small></div>
+            </div>
+            <p class="rule-p">A project is a shaded area on a map, a floor or a rug in the office. Never a dot, never a tinted sidebar.</p>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3>Themes<span class="aside">click one; the book and every frame switch with it</span></h3>
+          <div class="theme-grid">
+            <button class="theme-tile theme-scope" data-theme="enamel" data-theme-option="enamel">
+              <span class="tn">Enamel<small>light · flagship</small></span>
+              <span class="canvas">
+                <svg width="100%" height="28" viewBox="0 0 170 28" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><path d="M2 5h40l12 7h26M2 12h52h26M2 19h40l12 -7h26" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" /><path d="M2 12h78" style="stroke: var(--ln-gmail)" stroke-width="3" stroke-linecap="round" /><path d="M2 19h40l12-7h26" fill="none" style="stroke: var(--ln-github)" stroke-width="3" stroke-linecap="round" /><rect x="76" y="4" width="11" height="16" rx="5.5" style="fill: var(--trunk)" /><path d="M88 12h60" style="stroke: var(--trunk)" stroke-width="3" /><circle cx="152" cy="12" r="6" style="fill: var(--casing); stroke: var(--attn)" stroke-width="2.6" /></svg>
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i><b>EU checkout</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-strip="you" data-end="work" data-size="s"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">White enamel, black ink. The everyday light.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="tile" data-theme-option="tile">
+              <span class="tn">Tile<small>light</small></span>
+              <span class="canvas">
+                <svg width="100%" height="28" viewBox="0 0 170 28" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><path d="M2 5h40l12 7h26" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" /><path d="M2 12h78" style="stroke: var(--ln-gmail)" stroke-width="3" stroke-linecap="round" /><path d="M2 19h40l12-7h26" fill="none" style="stroke: var(--ln-github)" stroke-width="3" stroke-linecap="round" /><rect x="76" y="4" width="11" height="16" rx="5.5" style="fill: var(--trunk)" /><path d="M88 12h60" style="stroke: var(--trunk)" stroke-width="3" /><circle cx="152" cy="12" r="6" style="fill: var(--casing); stroke: var(--attn)" stroke-width="2.6" /></svg>
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i><b>EU checkout</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-strip="you" data-end="work" data-size="s"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Cream station tile, platform-trim green.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="night-service" data-theme-option="night-service">
+              <span class="tn">Night Service<small>dark · flagship</small></span>
+              <span class="canvas">
+                <svg width="100%" height="28" viewBox="0 0 170 28" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><path d="M2 5h40l12 7h26" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" /><path d="M2 12h78" style="stroke: var(--ln-gmail)" stroke-width="3" stroke-linecap="round" /><path d="M2 19h40l12-7h26" fill="none" style="stroke: var(--ln-github)" stroke-width="3" stroke-linecap="round" /><rect x="76" y="4" width="11" height="16" rx="5.5" style="fill: var(--trunk)" /><path d="M88 12h60" style="stroke: var(--trunk)" stroke-width="3" /><circle cx="152" cy="12" r="6" style="fill: var(--casing); stroke: var(--attn)" stroke-width="2.6" /></svg>
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i><b>EU checkout</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-strip="you" data-end="work" data-size="s"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Warm charcoal, enamel-white ink. Never navy.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="underground" data-theme-option="underground">
+              <span class="tn">Underground<small>dark</small></span>
+              <span class="canvas">
+                <svg width="100%" height="28" viewBox="0 0 170 28" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><path d="M2 5h40l12 7h26" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" /><path d="M2 12h78" style="stroke: var(--ln-gmail)" stroke-width="3" stroke-linecap="round" /><path d="M2 19h40l12-7h26" fill="none" style="stroke: var(--ln-github)" stroke-width="3" stroke-linecap="round" /><rect x="76" y="4" width="11" height="16" rx="5.5" style="fill: var(--trunk)" /><path d="M88 12h60" style="stroke: var(--trunk)" stroke-width="3" /><circle cx="152" cy="12" r="6" style="fill: var(--casing); stroke: var(--attn)" stroke-width="2.6" /></svg>
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i><b>EU checkout</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-strip="you" data-end="work" data-size="s"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Brown-black tunnel, brass fittings.</span>
+            </button>
+            <button class="theme-tile theme-scope" data-theme="signal" data-theme-option="signal">
+              <span class="tn">Signal<small>dark</small></span>
+              <span class="canvas">
+                <svg width="100%" height="28" viewBox="0 0 170 28" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><path d="M2 5h40l12 7h26" fill="none" style="stroke: var(--ln-sentry)" stroke-width="3" stroke-linecap="round" /><path d="M2 12h78" style="stroke: var(--ln-gmail)" stroke-width="3" stroke-linecap="round" /><path d="M2 19h40l12-7h26" fill="none" style="stroke: var(--ln-github)" stroke-width="3" stroke-linecap="round" /><rect x="76" y="4" width="11" height="16" rx="5.5" style="fill: var(--trunk)" /><path d="M88 12h60" style="stroke: var(--trunk)" stroke-width="3" /><circle cx="152" cy="12" r="6" style="fill: var(--casing); stroke: var(--attn)" stroke-width="2.6" /></svg>
+                <span class="trow"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i><b>EU checkout</b><span class="attn">waiting</span></span>
+                <span class="trow"><i data-strip="you" data-end="work" data-size="s"></i><b>Cart totals</b><span class="live">working</span></span>
+              </span>
+              <span class="sw"><i style="background: var(--bg)"></i><i style="background: var(--surface)"></i><i style="background: var(--ink)"></i><i style="background: var(--accent)"></i><i style="background: var(--attn)"></i></span>
+              <span class="role">Near-black, high-vis yellow. For the night shift.</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="block type">
+          <div>
+            <h3>Type</h3>
+            <div class="specimen">Aa 0123</div>
+            <div class="specimen-mono">studio-mac 09:40</div>
+            <p class="fam">Overpass and Overpass Mono, after Highway Gothic: signage letters built to be read at speed. Self-hosted, OFL.</p>
+          </div>
+          <div>
+            <div class="scale">
+              <div><code>19 · title</code><span style="font-size: 19px; font-weight: 720">Checkout fails for EU cards with 3-D Secure</span></div>
+              <div><code>16 · lead</code><span style="font-size: 16px; font-weight: 560">Fix 3-D Secure checkout for EU cards</span></div>
+              <div><code>14.5 · body</code><span style="font-size: 14.5px">Since deploy #1289, card payments that need 3-D Secure fail at checkout.</span></div>
+              <div><code>12.5 · meta</code><span style="font-size: 12.5px" class="muted">Thread · webshop · studio-mac · Opus 5.5</span></div>
+              <div><code>10.5 · sign</code><span class="sign" style="color: var(--muted)">Running now · Fleet · Triage</span></div>
+            </div>
+            <div class="numerals">
+              <span><b class="fail">1</b>burning</span><span><b>6</b>proposals</span><span><b>2</b>need a call</span><span><b>3</b>FYI</span><span><b>198</b>handled quietly</span>
+            </div>
+            <p class="cap">Hierarchy comes from numerals and weight. Titles stop at 19px.</p>
+          </div>
+        </div>
+
+        <div class="block depth">
+          <div>
+            <h3>Shape</h3>
+            <div class="radii">
+              <div><i style="border-radius: 4px; width: 34px; height: 34px"></i>4</div>
+              <div><i style="border-radius: 8px; width: 42px; height: 42px"></i>8</div>
+              <div><i style="border-radius: 12px"></i>12</div>
+              <div><i style="border-radius: 22px 22px 0 0; height: 60px"></i>22</div>
+              <div><i style="border-radius: 99px; width: 84px; height: 30px"></i>pill</div>
+            </div>
+            <p class="cap">Soft enamel corners, rounded line ends. Nothing sharp.</p>
+          </div>
+          <div>
+            <h3>Depth</h3>
+            <div class="shadows">
+              <div style="box-shadow: var(--shadow-1)">row</div>
+              <div style="box-shadow: var(--shadow-2)">card</div>
+              <div style="box-shadow: var(--shadow-3)">sheet</div>
+            </div>
+            <p class="cap">Three shadows, one surface deep. No card sits inside a card.</p>
+          </div>
+          <div>
+            <h3>Glass</h3>
+            <div class="glass-demo">
+              <svg width="100%" height="128" aria-hidden="true">
+                <path d="M-10 26H520" style="stroke: var(--ln-sentry)" stroke-width="5" stroke-linecap="round" />
+                <path d="M-10 44H520" style="stroke: var(--ln-gmail)" stroke-width="5" stroke-linecap="round" />
+                <path d="M-10 62H520" style="stroke: var(--ln-posthog)" stroke-width="5" stroke-linecap="round" />
+                <path d="M-10 80H520" style="stroke: var(--ln-github)" stroke-width="5" stroke-linecap="round" />
+                <path d="M-10 98H520" style="stroke: var(--trunk)" stroke-width="5" stroke-linecap="round" />
+              </svg>
+              <div class="pane">Reply to the agent<span class="glass-send"><i data-i="send"></i></span></div>
+            </div>
+            <p class="cap">Glass only where layers overlap: the composer, sheets, the quick panel. Blur 18px.</p>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3>Motion<span class="aside">trains run on a timetable, not a spring</span></h3>
+          <div class="motion">
+            <div>
+              <div class="stage">
+                <svg width="100%" height="96" viewBox="0 0 330 96" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                  <path d="M16 30H150C180 30 190 48 220 48H250" fill="none" style="stroke: var(--ln-sentry)" stroke-width="4" stroke-linecap="round" />
+                  <path d="M16 66H150C180 66 190 52 220 52H250" fill="none" style="stroke: var(--ln-gmail)" stroke-width="4" stroke-linecap="round" />
+                  <rect x="246" y="38" width="16" height="24" rx="8" style="fill: var(--casing); stroke: var(--trunk)" stroke-width="3" />
+                  <path d="M264 50H316" style="stroke: var(--trunk)" stroke-width="3.5" />
+                </svg>
+                <span class="train" style="--c: var(--ln-sentry); offset-path: path('M16 30H150C180 30 190 48 220 48H250')"></span>
+                <span class="train" style="--c: var(--ln-gmail); offset-path: path('M16 66H150C180 66 190 52 220 52H250'); animation-delay: -1.3s"></span>
+              </div>
+              <p class="cap"><b>An event arrives.</b> A train runs its line into Triage.</p>
+            </div>
+            <div>
+              <div class="stage">
+                <svg width="100%" height="96" viewBox="0 0 330 96" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+                  <path d="M20 48H110" style="stroke: var(--trunk)" stroke-width="3.5" />
+                  <path class="points-a" d="M122 48C160 48 170 22 206 22H300" fill="none" style="stroke: var(--faint)" stroke-width="2" stroke-dasharray="4 5" />
+                  <path class="points-b" d="M122 48H300" fill="none" style="stroke: var(--faint)" stroke-width="2" stroke-dasharray="4 5" />
+                  <path class="points-c" d="M122 48C160 48 170 74 206 74H250" fill="none" style="stroke: var(--faint)" stroke-width="2" stroke-dasharray="4 5" />
+                  <rect x="252" y="68" width="3" height="12" rx="1.5" class="points-c" style="fill: var(--faint)" />
+                  <rect x="104" y="36" width="18" height="24" rx="9" class="points-pick" style="fill: var(--casing); stroke: var(--trunk)" stroke-width="3" />
+                  <g style="font: 600 11px var(--font); fill: var(--muted)">
+                    <text x="306" y="26">Run</text>
+                    <text x="306" y="52">Task</text>
+                    <text x="262" y="78">ends</text>
+                  </g>
+                </svg>
+              </div>
+              <p class="cap"><b>You decide.</b> The points switch: the chosen track fills with ink in 220ms, the others fade.</p>
+            </div>
+            <div>
+              <div class="stage" style="display: flex; align-items: center; justify-content: center; gap: 30px">
+                <i data-strip="you" data-end="work" data-size="l"></i>
+                <span style="display: flex; align-items: center; gap: 8px; font-size: var(--t-m); font-weight: 600" class="live"><i data-mk="work" class="live" style="width: 16px; height: 16px"></i>working</span>
+              </div>
+              <p class="cap"><b>Work is under way.</b> The halo breathes, like a train at the platform.</p>
+            </div>
+          </div>
+          <div class="timing">
+            <div><b>120ms</b>hover, press</div>
+            <div><b>220ms</b>points, composer shrink</div>
+            <div><b>420ms</b>sheets, windows</div>
+            <div><b>2.8s</b>one train per line; off with reduced motion</div>
+          </div>
+        </div>
+
+        <div class="block marks">
+          <div>
+            <h3>Marks<span class="aside">12px grid, one family</span></h3>
+            <div class="mark-grid">
+              <div class="attn"><i data-mk="wait" class="attn"></i>waiting</div>
+              <div class="attn"><i data-mk="decision" class="attn"></i>a question</div>
+              <div class="live"><i data-mk="work" class="live"></i>working</div>
+              <div><i data-mk="done"></i>done</div>
+              <div class="fail"><i data-mk="fail" class="fail"></i>failed</div>
+              <div class="attn"><i data-mk="held" class="attn"></i>paused</div>
+              <div class="muted"><i data-mk="queued" class="faint"></i>queued</div>
+              <div class="muted"><i data-mk="idle" class="faint"></i>idle</div>
+              <div class="muted"><i data-mk="asleep" class="faint"></i>asleep</div>
+              <div class="muted"><i data-mk="unreachable" class="faint"></i>unreached</div>
+              <div class="muted"><i data-mk="cancel" class="faint"></i>cancelled</div>
+              <div class="muted"><i data-mk="skip" class="faint"></i>skipped</div>
+            </div>
+          </div>
+          <div>
+            <h3>Icons<span class="aside">16px grid, 1.4 stroke, round ends</span></h3>
+            <div class="icon-grid">
+              <i data-i="intake"></i><i data-i="checkin"></i><i data-i="task"></i><i data-i="run"></i><i data-i="workflow"></i><i data-i="thread"></i><i data-i="bot"></i><i data-i="fleet"></i><i data-i="pr"></i><i data-i="branch"></i>
+              <i data-i="plug"></i><i data-i="box"></i><i data-i="server"></i><i data-i="machine"></i><i data-i="shield"></i><i data-i="key"></i><i data-i="bound"></i><i data-i="memory"></i><i data-i="heartbeat"></i><i data-i="alarm"></i>
+              <i data-i="steer"></i><i data-i="reply"></i><i data-i="mic"></i><i data-i="send"></i><i data-i="search"></i><i data-i="sliders"></i><i data-i="office"></i><i data-i="map"></i><i data-i="link"></i><i data-i="terminal"></i>
+            </div>
+            <div class="brand-row">
+              <i data-brand="sentry"></i><i data-brand="gmail"></i><i data-brand="posthog"></i><i data-brand="github"></i><i data-brand="stripe"></i><i data-brand="intercom"></i><i data-brand="grafana"></i><i data-brand="slack"></i><i data-brand="discord"></i><i data-brand="claude"></i><i data-brand="openai"></i><i data-brand="pi"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="block layout">
+          <div>
+            <h3>Layout<span class="aside">three panes on desktop; two at 1280 on the web</span></h3>
+            <div class="schematic">
+              <div class="s-side"><span class="w">sidebar 264</span><i style="width: 70%"></i><i style="width: 84%"></i><i style="width: 60%"></i><i style="width: 76%"></i></div>
+              <div class="s-main"><span class="w">main · 720 to 880</span><i style="height: 44px; border-radius: 6px"></i><i style="width: 90%"></i><i style="width: 70%"></i><i style="width: 80%"></i></div>
+              <div class="s-rail"><span class="w">rail 392 · departures</span><i style="width: 88%"></i><i style="width: 72%"></i><i style="width: 80%"></i></div>
+            </div>
+            <div class="density">
+              <div><b>4px</b>rhythm</div>
+              <div><b>44 / 36</b>row, comfortable / compact</div>
+              <div><b>26px</b>strip at the head of every row</div>
+            </div>
+          </div>
+          <div>
+            <h3>A row, taken apart</h3>
+            <div class="anatomy">
+              <div class="irow">
+                <i data-strip="grafana cron" data-end="wait"></i>
+                <div>
+                  <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+                  <div class="irow-meta"><span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>3 nights running</span></div>
+                </div>
+                <div class="irow-acts"><button class="btn btn--sm">Start "Investigate"</button></div>
+              </div>
+            </div>
+            <div class="anatomy-key">
+              <div><b>Strip</b>where it came from, and where it stands</div>
+              <div><b>Title</b>what it is, in one line</div>
+              <div><b>Meta</b>priority bars, source, project, why</div>
+              <div><b>One action</b>the likely answer, bound</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3>The signature: the line diagram<span class="aside">the same drawing at every size</span></h3>
+          <div class="grow-row">
+            <div class="grow-cell">
+              <i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="l"></i>
+              <span class="sign">row glyph · 24px</span>
+            </div>
+            <i data-i="chev-r" class="arrow"></i>
+            <div class="grow-cell">
+              <svg class="lineage-svg" data-lineage width="400" height="60" data-cy="25" data-rightpad="24" data-lines="sentry gmail posthog github" data-stations="Proposal|08:52|done;Thread|waiting|here-wait;PR||future"></svg>
+              <span class="sign">a thread's line · 60px</span>
+            </div>
+            <i data-i="chev-r" class="arrow"></i>
+            <div class="grow-cell">
+              <svg class="netmap" data-netmap width="440" height="170" data-labelw="92" data-outw="96" data-row="18" data-top="16" data-outrow="24" data-trains="off" aria-hidden="true"></svg>
+              <span class="sign">the network map · Intake</span>
+            </div>
+          </div>
+          <div class="strips">
+            <div><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait"></i><span><b>Four lines, one station</b> waiting on you</span></div>
+            <div><i data-strip="you" data-end="work"></i><span><b>Your own line</b> working</span></div>
+            <div><i data-strip="webchat slack" data-end="work"></i><span><b>Ada</b> Web chat and Slack</span></div>
+            <div><i data-strip="github" data-end="held"></i><span><b>Held by a Bound</b> paused</span></div>
+            <div><i data-strip="grafana cron" data-end="fail"></i><span><b>Two sources</b> failed</span></div>
+            <div><i data-strip="discord" data-end="asleep"></i><span><b>Juno</b> asleep</span></div>
+          </div>
+        </div>
+
+        <div class="block identity">
+          <div>
+            <h3>Logo</h3>
+            <div class="logos"><span data-logo="96"></span><span data-logo="48"></span><span data-logo="24"></span><span data-logo="16"></span></div>
+            <div class="wordmark"><span data-logo="30"></span>Hercule</div>
+            <p class="cap">An H made of two lines and the interchange that joins them.</p>
+          </div>
+          <div>
+            <h3>App icon</h3>
+            <div class="icons-app"><span data-appicon="128"></span><span data-appicon="64"></span><span data-appicon="32"></span></div>
+            <p class="cap">Black enamel plate, the first two lines of any map. Fixed colors: the Dock has no theme.</p>
+          </div>
+          <div>
+            <h3>Favicon</h3>
+            <div class="favs">
+              <div><img src="favicon.svg" alt="" />nothing waits</div>
+              <div><img src="favicon-wait.svg" alt="" />a decision waits</div>
+            </div>
+            <p class="cap">The tab gains an amber ring and a count, so a pinned tab is a signal.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 · Screens -->
+      <section class="sec" id="screens">
+        <div class="sec-h"><span class="no">5</span><h2>Screens</h2><span class="lede">Twenty-two pages, live. The theme switcher at the top reaches every frame.</span></div>
+
+        <div class="group">
+          <div class="group-h"><b>Desktop app</b><span>1440 × 900 · macOS window, keyboard-first</span></div>
+          <div class="grid-1">
+            <figure data-frame="desktop" data-src="desktop/intake.html" data-caption="Intake" data-note="What came in since 18:20 as a network map. The lead Proposal is an interchange of four lines; its answers show their routes."></figure>
+          </div>
+          <div class="grid-2">
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-caption="Thread, waiting on you" data-note="The thread's line under the title. The question and its three answers sit above the composer."></figure>
+            <figure data-frame="desktop" data-src="desktop/session-active.html" data-state="scrolled" data-caption="Thread, reading back" data-note="Scrolled up: the glass composer shrinks to one line and lets the transcript show through."></figure>
+            <figure data-frame="desktop" data-src="desktop/session-empty.html" data-caption="New thread" data-note="Where it will run, drawn as a branch. Starting points from Intake sit below, as strips."></figure>
+            <figure data-frame="desktop" data-src="desktop/assistant.html" data-caption="Assistant · Ada" data-note="A Conversation across Web chat and Slack. Her check-ins run on a timetable."></figure>
+            <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="Menu bar, quick panel, notification" data-note="Answer a decision from anywhere with ⌥Space, without switching apps."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-appearance.html" data-caption="Settings · Appearance" data-note="Five themes, previewed on a real Intake; density and text size."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants · Ada" data-note="Her channels are her lines; memory, check-ins and reply mode."></figure>
+            <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Every Connection owns its line. Status is a shape; a line at rest turns dashed."></figure>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-h"><b>Web</b><span>1280 × 800 · zero install, shareable links</span></div>
+          <div class="tabs-demo">
+            <div>
+              <div class="tabstrip">
+                <span class="tab on"><img src="favicon-wait.svg" alt="" /><span>(3) Intake · Hercule</span></span>
+                <span class="tab"><img src="favicon-wait.svg" alt="" /><span>Decide: Checkout fails for EU cards</span></span>
+                <span class="tab"><i data-brand="github"></i><span>rogier/webshop · GitHub</span></span>
+              </div>
+              <p class="cap"><b>Three decisions wait.</b> The count leads the tab title and the favicon gains its amber ring.</p>
+            </div>
+            <div>
+              <div class="tabstrip">
+                <span class="tab on"><img src="favicon.svg" alt="" /><span>Intake · Hercule</span></span>
+                <span class="tab"><i data-brand="github"></i><span>rogier/webshop · GitHub</span></span>
+                <span class="tab"><i data-brand="sentry"></i><span>webshop-prod · Sentry</span></span>
+              </div>
+              <p class="cap"><b>Nothing waits.</b> Plain title, plain mark: a pinned tab you can ignore.</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <figure data-frame="web" data-src="web/decision.html" data-url="hercule.home.arpa/intake/p_0192f3" data-caption="Decision" data-note="Where a Slack or email link lands: one Proposal as a page, its lines meeting at the question."></figure>
+            <figure data-frame="web" data-src="web/intake.html" data-url="hercule.home.arpa/intake" data-caption="Intake at 1280" data-note="The rail folds into a band above the map; the answers stay one keypress away."></figure>
+            <figure data-frame="web" data-src="web/session-active.html" data-url="hercule.home.arpa/threads/th_8f2c" data-caption="Thread" data-note="Sibling tabs fold to their strips at 1280. The link copies from the title bar."></figure>
+            <figure data-frame="web" data-src="web/session-empty.html" data-url="hercule.home.arpa/threads/new" data-caption="New thread" data-note="The same draft, in a browser tab."></figure>
+            <figure data-frame="web" data-src="web/assistant.html" data-url="hercule.home.arpa/assistants/ada" data-caption="Assistant · Ada" data-note="Her record and timetable fold into one band over the Conversation."></figure>
+            <figure data-frame="web" data-src="web/settings-providers.html" data-url="hercule.home.arpa/settings/providers" data-caption="Settings · Providers" data-note="Providers are not Connections, so they run on ink. Machines are the stations."></figure>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-h"><b>Mobile</b><span>390 × 844 · one thumb, one line</span></div>
+          <div class="grid-m">
+            <figure data-frame="mobile" data-src="mobile/lock.html" data-caption="Lock screen" data-note="A Live Activity for the waiting thread; notifications with answer buttons."></figure>
+            <figure data-frame="mobile" data-src="mobile/intake.html" data-caption="Intake" data-note="One vertical line, like a platform display. Swipe a stop to answer."></figure>
+            <figure data-frame="mobile" data-src="mobile/decision.html" data-caption="Decision" data-note="A bottom sheet with three big answer rows in thumb reach."></figure>
+            <figure data-frame="mobile" data-src="mobile/session-active.html" data-caption="Thread" data-note="Voice first: hold to talk. The line rides along the top."></figure>
+            <figure data-frame="mobile" data-src="mobile/session-empty.html" data-caption="New thread" data-note="Say what you want done; where it runs is one tap."></figure>
+            <figure data-frame="mobile" data-src="mobile/assistant.html" data-caption="Assistant · Ada" data-note="The same Conversation, in your pocket."></figure>
+            <figure data-frame="mobile" data-src="mobile/settings.html" data-caption="Settings · Connections" data-note="Every domain is one tile in thumb reach. Connections opens as a sheet; each source is a line as thick as its volume."></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 · The office -->
+      <section class="sec" id="office">
+        <div class="sec-h"><span class="no">6</span><h2>The office</h2><span class="lede">The Fleet as a building. The lines do not stop at the door.</span></div>
+        <figure data-frame="desktop" data-theme="night-service" data-src="desktop/office.html" data-caption="Fleet · Office, in Night Service" data-note="Three runner rooms, the mailroom with the Triage desk, and the Assistants' lounge."></figure>
+        <div class="b-notes">
+          <div><b><span class="bullet" data-line="sentry"></span>Floor lines, like a hospital corridor</b>Work enters through the wall on its Connection's line, passes the Triage desk, and follows a painted floor line to the desk doing it.</div>
+          <div><b><i data-mk="wait" class="attn"></i>The same marks over every head</b>An amber ring waits on you, a green halo works, a dashed ring sleeps. Click a desk to answer from its popover.</div>
+          <div><b><span class="bullet" style="background: var(--zone-webshop); height: 12px; width: 18px; border-radius: 3px"></span>Rugs are projects</b>Each desk stands on its project's zone color. Runners are rooms; the office is the only place machines have walls.</div>
+        </div>
+      </section>
+
+      <!-- 7 · At 10x -->
+      <section class="sec" id="tenx">
+        <div class="sec-h"><span class="no">7</span><h2>At 10x</h2><span class="lede">140 live sessions and 31,000 events a day. Lines thicken; they do not multiply.</span></div>
+        <div class="tenx">
+          <div><span class="big">1 line <small>per Connection</small></span>A line's weight grows with its events on a log scale. 12,400 Sentry events are still one line.</div>
+          <div><span class="big">41 <small>proposals</small></span>An outcome is one station with a count. The list below it shows the top of the queue, never all of it.</div>
+          <div><span class="big">7 <small>departures</small></span>The board shows the next seven by urgency. The rest is a census: 52 working · 11 waiting · 77 idle.</div>
+          <div><span class="big">9 <small>floors</small></span>The office becomes a tower, one floor per runner. The lines climb its core with a station on every floor.</div>
+        </div>
+        <div class="grid-2">
+          <figure data-frame="desktop" data-state="swarm" data-src="desktop/intake.html" data-caption="Intake at 10x" data-note="31,000 events on the same eight lines; 41 proposals, still one lead."></figure>
+          <figure data-frame="desktop" data-state="swarm" data-src="desktop/office.html" data-caption="The office at 10x" data-note="A tower of runner floors; waiting desks glow amber through the windows."></figure>
+        </div>
+      </section>
+
+      <!-- 8 · Adopting it -->
+      <section class="sec" id="adopt">
+        <div class="sec-h"><span class="no">8</span><h2>Adopting it</h2><span class="lede">Today's tokens in packages/ui, and what they become.</span></div>
+        <table class="map">
+          <thead>
+            <tr>
+              <th style="width: 118px">Today</th>
+              <th style="width: 74px">Light · dark</th>
+              <th style="width: 150px">Metro</th>
+              <th style="width: 104px">Enamel · Night</th>
+              <th>What changes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>--bg</td>
+              <td><span class="swatch-pair"><i style="background: oklch(94.5% 0.0156 265)"></i><i style="background: oklch(20% 0.0288 265)"></i></span></td>
+              <td>--bg</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--bg)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--bg)"></i></span></td>
+              <td>Window ground: sidebar and titlebar. Warm neutral; no dark theme is blue.</td>
+            </tr>
+            <tr>
+              <td>--surface</td>
+              <td><span class="swatch-pair"><i style="background: oklch(96.7% 0.0125 265)"></i><i style="background: oklch(22.2% 0.0288 265)"></i></span></td>
+              <td>--surface</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--surface)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--surface)"></i></span></td>
+              <td>The main canvas, lighter than the ground, so content leads.</td>
+            </tr>
+            <tr>
+              <td>--raised</td>
+              <td><span class="swatch-pair"><i style="background: oklch(100% 0.0078 265)"></i><i style="background: oklch(25.5% 0.0259 265)"></i></span></td>
+              <td>--raised, --sunken</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--raised)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--raised)"></i></span></td>
+              <td>Cards, composer, popovers. New <code>--sunken</code> for wells: code and inputs at rest.</td>
+            </tr>
+            <tr>
+              <td>--ink</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265)"></i><i style="background: oklch(90% 0.008 265)"></i></span></td>
+              <td>--ink, --trunk</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ink)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ink)"></i></span></td>
+              <td>Text, and Hercule's own line. <code>--trunk</code> aliases it so a theme may part them later.</td>
+            </tr>
+            <tr>
+              <td>--muted</td>
+              <td><span class="swatch-pair"><i style="background: oklch(48% 0.0156 265)"></i><i style="background: oklch(68% 0.0288 265)"></i></span></td>
+              <td>--muted</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--muted)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--muted)"></i></span></td>
+              <td>Darker in light, lighter in dark: 4.5:1 at 12.5px on every surface.</td>
+            </tr>
+            <tr>
+              <td>--faint</td>
+              <td><span class="swatch-pair"><i style="background: oklch(66% 0.0156 265)"></i><i style="background: oklch(50% 0.0288 265)"></i></span></td>
+              <td>--faint</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--faint)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--faint)"></i></span></td>
+              <td>Now readable (54% and 65%). Today's 66% and 50% fail contrast for text.</td>
+            </tr>
+            <tr>
+              <td>--line</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265 / 0.1)"></i><i style="background: oklch(90% 0.0288 265 / 0.1)"></i></span></td>
+              <td>--line</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--line)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--line)"></i></span></td>
+              <td>Hairlines only. A diagram's line is never <code>--line</code>; it is a hue or <code>--trunk</code>.</td>
+            </tr>
+            <tr>
+              <td>--line-soft</td>
+              <td><span class="swatch-pair"><i style="background: oklch(23% 0.01 265 / 0.055)"></i><i style="background: oklch(90% 0.0288 265 / 0.06)"></i></span></td>
+              <td>--line-soft</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--line-soft)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--line-soft)"></i></span></td>
+              <td>Row separators. Unchanged in role.</td>
+            </tr>
+            <tr>
+              <td>--attn</td>
+              <td><span class="swatch-pair"><i style="background: #8a6116"></i><i style="background: #d0a147"></i></span></td>
+              <td>--attn, --attn-soft</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--attn)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--attn)"></i></span></td>
+              <td>Waiting on you. Words, rings and the halo around the station you are at.</td>
+            </tr>
+            <tr>
+              <td>--fail</td>
+              <td><span class="swatch-pair"><i style="background: #a34e46"></i><i style="background: #cf7b71"></i></span></td>
+              <td>--fail</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--fail)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--fail)"></i></span></td>
+              <td>Always with the cross. Never on a line.</td>
+            </tr>
+            <tr>
+              <td>--live</td>
+              <td><span class="swatch-pair"><i style="background: #48717f"></i><i style="background: #7fa8b8"></i></span></td>
+              <td>--live</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--live)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--live)"></i></span></td>
+              <td>Green, not blue-grey: working reads as go. Always with the breathing dot.</td>
+            </tr>
+            <tr>
+              <td>--ok</td>
+              <td><span class="swatch-pair"><i style="background: #48745a"></i><i style="background: #7fae8e"></i></span></td>
+              <td>--ok</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ok)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ok)"></i></span></td>
+              <td>Done words. The done mark itself is ink: finished work joins Hercule's line.</td>
+            </tr>
+            <tr>
+              <td>--project-*</td>
+              <td><span class="swatch-pair"><i style="background: #7d7ab0"></i><i style="background: #a67f92"></i></span></td>
+              <td>--zone-*</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--zone-webshop)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--zone-payments)"></i></span></td>
+              <td>Project dots go. A project is a shaded zone on maps, floors and rugs; hue belongs to Connections.</td>
+            </tr>
+            <tr>
+              <td class="faint">new</td>
+              <td></td>
+              <td>--ln-*, --casing</td>
+              <td><span class="swatch-pair"><i class="theme-scope" data-theme="enamel" style="background: var(--ln-sentry)"></i><i class="theme-scope" data-theme="night-service" style="background: var(--ln-gmail)"></i></span></td>
+              <td>One hue per Connection type, tuned per theme. <code>--casing</code> is the gap drawn where lines cross.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <ol class="changes">
+          <li><b>Swap the tokens</b><code>packages/ui/src/styles.css</code> takes Metro's five themes; <code>light</code> and <code>dark</code> alias Enamel and Night Service. Drop <code>--project-*</code>.</li>
+          <li><b>Redraw the marks</b><code>packages/ui/src/marks/marks.tsx</code> in Metro's shapes, and add <code>&lt;Strip&gt;</code>: the row glyph every list row starts with.</li>
+          <li><b>Map lines in one place</b>A <code>client-core</code> function returns a Proposal's source lines, in order, from what it was made from. Intake, a thread and the office all call it.</li>
+          <li><b>Answer rows</b><code>packages/ui</code> gets <code>&lt;AnswerRow&gt;</code> with its route and key. Intake's lead card and check-in swap their text links for it.</li>
+          <li><b>The map and the line</b><code>apps/web</code>: the network map on Intake, the lineage under a thread's title, the glass composer, and the tab title and favicon signals.</li>
+        </ol>
+      </section>
+
+      <!-- 9 · Spec -->
+      <section class="sec" id="spec">
+        <div class="sec-h"><span class="no">9</span><h2>What this design asks the spec to change</h2></div>
+        <div class="asks">
+          <div><b>A per-Proposal address</b>A link from Slack or email opens one Proposal as a page. The URL space has <code>/intake</code> but no address for one Proposal; add <code>/intake/&lt;proposal id&gt;</code>.<span class="spec-ref">spec 14 · URL space</span></div>
+          <div><b>Counts per Connection and outcome</b>The map needs, for "since you last checked", event counts per Connection and per triage outcome. Today's Intake brief has the outcome totals only.<span class="spec-ref">spec 10 · Intake · spec 11 · a read</span></div>
+          <div><b>A line hue per Connection type</b>Connection types are plugin-defined, so a type needs a hue slot: a palette index in the plugin manifest, or a client-core fallback. Two Gmail Connections share the Gmail line and differ by name.<span class="spec-ref">spec 05 · manifest · spec 08 · Connection</span></div>
+          <div><b>The tab as a signal</b>Pin the tab title as "(n) screen · Hercule", n being decisions waiting, and a favicon that gains a ring while n is above zero.<span class="spec-ref">spec 14 · App shell</span></div>
+          <div><b>Mobile opens on Intake</b>Home is Sessions on desktop and web, as pinned. On a phone the first tab is Intake, because that is where decisions get made on the go.<span class="spec-ref">spec 14 · Home is Sessions</span></div>
+          <div><b>Nothing else changes semantics</b>The mobile app, push, Live Activities and native desktop notifications are post-v1 clients of the same public API. They add no operation; every button is a Notification's bound action.<span class="spec-ref">spec 01 · out of scope · ADR 0012</span></div>
+        </div>
+        <div class="colophon"><span data-logo="20"></span>Metro · direction 02 of 10 · a prototype, not the product</div>
+      </section>
+    </main>
+  </body>
+</html>

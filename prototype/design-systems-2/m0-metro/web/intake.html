@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(6) Intake · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window window--web">
+      <aside class="sidebar" data-sidebar="hercule" data-current="intake" data-web></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Intake</h1>
+          <div class="tabs" role="tablist" aria-label="Topics">
+            <button role="tab" aria-selected="true">All</button>
+            <button role="tab" aria-selected="false">Checkout</button>
+            <button role="tab" aria-selected="false">Infrastructure</button>
+            <button role="tab" aria-selected="false">Customers</button>
+            <button role="tab" aria-selected="false">Releases</button>
+          </div>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Manage topics"><i data-i="sliders"></i></button>
+            <button class="icon-btn" aria-label="Search Intake"><i data-i="search"></i></button>
+            <button class="pill-btn"><i data-i="play"></i>Triage now</button>
+          </div>
+        </header>
+
+        <!-- Below 1360px the right-hand column folds into this band: what waits on Rogier first,
+             then the fleet and the timetable as one line each. -->
+        <div class="band when-narrow" role="region" aria-label="Running now">
+          <span class="band-h attn"><i data-mk="wait" class="attn"></i><b>3</b> waiting</span>
+          <a class="band-chip" href="session-active.html"><i data-strip="sentry gmail posthog github" data-via="done" data-end="wait" data-size="s"></i>Fix 3-D Secure checkout<small>git push?</small></a>
+          <a class="band-chip" href="#"><i data-strip="github" data-end="wait" data-size="s"></i>Ship release v2.15<small>publish?</small></a>
+          <a class="band-chip" href="#"><i data-strip="you" data-end="wait" data-size="s"></i>Migrate ops dashboards<small>question</small></a>
+          <span class="grow"></span>
+          <span class="band-stat"><i data-mk="work" class="live"></i><b>8</b> working</span>
+          <span class="band-stat"><i data-i="clock"></i>triage <b>11:00</b></span>
+        </div>
+
+        <div class="intake">
+          <div class="intake-main">
+            <div class="headline">
+              <span class="burning"><b>1</b>burning</span><span><b>6</b>proposals</span><span><b>2</b>need a call</span><span><b>3</b>FYI</span
+              ><span class="quiet"><b>198</b>handled quietly</span>
+            </div>
+
+            <!-- What came in since the last visit, as a network: each Connection is a line into Triage. -->
+            <figure class="mapband" aria-label="What came in since yesterday 18:20">
+              <svg class="netmap" data-netmap width="968" height="200" data-labelw="124" data-outw="124" data-row="21" data-top="28" data-outrow="27"></svg>
+            </figure>
+
+            <!-- The lead Proposal: four lines meet at one interchange. -->
+            <article class="lead" aria-label="Lead Proposal">
+              <div class="lead-top">
+                <span><span class="prio" data-n="4"><i></i><i></i><i></i><i></i></span><b class="fail">urgent</b></span>
+                <span>Checkout</span>
+                <span>webshop</span>
+                <span>first seen 08:52</span>
+                <span class="grow"></span>
+                <span class="stamp stamp--attn"><i data-mk="wait"></i>Proposal</span>
+              </div>
+              <h2>Checkout fails for EU cards with 3-D Secure</h2>
+              <p class="gist">
+                Since deploy #1289, card payments that need 3-D Secure fail at checkout for EU customers. The new Stripe SDK returns
+                <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.
+              </p>
+
+              <div class="mf" aria-label="Made from">
+                <div class="mf-row" data-line="sentry">
+                  <i class="ln"></i><span class="src"><i data-brand="sentry"></i>Sentry<span class="faint m">webshop-prod</span></span>
+                  <span class="ev"><code>PaymentError: authentication_required</code></span><span class="n"><b>412</b> · <b>188</b> users</span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="gmail">
+                  <i class="ln"></i><span class="src"><i data-brand="gmail"></i>Gmail<span class="faint m">rogier@personal</span></span>
+                  <span class="ev">"Card declined at checkout", "Can't pay with my Rabobank card", "Payment keeps failing"</span><span class="n"><b>3</b> emails</span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="posthog">
+                  <i class="ln"></i><span class="src"><i data-brand="posthog"></i>PostHog<span class="faint m">webshop</span></span>
+                  <span class="ev">checkout conversion, EU only, since 14:10 yesterday</span><span class="n"><b class="fail">-18%</b></span><i class="ln ln--out"></i>
+                </div>
+                <div class="mf-row" data-line="github">
+                  <i class="ln"></i><span class="src"><i data-brand="github"></i>GitHub<span class="faint m">rogier/webshop</span></span>
+                  <span class="ev">deploy <b class="ink">#1289</b> "Upgrade Stripe SDK to v14"</span><span class="n">14:02 yesterday</span><i class="ln ln--out"></i>
+                </div>
+                <i class="mf-cap" aria-hidden="true"></i>
+              </div>
+
+              <div class="ledger" role="group" aria-label="Answers">
+                <button class="ans ans--primary">
+                  <span class="pt"></span><span class="lbl">Start "Fix bug"</span><span class="desc">Starts Fix bug on webshop in a new worktree</span
+                  ><span class="route"><em><i></i>Run</em><em><i></i>Thread</em><em><i></i>PR</em><kbd>&#9166;</kbd></span>
+                </button>
+                <button class="ans">
+                  <span class="pt"></span><span class="lbl">Accept</span><span class="desc">Adds it to the backlog as a Task</span
+                  ><span class="route"><em><i></i>Task</em><kbd>A</kbd></span>
+                </button>
+                <button class="ans">
+                  <span class="pt"></span><span class="lbl">Dismiss</span><span class="desc">Closes the Proposal</span
+                  ><span class="route"><span class="end"></span>ends here<kbd>D</kbd></span>
+                </button>
+              </div>
+              <div class="lead-foot">
+                <i data-i="reply"></i>I can also draft a reply to the 3 customers once the fix ships.
+                <button class="btn btn--ghost btn--sm">Yes, after the fix</button>
+              </div>
+            </article>
+
+            <h2 class="sec-head">Needs a call<span class="n">2</span></h2>
+            <div class="irow">
+              <i data-strip="intercom" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>App is slow on Android</span><span class="stamp">Unsure</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="intercom"></i>Intercom</span><span>7 conversations since Sunday</span><span>Which project is this?</span></div>
+              </div>
+              <div class="irow-acts">
+                <div class="seg"><button>webshop</button><button>payments-api</button><button>Both</button><button>Not work</button></div>
+              </div>
+            </div>
+            <div class="irow">
+              <i data-strip="github" data-end="held"></i>
+              <div>
+                <div class="irow-title"><span>"Label new issues" held 34 events</span><span class="stamp stamp--attn">Breaker</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="github"></i>GitHub</span><span>Spawn Bound 20/h tripped 08:14</span><span>a bot opened 34 issues</span></div>
+              </div>
+              <div class="irow-acts">
+                <button class="btn btn--sm">Keep held</button><button class="btn btn--ghost btn--sm">Release all 34</button><button class="btn btn--ghost btn--sm">Raise to 50/h</button>
+              </div>
+            </div>
+
+            <h2 class="sec-head">Today<span class="n">4</span></h2>
+            <div class="irow">
+              <i data-strip="grafana cron" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>Nightly backup job timing out on ops-db</span></div>
+                <div class="irow-meta">
+                  <span><span class="prio" data-n="3"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="grafana"></i>Grafana</span><span>ops</span><span>hits its 2h limit at 04:00, 3 nights running</span>
+                </div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Start "Investigate"</button><button class="btn btn--ghost btn--sm">Accept</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="gmail" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>Draft a reply to Marta at Brightline</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="gmail"></i>Gmail</span><span>Customers</span><span>wants invoice INV-2291 in the company name</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Draft reply</button><button class="btn btn--ghost btn--sm">Not now</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="stripe sentry" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>Stripe webhook retries rising</span></div>
+                <div class="irow-meta">
+                  <span><span class="prio" data-n="2"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="stripe"></i>Stripe</span><span>payments-api</span><span>+ 2 Sentry events</span>
+                </div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Start "Investigate"</button><button class="btn btn--ghost btn--sm">Accept</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="github" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>Merge 4 dependency bumps</span><span class="stamp">Offer</span></div>
+                <div class="irow-meta"><span class="src"><i data-brand="github"></i>GitHub</span><span>webshop</span><span>all green, patch versions only</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Merge all 4</button><button class="btn btn--ghost btn--sm">Review first</button></div>
+            </div>
+
+            <h2 class="sec-head">When you can<span class="n">2</span></h2>
+            <div class="irow">
+              <i data-strip="cron" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>SSL certificate for status.acme.dev expires in 12 days</span></div>
+                <div class="irow-meta"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="cron"></i>Cron</span><span>ops</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Start "Fix bug"</button><button class="btn btn--ghost btn--sm">Accept</button></div>
+            </div>
+            <div class="irow">
+              <i data-strip="intercom" data-end="wait"></i>
+              <div>
+                <div class="irow-title"><span>Add iDEAL as a payment method</span></div>
+                <div class="irow-meta"><span><span class="prio" data-n="1"><i></i><i></i><i></i><i></i></span></span><span class="src"><i data-brand="intercom"></i>Intercom</span><span>webshop</span><span>5 requests</span></div>
+              </div>
+              <div class="irow-acts"><button class="btn btn--sm">Accept</button><button class="btn btn--ghost btn--sm">Dismiss</button></div>
+            </div>
+
+            <h2 class="sec-head">Nothing to decide</h2>
+            <div class="quietline">
+              <span class="lbl"><i data-strip="sentry" data-end="done" data-size="s"></i></span><b>Attached</b>2 Sentry events<span class="sep"></span>Task "Cart total rounding on discounts"
+            </div>
+            <div class="quietline">
+              <span class="lbl"><i data-strip="github stripe posthog" data-end="info" data-size="s"></i></span><b>FYI</b>payments-api v2.14.0 released<span class="sep"></span>sign-ups
+              <b class="ok">+9%</b> week over week<span class="sep"></span>Stripe payout <b>€18,240</b> on Thursday
+            </div>
+            <div class="quietline">
+              <span class="lbl"><i data-strip="sentry github gmail" data-end="idle" data-size="s"></i></span><b>198</b>no action: known, noise or duplicates
+              <button class="btn btn--ghost btn--sm" style="margin-left: auto">Show</button>
+            </div>
+          </div>
+
+          <aside class="rail when-wide">
+            <section class="rail-sec">
+              <h3>Running now<span class="aside">8 working · 3 waiting</span></h3>
+              <div class="board">
+                <a class="board-row" href="session-active.html">
+                  <i data-mk="wait" class="attn"></i>
+                  <div><div class="t">Fix 3-D Secure checkout for EU cards</div><div class="sub">Thread · webshop · studio-mac</div></div>
+                  <div class="st attn">git push?<small>09:40</small></div>
+                </a>
+                <div class="board-row">
+                  <i data-mk="wait" class="attn"></i>
+                  <div><div class="t">Ship release v2.15</div><div class="sub">Run · payments-api · build-box-2</div></div>
+                  <div class="st attn">publish to npm?<small>09:31</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="decision" class="attn"></i>
+                  <div><div class="t">Migrate ops dashboards</div><div class="sub">Thread · ops · studio-mac</div></div>
+                  <div class="st attn">a question<small>09:24</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work" class="live"></i>
+                  <div><div class="t">Refactor cart totals</div><div class="sub">Thread · webshop · build-box-1</div></div>
+                  <div class="st live">working<small>22m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work" class="live"></i>
+                  <div><div class="t">Investigate backup timeouts</div><div class="sub">Run · ops · build-box-1</div></div>
+                  <div class="st live">working<small>6m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="work" class="live"></i>
+                  <div><div class="t">Webhook retry backoff</div><div class="sub">Run · payments-api · build-box-1</div></div>
+                  <div class="st live">working<small>3m</small></div>
+                </div>
+                <div class="board-row">
+                  <i data-mk="held" class="attn"></i>
+                  <div><div class="t">Label new issues</div><div class="sub">Run · webshop · build-box-1</div></div>
+                  <div class="st attn">paused<small>bound tripped</small></div>
+                </div>
+              </div>
+              <a class="side-all" href="office.html" style="margin-top: 6px; padding: 0">5 more working · 6 idle · 1 asleep<i data-i="chev-r"></i></a>
+            </section>
+            <section class="rail-sec">
+              <h3>Fleet<span class="aside">16 of 22 slots</span></h3>
+              <div class="fleet-bars">
+                <span class="nm">studio-mac</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="v">5 of 6</span>
+                <span class="nm">build-box-1</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><span class="v attn">at cap</span>
+                <span class="nm">build-box-2</span><span class="cars"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></span><span class="v">3 of 8</span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Triage<span class="aside">every 2 hours</span></h3>
+              <div class="timetable" aria-label="Triage timetable">
+                <span class="tt done"><i></i>07:00<small>38s</small></span>
+                <span class="tt done"><i></i>09:00<small>42s</small></span>
+                <span class="tt next"><i></i>11:00<small>next</small></span>
+                <span class="tt"><i></i>13:00</span>
+                <span class="tt"><i></i>15:00</span>
+              </div>
+            </section>
+            <section class="rail-sec">
+              <h3>Connections<span class="aside">10 of 11 running</span></h3>
+              <a class="linebar" href="settings-connections.html" aria-label="11 Connections, Discord reconnecting">
+                <i style="--c: var(--ln-sentry)"></i><i style="--c: var(--ln-github)"></i><i style="--c: var(--ln-stripe)"></i><i
+                  style="--c: var(--ln-gmail)"></i><i style="--c: var(--ln-cron)"></i><i style="--c: var(--ln-posthog)"></i><i
+                  style="--c: var(--ln-intercom)"></i><i style="--c: var(--ln-grafana)"></i><i style="--c: var(--ln-slack)"></i><i
+                  style="--c: var(--ln-webchat)"></i><i class="broken" style="--c: var(--ln-discord)"></i>
+              </a>
+              <p class="linebar-note"><i data-brand="discord"></i><b>Discord</b> reconnecting since 09:12<span class="faint"> · Juno can't be reached</span></p>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

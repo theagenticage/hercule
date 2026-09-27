@@ -1,0 +1,184 @@
+<!doctype html>
+<!-- PROTOTYPE - one screen in all six round-2 systems: a row per family, the original first.
+     compare.html?screen=desktop/intake.html&theme=dark[&glass=0.5] -->
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Compare - Hercule design systems, round 2</title>
+    <script src="designs.js"></script>
+    <link rel="stylesheet" href="shared/frames.css" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f4f2;
+        --ink: #18181a;
+        --muted: #66666c;
+        --line: rgb(0 0 0 / 0.09);
+        --card: #fff;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+      }
+      :root[data-theme="dark"] {
+        --bg: #121213;
+        --ink: #ececee;
+        --muted: #9a9aa2;
+        --line: rgb(255 255 255 / 0.08);
+        --card: #1b1b1d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      .bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 32px;
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--line);
+      }
+      .bar a,
+      .bar select,
+      .bar button {
+        height: 30px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      .bar button[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--bg);
+      }
+      .bar .spacer {
+        flex: 1;
+      }
+      .bar strong {
+        font-weight: 600;
+        margin-right: 6px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px 28px;
+        padding: 8px 32px 32px;
+      }
+      .grid h2 {
+        grid-column: 1 / -1;
+        margin: 24px 0 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .grid h2 small {
+        margin-left: 8px;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .glass {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .glass input {
+        width: 140px;
+        accent-color: var(--ink);
+      }
+      .glass output {
+        min-width: 72px;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+      .f {
+        --f-chrome: var(--card);
+        --f-chrome-ink: var(--muted);
+      }
+      .f-caption small {
+        color: var(--muted);
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <a href="index.html">&larr; Gallery</a>
+      <strong style="margin-left: 8px">Compare</strong>
+      <select id="screen" aria-label="Screen"></select>
+      <span class="spacer"></span>
+      <label class="glass" title="The round-1 originals have no glass level and ignore the slider">
+        Glass
+        <input type="range" min="0" max="100" value="50" data-glass-control aria-label="Glass level" />
+        <output data-glass-value data-default-label="as designed"></output>
+      </label>
+      <button data-glass-reset>Default glass</button>
+      <button data-theme-option="light">Light</button>
+      <button data-theme-option="dark">Dark</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var screen = params.get("screen") || "desktop/intake.html";
+        var theme = params.get("theme") || "dark";
+        var kind = screen.split("/")[0];
+        document.documentElement.dataset.theme = theme;
+
+        var select = document.getElementById("screen");
+        Object.keys(window.SCREENS).forEach(function (k) {
+          var group = document.createElement("optgroup");
+          group.label = k === "desktop" ? "Desktop app" : k === "web" ? "Web" : "Mobile";
+          window.SCREENS[k].forEach(function (s) {
+            var o = document.createElement("option");
+            o.value = k + "/" + s[0];
+            o.textContent = s[1];
+            o.selected = o.value === screen;
+            group.appendChild(o);
+          });
+          select.appendChild(group);
+        });
+        select.onchange = function () {
+          // Read the query again: the theme and glass buttons rewrite it after the page loads.
+          var current = new URLSearchParams(location.search);
+          current.set("screen", select.value);
+          location.search = current.toString();
+        };
+
+        var grid = document.getElementById("grid");
+        grid.className = "grid " + kind;
+        window.FAMILIES.forEach(function (family) {
+          var heading = document.createElement("h2");
+          heading.innerHTML = family.name + "<small>the original, then two iterations</small>";
+          grid.appendChild(heading);
+          window.DESIGNS.filter(function (d) {
+            return d.family === family.id;
+          }).forEach(function (d) {
+            var fig = document.createElement("figure");
+            fig.dataset.frame = kind;
+            fig.dataset.src = d.id + "/" + screen;
+            fig.dataset.caption = d.name;
+            fig.dataset.note = d.step + " · " + d.thesis;
+            if (kind === "web") fig.dataset.url = "hercule.home.arpa";
+            grid.appendChild(fig);
+          });
+        });
+      })();
+    </script>
+    <script src="shared/book.js"></script>
+  </body>
+</html>

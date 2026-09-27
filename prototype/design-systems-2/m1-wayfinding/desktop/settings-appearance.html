@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="settings"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Settings</h1>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="settings">
+          <nav class="set-nav" data-setnav="appearance" aria-label="Settings"></nav>
+          <div class="set-body">
+            <div class="set-inner set-inner--wide">
+              <h2>Appearance</h2>
+              <p class="set-lede">Themes change the ground and the ink. Line colors keep their hue in every theme, so a Connection is always the same line.</p>
+
+              <div class="themes" role="radiogroup" aria-label="Theme">
+                <button class="theme-card" role="radio" aria-checked="true" data-pick="enamel">
+                  <span class="tp-frame"><span class="theme-scope tp" data-theme="enamel" data-tp></span></span>
+                  <span class="tc-name">Enamel<small>light</small></span>
+                </button>
+                <button class="theme-card" role="radio" aria-checked="false" data-pick="tile">
+                  <span class="tp-frame"><span class="theme-scope tp" data-theme="tile" data-tp></span></span>
+                  <span class="tc-name">Tile<small>light · cream</small></span>
+                </button>
+                <button class="theme-card" role="radio" aria-checked="false" data-pick="night-service">
+                  <span class="tp-frame"><span class="theme-scope tp" data-theme="night-service" data-tp></span></span>
+                  <span class="tc-name">Night Service<small>dark</small></span>
+                </button>
+                <button class="theme-card" role="radio" aria-checked="false" data-pick="underground">
+                  <span class="tp-frame"><span class="theme-scope tp" data-theme="underground" data-tp></span></span>
+                  <span class="tc-name">Underground<small>dark · brass</small></span>
+                </button>
+                <button class="theme-card" role="radio" aria-checked="false" data-pick="signal">
+                  <span class="tp-frame"><span class="theme-scope tp" data-theme="signal" data-tp></span></span>
+                  <span class="tc-name">Signal<small>dark · high contrast</small></span>
+                </button>
+              </div>
+
+              <div class="set-group">
+                <div class="set-row">
+                  <div>
+                    <div class="k">Match the system</div>
+                    <div class="h">Follows macOS when it turns light or dark.</div>
+                  </div>
+                  <div class="row-flex">
+                    <span class="pair"><i data-i="sun"></i><button class="field select">Enamel</button></span>
+                    <span class="pair"><i data-i="moon"></i><button class="field select">Night Service</button></span>
+                    <button class="toggle" role="switch" aria-checked="true" aria-label="Match the system"></button>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Density</div>
+                    <div class="h">Compact fits more rows; lines keep their weight.</div>
+                  </div>
+                  <div class="seg" role="group" aria-label="Density">
+                    <button aria-pressed="true">Comfortable</button><button aria-pressed="false">Compact</button>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Text size</div>
+                    <div class="h">Also follows the system text size.</div>
+                  </div>
+                  <div class="seg seg--type" role="group" aria-label="Text size">
+                    <button aria-pressed="false" style="font-size: 11px">A</button><button aria-pressed="true" style="font-size: 13.5px">A</button
+                    ><button aria-pressed="false" style="font-size: 16px">A</button>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Source marks on rows</div>
+                    <div class="h">Shows the Sentry, Gmail or GitHub mark beside a line's name.</div>
+                  </div>
+                  <div class="row-flex">
+                    <span class="marks-demo"><i class="bullet" style="--c: var(--ln-sentry)"></i><i data-brand="sentry"></i>Sentry</span>
+                    <button class="toggle" role="switch" aria-checked="true" aria-label="Source marks on rows"></button>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Reduce motion</div>
+                    <div class="h">Trains stop running on the map and working halos hold still.</div>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce motion"></button>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Glass</div>
+                    <div class="h">How much of the page shows through the thread header, the composer and sheets. At 0% they are solid.</div>
+                  </div>
+                  <div class="row-flex">
+                    <input class="range" type="range" min="0" max="100" value="35" aria-label="Glass" data-glass-setting />
+                    <output class="range-out" data-glass-setting-value>35%</output>
+                  </div>
+                </div>
+                <div class="set-row">
+                  <div>
+                    <div class="k">Reduce transparency</div>
+                    <div class="h">Makes every layer solid, whatever Glass is set to. Also follows the system setting.</div>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce transparency"></button>
+                </div>
+              </div>
+
+              <div class="set-group">
+                <h3>Line colors</h3>
+                <p class="set-lede">Each Connection owns one line color in every theme. Hercule's own line is the ink. State never borrows a line color: it is a shape.</p>
+                <div class="line-key">
+                  <span><i class="bullet" style="--c: var(--ln-sentry)"></i>Sentry</span>
+                  <span><i class="bullet" style="--c: var(--ln-gmail)"></i>Gmail</span>
+                  <span><i class="bullet" style="--c: var(--ln-posthog)"></i>PostHog</span>
+                  <span><i class="bullet" style="--c: var(--ln-github)"></i>GitHub</span>
+                  <span><i class="bullet" style="--c: var(--ln-stripe)"></i>Stripe</span>
+                  <span><i class="bullet" style="--c: var(--ln-intercom)"></i>Intercom</span>
+                  <span><i class="bullet" style="--c: var(--ln-grafana)"></i>Grafana</span>
+                  <span><i class="bullet" style="--c: var(--ln-cron)"></i>Cron</span>
+                  <span><i class="bullet" style="--c: var(--ln-slack)"></i>Slack</span>
+                  <span><i class="bullet" style="--c: var(--ln-discord)"></i>Discord</span>
+                  <span class="lk-wide"><i class="bullet bullet--trunk"></i>Hercule<small>accepted work and Web chat</small></span>
+                </div>
+                <div class="shape-key">
+                  <span><i data-mk="work"></i>working</span>
+                  <span><i data-mk="wait"></i>waiting on you</span>
+                  <span><i data-mk="done"></i>done</span>
+                  <span><i data-mk="fail"></i>failed</span>
+                  <span><i data-mk="paused"></i>paused</span>
+                  <span><i data-mk="idle"></i>idle</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // Marks the theme the page is showing as picked, and switches the whole page on a click.
+      (function () {
+        var alias = { light: "enamel", dark: "night-service" };
+        var root = document.documentElement;
+        function mark() {
+          var now = alias[root.dataset.theme] || root.dataset.theme;
+          document.querySelectorAll("[data-pick]").forEach(function (b) {
+            b.setAttribute("aria-checked", String(b.dataset.pick === now));
+          });
+        }
+        document.querySelectorAll("[data-pick]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            root.dataset.theme = b.dataset.pick;
+            mark();
+          });
+        });
+        mark();
+      })();
+      // Moves the glass level of the whole page with the Glass slider. The slider starts at the
+      // level the page is showing, which ?glass= may have changed from the default.
+      (function () {
+        var range = document.querySelector("[data-glass-setting]");
+        var out = document.querySelector("[data-glass-setting-value]");
+        function show(level) {
+          range.value = Math.round(level * 100);
+          range.style.setProperty("--fill", range.value + "%");
+          out.textContent = range.value + "%";
+        }
+        show(Number(getComputedStyle(document.documentElement).getPropertyValue("--glass-level")));
+        range.addEventListener("input", function () {
+          HerculePage.setGlassLevel(range.value / 100);
+        });
+        document.addEventListener("glasschange", function (e) {
+          show(e.detail);
+        });
+      })();
+      // Draws each theme preview: a small window with a plain sidebar on the left and four
+      // Connection lines meeting at a Proposal, in that theme's own colors.
+      document.querySelectorAll("[data-tp]").forEach(function (el) {
+        el.innerHTML =
+          '<span class="tp-side"><i></i><i class="on"></i><i></i><i></i><i></i></span>' +
+          '<svg class="tp-map" viewBox="0 0 150 86" aria-hidden="true">' +
+          '<path d="M6 20H58c10 0 14 12 24 12" style="stroke:var(--ln-sentry)"/>' +
+          '<path d="M6 30H58c10 0 14 5 24 5" style="stroke:var(--ln-gmail)"/>' +
+          '<path d="M6 40H58c10 0 14-2 24-2" style="stroke:var(--ln-posthog)"/>' +
+          '<path d="M6 50H58c10 0 14-9 24-9" style="stroke:var(--ln-github)"/>' +
+          '<path d="M86 36.5H128" class="tp-trunk"/>' +
+          '<rect x="78" y="26" width="10" height="21" rx="5" class="tp-cap"/>' +
+          '<circle cx="132" cy="36.5" r="5" class="tp-ring"/>' +
+          '<rect x="6" y="66" width="70" height="4" rx="2" class="tp-text"/>' +
+          '<rect x="6" y="75" width="44" height="4" rx="2" class="tp-text tp-text--soft"/>' +
+          '<rect x="104" y="64" width="40" height="15" rx="4" class="tp-btn"/>' +
+          "</svg>";
+      });
+    </script>
+  </body>
+</html>

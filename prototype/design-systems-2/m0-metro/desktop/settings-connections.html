@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="hercule" data-current="connections"></aside>
+
+      <main class="main">
+        <header class="chrome">
+          <h1>Settings</h1>
+          <div class="actions">
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+
+        <div class="settings">
+          <nav class="set-nav" data-setnav="connections" aria-label="Settings"></nav>
+          <div class="set-body">
+            <div class="set-inner set-inner--wide">
+              <div class="rec-head">
+                <div>
+                  <h2>Connections</h2>
+                  <p class="set-lede">A line's weight is its volume over the last 24 hours. A solid line is healthy; a dashed one has lost its connection.</p>
+                </div>
+                <button class="btn btn--primary"><i data-i="plus"></i>Add a Connection</button>
+              </div>
+
+              <div class="cx-sum">
+                <div><b>2,418</b><span>events in 24h</span></div>
+                <div><b>212</b><span>since you last checked</span></div>
+                <div><b>10</b><span>healthy</span></div>
+                <div class="attn"><b>1</b><span>reconnecting</span></div>
+              </div>
+
+              <div class="cx-head">
+                <h3>Event sources<span class="faint">8 · each line ends at its default Topic</span></h3>
+                <button class="btn btn--ghost btn--sm">Manage topics</button>
+              </div>
+
+              <div class="cx-map">
+                <div class="cx-group">
+                  <div>
+                    <div class="cx-row" data-line="sentry" style="--w: 13.2px">
+                      <i data-brand="sentry"></i><span class="cx-name"><b>Sentry</b>webshop-prod</span><span class="cx-n">1,406</span><span class="cx-track"></span>
+                    </div>
+                    <div class="cx-row" data-line="stripe" style="--w: 6.3px">
+                      <i data-brand="stripe"></i><span class="cx-name"><b>Stripe</b>live</span><span class="cx-n">209</span><span class="cx-track"></span>
+                    </div>
+                    <div class="cx-row" data-line="posthog" style="--w: 4.9px">
+                      <i data-brand="posthog"></i><span class="cx-name"><b>PostHog</b>webshop</span><span class="cx-n">96</span><span class="cx-track"></span>
+                    </div>
+                  </div>
+                  <span class="cx-cap"></span>
+                  <span class="cx-topic"><b>Checkout</b><small>1,711 in 24h</small></span>
+                </div>
+
+                <div class="cx-group">
+                  <div>
+                    <div class="cx-row" data-line="github" style="--w: 7.3px">
+                      <i data-brand="github"></i><span class="cx-name"><b>GitHub</b>rogier</span><span class="cx-n">312</span><span class="cx-track"></span>
+                    </div>
+                  </div>
+                  <span class="cx-cap"></span>
+                  <span class="cx-topic"><b>Releases</b><small>312 in 24h</small></span>
+                </div>
+
+                <div class="cx-group">
+                  <div>
+                    <div class="cx-row" data-line="gmail" style="--w: 6.1px">
+                      <i data-brand="gmail"></i><span class="cx-name"><b>Gmail</b>rogier@personal</span><span class="cx-n">188</span><span class="cx-track"></span>
+                    </div>
+                    <div class="cx-row" data-line="intercom" style="--w: 4.3px">
+                      <i data-brand="intercom"></i><span class="cx-name"><b>Intercom</b>support</span><span class="cx-n">61</span><span class="cx-track"></span>
+                    </div>
+                  </div>
+                  <span class="cx-cap"></span>
+                  <span class="cx-topic"><b>Customers</b><small>249 in 24h</small></span>
+                </div>
+
+                <div class="cx-group">
+                  <div>
+                    <div class="cx-row" data-line="grafana" style="--w: 4px">
+                      <i data-brand="grafana"></i><span class="cx-name"><b>Grafana</b>ops</span><span class="cx-n">44</span><span class="cx-track"></span>
+                    </div>
+                  </div>
+                  <span class="cx-cap"></span>
+                  <span class="cx-topic"><b>Infrastructure</b><small>44 in 24h</small></span>
+                </div>
+
+                <div class="cx-group">
+                  <div>
+                    <div class="cx-row" data-line="cron" style="--w: 5px">
+                      <i data-brand="cron"></i><span class="cx-name"><b>Cron</b>schedules</span><span class="cx-n">102</span><span class="cx-track"></span>
+                    </div>
+                  </div>
+                  <span class="cx-cap cx-cap--end"></span>
+                  <span class="cx-topic cx-topic--none"><b>No default Topic</b><small>102 in 24h</small></span>
+                </div>
+              </div>
+
+              <div class="cx-head">
+                <h3>Channels<span class="faint">3 · where Assistants reach you</span></h3>
+              </div>
+
+              <div class="cx-map">
+                <div class="cx-group" data-line="slack">
+                  <div>
+                    <div class="cx-row cx-row--ch">
+                      <i data-brand="slack"></i><span class="cx-name"><b>Slack</b>acme-hq</span><span class="cx-n"></span>
+                      <span class="cx-track">
+                        <span class="cx-stop"><i data-mk="work" class="live"></i>Ada<small>DM with Rogier</small></span>
+                        <span class="cx-stop"><i data-mk="idle" class="faint"></i>Milo<small>#ops</small></span>
+                      </span>
+                    </div>
+                  </div>
+                  <span class="cx-cap cx-cap--ring"></span>
+                  <span class="cx-topic cx-topic--health"><span class="faint">healthy</span></span>
+                </div>
+
+                <div class="cx-group" data-line="discord">
+                  <div>
+                    <div class="cx-row cx-row--ch cx-row--down">
+                      <i data-brand="discord"></i><span class="cx-name"><b>Discord</b>community</span><span class="cx-n"></span>
+                      <span class="cx-track">
+                        <span class="cx-stop"><i data-mk="asleep" class="faint"></i>Juno<small>#support</small></span>
+                      </span>
+                    </div>
+                  </div>
+                  <span class="cx-cap cx-cap--ring cx-cap--down"></span>
+                  <span class="cx-topic cx-topic--health"
+                    ><span class="attn"><i data-mk="wait" class="attn"></i>reconnecting</span><small>since 09:12 · <a href="#">Retry now</a></small></span
+                  >
+                </div>
+
+                <div class="cx-group" data-line="webchat">
+                  <div>
+                    <div class="cx-row cx-row--ch">
+                      <i data-brand="webchat"></i><span class="cx-name"><b>Web chat</b>built in</span><span class="cx-n"></span>
+                      <span class="cx-track">
+                        <span class="cx-stop"><i data-mk="work" class="live"></i>Ada<small>always</small></span>
+                      </span>
+                    </div>
+                  </div>
+                  <span class="cx-cap cx-cap--ring"></span>
+                  <span class="cx-topic cx-topic--health"><span class="faint">healthy</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

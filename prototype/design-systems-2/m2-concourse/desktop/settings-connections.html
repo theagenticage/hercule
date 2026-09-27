@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Connections · Settings · Hercule</title>
+    <link rel="icon" href="../favicon.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="window">
+      <aside class="sidebar" data-sidebar="settings" data-current="connections"></aside>
+
+      <main class="main">
+        <div class="pane">
+          <div class="set set--wide">
+            <p class="set-lede prose">Event sources bring events in, and Triage reads every one. Channels are where Assistants reach you.</p>
+
+            <h2 class="set-h">Event sources<span class="aside">8 · 2,418 events in the last 24 hours</span></h2>
+            <div class="set-card">
+              <table class="tbl">
+                <thead>
+                  <tr><th class="c-name">Connection</th><th class="c-topic">Default Topic</th><th class="c-num num">Events, 24h</th><th>Status</th><th class="c-end"></th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who"><i data-brand="sentry" style="color: var(--ln-sentry)"></i><b>Sentry</b><span class="faint">webshop-prod</span></span></td>
+                    <td>Checkout</td>
+                    <td class="num">1,406</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Sentry options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="stripe" style="color: var(--ln-stripe)"></i><b>Stripe</b><span class="faint">live</span></span></td>
+                    <td>Checkout</td>
+                    <td class="num">209</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Stripe options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="posthog" style="color: var(--ln-posthog)"></i><b>PostHog</b><span class="faint">webshop</span></span></td>
+                    <td>Checkout</td>
+                    <td class="num">96</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="PostHog options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="github" style="color: var(--ln-github)"></i><b>GitHub</b><span class="faint">rogier</span></span></td>
+                    <td>Releases</td>
+                    <td class="num">312</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="GitHub options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="gmail" style="color: var(--ln-gmail)"></i><b>Gmail</b><span class="faint">rogier@personal</span></span></td>
+                    <td>Customers</td>
+                    <td class="num">188</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Gmail options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="intercom" style="color: var(--ln-intercom)"></i><b>Intercom</b><span class="faint">support</span></span></td>
+                    <td>Customers</td>
+                    <td class="num">61</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Intercom options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="grafana" style="color: var(--ln-grafana)"></i><b>Grafana</b><span class="faint">ops</span></span></td>
+                    <td>Infrastructure</td>
+                    <td class="num">44</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Grafana options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="cron" style="color: var(--ln-cron)"></i><b>Cron</b><span class="faint">schedules</span></span></td>
+                    <td><span class="faint">none</span></td>
+                    <td class="num">102</td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Cron options"><i data-i="more"></i></button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h2 class="set-h">Channels<span class="aside">3</span></h2>
+            <div class="set-card">
+              <table class="tbl">
+                <thead>
+                  <tr><th class="c-name">Connection</th><th class="c-who">Assistants</th><th>Status</th><th class="c-end"></th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who"><i data-brand="slack" style="color: var(--ln-slack)"></i><b>Slack</b><span class="faint">acme-hq</span></span></td>
+                    <td>Ada <span class="faint">in a DM with Rogier</span> · Milo <span class="faint">in #ops</span></td>
+                    <td><span class="status">Connected</span></td>
+                    <td class="end"><button class="icon-btn" aria-label="Slack options"><i data-i="more"></i></button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="discord" style="color: var(--ln-discord)"></i><b>Discord</b><span class="faint">community</span></span></td>
+                    <td>Juno <span class="faint">in #support</span></td>
+                    <td><span class="status fail"><i data-mk="fail"></i>Offline since 09:12</span></td>
+                    <td class="end"><button class="btn btn--sm">Retry now</button></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who"><i data-brand="webchat"></i><b>Web chat</b><span class="faint">built in</span></span></td>
+                    <td>Ada</td>
+                    <td><span class="status">Always on</span></td>
+                    <td class="end"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <header class="chrome">
+          <h1 class="page-title">Connections</h1>
+          <div class="actions">
+            <button class="btn btn--sm"><i data-i="plus"></i>Add a Connection</button>
+            <button class="icon-btn" aria-label="Search settings"><i data-i="search"></i></button>
+          </div>
+        </header>
+      </main>
+    </div>
+  </body>
+</html>

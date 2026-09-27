@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en" data-theme="enamel">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Fix 3-D Secure checkout · Hercule</title>
+    <link rel="icon" href="../favicon-wait.svg" />
+    <script src="../metro.js" defer></script>
+  </head>
+  <body>
+    <div class="phone" data-glass-host>
+      <div class="statusbar" data-statusbar="9:41"></div>
+
+      <header class="m-nav">
+        <a class="back" href="intake.html" aria-label="Back to Threads"><i data-i="chev-l"></i></a>
+        <div class="t">
+          <b>Fix 3-D Secure checkout</b>
+          <small>webshop · studio-mac · Opus 5.5</small>
+        </div>
+        <button class="m-icon" aria-label="More"><i data-i="more"></i></button>
+      </header>
+
+      <main class="m-body transcript" data-glass data-scrolled-by="520">
+        <div class="col turns">
+          <nav class="route-strip" aria-label="Where this thread came from and where it goes">
+            <a class="rs-stop" href="intake.html"><i data-strip="sentry gmail posthog github" data-size="s"></i><b>Proposal</b></a>
+            <span class="rs-link"></span>
+            <span class="rs-stop"><i data-mk="wait"></i><b>This thread</b></span>
+            <span class="rs-link rs-link--next"></span>
+            <span class="rs-stop"><i data-mk="idle"></i><b>Pull request</b></span>
+          </nav>
+          <div class="stamp-line">Today 09:02 · from the Proposal · Opus 5.5 · high</div>
+          <div class="msg-user">Checkout fails for EU cards that need <span class="nw">3-D Secure</span> since deploy #1289. Find the cause and fix it. Add a test that reproduces it first.</div>
+          <div class="msg-time">09:02</div>
+
+          <button class="worked">
+            <span>Worked for <b>2m 14s</b></span>
+            <span class="ticks"><i></i><i></i><i></i><i></i><i></i><i></i><i class="cmd"></i></span>
+            <i data-i="chev-r" class="faint"></i>
+          </button>
+
+          <div class="msg-agent">
+            <p>
+              Found it. Since Stripe SDK v14, <code>confirmPayment</code> returns <code>requires_action</code> for cards that need 3-D Secure.
+              <code>handlePaymentResult</code> treats anything but <code>succeeded</code> as a failure, so we show "Card declined" instead of
+              the 3-D Secure modal.
+            </p>
+            <div class="codeblock"><span class="k">if</span> <span class="p">(</span>result.status <span class="p">===</span> <span class="s">"requires_action"</span><span class="p">) {</span>
+  <span class="k">return</span> openThreeDSModal<span class="p">(</span>result.clientSecret<span class="p">);</span>
+<span class="p">}</span></div>
+          </div>
+
+          <div class="msg-agent"><p>I wrote a failing test first, then the fix.</p></div>
+
+          <button class="worked">
+            <span>Worked for <b>4m 51s</b></span>
+            <span class="ticks"><i></i><i></i><i class="cmd"></i><i></i><i></i><i></i><i></i><i class="cmd"></i><i></i><i></i><i></i><i class="cmd"></i></span>
+            <i data-i="chev-r" class="faint"></i>
+          </button>
+
+          <section class="files" aria-label="Changed files">
+            <div class="files-head">
+              <b>3 changed files</b><span class="plus">+48</span><span class="minus">-12</span>
+              <span class="grow"></span>
+              <button class="btn btn--sm">Open diff</button>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/payment.ts</code><span><span class="plus">+21</span> <span class="minus">-9</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i class="d"></i></span>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/payment.test.ts</code><span><span class="plus">+19</span> <span class="minus">-0</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></span>
+            </div>
+            <div class="files-row">
+              <code>src/checkout/3ds-modal.tsx</code><span><span class="plus">+8</span> <span class="minus">-3</span></span
+              ><span class="diffbar"><i class="a"></i><i class="a"></i><i class="a"></i><i class="d"></i><i></i></span>
+            </div>
+            <div class="files-foot"><i data-mk="done" class="ok"></i><b class="ok">24 passed</b><code>pnpm test checkout</code></div>
+          </section>
+
+          <div class="msg-agent"><p>Tests pass. Ready to push the branch and open a pull request.</p></div>
+        </div>
+      </main>
+
+      <!-- The composer: glass over the foot of the transcript. The Request waits in the dock above
+           the card, with thumb-sized answers; the card itself is voice first. -->
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="dock glass-tab">
+            <div class="when-full">
+              <div class="dock-head">
+                <span class="q"><i data-mk="wait"></i></span>
+                <div>
+                  <div class="dock-title">Run this command?</div>
+                  <div class="dock-subject">git push -u origin fix/3ds-eu-cards</div>
+                </div>
+                <span class="dock-meta">09:40</span>
+              </div>
+              <!-- Stacked full width, so the three answers line up under one thumb. -->
+              <div class="m-answers">
+                <button class="m-btn m-btn--ink">Allow once</button>
+                <button class="m-btn">Always allow git push</button>
+                <button class="m-btn m-btn--quiet">Deny</button>
+              </div>
+              <div class="queued">
+                <i data-mk="idle"></i><span class="what">Also check the Apple Pay path</span><span class="tag">runs next</span>
+                <span class="grow"></span>
+                <button class="m-btn m-btn--quiet m-btn--sm"><i data-i="steer"></i>Steer</button>
+              </div>
+            </div>
+            <div class="dock-mini when-shrunk">
+              <span class="q"><i data-mk="wait"></i></span><code class="grow">git push -u origin fix/3ds-eu-cards</code>
+              <button class="m-btn m-btn--ink">Allow once</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="m-voice when-full">
+              <button class="icon-btn" aria-label="Attach"><i data-i="plus"></i></button>
+              <span class="ph">Reply, or hold to talk</span>
+              <button class="stop"><i></i>Stop</button>
+              <button class="m-mic" aria-label="Hold to talk"><i data-i="mic"></i></button>
+            </div>
+            <div class="card-mini when-shrunk">
+              <span class="grow">Reply…</span><span class="faint" style="font-size: 11.5px">1 queued</span>
+              <button class="m-mic" aria-label="Hold to talk"><i data-i="mic"></i></button>
+            </div>
+          </div>
+
+          <div class="lip glass-tab when-full">
+            <span><i data-i="branch"></i><code>fix/3ds-eu-cards</code></span>
+            <span class="rule"></span>
+            <span>own worktree</span>
+            <span class="right"><i data-i="machine"></i>studio-mac</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="home-ind"></div>
+    </div>
+  </body>
+</html>
