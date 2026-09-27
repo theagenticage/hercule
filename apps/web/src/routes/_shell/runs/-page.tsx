@@ -1,18 +1,16 @@
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
+  describeReruns,
   isRunLive,
-  listRerunChoices,
   queryKeys,
   type HerculeClient,
-  type RerunsReading,
   type RunnerWait,
   type RunWorkspaceReading,
 } from "@hercule/client-core";
-import type { RerunMode, Run, Runner } from "@hercule/contract";
+import type { Run, Runner } from "@hercule/contract";
 import {
   Button,
   Checkbox,
@@ -23,6 +21,7 @@ import {
   useElementWidth,
   useTickingClock,
 } from "@hercule/ui";
+import { runsQuery } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { RunGraphView } from "../../../screens/runs/run-graph-view";
 import { RunHeader } from "../../../screens/runs/run-header";
@@ -31,6 +30,7 @@ import { RunOutputCard } from "../../../screens/runs/run-output-card";
 import { StepList } from "../../../screens/runs/step-list";
 import { StepTimeline } from "../../../screens/runs/step-timeline";
 import { readErrorMessage } from "../../../screens/save-status";
+import { RerunQuestion, useRerun } from "./-rerun-question";
 
 /** How a run's steps are shown below its graph. */
 export type StepsView = "list" | "timeline";
@@ -73,7 +73,10 @@ const PAGE_PADDING = 32;
  * focus can return to it when the question is declined. On a wide page the
  * cancel and delete questions sit beside the title; on a narrow one they have
  * a row of their own below the header's lines. The re-run question always has
- * that row, because it explains each choice, and every word of it matters.
+ * that row, because it explains each choice.
+ *
+ * The page reads the runs that re-ran this one, which the header links. The
+ * route's loader has already read them, so the page does not wait for them.
  */
 export function RunPage({
   client,
@@ -82,7 +85,6 @@ export function RunPage({
   workspaceLabel,
   workspaceReading,
   runnerWait,
-  reruns,
   timezone,
   stepsView,
   onStepsViewChange,
@@ -97,22 +99,17 @@ export function RunPage({
   readonly workspaceReading: RunWorkspaceReading;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
-  /** The runs that re-ran this one, as the header links them. */
-  readonly reruns: RerunsReading;
   readonly timezone: string;
   readonly stepsView: StepsView;
   readonly onStepsViewChange: (view: StepsView) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const isLive = isRunLive(run.status);
   const now = useTickingClock(isLive);
   const [asking, setAsking] = useState<"cancel" | "delete-workspace" | "rerun" | undefined>(
     undefined,
   );
   const [deletesWorkspace, setDeletesWorkspace] = useState(true);
-  const rerunChoices = listRerunChoices(run);
-  const [rerunChoice, setRerunChoice] = useState(rerunChoices[0]);
   const { workspaceId } = run;
   const { observeElement: observePage, width: pageWidth } = useElementWidth();
 
@@ -132,14 +129,13 @@ export function RunPage({
     onSuccess: (_, id) => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(id) }),
   });
 
-  const rerun = useMutation({
-    mutationFn: (mode: RerunMode) =>
-      client.run.rerun({ params: { id: run.id }, payload: { mode } }),
-    onSuccess: async ({ runId }) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
-      await navigate({ to: "/runs/$runId", params: { runId } });
-    },
-  });
+  const { rerun, startRerun } = useRerun(client, run.id);
+
+  // Only the first page is read: the header links the newest few re-runs and
+  // counts the rest.
+  const [rerunsPage = { items: [] }] = useSuspenseInfiniteQuery(
+    runsQuery(client, { originalRunId: run.id }),
+  ).data.pages;
 
   // The run stays the same object until a refetch changes it, so the graph,
   // and with it the graph's layout, is built once per change of the run and
@@ -185,11 +181,8 @@ export function RunPage({
     </InPlaceQuestion>
   );
   const deleteQuestion =
-    workspaceId === undefined ? null : (
+    workspaceId === undefined ? undefined : (
       <InPlaceQuestion
-        // Its own key, because it can replace the re-run question in the
-        // same place.
-        key="delete-workspace"
         stacked={stacksQuestion}
         question="Delete the run's workspace?"
         declineLabel="Keep it"
@@ -203,41 +196,26 @@ export function RunPage({
         }}
       />
     );
-  const rerunQuestion = (
-    <InPlaceQuestion
-      key="rerun"
-      stacked
-      question="Re-run with the same inputs?"
-      declineLabel="Cancel"
-      acceptLabel="Re-run"
-      onDecline={() => {
-        setAsking(undefined);
-      }}
-      onAccept={() => {
-        setAsking(undefined);
-        rerun.mutate(rerunChoice.mode);
-      }}
-    >
-      {rerunChoices.length === 1 ? null : (
-        <SegmentedControl
-          aria-label="Re-run"
-          className="w-auto self-start"
-          value={rerunChoice.mode}
-          onValueChange={(next) => {
-            const picked = rerunChoices.find((choice) => choice.mode === next);
-            if (picked !== undefined) setRerunChoice(picked);
-          }}
-        >
-          {rerunChoices.map((choice) => (
-            <SegmentedControlItem key={choice.mode} value={choice.mode} className="px-3">
-              {choice.label}
-            </SegmentedControlItem>
-          ))}
-        </SegmentedControl>
-      )}
-      <p className="text-meta text-pretty">{rerunChoice.explanation}</p>
-    </InPlaceQuestion>
-  );
+  const questions = {
+    cancel: cancelQuestion,
+    "delete-workspace": deleteQuestion,
+    rerun: (
+      <RerunQuestion
+        run={run}
+        onDecline={() => {
+          setAsking(undefined);
+        }}
+        onAccept={(mode) => {
+          setAsking(undefined);
+          startRerun(mode);
+        }}
+      />
+    ),
+  };
+  // The re-run question always has a row of its own below the header's
+  // lines. The other two have that row only on a narrow page.
+  const questionBelowHeader =
+    asking !== undefined && (asking === "rerun" || stacksQuestion) ? questions[asking] : undefined;
 
   return (
     <div ref={observePage} className="flex min-h-0 flex-1 flex-col pb-28">
@@ -247,19 +225,9 @@ export function RunPage({
         workspaceLabel={workspaceLabel}
         workspaceNote={workspaceReading.note}
         now={now}
-        reruns={reruns}
+        reruns={describeReruns(rerunsPage)}
         timezone={timezone}
-        question={
-          asking === "rerun"
-            ? rerunQuestion
-            : !stacksQuestion
-              ? undefined
-              : asking === "cancel"
-                ? cancelQuestion
-                : asking === "delete-workspace"
-                  ? deleteQuestion
-                  : undefined
-        }
+        question={questionBelowHeader}
       >
         {cancel.error === null ? null : (
           <span role="alert" className="min-w-0 truncate text-fine text-fail">
@@ -283,7 +251,6 @@ export function RunPage({
               hidden={asking === "cancel"}
               aria-disabled={cancel.isPending}
               onClick={() => {
-                if (cancel.isPending) return;
                 cancel.reset();
                 setDeletesWorkspace(true);
                 setAsking("cancel");
@@ -300,7 +267,6 @@ export function RunPage({
               hidden={asking === "delete-workspace"}
               aria-disabled={deleteWorkspace.isPending}
               onClick={() => {
-                if (deleteWorkspace.isPending) return;
                 deleteWorkspace.reset();
                 setAsking("delete-workspace");
               }}
@@ -312,13 +278,11 @@ export function RunPage({
         {isLive ? null : (
           <Button
             hidden={asking === "rerun"}
+            // An `aria-disabled` button ignores clicks, so a second re-run
+            // cannot start while the first is still starting.
             aria-disabled={rerun.isPending}
             onClick={() => {
-              // A second re-run while the first is still starting would
-              // start a second run.
-              if (rerun.isPending) return;
               rerun.reset();
-              setRerunChoice(rerunChoices[0]);
               setAsking("rerun");
             }}
           >

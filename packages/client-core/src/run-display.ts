@@ -102,8 +102,10 @@ export interface RerunsReading {
   /** The ids of the newest re-runs, newest first, at most three. */
   readonly runIds: ReadonlyArray<string>;
   /**
-   * How many re-runs are not linked, such as "2 more", or "47+ more" when
-   * the page read had a next page. `undefined` when every re-run is linked.
+   * How many re-runs are not linked, such as "2 more". When the page read
+   * has a next page, the count is a lower bound, such as "47+ more", or just
+   * "more" when every re-run on the page is linked. `undefined` when every
+   * re-run is linked.
    */
   readonly unlinkedCountText: string | undefined;
 }
@@ -112,8 +114,7 @@ export interface RerunsReading {
  * Returns the re-runs a run's header links to: the newest three of one page
  * of `run.query` with `originalRunId`, which lists them newest first, and how
  * many more there are. A run rarely has more than a few re-runs, so the header
- * counts the rest instead of listing them. The page is expected to hold more
- * than three re-runs whenever it has a next page.
+ * counts the rest instead of listing them, and reads only the first page.
  */
 export const describeReruns = (page: {
   readonly items: ReadonlyArray<{ readonly id: string }>;
@@ -121,13 +122,22 @@ export const describeReruns = (page: {
 }): RerunsReading => {
   const runIds = page.items.slice(0, SHOWN_RERUN_COUNT).map((rerun) => rerun.id);
   const unlinkedCount = page.items.length - runIds.length;
-  const unlinkedCountText =
-    page.nextCursor !== undefined
-      ? `${String(unlinkedCount)}+ more`
-      : unlinkedCount > 0
-        ? `${String(unlinkedCount)} more`
-        : undefined;
-  return { runIds, unlinkedCountText };
+  return { runIds, unlinkedCountText: describeUnlinkedCount(unlinkedCount, page.nextCursor) };
+};
+
+/**
+ * Returns the words for the re-runs a run's header does not link, or
+ * `undefined` when there are none. `unlinkedCount` counts the ones on the page
+ * read; a next page means there are more than that.
+ */
+const describeUnlinkedCount = (
+  unlinkedCount: number,
+  nextCursor: string | undefined,
+): string | undefined => {
+  if (nextCursor === undefined) {
+    return unlinkedCount === 0 ? undefined : `${String(unlinkedCount)} more`;
+  }
+  return unlinkedCount === 0 ? "more" : `${String(unlinkedCount)}+ more`;
 };
 
 /** Who started a run, and how, if not by hand. */

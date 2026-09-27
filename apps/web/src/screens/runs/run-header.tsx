@@ -11,7 +11,7 @@ import {
 } from "@hercule/client-core";
 import type { Run, Runner } from "@hercule/contract";
 import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
-import { ActorLink } from "../actor-link";
+import { ActorLink, INLINE_LINK } from "../actor-link";
 import { Connectivity } from "../connectivity";
 import { FailureText } from "./step-parts";
 
@@ -25,13 +25,13 @@ const QUIET_LINK =
  * The second line shows where the run is: its status mark and status with its
  * duration, why it failed, who started it and how, when it started and ended,
  * and its id's tail, which the CLI takes. For a run that is a re-run, or that
- * was re-run, the next line links the runs on either side: "re-run of run
- * 1f3a9c2e", "re-run as run 4e5f6a7b, run 8c9d0e1f and 2 more". Once the run
- * is pinned to a runner, the next line shows where it works: the runner,
- * linked to its page, with whether the controller can reach it, the run's
- * workspace, and the note on what happens to the workspace, such as
- * "Workspace deleted 3 Oct". A run that failed at an edge has a last line:
- * what went wrong there.
+ * was re-run, the next line links the runs on either side, such as "re-run of
+ * run 1f3a9c2e" or "re-run as run 4e5f6a7b, run 8c9d0e1f, run 2b7c4d9a and 2
+ * more". Once the run is pinned to a runner, the next line shows where it
+ * works: the runner, linked to its page, with whether the controller can
+ * reach it, the run's workspace, and the note on what happens to the
+ * workspace, such as "Workspace deleted 3 Oct". A run that failed at an edge
+ * has a last line: what went wrong there.
  *
  * The title sits where the shell's top bar puts every other screen's title,
  * so the page does not jump when it opens.
@@ -236,14 +236,7 @@ export function RunHeader({
  */
 function RunLink({ runId }: { readonly runId: string }): JSX.Element {
   return (
-    <Link
-      to="/runs/$runId"
-      params={{ runId }}
-      className={cn(
-        "rounded-control text-ink underline decoration-line underline-offset-[3px]",
-        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
-      )}
-    >
+    <Link to="/runs/$runId" params={{ runId }} className={INLINE_LINK}>
       {`run ${toIdTail(runId)}`}
     </Link>
   );

@@ -42,7 +42,8 @@ export interface EventRow {
 const parseJsonObject = (text: string): Record<string, unknown> =>
   JSON.parse(text) as Record<string, unknown>;
 
-export const toEvent = (row: EventRow): Event => ({
+/** Parses one row of the events table into the event the API returns. */
+export const parseEventRow = (row: EventRow): Event => ({
   id: row.id,
   source: row.source,
   connectionId: row.connection_id === null ? null : uuidToString(row.connection_id),
@@ -76,7 +77,7 @@ export const readEventsAfter = (
       SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
       WHERE id > ${after} ORDER BY id LIMIT ${limit}
     `,
-    (rows) => rows.map(toEvent),
+    (rows) => rows.map(parseEventRow),
   );
 
 /**
@@ -98,7 +99,7 @@ export const readPipelineEventsAfter = (
       SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
       WHERE id > ${after} AND kind NOT IN ${sql.in(AUDIT_KINDS)} ORDER BY id LIMIT ${limit}
     `,
-    (rows) => rows.map(toEvent),
+    (rows) => rows.map(parseEventRow),
   );
 
 /**
@@ -114,7 +115,7 @@ export const readPipelineEvent = (
       SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
       WHERE id = ${id} AND kind NOT IN ${sql.in(AUDIT_KINDS)}
     `,
-    (rows) => Option.map(Option.fromNullishOr(rows[0]), toEvent),
+    (rows) => Option.map(Option.fromNullishOr(rows[0]), parseEventRow),
   );
 
 /**

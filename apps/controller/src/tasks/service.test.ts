@@ -9,8 +9,8 @@ import {
   type TaskCreateInput,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { mintUuid, uuidToString, type Change } from "../db";
+import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "../events";
 import { TaskService, TaskServiceLayer, type QueryInput, type TaskPage } from "./index";
 
@@ -619,7 +619,7 @@ const runTicking = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 
 describe("the event log", () => {
   it("dates an entry with the same clock read as the row it records", async () => {
-    const { created, updated, createdEntries, updatedEntries } = await runTicking(
+    const { created, updated, createdEvents, updatedEvents } = await runTicking(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const platformEvents = yield* PlatformEvents;
@@ -628,34 +628,34 @@ describe("the event log", () => {
         return {
           created,
           updated,
-          createdEntries: yield* platformEvents.listByKind("task.created"),
-          updatedEntries: yield* platformEvents.listByKind("task.updated"),
+          createdEvents: yield* platformEvents.listByKind("task.created"),
+          updatedEvents: yield* platformEvents.listByKind("task.updated"),
         };
       }),
     );
     // The event that records a change is never dated before the change, so a
     // caller reading the log up to a task's `createdAt` sees the entry.
-    expect(createdEntries[0]?.receivedAt).toBe(created.createdAt);
-    expect(updatedEntries[0]?.receivedAt).toBe(updated.updatedAt);
+    expect(createdEvents[0]?.receivedAt).toBe(created.createdAt);
+    expect(updatedEvents[0]?.receivedAt).toBe(updated.updatedAt);
   });
 
   it("writes one task.created containing the task, and nothing about the actor in the payload", async () => {
-    const { task, entries } = await run(
+    const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const platformEvents = yield* PlatformEvents;
         const task = yield* tasks.create({ title: "Write it down", description: "d" });
-        return { task, entries: yield* platformEvents.listByKind("task.created") };
+        return { task, events: yield* platformEvents.listByKind("task.created") };
       }),
     );
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.actor).toBe("user");
-    expect(entries[0]?.payload).toEqual({ task });
-    expect(Object.keys(entries[0]?.payload ?? {})).toEqual(["task"]);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.actor).toBe("user");
+    expect(events[0]?.payload).toEqual({ task });
+    expect(Object.keys(events[0]?.payload ?? {})).toEqual(["task"]);
   });
 
   it("writes one task.updated containing only what changed, with scalars and lists reported differently", async () => {
-    const { task, entries } = await run(
+    const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const platformEvents = yield* PlatformEvents;
@@ -667,12 +667,12 @@ describe("the event log", () => {
           addLabels: ["code"],
           provenance: [{ ref: ISSUE_REF }],
         });
-        return { task: created, entries: yield* platformEvents.listByKind("task.updated") };
+        return { task: created, events: yield* platformEvents.listByKind("task.updated") };
       }),
     );
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.actor).toBe("user");
-    const payload = entries[0]?.payload as {
+    expect(events).toHaveLength(1);
+    expect(events[0]?.actor).toBe("user");
+    const payload = events[0]?.payload as {
       taskId: string;
       changes: Record<string, unknown>;
     };
@@ -724,6 +724,57 @@ describe("the event log", () => {
     expect(created).toEqual([]);
     expect(updated).toEqual([]);
     expect(deleted).toEqual([]);
+  });
+});
+
+/**
+ * Runs `effect` as `run` does, and returns its value with every change
+ * announced after a commit, in order.
+ */
+const runRecordingAnnouncements = async <A, E>(
+  effect: Effect.Effect<A, E, Deps>,
+): Promise<{ readonly value: A; readonly announced: ReadonlyArray<Change> }> => {
+  const { listener, announced } = buildAnnouncementRecorder();
+  const value = await run(effect.pipe(Effect.provide(listener)));
+  return { value, announced };
+};
+
+describe("the changes a task write announces", () => {
+  it("announces the log and the created task after task.create", async () => {
+    const { value: task, announced } = await runRecordingAnnouncements(
+      Effect.flatMap(TaskService, (tasks) =>
+        tasks.create({ title: "Announce me", description: "" }),
+      ),
+    );
+    expect(announced).toEqual([
+      { _tag: "event" },
+      { _tag: "record", topic: "task", id: task.id, kind: "created" },
+    ]);
+  });
+
+  it("announces the log and the updated task after task.update", async () => {
+    const { value: task, announced } = await runRecordingAnnouncements(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create({ title: "Announce me", description: "" });
+        return yield* tasks.update({ id: created.id, status: "done" });
+      }),
+    );
+    expect(announced).toEqual([
+      { _tag: "event" },
+      { _tag: "record", topic: "task", id: task.id, kind: "created" },
+      { _tag: "event" },
+      { _tag: "record", topic: "task", id: task.id, kind: "updated" },
+    ]);
+  });
+
+  it("announces nothing when the write fails", async () => {
+    const { announced } = await runRecordingAnnouncements(
+      Effect.flatMap(TaskService, (tasks) =>
+        Effect.ignore(tasks.update({ id: UNKNOWN_ID, title: "x" })),
+      ),
+    );
+    expect(announced).toEqual([]);
   });
 });
 
@@ -816,7 +867,7 @@ describe("paging", () => {
 
 describe("an update that changes nothing", () => {
   it("writes no row and no event when the task already has the values", async () => {
-    const { before, after, entries } = await run(
+    const { before, after, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const platformEvents = yield* PlatformEvents;
@@ -829,15 +880,15 @@ describe("an update that changes nothing", () => {
           projectId: null,
           addLabels: [],
         });
-        return { before, after, entries: yield* platformEvents.listByKind("task.updated") };
+        return { before, after, events: yield* platformEvents.listByKind("task.updated") };
       }),
     );
     expect(after).toEqual(before);
-    expect(entries).toEqual([]);
+    expect(events).toEqual([]);
   });
 
   it("reports a label added and removed in one call as neither", async () => {
-    const { task, entries } = await run(
+    const { task, events } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const platformEvents = yield* PlatformEvents;
@@ -851,11 +902,11 @@ describe("an update that changes nothing", () => {
           addLabels: ["code"],
           removeLabels: ["code"],
         });
-        return { task, entries: yield* platformEvents.listByKind("task.updated") };
+        return { task, events: yield* platformEvents.listByKind("task.updated") };
       }),
     );
     expect(task.labels).toEqual(["code"]);
-    expect(entries).toEqual([]);
+    expect(events).toEqual([]);
   });
 });
 

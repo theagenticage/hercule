@@ -37,6 +37,7 @@ import {
   type Forbidden,
   type InvalidState,
   type NotFound,
+  type RunStatus,
   type SortDirection,
   type Subscription,
   type SubscriptionHealth,
@@ -99,7 +100,7 @@ const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref" | "
  * Returns the reason a run target is refused when its run has already ended.
  * A run emits one event, when it ends, so nothing would ever arrive.
  */
-const buildEndedRunReason = (status: string): string =>
+const buildEndedRunReason = (status: RunStatus): string =>
   `the run has already ended (${status}), so no event about it will arrive; ` +
   "read the run with run.read instead";
 

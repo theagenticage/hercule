@@ -5,7 +5,7 @@
  * the controller daemon.
  *
  * One table holds both pipeline events and audit entries, and this reader
- * mostly treats them the same: a `task.created` row and a `github.issue.opened`
+ * mostly treats them the same: a `task.deleted` row and a `github.issue.opened`
  * row come back from the same unfiltered call, and differ only in their `kind`.
  * The log is also the audit log, and people usually open it to see what
  * happened around something, so one grant reads both.
@@ -70,7 +70,7 @@ import {
 } from "../db";
 import { SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
-import { EVENT_COLUMNS, toEvent, type EventRow } from "./log";
+import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
 
 /** The filters and paging options of `event.query`. */
 const QueryInput = Schema.Struct({
@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
         const page = yield* buildPage(
           rows,
           limit,
-          (read) => Effect.succeed(read.map(toEvent)),
+          (read) => Effect.succeed(read.map(parseEventRow)),
           (last) => encodeIntegerKeyCursor(scope, last.id),
         );
         return {
@@ -253,7 +253,7 @@ const make = Effect.gen(function* () {
         const row = rows[0];
         return row === undefined
           ? yield* Effect.fail(createNotFoundError("no such event"))
-          : toEvent(row);
+          : parseEventRow(row);
       }),
 
     /**
@@ -384,7 +384,7 @@ const make = Effect.gen(function* () {
         if (row === undefined || row.source === "platform") {
           return yield* Effect.fail(createNotFoundError("no such event"));
         }
-        const held = toEvent(row);
+        const held = parseEventRow(row);
 
         const system = input.system ?? held.system;
         const url = input.url ?? held.url;

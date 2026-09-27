@@ -1,13 +1,12 @@
 /**
  * Tests the platform event a run emits when it ends: the payload
- * `buildRunEndedEvent` builds for each way a run ends, and the actor
- * `readEndingActor` stamps it with for each kind of caller.
+ * `buildRunEndedEvent` builds for each way a run ends, stamped with the actor
+ * it is given. Which actor the run engine passes is tested over HTTP, in
+ * `engine.events.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import * as Effect from "effect/Effect";
 import type { Run } from "@hercule/contract";
-import { CurrentActor, type Actor } from "../actor";
-import { buildRunEndedEvent, readEndingActor } from "./run-events";
+import { buildRunEndedEvent } from "./run-events";
 
 const RUN_ID = "0199f0b7-0000-7000-8000-00000000e001";
 const WORKFLOW_ID = "0199f0b7-0000-7000-8000-00000000e002";
@@ -73,7 +72,7 @@ describe("buildRunEndedEvent", () => {
   });
 
   it("leaves output out of run.completed when no terminal step ended the run", () => {
-    const event = buildRunEndedEvent(RUNNING_RUN, { status: "completed" }, FINISHED_AT, null);
+    const event = buildRunEndedEvent(RUNNING_RUN, { status: "completed" }, FINISHED_AT, "system");
 
     expect(event.payload).toStrictEqual(RUNNING_FIELDS);
   });
@@ -83,7 +82,7 @@ describe("buildRunEndedEvent", () => {
       RUNNING_RUN,
       { status: "completed", output: null },
       FINISHED_AT,
-      null,
+      "system",
     );
 
     expect(event.payload).toStrictEqual({ ...RUNNING_FIELDS, output: null });
@@ -102,11 +101,11 @@ describe("buildRunEndedEvent", () => {
           failedEdge,
         },
         FINISHED_AT,
-        null,
+        "system",
       ),
     ).toStrictEqual({
       kind: "run.failed",
-      actor: null,
+      actor: "system",
       at: FINISHED_AT,
       payload: {
         ...RUNNING_FIELDS,
@@ -122,7 +121,7 @@ describe("buildRunEndedEvent", () => {
       RUNNING_RUN,
       { status: "failed", failureReason: "step-failed", failedStepId: "create" },
       FINISHED_AT,
-      null,
+      "system",
     );
 
     expect(event.payload).toStrictEqual({
@@ -137,7 +136,7 @@ describe("buildRunEndedEvent", () => {
       RUNNING_RUN,
       { status: "failed", failureReason: "controller-error" },
       FINISHED_AT,
-      null,
+      "system",
     );
 
     expect(event.payload).toStrictEqual({ ...RUNNING_FIELDS, failureReason: "controller-error" });
@@ -177,40 +176,5 @@ describe("buildRunEndedEvent", () => {
       inputs: {},
       finishedAt: FINISHED_AT,
     });
-  });
-});
-
-describe("readEndingActor", () => {
-  /** Returns what `readEndingActor` reads while `actor` is the current actor. */
-  const readAs = (actor: Actor) =>
-    Effect.runSync(Effect.provideService(readEndingActor, CurrentActor, actor));
-
-  it("is the user when the user's request ended the run", () => {
-    expect(
-      readAs({
-        _tag: "user",
-        userId: "0199f0b7-0000-7000-8000-00000000e004",
-        credential: { kind: "login", id: "0199f0b7-0000-7000-8000-00000000e005", tokenHash: "h" },
-      }),
-    ).toBe("user");
-  });
-
-  it("is session:<id> when a session's request ended the run", () => {
-    expect(
-      readAs({
-        _tag: "session",
-        sessionId: SESSION_ID,
-        profileId: "0199f0b7-0000-7000-8000-00000000e006",
-        grants: ["run.write"],
-      }),
-    ).toBe(`session:${SESSION_ID}`);
-  });
-
-  it("is null when the run ended on its own, while one of its steps executed as the run", () => {
-    expect(readAs({ _tag: "run", runId: RUN_ID, stepId: "create" })).toBeNull();
-  });
-
-  it("is null when no caller ended the run, as when the controller fails it", () => {
-    expect(readAs({ _tag: "none" })).toBeNull();
   });
 });

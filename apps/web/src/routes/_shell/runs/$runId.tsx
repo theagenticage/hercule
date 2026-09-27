@@ -1,8 +1,7 @@
 import { useEffect, useRef, type JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useQuery, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  describeReruns,
   describeRunnerWait,
   describeRunWorkspace,
   formatWorkspaceLabel,
@@ -108,11 +107,6 @@ function RunScreen(): JSX.Element {
   }).data;
   const resources = useQuery({ ...resourcesQuery(client), enabled: workspace !== undefined }).data;
   const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
-  // Only the first page is read: the header links the newest few re-runs and
-  // counts the rest.
-  const [rerunsPage = { items: [] }] = useSuspenseInfiniteQuery(
-    runsQuery(client, { originalRunId: runId }),
-  ).data.pages;
 
   return (
     <RunPage
@@ -129,7 +123,6 @@ function RunScreen(): JSX.Element {
       }
       workspaceReading={describeRunWorkspace(run, workspace, timezone)}
       runnerWait={describeRunnerWait(run, runner, actions, timezone)}
-      reruns={describeReruns(rerunsPage)}
       timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>

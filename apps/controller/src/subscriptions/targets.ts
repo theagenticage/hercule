@@ -29,7 +29,13 @@ export const expandTarget = (target: SubscriptionTarget): string => {
     case "ref":
       return `${quoteAsCelString(target.ref)} in event.refs`;
     case "run":
-      return `event.kind.startsWith("run.") && event.payload.runId == ${quoteAsCelString(target.runId)}`;
+      // Only the controller writes platform events. A plugin whose id is
+      // `run` could declare a `run.*` kind, and an event of it must not pass
+      // for news about the run.
+      return (
+        `event.source == "platform" && event.kind.startsWith("run.") && ` +
+        `event.payload.runId == ${quoteAsCelString(target.runId)}`
+      );
     case "session":
       return (
         `event.kind.startsWith("session.") && ` +

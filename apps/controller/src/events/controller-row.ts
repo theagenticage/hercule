@@ -14,7 +14,7 @@ import type { Actor } from "@hercule/contract";
 import { announce } from "../db";
 
 /** One row the controller writes about itself, as it goes into the log. */
-export interface PlatformRowToAppend {
+export interface ControllerRowToAppend {
   readonly kind: string;
   /** Null when the row has no actor the system can name. */
   readonly actor: Actor | null;
@@ -24,7 +24,7 @@ export interface PlatformRowToAppend {
 }
 
 /** One row the controller wrote about itself, as it reads back out of the log. */
-export interface PlatformRow<Kind extends string> {
+export interface ControllerRow<Kind extends string> {
   readonly id: number;
   readonly kind: Kind;
   readonly actor: Actor | null;
@@ -37,9 +37,9 @@ export interface PlatformRow<Kind extends string> {
  * transaction, and announces the change to the log's Live Topic once the
  * transaction commits.
  */
-export const appendPlatformRow = (
+export const appendControllerRow = (
   sql: SqlClient.SqlClient,
-  row: PlatformRowToAppend,
+  row: ControllerRowToAppend,
 ): Effect.Effect<void, SqlError> =>
   Effect.gen(function* () {
     // `dedup_key` is an emitter's idempotency key, and the controller needs
@@ -62,10 +62,10 @@ export const appendPlatformRow = (
   });
 
 /** Returns the rows of one kind, oldest first. Only tests use it. */
-export const listPlatformRows = <Kind extends string>(
+export const listControllerRows = <Kind extends string>(
   sql: SqlClient.SqlClient,
   kind: Kind,
-): Effect.Effect<ReadonlyArray<PlatformRow<Kind>>, SqlError> =>
+): Effect.Effect<ReadonlyArray<ControllerRow<Kind>>, SqlError> =>
   Effect.map(
     sql<{
       readonly id: number;

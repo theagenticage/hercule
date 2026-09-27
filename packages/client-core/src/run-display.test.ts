@@ -90,6 +90,15 @@ describe("describeReruns", () => {
       "47+ more",
     );
   });
+
+  it("says only that there are more when the page has a next page and every re-run on it is linked", () => {
+    for (const count of [2, 3]) {
+      assert.strictEqual(
+        describeReruns({ items: listIds(count), nextCursor: "next" }).unlinkedCountText,
+        "more",
+      );
+    }
+  });
 });
 
 describe("shouldRunRecede", () => {

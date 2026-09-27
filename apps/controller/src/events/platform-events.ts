@@ -4,8 +4,8 @@
  * triggers and subscriptions. A workflow that starts when another one fails,
  * or a session that waits for a run to end, listens for these.
  *
- * A platform event is written like an audit entry (`platform-row.ts`), in the
- * transaction of the change it reports, so the event and the change commit
+ * A platform event is written like an audit entry (`controller-row.ts`), in
+ * the transaction of the change it reports, so the event and the change commit
  * together or not at all. Unlike an audit entry, every kind here has a payload
  * schema in the contract, because triggers filter on its fields and readers
  * of the log decode it.
@@ -24,8 +24,7 @@ import {
   TaskUpdatedEventPayload,
   type Actor,
 } from "@hercule/contract";
-import { announce } from "../db";
-import { appendPlatformRow, listPlatformRows, type PlatformRow } from "./platform-row";
+import { appendControllerRow, listControllerRows, type ControllerRow } from "./controller-row";
 
 /** The payload schema of each platform event kind. */
 const PLATFORM_EVENT_PAYLOADS = {
@@ -41,9 +40,9 @@ export type PlatformEventKind = keyof typeof PLATFORM_EVENT_PAYLOADS;
 /**
  * One platform event: its kind, its payload, and who caused it.
  *
- * - `actor` is the user or session whose request caused the event, and null
- *   when nobody did, as for a run that ended on its own. A payload never
- *   repeats the actor.
+ * - `actor` is the actor whose request caused the event, or `system` when no
+ *   request did, as for a run that ended on its own. A payload never repeats
+ *   the actor.
  * - `at` is the timestamp the change wrote on its own rows, so the event is
  *   never dated before the change it reports.
  */
@@ -51,34 +50,13 @@ export type PlatformEvent = {
   readonly [Kind in PlatformEventKind]: {
     readonly kind: Kind;
     readonly payload: Schema.Schema.Type<(typeof PLATFORM_EVENT_PAYLOADS)[Kind]>;
-    readonly actor: Actor | null;
+    readonly actor: Actor;
     readonly at: string;
   };
 }[PlatformEventKind];
 
 /** A platform event as it reads back out of the log. */
-export type PlatformEventRow = PlatformRow<PlatformEventKind>;
-
-/**
- * Announces the task a task event is about as changed, so a screen that shows
- * the task reads it again. A run event announces nothing: the runs domain
- * announces every write to a run itself.
- */
-const announceChangedRecord = (event: PlatformEvent): Effect.Effect<void> => {
-  switch (event.kind) {
-    case "task.created":
-      return announce({
-        _tag: "record",
-        topic: "task",
-        id: event.payload.task.id,
-        kind: "created",
-      });
-    case "task.updated":
-      return announce({ _tag: "record", topic: "task", id: event.payload.taskId, kind: "updated" });
-    default:
-      return Effect.void;
-  }
-};
+export type PlatformEventRow = ControllerRow<PlatformEventKind>;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -89,6 +67,10 @@ const make = Effect.gen(function* () {
      * are ambient, so the event rolls back with the change it reports, and
      * the event router never sees an event about something that did not
      * happen.
+     *
+     * It announces a change to the log's Live Topic only. The domain the
+     * event is about announces the change to its own record, as it does for
+     * every other write to that record.
      */
     emit: (event: PlatformEvent): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -97,19 +79,18 @@ const make = Effect.gen(function* () {
         const payload = yield* Effect.orDie(
           Schema.encodeUnknownEffect(PLATFORM_EVENT_PAYLOADS[event.kind])(event.payload),
         );
-        yield* appendPlatformRow(sql, {
+        yield* appendControllerRow(sql, {
           kind: event.kind,
           actor: event.actor,
           payload,
           at: event.at,
         });
-        yield* announceChangedRecord(event);
       }),
 
     /** Returns the events of one kind, oldest first. Only tests use it. */
     listByKind: (
       kind: PlatformEventKind,
-    ): Effect.Effect<ReadonlyArray<PlatformEventRow>, SqlError> => listPlatformRows(sql, kind),
+    ): Effect.Effect<ReadonlyArray<PlatformEventRow>, SqlError> => listControllerRows(sql, kind),
   };
 });
 

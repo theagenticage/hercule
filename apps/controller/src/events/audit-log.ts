@@ -16,7 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
 import { announce, nowIso } from "../db";
-import { appendPlatformRow, listPlatformRows, type PlatformRow } from "./platform-row";
+import { appendControllerRow, listControllerRows, type ControllerRow } from "./controller-row";
 
 /**
  * The audit kinds this build emits, following `<entity>.<verb>ed`. The list
@@ -193,7 +193,7 @@ export type AuditEntry =
     });
 
 /** An audit entry as it reads back out of the log. */
-export type AuditRow = PlatformRow<AuditKind>;
+export type AuditRow = ControllerRow<AuditKind>;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -206,7 +206,7 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        yield* appendPlatformRow(sql, {
+        yield* appendControllerRow(sql, {
           kind: entry.kind,
           actor: entry.actor,
           payload: entry.payload,
@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
 
     /** Returns the entries of one kind, oldest first. Only tests use it. */
     listByKind: (kind: AuditKind): Effect.Effect<ReadonlyArray<AuditRow>, SqlError> =>
-      listPlatformRows(sql, kind),
+      listControllerRows(sql, kind),
   };
 });
 

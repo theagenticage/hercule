@@ -12,6 +12,7 @@
  * - the list of a run's re-runs, read with `GET /runs?originalRunId=`.
  */
 import { describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
 import { del, post, readErrorBody, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
 import { spawnAgentWithGrants, WAIT_DEADLINE_MS } from "../sessions/testing";
@@ -24,15 +25,14 @@ import {
 import {
   buildCreateStep,
   buildHeldAction,
-  buildHeldStep,
   countRuns,
   INPUTS_DEFINITION,
   insertPendingRun,
   queryRuns,
   readRun,
   startRun,
+  startHeldRun,
   startSentWorkflow,
-  waitForHeldExecutions,
   waitForRunToFinish,
   withRunFleet,
 } from "./testing";
@@ -40,7 +40,11 @@ import {
 /** Long enough for a runner fleet, a session, and a few runs that finish. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
-/** The sentence every refused re-stamp ends with, pointing the caller to replay. */
+/**
+ * The sentence a re-stamp refusal ends with when a replay may still succeed,
+ * pointing the caller to replay. A re-stamp that no runner can run gets no
+ * hint, because a replay needs the same runners.
+ */
 const REPLAY_HINT = "Re-run with mode replay to run the original run's plan instead.";
 
 /** A run id no run has. */
@@ -309,11 +313,7 @@ describe("run.rerun refuses", () => {
     await withSetUpController(
       async ({ harness, base, token }) => {
         try {
-          const workflow = await createWorkflowOrFail(base, token, {
-            definition: { name: "Wait", steps: [buildHeldStep(held, "wait")] },
-          });
-          const runId = await startRun(base, token, workflow.id);
-          await waitForHeldExecutions(held, 1);
+          const runId = await startHeldRun(base, token, held);
 
           for (const mode of ["re-stamp", "replay"]) {
             await expectRerunRefused(
@@ -425,7 +425,9 @@ describe("run.rerun refuses", () => {
       const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
-      expect(refusal.message).toBe(`the inputs are not valid. ${REPLAY_HINT}`);
+      expect(refusal.message).toBe(
+        `the original run's inputs do not match the workflow as it is saved now. ${REPLAY_HINT}`,
+      );
       expect(refusal.issues.toSorted()).toEqual([
         ["inputs", "owner"],
         ["inputs", "priority"],
@@ -477,6 +479,65 @@ describe("run.rerun refuses", () => {
       },
       [buildActionPlugin("notes", NOTE_APPEND_ACTION)],
     );
+  });
+  it("a re-stamp whose stored workflow no runner can run, with validation and no hint to replay", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: { name: "One task", steps: [buildCreateStep("create")] },
+      });
+      const originalId = await startRun(base, token, workflow.id);
+      await waitForRunToFinish(base, token, originalId);
+      // The edit adds a git.commit step, which only a runner can run, and
+      // this controller has no runner.
+      const repo = await post(
+        base,
+        "/api/v1/resources",
+        { kind: "repo", remote: "https://github.com/o/r.git" },
+        token,
+      );
+      expect(repo.status, await repo.clone().text()).toBe(200);
+      const { id: repoId } = (await repo.json()) as { id: string };
+      const edited = await updateWorkflow(base, token, workflow.id, {
+        definition: {
+          name: "Commit",
+          workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+          steps: [
+            { id: "commit", kind: "action", action: "git.commit", params: { message: "Save" } },
+          ],
+        },
+      });
+      expect(edited.status, await edited.clone().text()).toBe(200);
+
+      const response = await requestRerun(base, token, originalId);
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(400);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.message).toBe("no runner can run this workflow");
+      expect(await countRuns(harness)).toBe(1);
+    });
+  });
+
+  it("a replay whose stored inputs no longer match the original's plan, with validation", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const original = await runInputsWorkflow(base, token);
+      // No request can store inputs its plan refuses, so the row is edited
+      // directly. It stands for a run stored by a version whose input checks
+      // were looser.
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`UPDATE runs SET inputs = '{}'
+            WHERE id = unhex(replace(${original.runId}, '-', ''))`,
+        ),
+      );
+
+      const response = await requestRerun(base, token, original.runId, { mode: "replay" });
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(400);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.message).toBe("the original run's inputs no longer match its plan");
+      expect(refusal.issues).toEqual([["inputs", "title"]]);
+      expect(await countRuns(harness)).toBe(1);
+    });
   });
 });
 

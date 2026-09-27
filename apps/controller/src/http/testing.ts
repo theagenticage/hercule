@@ -254,6 +254,12 @@ export interface ServerHarness {
   readonly insertRunner: RunnerArranger;
   readonly joinToken: JoinTokenArranger;
   readonly reboot: RebootArranger;
+  /**
+   * Checks whether a fiber is still executing the run. A cancelled run's
+   * fiber lives on until its steps have stopped, so a test that checks what a
+   * step does after the cancel waits for this to turn false first.
+   */
+  readonly isRunExecuting: (runId: string) => boolean;
 }
 
 /** The options a test can set on the controller it runs. */
@@ -353,9 +359,9 @@ export const withServer = (
         // reader.
         const log = yield* AuditLog;
         const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        const emitted = yield* PlatformEvents;
+        const platformEventWriter = yield* PlatformEvents;
         const platformEvents: PlatformEventReader = (kind) =>
-          Effect.runPromise(Effect.orDie(emitted.listByKind(kind)));
+          Effect.runPromise(Effect.orDie(platformEventWriter.listByKind(kind)));
         // Reads the controller's live subscriptions through the service that
         // holds them, so a test checks what the running server has, not what it
         // can infer from the wire.
@@ -395,7 +401,17 @@ export const withServer = (
             ),
           );
         yield* Effect.promise(() =>
-          body({ base, audit, platformEvents, sql, live, insertRunner, joinToken, reboot }),
+          body({
+            base,
+            audit,
+            platformEvents,
+            sql,
+            live,
+            insertRunner,
+            joinToken,
+            reboot,
+            isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
+          }),
         );
       }),
     ).pipe(

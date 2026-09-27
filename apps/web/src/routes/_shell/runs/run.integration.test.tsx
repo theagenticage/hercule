@@ -460,7 +460,7 @@ const listReruns = (api: { readonly calls: readonly Call[] }, id: string): reado
  * Sends a push for the run with `id` on the `run` topic, once the page has
  * subscribed: `updated` by default, or `created` for a run that just started.
  */
-const pushRunUpdate = async (
+const pushRunChange = async (
   live: LiveStub,
   id: string,
   kind: "created" | "updated" = "updated",
@@ -623,7 +623,7 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
     expect(readStatusWords(getStepRow("start"))).toEqual(["running"]);
 
     hold(COMPLETED_RUN);
-    await pushRunUpdate(live, RUNNING_RUN.id);
+    await pushRunChange(live, RUNNING_RUN.id);
 
     await waitFor(() => {
       expect(readStatusWords(getStepRow("start"))).toEqual(["completed"]);
@@ -685,7 +685,7 @@ describe("A run's page > the run graph", { timeout: GRAPH_TEST_TIMEOUT_MS }, () 
     });
 
     hold(COMPLETED_RUN);
-    await pushRunUpdate(live, RUNNING_RUN.id);
+    await pushRunChange(live, RUNNING_RUN.id);
 
     await waitFor(() => {
       expect(readStatusWords(getGraphCard(graph, "start"))).toEqual(["completed"]);
@@ -1061,7 +1061,7 @@ describe("A run's page > what happens to its workspace", () => {
     // The run fails, which releases its lease as the controller records it.
     setWorkspace({ ...WORKSPACE, keptUntil: KEPT_UNTIL });
     hold(FAILED_IN_WORKSPACE);
-    await pushRunUpdate(live, IN_WORKSPACE.id);
+    await pushRunChange(live, IN_WORKSPACE.id);
 
     await waitFor(() => {
       expect(readPageText(header)).toContain("Workspace kept until 9 Oct");
@@ -1111,13 +1111,19 @@ const SENT_WORKFLOW_RUN: Run = {
   workflowId: null,
 };
 
-/** Returns the question's row: the element that holds the Re-run question and its buttons. */
-const findRerunQuestion = async (): Promise<HTMLElement> => {
-  const question = await screen.findByText("Re-run with the same inputs?");
-  const row = question.parentElement;
-  if (row === null) throw new Error("the re-run question has no row");
-  return row;
-};
+const RERUN_QUESTION = "Re-run with the same inputs?";
+
+/** Waits for the re-run question: the group named by the question, which holds its controls. */
+const findRerunQuestion = (): Promise<HTMLElement> =>
+  screen.findByRole("group", { name: RERUN_QUESTION });
+
+/**
+ * Returns the header's line that links the runs on either side of a re-run,
+ * the text that starts "re-run of" or "re-run as", or `null` when the header
+ * has none.
+ */
+const queryRerunLine = (header: HTMLElement): HTMLElement | null =>
+  within(header).queryByText(/^re-run (of|as)\b/);
 
 /** Returns the header's link to run `id`, named by its id's tail. */
 const getHeaderRunLink = (header: HTMLElement, id: string): HTMLElement =>
@@ -1168,7 +1174,7 @@ describe("A run's page > Re-run", () => {
 
     await user.click(decline);
 
-    expect(screen.queryByText("Re-run with the same inputs?")).toBeNull();
+    expect(screen.queryByRole("group", { name: RERUN_QUESTION })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Re-run" }));
     expect(listReruns(api, COMPLETED_RUN.id)).toEqual([]);
   });
@@ -1262,6 +1268,41 @@ describe("A run's page > Re-run", () => {
     expect(alert.textContent).toContain("The run's workflow was deleted.");
     expect(router.state.location.pathname).toBe(`/runs/${COMPLETED_RUN.id}`);
   });
+
+  it("starts no second run when Re-run is clicked again while the first re-run is still starting", async () => {
+    const user = userEvent.setup();
+    let answerRerun: () => void = () => undefined;
+    const { api, router } = await openRunPage(COMPLETED_RUN, {
+      overrides: {
+        [`POST /api/v1/runs/${COMPLETED_RUN.id}/rerun`]: () =>
+          new Promise((resolve) => {
+            answerRerun = () => {
+              resolve({ body: { runId: RERUN.id } });
+            };
+          }),
+        [`GET /api/v1/runs/${RERUN.id}`]: { body: RERUN },
+      },
+    });
+
+    const header = await findPageHeader();
+    await user.click(within(header).getByRole("button", { name: "Re-run" }));
+    await user.click(within(await findRerunQuestion()).getByRole("button", { name: "Re-run" }));
+    await waitFor(() => {
+      expect(listReruns(api, COMPLETED_RUN.id)).toHaveLength(1);
+    });
+
+    // The first re-run is still starting: Re-run shows again, but asks nothing.
+    const again = within(header).getByRole("button", { name: "Re-run" });
+    expect(again.getAttribute("aria-disabled")).toBe("true");
+    await user.click(again);
+    expect(screen.queryByRole("group", { name: RERUN_QUESTION })).toBeNull();
+
+    answerRerun();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/runs/${RERUN.id}`);
+    });
+    expect(listReruns(api, COMPLETED_RUN.id)).toHaveLength(1);
+  });
 });
 
 describe("A run's page > the runs on either side of a re-run", () => {
@@ -1269,7 +1310,9 @@ describe("A run's page > the runs on either side of a re-run", () => {
     await openRunPage(RERUN);
 
     const header = await findPageHeader();
-    expect(readPageText(header)).toContain(`re-run of run ${toIdTail(COMPLETED_RUN.id)}`);
+    expect(readPageText(queryRerunLine(header))).toBe(
+      `re-run of run ${toIdTail(COMPLETED_RUN.id)}`,
+    );
     expect(getHeaderRunLink(header, COMPLETED_RUN.id).getAttribute("href")).toBe(
       `/runs/${COMPLETED_RUN.id}`,
     );
@@ -1281,7 +1324,7 @@ describe("A run's page > the runs on either side of a re-run", () => {
 
     const header = await findPageHeader();
     const tails = ids.map(toIdTail);
-    expect(readPageText(header)).toContain(
+    expect(readPageText(queryRerunLine(header))).toBe(
       `re-run as run ${tails[0] ?? ""}, run ${tails[1] ?? ""}, run ${tails[2] ?? ""} and 2 more`,
     );
     for (const id of ids.slice(0, 3)) {
@@ -1299,18 +1342,19 @@ describe("A run's page > the runs on either side of a re-run", () => {
   it("shows no such line for a run that is not a re-run and was not re-run", async () => {
     await openRunPage(COMPLETED_RUN);
 
-    expect(readPageText(await findPageHeader())).not.toContain("re-run");
+    expect(queryRerunLine(await findPageHeader())).toBeNull();
   });
 
   it("links a re-run that starts while the page is open, when it is pushed on the run topic", async () => {
     const { live, holdReruns } = await openRunPage(COMPLETED_RUN);
-    await findPageHeader();
+    const header = await findPageHeader();
+    expect(queryRerunLine(header)).toBeNull();
 
     holdReruns([buildRerunSummary(RERUN.id)]);
-    await pushRunUpdate(live, RERUN.id, "created");
+    await pushRunChange(live, RERUN.id, "created");
 
-    await waitFor(async () => {
-      expect(readPageText(await findPageHeader())).toContain(`re-run as run ${toIdTail(RERUN.id)}`);
+    await waitFor(() => {
+      expect(readPageText(queryRerunLine(header))).toBe(`re-run as run ${toIdTail(RERUN.id)}`);
     });
   });
 });

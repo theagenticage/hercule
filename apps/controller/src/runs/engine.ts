@@ -119,7 +119,7 @@ import {
   type WorkspacePolicy,
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
-import { CurrentActor, requireGrant, type RunActor } from "../actor";
+import { CurrentActor, currentStampOrSystem, requireGrant, type RunActor } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
@@ -134,7 +134,7 @@ import {
   listCapableRunners,
   listWorkspaceActionIds,
 } from "./runner-capabilities";
-import { buildRunEndedEvent, readEndingActor } from "./run-events";
+import { buildRunEndedEvent } from "./run-events";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -365,6 +365,10 @@ export const makeRunEngine = Effect.gen(function* () {
    * The run's platform event (`run.completed`, `run.failed` or
    * `run.cancelled`) is emitted here too, in the same transaction, so every
    * way a run ends emits exactly one event, and only if the ending commits.
+   * The event's actor is whoever's request ended the run: the user or a
+   * session cancelling it, or a run whose step cancelled it. A run that ends
+   * on its own ends with no request behind it, so its event is stamped
+   * `system`.
    *
    * Once the transaction has committed, the workspace steps whose records
    * were running are settled with the run's runner (see
@@ -387,7 +391,9 @@ export const makeRunEngine = Effect.gen(function* () {
         if (run.workspaceId !== undefined) {
           yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
         }
-        yield* platformEvents.emit(buildRunEndedEvent(run, outcome, at, yield* readEndingActor));
+        yield* platformEvents.emit(
+          buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
+        );
       }
       yield* settleWorkspaceSteps(run, wasRunning);
     });

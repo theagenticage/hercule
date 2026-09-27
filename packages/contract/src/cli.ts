@@ -925,11 +925,12 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the run has already ended, so nothing more will arrive about it; or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run",
+        "the run has already ended, so no event about it will arrive: read it with `hercule run read <id>`. Or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run instead",
       not_found: "no run has the id in a run:<id> target",
       forbidden:
         "a run target needs the run.read grant, because the events about a run describe it",
-      validation: "a user credential holds no subscription; call this on a session token",
+      validation:
+        "the target is not written in one of the forms above, or a run target's id is not a full run id; or a user credential holds no subscription: call this on a session token",
     },
   },
   "subscription.cancel": {
@@ -1272,7 +1273,7 @@ export const CLI = {
   },
   "run.rerun": {
     command: "run rerun",
-    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the old run froze instead, exactly as it ran. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the old one as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
+    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the original run froze instead. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the original run as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
     examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--mode", "replay"] }],
     fields: {
       id: {
@@ -1282,14 +1283,14 @@ export const CLI = {
       },
       mode: {
         flag: "mode",
-        help: "re-stamp (the default) runs the workflow as it is stored now; replay runs the plan the old run froze.",
+        help: "re-stamp (the default) runs the workflow as it is stored now; replay runs the plan the original run froze.",
       },
     },
     errors: {
       invalid_state:
-        "the run has not ended yet, or it has no stored workflow to re-stamp from: run it again with --mode replay",
+        "the run has not ended yet: wait for it to end or cancel it first; or it has no stored workflow to re-stamp from: re-run it with --mode replay",
       validation:
-        "the workflow as it is stored now cannot run with the old run's inputs, or no runner can run it: each printed line gives the path and the problem; no run was started. --mode replay runs the plan as it was",
+        "the new run cannot start: the workflow as it is stored now cannot run or does not accept the original run's inputs (--mode replay may still run), the original run's plan cannot run any more, or no runner can run it. Each printed line gives the path and the problem; no run was started",
       cap_exceeded:
         "the run would be nested deeper than the controller's run.nestingLimit setting; no run was started",
     },

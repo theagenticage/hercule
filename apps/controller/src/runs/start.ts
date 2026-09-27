@@ -32,7 +32,7 @@ import {
   type RunOrigin,
   type RunStarted,
   type Unauthenticated,
-  Validation,
+  type Validation,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
@@ -69,8 +69,50 @@ export type RunStartError =
 /** The errors `run.rerun` can fail with. */
 export type RunRerunError = RunStartError | InvalidState;
 
-/** What a re-stamp that cannot run tells the caller to do instead. */
+/**
+ * What a refused re-run tells the caller to do instead, when the original
+ * run's plan may still run although the stored workflow cannot.
+ */
 const REPLAY_HINT = "Re-run with mode replay to run the original run's plan instead.";
+
+/**
+ * The messages of the `Validation` errors `writeRun` fails with, which differ
+ * with where the run's plan and inputs came from.
+ */
+interface RefusalMessages {
+  /** The message when the plan does not validate or has an element runs cannot execute yet. */
+  readonly unrunnablePlan: string;
+  /** The message when the inputs do not match the plan's declarations. */
+  readonly invalidInputs: string;
+}
+
+/** The refusal messages of a run of the workflow the caller sent. */
+const SENT_WORKFLOW_REFUSALS: RefusalMessages = {
+  unrunnablePlan: "this workflow cannot run",
+  invalidInputs: "the inputs are not valid",
+};
+
+/** The refusal messages of a run of a stored workflow. */
+const STORED_WORKFLOW_REFUSALS: RefusalMessages = {
+  unrunnablePlan: "this workflow cannot run as it is saved now",
+  invalidInputs: "the inputs are not valid",
+};
+
+/**
+ * The refusal messages of a re-stamp. Both point at replay, because the
+ * original run's plan and inputs matched each other when it ran. A missing
+ * runner is not among them: a replay needs the same runners.
+ */
+const RESTAMP_REFUSALS: RefusalMessages = {
+  unrunnablePlan: `this workflow cannot run as it is saved now. ${REPLAY_HINT}`,
+  invalidInputs: `the original run's inputs do not match the workflow as it is saved now. ${REPLAY_HINT}`,
+};
+
+/** The refusal messages of a replay. */
+const REPLAY_REFUSALS: RefusalMessages = {
+  unrunnablePlan: "the original run's plan cannot run any more",
+  invalidInputs: "the original run's inputs no longer match its plan",
+};
 
 /**
  * Returns an issue for each element of a definition that runs cannot execute
@@ -182,25 +224,25 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
       });
 
     /**
-     * Writes the run `prepare` returns: validates its plan again, refuses
-     * what runs cannot execute yet and what no runner can run, checks how
-     * deep the run is nested, resolves the inputs, and writes the run and its
-     * entry step records. Returns the run's id at once, without waiting for
-     * any step. Fails, starting no run, with:
+     * Writes the run `readRunToWrite` returns: validates its plan again,
+     * refuses what runs cannot execute yet and what no runner can run, checks
+     * how deep the run is nested, resolves the inputs, and writes the run and
+     * its entry step records. Returns the run's id at once, without waiting
+     * for any step. Fails, starting no run, with:
      *
      * - `Validation` when the plan does not validate, no runner can run it,
-     *   or the inputs do not match its declarations. `unrunnable` is the
-     *   error's message when the plan itself cannot run;
+     *   or the inputs do not match its declarations, with the message from
+     *   `refusals` where it has one;
      * - `CapExceeded` when the run is nested too deep;
-     * - whatever `prepare` fails with.
+     * - whatever `readRunToWrite` fails with.
      *
-     * `prepare` runs inside the transaction, so a stored workflow cannot
-     * change between being read and its run being written.
+     * `readRunToWrite` runs inside the transaction, so a stored workflow
+     * cannot change between being read and its run being written.
      */
     const writeRun = <E>(
-      prepare: Effect.Effect<RunToWrite, E>,
+      readRunToWrite: Effect.Effect<RunToWrite, E>,
       origin: RunOrigin,
-      unrunnable: string,
+      refusals: RefusalMessages,
     ): Effect.Effect<RunStarted, E | Validation | CapExceeded | SettingError | SqlError> =>
       // Uninterruptible, because it only touches the local database: a
       // caller that disconnects while it commits must not leave a committed
@@ -208,8 +250,12 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
       commitUninterruptibly(
         sql,
         Effect.gen(function* () {
-          const run = yield* prepare;
-          const plan = run.plan;
+          const {
+            plan,
+            workflowId,
+            inputs: unresolvedInputs,
+            originalRunId,
+          } = yield* readRunToWrite;
           // What runs cannot do yet is checked only on a valid definition:
           // an action that does not exist is reported once, as unknown.
           const invalid = (yield* workflows.validateDefinition(plan)).errors;
@@ -218,7 +264,7 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
               ? invalid
               : listUnsupportedElements(plan, yield* host.listActiveWorkflowActions());
           if (problems.length > 0) {
-            return yield* Effect.fail(createValidationError(problems, unrunnable));
+            return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
           }
           // A retired runner never takes the run, and neither does a reserved
           // one, because a run names no runner. An offline or draining one
@@ -236,20 +282,20 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
             );
           }
           yield* checkNesting(origin);
-          const inputs = yield* workflows.resolveRunInputs(plan, run.inputs);
+          const inputs = yield* workflows.resolveRunInputs(plan, unresolvedInputs);
           if (Result.isFailure(inputs)) {
             return yield* Effect.fail(
-              createValidationError(inputs.failure, "the inputs are not valid"),
+              createValidationError(inputs.failure, refusals.invalidInputs),
             );
           }
           const runId = yield* runs.insert(
             {
-              workflowId: run.workflowId,
+              workflowId,
               plan,
               inputs: inputs.success,
               origin,
               entryStepIds: listEntrySteps(plan).map((step) => step.id),
-              ...(run.originalRunId === undefined ? {} : { originalRunId: run.originalRunId }),
+              ...(originalRunId === undefined ? {} : { originalRunId }),
             },
             yield* nowIso,
           );
@@ -264,16 +310,16 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
       );
 
     /**
-     * Reads a stored workflow's definition. Fails with `notFound` when no
-     * workflow has the id.
+     * Reads a stored workflow's definition. Fails with the error
+     * `createMissingError` returns when no workflow has the id.
      */
     const readStoredDefinition = <E>(
       workflowId: string,
-      notFound: () => E,
+      createMissingError: () => E,
     ): Effect.Effect<WorkflowDefinition, E | SqlError> =>
       Effect.flatMap(
         storedWorkflows.readDefinition(workflowId),
-        Option.match({ onNone: () => Effect.fail(notFound()), onSome: Effect.succeed }),
+        Option.match({ onNone: () => Effect.fail(createMissingError()), onSome: Effect.succeed }),
       );
 
     /**
@@ -322,14 +368,14 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
               (plan) => ({ plan, workflowId, inputs }),
             ),
             origin,
-            "this workflow cannot run as it is saved now",
+            STORED_WORKFLOW_REFUSALS,
           );
         }
         const plan = yield* workflows.parseDefinition(content);
         return yield* writeRun(
           Effect.succeed({ plan, workflowId: null, inputs }),
           origin,
-          "this workflow cannot run",
+          SENT_WORKFLOW_REFUSALS,
         );
       });
 
@@ -370,8 +416,9 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
      *   stored workflow to read, because the run's workflow was sent with
      *   `run.start` or has been deleted since. It never falls back to
      *   replay, because the caller would get the old plan without knowing;
-     * - `Validation`, starting no run, as for `run.start`. A re-stamp's
-     *   message tells the caller that replay may still run;
+     * - `Validation`, starting no run, as for `run.start`. When a re-stamp
+     *   fails because of the stored workflow, the message tells the caller
+     *   that replay may still run;
      * - `CapExceeded` as for `run.start`.
      */
     const rerun = (id: string, input: RunRerunInput): Effect.Effect<RunStarted, RunRerunError> =>
@@ -391,10 +438,10 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
               originalRunId: original.id,
             })),
             origin,
-            "the original run's plan cannot run any more",
+            REPLAY_REFUSALS,
           );
         }
-        const restamp = Effect.gen(function* () {
+        const readRestampedRun = Effect.gen(function* () {
           const original = yield* readEndedRun(id);
           if (original.workflowId === null) {
             return yield* Effect.fail(
@@ -415,17 +462,7 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
             originalRunId: original.id,
           };
         });
-        return yield* Effect.catchIf(
-          writeRun(restamp, origin, "this workflow cannot run as it is saved now"),
-          (error) => error instanceof Validation,
-          (refused) =>
-            Effect.fail(
-              createValidationError(
-                refused.error.details.issues,
-                `${refused.error.message}. ${REPLAY_HINT}`,
-              ),
-            ),
-        );
+        return yield* writeRun(readRestampedRun, origin, RESTAMP_REFUSALS);
       });
 
     return { start, rerun };

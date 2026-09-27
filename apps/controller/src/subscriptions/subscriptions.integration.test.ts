@@ -25,8 +25,9 @@ import {
   buildHeldAction,
   buildHeldStep,
   insertPendingRun,
+  RUN_WATCHER_GRANTS,
+  startHeldRun,
   startRun,
-  waitForHeldExecutions,
   waitForRunToFinish,
   withRunFleet,
 } from "../runs/testing";
@@ -117,12 +118,9 @@ const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRo
     ),
   );
 
-/** The grants of a session that may wait on a run: it may subscribe and read runs. */
-const RUN_WATCHER_GRANTS = ["subscription.write", "subscription.read", "run.read"];
-
 /** Returns the condition a run target expands into. */
 const buildRunCondition = (runId: string): string =>
-  `event.kind.startsWith("run.") && event.payload.runId == "${runId}"`;
+  `event.source == "platform" && event.kind.startsWith("run.") && event.payload.runId == "${runId}"`;
 
 /** The id of the pending run a test inserts. A UUIDv7, like every id the controller mints. */
 const PENDING_RUN_ID = "0199f0b7-0000-7000-8000-00000000c001";
@@ -200,12 +198,7 @@ describe("subscription.create with a run target", () => {
     await withRunFleet(
       async (arranged) => {
         try {
-          const base = arranged.harness.base;
-          const workflow = await createWorkflowOrFail(base, arranged.token, {
-            definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
-          });
-          const runId = await startRun(base, arranged.token, workflow.id);
-          await waitForHeldExecutions(held, 1);
+          const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
           const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
           const subscriptionId = await createSubscriptionOrFail(
@@ -283,6 +276,25 @@ describe("subscription.create with a run target", () => {
     });
   });
 
+  it("rejects a run id that is not a UUID with validation, and stores nothing", async () => {
+    await withAgentFleet(async (arranged) => {
+      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+
+      // The shorthand's prefix written into the id is the likeliest mistake.
+      const response = await createSubscription(
+        arranged,
+        { kind: "run", runId: "run:abc" },
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(400);
+      expect(refused.code).toBe("validation");
+      expect(refused.issues).toEqual([["target", "runId"]]);
+      expect(await listPage(arranged, agent.token)).toEqual([]);
+    });
+  });
+
   it("returns not_found for a run id that matches no run, and stores nothing", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
@@ -305,12 +317,7 @@ describe("subscription.create with a run target", () => {
     await withRunFleet(
       async (arranged) => {
         try {
-          const base = arranged.harness.base;
-          const workflow = await createWorkflowOrFail(base, arranged.token, {
-            definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
-          });
-          const runId = await startRun(base, arranged.token, workflow.id);
-          await waitForHeldExecutions(held, 1);
+          const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
           const agent = await spawnAgentWithGrants(arranged, "subscribers", [
             "subscription.write",
             "subscription.read",

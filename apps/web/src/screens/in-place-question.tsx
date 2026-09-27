@@ -1,6 +1,6 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useId, useState, type JSX, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { Button } from "@hercule/ui";
+import { Button, cn } from "@hercule/ui";
 
 /**
  * A confirmation question with two buttons, shown inline next to the control
@@ -24,6 +24,8 @@ import { Button } from "@hercule/ui";
  *   while an action the answer would interfere with is still running.
  * - `children`, when given, sit between the question and the buttons: a
  *   control that shapes the answer, such as a checkbox.
+ * - The question and its controls form a group named by the question, so a
+ *   screen reader reads the question when the focus moves to its buttons.
  */
 export function InPlaceQuestion({
   question,
@@ -47,6 +49,7 @@ export function InPlaceQuestion({
   // The first render runs before the decline button takes focus, so the
   // focused element is still the one that asked.
   const [asker] = useState(() => document.activeElement);
+  const questionId = useId();
   const buttons = (
     <>
       <Button
@@ -56,7 +59,7 @@ export function InPlaceQuestion({
         // breaks over two lines: on one line the question gives way first.
         // Stacked, the decline button starts the row under the question, so
         // its text is pulled back to line up with the question's first letter.
-        className={stacked ? "-ml-2 shrink-0" : "shrink-0"}
+        className={cn("shrink-0", stacked && "-ml-2")}
         onClick={() => {
           // The asking element can take focus only after the page re-renders
           // without the question, so that render is flushed first.
@@ -73,18 +76,28 @@ export function InPlaceQuestion({
   );
   if (stacked) {
     return (
-      <div className="flex flex-col gap-1.5 text-row text-muted">
+      <div
+        role="group"
+        aria-labelledby={questionId}
+        className="flex flex-col gap-1.5 text-row text-muted"
+      >
         {/* Pretty wrapping keeps the last line from holding a single word. */}
-        <p className="text-pretty">{question}</p>
+        <p id={questionId} className="text-pretty">
+          {question}
+        </p>
         {children}
         <div className="flex items-center gap-1.5">{buttons}</div>
       </div>
     );
   }
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-row text-muted">
+    <div
+      role="group"
+      aria-labelledby={questionId}
+      className="flex min-w-0 items-center gap-1.5 text-row text-muted"
+    >
       {/* A long question is truncated in a narrow row, so the tooltip shows the full text. */}
-      <span title={question} className="min-w-0 truncate">
+      <span id={questionId} title={question} className="min-w-0 truncate">
         {question}
       </span>
       {children}

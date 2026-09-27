@@ -1,12 +1,18 @@
+/**
+ * Tests how the controller writes a platform event: the row it appends to the
+ * event log, that the event router reads it where it skips an audit entry,
+ * that it commits or rolls back with the change it reports, and what it
+ * announces once it has committed.
+ */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Task } from "@hercule/contract";
-import { AfterCommit, type Change } from "../db";
+import type { Change } from "../db";
 import { withTransaction } from "../db/client";
-import { TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "./audit-log";
-import { readPipelineEventsAfter } from "./log";
+import { EVENT_COLUMNS, readPipelineEventsAfter, type EventRow } from "./log";
 import { PlatformEvents, PlatformEventsLayer, type PlatformEvent } from "./platform-events";
 
 const AT = "2026-09-27T09:30:00.000Z";
@@ -28,9 +34,10 @@ const TASK: Task = {
   statusChangedAt: AT,
 };
 
+/** The event of a run that ended on its own, so no request caused it. */
 const RUN_COMPLETED: PlatformEvent = {
   kind: "run.completed",
-  actor: null,
+  actor: "system",
   at: AT,
   payload: {
     runId: RUN_ID,
@@ -57,23 +64,17 @@ const TASK_UPDATED: PlatformEvent = {
   payload: { taskId: TASK_ID, changes: { status: { old: "open", new: "done" } } },
 };
 
-type Deps = PlatformEvents | AuditLog | SqlClient.SqlClient;
+/** The services every test here runs with: both writers of the event log, and the database. */
+type EventLogServices = PlatformEvents | AuditLog | SqlClient.SqlClient;
 
 /**
  * Runs `effect` against a fresh database, and returns its value with every
- * change announced after a commit, in order. The listener stands in for the
- * live socket, which is the only other thing that receives announcements.
+ * change announced after a commit, in order.
  */
 const runRecordingAnnouncements = async <A, E>(
-  effect: Effect.Effect<A, E, Deps>,
+  effect: Effect.Effect<A, E, EventLogServices>,
 ): Promise<{ readonly value: A; readonly announced: ReadonlyArray<Change> }> => {
-  const announced: Array<Change> = [];
-  const listener = Layer.succeed(AfterCommit, {
-    publish: (changes) =>
-      Effect.sync(() => {
-        announced.push(...changes);
-      }),
-  });
+  const { listener, announced } = buildAnnouncementRecorder();
   const layer = Layer.mergeAll(PlatformEventsLayer, AuditLogLayer).pipe(
     Layer.provideMerge(TestDatabase),
   );
@@ -90,20 +91,7 @@ describe("PlatformEvents", () => {
         const platformEvents = yield* PlatformEvents;
         yield* platformEvents.emit(TASK_CREATED);
         const sql = yield* SqlClient.SqlClient;
-        return yield* sql<{
-          readonly source: string;
-          readonly connection_id: Uint8Array | null;
-          readonly system: string;
-          readonly kind: string;
-          readonly occurred_at: string;
-          readonly received_at: string;
-          readonly dedup_key: string;
-          readonly refs: string;
-          readonly url: string | null;
-          readonly payload: string;
-          readonly raw: string | null;
-          readonly actor: string | null;
-        }>`SELECT * FROM events`;
+        return yield* sql<EventRow>`SELECT ${sql.literal(EVENT_COLUMNS)} FROM events`;
       }),
     );
     expect(rows).toHaveLength(1);
@@ -122,7 +110,7 @@ describe("PlatformEvents", () => {
     expect(row.actor).toBe(SESSION_ACTOR);
   });
 
-  it("writes a null actor for a run that ended on its own, and keeps the run's payload whole", async () => {
+  it("writes the system actor for a run that ended on its own, and keeps the run's payload whole", async () => {
     const { value: rows } = await runRecordingAnnouncements(
       Effect.gen(function* () {
         const platformEvents = yield* PlatformEvents;
@@ -131,7 +119,7 @@ describe("PlatformEvents", () => {
       }),
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.actor).toBeNull();
+    expect(rows[0]!.actor).toBe("system");
     expect(rows[0]!.receivedAt).toBe(AT);
     expect(rows[0]!.payload).toEqual(RUN_COMPLETED.payload);
   });
@@ -160,31 +148,13 @@ describe("PlatformEvents", () => {
     ]);
   });
 
-  it("announces the log and the created task for task.created", async () => {
-    const { announced } = await runRecordingAnnouncements(
-      Effect.flatMap(PlatformEvents, (platformEvents) => platformEvents.emit(TASK_CREATED)),
-    );
-    expect(announced).toEqual([
-      { _tag: "event" },
-      { _tag: "record", topic: "task", id: TASK_ID, kind: "created" },
-    ]);
-  });
-
-  it("announces the log and the updated task for task.updated", async () => {
-    const { announced } = await runRecordingAnnouncements(
-      Effect.flatMap(PlatformEvents, (platformEvents) => platformEvents.emit(TASK_UPDATED)),
-    );
-    expect(announced).toEqual([
-      { _tag: "event" },
-      { _tag: "record", topic: "task", id: TASK_ID, kind: "updated" },
-    ]);
-  });
-
-  it("announces only the log for a run event, because the runs domain announces the run", async () => {
-    const { announced } = await runRecordingAnnouncements(
-      Effect.flatMap(PlatformEvents, (platformEvents) => platformEvents.emit(RUN_COMPLETED)),
-    );
-    expect(announced).toEqual([{ _tag: "event" }]);
+  it("announces only a change to the log, because the domain an event is about announces its own record", async () => {
+    for (const event of [TASK_CREATED, TASK_UPDATED, RUN_COMPLETED]) {
+      const { announced } = await runRecordingAnnouncements(
+        Effect.flatMap(PlatformEvents, (platformEvents) => platformEvents.emit(event)),
+      );
+      expect(announced, event.kind).toEqual([{ _tag: "event" }]);
+    }
   });
 
   it("rolls back with the change it reports, and announces nothing", async () => {
@@ -216,9 +186,6 @@ describe("PlatformEvents", () => {
       }),
     );
     expect(rows).toHaveLength(1);
-    expect(announced).toEqual([
-      { _tag: "event" },
-      { _tag: "record", topic: "task", id: TASK_ID, kind: "updated" },
-    ]);
+    expect(announced).toEqual([{ _tag: "event" }]);
   });
 });

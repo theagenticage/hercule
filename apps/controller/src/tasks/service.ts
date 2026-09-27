@@ -47,7 +47,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import { announce, nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
 import { taskRepository, type TaskEdit, type TaskOrder } from "./repository";
 
@@ -217,6 +217,7 @@ const make = Effect.gen(function* () {
               actor,
             });
             yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
+            yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
             return task;
           }),
         );
@@ -323,6 +324,7 @@ const make = Effect.gen(function* () {
               payload: { taskId: id, changes },
               at,
             });
+            yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
             // Read back rather than merged in memory, so the caller gets the
             // row that was written, whatever the edit changed.
             return yield* readLiveTaskOrFail(id);

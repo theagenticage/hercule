@@ -404,16 +404,17 @@ export const RunCancelInput = closedStruct({
 export type RunCancelInput = Schema.Schema.Type<typeof RunCancelInput>;
 
 /**
- * How `run.rerun` chooses the workflow definition of the new run:
+ * How `run.rerun` chooses the plan of the new run:
  *
  * - `re-stamp`: the workflow as it is stored now, for a run whose workflow
  *   was changed after it ran. A run of a workflow sent with `run.start`, or
  *   of a workflow that was deleted since, has no stored workflow to re-stamp
  *   from.
- * - `replay`: the plan the run froze when it started, so the new run does
- *   exactly what the old one was meant to do.
+ * - `replay`: the plan the original run froze when it started, so the new
+ *   run is meant to do what the original run was meant to do.
  *
- * Either way the new run starts with the inputs the old run started with.
+ * Either way the new run starts with the inputs the original run started
+ * with.
  */
 export const RERUN_MODES = ["re-stamp", "replay"] as const;
 
@@ -430,8 +431,8 @@ export type RunRerunInput = Schema.Schema.Type<typeof RunRerunInput>;
 
 /**
  * The fields every run event's payload has. The payload never names who ended
- * the run: the event's `actor` holds the user or session whose request ended
- * it, and is null when the run ended on its own.
+ * the run: the event's `actor` holds the actor whose request ended it, and is
+ * `system` when the run ended on its own.
  */
 const RUN_EVENT_FIELDS = {
   runId: Id,
@@ -517,7 +518,8 @@ export const run = HttpApiGroup.make("run")
     }),
     /**
      * Starts a new run with the inputs of a run that has ended, and returns
-     * its id at once. The new run records the old one in `originalRunId`. Fails
+     * its id at once. The new run records the original run in
+     * `originalRunId`. Fails
      * with `invalid_state` for a run that has not ended, and for a `re-stamp`
      * of a run with no stored workflow to re-stamp from; with `validation`
      * when the new run cannot start, as for `run.start`; and with

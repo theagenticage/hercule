@@ -12,10 +12,10 @@ import { post, send } from "../../http/testing";
 import {
   buildCreateStep,
   buildHeldAction,
-  buildHeldStep,
   requestCancel,
+  RUN_WATCHER_GRANTS,
+  startHeldRun,
   startRun,
-  waitForHeldExecutions,
   waitForRunToFinish,
   type HeldAction,
 } from "../../runs/testing";
@@ -204,20 +204,6 @@ const withHeldRunPipeline = (
   );
 
 /**
- * Starts a run whose one step waits until the test releases it, and returns
- * the run's id once the step has started.
- */
-const startHeldRun = async (arranged: Arranged, held: HeldAction): Promise<string> => {
-  const base = arranged.harness.base;
-  const workflow = await createWorkflowOrFail(base, arranged.token, {
-    definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
-  });
-  const runId = await startRun(base, arranged.token, workflow.id);
-  await waitForHeldExecutions(held, 1);
-  return runId;
-};
-
-/**
  * Spawns an idle session subscribed to the run, and returns it with its
  * subscription's id. The session is idle, so a matched input is delivered to
  * it at once.
@@ -226,11 +212,7 @@ const subscribeIdleAgentToRun = async (
   arranged: Arranged,
   runId: string,
 ): Promise<{ readonly agent: Agent; readonly subscriptionId: string }> => {
-  const agent = await spawnAgentWithGrants(arranged, "run-watchers", [
-    "subscription.write",
-    "subscription.read",
-    "run.read",
-  ]);
+  const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
   const response = await post(
     arranged.harness.base,
     "/api/v1/subscriptions",
@@ -289,7 +271,7 @@ describe("the platform events in the pipeline", () => {
     const held = buildHeldAction();
     await withHeldRunPipeline(held, async (arranged) => {
       const base = arranged.harness.base;
-      const runId = await startHeldRun(arranged, held);
+      const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
       const { agent, subscriptionId } = await subscribeIdleAgentToRun(arranged, runId);
 
       // Another run ends first. Its run.completed is in the log, and the
@@ -315,8 +297,9 @@ describe("the platform events in the pipeline", () => {
         (event) => event.payload["runId"] === runId,
       );
       expect(ended, "the run's run.completed").toBeDefined();
-      // The run ended on its own, when its last step returned.
-      expect(ended!.actor).toBeNull();
+      // The run ended on its own, when its last step returned, so no one
+      // ended it but the system.
+      expect(ended!.actor).toBe("system");
       expect(rows.map((row) => row.event_id)).toEqual([ended!.id]);
 
       // The other run's ending was read by the router, and matched nothing.
@@ -329,7 +312,7 @@ describe("the platform events in the pipeline", () => {
     const held = buildHeldAction();
     await withHeldRunPipeline(held, async (arranged) => {
       const base = arranged.harness.base;
-      const runId = await startHeldRun(arranged, held);
+      const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
       const { agent, subscriptionId } = await subscribeIdleAgentToRun(arranged, runId);
 
       const response = await requestCancel(base, arranged.token, runId);

@@ -193,8 +193,8 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 
 *(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* **Re-running a run.** The semantics are in [./07](./07-workflows.md) section 7.4.
 
-- **Route.** `POST /runs/{id}/rerun`, with the run's id in the path, as every other operation on one run has it, and `{ mode? }` in the body. It needs the `run.start` grant, because it starts a run.
-- **Errors.** `not_found` for an unknown run. `invalid_state` for a run that has not ended, and for a re-stamp of a run with no stored workflow to re-stamp from; the message tells the caller to replay. `validation` when the new run cannot start, as for `run.start`; for a re-stamp, the message points to replay. `cap_exceeded` when the new run would be nested too deep, as for `run.start`.
+- **Route.** `POST /runs/{id}/rerun`, with the run's id in the path, as every other operation on one run has it, and `{ mode? }` in the body. It needs the `run.start` grant, because it starts a run. It does not also need `run.read`, though it reads the original run: the new run's steps already act with every grant, so `run.start` gives more than `run.read` does.
+- **Errors.** `not_found` for an unknown run. `invalid_state` for a run that has not ended, and for a re-stamp of a run with no stored workflow to re-stamp from; the message tells the caller to replay. `validation` when the new run cannot start, as for `run.start`; when a re-stamp fails because the stored workflow cannot run or does not accept the original run's inputs, the message points to replay. A missing runner does not, because a replay needs the same runners. `cap_exceeded` when the new run would be nested too deep, as for `run.start`.
 - **`run.query`** takes `originalRunId` and then lists only the re-runs of that run. A `RunSummary` has no `originalRunId`; `run.read` returns it.
 - **The CLI rows**: `hercule run rerun <id> [--mode re-stamp|replay]` prints the new run's id and the subscription hint (section 8), as `hercule run start` does. `hercule run list --original-run <id>` lists the re-runs of a run. Both take a full id or a tail of eight or more characters.
 
@@ -271,7 +271,7 @@ The controller expands a target into the pipeline's matching condition and store
 *(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* **Targets as built.** `subscription.create` accepts two of the four kinds:
 
 - `ref`, as above.
-- `run:<id>`, which receives that run's `run.completed`, `run.failed` or `run.cancelled` event ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.5). The controller reads the run through the runs domain's own read, so the caller also needs the `run.read` grant, and is refused with `forbidden` without it. An unknown run is refused with `not_found`. A run that has already ended is refused with `invalid_state`, because no event of it would ever come.
+- `run:<id>`, which receives that run's `run.completed`, `run.failed` or `run.cancelled` event ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.5). The controller reads the run through the runs domain's own read, so the caller also needs the `run.read` grant, and is refused with `forbidden` without it. An unknown run is refused with `not_found`. A run that has already ended is refused with `invalid_state`, because no event of it would ever come. A run id that is not a UUID is refused with `validation`. The stored condition also requires `event.source == "platform"`, so an event a plugin emits under a `run.` kind cannot pass for the run's own.
 
 `session` and `request` targets are still refused with `invalid_state`: no `session.*` events are emitted yet, and Permission Requests do not exist yet.
 

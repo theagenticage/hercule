@@ -2,8 +2,8 @@
  * Integration tests for the platform event a run emits when it ends, driven
  * over HTTP against a real controller: `run.completed`, `run.failed` or
  * `run.cancelled`, exactly one per run, with a payload built from the run
- * record and the actor whose request ended the run, or none when the run
- * ended on its own.
+ * record, and stamped with the actor whose request ended the run, or with
+ * `system` when the run ended on its own.
  *
  * The events are read back from the event log with the harness's
  * `platformEvents`, and once through the reader the event router uses, to
@@ -13,7 +13,6 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Run } from "@hercule/contract";
 import { ActionError } from "@hercule/plugin-host";
 import { runEffect } from "../daemon/testing";
 import { buildActionPlugin } from "../plugins/testing";
@@ -24,28 +23,20 @@ import {
   buildCreateStep,
   buildHeldAction,
   buildHeldStep,
+  expectEnded,
   expectStatus,
   insertPendingRun,
   queryRuns,
   readRun,
   requestCancel,
+  startHeldRun,
   startRun,
   waitForHeldExecutions,
   waitForRunToFinish,
+  type EndedRun,
 } from "./testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
-
-/** A run that has ended. */
-type EndedRun = Exclude<Run, { readonly status: "pending" | "running" }>;
-
-/** Returns the run narrowed to an ended one. Fails the test when it has not ended. */
-const expectEnded = (run: Run): EndedRun => {
-  if (run.status === "pending" || run.status === "running") {
-    expect.fail(`the run has not ended: ${JSON.stringify(run)}`);
-  }
-  return run;
-};
 
 /**
  * Returns the fields every run event's payload has, as the ended run's
@@ -90,31 +81,42 @@ const FAILING_DEFINITION = {
 };
 
 /**
- * A plugin whose one action, `refuse/on_abort`, waits until its run is
+ * Builds a plugin whose one action, `refuse/on_abort`, waits until its run is
  * cancelled and then fails. A run engine that acted on that failure would
  * fail the run at the step after the cancel had already ended it.
+ *
+ * `started` and `failed` list the run id of each execution that has started,
+ * and of each that has failed, so a test can wait for the action to be in
+ * flight and check that it did fail after the cancel.
  */
-const FAIL_ON_ABORT_PLUGIN = buildActionPlugin("refuse", {
-  id: "on_abort",
-  displayName: "Fail on abort",
-  description: "Waits until its run is cancelled, then fails.",
-  input: Schema.Struct({}),
-  output: Schema.Struct({}),
-  execute: (_input, context) =>
-    Effect.callback<object, ActionError>((resume) => {
-      context.signal.addEventListener("abort", () =>
-        resume(
-          Effect.fail(new ActionError({ code: "aborted", message: "The run was cancelled." })),
-        ),
-      );
-    }),
-});
+const buildFailOnAbortAction = () => {
+  const started: Array<string> = [];
+  const failed: Array<string> = [];
+  const plugin = buildActionPlugin("refuse", {
+    id: "on_abort",
+    displayName: "Fail on abort",
+    description: "Waits until its run is cancelled, then fails.",
+    input: Schema.Struct({}),
+    output: Schema.Struct({}),
+    execute: (_input, context) =>
+      Effect.callback<object, ActionError>((resume) => {
+        started.push(context.run.runId);
+        context.signal.addEventListener("abort", () => {
+          failed.push(context.run.runId);
+          resume(
+            Effect.fail(new ActionError({ code: "aborted", message: "The run was cancelled." })),
+          );
+        });
+      }),
+  });
+  return { plugin, started, failed };
+};
 
 /** The id of the pending run a test inserts. A UUIDv7, like every id the controller mints. */
 const PENDING_RUN_ID = "0199f0b7-0000-7000-8000-00000000e101";
 
 describe("the event a run emits when it ends on its own", () => {
-  it("emits run.completed with the terminal step's output and no actor, dated when the run ended", async () => {
+  it("emits run.completed with the terminal step's output, stamped system and dated when the run ended", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: TERMINAL_DEFINITION,
@@ -133,7 +135,7 @@ describe("the event a run emits when it ends on its own", () => {
         {
           id: expect.any(Number) as unknown,
           kind: "run.completed",
-          actor: null,
+          actor: "system",
           payload: { ...buildExpectedFields(completed), output: completed.output },
           receivedAt: completed.finishedAt,
         },
@@ -165,7 +167,7 @@ describe("the event a run emits when it ends on its own", () => {
     });
   });
 
-  it("emits run.failed naming the step the run failed at, with no failedEdge and no actor", async () => {
+  it("emits run.failed naming the step the run failed at, with no failedEdge, stamped system", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, { definition: FAILING_DEFINITION });
 
@@ -176,7 +178,7 @@ describe("the event a run emits when it ends on its own", () => {
         {
           id: expect.any(Number) as unknown,
           kind: "run.failed",
-          actor: null,
+          actor: "system",
           payload: {
             ...buildExpectedFields(failed),
             failureReason: "step-failed",
@@ -220,7 +222,7 @@ describe("the event a run emits when it ends on its own", () => {
     });
   });
 
-  it("emits run.completed with no actor for a run a run's step started, and names the parent in its origin", async () => {
+  it("emits run.completed stamped system for a run a run's step started, and names the parent in its origin", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const child = await createWorkflowOrFail(base, token, {
         definition: { name: "Child", steps: [buildCreateStep("create")] },
@@ -240,7 +242,8 @@ describe("the event a run emits when it ends on its own", () => {
       const childRun = expectEnded(await waitForRunToFinish(base, token, childSummary!.id));
 
       const events = await harness.platformEvents("run.completed");
-      expect(events.map((event) => event.actor)).toEqual([null, null]);
+      // Neither run was ended by a request: each ended when its last step did.
+      expect(events.map((event) => event.actor)).toEqual(["system", "system"]);
       expect(events.find((event) => event.payload["runId"] === childRun.id)?.payload).toEqual({
         ...buildExpectedFields(childRun),
         origin: { kind: "action", parentRunId: parentId, stepId: "start" },
@@ -277,7 +280,7 @@ describe("the event a run emits when it ends on its own", () => {
           receivedAt: run.finishedAt,
           refs: [],
           payload: emitted!.payload,
-          actor: null,
+          actor: "system",
         }) as unknown,
       ]);
       const single = await runEffect(readPipelineEvent(harness.sql, emitted!.id));
@@ -390,11 +393,7 @@ describe("the event a cancelled run emits", () => {
     await withSetUpController(
       async ({ harness, base, token }) => {
         try {
-          const workflow = await createWorkflowOrFail(base, token, {
-            definition: { name: "Wait", steps: [buildHeldStep(held, "first")] },
-          });
-          const runId = await startRun(base, token, workflow.id);
-          await waitForHeldExecutions(held, 1);
+          const runId = await startHeldRun(base, token, held);
 
           const cancelled = await requestCancel(base, token, runId);
           expect(cancelled.status, await cancelled.clone().text()).toBe(200);
@@ -421,6 +420,7 @@ describe("the event a cancelled run emits", () => {
   });
 
   it("emits no run.failed when the run's action fails after the cancel", async () => {
+    const failOnAbort = buildFailOnAbortAction();
     await withSetUpController(
       async ({ harness, base, token }) => {
         const workflow = await createWorkflowOrFail(base, token, {
@@ -430,26 +430,27 @@ describe("the event a cancelled run emits", () => {
           },
         });
         const runId = await startRun(base, token, workflow.id);
-        await waitUntil("started the refusing step", async () => {
-          const run = await readRun(base, token, runId);
-          return run.steps[0]?.status === "running" ? true : undefined;
-        });
+        await waitUntil("started the refusing action", () =>
+          failOnAbort.started.includes(runId) ? true : undefined,
+        );
 
         const cancelled = await requestCancel(base, token, runId);
         expect(cancelled.status, await cancelled.clone().text()).toBe(200);
 
-        // Reads the run a few times over a short while, so the action's
-        // failure has had time to reach the run engine.
-        for (let read = 0; read < 10; read += 1) {
-          expect((await readRun(base, token, runId)).status).toBe("cancelled");
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
+        // The run's fiber ends only once its steps have stopped, so by then
+        // the action has failed, and the engine has done all it ever will
+        // with that failure.
+        await waitUntil("stopped executing the run", () =>
+          harness.isRunExecuting(runId) ? undefined : true,
+        );
+        expect(failOnAbort.failed).toEqual([runId]);
+        expect((await readRun(base, token, runId)).status).toBe("cancelled");
         expect(
           (await harness.platformEvents("run.cancelled")).map((event) => event.payload["runId"]),
         ).toEqual([runId]);
         expect(await harness.platformEvents("run.failed")).toEqual([]);
       },
-      [FAIL_ON_ABORT_PLUGIN],
+      [failOnAbort.plugin],
     );
   });
 });
