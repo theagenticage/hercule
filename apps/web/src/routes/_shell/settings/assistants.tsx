@@ -155,7 +155,7 @@ function Assistants(): JSX.Element {
   if (selected === undefined) {
     return (
       <EmptyState
-        headline="No assistant has been created yet."
+        headline="No assistants."
         lead="An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat and reply style are edited here."
       >
         {newAssistantButton}

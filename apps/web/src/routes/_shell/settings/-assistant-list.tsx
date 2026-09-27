@@ -26,28 +26,24 @@ export function AssistantList({
   return (
     <div>
       <LaneLabel>Assistants</LaneLabel>
-      {/* The settings screens are a column of 520px cards, so the list uses
-          the same width. */}
-      <div className="max-w-[520px]">
-        <Group>
-          <ul className="flex flex-col">
-            {assistants.map((assistant) => (
-              <li key={assistant.id}>
-                <ListRow
-                  ref={assistant.id === selectedId ? selectedRowRef : undefined}
-                  selected={assistant.id === selectedId}
-                  disabled={disabled}
-                  onClick={() => {
-                    if (assistant.id !== selectedId) onSelect(assistant.id);
-                  }}
-                >
-                  <span className="min-w-0 truncate font-emph text-ink">{assistant.name}</span>
-                </ListRow>
-              </li>
-            ))}
-          </ul>
-        </Group>
-      </div>
+      <Group>
+        <ul className="flex flex-col">
+          {assistants.map((assistant) => (
+            <li key={assistant.id}>
+              <ListRow
+                ref={assistant.id === selectedId ? selectedRowRef : undefined}
+                selected={assistant.id === selectedId}
+                disabled={disabled}
+                onClick={() => {
+                  if (assistant.id !== selectedId) onSelect(assistant.id);
+                }}
+              >
+                <span className="min-w-0 truncate font-emph text-ink">{assistant.name}</span>
+              </ListRow>
+            </li>
+          ))}
+        </ul>
+      </Group>
     </div>
   );
 }

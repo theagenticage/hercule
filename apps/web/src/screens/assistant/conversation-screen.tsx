@@ -7,13 +7,9 @@
  * work behind a reply is one "Show work" click away, on the session view.
  */
 import { useLayoutEffect, useRef, type JSX } from "react";
+import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  useQuery,
-  useQueryClient,
-  useSuspenseInfiniteQuery,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
-import {
+  chooseMessageStamps,
   decideAssistantPresence,
   decideConversationActivity,
   flattenMessagePages,
@@ -26,7 +22,6 @@ import {
   assistantQuery,
   conversationMessagesQuery,
   currentConversationSessionQuery,
-  sessionsQuery,
 } from "../../app/queries";
 import { ContentColumn } from "../content-column";
 import { readErrorMessage } from "../save-status";
@@ -59,11 +54,14 @@ export function ConversationScreen({
   live,
   assistantId,
   conversationId,
+  timezone,
 }: {
   readonly client: HerculeClient;
   readonly live: Live;
   readonly assistantId: string;
   readonly conversationId: string;
+  /** The zone the timestamps are shown in. */
+  readonly timezone: string;
 }): JSX.Element {
   const queryClient = useQueryClient();
   // A rename reaches the header, a new message the list, and a session
@@ -74,15 +72,15 @@ export function ConversationScreen({
 
   const assistant = useSuspenseQuery(assistantQuery(client, assistantId)).data;
   const messages = useSuspenseInfiniteQuery(conversationMessagesQuery(client, conversationId));
+  // The header's presence word and the activity row under the last message
+  // both read this one session, so the two never disagree.
   const current = useSuspenseQuery(currentConversationSessionQuery(client, conversationId)).data;
-  // The presence word reads the same list and function as the sidebar row,
-  // so the two never disagree.
-  const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
 
   const lines = flattenMessagePages(messages.data.pages);
   const oldestId = lines[0]?.id;
   const newestId = lines.at(-1)?.id;
   const activity = decideConversationActivity(current);
+  const stamps = chooseMessageStamps(lines, timezone);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
 
   // A new message or a change in the activity row grows the column at the
@@ -137,10 +135,7 @@ export function ConversationScreen({
 
   return (
     <div className="flex flex-1 flex-col">
-      <ConversationChrome
-        name={assistant.name}
-        presence={decideAssistantPresence(assistantId, sessions)}
-      />
+      <ConversationChrome name={assistant.name} presence={decideAssistantPresence(current)} />
       <ContentColumn className="gap-5">
         {/* The messages take the height the composer leaves, so the empty
             hint is centred in that space, not in the whole column. */}
@@ -168,7 +163,9 @@ export function ConversationScreen({
               up where it left off.
             </p>
           ) : (
-            lines.map((message) => <ConversationMessageView key={message.id} message={message} />)
+            lines.map((message, index) => (
+              <ConversationMessageView key={message.id} message={message} stamp={stamps[index]} />
+            ))
           )}
           <ActivityRow activity={activity} name={assistant.name} />
         </div>

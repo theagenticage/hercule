@@ -253,7 +253,7 @@ const readCheckedSegment = (name: string): string | null | undefined =>
     .getAllByRole("radio")
     .find((item) => item.getAttribute("aria-checked") === "true")?.textContent;
 
-const EMPTY_HEADLINE = "No assistant has been created yet.";
+const EMPTY_HEADLINE = "No assistants.";
 const EMPTY_LEAD =
   "An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat and reply style are edited here.";
 

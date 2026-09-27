@@ -6,10 +6,15 @@ import { cn } from "./cn";
  * Renders a control that switches between two or more views of one surface.
  * One is always selected.
  *
- * `compact` gives the segments smaller text and less padding. It is the style
- * for a control in the value column of a settings `Row`: the control fills the
- * column like the selects above and below it, and the longest segment labels,
- * such as the four access modes, still fit without breaking a word.
+ * `compact` is the style for a control in the value column of a settings
+ * `Row`. The control fills the column like the selects above and below it,
+ * and the segments get smaller text and less padding, so that the longest
+ * labels, such as the four access modes, fit without breaking a word.
+ *
+ * A compact segment is sized to its label, and the spare room is shared out
+ * equally. Equal-width segments would squeeze long labels against the
+ * control's edge and give the spare room to the short ones. With two labels
+ * of similar length, the two rules look the same.
  */
 export function SegmentedControl({
   compact = false,
@@ -33,7 +38,7 @@ export function SegmentedControl({
       }}
       className={cn(
         "inline-flex w-full gap-0.5 rounded-control border border-line-soft bg-surface p-0.5",
-        compact && "[&>button]:px-1.5 [&>button]:text-fine",
+        compact && "[&>button]:flex-auto [&>button]:px-1.5 [&>button]:text-fine",
         className,
       )}
       {...props}

@@ -140,7 +140,7 @@ export function Sidebar({
   const rows = resolveThreadRowsMode(settings.user["ui.threadRows"]);
 
   return (
-    <div className="sticky top-0 flex h-dvh w-[244px] shrink-0 flex-col border-r border-line-soft bg-surface px-2.5 pt-3.5 pb-3">
+    <div className="flex h-dvh w-[244px] shrink-0 flex-col border-r border-line-soft bg-surface px-2.5 pt-3.5 pb-3">
       <div className="flex items-baseline px-2.5 pt-1 pb-3.5 text-lead font-emph text-ink">
         <Logo />
       </div>

@@ -32,12 +32,7 @@ export function AccessModeControl({
       }}
     >
       {ACCESS_MODES.map((mode) => (
-        // The four labels differ in length and together nearly fill the
-        // column. Equal-width segments leave the long labels only the
-        // minimum padding, their text almost touching the control's edge, and
-        // give the spare room to "auto". Sizing each segment to its label
-        // shares the spare room out equally instead.
-        <SegmentedControlItem key={mode} value={mode} className="flex-auto">
+        <SegmentedControlItem key={mode} value={mode}>
           {mode}
         </SegmentedControlItem>
       ))}

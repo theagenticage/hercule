@@ -2,13 +2,14 @@ import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ConversationActivity } from "@hercule/client-core";
 import { DecisionMark, WorkingMark } from "@hercule/ui";
+import { ShowWork } from "./conversation-message-view";
 
 /**
  * The row under the conversation's last message, while the assistant is
  * busy:
  *
  * - "<name> is working…" beside the working mark, in the live hue, while a
- *   turn runs;
+ *   turn runs, with a "Show work" link to the session doing the work;
  * - "<name> needs your approval" while the session waits on a permission
  *   request. The request is answered on the session, so the row links there
  *   instead of repeating the permission card here.
@@ -25,9 +26,12 @@ export function ActivityRow({
   switch (activity.kind) {
     case "working":
       return (
-        <div className="flex items-center gap-2 text-meta text-live">
-          <WorkingMark />
-          {name} is working…
+        <div className="flex items-baseline gap-x-2 text-meta">
+          <span className="flex items-center gap-2 self-center text-live">
+            <WorkingMark />
+            {name} is working…
+          </span>
+          <ShowWork sessionId={activity.sessionId} />
         </div>
       );
     case "awaiting-approval":

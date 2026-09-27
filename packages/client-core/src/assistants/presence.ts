@@ -21,23 +21,36 @@ import { WORKING_STATUSES } from "../threads/status";
 export type AssistantPresence = "working" | "idle" | "asleep" | "unavailable";
 
 /**
- * Returns the presence of the assistant with `assistantId`, decided by the
- * newest of its conversation sessions in `sessions` (by `createdAt`). Only
- * the newest session counts, because that is the one the next message goes
- * to. Sessions outside a conversation are ignored, even when they carry the
- * assistant's `agentId`.
+ * Returns the newest of the assistant's conversation sessions in `sessions`
+ * (by `createdAt`), or null when it has none. The newest session is the one
+ * the next message goes to, so it is the one presence is read from. Sessions
+ * outside a conversation are ignored, even when they carry the assistant's
+ * `agentId`.
  */
-export const decideAssistantPresence = (
+export const findNewestConversationSession = (
   assistantId: string,
   sessions: readonly Session[],
-): AssistantPresence => {
-  let newest: Session | undefined;
+): Session | null => {
+  let newest: Session | null = null;
   for (const session of sessions) {
     if (session.agentId !== assistantId || session.conversationId === null) continue;
-    if (newest === undefined || session.createdAt > newest.createdAt) newest = session;
+    if (newest === null || session.createdAt > newest.createdAt) newest = session;
   }
-  if (newest === undefined) return "asleep";
-  if (WORKING_STATUSES.has(newest.status)) return "working";
-  if (newest.status === "idle") return "idle";
-  return newest.resumable && !newest.resumeHeld ? "asleep" : "unavailable";
+  return newest;
+};
+
+/**
+ * Returns the presence of an assistant whose newest conversation session is
+ * `session`, or null when it has none yet.
+ *
+ * The sidebar finds that session in the session list with
+ * `findNewestConversationSession`. The conversation screen passes its current
+ * session, the same record its activity row reads, so the header and the row
+ * under the last message never disagree.
+ */
+export const decideAssistantPresence = (session: Session | null): AssistantPresence => {
+  if (session === null) return "asleep";
+  if (WORKING_STATUSES.has(session.status)) return "working";
+  if (session.status === "idle") return "idle";
+  return session.resumable && !session.resumeHeld ? "asleep" : "unavailable";
 };

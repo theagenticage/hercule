@@ -1,16 +1,20 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ConversationMessage } from "@hercule/contract";
-import { Bubble, OwnerBubble } from "../bubble";
+import { OwnerBubble } from "../bubble";
 import { Markdown } from "../thread/markdown";
+import { TimeSeparator } from "../time-separator";
 
 /**
- * One message of an assistant's conversation, drawn by who wrote it:
+ * One message of an assistant's conversation, drawn by who wrote it, in the
+ * shape of the thread surface (spec 14 §The thread surface):
  *
- * - the owner's message is a bubble on the right, as in a thread;
- * - the assistant's reply is a bubble on the left, under the assistant's name;
- * - a notice is a centred, muted line, not a bubble, because the system wrote
- *   it rather than either side of the conversation.
+ * - the owner's message is a bubble on the right, as in a thread, under a
+ *   centred time separator when the screen passes one;
+ * - the assistant's reply is prose at full width on the left, under the
+ *   assistant's name, as an agent's prose is in a thread;
+ * - a notice is a centred, muted line between two hairlines, not a bubble,
+ *   because the system wrote it rather than either side of the conversation.
  *
  * A reply or notice that a session produced links to that session, where the
  * work behind it, or the failure, can be read.
@@ -24,26 +28,36 @@ import { Markdown } from "../thread/markdown";
  */
 export function ConversationMessageView({
   message,
+  stamp,
 }: {
   readonly message: ConversationMessage;
+  /** The time separator to show above the message; none when undefined. */
+  readonly stamp?: string | undefined;
 }): JSX.Element {
   switch (message.senderRole) {
     case "owner":
       return (
-        <div data-sender="owner" data-message-id={message.id} className="flex justify-end">
-          <OwnerBubble text={message.text} />
+        <div data-sender="owner" data-message-id={message.id} className="flex flex-col gap-2">
+          {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
+          <div className="flex justify-end">
+            <OwnerBubble text={message.text} />
+          </div>
         </div>
       );
     case "notice":
       return (
-        <p
+        <div
           data-sender="notice"
           data-message-id={message.id}
-          className="flex flex-wrap items-baseline justify-center gap-x-2 text-center text-meta text-muted"
+          className="flex items-center justify-center gap-3 text-center text-meta text-muted"
         >
-          <span>{message.text}</span>
-          <ShowWork sessionId={message.sessionId} />
-        </p>
+          <span aria-hidden="true" className="h-px min-w-6 flex-1 bg-line" />
+          <p className="flex max-w-[80%] flex-wrap items-baseline justify-center gap-x-2">
+            <span>{message.text}</span>
+            <ShowWork sessionId={message.sessionId} />
+          </p>
+          <span aria-hidden="true" className="h-px min-w-6 flex-1 bg-line" />
+        </div>
       );
     case "assistant":
       return (
@@ -53,17 +67,20 @@ export function ConversationMessageView({
           className="flex flex-col items-start gap-1"
         >
           <span className="text-meta text-faint">{message.senderLabel}</span>
-          <Bubble>
+          <div className="w-full text-row text-ink">
             <Markdown text={message.text} />
-          </Bubble>
+          </div>
           <ShowWork sessionId={message.sessionId} />
         </div>
       );
   }
 }
 
-/** The link from a reply or a notice to the session that produced it. Nothing when there is none. */
-function ShowWork({ sessionId }: { readonly sessionId: string | null }): JSX.Element | null {
+/**
+ * Renders the link from a reply, a notice or the working row to the session
+ * behind it. Renders nothing when there is no session.
+ */
+export function ShowWork({ sessionId }: { readonly sessionId: string | null }): JSX.Element | null {
   if (sessionId === null) return null;
   return (
     <Link

@@ -49,7 +49,7 @@ const screens: readonly [path: string, title: string, headline: string][] = [
   ["/notifications", "Notifications", "Decisions and outcomes will land here."],
   ["/settings/profile", "Profile", "Timezone"],
   ["/settings/threads", "Threads", "Sidebar rows"],
-  ["/settings/assistants", "Assistants", "No assistant has been created yet."],
+  ["/settings/assistants", "Assistants", "No assistants."],
   ["/settings/identities", "Identities", "No platform identity is paired."],
   [
     "/settings/permission-profiles",

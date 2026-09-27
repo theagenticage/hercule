@@ -34,7 +34,11 @@ export function ThreadChrome({
       crumb={crumb ?? "Threads"}
       title={
         tabs.length === 0 ? (
-          <span className="truncate">{title}</span>
+          // A thread's title is its first message, which can be long, so it
+          // is cut to one line, with the full text in a tooltip.
+          <span title={title} className="min-w-0 truncate">
+            {title}
+          </span>
         ) : (
           <span className="flex min-w-0 items-center gap-1.5">
             {tabs.map((tab) => (
@@ -70,7 +74,7 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
     </>
   );
   const shape = cn(
-    "flex min-w-0 items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-body",
+    "flex min-w-0 items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-body tracking-normal",
     tab.active
       ? "border border-line bg-raised font-emph text-ink shadow-card"
       : "font-normal text-muted hover:text-ink",
@@ -100,6 +104,9 @@ export function ChromeAction(props: {
       className={cn(
         ACTION,
         "enabled:cursor-pointer enabled:hover:bg-line-soft enabled:hover:text-ink",
+        // A button that cannot be used loses its lit fill and its label fades,
+        // so it no longer reads as something to press.
+        "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-faint",
         props.icon ? "px-[9px] tracking-[1px]" : "px-[11px]",
       )}
     >

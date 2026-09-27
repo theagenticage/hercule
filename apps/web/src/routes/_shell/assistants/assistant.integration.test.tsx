@@ -1,8 +1,8 @@
 /**
  * Tests an assistant's conversation screen (`/assistants/$assistantId`)
  * against a stubbed controller. The screen is a messenger: it shows the
- * messages of the assistant's web conversation as bubbles, reads the
- * conversation's current session for the row under the last bubble, and sends
+ * messages of the assistant's web conversation, reads the conversation's
+ * current session for the row under the last message, and sends
  * what the user types with `conversation.send`.
  *
  * The spec gives the screen's text but not how its layout is marked up. These
@@ -17,10 +17,10 @@
  * - The send control's accessible name contains "send", as in the thread's
  *   composer.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard } from "@hercule/client-core";
+import { buildApprovalCard, formatStamp } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
   type Assistant,
@@ -31,11 +31,13 @@ import {
 import {
   buildErrorBody,
   expectInDocumentOrder,
+  fakeMainScrollGeometry,
   readPageText,
   renderApp,
   stubApi,
   type Answer,
   type Call,
+  type FakeScrollGeometry,
   type Handler,
 } from "../../../app/testing";
 
@@ -466,11 +468,10 @@ describe("Assistant conversation: messages", () => {
     expectInDocumentOrder([owner, label!, reply]);
   });
 
-  // Added in review round 2 of #92 slice 3 (D-91). D-76 moved the tests off
-  // class names to tell the senders apart, which left the layout AC-26 names
-  // untested. jsdom computes no layout, so the test reads the classes that
-  // place each row: the row element with `data-sender` owns them.
-  it("puts the owner's bubble on the right, the assistant's on the left, and the notice centred and muted", async () => {
+  // jsdom computes no layout, so the test reads the classes that place each
+  // row. The row element with `data-sender` owns them, except the owner's
+  // bubble, which sits in a row of its own under the timestamp.
+  it("puts the owner's bubble on the right, the assistant's prose on the left, and the notice centred and muted", async () => {
     await openConversation({ messages: MESSAGES });
 
     await findOnScreen(NOTICE);
@@ -478,13 +479,46 @@ describe("Assistant conversation: messages", () => {
     const readClasses = (sender: string): string[] =>
       rows.find((row) => row.dataset["sender"] === sender)?.className.split(/\s+/) ?? [];
 
-    expect(readClasses("owner")).toEqual(expect.arrayContaining(["flex", "justify-end"]));
+    const bubble = await findOnScreen("a");
+    expect(bubble.closest(".justify-end"), "the owner's bubble is not on the right").not.toBeNull();
     expect(readClasses("assistant")).toEqual(
       expect.arrayContaining(["flex", "flex-col", "items-start"]),
     );
     expect(readClasses("notice")).toEqual(
       expect.arrayContaining(["justify-center", "text-center", "text-muted"]),
     );
+  });
+
+  it("stamps the owner's messages in mono, once per minute, and never the replies or notices", async () => {
+    await openConversation({
+      messages: [
+        buildMessage(1, { text: "first", createdAt: "2026-09-25T10:00:05.000Z" }),
+        // Sent in the same minute as "first": it shares that stamp.
+        buildMessage(2, { text: "second", createdAt: "2026-09-25T10:00:40.000Z" }),
+        buildMessage(3, {
+          senderRole: "assistant",
+          senderLabel: "Ada",
+          text: "reply",
+          sessionId: SESSION_ID,
+          createdAt: "2026-09-25T10:03:00.000Z",
+        }),
+        buildMessage(4, { text: "third", createdAt: "2026-09-25T10:07:00.000Z" }),
+      ],
+    });
+
+    await findOnScreen("third");
+    const early = formatStamp(new Date("2026-09-25T10:00:05.000Z"), ZONE)!;
+    const late = formatStamp(new Date("2026-09-25T10:07:00.000Z"), ZONE)!;
+    const reply = formatStamp(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
+    const stamps = screen.getAllByText(new RegExp(`^(${early}|${late}|${reply})$`));
+    expect(stamps.map((stamp) => stamp.textContent)).toEqual([early, late]);
+    expect(stamps[0]!.className).toMatch(/\bfont-mono\b/);
+    expectInDocumentOrder([
+      stamps[0]!,
+      await findOnScreen("first"),
+      stamps[1]!,
+      await findOnScreen("third"),
+    ]);
   });
 
   it("links the assistant's reply and the notice to the session's work", async () => {
@@ -687,6 +721,10 @@ describe("Assistant conversation: the row under the last bubble", () => {
 
     const working = await findOnScreen("Ada is working…");
     expectInDocumentOrder([await findOnScreen("hi"), working]);
+    // The work behind the row is one click away, as it is from a reply.
+    const showWork = screen.getByRole("link", { name: "Show work" });
+    expect(showWork.getAttribute("href")).toBe(`/threads/${SESSION_ID}`);
+    expectInDocumentOrder([working, showWork]);
 
     world.current = buildConversationSession({ status: "idle" });
     await waitFor(() => {
@@ -699,6 +737,24 @@ describe("Assistant conversation: the row under the last bubble", () => {
     await waitFor(() => {
       expect(screen.queryByText("Ada is working…")).toBeNull();
     });
+  });
+
+  // The session list holds at most one page, and a long-lived conversation
+  // session can fall off it once enough newer sessions exist. The header reads
+  // the same session as the row, so it says working too.
+  it("shows the presence word working in the header while the row shows working, even when the session list does not hold the session", async () => {
+    await openConversation({
+      messages: [LAST],
+      current: buildConversationSession({ status: "busy" }),
+      sessions: [],
+    });
+
+    await findOnScreen("Ada is working…");
+    const name = screen
+      .getAllByText("Ada")
+      .find((element) => element.closest("nav") === null && element.closest("main") !== null);
+    expect(readPageText(name?.parentElement)).toContain("working");
+    expect(readPageText(name?.parentElement)).not.toContain("asleep");
   });
 
   it("links to the session when it waits for an approval, and shows no permission card", async () => {
@@ -724,51 +780,31 @@ describe("Assistant conversation: the row under the last bubble", () => {
 
 /**
  * jsdom computes no layout, so these tests set by hand the scroll geometry
- * that `useStickToBottom` reads, on the document's scrolling element. The
- * screen has no scroll region of its own; the whole page scrolls.
+ * that `useStickToBottom` reads, on the shell's `main`: the screen has no
+ * scroll region of its own and scrolls with `main`.
  */
 describe("Assistant conversation: scrolling", () => {
-  const getScrollElement = (): Element => document.scrollingElement ?? document.documentElement;
+  let geometry: FakeScrollGeometry;
 
-  const setGeometry = (values: {
-    scrollTop: number;
-    scrollHeight: number;
-    clientHeight: number;
-  }): void => {
-    const element = getScrollElement();
-    Object.defineProperty(element, "scrollTop", {
-      value: values.scrollTop,
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(element, "scrollHeight", {
-      value: values.scrollHeight,
-      configurable: true,
-    });
-    Object.defineProperty(element, "clientHeight", {
-      value: values.clientHeight,
-      configurable: true,
-    });
-  };
+  beforeEach(() => {
+    geometry = fakeMainScrollGeometry();
+  });
 
   afterEach(() => {
-    const element = getScrollElement();
-    delete (element as { scrollTop?: number }).scrollTop;
-    delete (element as { scrollHeight?: number }).scrollHeight;
-    delete (element as { clientHeight?: number }).clientHeight;
+    geometry.restore();
     vi.restoreAllMocks();
   });
 
   // Added in review round 1 of #92 slice 3 (F-72): the screen opened at the
   // top of the conversation, on its oldest message.
   it("opens on the newest message", async () => {
-    setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+    geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
 
     await openConversation({ messages: buildMessages(3) });
 
     await findOnScreen("message 3");
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1000 - 100);
+      expect(geometry.readScrollTop()).toBe(1000 - 100);
     });
   });
 
@@ -782,11 +818,11 @@ describe("Assistant conversation: scrolling", () => {
       expect(live.topics()).toContain("conversation");
     });
 
-    setGeometry({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
     await settle();
 
-    setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
+    geometry.set({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
     world.messages = buildMessages(51);
     act(() => {
       live.push("conversation", { _tag: "invalidate", ids: [WEB.id], kind: "updated" });
@@ -794,7 +830,7 @@ describe("Assistant conversation: scrolling", () => {
 
     await findOnScreen("message 51");
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1200 - 100);
+      expect(geometry.readScrollTop()).toBe(1200 - 100);
     });
   });
 
@@ -808,13 +844,13 @@ describe("Assistant conversation: scrolling", () => {
     ) {
       const rows = Array.from(document.querySelectorAll("[data-message-id]"));
       const index = rows.indexOf(this);
-      const top = index < 0 ? 0 : index * 100 - getScrollElement().scrollTop;
+      const top = index < 0 ? 0 : index * 100 - geometry.readScrollTop();
       return DOMRect.fromRect({ x: 0, y: top, width: 800, height: 100 });
     });
     await openConversation({ messages: buildMessages(60) });
     await findOnScreen("message 60");
-    setGeometry({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
+    geometry.scroll();
     await settle();
 
     await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
@@ -823,7 +859,7 @@ describe("Assistant conversation: scrolling", () => {
     // "message 11" was the first row, at the top of the viewport. Ten rows
     // loaded above it, so the page scrolled down by ten rows to keep it there.
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1000);
+      expect(geometry.readScrollTop()).toBe(1000);
     });
   });
 
@@ -836,7 +872,7 @@ describe("Assistant conversation: scrolling", () => {
     ) {
       const rows = Array.from(document.querySelectorAll("[data-message-id]"));
       const index = rows.indexOf(this);
-      const top = index < 0 ? 0 : index * 100 - getScrollElement().scrollTop;
+      const top = index < 0 ? 0 : index * 100 - geometry.readScrollTop();
       return DOMRect.fromRect({ x: 0, y: top, width: 800, height: 100 });
     });
     const messages = buildMessages(60);
@@ -851,18 +887,18 @@ describe("Assistant conversation: scrolling", () => {
       },
     );
     await findOnScreen("message 60");
-    setGeometry({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
+    geometry.scroll();
     await settle();
 
     await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
-    setGeometry({ scrollTop: 300, scrollHeight: 6000, clientHeight: 1000 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 300, scrollHeight: 6000, clientHeight: 1000 });
+    geometry.scroll();
     hold.release();
     await findOnScreen("message 1");
     await settle();
 
-    expect(getScrollElement().scrollTop).toBe(300);
+    expect(geometry.readScrollTop()).toBe(300);
   });
 });
 

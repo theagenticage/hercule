@@ -49,10 +49,13 @@ export function LaneLabel({
   );
 }
 
-/** A passive container for rows. */
+/**
+ * Renders a passive container for rows. It is as wide as a `FormCard`, so a
+ * list and the cards under it share one right edge.
+ */
 export function Group({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
-    <div className="max-w-[560px] rounded-card border border-line-soft bg-surface px-1.5 py-1">
+    <div className="max-w-[568px] rounded-card border border-line-soft bg-surface px-1.5 py-1">
       {children}
     </div>
   );
@@ -105,7 +108,7 @@ export function FormCard({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <section className="flex max-w-[520px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
+    <section className="flex max-w-[568px] flex-col gap-2 rounded-card border border-line bg-raised px-4.5 py-3.5 shadow-card">
       {typeof label === "string" ? (
         <div className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</div>
       ) : (
@@ -118,9 +121,17 @@ export function FormCard({
 }
 
 /** The small uppercase style of a card row's label. */
-const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] text-faint uppercase";
+const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] whitespace-nowrap text-faint uppercase";
 
-/** One labelled row of a card: the label in its own column, the control beside it. */
+/**
+ * Renders one labelled row of a card: the label in its own column, the
+ * control beside it.
+ *
+ * The label column is as wide as the longest label, "Default GitHub account",
+ * so no label breaks onto a second line, and every row on a page puts its
+ * control at the same x. A card is 568px wide so that the control column
+ * beside it still holds the four access modes of a compact segmented control.
+ */
 export function Row({
   label,
   htmlFor,
@@ -131,7 +142,7 @@ export function Row({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-3 text-row">
+    <div className="grid grid-cols-[160px_minmax(0,1fr)] items-baseline gap-3 text-row">
       <label htmlFor={htmlFor} className={ROW_LABEL}>
         {label}
       </label>

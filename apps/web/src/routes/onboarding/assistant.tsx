@@ -79,7 +79,11 @@ function AssistantStep(): JSX.Element {
   return (
     <CenteredScreen
       title="Name your assistant"
-      lead="Your assistant is an agent you talk to in this controller. You can rename it later in Settings > Assistants."
+      // Non-breaking spaces keep "Settings > Assistants" on one line: the
+      // place name reads as one thing and must not wrap after the ">".
+      lead={
+        "Your assistant is an agent you talk to in this controller. You can rename it later in Settings\u00a0>\u00a0Assistants."
+      }
     >
       <form className="flex flex-col gap-4" onSubmit={submit}>
         <Field

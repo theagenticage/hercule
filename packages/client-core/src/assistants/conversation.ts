@@ -1,9 +1,11 @@
 /**
  * The reads behind an assistant's conversation screen: which conversation it
- * shows, the messages it draws, which assistant a session answered, and
- * whether a session's queued inputs may be steered or cancelled.
+ * shows, the messages it draws and the time separators above them, which
+ * assistant a session answered, and whether a session's queued inputs may be
+ * steered or cancelled.
  */
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
+import { chooseStamps } from "../time-context";
 
 /**
  * Returns the assistant's conversation on the web channel from a
@@ -22,6 +24,22 @@ export const flattenMessagePages = (
   pages: ReadonlyArray<{ readonly items: readonly ConversationMessage[] }>,
 ): readonly ConversationMessage[] =>
   pages.flatMap((page) => page.items).sort((a, b) => a.position - b.position);
+
+/**
+ * Returns the time separator to show above each message, by position, or
+ * undefined for none. Only the owner's messages carry one: an owner's message
+ * opens an exchange, as the user's message opens a turn in a thread, and the
+ * replies and notices that answer it follow under the same time. Messages
+ * sent in the same minute share one separator.
+ */
+export const chooseMessageStamps = (
+  messages: readonly ConversationMessage[],
+  timezone: string,
+): readonly (string | undefined)[] =>
+  chooseStamps(
+    messages.map((message) => (message.senderRole === "owner" ? message.createdAt : null)),
+    timezone,
+  );
 
 /**
  * Returns the id of the assistant a session answered, or null when the

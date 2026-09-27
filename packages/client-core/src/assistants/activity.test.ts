@@ -1,9 +1,8 @@
 /**
  * Tests `decideConversationActivity(session)`, which picks the row the
  * conversation screen shows under its last message from the conversation's
- * current session. Its result is an object since review round 1 of slice 3
- * (D-75): the awaiting-approval row links to the session, so it carries the
- * session's id.
+ * current session. The working and awaiting-approval rows both link to the
+ * session, so both carry the session's id.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
@@ -53,6 +52,7 @@ describe("decideConversationActivity", () => {
     (status) => {
       expect(decideConversationActivity(buildConversationSession({ status }))).toEqual({
         kind: "working",
+        sessionId: "s1",
       });
     },
   );

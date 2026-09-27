@@ -9,6 +9,7 @@ export { describeActor, type ActorReading } from "./actor-display";
 export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
 export {
   canSteerOrCancelQueuedInputs,
+  chooseMessageStamps,
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
@@ -20,7 +21,11 @@ export {
   mergeAssistantEdits,
   type AssistantDraft,
 } from "./assistants/form";
-export { decideAssistantPresence, type AssistantPresence } from "./assistants/presence";
+export {
+  decideAssistantPresence,
+  findNewestConversationSession,
+  type AssistantPresence,
+} from "./assistants/presence";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
@@ -107,7 +112,13 @@ export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
-export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
+export {
+  chooseStamps,
+  formatPreciseStamp,
+  formatSince,
+  formatStamp,
+  formatTimeContext,
+} from "./time-context";
 export {
   readPriorityGlyph,
   describeProvenanceTarget,
@@ -179,6 +190,7 @@ export {
 export { buildRunnerMenu } from "./threads/runner-menu";
 export { buildSubmission } from "./threads/submission";
 export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread-defaults";
+export { describeThreadItem, describeTurnDivider, showsTurnDivider } from "./threads/turn-divider";
 export { buildTurns, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   resolveBrowserTimezone,

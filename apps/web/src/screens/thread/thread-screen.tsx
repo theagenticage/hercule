@@ -12,6 +12,7 @@ import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-quer
 import {
   buildSiblingTabs,
   buildTurns,
+  chooseStamps,
   findAnsweredAssistantId,
   type HerculeClient,
   type Live,
@@ -64,6 +65,11 @@ export function ThreadScreen({
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
+  // Turns started in the same minute share one time separator.
+  const stamps = chooseStamps(
+    turns.map((turn) => turn.startedAt),
+    timezone,
+  );
 
   // The queued list above the composer is the third way the column grows. The
   // other two, a new stream row and a tap flush, are covered by `rows` and
@@ -136,7 +142,7 @@ export function ThreadScreen({
               // The tap buffer holds one item's text at a time, so only the
               // live last turn gets the live tail element.
               tailRef={isLive ? tailRef : undefined}
-              timezone={timezone}
+              stamp={stamps[index]}
             />
           );
         })}

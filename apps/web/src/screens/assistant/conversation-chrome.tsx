@@ -31,10 +31,12 @@ export function ConversationChrome({
       crumb="Assistants"
       title={
         <>
-          <span className="truncate">{name}</span>{" "}
+          <span title={name} className="min-w-0 truncate">
+            {name}
+          </span>{" "}
           <span
             className={cn(
-              "flex shrink-0 items-center gap-1.5 text-meta font-normal",
+              "flex shrink-0 items-center gap-1.5 text-meta font-normal tracking-normal",
               WORD_CLASSES[presence],
             )}
           >

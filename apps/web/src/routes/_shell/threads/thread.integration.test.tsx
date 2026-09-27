@@ -12,7 +12,7 @@
  * - Assistant text arrives only on `content.delta`, never on the
  *   `assistant_message` item events.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildApprovalCard, formatDuration, formatStamp } from "@hercule/client-core";
@@ -32,10 +32,12 @@ import type {
 import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
 import {
   buildErrorBody,
+  fakeMainScrollGeometry,
   pickRow,
   readPageText,
   renderApp,
   stubApi,
+  type FakeScrollGeometry,
   type Handler,
 } from "../../../app/testing";
 
@@ -302,8 +304,12 @@ const buildTurnStart = (turnId: string, at: string): TurnEvent[] => [
 ];
 
 /** Builds the event that completes a turn. The screen needs it to show the turn's duration. */
-const buildTurnCompletion = (turnId: string, at: string): TurnEvent[] => [
-  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
+const buildTurnCompletion = (
+  turnId: string,
+  at: string,
+  state: "completed" | "failed" | "interrupted" = "completed",
+): TurnEvent[] => [
+  { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state },
 ];
 
 /**
@@ -518,7 +524,7 @@ describe("Thread: transcript", () => {
     expect(screen.queryAllByRole("button", { name: /worked for/i })).toHaveLength(1);
   });
 
-  it("shows an earlier turn cut off by an interrupt as finished with no duration, never as 0s or as still running", async () => {
+  it("shows an earlier turn with no turn.completed as cut short, never as 0s or as still running", async () => {
     // Turn 1 starts a tool call and is cut off (no item.completed, no
     // turn.completed). Then turn 2 starts and finishes normally.
     const abandonedThenCompleted: TranscriptRow[] = [
@@ -578,11 +584,95 @@ describe("Thread: transcript", () => {
     ];
     await openApp(buildSession({ status: "idle" }), abandonedThenCompleted);
 
-    const divider = await screen.findByRole("button", { name: /worked for/i });
-    expect(readPageText(divider)).toBe("Worked for —›");
+    const divider = await screen.findByRole("button", { name: /^Cut short$/ });
+    expect(readPageText(divider)).toBe("Cut short›");
     // Finished, not still running: no shimmer and no live color.
     expect(divider.className).not.toContain("hercule-thread-shimmer");
     expect(divider.className).not.toContain("text-live");
+  });
+
+  it.each([
+    ["interrupted", "Stopped after"],
+    ["failed", "Failed after"],
+  ] as const)("shows a turn that ended %s as %s its duration", async (state, words) => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildCommandStart("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z", state),
+      ),
+    );
+
+    const divider = await screen.findByRole("button", { name: new RegExp(`^${words}`) });
+    expect(readPageText(divider)).toBe(`${words} ${formatDuration(5000)}›`);
+  });
+
+  // An ending that is not shown is a silent ending: a turn that was stopped
+  // or failed before it used a tool still says so, as plain text, because it
+  // has no items to open.
+  it.each([
+    ["interrupted", "Stopped after"],
+    ["failed", "Failed after"],
+  ] as const)(
+    "shows a turn with no tool items that ended %s as %s its duration",
+    async (state, words) => {
+      await openApp(
+        buildSession({ status: "idle" }),
+        buildTranscript(
+          buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+          buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+          buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z", state),
+        ),
+      );
+
+      const divider = await screen.findByText(`${words} ${formatDuration(5000)}`);
+      expect(divider.closest("button")).toBeNull();
+    },
+  );
+
+  it("shows no divider under a completed turn with no tool items", async () => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await screen.findAllByText("Fix the login bug");
+    expect(screen.queryByText(/^Worked for/)).toBeNull();
+  });
+
+  it("leaves out the target of a tool item that reported none, so no separator is doubled", async () => {
+    const user = userEvent.setup();
+    // An item that started with no detail has an empty target.
+    const startWithoutDetail: TurnEvent[] = [
+      {
+        _tag: "item.started",
+        eventId: "",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:01.000Z",
+        turnId: "t1",
+        itemId: "tool1",
+        kind: "command_execution",
+      },
+    ];
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        startWithoutDetail,
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^Worked for/ }));
+    expect(readPageText()).toContain("command · running");
+    expect(readPageText()).not.toContain("· ·");
   });
 });
 
@@ -686,7 +776,7 @@ describe("Thread: the live turn", () => {
     await openApp(exited, buildLiveTurnRows());
     await settle();
 
-    const divider = screen.getByRole("button", { name: /^Worked for —$/ });
+    const divider = screen.getByRole("button", { name: /^Cut short$/ });
     expect(divider.className).not.toContain("hercule-thread-shimmer");
 
     // Nothing counts up: a minute later the divider shows the same text.
@@ -694,7 +784,7 @@ describe("Thread: the live turn", () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
     await settle();
-    screen.getByRole("button", { name: /^Worked for —$/ });
+    screen.getByRole("button", { name: /^Cut short$/ });
     expect(screen.queryByRole("button", { name: /Working for/ })).toBeNull();
   });
 
@@ -1589,35 +1679,20 @@ describe("Thread: live subscriptions", () => {
   });
 });
 
+/**
+ * jsdom computes no layout, so these tests set by hand the scroll geometry
+ * that `useStickToBottom` reads, on the shell's `main`: the thread has no
+ * scroll region of its own and scrolls with `main`.
+ */
 describe("Thread: auto-scroll follows new content", () => {
-  /**
-   * Returns the document's scrolling element. jsdom computes no layout, so
-   * the tests set the scroll geometry that `useStickToBottom` reads by hand on
-   * this element. The thread has no scroll region of its own; the whole page
-   * scrolls.
-   */
-  const getScrollElement = (): Element => document.scrollingElement ?? document.documentElement;
+  let geometry: FakeScrollGeometry;
 
-  const setGeometry = (values: {
-    scrollTop: number;
-    scrollHeight: number;
-    clientHeight: number;
-  }): void => {
-    const el = getScrollElement();
-    Object.defineProperty(el, "scrollTop", {
-      value: values.scrollTop,
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(el, "scrollHeight", { value: values.scrollHeight, configurable: true });
-    Object.defineProperty(el, "clientHeight", { value: values.clientHeight, configurable: true });
-  };
+  beforeEach(() => {
+    geometry = fakeMainScrollGeometry();
+  });
 
   afterEach(() => {
-    const el = getScrollElement();
-    delete (el as { scrollTop?: number }).scrollTop;
-    delete (el as { scrollHeight?: number }).scrollHeight;
-    delete (el as { clientHeight?: number }).clientHeight;
+    geometry.restore();
   });
 
   const buildNewRow = (): TranscriptRow =>
@@ -1634,12 +1709,12 @@ describe("Thread: auto-scroll follows new content", () => {
   // `useLayoutEffect`, so the first follow found no element and the thread
   // opened at its top.
   it("opens on the latest turn", async () => {
-    setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+    geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
 
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1000 - 100);
+      expect(geometry.readScrollTop()).toBe(1000 - 100);
     });
   });
 
@@ -1649,13 +1724,13 @@ describe("Thread: auto-scroll follows new content", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
-    setGeometry({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
     await settle();
 
     // In a real browser, scrollHeight already includes the new row when the
     // layout effect after this delta's commit runs.
-    setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
+    geometry.set({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
@@ -1665,7 +1740,7 @@ describe("Thread: auto-scroll follows new content", () => {
     });
 
     await waitFor(() => {
-      expect(getScrollElement().scrollTop).toBe(1200 - 100);
+      expect(geometry.readScrollTop()).toBe(1200 - 100);
     });
   });
 
@@ -1675,11 +1750,11 @@ describe("Thread: auto-scroll follows new content", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
-    setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
-    fireEvent.scroll(window);
+    geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
     await settle();
 
-    setGeometry({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
+    geometry.set({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
@@ -1689,7 +1764,7 @@ describe("Thread: auto-scroll follows new content", () => {
     });
     await settle();
 
-    expect(getScrollElement().scrollTop).toBe(0);
+    expect(geometry.readScrollTop()).toBe(0);
   });
 });
 

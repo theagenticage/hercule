@@ -8,12 +8,15 @@
  * - `findAnsweredAssistantId(session)` names the assistant a session answered.
  * - `canSteerOrCancelQueuedInputs(session)` tells whether the session view
  *   offers Steer and Cancel on queued inputs.
+ * - `chooseMessageStamps(messages, timezone)` picks the time separators shown
+ *   above the messages.
  */
 import { describe, expect, it } from "vitest";
 import type { Conversation, ConversationMessage } from "@hercule/contract";
 import { buildSession } from "../threads/workspaces.testing";
 import {
   canSteerOrCancelQueuedInputs,
+  chooseMessageStamps,
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
@@ -96,5 +99,52 @@ describe("canSteerOrCancelQueuedInputs", () => {
     const session = buildSession({ id: "s1", agentId: "ada", conversationId: "c1" });
 
     expect(canSteerOrCancelQueuedInputs(session)).toBe(false);
+  });
+});
+
+describe("chooseMessageStamps", () => {
+  /** Builds a message from `senderRole`, sent at `createdAt`. */
+  const buildSentMessage = (
+    position: number,
+    senderRole: ConversationMessage["senderRole"],
+    createdAt: string,
+  ): ConversationMessage => ({ ...buildMessage(position), senderRole, createdAt });
+
+  it("puts a separator above each of the owner's messages, in the given zone", () => {
+    const messages = [
+      buildSentMessage(1, "owner", "2026-09-25T09:00:00.000Z"),
+      buildSentMessage(2, "owner", "2026-09-25T10:30:00.000Z"),
+    ];
+
+    expect(chooseMessageStamps(messages, "Europe/Amsterdam")).toEqual([
+      "25 Sep 11:00",
+      "25 Sep 12:30",
+    ]);
+  });
+
+  it("puts none above a reply or a notice, which follow under the owner's time", () => {
+    const messages = [
+      buildSentMessage(1, "owner", "2026-09-25T09:00:00.000Z"),
+      buildSentMessage(2, "assistant", "2026-09-25T09:05:00.000Z"),
+      buildSentMessage(3, "notice", "2026-09-25T09:06:00.000Z"),
+    ];
+
+    expect(chooseMessageStamps(messages, "UTC")).toEqual(["25 Sep 09:00", undefined, undefined]);
+  });
+
+  it("shares one separator between the owner's messages sent in the same minute", () => {
+    const messages = [
+      buildSentMessage(1, "owner", "2026-09-25T09:00:05.000Z"),
+      buildSentMessage(2, "assistant", "2026-09-25T09:00:20.000Z"),
+      buildSentMessage(3, "owner", "2026-09-25T09:00:40.000Z"),
+      buildSentMessage(4, "owner", "2026-09-25T09:01:00.000Z"),
+    ];
+
+    expect(chooseMessageStamps(messages, "UTC")).toEqual([
+      "25 Sep 09:00",
+      undefined,
+      undefined,
+      "25 Sep 09:01",
+    ]);
   });
 });

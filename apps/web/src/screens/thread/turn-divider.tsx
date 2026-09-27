@@ -1,7 +1,10 @@
 /**
- * The "Worked for" / "Working for" divider. It is collapsed by default and
- * expands to a quiet mono list with one `verb · target · result` line per tool
- * item (spec 14 §The thread surface).
+ * The divider under a turn that says how long the agent worked, or how the
+ * turn ended; `describeTurnDivider` in client-core picks the words. A turn
+ * with tool items can open the divider into a quiet mono list with one
+ * `verb · target · result` line per item (spec 14 §The thread surface). A
+ * turn with none has nothing to list, so its divider is plain text with no
+ * chevron.
  *
  * While the turn is live, the time updates every second and shimmers in the
  * live colour. With `prefers-reduced-motion`, the shimmer stops and the colour
@@ -11,7 +14,12 @@
  */
 import { useEffect, useState, type JSX } from "react";
 import { cn } from "@hercule/ui";
-import { formatDuration, type ThreadItem } from "@hercule/client-core";
+import {
+  describeThreadItem,
+  describeTurnDivider,
+  type ThreadItem,
+  type ThreadTurn,
+} from "@hercule/client-core";
 
 /**
  * Returns the text colour class for a tool item's result: the live colour
@@ -22,21 +30,12 @@ const chooseResultHue = (result: ThreadItem["result"]): string | undefined =>
   result === "running" ? "text-live" : result === "awaiting approval" ? "text-attn" : undefined;
 
 export function TurnDivider({
+  turn,
   live,
-  duration,
-  startedAt,
-  items,
 }: {
+  readonly turn: ThreadTurn;
+  /** Whether the turn is running; its elapsed time is shown instead of its duration. */
   readonly live: boolean;
-  /**
-   * The turn's duration in milliseconds; null for a turn with no
-   * `turn.completed` row. A live turn shows its elapsed time instead. A turn
-   * that is not live and has no duration was abandoned rather than finished,
-   * so it shows no number.
-   */
-  readonly duration: number | null;
-  readonly startedAt: string;
-  readonly items: readonly ThreadItem[];
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -47,33 +46,25 @@ export function TurnDivider({
     return () => clearInterval(id);
   }, [live]);
 
-  // A turn that is not live and has no duration was abandoned before
-  // `turn.completed` arrived, most often by an interrupt. There is no true
-  // number to show, and "0s" would wrongly suggest it finished instantly.
-  const reading = live
-    ? `Working for ${formatDuration(now - Date.parse(startedAt))}`
-    : duration === null
-      ? "Worked for —"
-      : `Worked for ${formatDuration(duration)}`;
+  const reading = describeTurnDivider(turn, live, now);
+  const style = cn(
+    "flex items-center gap-1.5 font-mono text-fine tabular-nums",
+    live ? "hercule-thread-shimmer" : "text-faint",
+  );
+
+  if (turn.items.length === 0) return <p className={style}>{reading}</p>;
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setOpen((was) => !was)}
-        className={cn(
-          "flex items-center gap-1.5 font-mono text-fine tabular-nums",
-          live ? "hercule-thread-shimmer" : "text-faint",
-        )}
-      >
+      <button type="button" onClick={() => setOpen((was) => !was)} className={style}>
         {reading}
         <span aria-hidden="true">{open ? "⌄" : "›"}</span>
       </button>
       {open ? (
         <ul className="mt-1 flex flex-col gap-0.5 font-mono text-fine text-muted">
-          {items.map((item) => (
+          {turn.items.map((item) => (
             <li key={item.itemId} className={chooseResultHue(item.result)}>
-              {item.verb} · {item.target} · {item.result}
+              {describeThreadItem(item)}
             </li>
           ))}
         </ul>

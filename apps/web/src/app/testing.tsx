@@ -178,6 +178,90 @@ export const expectInDocumentOrder = (elements: readonly HTMLElement[]): void =>
   });
 };
 
+/** The three values of a scroll container's geometry that `useStickToBottom` reads. */
+export interface ScrollGeometry {
+  readonly scrollTop: number;
+  readonly scrollHeight: number;
+  readonly clientHeight: number;
+}
+
+/** The fake scroll geometry of the shell's `main` that `fakeMainScrollGeometry` installs. */
+export interface FakeScrollGeometry {
+  /** Sets all three values; the screen's own writes to `scrollTop` also land here. */
+  readonly set: (values: ScrollGeometry) => void;
+  /** Returns the current `scrollTop` of `main`. */
+  readonly readScrollTop: () => number;
+  /** Fires a `scroll` event on `main`, as a user scrolling would. */
+  readonly scroll: () => void;
+  /** Puts jsdom's own geometry back. */
+  readonly restore: () => void;
+}
+
+const SCROLL_GEOMETRY_KEYS = ["scrollTop", "scrollHeight", "clientHeight"] as const;
+
+/**
+ * Fakes the scroll geometry of the shell's `main`, the one element inside the
+ * shell that scrolls. jsdom computes no layout, so a test sets by hand the
+ * values that `useStickToBottom` reads. Every other element keeps jsdom's
+ * values.
+ *
+ * The fake is installed on `Element.prototype`, not on the `main` element, so
+ * it can be installed before the app renders: a screen scrolls from its mount
+ * effect, before the test could reach the element. Call `restore` after the
+ * test.
+ */
+export const fakeMainScrollGeometry = (): FakeScrollGeometry => {
+  const geometry: { -readonly [Key in keyof ScrollGeometry]: number } = {
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
+  const isMain = (element: Element): boolean => element.tagName === "MAIN";
+  const originals = SCROLL_GEOMETRY_KEYS.map(
+    (key) => [key, Object.getOwnPropertyDescriptor(Element.prototype, key)!] as const,
+  );
+  for (const [key, original] of originals) {
+    Object.defineProperty(Element.prototype, key, {
+      configurable: true,
+      get(this: Element): number {
+        // jsdom's own getter is typed as returning `any`; all three values are numbers.
+        return isMain(this) ? geometry[key] : (original.get?.call(this) as number);
+      },
+      set(this: Element, value: number) {
+        if (isMain(this)) geometry[key] = value;
+        else original.set?.call(this, value);
+      },
+    });
+  }
+  // The router scrolls `main` back to the top after every navigation. A test
+  // sees that reset too, so a screen that opens at the bottom is checked
+  // against it.
+  const originalScrollTo = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTo")!;
+  Object.defineProperty(Element.prototype, "scrollTo", {
+    configurable: true,
+    writable: true,
+    value(this: Element, options: ScrollToOptions) {
+      if (isMain(this)) geometry.scrollTop = options.top ?? geometry.scrollTop;
+    },
+  });
+  return {
+    set: (values) => {
+      Object.assign(geometry, values);
+    },
+    readScrollTop: () => geometry.scrollTop,
+    scroll: () => {
+      const main = document.querySelector("main");
+      if (main === null) throw new Error("The shell's main element is not on the page.");
+      main.dispatchEvent(new Event("scroll"));
+    },
+    restore: () => {
+      for (const [key, original] of originals)
+        Object.defineProperty(Element.prototype, key, original);
+      Object.defineProperty(Element.prototype, "scrollTo", originalScrollTo);
+    },
+  };
+};
+
 /** Returns the names of the sidebar links marked as the current page. */
 export const readCurrentNavItems = (): readonly (string | null)[] =>
   within(screen.getByRole("navigation", { name: "Hercule" }))

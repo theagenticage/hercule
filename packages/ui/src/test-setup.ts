@@ -1,8 +1,9 @@
 /**
  * jsdom implements neither the pointer-capture API nor scrollIntoView, and has
  * no ResizeObserver, so the primitives built on Radix cannot open without these.
- * It has no `scrollTo` either, which the router calls on every navigation and
- * which would otherwise print a "not implemented" line per test.
+ * It has no `scrollTo` either, on the window or on an element. The router
+ * calls both on every navigation: the window's would print a "not implemented"
+ * line per test, and a missing element one fails with an error.
  */
 Element.prototype.hasPointerCapture = () => false;
 Element.prototype.setPointerCapture = () => {};
@@ -16,6 +17,7 @@ globalThis.ResizeObserver = class {
 };
 
 window.scrollTo = () => {};
+Element.prototype.scrollTo = () => {};
 
 /**
  * jsdom does no layout, so `Range` has no `getClientRects`. The workflow

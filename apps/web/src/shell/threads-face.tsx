@@ -7,6 +7,7 @@ import {
   joinLabelText,
   buildThreadGroups,
   decideAssistantPresence,
+  findNewestConversationSession,
   findAnsweredAssistantId,
   hasLoggedInRunner,
   type DraftPlace,
@@ -16,7 +17,7 @@ import {
   type WorkspaceGroup,
 } from "@hercule/client-core";
 import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
-import { cn, useMinuteClock } from "@hercule/ui";
+import { LaneLabel, cn, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import {
   assistantsQuery,
@@ -199,19 +200,18 @@ export function ThreadsFace({
         )}
         {assistants.length === 0 ? null : (
           <div>
-            {/* The same box as a project's header, so the group titles form
-                one column: the text is indented as far as a project's name,
-                which follows the project's colour dot, and the row is as tall
-                as a project header with its + button. */}
-            <div className="flex h-8 items-center pt-2.5 pr-1 pb-0.5 pl-6 text-meta font-emph text-ink">
-              Assistants
-            </div>
+            {/* A lane label, the heading style above every group of rows, and
+                not a project header: the assistants are not a project. It
+                starts where "No threads yet" and "All sessions" start. */}
+            <LaneLabel className="mb-0 px-2.5 pt-4 pb-1.5">Assistants</LaneLabel>
             {assistants.map((assistant) => (
               <AssistantRow
                 key={assistant.id}
                 assistantId={assistant.id}
                 name={assistant.name}
-                presence={decideAssistantPresence(assistant.id, sessions)}
+                presence={decideAssistantPresence(
+                  findNewestConversationSession(assistant.id, sessions),
+                )}
                 selected={assistant.id === openAssistantId}
               />
             ))}

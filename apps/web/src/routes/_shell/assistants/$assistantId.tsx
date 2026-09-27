@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { findWebConversation, isNotFound } from "@hercule/client-core";
+import { findWebConversation, isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
 import type { Conversation } from "@hercule/contract";
 import { EmptyState } from "@hercule/ui";
 import {
@@ -9,7 +9,7 @@ import {
   conversationMessagesQuery,
   conversationsQuery,
   currentConversationSessionQuery,
-  sessionsQuery,
+  settingsQuery,
 } from "../../../app/queries";
 import { ConversationScreen } from "../../../screens/assistant/conversation-screen";
 import { HomeLink, NOT_FOUND_HEADLINE } from "../../../screens/fallbacks";
@@ -36,8 +36,6 @@ export const Route = createFileRoute("/_shell/assistants/$assistantId")({
           throw isNotFound(error) ? notFound() : error;
         }),
       queryClient.ensureQueryData(conversationsQuery(client, params.assistantId)),
-      // The presence word reads the session list the sidebar reads.
-      queryClient.prefetchQuery(sessionsQuery(client)),
     ]);
     const conversationId = readWebConversationId(conversations.items);
     await Promise.all([
@@ -53,6 +51,7 @@ function AssistantRoute(): JSX.Element {
   const { client, live } = Route.useRouteContext();
   const { assistantId } = Route.useParams();
   const conversations = useSuspenseQuery(conversationsQuery(client, assistantId)).data;
+  const settings = useSuspenseQuery(settingsQuery(client)).data;
 
   // Keyed by the assistant, so moving to another assistant's conversation
   // starts with an empty composer and at the bottom of the new conversation.
@@ -63,6 +62,7 @@ function AssistantRoute(): JSX.Element {
       live={live}
       assistantId={assistantId}
       conversationId={readWebConversationId(conversations.items)}
+      timezone={resolveDisplayTimezone(settings.user.timezone)}
     />
   );
 }

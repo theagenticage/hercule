@@ -39,22 +39,18 @@ function Secrets(): JSX.Element {
       ) : (
         <section>
           <LaneLabel>Stored</LaneLabel>
-          {/* The settings screens are a column of 520px cards, so the list
-              uses the same width. */}
-          <div className="max-w-[520px]">
-            <Group>
-              <ul className="flex flex-col">
-                {secrets.map((secret) => (
-                  <SecretRow
-                    key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
-                    client={client}
-                    secret={secret}
-                    timezone={timezone}
-                  />
-                ))}
-              </ul>
-            </Group>
-          </div>
+          <Group>
+            <ul className="flex flex-col">
+              {secrets.map((secret) => (
+                <SecretRow
+                  key={`${secret.ownerKind}/${secret.ownerId}/${secret.name}`}
+                  client={client}
+                  secret={secret}
+                  timezone={timezone}
+                />
+              ))}
+            </ul>
+          </Group>
         </section>
       )}
 
