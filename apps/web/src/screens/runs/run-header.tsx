@@ -40,6 +40,7 @@ export function RunHeader({
   now,
   timezone,
   children,
+  question,
 }: {
   readonly run: Run;
   /** The runner the run is pinned to, once it is pinned and the runner has been read. */
@@ -56,6 +57,12 @@ export function RunHeader({
    * shown before either is done.
    */
   readonly children: ReactNode;
+  /**
+   * The question shown before an action is done, when the page is too narrow
+   * to show it beside the title. It takes a row of its own below the header's
+   * lines.
+   */
+  readonly question?: ReactNode;
 }): JSX.Element {
   const origin = describeRunOrigin(run.origin);
   const { startedAt, finishedAt } = readTimestamps(run);
@@ -185,6 +192,7 @@ export function RunHeader({
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
       ) : null}
+      {question === undefined ? null : <div className="mt-3">{question}</div>}
     </header>
   );
 }

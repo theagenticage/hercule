@@ -16,6 +16,8 @@ import {
   LaneLabel,
   SegmentedControl,
   SegmentedControlItem,
+  cn,
+  useElementWidth,
   useTickingClock,
 } from "@hercule/ui";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
@@ -37,6 +39,16 @@ export type StepsView = "list" | "timeline";
 const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
 
 /**
+ * The narrowest width of the page's body, inside its padding, at which the
+ * inputs sit beside the steps. It must match the body's `@min-[882px]`
+ * breakpoint below.
+ */
+const SIDE_BY_SIDE_BODY_WIDTH = 882;
+
+/** The page's padding on each side, `px-8`. */
+const PAGE_PADDING = 32;
+
+/**
  * Renders a run's page: the header, the frozen plan drawn as the workflow
  * graph with each step's progress on it, and below it the steps, as a list or
  * on a timeline, beside the inputs the run started with and, once it has
@@ -53,7 +65,9 @@ const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
  *   inspection.
  *
  * While a question shows, its button is hidden instead of unmounted, so the
- * focus can return to it when the question is declined.
+ * focus can return to it when the question is declined. On a wide page the
+ * question sits beside the title; on a narrow one it has a row of its own
+ * below the header's lines.
  */
 export function RunPage({
   client,
@@ -86,6 +100,7 @@ export function RunPage({
   const [asking, setAsking] = useState<"cancel" | "delete-workspace" | undefined>(undefined);
   const [deletesWorkspace, setDeletesWorkspace] = useState(true);
   const { workspaceId } = run;
+  const { observeElement: observePage, width: pageWidth } = useElementWidth();
 
   const cancel = useMutation({
     mutationFn: (keepWorkspace: boolean) =>
@@ -109,8 +124,62 @@ export function RunPage({
   const runGraph = useMemo(() => buildRunGraph(run), [run]);
   const lines = buildStepLines(run);
 
+  // On a page too narrow for the inputs beside the steps, the title row has
+  // no room for a question beside the title either. The question then gets a
+  // row of its own below the header's lines, wrapped over as many lines as it
+  // needs. Until the page is measured, and in tests, where nothing is laid
+  // out, the question stays on the title row.
+  const stacksQuestion =
+    pageWidth !== undefined && pageWidth < SIDE_BY_SIDE_BODY_WIDTH + 2 * PAGE_PADDING;
+
+  const cancelQuestion = (
+    <InPlaceQuestion
+      stacked={stacksQuestion}
+      question="Cancel this run?"
+      declineLabel="Keep running"
+      acceptLabel="Confirm"
+      onDecline={() => {
+        setAsking(undefined);
+      }}
+      onAccept={() => {
+        setAsking(undefined);
+        cancel.mutate(workspaceReading.asksOnCancel && !deletesWorkspace);
+      }}
+    >
+      {!workspaceReading.asksOnCancel ? null : (
+        // A flex wrapper, so the label centres on the question's line instead
+        // of sitting on an inline line box that lifts it.
+        <span className={cn("flex shrink-0", !stacksQuestion && "ml-1.5")}>
+          <Checkbox
+            label="Delete workspace"
+            checked={deletesWorkspace}
+            onChange={(event) => {
+              setDeletesWorkspace(event.target.checked);
+            }}
+          />
+        </span>
+      )}
+    </InPlaceQuestion>
+  );
+  const deleteQuestion =
+    workspaceId === undefined ? null : (
+      <InPlaceQuestion
+        stacked={stacksQuestion}
+        question="Delete the run's workspace?"
+        declineLabel="Keep it"
+        acceptLabel="Delete"
+        onDecline={() => {
+          setAsking(undefined);
+        }}
+        onAccept={() => {
+          setAsking(undefined);
+          deleteWorkspace.mutate(workspaceId);
+        }}
+      />
+    );
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-28">
+    <div ref={observePage} className="flex min-h-0 flex-1 flex-col pb-28">
       <RunHeader
         run={run}
         runner={runner}
@@ -118,6 +187,15 @@ export function RunPage({
         workspaceNote={workspaceReading.note}
         now={now}
         timezone={timezone}
+        question={
+          !stacksQuestion
+            ? undefined
+            : asking === "cancel"
+              ? cancelQuestion
+              : asking === "delete-workspace"
+                ? deleteQuestion
+                : undefined
+        }
       >
         {cancel.error === null ? null : (
           <span role="alert" className="min-w-0 truncate text-fine text-fail">
@@ -131,34 +209,7 @@ export function RunPage({
         )}
         {!isLive ? null : (
           <>
-            {asking === "cancel" ? (
-              <InPlaceQuestion
-                question="Cancel this run?"
-                declineLabel="Keep running"
-                acceptLabel="Confirm"
-                onDecline={() => {
-                  setAsking(undefined);
-                }}
-                onAccept={() => {
-                  setAsking(undefined);
-                  cancel.mutate(workspaceReading.asksOnCancel && !deletesWorkspace);
-                }}
-              >
-                {!workspaceReading.asksOnCancel ? null : (
-                  // A flex wrapper, so the label centres on the question's line
-                  // instead of sitting on an inline line box that lifts it.
-                  <span className="ml-1.5 flex shrink-0">
-                    <Checkbox
-                      label="Delete workspace"
-                      checked={deletesWorkspace}
-                      onChange={(event) => {
-                        setDeletesWorkspace(event.target.checked);
-                      }}
-                    />
-                  </span>
-                )}
-              </InPlaceQuestion>
-            ) : null}
+            {asking === "cancel" && !stacksQuestion ? cancelQuestion : null}
             <Button
               hidden={asking === "cancel"}
               aria-disabled={cancel.isPending}
@@ -174,20 +225,7 @@ export function RunPage({
         )}
         {!workspaceReading.offersDelete || workspaceId === undefined ? null : (
           <>
-            {asking === "delete-workspace" ? (
-              <InPlaceQuestion
-                question="Delete the run's workspace?"
-                declineLabel="Keep it"
-                acceptLabel="Delete"
-                onDecline={() => {
-                  setAsking(undefined);
-                }}
-                onAccept={() => {
-                  setAsking(undefined);
-                  deleteWorkspace.mutate(workspaceId);
-                }}
-              />
-            ) : null}
+            {asking === "delete-workspace" && !stacksQuestion ? deleteQuestion : null}
             <Button
               hidden={asking === "delete-workspace"}
               aria-disabled={deleteWorkspace.isPending}
