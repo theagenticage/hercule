@@ -188,7 +188,7 @@ Semantics: [./07-workflows.md](./07-workflows.md); breaker semantics in [./10-tr
 
 - **`run.cancel`** takes `{ keepWorkspace? }` in its body, default `false`. It applies to the run and to every descendant run cancelled with it. Not kept, the run's ephemeral workspace is deleted by the next workspace sweep; kept, it is kept like a failed run's ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.7). A primary workspace is never deleted by a run, whatever the choice.
 - **The CLI row** gains `--keep-workspace true`: `hercule run cancel <id> --keep-workspace true`. A boolean on this CLI is always written `--flag true` or `--flag false`; there is no bare flag.
-- **`Run.workspaceKeptUntil`** is present only for a run with an ephemeral workspace that failed, or was cancelled with `keepWorkspace`: the run's `finishedAt` plus the controller setting `workspace.failedRunTtlDays` (default 14), read at the time of the request. It stays after the workspace is deleted, so a client reads the workspace's own `status` and `disposedAt` to learn whether it still exists.
+- ~~**`Run.workspaceKeptUntil`** is present only for a run with an ephemeral workspace that failed, or was cancelled with `keepWorkspace`: the run's `finishedAt` plus the controller setting `workspace.failedRunTtlDays` (default 14), read at the time of the request. It stays after the workspace is deleted, so a client reads the workspace's own `status` and `disposedAt` to learn whether it still exists.~~ *(Struck 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263): the workspace answers `keptUntil`, fixed when the run releases its lease, below; `run.read` and `run.cancel` no longer read settings and no longer fail with a setting error.)*
 - **`workspace.dispose`** refuses a workspace whose run is `pending` or `running` with `invalid_state`, and the message says to cancel the run first. Disposing of a kept workspace is how a user dismisses a failed run; there is no dismiss operation for runs.
 
 
@@ -346,6 +346,14 @@ Semantics: [./03-controller-and-runners.md](./03-controller-and-runners.md).
 | `workspace.dispose` | `{ workspaceId }` (an ephemeral, including the kept workspace of a failed run; a primary is never torn down by Hercule: 409 `invalid_state`) | `workspace.write` | `DELETE /workspaces/{id}` |
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
+
+*(Amended 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263); [ADR 0036](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md).)* **A workspace says how long it is kept, and `workspace.dispose` names what still uses it.**
+
+- **`Workspace.keptUntil`** (`Timestamp | null`) is when the sweep may delete the workspace: the latest kept-until time of its Workspace Leases, fixed when its last holder released it. A settings change does not move it. It is null for a primary, for a workspace that is gone, and while a session or a run still holds it. Example: a run that failed on 24 Sep leaves its workspace with `keptUntil` 8 Oct, fourteen days by default.
+- **`Workspace.sessionIds`** are the sessions holding an active lease on it.
+- **`run.cancel`'s `keepWorkspace`** picks the retention the run releases its lease with: `inspection`, kept for `workspace.inspectionTtlDays` from the cancel, or `none`.
+- **`workspace.dispose`** refuses a workspace with an active lease with `invalid_state`, and the message names what to stop: `cancel run <id> first` for an unfinished run, `stop sessions <ids> first` for sessions that have not exited, and both when a run and sessions both hold it.
+- **The setting `workspace.failedRunTtlDays` is renamed `workspace.inspectionTtlDays`.** Its default stays 14 days.
 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* Three sentences the rows above only sketched.
 

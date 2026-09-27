@@ -200,6 +200,10 @@ A provisioned working area on a runner in which sessions do their work, containi
 The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hercule's own clone under the runner's storage - Hercule never takes over a folder the user already has.
 _Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (adopting a folder in place is not built)
 
+**Workspace Lease**:
+A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks how long the workspace is kept, and that time is fixed then. The sweep deletes an ephemeral workspace once no lease is active and every lease's kept-until time has passed.
+_Avoid_: claim (a Subscription is a claim), pin (a run is pinned to a runner), reference count
+
 **Checkout**:
 One working copy of a single resource inside a workspace. In v1 only git repos are checkout-able.
 
