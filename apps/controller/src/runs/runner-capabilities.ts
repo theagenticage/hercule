@@ -18,7 +18,7 @@ import { runsInWorkspace } from "../plugins";
 import type { PlacementCandidate } from "../runners";
 
 /** Returns the ids of the workspace actions a plan's steps use, each once, in step order. */
-const listWorkspaceActionIds = (plan: WorkflowDefinition): ReadonlyArray<string> => [
+export const listWorkspaceActionIds = (plan: WorkflowDefinition): ReadonlyArray<string> => [
   ...new Set(
     plan.steps.flatMap((step) =>
       step.kind === "action" && runsInWorkspace(step.action) ? [step.action] : [],
@@ -36,21 +36,21 @@ const offersEveryAction = (
   );
 
 /**
- * Returns the runners among `candidates` that can run every workspace action
- * in the plan. A plan with no workspace action can run on any of them.
+ * Returns the runners among `candidates` that can run every one of a plan's
+ * workspace actions, `actionIds` (see `listWorkspaceActionIds`). A plan with
+ * no workspace action can run on any of them.
  */
 export const listCapableRunners = (
-  plan: WorkflowDefinition,
+  actionIds: ReadonlyArray<string>,
   candidates: ReadonlyArray<PlacementCandidate>,
-): ReadonlyArray<PlacementCandidate> => {
-  const actionIds = listWorkspaceActionIds(plan);
-  return candidates.filter((candidate) => offersEveryAction(candidate, actionIds));
-};
+): ReadonlyArray<PlacementCandidate> =>
+  candidates.filter((candidate) => offersEveryAction(candidate, actionIds));
 
 /**
- * Returns why no runner among `candidates` can run the plan, as a message for
- * the user, or `undefined` when one can. A plan with no workspace action needs
- * no runner, so it always gets `undefined`.
+ * Returns why no runner among `candidates` can run a plan's workspace
+ * actions, `actionIds` (see `listWorkspaceActionIds`), as a message for the
+ * user, or `undefined` when one can. A plan with no workspace action needs no
+ * runner, so it always gets `undefined`.
  *
  * The message names the plan's workspace actions that no runner offers. When
  * each one is offered by some runner, but no runner offers them all, it names
@@ -58,10 +58,9 @@ export const listCapableRunners = (
  * missing.
  */
 export const describeMissingCapableRunner = (
-  plan: WorkflowDefinition,
+  actionIds: ReadonlyArray<string>,
   candidates: ReadonlyArray<PlacementCandidate>,
 ): string | undefined => {
-  const actionIds = listWorkspaceActionIds(plan);
   if (actionIds.length === 0) return undefined;
   if (candidates.some((candidate) => offersEveryAction(candidate, actionIds))) return undefined;
   const offeredByNone = actionIds.filter(

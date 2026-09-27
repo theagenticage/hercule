@@ -128,7 +128,11 @@ import { buildRunBranch, WorkspaceService } from "../workspaces";
 import { RunExecutor } from "./executor";
 import { runRepository, type RunOutcome, type StepRecordId } from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
-import { describeMissingCapableRunner, listCapableRunners } from "./runner-capabilities";
+import {
+  describeMissingCapableRunner,
+  listCapableRunners,
+  listWorkspaceActionIds,
+} from "./runner-capabilities";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -469,10 +473,11 @@ export const makeRunEngine = Effect.gen(function* () {
   > =>
     Effect.gen(function* () {
       const candidates = yield* runners.listPlacementCandidates();
-      const missing = describeMissingCapableRunner(plan, candidates);
+      const actionIds = listWorkspaceActionIds(plan);
+      const missing = describeMissingCapableRunner(actionIds, candidates);
       if (missing !== undefined) return { _tag: "noCapableRunner", message: missing } as const;
       const placeable = new Set(
-        listCapableRunners(plan, candidates)
+        listCapableRunners(actionIds, candidates)
           .filter((candidate) => candidate.placeable)
           .map((candidate) => candidate.id),
       );
@@ -1236,7 +1241,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * A run with nothing waiting goes back to sleep at once.
      */
     wakeRunsWaitingForRunner: (): Effect.Effect<void, SqlError> =>
-      Effect.map(runs.listUnpinnedWithWorkspace(), (ids) => {
+      Effect.map(runs.listRunsWaitingForRunner(), (ids) => {
         for (const runId of ids) executeInBackground(runId);
       }),
   };

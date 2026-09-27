@@ -38,7 +38,7 @@ import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import { workflowRepository, WorkflowService } from "../workflows";
 import { runRepository } from "./repository";
-import { describeMissingCapableRunner } from "./runner-capabilities";
+import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
 import { commitUninterruptibly } from "./transaction";
 
 /**
@@ -198,7 +198,7 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
           // one, because a run names no runner. An offline or draining one
           // may come back, and the run waits for it.
           const missingRunner = describeMissingCapableRunner(
-            plan,
+            listWorkspaceActionIds(plan),
             yield* runners.listPlacementCandidates(),
           );
           if (missingRunner !== undefined) {

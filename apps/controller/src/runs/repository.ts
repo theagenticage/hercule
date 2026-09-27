@@ -763,11 +763,12 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids of the running runs that have a workspace in their plan
-     * but no runner pinned yet. Their next workspace step may be waiting for a
-     * runner to place it on.
+     * Returns the ids of the runs that may be waiting for a runner: running
+     * runs whose plan has a workspace and that are not pinned to a runner
+     * yet. Their first workspace step either waits for a runner to place it
+     * on, or has not been reached.
      */
-    listUnpinnedWithWorkspace: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    listRunsWaitingForRunner: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runs
