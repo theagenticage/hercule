@@ -19,19 +19,20 @@ const RUNNING: Run = {
   workspaceId: WORKSPACE_ID,
 };
 
-/** The run failed, and its workspace is kept until 23:30 UTC on 8 Oct: 9 Oct in Amsterdam. */
 const FAILED: Run = {
   ...RUNNING,
   status: "failed",
   failureReason: "step-failed",
   failedStepId: "commit",
   finishedAt: "2026-09-24T23:30:00Z",
-  workspaceKeptUntil: "2026-10-08T23:30:00Z",
 };
 
 const COMPLETED: Run = { ...RUNNING, status: "completed", finishedAt: "2026-09-25T10:01:00Z" };
 
 const EPHEMERAL = buildWorkspace({ id: WORKSPACE_ID, kind: "ephemeral" });
+
+/** Kept for inspection until 23:30 UTC on 8 Oct: 9 Oct in Amsterdam. */
+const KEPT = { ...EPHEMERAL, keptUntil: "2026-10-08T23:30:00Z" };
 
 const DELETED = { ...EPHEMERAL, status: "deleted", disposedAt: "2026-10-03T08:00:00Z" } as const;
 
@@ -56,17 +57,25 @@ describe("describeRunWorkspace", () => {
     );
   });
 
-  it("says until when a failed or kept run's workspace is kept, in the user's timezone, and offers to delete it", () => {
-    assert.deepStrictEqual(describeRunWorkspace(FAILED, EPHEMERAL, ZONE), {
+  it("says until when a workspace is kept past the run's end, in the user's timezone, and offers to delete it", () => {
+    assert.deepStrictEqual(describeRunWorkspace(FAILED, KEPT, ZONE), {
       asksOnCancel: false,
-      note: "Workspace kept for inspection until 9 Oct",
+      note: "Workspace kept until 9 Oct",
       offersDelete: true,
     });
     const kept: Run = { ...FAILED, status: "cancelled" };
-    assert.strictEqual(
-      describeRunWorkspace(kept, EPHEMERAL, ZONE).note,
-      "Workspace kept for inspection until 9 Oct",
-    );
+    assert.strictEqual(describeRunWorkspace(kept, KEPT, ZONE).note, "Workspace kept until 9 Oct");
+  });
+
+  it("says a workspace a thread still works in is in use, and does not offer to delete it", () => {
+    const joined = { ...EPHEMERAL, sessionIds: ["0199c0ff-3333-7000-8000-000000000001"] };
+    for (const run of [FAILED, COMPLETED]) {
+      assert.deepStrictEqual(describeRunWorkspace(run, joined, ZONE), {
+        asksOnCancel: false,
+        note: "Workspace in use by a thread",
+        offersDelete: false,
+      });
+    }
   });
 
   it("says when the workspace was deleted, from the workspace, whatever the run's status", () => {
@@ -79,14 +88,17 @@ describe("describeRunWorkspace", () => {
     }
   });
 
-  it("says a completed run's workspace, or one a cancel did not keep, will be deleted shortly", () => {
+  it("says a workspace kept no later than the run's end, or not yet released, will be deleted shortly", () => {
     const cancelled: Run = { ...COMPLETED, status: "cancelled" };
+    const keptToTheEnd = { ...EPHEMERAL, keptUntil: "2026-09-25T10:01:00Z" };
     for (const run of [COMPLETED, cancelled]) {
-      assert.deepStrictEqual(describeRunWorkspace(run, EPHEMERAL, ZONE), {
-        asksOnCancel: false,
-        note: "Workspace will be deleted shortly",
-        offersDelete: false,
-      });
+      for (const workspace of [keptToTheEnd, EPHEMERAL]) {
+        assert.deepStrictEqual(describeRunWorkspace(run, workspace, ZONE), {
+          asksOnCancel: false,
+          note: "Workspace will be deleted shortly",
+          offersDelete: false,
+        });
+      }
     }
   });
 
@@ -97,7 +109,7 @@ describe("describeRunWorkspace", () => {
       nothing,
     );
     assert.deepStrictEqual(
-      describeRunWorkspace(FAILED, { ...EPHEMERAL, status: "lost" }, ZONE),
+      describeRunWorkspace(FAILED, { ...KEPT, status: "lost" }, ZONE),
       nothing,
     );
     assert.deepStrictEqual(

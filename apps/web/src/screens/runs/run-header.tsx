@@ -46,7 +46,7 @@ export function RunHeader({
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
   readonly workspaceLabel: string | undefined;
-  /** What happens to the run's workspace, such as "Workspace kept for inspection until 9 Oct". */
+  /** What happens to the run's workspace, such as "Workspace kept until 9 Oct". */
   readonly workspaceNote: string | undefined;
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
