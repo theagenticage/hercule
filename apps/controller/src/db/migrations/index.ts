@@ -41,6 +41,7 @@ import strandedRunsCompleted from "./0030-stranded-runs-completed";
 import assistants from "./0031-assistants";
 import conversationMessages from "./0032-conversation-messages";
 import runWorkspace from "./0033-run-workspace";
+import workspaceLeases from "./0034-workspace-leases";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -76,6 +77,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [31, "assistants", Effect.succeed(assistants)],
   [32, "conversation-messages", Effect.succeed(conversationMessages)],
   [33, "run-workspace", Effect.succeed(runWorkspace)],
+  [34, "workspace-leases", Effect.succeed(workspaceLeases)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

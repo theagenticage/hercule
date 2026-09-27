@@ -4,9 +4,10 @@
  * A runner never holds a token. It asks for one per request, naming the remote
  * git is about to contact and either the session that asked or a workspace
  * the runner is provisioning or running a workspace step in. The controller
- * returns a token only when the asker already has a checkout of that remote. These tests drive the exchange the
- * way a runner does - a `credentialRequest` on the wire, a `credentialAnswer`
- * back - because the wire is the whole authorization boundary.
+ * returns a token only when the asker already has a checkout of that remote.
+ * These tests drive the exchange the way a runner does - a
+ * `credentialRequest` on the wire, a `credentialAnswer` back - because the
+ * wire is the whole authorization boundary.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionStart } from "@hercule/protocol";
@@ -300,6 +301,38 @@ describe("a credential asked for by a runner running a workspace step", () => {
     });
   });
 
+  it("refuses while a failed run's workspace is kept for inspection", async () => {
+    await withCredentials(async (arranged) => {
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+      const web = await createRepo(arranged, "https://github.com/acme/web", github);
+      const { runId, workspaceId } = await startPushRun(arranged, web);
+
+      arranged.wire.send({
+        _tag: "workspaceStepResult",
+        runId,
+        stepId: "push",
+        iteration: 1,
+        outcome: { status: "failed", code: "action_failed", message: "rejected" },
+      });
+      await waitForRun(
+        arranged.harness.base,
+        arranged.token,
+        runId,
+        "failed",
+        (run) => run.status === "failed",
+      );
+      expect((await readWorkspace(arranged, workspaceId)).keptUntil).not.toBeNull();
+
+      // The workspace still holds the checkout, but no step runs in it.
+      const kept = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId,
+      });
+      expect(kept["error"]).toBe("unauthorized");
+      expect(kept["token"]).toBeUndefined();
+    });
+  });
+
   it("refuses another runner, and a remote the workspace has no checkout of", async () => {
     await withCredentials(async (arranged) => {
       const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
@@ -334,7 +367,7 @@ describe("a credential asked for by a runner running a workspace step", () => {
 });
 
 describe("a credential asked for by a session", () => {
-  it("rejects the token of a session the runner no longer reports", async () => {
+  it("answers a running session, and rejects its token once the runner no longer reports it", async () => {
     await withCredentials(async (arranged) => {
       const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -351,6 +384,13 @@ describe("a credential asked for by a session", () => {
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       const token = (start as unknown as Frame)["token"];
       expect(token, "the session was started with no token").toBeTruthy();
+
+      // The running session holds an active lease on its workspace.
+      const during = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        sessionToken: String(token),
+      });
+      expect(during["token"]).toBe(GITHUB_PAT);
 
       // The runner reports no sessions, so the session has ended, whether or
       // not it ever reported an exit, and its token stops working with it.

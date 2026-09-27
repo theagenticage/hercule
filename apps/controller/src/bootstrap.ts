@@ -90,7 +90,8 @@ import {
 import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
-import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
+import { RunWorkspaceStepActivityLayer } from "./runs";
+import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
 
 /** Setup tokens are created and stored like every other Hercule token. */
 export { hashToken };
@@ -247,6 +248,7 @@ export type ControllerServices =
   | ProviderService
   | SessionService
   | WorkspaceService
+  | WorkspaceStepActivity
   | ConnectionService
   | HerculeHome
   | BootstrapConfig;
@@ -327,14 +329,24 @@ export const bootWith = <A, E>(
       Layer.provide(ConversationMessagesLayer),
     );
 
-    /** The services built on the catalog and the fleet. */
+    /**
+     * The services built on the catalog and the fleet. The session service
+     * releases and takes workspace leases, so the workspace service is
+     * provided to it. The workspace service asks the runs domain, through
+     * the `WorkspaceStepActivity` port, whether a workspace step is running
+     * before it hands out a git credential. The workspaces domain cannot
+     * import the runs domain, so the two are joined here.
+     */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
       sessionService,
-      WorkspaceServiceLayer,
       ConnectionServiceLayer,
-    ).pipe(Layer.provideMerge(withFleet));
+    ).pipe(
+      Layer.provideMerge(WorkspaceServiceLayer),
+      Layer.provideMerge(RunWorkspaceStepActivityLayer),
+      Layer.provideMerge(withFleet),
+    );
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });

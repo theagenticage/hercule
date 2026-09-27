@@ -102,7 +102,7 @@ const encode = (
   );
 
 /**
- * Decodes every row of one scope to its key's declared type.
+ * Decodes every row of one scope to its key's declared type. Never fails.
  *
  * A row this version cannot read is skipped with a warning in the log, rather
  * than failing the whole read over one key the caller never asked about. A row
@@ -119,7 +119,7 @@ const encode = (
 const decodeRows = <S extends TypedScope>(
   scope: S,
   rows: ReadonlyArray<{ readonly key: string; readonly value: string }>,
-): Effect.Effect<ScopeSettings<S>, SettingError> =>
+): Effect.Effect<ScopeSettings<S>> =>
   Effect.gen(function* () {
     const entries: Array<readonly [string, unknown]> = [];
     for (const row of rows) {
@@ -176,10 +176,12 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every controller setting that is set, decoded to its declared
-     * type. A key nobody has set is absent rather than defaulted, so the
-     * default lives in one place: the code that reads the key.
+     * type. Fails only if the database fails: a stored value this version
+     * cannot read is skipped (see `decodeRows`). A key nobody has set is
+     * absent rather than defaulted, so the default lives in one place: the
+     * code that reads the key.
      */
-    all: (): Effect.Effect<ScopeSettings<"controller">, SettingError | SqlError> =>
+    all: (): Effect.Effect<ScopeSettings<"controller">, SqlError> =>
       Effect.flatMap(
         sql<KeyValueRow>`
           SELECT key, value FROM settings
@@ -276,7 +278,7 @@ const make = Effect.gen(function* () {
       ),
 
     /** Returns every setting one user has set, decoded to its declared type. */
-    allForUser: (userId: string): Effect.Effect<ScopeSettings<"user">, SettingError | SqlError> =>
+    allForUser: (userId: string): Effect.Effect<ScopeSettings<"user">, SqlError> =>
       Effect.flatMap(
         sql<KeyValueRow>`
           SELECT key, value FROM user_settings

@@ -61,17 +61,17 @@ const make = Effect.gen(function* () {
 
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
-    for (const candidate of yield* workspaces.expiredCandidates()) {
-      // The check and the write are one transaction. Otherwise a session that
-      // starts in the workspace between the two would have its directory
+    for (const id of yield* workspaces.listSweepCandidates()) {
+      // The check and the write are one transaction. Otherwise a session that is
+      // resumed in the workspace between the two would have its directory
       // deleted while it runs.
       const gone = yield* withTransaction(
         sql,
         Effect.gen(function* () {
-          const row = yield* workspaces.sweepable(candidate.id);
-          if (row === undefined) return undefined;
-          const frame = yield* workspaces.markGone(row, SYSTEM_ACTOR, candidate.reason);
-          return { runnerId: row.runnerId, frame };
+          const found = yield* workspaces.sweepable(id);
+          if (found === undefined) return undefined;
+          const frame = yield* workspaces.markGone(found.workspace, SYSTEM_ACTOR, found.expired);
+          return { runnerId: found.workspace.runnerId, frame };
         }),
       );
       if (gone === undefined) continue;

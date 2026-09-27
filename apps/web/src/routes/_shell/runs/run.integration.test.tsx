@@ -11,7 +11,13 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeActor } from "@hercule/client-core";
 import { buildCheckout, buildRunner, buildWorkspace } from "@hercule/client-core/threads/testing";
-import type { Run, RunnerDetail, StepStatus, WorkflowDefinition } from "@hercule/contract";
+import type {
+  Run,
+  RunnerDetail,
+  StepStatus,
+  WorkflowDefinition,
+  Workspace,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   readPageText,
@@ -878,21 +884,31 @@ describe("A run's page > what happens to its workspace", () => {
   });
   /** The run working in an ephemeral workspace, not yet pinned to a runner. */
   const IN_WORKSPACE: Run = { ...RUNNING_RUN, workspaceId: WORKSPACE_ID };
+  /** When the ended runs below ended. */
+  const ENDED_AT = "2026-09-24T23:30:00.000Z";
   /** 23:30 UTC on 8 Oct is 9 Oct in Amsterdam, the user's timezone. */
   const KEPT_UNTIL = "2026-10-08T23:30:00.000Z";
-  const FAILED_KEPT: Run = {
+  const FAILED_IN_WORKSPACE: Run = {
     ...FAILED_RUN,
     workspaceId: WORKSPACE_ID,
-    workspaceKeptUntil: KEPT_UNTIL,
+    finishedAt: ENDED_AT,
+  };
+  const CANCELLED_IN_WORKSPACE: Run = {
+    ...CANCELLED_RUN,
+    workspaceId: WORKSPACE_ID,
+    finishedAt: ENDED_AT,
   };
 
   /**
    * Opens the page of `run`, whose workspace the stub controller holds as
-   * `workspace` until the workspace is deleted.
+   * `initial` until the run is cancelled or the workspace is deleted. A cancel
+   * keeps the workspace until `KEPT_UNTIL` when it asks to keep it, and until
+   * the cancel otherwise, as the controller does. Returns the opened page, and
+   * `setWorkspace` to change what the stub controller holds.
    */
-  const openWithWorkspace = (run: Run, overrides: Readonly<Record<string, Handler>> = {}) => {
-    let workspace = WORKSPACE;
-    return openRunPage(run, {
+  const openWithWorkspace = async (run: Run, initial: Workspace = WORKSPACE) => {
+    let workspace = initial;
+    const opened = await openRunPage(run, {
       overrides: {
         [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: () => ({ body: workspace }),
         [`DELETE /api/v1/workspaces/${WORKSPACE_ID}`]: () => {
@@ -900,20 +916,30 @@ describe("A run's page > what happens to its workspace", () => {
           return { body: {} };
         },
         "GET /api/v1/resources": { body: { items: [] } },
-        [`POST /api/v1/runs/${run.id}/cancel`]: { body: CANCELLED_RUN },
-        ...overrides,
+        [`POST /api/v1/runs/${run.id}/cancel`]: (call) => {
+          const keeps = (call.body as { keepWorkspace?: boolean }).keepWorkspace === true;
+          workspace = { ...workspace, keptUntil: keeps ? KEPT_UNTIL : ENDED_AT };
+          return { body: CANCELLED_IN_WORKSPACE };
+        },
       },
     });
+    return {
+      ...opened,
+      setWorkspace: (next: Workspace) => {
+        workspace = next;
+      },
+    };
   };
 
   const getWorkspaceCheckbox = (): HTMLInputElement =>
-    screen.getByRole("checkbox", { name: "Delete the run's workspace too" });
+    screen.getByRole("checkbox", { name: "Delete workspace" });
 
-  it("asks on cancel whether to delete the workspace too, ticked by default, and sends the answer", async () => {
+  it("asks on cancel whether to delete the workspace too, ticked by default, and says until when a kept one is kept", async () => {
     const user = userEvent.setup();
     const { api } = await openWithWorkspace(IN_WORKSPACE);
 
-    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+    const header = await findPageHeader();
+    await user.click(within(header).getByRole("button", { name: "Cancel" }));
     expect(getWorkspaceCheckbox().checked).toBe(true);
     await user.click(getWorkspaceCheckbox());
     await user.click(screen.getByRole("button", { name: "Confirm" }));
@@ -923,15 +949,16 @@ describe("A run's page > what happens to its workspace", () => {
         { keepWorkspace: true },
       ]);
     });
+    // The cancel fixed until when the workspace is kept, and the page reads
+    // the workspace again without a reload.
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace kept until 9 Oct");
+    });
   });
 
   it("deletes the workspace on cancel when the box stays ticked, and says it will be deleted shortly", async () => {
     const user = userEvent.setup();
-    const { api } = await openWithWorkspace(IN_WORKSPACE, {
-      [`POST /api/v1/runs/${IN_WORKSPACE.id}/cancel`]: {
-        body: { ...CANCELLED_RUN, workspaceId: WORKSPACE_ID },
-      },
-    });
+    const { api } = await openWithWorkspace(IN_WORKSPACE);
 
     const header = await findPageHeader();
     await user.click(within(header).getByRole("button", { name: "Cancel" }));
@@ -959,11 +986,14 @@ describe("A run's page > what happens to its workspace", () => {
 
   it("says until when a failed run's workspace is kept, and after Delete workspace, when it was deleted", async () => {
     const user = userEvent.setup();
-    const { api } = await openWithWorkspace(FAILED_KEPT);
+    const { api } = await openWithWorkspace(FAILED_IN_WORKSPACE, {
+      ...WORKSPACE,
+      keptUntil: KEPT_UNTIL,
+    });
 
     const header = await findPageHeader();
     await waitFor(() => {
-      expect(readPageText(header)).toContain("Workspace kept for inspection until 9 Oct");
+      expect(readPageText(header)).toContain("Workspace kept until 9 Oct");
     });
 
     await user.click(within(header).getByRole("button", { name: "Delete workspace" }));
@@ -975,11 +1005,25 @@ describe("A run's page > what happens to its workspace", () => {
     await waitFor(() => {
       expect(readPageText(header)).toContain("Workspace deleted 3 Oct");
     });
-    expect(readPageText(header)).not.toContain("kept for inspection");
+    expect(readPageText(header)).not.toContain("Workspace kept");
     expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
     expect(api.calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
       `/api/v1/workspaces/${WORKSPACE_ID}`,
     ]);
+  });
+
+  it("reads the workspace again when the run ends while the page is open", async () => {
+    const { hold, live, setWorkspace } = await openWithWorkspace(IN_WORKSPACE);
+    const header = await findPageHeader();
+
+    // The run fails, which releases its lease as the controller records it.
+    setWorkspace({ ...WORKSPACE, keptUntil: KEPT_UNTIL });
+    hold(FAILED_IN_WORKSPACE);
+    await pushRunUpdate(live, IN_WORKSPACE.id);
+
+    await waitFor(() => {
+      expect(readPageText(header)).toContain("Workspace kept until 9 Oct");
+    });
   });
 });
 

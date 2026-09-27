@@ -383,6 +383,7 @@ const PRIMARY: Workspace = {
   designatedConnectionId: "conn-github",
   message: null,
   sessionIds: [],
+  keptUntil: null,
   createdAt: at,
   provisionedAt: at,
   lastUsedAt: at,

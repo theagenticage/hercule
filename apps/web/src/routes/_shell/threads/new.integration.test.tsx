@@ -1314,6 +1314,7 @@ const buildWorkspace = (
   designatedConnectionId: "01a06d02-7500-7000-8000-000000000001",
   message: null,
   sessionIds,
+  keptUntil: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,

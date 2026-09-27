@@ -4,29 +4,37 @@
  * `git.commit` step in an ephemeral workspace, and the test plays the runner:
  * it reports the workspace ready and sends the step's result.
  *
- * What happens to a run's workspace follows how the run ended:
+ * A run holds a lease on its workspace until it ends, and then releases it
+ * with a retention that follows how it ended:
  *
- * - unfinished: never touched, and `workspace.dispose` refuses it
- * - completed: deleted by the next sweep
- * - cancelled without keeping it: deleted by the next sweep
- * - failed, or cancelled with `keepWorkspace`: kept for the failed-run
- *   window, then deleted
+ * - unfinished: the lease is active, so the sweep never touches the
+ *   workspace and `workspace.dispose` refuses it
+ * - completed, or cancelled without keeping it: `none`, so the next sweep
+ *   deletes it
+ * - failed, or cancelled with `keepWorkspace`: `inspection`, so it is kept
+ *   for the inspection window, then deleted
+ *
+ * A thread that joins the workspace holds a lease of its own, and the
+ * workspace is kept until the later of the two runs out.
  *
  * The sweep interval is shortened, as in the thread sweep's tests, and the
- * failed-run window is crossed by moving the run's finish time back rather
- * than by waiting.
+ * windows are crossed by moving the leases back rather than by waiting.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect } from "effect";
+import { Duration } from "effect";
 import type { Run } from "@hercule/contract";
-import { del, get, post } from "../../http/testing";
+import { del, post } from "../../http/testing";
 import { readRun, startSentWorkflow, waitForRun } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS, type Arranged } from "../../sessions/testing";
 import {
+  ageLeases,
   createRepo,
+  endResumable,
   listFramesTagged,
+  listWorkspaceDeletions,
   readWorkspace,
   reportWorkspaceReady,
+  spawnThread,
   withFleet,
   type WorkspaceRecord,
 } from "../../workspaces/testing";
@@ -104,46 +112,22 @@ const waitForDeleted = (arranged: Arranged, id: string): Promise<WorkspaceRecord
     return one.status === "deleted" ? one : undefined;
   });
 
-/** Moves a workspace's timestamps back, so no thread window can be what keeps it. */
-const ageWorkspace = (arranged: Arranged, id: string, days: number): Promise<unknown> =>
-  Effect.runPromise(
-    Effect.orDie(
-      arranged.harness.sql`
-        UPDATE workspaces
-        SET last_used_at = ${new Date(Date.now() - days * DAY_MS).toISOString()},
-            created_at = ${new Date(Date.now() - days * DAY_MS).toISOString()}
-        WHERE id = unhex(replace(${id}, '-', ''))`,
-    ),
+/** Returns the reason and the holder of each `workspace.deleted` audit entry, by workspace id. */
+const readDeletionReasons = async (arranged: Arranged): Promise<Record<string, unknown>> =>
+  Object.fromEntries(
+    (await listWorkspaceDeletions(arranged)).map((entry): [string, unknown] => [
+      String(entry.payload["workspaceId"]),
+      { reason: entry.payload["reason"], holder: entry.payload["holder"] },
+    ]),
   );
 
-/** Moves a run's finish time back by `days`, which is how these tests cross the failed-run window. */
-const ageRun = (arranged: Arranged, id: string, days: number): Promise<unknown> =>
-  Effect.runPromise(
-    Effect.orDie(
-      arranged.harness.sql`
-        UPDATE runs SET finished_at = ${new Date(Date.now() - days * DAY_MS).toISOString()}
-        WHERE id = unhex(replace(${id}, '-', ''))`,
-    ),
-  );
+/** Returns the time `days` after `from`, as the API writes a timestamp. */
+const addDays = (from: string, days: number): string =>
+  new Date(Date.parse(from) + days * DAY_MS).toISOString();
 
-/** Returns the reason of each `workspace.deleted` audit entry, by workspace id. */
-const readDeletionReasons = async (arranged: Arranged): Promise<Record<string, unknown>> => {
-  const response = await get(arranged.harness.base, "/api/v1/events", arranged.token);
-  const log = (await response.json()) as {
-    readonly items: ReadonlyArray<{
-      readonly kind: string;
-      readonly payload: Record<string, unknown>;
-    }>;
-  };
-  return Object.fromEntries(
-    log.items
-      .filter((entry) => entry.kind === "workspace.deleted")
-      .map((entry): [string, unknown] => [
-        String(entry.payload["workspaceId"]),
-        entry.payload["reason"],
-      ]),
-  );
-};
+/** Reads the message of an error response. */
+const readErrorMessage = async (response: Response): Promise<string> =>
+  ((await response.json()) as { error: { message: string } }).error.message;
 
 /** Waits for six sweep intervals, so a workspace that still exists is one the sweep kept. */
 const waitForSeveralSweeps = (): Promise<void> =>
@@ -157,10 +141,9 @@ describe("the sweep on the workspaces of runs", () => {
         async (arranged) => {
           const repoId = await createRepo(arranged, "https://github.com/o/sweep.git");
 
-          // An unfinished run, whose workspace is older than any thread window.
           const waiting = await startCommitRun(arranged, repoId);
           const waitingWorkspace = await readyWorkspaceOf(arranged, waiting);
-          await ageWorkspace(arranged, waitingWorkspace, 90);
+          expect((await readWorkspace(arranged, waitingWorkspace)).keptUntil).toBeNull();
 
           const refused = await del(
             arranged.harness.base,
@@ -168,9 +151,7 @@ describe("the sweep on the workspaces of runs", () => {
             arranged.token,
           );
           expect(refused.status).toBe(409);
-          expect(((await refused.json()) as { error: { message: string } }).error.message).toMatch(
-            /cancel the run first/,
-          );
+          expect(await readErrorMessage(refused)).toMatch(`cancel run ${waiting} first`);
 
           const completing = await startCommitRun(arranged, repoId);
           const completedWorkspace = await readyWorkspaceOf(arranged, completing);
@@ -179,21 +160,20 @@ describe("the sweep on the workspaces of runs", () => {
             output: { sha: "abc123", branch: `hercule/run-${completing}`, committed: true },
           });
           const completed = await waitForRunTo(arranged, completing, "completed");
-          expect(completed.workspaceKeptUntil).toBeUndefined();
+          expect(completed).not.toHaveProperty("workspaceKeptUntil");
 
           // Once a sweep has deleted the completed run's workspace, the
-          // unfinished run's workspace, which is older, is still ready: the
-          // sweep leaves out the workspace of an unfinished run.
-          await waitForDeleted(arranged, completedWorkspace);
+          // unfinished run's workspace is still ready: its lease is active.
+          const gone = await waitForDeleted(arranged, completedWorkspace);
+          expect(gone.keptUntil).toBeNull();
           expect((await readWorkspace(arranged, waitingWorkspace)).status).toBe("ready");
 
-          const cancelled = await cancelRun(arranged, waiting, {});
-          expect(cancelled.workspaceKeptUntil).toBeUndefined();
+          await cancelRun(arranged, waiting, {});
           await waitForDeleted(arranged, waitingWorkspace);
 
           expect(await readDeletionReasons(arranged)).toEqual({
-            [completedWorkspace]: "run-completed",
-            [waitingWorkspace]: "run-cancelled",
+            [completedWorkspace]: { reason: "none", holder: `run:${completing}` },
+            [waitingWorkspace]: { reason: "none", holder: `run:${waiting}` },
           });
         },
         { workspaceSweepInterval: SWEEP },
@@ -203,7 +183,30 @@ describe("the sweep on the workspaces of runs", () => {
   );
 
   it(
-    "keeps the workspace of a failed run, and of a run cancelled with its workspace kept, for the failed-run window",
+    "names both the run and the thread in its refusal to dispose of a workspace they both use",
+    async () => {
+      await withFleet(async (arranged) => {
+        const repoId = await createRepo(arranged, "https://github.com/o/shared.git");
+        const running = await startCommitRun(arranged, repoId);
+        const workspaceId = await readyWorkspaceOf(arranged, running);
+        const thread = await spawnThread(arranged, { kind: "existing", workspaceId }, 1);
+
+        const refused = await del(
+          arranged.harness.base,
+          `/api/v1/workspaces/${workspaceId}`,
+          arranged.token,
+        );
+        expect(refused.status).toBe(409);
+        const message = await readErrorMessage(refused);
+        expect(message).toContain(`cancel run ${running} first`);
+        expect(message).toContain(`stop sessions ${thread.id} first`);
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "keeps the workspace of a failed run, and of a run cancelled with its workspace kept, for the inspection window",
     async () => {
       await withFleet(
         async (arranged) => {
@@ -221,29 +224,85 @@ describe("the sweep on the workspaces of runs", () => {
           const keeping = await startCommitRun(arranged, repoId);
           const keptWorkspace = await readyWorkspaceOf(arranged, keeping);
           const kept = await cancelRun(arranged, keeping, { keepWorkspace: true });
-
-          // The window runs from when each run finished: fourteen days by default.
-          for (const run of [failed, kept]) {
-            if (run.status !== "failed" && run.status !== "cancelled") throw new Error("unended");
-            expect(run.workspaceKeptUntil).toBe(
-              new Date(Date.parse(run.finishedAt) + 14 * DAY_MS).toISOString(),
-            );
-          }
           expect(await readRun(arranged.harness.base, arranged.token, keeping)).toEqual(kept);
 
-          await ageWorkspace(arranged, failedWorkspace, 90);
-          await ageWorkspace(arranged, keptWorkspace, 90);
+          // The window runs from when each run finished: fourteen days by default.
+          for (const [run, workspaceId] of [
+            [failed, failedWorkspace],
+            [kept, keptWorkspace],
+          ] as const) {
+            if (run.status !== "failed" && run.status !== "cancelled") throw new Error("unended");
+            expect((await readWorkspace(arranged, workspaceId)).keptUntil).toBe(
+              addDays(run.finishedAt, 14),
+            );
+          }
+
+          await ageLeases(arranged, failedWorkspace, 13 * 24);
+          await ageLeases(arranged, keptWorkspace, 13 * 24);
           await waitForSeveralSweeps();
           expect((await readWorkspace(arranged, failedWorkspace)).status).toBe("ready");
           expect((await readWorkspace(arranged, keptWorkspace)).status).toBe("ready");
 
-          await ageRun(arranged, failing, 15);
-          await ageRun(arranged, keeping, 15);
+          await ageLeases(arranged, failedWorkspace, 2 * 24);
+          await ageLeases(arranged, keptWorkspace, 2 * 24);
           await waitForDeleted(arranged, failedWorkspace);
           await waitForDeleted(arranged, keptWorkspace);
           expect(await readDeletionReasons(arranged)).toEqual({
-            [failedWorkspace]: "run-failed",
-            [keptWorkspace]: "run-kept",
+            [failedWorkspace]: { reason: "inspection", holder: `run:${failing}` },
+            [keptWorkspace]: { reason: "inspection", holder: `run:${keeping}` },
+          });
+        },
+        { workspaceSweepInterval: SWEEP },
+      );
+    },
+    WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "keeps a failed run's workspace that a thread joined until the thread's own window ends",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const repoId = await createRepo(arranged, "https://github.com/o/joined.git");
+          const failing = await startCommitRun(arranged, repoId);
+          const workspaceId = await readyWorkspaceOf(arranged, failing);
+          finishCommit(arranged, failing, {
+            status: "failed",
+            code: "action_failed",
+            message: "nothing to commit",
+          });
+          await waitForRunTo(arranged, failing, "failed");
+
+          // A thread opened in the failed run's workspace, to look at what it left.
+          const thread = await spawnThread(arranged, { kind: "existing", workspaceId }, 1);
+          const joined = await readWorkspace(arranged, workspaceId);
+          expect(joined.sessionIds).toEqual([thread.id]);
+          expect(joined.keptUntil).toBeNull();
+
+          const refused = await del(
+            arranged.harness.base,
+            `/api/v1/workspaces/${workspaceId}`,
+            arranged.token,
+          );
+          expect(refused.status).toBe(409);
+          expect(await readErrorMessage(refused)).toMatch(`stop sessions ${thread.id} first`);
+
+          // The thread can be resumed, so it keeps the workspace for the idle
+          // window, thirty days, which ends after the run's fourteen.
+          await endResumable(arranged, thread);
+          const released = await readWorkspace(arranged, workspaceId);
+          expect(released.sessionIds).toEqual([]);
+          expect(Date.parse(String(released.keptUntil))).toBeGreaterThan(Date.now() + 29 * DAY_MS);
+
+          // Past the run's window, short of the thread's.
+          await ageLeases(arranged, workspaceId, 15 * 24);
+          await waitForSeveralSweeps();
+          expect((await readWorkspace(arranged, workspaceId)).status).toBe("ready");
+
+          await ageLeases(arranged, workspaceId, 16 * 24);
+          await waitForDeleted(arranged, workspaceId);
+          expect(await readDeletionReasons(arranged)).toEqual({
+            [workspaceId]: { reason: "idle", holder: `session:${thread.id}` },
           });
         },
         { workspaceSweepInterval: SWEEP },

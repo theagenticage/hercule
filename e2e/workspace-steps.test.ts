@@ -93,7 +93,6 @@ interface Run {
   readonly failedStepId?: string;
   readonly runnerId?: string;
   readonly workspaceId?: string;
-  readonly workspaceKeptUntil?: string;
   readonly steps: ReadonlyArray<StepRecord>;
 }
 
@@ -349,6 +348,7 @@ const createCommitThenWorkflow = async (
 
 interface Workspace {
   readonly status: string;
+  readonly keptUntil: string | null;
   readonly disposedAt: string | null;
 }
 
@@ -386,11 +386,9 @@ describe("the workspace of a run that failed or has not finished", () => {
       expect(run).toMatchObject({ status: "failed", failedStepId: "after" });
       expect(run.steps.find((record) => record.stepId === "commit")?.status).toBe("completed");
       const workspaceId = run.workspaceId!;
-      expect(run.workspaceKeptUntil).toBeDefined();
-      expect(await readWorkspace(workspaceId)).toMatchObject({
-        status: "ready",
-        disposedAt: null,
-      });
+      const kept = await readWorkspace(workspaceId);
+      expect(kept).toMatchObject({ status: "ready", disposedAt: null });
+      expect(kept.keptUntil).not.toBeNull();
 
       const disposed = await runLoggedInCli(["workspace", "dispose", workspaceId]);
       expect(disposed.code, `${disposed.stdout}\n${disposed.stderr}`).toBe(0);
@@ -431,7 +429,7 @@ describe("the workspace of a run that failed or has not finished", () => {
 
       const refused = await runLoggedInCli(["workspace", "dispose", run.workspaceId!]);
       expect(refused.code).not.toBe(0);
-      expect(refused.stderr).toContain("cancel the run first");
+      expect(refused.stderr).toContain(`cancel run ${runId} first`);
       expect((await readWorkspace(run.workspaceId!)).status).toBe("ready");
 
       const cancelled = await runLoggedInCli(["run", "cancel", runId]);

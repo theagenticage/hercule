@@ -40,13 +40,14 @@ export function RunHeader({
   now,
   timezone,
   children,
+  question,
 }: {
   readonly run: Run;
   /** The runner the run is pinned to, once it is pinned and the runner has been read. */
   readonly runner: Runner | undefined;
   /** The name of the run's workspace, once it has one and it has been read. */
   readonly workspaceLabel: string | undefined;
-  /** What happens to the run's workspace, such as "Workspace kept for inspection until 9 Oct". */
+  /** What happens to the run's workspace, such as "Workspace kept until 9 Oct". */
   readonly workspaceNote: string | undefined;
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
@@ -56,13 +57,26 @@ export function RunHeader({
    * shown before either is done.
    */
   readonly children: ReactNode;
+  /**
+   * The question shown before an action is done, when the page is too narrow
+   * to show it beside the title. It takes a row of its own below the header's
+   * lines.
+   */
+  readonly question?: ReactNode;
 }): JSX.Element {
   const origin = describeRunOrigin(run.origin);
   const { startedAt, finishedAt } = readTimestamps(run);
   const started = startedAt ?? run.createdAt;
   return (
     <header className="shrink-0 px-8 pt-[22px]">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1lh] items-center gap-4 text-title">
+      {/*
+        The actions take the room they need, and the title the rest. The
+        breadcrumb back to the run list always keeps its room, so a long
+        question beside it cannot run over it. The workflow's name adds
+        nothing to the smallest width the title needs, so it is the part that
+        gives way.
+      */}
+      <div className="grid grid-cols-[minmax(min-content,1fr)_auto] grid-rows-[1lh] items-center gap-4 text-title">
         <div className="flex min-w-0 items-baseline gap-2 tracking-[-0.015em]">
           <Link
             to="/runs"
@@ -74,7 +88,10 @@ export function RunHeader({
           <span aria-hidden="true" className="text-faint">
             /
           </span>
-          <h1 title={run.plan.name} className="min-w-0 truncate font-emph text-ink">
+          <h1
+            title={run.plan.name}
+            className="min-w-0 grow truncate font-emph text-ink contain-inline-size"
+          >
             {run.plan.name}
           </h1>
         </div>
@@ -151,9 +168,13 @@ export function RunHeader({
           {workspaceLabel === undefined ? null : (
             // When the line is too narrow for both, the workspace's name gives
             // way before the note: hovering shows the whole name, and the note
-            // is what the user may act on. The name has no line height of its
-            // own for the same reason as the times on the line above.
-            <span className="min-w-0 shrink-[1000] truncate" title={workspaceLabel}>
+            // is what the user may act on. The name starts from no width and
+            // grows up to its full width into the space the rest of the line
+            // leaves. A shrinking name would take the note down with it by a
+            // fraction of a pixel, which is enough to cut the note's last
+            // letters off. The name has no line height of its own for the
+            // same reason as the times on the line above.
+            <span className="max-w-max min-w-0 flex-[1_1_0%] truncate" title={workspaceLabel}>
               {"in "}
               <span className="font-mono text-fine leading-none text-ink">{workspaceLabel}</span>
             </span>
@@ -171,6 +192,7 @@ export function RunHeader({
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
       ) : null}
+      {question === undefined ? null : <div className="mt-3">{question}</div>}
     </header>
   );
 }

@@ -124,7 +124,7 @@ import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
-import { buildRunBranch, WorkspaceService } from "../workspaces";
+import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { RunExecutor } from "./executor";
 import { runRepository, type RunOutcome, type StepRecordId } from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
@@ -305,6 +305,26 @@ const listWorkspaceStepsToSettle = (
 
 const decodeCancel = Schema.decodeUnknownEffect(RunCancelInput);
 
+/**
+ * Decides how long a run's workspace is kept after the run ends:
+ *
+ * - a completed run needs nothing more from it (`none`);
+ * - a failed run keeps it for inspection, so the user can see what the
+ *   failing step left behind (`inspection`);
+ * - a cancelled run keeps it for inspection only when the user asked for
+ *   that with `keepWorkspace`, and needs nothing more from it otherwise.
+ */
+const decideRetention = (outcome: RunOutcome): Retention => {
+  switch (outcome.status) {
+    case "completed":
+      return "none";
+    case "failed":
+      return "inspection";
+    case "cancelled":
+      return outcome.keepWorkspace ? "inspection" : "none";
+  }
+};
+
 /** Describes how a run ended, for the refusal to cancel it. */
 const describeEnding = (status: RunStatus): string =>
   status === "cancelled" ? "has already been cancelled" : `has already ${status}`;
@@ -336,6 +356,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * through here, inside the transaction that decided it, so a reader never
    * sees an ended run with a step record still pending or running.
    *
+   * A run that had a workspace releases its lease on it here, with the
+   * retention its ending calls for (`decideRetention`).
+   *
    * Once the transaction has committed, the workspace steps whose records
    * were running are settled with the run's runner (see
    * `settleWorkspaceSteps`).
@@ -350,6 +373,11 @@ export const makeRunEngine = Effect.gen(function* () {
       const run = Option.getOrThrow(yield* runs.read(runId));
       const wasRunning = yield* runs.cancelUnfinishedSteps(runId, at);
       yield* runs.finish(runId, outcome, at);
+      // `finish` leaves a run that has already ended alone, and so does this:
+      // releasing again would replace the retention its real ending chose.
+      if (isUnfinished(run.status) && run.workspaceId !== undefined) {
+        yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
+      }
       yield* settleWorkspaceSteps(run, wasRunning);
     });
 
@@ -543,6 +571,7 @@ export const makeRunEngine = Effect.gen(function* () {
       const opened = yield* Effect.result(
         Effect.provideService(
           workspaces.openFor({
+            holder: { kind: "run", id: run.id },
             wish: policy,
             heldWorkspaceId: null,
             runnerId,
@@ -1023,9 +1052,12 @@ export const makeRunEngine = Effect.gen(function* () {
      * their runners, which stop them (see `writeRunEnding`). A step whose action ends after
      * the cancel cannot end its record any more, and no later step starts.
      *
-     * `input.keepWorkspace` is recorded on the run and on every run cancelled
-     * with it. The workspace sweep reads it: a kept ephemeral workspace stays
-     * for the failed-run window, and any other is deleted by the next sweep.
+     * `input.keepWorkspace` applies to the run and to every run cancelled
+     * with it. Each of them releases its workspace lease as `inspection` when
+     * it is set, which keeps an ephemeral workspace for the
+     * `workspace.inspectionTtlDays` window from the cancel, and as `none`
+     * otherwise, which lets the next sweep delete it once no other holder
+     * keeps it.
      *
      * Fails with `Validation` for an input that does not match
      * `RunCancelInput`, with `NotFound` for an unknown run, and with

@@ -284,17 +284,6 @@ export const Run = Schema.Union(
       runnerId: Schema.optionalKey(Id),
       /** The run's workspace, set when its first workspace step starts. */
       workspaceId: Schema.optionalKey(Id),
-      /**
-       * When the workspace sweep deletes the run's ephemeral workspace, which
-       * is kept for inspection until then. Present only when the run has an
-       * ephemeral workspace and either failed or was cancelled with
-       * `keepWorkspace`; absent for every other run. It is the time the run
-       * finished plus the controller setting `workspace.failedRunTtlDays`,
-       * so a change to the setting moves it. It stays set after the workspace
-       * is gone: read the workspace's own status to learn whether it still
-       * exists.
-       */
-      workspaceKeptUntil: Schema.optionalKey(Timestamp),
       steps: Schema.Array(StepRecord),
       /**
        * How many times the run has followed each edge: one count per edge of

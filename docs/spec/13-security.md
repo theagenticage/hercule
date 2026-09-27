@@ -269,6 +269,11 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 
 The remote must still canonicalise to a checkout of that workspace, so the credential only ever works for the workspace's own remotes. A step that has ended, a controller step of the same run (such as `wait`), and another runner naming the workspace all get `unauthorized`. The runner puts the workspace id in the environment of its own git only while it provisions a workspace or runs a workspace step; a session's git carries its session token instead.
 
+*(Amended 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263); [ADR 0036](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md).)* **The two rules, as the controller now answers them.** Neither rule changes what it allows; what changes is where the facts are read.
+
+- **The session-token rule** answers only while the session holds an active Workspace Lease on a workspace on that runner with a checkout of the remote. A session releases its lease when it exits, which is also when its token is revoked, so the two checks agree; the lease is the fact the workspaces domain owns.
+- **The workspace-step rule** is answered through a port, `WorkspaceStepActivity`, which the workspaces domain declares and the runs domain implements, because step records belong to runs. It asks whether a workspace step's record is `running` in that workspace, in a run pinned to that runner. A run's active lease is not enough: a run holds its lease through controller steps such as `wait`, and through the time between steps, when no push should be possible.
+
 ### 9.2 Per-checkout identity
 
 - `credential.useHttpPath=true` makes git include the repository path in the credential lookup, so the helper resolves identity per checkout.

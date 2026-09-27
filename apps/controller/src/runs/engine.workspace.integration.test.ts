@@ -26,6 +26,7 @@ import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
+import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
 import { RunService, RunServiceLayer } from "./service";
 import {
@@ -89,7 +90,12 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
       ),
     ),
     Layer.provideMerge(TaskServiceLayer),
-    Layer.provideMerge(WorkspaceServiceLayer.pipe(Layer.provide(SessionTokensLayer))),
+    Layer.provideMerge(
+      WorkspaceServiceLayer.pipe(
+        Layer.provide(SessionTokensLayer),
+        Layer.provide(RunWorkspaceStepActivityLayer),
+      ),
+    ),
     Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(RunExecutorLayer),
     Layer.provideMerge(workspaceSteps),
@@ -379,10 +385,19 @@ describe("a workspace step", () => {
         const childRunId = starts.find((start) => start.runId !== runId)!.runId;
 
         yield* runs.cancel(runId, { keepWorkspace: true });
+        const workspaces = yield* WorkspaceService;
         for (const id of [runId, childRunId]) {
           const cancelled = yield* readRun(id);
           expect(cancelled).toMatchObject({ status: "cancelled", runnerId });
-          expect(cancelled.workspaceKeptUntil).toBeDefined();
+          if (cancelled.status !== "cancelled" || cancelled.workspaceId === undefined) {
+            throw new Error("the cancelled run has no workspace");
+          }
+          // Kept for the inspection window, fourteen days by default, from
+          // the cancel.
+          const workspace = yield* workspaces.read(cancelled.workspaceId);
+          expect(workspace.keptUntil).toBe(
+            new Date(Date.parse(cancelled.finishedAt) + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          );
         }
       }),
     );

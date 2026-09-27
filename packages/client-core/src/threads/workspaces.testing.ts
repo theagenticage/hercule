@@ -84,6 +84,7 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   designatedConnectionId: null,
   message: null,
   sessionIds: [],
+  keptUntil: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,

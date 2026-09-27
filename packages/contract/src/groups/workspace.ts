@@ -104,8 +104,14 @@ export const Workspace = Schema.Struct({
   designatedConnectionId: Schema.NullOr(Id),
   /** The error message the machine reported when it could not make the workspace. */
   message: Schema.NullOr(Schema.String),
-  /** The sessions in it that have not exited. */
+  /** The sessions working in it: each holds an active lease on it until it exits. */
   sessionIds: Schema.Array(Id),
+  /**
+   * When the sweep may delete this workspace. Fixed when its last holder
+   * released it; a settings change does not move it. Null for a primary, for
+   * a workspace that is gone, and while a session or run still holds it.
+   */
+  keptUntil: Schema.NullOr(Timestamp),
   createdAt: Timestamp,
   provisionedAt: Schema.NullOr(Timestamp),
   /** Set at provisioning and at every session start and exit in it. */

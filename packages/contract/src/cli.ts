@@ -690,7 +690,7 @@ export const CLI = {
 
   "workspace.query": {
     command: "workspace list",
-    help: 'Lists the Workspaces on the fleet: what each holds and its status. Use it to find one to open a thread in with `hercule session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
+    help: 'Lists the Workspaces on the fleet: what each holds and its status. Its keptUntil is when the sweep may delete it, once no session or run uses it. Use it to find one to open a thread in with `hercule session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
     examples: [{ args: [] }, { args: ["--runner", "7b41d0a5", "--status", "ready"] }],
     fields: {
       runnerId: { flag: "runner", help: "Only workspaces on this machine." },
@@ -714,7 +714,7 @@ export const CLI = {
   },
   "workspace.read": {
     command: "workspace read",
-    help: "Reads one Workspace in full. It shows its checkouts and their branches, its status, and the sessions in it that have not exited. Poll it after `hercule workspace provision` until its status is ready.",
+    help: "Reads one Workspace in full. It shows its checkouts and their branches, its status, the sessions in it that have not exited, and, in keptUntil, when the sweep may delete it once no session or run uses it. Poll it after `hercule workspace provision` until its status is ready.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -755,7 +755,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and the workspace of a run that has not finished stays until the run is cancelled",
+        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and a workspace still in use stays: stop the sessions in it that have not exited, or cancel the run that has not finished",
     },
   },
 
@@ -1251,7 +1251,7 @@ export const CLI = {
       },
       keepWorkspace: {
         flag: "keep-workspace",
-        help: "true keeps the ephemeral workspace of the run, and of every run cancelled with it, until it is disposed or its failed-run window ends.",
+        help: "true keeps the ephemeral workspace of the run, and of every run cancelled with it, for inspection: it is kept for workspace.inspectionTtlDays from the cancel, unless it is disposed first.",
       },
     },
     errors: {

@@ -54,7 +54,9 @@ export function InPlaceQuestion({
         disabled={disabled}
         // Stacked, the decline button starts the row under the question, so
         // its text is pulled back to line up with the question's first letter.
-        className={stacked ? "-ml-2" : undefined}
+        // On one line, the question gives way before either button, so a
+        // label such as "Keep running" never breaks over two lines.
+        className={stacked ? "-ml-2" : "shrink-0"}
         onClick={() => {
           // The asking element can take focus only after the page re-renders
           // without the question, so that render is flushed first.
@@ -64,7 +66,12 @@ export function InPlaceQuestion({
       >
         {declineLabel}
       </Button>
-      <Button variant="primary" disabled={disabled} onClick={onAccept}>
+      <Button
+        variant="primary"
+        disabled={disabled}
+        className={stacked ? undefined : "shrink-0"}
+        onClick={onAccept}
+      >
         {acceptLabel}
       </Button>
     </>
