@@ -267,6 +267,7 @@ export {
   BoundAction,
   BoundOperation,
   CORE_KIND_PREFIX,
+  CORE_NOTIFICATION_KINDS,
   MAX_ACTION_DESCRIPTION_LENGTH,
   MAX_ACTION_ID_LENGTH,
   MAX_ACTION_LABEL_LENGTH,
@@ -288,6 +289,7 @@ export {
   NotificationStatus,
   NotificationSubject,
   NotificationWithdrawInput,
+  type CoreNotificationKind,
   Resolution,
   ResolutionOrigin,
 } from "./groups/notification";

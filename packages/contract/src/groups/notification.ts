@@ -20,7 +20,14 @@ import { PluginId } from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Forbidden, Internal, InvalidState, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Actor, Id, Timestamp } from "../ids";
 import { isOperationId } from "../operations";
 import { page, pageParams } from "../pagination";
@@ -80,6 +87,19 @@ export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>;
 
 /** The prefix of the kinds only the core produces. */
 export const CORE_KIND_PREFIX = "core.";
+
+/**
+ * The kinds the core produces about itself (spec 10 §7.2). Clients that treat
+ * one of them specially, such as marking a failed run, name it from here.
+ */
+export const CORE_NOTIFICATION_KINDS = [
+  "core.run-failed",
+  "core.plugin-error",
+  "core.runner-unreachable",
+  "core.subscription-condition-error",
+] as const;
+
+export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];
 
 /** Open: still wants an answer from the user. Resolved: nothing left to answer. */
 export const NotificationStatus = Schema.Literals(["open", "resolved"]);
@@ -188,9 +208,12 @@ export type BoundAction = Schema.Schema.Type<typeof BoundAction>;
  * channel click), `session:<id>` or `plugin:<id>`.
  */
 export const ResolutionOrigin = Schema.String.check(
-  Schema.isPattern(/^(web|core|(connection|session):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/, {
-    description: "web, core, connection:<id>, session:<id> or plugin:<id>",
-  }),
+  Schema.isPattern(
+    /^(web|core|(connection|session):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/,
+    {
+      description: "web, core, connection:<id>, session:<id> or plugin:<id>",
+    },
+  ),
 );
 
 export type ResolutionOrigin = Schema.Schema.Type<typeof ResolutionOrigin>;

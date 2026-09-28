@@ -2668,7 +2668,8 @@ export const NOUNS = {
     flow: "hercule task list to find work, hercule task read for the whole of one, hercule task create to record new intent, hercule task update as it moves.",
   },
   notification: {
-    summary: "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
+    summary:
+      "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
     flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
   },
   project: {
