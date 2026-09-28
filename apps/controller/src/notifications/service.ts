@@ -16,9 +16,8 @@
  * - the core produces its own `core.*` kinds through `createCoreNotification`,
  *   and cannot be muted.
  *
- * The user reads every notification but creates none: a notification is a
- * message to the user. A session or a run reads only the notifications it
- * produced.
+ * Every caller with the grant reads every notification. The user creates
+ * none, because a notification is a message to the user.
  *
  * An answer's operation is checked when the notification is created: it must
  * be one an answer may run, its input must fit that operation, and the
@@ -87,7 +86,7 @@ import {
 import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { BoundOperationDescriber } from "./describer";
-import { notificationRepository, type NewNotification, type ProducerScope } from "./repository";
+import { notificationRepository, type NewNotification } from "./repository";
 
 /** The input of `notification.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -276,30 +275,6 @@ const isProducer = (actor: Actor, producer: NotificationProducer): actor is Sess
   actor._tag === "session" && producer.type === "session" && producer.sessionId === actor.sessionId;
 
 /**
- * Returns the producer whose notifications a caller may read: its own session
- * or run. Returns undefined for the user, who reads every notification.
- */
-const buildReadableScope = (caller: Actor): ProducerScope | undefined => {
-  switch (caller._tag) {
-    case "session":
-      return { type: "session", sessionId: caller.sessionId };
-    case "run":
-      return { type: "run", runId: caller.runId };
-    case "user":
-    case "none":
-      return undefined;
-  }
-};
-
-/** Checks whether a notification was produced by the session or run a scope names. */
-const isInScope = (notification: Notification, scope: ProducerScope): boolean => {
-  const { producer } = notification;
-  return scope.type === "session"
-    ? producer.type === "session" && producer.sessionId === scope.sessionId
-    : producer.type === "run" && producer.runId === scope.runId;
-};
-
-/**
  * An answer's operation after the check at read time: decoded, or refused,
  * with a describe line that shows the user why the answer cannot be taken.
  */
@@ -478,9 +453,8 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns one page of the notifications that match a filter, newest
-     * first by default. A session or a run sees only the notifications it
-     * produced. The describe lines are added only for the user, the only
-     * caller who can take an answer.
+     * first by default. The describe lines are added only for the user, the
+     * only caller who can take an answer.
      */
     query: (
       input: QueryInput,
@@ -490,15 +464,11 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const { limit, cursor, sort, ...filter } = decoded;
         const listing = yield* refuseCursor(
-          notifications.list(
-            filter,
-            {
-              limit: limit ?? DEFAULT_PAGE_LIMIT,
-              cursor,
-              direction: sort?.direction ?? "desc",
-            },
-            buildReadableScope(caller),
-          ),
+          notifications.list(filter, {
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: sort?.direction ?? "desc",
+          }),
         );
         return {
           items:
@@ -512,8 +482,7 @@ const make = Effect.gen(function* () {
     /**
      * Returns one notification by id. For the user, each answer of an open
      * decision carries its describe line. Fails with `NotFound` if it does
-     * not exist, or if the caller is a session or a run that did not produce
-     * it.
+     * not exist.
      */
     read: (
       id: Id,
@@ -521,10 +490,6 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const caller = yield* requireGrant("notification.read");
         const notification = yield* readOrFail(id);
-        const scope = buildReadableScope(caller);
-        if (scope !== undefined && !isInScope(notification, scope)) {
-          return yield* Effect.fail(createNotFoundError(NO_SUCH_NOTIFICATION));
-        }
         return caller._tag === "user" ? yield* addDescribeLines(notification) : notification;
       }),
 
@@ -587,9 +552,8 @@ const make = Effect.gen(function* () {
      * Fails with:
      *
      * - `Validation` if the reason is empty or longer than one line;
-     * - `Forbidden` if the caller is a run or the user;
-     * - `NotFound` if the notification does not exist, or if the caller is a
-     *   session that did not produce it;
+     * - `Forbidden` if the caller is a run, or did not produce it;
+     * - `NotFound` if the notification does not exist;
      * - `InvalidState` if it is already resolved, which includes every
      *   informational notification.
      */
@@ -614,13 +578,6 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const notification = yield* readOrFail(input.id);
-            // A session may not read another session's notifications, so it
-            // gets the same `NotFound` a read returns, and cannot learn that
-            // the notification exists.
-            const scope = buildReadableScope(caller);
-            if (scope !== undefined && !isInScope(notification, scope)) {
-              return yield* Effect.fail(createNotFoundError(NO_SUCH_NOTIFICATION));
-            }
             if (!isProducer(caller, notification.producer)) {
               return yield* Effect.fail(
                 createForbiddenError("notification.write", NOT_THE_PRODUCER),

@@ -222,14 +222,14 @@ describe("a session", () => {
       expect(created.status, noGrant.text).toBe(403);
       expect(noGrant).toMatchObject({ code: "forbidden", grant: "notification.write" });
 
-      const hidden = await requestWithdraw(base, other.token, id, "not mine");
-      expect(hidden.status).toBe(404);
-      const response = await requestWithdraw(base, arranged.token, id, "not mine");
-      const refused = await readErrorBody(response);
-      expect(response.status, refused.text).toBe(403);
-      expect(refused.code).toBe("forbidden");
-      expect(refused.message).toMatch(/only the producer/);
-      expect((await readOrFail(base, arranged.token, id)).status).toBe("open");
+      for (const token of [other.token, arranged.token]) {
+        const response = await requestWithdraw(base, token, id, "not mine");
+        const refused = await readErrorBody(response);
+        expect(response.status, refused.text).toBe(403);
+        expect(refused.code).toBe("forbidden");
+        expect(refused.message).toMatch(/only the producer/);
+      }
+      expect((await readOrFail(base, reader.token, id)).status).toBe("open");
 
       const missing = await requestWithdraw(base, producer.token, ABSENT_ID, "gone");
       expect(missing.status).toBe(404);

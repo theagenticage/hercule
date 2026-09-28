@@ -40,14 +40,6 @@ export interface NotificationPageRequest {
   readonly direction: SortDirection;
 }
 
-/**
- * The producer a listing is limited to: one session, or one run with any of
- * its steps.
- */
-export type ProducerScope =
-  | { readonly type: "session"; readonly sessionId: string }
-  | { readonly type: "run"; readonly runId: string };
-
 /** A notification as it is written, before it has an id. */
 export type NewNotification = Omit<Notification, "id">;
 
@@ -221,15 +213,10 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /**
-     * Returns one page of the notifications that match a filter, ordered by
-     * `createdAt`. With `producer`, only the notifications that session or
-     * run produced are listed.
-     */
+    /** Returns one page of the notifications that match a filter, ordered by `createdAt`. */
     list: (
       filter: NotificationFilter,
       request: NotificationPageRequest,
-      producer?: ProducerScope,
     ): Effect.Effect<Page<Notification>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope: CursorScope = {
@@ -251,15 +238,6 @@ const make = Effect.gen(function* () {
         if (filter.kind !== undefined) clauses.push(sql`kind = ${filter.kind}`);
         if (filter.status !== undefined) clauses.push(sql`status = ${filter.status}`);
         if (filter.since !== undefined) clauses.push(sql`created_at >= ${filter.since}`);
-        if (producer?.type === "session") {
-          clauses.push(sql`producer ->> 'type' = 'session'
-                           AND producer ->> 'sessionId' = ${producer.sessionId}`);
-        }
-        if (producer?.type === "run") {
-          clauses.push(
-            sql`producer ->> 'type' = 'run' AND producer ->> 'runId' = ${producer.runId}`,
-          );
-        }
         const rows = yield* sql<NotificationRow>`
           SELECT ${sql.literal(COLUMNS)} FROM notifications
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}

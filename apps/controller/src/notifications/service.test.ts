@@ -403,56 +403,25 @@ describe("notification.read", () => {
     }
   });
 
-  it("shows a session only the notifications it produced, on read and on query", async () => {
-    const { own, listed, refused } = await run(
+  it("shows a session and a run every notification, whoever produced it", async () => {
+    const { created, readBySession, listedByRun } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
-        const mine = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
-        const theirs = yield* actAs(OTHER_SESSION, notifications.create(INFORMATIONAL));
-        yield* actAs(WORKFLOW_RUN, notifications.create(INFORMATIONAL));
-        return {
-          own: yield* actAs(PLAIN_SESSION, notifications.read(mine.notificationId)),
-          listed: (yield* actAs(PLAIN_SESSION, notifications.query({}))).items,
-          refused: yield* Effect.flip(
-            actAs(PLAIN_SESSION, notifications.read(theirs.notificationId)),
-          ),
-        };
-      }),
-    );
-
-    expect(own.title).toBe(DECISION.title);
-    expect(listed.map((notification) => notification.id)).toEqual([own.id]);
-    expect(refused).toMatchObject({ error: { code: "not_found" } });
-  });
-
-  it("shows a run only the notifications its steps produced, on read and on query", async () => {
-    const { produced, listed, refused } = await run(
-      Effect.gen(function* () {
-        const notifications = yield* NotificationService;
-        const otherStep: Actor = {
-          _tag: "run",
-          runId: WORKFLOW_RUN_ID,
-          stepId: "report",
-          workflowId: WORKFLOW_ID,
-        };
-        const produced = [
-          (yield* actAs(WORKFLOW_RUN, notifications.create(INFORMATIONAL))).notificationId,
-          (yield* actAs(otherStep, notifications.create(DECISION))).notificationId,
+        const created = [
+          (yield* actAs(PLAIN_SESSION, notifications.create(DECISION))).notificationId,
+          (yield* actAs(OTHER_SESSION, notifications.create(INFORMATIONAL))).notificationId,
+          (yield* actAs(SENT_RUN, notifications.create(INFORMATIONAL))).notificationId,
         ];
-        const theirs = yield* actAs(SENT_RUN, notifications.create(INFORMATIONAL));
-        yield* actAs(PLAIN_SESSION, notifications.create(INFORMATIONAL));
         return {
-          produced,
-          listed: (yield* actAs(WORKFLOW_RUN, notifications.query({}))).items,
-          refused: yield* Effect.flip(
-            actAs(WORKFLOW_RUN, notifications.read(theirs.notificationId)),
-          ),
+          created,
+          readBySession: yield* actAs(PLAIN_SESSION, notifications.read(created[1]!)),
+          listedByRun: (yield* actAs(WORKFLOW_RUN, notifications.query({}))).items,
         };
       }),
     );
 
-    expect(listed.map((notification) => notification.id).sort()).toEqual([...produced].sort());
-    expect(refused).toMatchObject({ error: { code: "not_found" } });
+    expect(readBySession.id).toBe(created[1]);
+    expect(listedByRun.map((notification) => notification.id).sort()).toEqual([...created].sort());
   });
 });
 
@@ -549,27 +518,30 @@ describe("notification.withdraw", () => {
     expect(stored.status).toBe("open");
   });
 
-  it("refuses the user, and tells another session the notification does not exist", async () => {
-    const { otherSession, user, stored } = await run(
+  it("refuses another session and the user, because only the producer may withdraw", async () => {
+    const { errors, stored } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
         const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
         const withdraw = notifications.withdraw({ id: notificationId, reason: "not mine" });
         return {
-          otherSession: yield* Effect.flip(actAs(OTHER_SESSION, withdraw)),
-          user: yield* Effect.flip(actAs(USER, withdraw)),
+          errors: [
+            yield* Effect.flip(actAs(OTHER_SESSION, withdraw)),
+            yield* Effect.flip(actAs(USER, withdraw)),
+          ],
           stored: yield* actAs(USER, notifications.read(notificationId)),
         };
       }),
     );
 
-    expect(otherSession).toMatchObject({ error: { code: "not_found" } });
-    expect(user).toMatchObject({
-      error: {
-        code: "forbidden",
-        message: expect.stringMatching(/only the producer/) as unknown,
-      },
-    });
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        error: {
+          code: "forbidden",
+          message: expect.stringMatching(/only the producer/) as unknown,
+        },
+      });
+    }
     expect(stored.status).toBe("open");
   });
 
