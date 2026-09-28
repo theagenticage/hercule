@@ -16,9 +16,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Actor, EventId } from "@hercule/contract";
 import { appendEvent } from "./append";
-
-/** The source of every event the controller logs about its own state. */
-export const PLATFORM_SOURCE = "platform";
+import { PLATFORM_SOURCE } from "./sources";
 
 /** One event the controller logs about itself, as it goes into the log. */
 export interface PlatformSourceEventToAppend {

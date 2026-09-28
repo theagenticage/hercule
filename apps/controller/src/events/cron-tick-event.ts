@@ -8,7 +8,8 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { CronTickEventPayload } from "@hercule/contract";
 import { appendEvent } from "./append";
-import { CRON_TICK_EVENT_KIND, CRON_TICK_SOURCE } from "./kinds";
+import { CRON_TICK_EVENT_KIND } from "./kinds";
+import { CRON_TICK_SOURCE } from "./sources";
 
 /**
  * Appends one `cron.tick` event to the log, in the caller's transaction, and

@@ -70,12 +70,8 @@ import {
 import { appendEvent } from "./append";
 import { SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
-import { CRON_TICK_SOURCE } from "./kinds";
 import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
-import { PLATFORM_SOURCE } from "./platform-source-event";
-
-/** The source of every event `event.emit` appends. */
-const MANUAL_SOURCE = "manual";
+import { isControllerSource, MANUAL_SOURCE } from "./sources";
 
 /** The filters and paging options of `event.query`. */
 const QueryInput = Schema.Struct({
@@ -383,15 +379,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${input.id}
         `;
         const row = rows[0];
-        // The controller writes its own events under two sources: "platform"
-        // for audit entries and platform events, and "cron" for the
-        // Scheduler's ticks. A tick's payload names the trigger it fires, so
-        // an added ref must not be able to widen what it matches either.
-        if (
-          row === undefined ||
-          row.source === PLATFORM_SOURCE ||
-          row.source === CRON_TICK_SOURCE
-        ) {
+        if (row === undefined || isControllerSource(row.source)) {
           return yield* Effect.fail(createNotFoundError("no such event"));
         }
         const held = parseEventRow(row);

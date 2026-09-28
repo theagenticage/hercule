@@ -16,12 +16,6 @@ import type { PlatformEventKind } from "./platform-events";
 export const CRON_TICK_EVENT_KIND = "cron.tick";
 
 /**
- * The source of every `cron.tick` event. Only the Scheduler writes events with
- * this source, so a tick with any other source did not come from a schedule.
- */
-export const CRON_TICK_SOURCE = "cron";
-
-/**
  * The description of each platform event kind. The record's type names every
  * kind the controller emits, so a kind cannot be emitted without being in the
  * catalog, where a trigger can name it.

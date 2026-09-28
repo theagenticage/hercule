@@ -13,13 +13,7 @@
 export { AUDIT_KINDS, AuditLog, AuditLogLayer, type AuditEntry, type AuditKind } from "./audit-log";
 export { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
 export { appendCronTickEvent } from "./cron-tick-event";
-export {
-  CRON_TICK_EVENT_KIND,
-  CRON_TICK_SOURCE,
-  EventKinds,
-  EventKindsLayer,
-  isCoreEventKind,
-} from "./kinds";
+export { CRON_TICK_EVENT_KIND, EventKinds, EventKindsLayer, isCoreEventKind } from "./kinds";
 export {
   advanceConsumerCursor,
   readConsumerPosition,
@@ -35,3 +29,4 @@ export {
   type PlatformEventKind,
 } from "./platform-events";
 export { EventService, EventServiceLayer } from "./service";
+export { CRON_TICK_SOURCE } from "./sources";
