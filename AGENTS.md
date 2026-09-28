@@ -15,7 +15,7 @@ Before writing code:
 1. **`CONTEXT.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
 2. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
 3. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
-4. **For UI work**: `docs/design-language.md`.
+4. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md` and the Crew Bureau pages it names.
 
 If what you're about to build contradicts the spec or an ADR, stop and say so explicitly ("Contradicts ADR-0007 because..."). Never silently deviate; never silently pick one of several possible readings. If the spec leaves your question open, check `docs/spec/16-open-items.md` first - it may already be marked an implementer's choice or handed to a ticket.
 
@@ -75,6 +75,7 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Every operation has a CLI row.** An operation added to `packages/contract` lands its row in the CLI table beside the operation table in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason. The row type and the tree tests refuse a contract without it. (Spec 11 §6.3)
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you.
+- **In the desktop app, performance and resource use come first.** Before a desktop change is built, its plan states what it will cost and how that cost is measured: processes, memory, work while idle, work per streamed token, and bundle bytes. Afterwards the measurement is recorded in spec 17 §Performance. A change that misses a budget does not merge. (ADR 0037)
 - **Never touch `~/.hercule`.** That is the user's live Hercule Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hercule` command that writes) uses a throwaway home: `HERCULE_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hercule/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 - **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
 

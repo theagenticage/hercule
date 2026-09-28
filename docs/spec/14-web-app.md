@@ -39,6 +39,8 @@ Discipline: **no domain logic in components**. Anything that interprets domain d
 
 Desktop readiness is achieved through this structure, not through a shell. Planning assumption: Electron (any realistic option renders web tech, so `ui` transfers either way). The final call belongs to the post-v1 desktop effort. The desktop app is explicitly NOT a wrapped webview of the web app; it reuses `client-core` and `ui` and stays free to build desktop-specific UI. The onboarding and setup views ship in the web app and are reused unchanged when the desktop app becomes the installer ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 
+*(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275), [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)* The desktop effort has made its call. The desktop app is Electron, and it shares `contract` and `client-core` with the web app, not `ui`. Its components are its own, drawn in the Crew Bureau design system, because the native feel lives in the components. The paragraph above still holds, except for the reuse of `ui`. The desktop app does not reuse the web app's onboarding and setup views either: until it becomes the installer, it opens the web app's setup in the default browser. The desktop app is specified in [./17-desktop-app.md](./17-desktop-app.md).
+
 ## Live model: one WebSocket, subscriptions only
 
 One WebSocket per client. It carries **Live Topic** subscribe/unsubscribe and pushes; nothing else. A Live Topic is a client viewing concern (a session transcript, the event feed, notifications), distinct from the domain term Subscription ([../../CONTEXT.md](../../CONTEXT.md)).
@@ -559,7 +561,7 @@ Throwaway single-file HTML prototypes, not app code. They are the visual referen
 
 ## Post-v1
 
-- **Desktop app.** High priority later; v1 keeps `client-core` + `ui` framework-agnostic and free of domain logic in components so the desktop app reuses them wholesale.
+- **Desktop app.** High priority later; v1 keeps `client-core` framework-agnostic and components free of domain logic, so the desktop app reuses the client logic wholesale. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): the desktop app has its own components and does not reuse `ui`; its first milestone is [./17-desktop-app.md](./17-desktop-app.md).)*
 - **Visual drag-and-drop workflow authoring.** The ringfenced `workflow-editor` module lets a visual editor replace the internals.
 - **Bespoke per-workflow-type UIs** (for example a scheduled-tasks view). The screen inventory is fixed without them; a scheduled-task form is sugar over a one-step cron-triggered workflow.
 - **Web Push notifications.** Needs a secure context; native desktop notifications arrive with the desktop app.
