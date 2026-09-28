@@ -7,7 +7,7 @@
   "scripts": {
     "prepare": "bun run scripts/gen-version.ts && bun run scripts/gen-web-bundle.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=4096 eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "bun --bun run vitest run --project node && vitest run --project react",
     "test:binary": "bun --bun run vitest run --project binary",

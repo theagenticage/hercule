@@ -189,6 +189,11 @@ export default tseslint.config(
   tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
+      // Type-aware linting holds the backend's, the UI's and the web app's
+      // TypeScript programs in memory at once, which needs more than 2 GB.
+      // Node sizes its default heap from the machine's memory, so the lint
+      // script sets the heap to 4 GB: without it, lint passes on a developer
+      // machine and runs out of memory on a CI runner.
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
