@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ConversationMessage } from "@hercule/contract";
 import { OwnerBubble } from "../bubble";
-import { Markdown } from "../thread/markdown";
+import { Markdown } from "../markdown";
 import { TimeSeparator } from "../time-separator";
 
 /**

@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Markdown } from "./thread/markdown";
+import { Markdown } from "./markdown";
 
 /**
  * Renders what the user wrote, in a bubble: a thread turn's message, or the
