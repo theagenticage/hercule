@@ -14,6 +14,7 @@ import { expect } from "vitest";
 import type * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
@@ -41,13 +42,16 @@ import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
+  BoundOperationDescriberLayer,
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
+  Live,
   LostRunnerSweepInterval,
   RunFibers,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
+import { CurrentActor, type Actor } from "../actor";
 import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -147,7 +151,8 @@ const buildServices = (home: string) =>
         ),
       ),
     ),
-    Layer.provideMerge(NotificationServiceLayer),
+    // The real describer, so a request reads the describe lines the binary writes.
+    Layer.provideMerge(NotificationServiceLayer.pipe(Layer.provide(BoundOperationDescriberLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -237,6 +242,22 @@ const makeRepeatable = <A, E, R>(
     (services) => () => Effect.runPromiseWith(services)(Effect.orDie(effect)),
   );
 
+/**
+ * Runs an effect as the user against the running controller's live session
+ * operations and its database, and returns how the effect ended. For a test
+ * of a `Live` method that no route calls.
+ */
+export type LiveSessionsRunner = <A, E>(
+  effect: Effect.Effect<A, E, Live | SqlClient.SqlClient>,
+) => Promise<Exit.Exit<A, E>>;
+
+/** The user, as `LiveSessionsRunner` runs an effect. */
+const TEST_USER: Actor = {
+  _tag: "user",
+  userId: "0199e0e7-0000-7000-8000-000000000000",
+  credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
+};
+
 /** Reads the subscriptions the controller holds for clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
@@ -253,6 +274,7 @@ export interface ServerHarness {
   readonly insertRunner: RunnerArranger;
   readonly joinToken: JoinTokenArranger;
   readonly reboot: RebootArranger;
+  readonly runWithLiveSessions: LiveSessionsRunner;
   /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
@@ -388,6 +410,15 @@ export const withServer = (
               }),
             ),
           );
+        const liveSessions = yield* Effect.context<Live | SqlClient.SqlClient>();
+        const runWithLiveSessions: LiveSessionsRunner = (effect) =>
+          Effect.runPromiseExit(
+            Effect.provideService(
+              Effect.provideContext(effect, liveSessions),
+              CurrentActor,
+              TEST_USER,
+            ),
+          );
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -405,6 +436,7 @@ export const withServer = (
             insertRunner,
             joinToken,
             reboot,
+            runWithLiveSessions,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );

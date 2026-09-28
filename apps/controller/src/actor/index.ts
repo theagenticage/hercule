@@ -266,8 +266,12 @@ export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =
 const USER_ONLY = "only the user may make this call; no grant confers it";
 
 /**
- * Runs the grant check for an operation that acts on the caller's own rows,
- * and so needs the user rather than any actor. Returns the user actor.
+ * Runs the grant check for an operation only the user may call, such as one
+ * that acts on the caller's own rows. Returns the user actor.
+ *
+ * `refusal` is the message a session or a run is refused with. Pass one when
+ * the operation has its own reason to refuse them, so the caller learns why
+ * holding the grant does not help.
  *
  * Fails with:
  *
@@ -280,13 +284,14 @@ const USER_ONLY = "only the user may make this call; no grant confers it";
  */
 export const requireUserActor = (
   id: OperationId,
+  refusal: string = USER_ONLY,
 ): Effect.Effect<UserActor, Forbidden | Unauthenticated> =>
   Effect.flatMap(requireGrant(id), (actor) => {
     if (actor._tag === "user") return Effect.succeed(actor);
     const grant = findRequiredGrant(OPERATIONS[id].requires);
     return Effect.fail(
       actor._tag !== "none" && grant !== undefined
-        ? createForbiddenError(grant, USER_ONLY)
+        ? createForbiddenError(grant, refusal)
         : createUnauthenticatedError(NO_CREDENTIAL),
     );
   });

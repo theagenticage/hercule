@@ -387,6 +387,20 @@ export const RunStartInput = closedStruct({
 
 export type RunStartInput = Schema.Schema.Type<typeof RunStartInput>;
 
+/**
+ * One call of `run.start` that runs a stored workflow: the workflow's id and
+ * the values its run starts with. A workflow step and a bound answer send this
+ * shape. Neither may send a workflow's source: a step that starts a run of a
+ * workflow written into its own params would be a sub-workflow, which is not
+ * built, and an answer holds ids, not documents.
+ */
+export const RunStartCall = closedStruct({
+  workflowId: Id,
+  inputs: Schema.optionalKey(RunInputs),
+});
+
+export type RunStartCall = Schema.Schema.Type<typeof RunStartCall>;
+
 /** The response to starting a run: the id to read it by. */
 export const RunStarted = Schema.Struct({ runId: Id });
 

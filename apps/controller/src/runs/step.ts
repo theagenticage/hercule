@@ -26,11 +26,13 @@ import {
   type Run,
   type RunStarted,
   type WorkflowDefinition,
+  type RunStartCall,
   type RunStartInput,
   type StepError,
   type TaskCreateInput,
   type NotificationCreateInput,
   type TaskFilter,
+  type TaskUpdateCall,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
@@ -278,7 +280,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
         execute: (input) => {
           // A request sends the task id in the path; a step has no path, so it
           // sends the id as taskId.
-          const { taskId, ...fields } = input as { readonly taskId: string };
+          const { taskId, ...fields } = input as TaskUpdateCall;
           return tasks.update({ id: taskId, ...fields });
         },
       },
@@ -289,7 +291,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
         inTransaction: true,
         execute: (input) => notifications.create(input as NotificationCreateInput),
       },
-      "run.start": { inTransaction: true, execute: (input) => start(input as RunStartInput) },
+      "run.start": { inTransaction: true, execute: (input) => start(input as RunStartCall) },
       wait: {
         inTransaction: false,
         execute: (input, step) =>

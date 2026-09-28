@@ -1,11 +1,12 @@
 /**
  * Tests the output that is not the generic table: the hint after a spawn, the
  * transcript, the output of workflow read, create, update and validate, and
- * the two catalogs used to write a workflow. Also tests one rule of the
- * table: each row stays on one line.
+ * the two catalogs used to write a workflow, and a notification's answers.
+ * Also tests two rules of all output: each table row stays on one line, and
+ * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
-import { renderHuman } from "./render";
+import { removeTerminalControls, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
 const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
@@ -679,5 +680,215 @@ describe("hercule run", () => {
     expect(readStartedBy({ kind: "action", parentRunId: RUN, stepId: "spawn" })).toBe(
       "startedBy  run 000000bb at step spawn",
     );
+  });
+});
+
+describe("hercule notification", () => {
+  const NOTIFICATION = "0199e0e7-1111-7000-8000-00000000abcd";
+  /** The answers as the controller stores them; an open decision's also carry describe lines. */
+  const stored = [
+    {
+      id: "event-sourced",
+      label: "Event-sourced",
+      description: "Replays the ledger.",
+      operation: { op: "session.input", input: { sessionId: SESSION, text: "Event-sourced" } },
+      primary: true,
+    },
+    { id: "neither", label: "Neither", operation: null },
+  ];
+  const decision = {
+    id: NOTIFICATION,
+    kind: "triage.unsure",
+    title: "Which architecture?",
+    body: "Two options.\nBoth work.",
+    producer: { type: "session", sessionId: SESSION },
+    subject: [],
+    actions: [
+      {
+        ...stored[0],
+        describeLine: [
+          { kind: "text", text: "Reply to session " },
+          { kind: "name", text: "Design ordering" },
+        ],
+      },
+      { ...stored[1], describeLine: [{ kind: "text", text: "Does nothing" }] },
+    ],
+    status: "open",
+    createdAt: "2026-09-28T10:00:00.000Z",
+  };
+
+  it("prints an open decision's fields, its body, and a table of its answers with what each does", () => {
+    const lines = renderHuman(
+      { kind: "value", value: decision },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^title +Which architecture\?$/));
+    expect(lines.slice(lines.indexOf("body"))).toEqual([
+      "body",
+      "Two options.",
+      "Both work.",
+      "",
+      "answers",
+      "id             label          does                                description",
+      "event-sourced  Event-sourced  Reply to session «Design ordering»  Replays the ledger.",
+      "neither        Neither        Does nothing",
+    ]);
+    expect(lines.join("\n")).not.toContain("operation");
+  });
+
+  it("prints a resolved decision's answers without what each does, and its resolution", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          body: undefined,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "decided",
+            actionId: "neither",
+            actor: "user",
+            origin: "api",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^resolution\.origin +api$/));
+    expect(lines).not.toContain("body");
+    expect(lines.slice(lines.indexOf("answers"))).toEqual([
+      "answers",
+      "id             label          description",
+      "event-sourced  Event-sourced  Replays the ledger.",
+      "neither        Neither",
+    ]);
+  });
+
+  it("lists each notification on one line, with its answers by label and without their operations", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { items: [decision] } },
+      lookUpCommand("notification", "list"),
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^id +kind +title +status +answers +age$/);
+    expect(lines[1]).toMatch(
+      new RegExp(
+        `^${NOTIFICATION.slice(-8)} +triage\\.unsure +Which architecture\\? +open +Event-sourced / Neither +\\S+$`,
+      ),
+    );
+  });
+
+  it("prints an informational notification without an answers heading", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { ...decision, body: undefined, actions: [], status: "resolved" } },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).not.toContain("answers");
+  });
+
+  it("prints the answer a decision was resolved with after act", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "decided",
+            actionId: "event-sourced",
+            actor: "user",
+            origin: "api",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "act"),
+    );
+
+    expect(lines).toEqual([`notification ${NOTIFICATION.slice(-8)} decided: Event-sourced`]);
+  });
+
+  it("says how the decision was resolved after act when it was not with the answer, such as withdrawn first", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "withdrawn",
+            reason: "The session ended before the request was answered.",
+            actor: "user",
+            origin: "core",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "act"),
+    );
+
+    expect(lines).toEqual([
+      `notification ${NOTIFICATION.slice(-8)} withdrawn: The session ended before the request was answered.`,
+    ]);
+  });
+
+  it("removes escape sequences and bidirectional controls from what an agent wrote", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          title: "Which\u001b[8m architecture?",
+          body: "Two options.\u001b[2K\rBoth\tfine.",
+          actions: [
+            {
+              ...stored[0],
+              label: "Event\u202E-sourced",
+              describeLine: [
+                { kind: "text", text: "Reply to session " },
+                { kind: "name", text: "Design\u001b[2K\r ordering" },
+              ],
+            },
+          ],
+        },
+      },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^title +Which\[8m architecture\?$/));
+    expect(lines.slice(lines.indexOf("body"))).toEqual([
+      "body",
+      "Two options.[2KBoth\tfine.",
+      "",
+      "answers",
+      "id             label          does                                   description",
+      "event-sourced  Event-sourced  Reply to session «Design[2K ordering»  Replays the ledger.",
+    ]);
+  });
+});
+
+describe("removeTerminalControls", () => {
+  it("removes the C0 and C1 control characters but keeps tabs and line breaks", () => {
+    expect(removeTerminalControls("a\u0000b\u0007c\u001bd\re\u007ff\u009bg\th\ni")).toBe(
+      "abcdefg\th\ni",
+    );
+  });
+
+  it("removes every bidirectional control", () => {
+    const controls = "\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u200E\u200F\u061C";
+    expect(removeTerminalControls(`left${controls}right`)).toBe("leftright");
+  });
+
+  it("leaves ordinary text, including non-Latin scripts and emoji, alone", () => {
+    const text = "Déploiement «prod» · שלום · 🚀";
+    expect(removeTerminalControls(text)).toBe(text);
   });
 });

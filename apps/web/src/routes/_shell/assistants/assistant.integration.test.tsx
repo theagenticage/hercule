@@ -770,9 +770,10 @@ describe("Assistant conversation: the row under the last bubble", () => {
     expect(screen.getByText("Ada needs your approval").className).toMatch(/\bunderline\b/);
     expect(screen.queryByText("Ada is working…")).toBeNull();
     for (const each of buildApprovalCard(REQUEST).rows) {
+      const describeLine = each.describeLine.map((part) => part.text).join("");
       expect(
         screen.queryByRole("button", {
-          name: (name) => name.includes(each.label) && name.includes(each.describe),
+          name: (name) => name.includes(each.label) && name.includes(describeLine),
         }),
       ).toBeNull();
     }

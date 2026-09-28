@@ -36,6 +36,8 @@ import {
 } from "../conversations";
 import { Controller, ControllerLayer } from "../controller";
 import {
+  Answering,
+  AnsweringLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
   DispatchLayer,
@@ -212,12 +214,16 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
 const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) =>
   Effect.gen(function* () {
     const notifications = yield* NotificationService;
+    const answering = yield* Answering;
     return handlers
       .handle("query", ({ query }) => withApiErrors(notifications.query(query)))
       .handle("read", ({ params }) => withApiErrors(notifications.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(notifications.create(payload)))
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(notifications.withdraw({ id: params.id, ...payload })),
+      )
+      .handle("act", ({ params, payload }) =>
+        withApiErrors(answering.act({ id: params.id, ...payload })),
       );
   }),
 );
@@ -628,8 +634,12 @@ export const operationLayers = Layer.mergeAll(
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
+  // Taking an answer of a decision runs task, run and live session
+  // operations, so `Answering` is given the run layers, which hold the task
+  // service too, and sits in this group for `Live`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunLayers)),
+    AnsweringLayer.pipe(Layer.provide(RunLayers)),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events

@@ -25,8 +25,8 @@ import { hashToken } from "../credentials";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
+import { NotificationServiceTestLayer } from "../notifications/testing";
 import { SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
@@ -53,7 +53,7 @@ const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClie
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(secrets),
-    Layer.provideMerge(NotificationServiceLayer),
+    Layer.provideMerge(NotificationServiceTestLayer),
     Layer.provideMerge(AuditLogLayer),
   );
 
@@ -953,5 +953,54 @@ describe("an answer that an input opened a turn", () => {
     expect(result.applied.status).toBe("busy");
     expect(result.applied.input).toMatchObject({ status: "delivered", delivery: "opened" });
     expect(result.status).toBe("idle");
+  });
+});
+
+/** Reads the status of every approval notification in the database. */
+const readApprovalNotificationStatuses = Effect.flatMap(
+  SqlClient.SqlClient,
+  (sql) =>
+    sql<{ readonly status: string }>`SELECT status FROM notifications WHERE kind = 'core.approval'`,
+);
+
+describe("a report applied after its session ended", () => {
+  it("stores no open request and raises no approval notification", async () => {
+    // The report is folded outside any transaction. A retired runner ends the
+    // session before the report's transaction opens.
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const event = {
+          _tag: "request.opened" as const,
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          request: {
+            requestId: "req-1",
+            itemId: "i1",
+            kind: "command_approval" as const,
+            decisions: ["allow", "deny"] as const,
+            detail: { command: "ls -la" },
+          },
+        };
+
+        const folded = yield* sessions.foldReport(runnerId, 1, event);
+        yield* withTransaction(sql, sessions.endOnRunner(runnerId));
+        yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!));
+
+        return {
+          session: Option.getOrThrow(yield* rows.one(sessionId)),
+          notifications: yield* readApprovalNotificationStatuses,
+        };
+      }),
+    );
+
+    expect(result.session.status).toBe("exited");
+    expect(result.session.openRequest).toBeNull();
+    expect(result.notifications).toEqual([]);
   });
 });

@@ -5,13 +5,32 @@
  * answer: the user must see what a click does, in the same words on every
  * screen (spec 10 §7.4, spec 14 §Answers as a ledger).
  */
-import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
+import {
+  APPROVAL_ANSWER_LABELS,
+  describeApprovalAnswer,
+  type ApprovalDecision,
+  type DescribeLine,
+  type OpenRequest,
+} from "@hercule/contract";
 
-/** One answer row. The whole row is the button; the label is its left column. */
+/**
+ * One answer row, in the shape the answer ledger takes. The whole row is the
+ * button; the label is its left column.
+ */
 export interface ApprovalRow {
-  readonly decision: ApprovalDecision;
+  /** The decision the row sends, which also tells the rows apart. */
+  readonly id: ApprovalDecision;
   readonly label: string;
-  readonly describe: string;
+  /**
+   * Always `false`: no answer to an approval carries more weight than the
+   * others, here or in the notification center.
+   */
+  readonly primary: false;
+  /**
+   * What the answer does, as one text part. The card already shows what the
+   * request is about above its answers, so the line does not repeat it.
+   */
+  readonly describeLine: DescribeLine;
 }
 
 /**
@@ -62,41 +81,6 @@ export interface ApprovalCard {
   /** One row per decision the request offers, in the request's order. */
   readonly rows: readonly ApprovalRow[];
 }
-
-const LABELS: Readonly<Record<ApprovalDecision, string>> = {
-  allow: "Allow",
-  allow_always: "Allow always",
-  deny: "Deny",
-  cancel: "Cancel",
-};
-
-/**
- * The subject of each request kind, as the answer descriptions refer to it.
- * Without a subject, the descriptions of a request kind would say nothing
- * useful, so every kind has one.
- */
-const SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
-  command_approval: "the command",
-  file_change_approval: "the change",
-  file_read_approval: "the read",
-  tool_approval: "the tool call",
-  question: "the question",
-};
-
-const describeDecision = (decision: ApprovalDecision, subject: string): string => {
-  switch (decision) {
-    case "allow":
-      return `Runs ${subject} this once; the agent asks again next time.`;
-    case "allow_always":
-      // Not "for the rest of this thread": a resume starts a new harness
-      // process, and the harness keeps the rule only in the process that asked.
-      return `Runs ${subject} and stops asking for it while this thread keeps running.`;
-    case "deny":
-      return `Denies ${subject}; the agent is told and continues.`;
-    case "cancel":
-      return `Denies ${subject} and stops the turn.`;
-  }
-};
 
 /**
  * The harness asks for answers, but `session.respond` can only send a
@@ -160,8 +144,9 @@ export const buildApprovalCard = (request: OpenRequest): ApprovalCard => ({
   questions: buildCardQuestions(request),
   note: request.kind === "question" ? NOT_BUILT : null,
   rows: request.decisions.map((decision) => ({
-    decision,
-    label: LABELS[decision],
-    describe: describeDecision(decision, SUBJECTS[request.kind]),
+    id: decision,
+    label: APPROVAL_ANSWER_LABELS[decision],
+    primary: false,
+    describeLine: [{ kind: "text", text: describeApprovalAnswer(decision, request.kind) }],
   })),
 });

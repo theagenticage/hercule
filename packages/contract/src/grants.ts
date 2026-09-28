@@ -7,9 +7,10 @@
  * - `profile.create` takes a list of grants;
  * - the CLI's `--help` prints the grant an operation needs.
  *
- * So the vocabulary lives here rather than only inside the controller.
- * `grants.test.ts` checks that this list is the same list the controller
- * enforces, so the two can never drift apart.
+ * So the vocabulary lives here rather than only inside the controller. The
+ * controller keeps no list of its own: it imports `Grant` and `GrantSchema`
+ * from here. `api.test.ts` checks that every operation requires a grant from
+ * this list.
  */
 import { Schema } from "effect";
 

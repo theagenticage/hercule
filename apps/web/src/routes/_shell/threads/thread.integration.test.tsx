@@ -2671,9 +2671,10 @@ describe("Thread: the permission card", () => {
     request: NonNullable<Session["openRequest"]>,
     decision: string,
   ): ((name: string) => boolean) => {
-    const found = buildApprovalCard(request).rows.find((each) => each.decision === decision);
+    const found = buildApprovalCard(request).rows.find((each) => each.id === decision);
     if (found === undefined) throw new Error(`the card offers no ${decision} row`);
-    return (name: string) => name.includes(found.label) && name.includes(found.describe);
+    const describeLine = found.describeLine.map((part) => part.text).join("");
+    return (name: string) => name.includes(found.label) && name.includes(describeLine);
   };
 
   /** Returns the composer's card, the raised box that holds the message. Throws if it is missing. */
@@ -3209,10 +3210,11 @@ describe("Thread: the session view of an assistant's session", () => {
     });
     await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
 
-    const allow = buildApprovalCard(REQUEST).rows.find((row) => row.decision === "allow")!;
+    const allow = buildApprovalCard(REQUEST).rows.find((row) => row.id === "allow")!;
+    const describeLine = allow.describeLine.map((part) => part.text).join("");
     await user.click(
       await screen.findByRole("button", {
-        name: (name) => name.includes(allow.label) && name.includes(allow.describe),
+        name: (name) => name.includes(allow.label) && name.includes(describeLine),
       }),
     );
 

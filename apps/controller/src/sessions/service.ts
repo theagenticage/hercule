@@ -73,9 +73,19 @@ import {
 } from "../db";
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
+import { NotificationService } from "../notifications";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
+import {
+  buildApprovalNotification,
+  buildRequestSubject,
+  buildRespondOperation,
+  buildWaitEndedWithdrawReason,
+  buildWithdrawReason,
+  WITHDRAW_REASON_SESSION_ENDED,
+  type WaitEndedBy,
+} from "./approval-notification";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -87,7 +97,14 @@ import {
   type SessionAccess,
   type StoredSession,
 } from "./repository";
-import { fold, computeOpenRequestAfter, startTracking, type Folded, type Tracked } from "./stream";
+import {
+  fold,
+  computeOpenRequestAfter,
+  isRequestEvent,
+  startTracking,
+  type Folded,
+  type Tracked,
+} from "./stream";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
@@ -210,19 +227,6 @@ export interface TakeInputRequest<E> {
 }
 
 /**
- * One event reported by a runner, checked against its session and folded into
- * the stored stream. It holds everything the write needs, worked out before a
- * transaction opens. `foldReport` returns it and only `applyReport` reads it.
- */
-export interface FoldedReport {
-  /** The session as it was read before the write. The fold used this state. */
-  readonly session: StoredSession;
-  readonly folded: Folded;
-  /** The open request after this event, or `undefined` to leave it unchanged. */
-  readonly park: OpenRequest | null | undefined;
-}
-
-/**
  * What the controller daemon still has to do after a report's rows are
  * committed. Each item means sending a frame to a runner, which this domain
  * never does itself.
@@ -263,6 +267,15 @@ const INPUT_DIRECTION: SortDirection = "asc";
 const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already been sent to the runner";
+
+/**
+ * The refusal of a second answer to one request. The runner still reports
+ * the request as open until the harness has taken the first answer, so
+ * without this check a second click would send the harness a second answer.
+ */
+const ALREADY_ANSWERED =
+  "that request was already answered, or its wait was ended; " +
+  "read the session again to see whether it is waiting on a request now";
 
 /**
  * The refusal of `input.update` and `input.cancel` on a session that answers
@@ -334,6 +347,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const observer = yield* SessionObserver;
   const workspaces = yield* WorkspaceService;
+  const notifications = yield* NotificationService;
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -469,6 +483,48 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Withdraws the approval notification about the request a session was
+   * waiting on, if one was open. It does nothing when the request was
+   * already answered through the controller, because that answer resolved
+   * the notification.
+   */
+  const withdrawOpenRequestNotification = (
+    session: Pick<StoredSession, "id" | "openRequest">,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    session.openRequest === null
+      ? Effect.void
+      : notifications.withdrawDecisionsAbout(
+          [buildRequestSubject(session.id, session.openRequest.requestId)],
+          reason,
+        );
+
+  /**
+   * Stores the request a session now waits on, or `null` for none, and keeps
+   * the approval notification in step with it, in the caller's transaction:
+   *
+   * - the notification about the request that stops waiting is withdrawn
+   *   with `reason`;
+   * - an approval request that starts waiting raises a new notification. A
+   *   request reported again with the same id keeps its notification.
+   *
+   * `session` is the row as it was before this change.
+   */
+  const replaceOpenRequest = (
+    session: StoredSession,
+    request: OpenRequest | null,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* sessions.setOpenRequest(session.id, request);
+      if (session.openRequest?.requestId === request?.requestId) return;
+      yield* withdrawOpenRequestNotification(session, reason);
+      const notification =
+        request === null ? undefined : buildApprovalNotification(session, request);
+      if (notification !== undefined) yield* notifications.createCoreNotification(notification);
+    });
+
+  /**
    * Does the cleanup after sessions move to `exited`, whatever ended them.
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
@@ -478,6 +534,8 @@ const make = Effect.gen(function* () {
    * - releases its lease on its workspace: `idle` when it can be resumed,
    *   so a thread the user may come back to keeps its files for the long
    *   window, and `orphan` when it cannot;
+   * - withdraws the approval notification about the request it was waiting
+   *   on;
    * - tells `SessionObserver` that the session exited, and whether the
    *   crash-loop guard now holds it back from a resume;
    * - forgets its token and ingest state, and announces it once.
@@ -494,6 +552,10 @@ const make = Effect.gen(function* () {
         if (!keepsInputsOnExit(session)) {
           yield* inputs.cancelQueued(session.id, cancelReason);
         }
+        // For an exit the harness reported, `applyReport` has already
+        // withdrawn the notification when it cleared the open request, and
+        // this finds nothing open. Every other end clears the request here.
+        yield* withdrawOpenRequestNotification(session, WITHDRAW_REASON_SESSION_ENDED);
         // Read again after the exit and the cancel: whether the guard holds
         // the session depends on the input that is still waiting.
         const after = yield* sessions.one(session.id);
@@ -874,6 +936,58 @@ const make = Effect.gen(function* () {
       requestId: string,
       decision: ApprovalDecision,
     ): SessionRespond => ({ _tag: "sessionRespond", sessionId, requestId, decision }),
+
+    /**
+     * Resolves the approval notification about a session's request as
+     * decided, with the answer that sends `decision`, stamped with the
+     * current actor. The daemon calls it in the transaction that answers the
+     * request, so the notification says the request was answered, wherever
+     * it was answered. Does nothing when no open notification offers that
+     * answer, as for a `question` request, which raises none.
+     *
+     * Fails with `InvalidState` when the notification about the request is
+     * already resolved: the request was answered before, or the user ended
+     * the wait by interrupting the turn or stopping the session. The failure
+     * rolls back the caller's transaction, so no second answer is recorded or
+     * sent.
+     */
+    resolveApprovalNotification: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): Effect.Effect<void, InvalidState | SqlError> =>
+      Effect.flatMap(
+        notifications.resolveDecisionsAnsweredBy(
+          buildRequestSubject(sessionId, requestId),
+          buildRespondOperation(sessionId, requestId, decision),
+        ),
+        (outcome) =>
+          outcome === "already-resolved"
+            ? Effect.fail(createInvalidStateError(ALREADY_ANSWERED))
+            : Effect.void,
+      ),
+
+    /**
+     * Withdraws the approval notification about the request a session waits
+     * on, because the user ended the wait without answering: by interrupting
+     * the turn or by stopping the session. The reason stored on the
+     * notification says which. Reads the session in the caller's
+     * transaction, so it sees the request that is open when the transaction
+     * runs. Does nothing when no request is open or its notification is
+     * already resolved.
+     */
+    withdrawApprovalNotification: (
+      sessionId: string,
+      endedBy: WaitEndedBy,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.flatMap(sessions.one(sessionId), (found) =>
+          Option.isNone(found)
+            ? Effect.void
+            : withdrawOpenRequestNotification(found.value, buildWaitEndedWithdrawReason(endedBy)),
+        ),
+      ),
 
     /**
      * Puts a session back on the queue when no runner accepted its start frame.
@@ -1345,10 +1459,10 @@ const make = Effect.gen(function* () {
 
     /**
      * Checks one event a runner reported against the session it names, and
-     * folds it into the stored stream. Writes nothing: it works out the write
-     * before any transaction opens. Returns `undefined` when there is nothing
-     * to write: the session does not exist, is not on this runner, or has
-     * already seen the event.
+     * folds it into the stored stream. Writes nothing: it works out the
+     * stream rows before any transaction opens. Returns `undefined` when there
+     * is nothing to write: the session does not exist, is not on this runner,
+     * or has already seen the event.
      *
      * A delta's tap is announced here, before the transaction and never inside
      * it. A delta is not stored until it is flushed, but a client watching the
@@ -1359,14 +1473,13 @@ const make = Effect.gen(function* () {
       runnerId: string,
       seq: number,
       event: ProviderEvent,
-    ): Effect.Effect<FoldedReport | undefined, SqlError> =>
+    ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
         const id = event.sessionId;
         const found = yield* sessions.one(id);
         // A runner may report only on sessions placed on it. An event for any
         // other session is ignored.
         if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
-        const before = found.value.status;
         const held = tracking.get(id) ?? startTracking(yield* sessions.ingestState(id));
         const folded = fold(held, seq, event);
         if (folded === undefined) return undefined;
@@ -1382,17 +1495,7 @@ const make = Effect.gen(function* () {
             },
           });
         }
-        return {
-          session: found.value,
-          folded,
-          // The open request after this event, or `undefined` for no change. An
-          // event for a session that has already exited never opens a request
-          // again.
-          park:
-            before === "exited"
-              ? undefined
-              : computeOpenRequestAfter(event, found.value.openRequest),
-        };
+        return folded;
       }),
 
     /**
@@ -1401,16 +1504,32 @@ const make = Effect.gen(function* () {
      * transaction, so the caller's other writes for the report commit with it.
      * Returns what is left to do after the commit, because that affects more
      * than this session's rows.
+     *
+     * The session is read again here, inside the transaction, and every
+     * decision about its status and its open request is made from that read.
+     * Something else, such as a retired runner, can end the session between
+     * `foldReport` and this write. A report that arrives that late is still
+     * recorded, but it never moves the session or opens a request on it, so
+     * it cannot raise an approval notification that nothing would withdraw.
      */
     applyReport: (
       runnerId: string,
       event: ProviderEvent,
-      report: FoldedReport,
+      folded: Folded,
     ): Effect.Effect<AppliedReport, SqlError> =>
       Effect.gen(function* () {
-        const { session, folded, park } = report;
-        const id = session.id;
+        const id = event.sessionId;
+        // `foldReport` found the row, and sessions are never deleted.
+        const session = Option.getOrThrow(yield* sessions.one(id));
         const before = session.status;
+        // Only these events can open or close a request. An event for a
+        // session that has already exited never opens a request again.
+        const requestEvent = before !== "exited" && isRequestEvent(event) ? event : undefined;
+        // The open request after this event, or `undefined` for no change.
+        const park =
+          requestEvent === undefined
+            ? undefined
+            : computeOpenRequestAfter(requestEvent, session.openRequest);
         const at = yield* nowIso;
         for (const row of folded.rows) yield* sessions.append(id, row);
         if (folded.rows.length > 0) {
@@ -1424,7 +1543,9 @@ const make = Effect.gen(function* () {
         if (native !== undefined) {
           yield* sessions.bind(id, runnerId, session.instanceId, native);
         }
-        if (park !== undefined) yield* sessions.setOpenRequest(id, park);
+        if (requestEvent !== undefined && park !== undefined) {
+          yield* replaceOpenRequest(session, park, buildWithdrawReason(requestEvent));
+        }
         // A session starting or exiting is what counts as use of its
         // workspace. The time is shown to the user; how long the workspace is
         // kept is decided by its leases, not by this time.
@@ -1575,7 +1696,13 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost | SessionObserver | WorkspaceService
+  | SqlClient.SqlClient
+  | AuditLog
+  | SessionTokens
+  | PluginHost
+  | SessionObserver
+  | WorkspaceService
+  | NotificationService
 > = Layer.effect(SessionService)(make);
 
 /**

@@ -25,6 +25,14 @@ export {
 
 export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily } from "./grants";
 
+export {
+  decodeBindableOperation,
+  OWN_SESSION_ALIAS,
+  type BindableOperation,
+  type BindableOperationId,
+  type BindableOperationInput,
+} from "./bound-operations";
+
 export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
 export {
@@ -259,6 +267,7 @@ export {
   TaskFilter,
   TaskPriority,
   TaskStatus,
+  TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
   refuseEmptyTaskUpdate,
@@ -278,9 +287,13 @@ export {
   MAX_NOTIFICATION_SUBJECTS,
   MAX_NOTIFICATION_TITLE_LENGTH,
   MAX_WITHDRAW_REASON_LENGTH,
+  DescribeLine,
+  DescribeLinePart,
   MuteKey,
   NOTIFICATION_SORT_FIELDS,
   Notification,
+  NotificationActInput,
+  NotificationAction,
   NotificationCreateInput,
   NotificationCreateResult,
   NotificationFilter,
@@ -393,6 +406,7 @@ export {
   RunFilter,
   RunInputs,
   RunOrigin,
+  RunStartCall,
   RunStartInput,
   RunStarted,
   RunStatus,
@@ -402,6 +416,7 @@ export {
   StepStatus,
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
+export { APPROVAL_ANSWER_LABELS, describeApprovalAnswer } from "./approval-answers";
 export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {

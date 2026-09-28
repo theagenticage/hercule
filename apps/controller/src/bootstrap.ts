@@ -42,7 +42,7 @@ import {
   ConnectionTypes,
   ConnectionTypesLayer,
 } from "./connections";
-import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
+import { BoundOperationDescriberLayer, cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { NotificationService, NotificationServiceLayer } from "./notifications";
@@ -285,8 +285,11 @@ export const bootWith = <A, E>(
     // the code that runs after the boot needs it too. The notification
     // service sits on the audit log, and beside the repositories rather than
     // above the plugin host, because the plugin host and the fleet raise
-    // notifications of their own.
+    // notifications of their own. The describe lines of its answers come from
+    // the controller daemon's describer, which reads only the database, so it
+    // can sit this low too.
     const repositories = NotificationServiceLayer.pipe(
+      Layer.provide(BoundOperationDescriberLayer),
       Layer.provideMerge(
         Layer.mergeAll(
           controllerIdentityLayer,

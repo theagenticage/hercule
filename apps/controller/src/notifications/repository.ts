@@ -40,6 +40,14 @@ export interface NotificationPageRequest {
   readonly direction: SortDirection;
 }
 
+/**
+ * The producer a listing is limited to: one session, or one run with any of
+ * its steps.
+ */
+export type ProducerScope =
+  | { readonly type: "session"; readonly sessionId: string }
+  | { readonly type: "run"; readonly runId: string };
+
 /** A notification as it is written, before it has an id. */
 export type NewNotification = Omit<Notification, "id">;
 
@@ -83,14 +91,24 @@ const make = Effect.gen(function* () {
   /**
    * Builds the condition that one element of a notification's subject list,
    * `subject.value`, is the given subject. A trigger is named by its workflow
-   * and its id in that workflow; everything else by its id.
+   * and its id in that workflow, a request by its session and its id in that
+   * session, and everything else by its id.
    */
-  const buildSubjectMatch = (subject: NotificationSubject) =>
-    subject.kind === "trigger"
-      ? sql`subject.value ->> 'kind' = 'trigger'
-            AND subject.value ->> 'workflowId' = ${subject.workflowId}
-            AND subject.value ->> 'triggerId' = ${subject.triggerId}`
-      : sql`subject.value ->> 'kind' = ${subject.kind} AND subject.value ->> 'id' = ${subject.id}`;
+  const buildSubjectMatch = (subject: NotificationSubject) => {
+    switch (subject.kind) {
+      case "trigger":
+        return sql`subject.value ->> 'kind' = 'trigger'
+                   AND subject.value ->> 'workflowId' = ${subject.workflowId}
+                   AND subject.value ->> 'triggerId' = ${subject.triggerId}`;
+      case "request":
+        return sql`subject.value ->> 'kind' = 'request'
+                   AND subject.value ->> 'sessionId' = ${subject.sessionId}
+                   AND subject.value ->> 'requestId' = ${subject.requestId}`;
+      default:
+        return sql`subject.value ->> 'kind' = ${subject.kind}
+                   AND subject.value ->> 'id' = ${subject.id}`;
+    }
+  };
 
   return {
     /** Writes a new notification and returns it with its id. */
@@ -136,24 +154,42 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids of the open notifications whose subject lists any of
-     * these subjects. Only a decision is ever open.
+     * Returns the open notifications whose subject lists any of these
+     * subjects, oldest first. Only a decision is ever open.
      */
-    listOpenDecisionIdsAbout: (
+    listOpenDecisionsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<Notification>, SqlError> =>
       subjects.length === 0
         ? Effect.succeed([])
         : Effect.map(
-            sql<{ readonly id: Uint8Array }>`
-              SELECT notifications.id FROM notifications
+            sql<NotificationRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM notifications
               WHERE notifications.status = 'open'
                 AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
                             WHERE ${sql.or(subjects.map(buildSubjectMatch))})
               ORDER BY notifications.created_at, notifications.id
             `,
-            (rows) => rows.map((row) => uuidToString(row.id)),
+            (rows) => rows.map(parseRow),
           ),
+
+    /**
+     * Checks whether a resolved decision lists this subject: one that was
+     * decided, handled or withdrawn. An informational notification is
+     * resolved from the start, but it has no answers, so it does not count.
+     */
+    hasResolvedDecisionAbout: (subject: NotificationSubject): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT notifications.id FROM notifications
+          WHERE notifications.status = 'resolved'
+            AND json_array_length(notifications.actions) > 0
+            AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                        WHERE ${buildSubjectMatch(subject)})
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Checks whether a notification of this kind was created after `since`
@@ -181,10 +217,15 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns one page of the notifications that match a filter, ordered by `createdAt`. */
+    /**
+     * Returns one page of the notifications that match a filter, ordered by
+     * `createdAt`. With `producer`, only the notifications that session or
+     * run produced are listed.
+     */
     list: (
       filter: NotificationFilter,
       request: NotificationPageRequest,
+      producer?: ProducerScope,
     ): Effect.Effect<Page<Notification>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope: CursorScope = {
@@ -206,6 +247,15 @@ const make = Effect.gen(function* () {
         if (filter.kind !== undefined) clauses.push(sql`kind = ${filter.kind}`);
         if (filter.status !== undefined) clauses.push(sql`status = ${filter.status}`);
         if (filter.since !== undefined) clauses.push(sql`created_at >= ${filter.since}`);
+        if (producer?.type === "session") {
+          clauses.push(sql`producer ->> 'type' = 'session'
+                           AND producer ->> 'sessionId' = ${producer.sessionId}`);
+        }
+        if (producer?.type === "run") {
+          clauses.push(
+            sql`producer ->> 'type' = 'run' AND producer ->> 'runId' = ${producer.runId}`,
+          );
+        }
         const rows = yield* sql<NotificationRow>`
           SELECT ${sql.literal(COLUMNS)} FROM notifications
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}

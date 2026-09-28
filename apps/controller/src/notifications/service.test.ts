@@ -22,11 +22,13 @@ import { withTransaction, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { NotificationService, NotificationServiceLayer, type CoreNotification } from "./index";
+import { NotificationService, type CoreNotification } from "./index";
+import { notificationRepository } from "./repository";
+import { NotificationServiceTestLayer } from "./testing";
 
 type Deps = NotificationService | SqlClient.SqlClient;
 
-const layer = NotificationServiceLayer.pipe(
+const layer = NotificationServiceTestLayer.pipe(
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );
@@ -166,7 +168,11 @@ describe("notification.create", () => {
       producer: { type: "session", sessionId: ASSISTANT_SESSION_ID },
       muteKey: `assistant:${ASSISTANT_ID}`,
       subject: DECISION.subject,
-      actions: DECISION.actions,
+      // The test describer writes the operation id as the describe line.
+      actions: [
+        { ...DECISION.actions![0]!, describeLine: [{ kind: "text", text: "run.start" }] },
+        { ...DECISION.actions![1]!, describeLine: [{ kind: "text", text: "Does nothing" }] },
+      ],
       status: "open",
       createdAt: notification.createdAt,
     });
@@ -396,6 +402,58 @@ describe("notification.read", () => {
       });
     }
   });
+
+  it("shows a session only the notifications it produced, on read and on query", async () => {
+    const { own, listed, refused } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const mine = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
+        const theirs = yield* actAs(OTHER_SESSION, notifications.create(INFORMATIONAL));
+        yield* actAs(WORKFLOW_RUN, notifications.create(INFORMATIONAL));
+        return {
+          own: yield* actAs(PLAIN_SESSION, notifications.read(mine.notificationId)),
+          listed: (yield* actAs(PLAIN_SESSION, notifications.query({}))).items,
+          refused: yield* Effect.flip(
+            actAs(PLAIN_SESSION, notifications.read(theirs.notificationId)),
+          ),
+        };
+      }),
+    );
+
+    expect(own.title).toBe(DECISION.title);
+    expect(listed.map((notification) => notification.id)).toEqual([own.id]);
+    expect(refused).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("shows a run only the notifications its steps produced, on read and on query", async () => {
+    const { produced, listed, refused } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const otherStep: Actor = {
+          _tag: "run",
+          runId: WORKFLOW_RUN_ID,
+          stepId: "report",
+          workflowId: WORKFLOW_ID,
+        };
+        const produced = [
+          (yield* actAs(WORKFLOW_RUN, notifications.create(INFORMATIONAL))).notificationId,
+          (yield* actAs(otherStep, notifications.create(DECISION))).notificationId,
+        ];
+        const theirs = yield* actAs(SENT_RUN, notifications.create(INFORMATIONAL));
+        yield* actAs(PLAIN_SESSION, notifications.create(INFORMATIONAL));
+        return {
+          produced,
+          listed: (yield* actAs(WORKFLOW_RUN, notifications.query({}))).items,
+          refused: yield* Effect.flip(
+            actAs(WORKFLOW_RUN, notifications.read(theirs.notificationId)),
+          ),
+        };
+      }),
+    );
+
+    expect(listed.map((notification) => notification.id).sort()).toEqual([...produced].sort());
+    expect(refused).toMatchObject({ error: { code: "not_found" } });
+  });
 });
 
 describe("notification.withdraw", () => {
@@ -491,30 +549,27 @@ describe("notification.withdraw", () => {
     expect(stored.status).toBe("open");
   });
 
-  it("refuses another session and the user, because only the producer may withdraw", async () => {
-    const { errors, stored } = await run(
+  it("refuses the user, and tells another session the notification does not exist", async () => {
+    const { otherSession, user, stored } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
         const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
         const withdraw = notifications.withdraw({ id: notificationId, reason: "not mine" });
         return {
-          errors: [
-            yield* Effect.flip(actAs(OTHER_SESSION, withdraw)),
-            yield* Effect.flip(actAs(USER, withdraw)),
-          ],
+          otherSession: yield* Effect.flip(actAs(OTHER_SESSION, withdraw)),
+          user: yield* Effect.flip(actAs(USER, withdraw)),
           stored: yield* actAs(USER, notifications.read(notificationId)),
         };
       }),
     );
 
-    for (const error of errors) {
-      expect(error).toMatchObject({
-        error: {
-          code: "forbidden",
-          message: expect.stringMatching(/only the producer/) as unknown,
-        },
-      });
-    }
+    expect(otherSession).toMatchObject({ error: { code: "not_found" } });
+    expect(user).toMatchObject({
+      error: {
+        code: "forbidden",
+        message: expect.stringMatching(/only the producer/) as unknown,
+      },
+    });
     expect(stored.status).toBe("open");
   });
 
@@ -1000,5 +1055,505 @@ describe("withdrawDecisionsAbout", () => {
 
     expect(stored.status).toBe("open");
     expect(entries).toEqual([]);
+  });
+});
+
+describe("notification.create with bound operations", () => {
+  it("refuses an operation an answer may not run, with the path of its op", async () => {
+    const error = await run(
+      Effect.flatMap(NotificationService, (notifications) =>
+        Effect.flip(
+          actAs(
+            PLAIN_SESSION,
+            notifications.create({
+              ...DECISION,
+              actions: [
+                {
+                  id: "delete",
+                  label: "Delete the task",
+                  operation: { op: "task.delete", input: { id: TASK_ID } },
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["actions", "0", "operation", "op"] }] },
+      },
+    });
+  });
+
+  it("refuses an input that does not fit the operation, with a path under its input", async () => {
+    const error = await run(
+      Effect.flatMap(NotificationService, (notifications) =>
+        Effect.flip(
+          actAs(
+            PLAIN_SESSION,
+            notifications.create({
+              ...DECISION,
+              actions: [
+                { id: "dismiss", label: "Dismiss", operation: null },
+                {
+                  id: "start",
+                  label: "Start",
+                  operation: { op: "run.start", input: { workflowId: 42 } },
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["actions", "1", "operation", "input", "workflowId"] }] },
+      },
+    });
+  });
+
+  it('stores the calling session\'s id for the session id "me"', async () => {
+    const notification = await run(
+      createAndRead(PLAIN_SESSION, {
+        ...DECISION,
+        actions: [
+          {
+            id: "continue",
+            label: "Continue",
+            operation: { op: "session.input", input: { sessionId: "me", text: "continue" } },
+          },
+        ],
+      }),
+    );
+
+    expect(notification.actions[0]!.operation).toEqual({
+      op: "session.input",
+      input: { sessionId: PLAIN_SESSION_ID, text: "continue" },
+    });
+  });
+
+  it('refuses the session id "me" from a run, because a run is not a session', async () => {
+    const error = await run(
+      Effect.flatMap(NotificationService, (notifications) =>
+        Effect.flip(
+          actAs(
+            WORKFLOW_RUN,
+            notifications.create({
+              ...DECISION,
+              actions: [
+                {
+                  id: "continue",
+                  label: "Continue",
+                  operation: { op: "session.input", input: { sessionId: "me", text: "continue" } },
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["actions", "0", "operation", "input", "sessionId"] }] },
+      },
+    });
+  });
+});
+
+describe("notification.create with answers only the producer may bind", () => {
+  /** Creates a decision as `actor` with one answer running `operation`, and returns the failure. */
+  const refuseAnswer = (actor: Actor, operation: { op: string; input: unknown }) =>
+    Effect.flatMap(NotificationService, (notifications) =>
+      Effect.flip(
+        actAs(
+          actor,
+          notifications.create({
+            ...DECISION,
+            actions: [{ id: "answer", label: "Answer", operation }],
+          }),
+        ),
+      ),
+    );
+
+  it.each([
+    ["a session", PLAIN_SESSION],
+    ["a run", WORKFLOW_RUN],
+  ] as const)(
+    "refuses session.respond from %s, because only the core binds it",
+    async (_, actor) => {
+      const error = await run(
+        refuseAnswer(actor, {
+          op: "session.respond",
+          input: { sessionId: PLAIN_SESSION_ID, requestId: "req-1", decision: "allow" },
+        }),
+      );
+
+      expect(error).toMatchObject({
+        error: {
+          code: "validation",
+          details: {
+            issues: [
+              {
+                path: ["actions", "0", "operation", "op"],
+                message: expect.stringMatching(
+                  /core raises .* bind session.input instead/,
+                ) as unknown,
+              },
+            ],
+          },
+        },
+      });
+    },
+  );
+
+  it("refuses a session that binds session.input to another session", async () => {
+    const error = await run(
+      refuseAnswer(PLAIN_SESSION, {
+        op: "session.input",
+        input: { sessionId: OTHER_SESSION_ID, text: "continue" },
+      }),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: {
+          issues: [
+            {
+              path: ["actions", "0", "operation", "input"],
+              message: expect.stringMatching(/only to itself.*"me"/) as unknown,
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it("refuses a session in an assistant's conversation that binds session.input to itself", async () => {
+    const error = await run(
+      refuseAnswer(ASSISTANT_SESSION, {
+        op: "session.input",
+        input: { sessionId: "me", text: "continue" },
+      }),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: {
+          issues: [
+            {
+              path: ["actions", "0", "operation", "input"],
+              message: expect.stringMatching(
+                /conversation\.send.*in the conversation instead/,
+              ) as unknown,
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it("lets a run bind session.input to any session", async () => {
+    const notification = await run(
+      createAndRead(WORKFLOW_RUN, {
+        ...DECISION,
+        actions: [
+          {
+            id: "continue",
+            label: "Continue",
+            operation: {
+              op: "session.input",
+              input: { sessionId: PLAIN_SESSION_ID, text: "continue" },
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(notification.actions[0]!.operation).toEqual({
+      op: "session.input",
+      input: { sessionId: PLAIN_SESSION_ID, text: "continue" },
+    });
+  });
+});
+
+describe("describe lines", () => {
+  it("are added to the answers of an open decision only, on read and on query", async () => {
+    const { open, listed, withdrawn } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
+        const open = yield* actAs(USER, notifications.read(notificationId));
+        const listed = (yield* actAs(USER, notifications.query({}))).items[0]!;
+        yield* actAs(PLAIN_SESSION, notifications.withdraw({ id: notificationId, reason: "done" }));
+        return { open, listed, withdrawn: yield* actAs(USER, notifications.read(notificationId)) };
+      }),
+    );
+
+    expect(open.actions.map((action) => action.describeLine)).toEqual([
+      [{ kind: "text", text: "run.start" }],
+      [{ kind: "text", text: "Does nothing" }],
+    ]);
+    expect(listed.actions).toEqual(open.actions);
+    // A resolved decision's answers can no longer be taken, so they are not described.
+    expect(withdrawn.actions).toEqual(DECISION.actions);
+  });
+
+  it("are added only for the user, the only caller who can take an answer", async () => {
+    const { read, listed } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
+        return {
+          read: yield* actAs(PLAIN_SESSION, notifications.read(notificationId)),
+          listed: (yield* actAs(PLAIN_SESSION, notifications.query({}))).items[0]!,
+        };
+      }),
+    );
+
+    expect(read.actions).toEqual(DECISION.actions);
+    expect(listed.actions).toEqual(DECISION.actions);
+  });
+
+  it("say why a stored answer whose operation no longer passes the check cannot be taken", async () => {
+    const notification = await run(
+      Effect.gen(function* () {
+        // An operation that was bindable when the notification was created,
+        // and no longer is. Only a straight insert can store one now.
+        const stored = yield* (yield* notificationRepository).insert({
+          kind: "triage.proposal",
+          title: "Delete the duplicate?",
+          producer: { type: "session", sessionId: PLAIN_SESSION_ID },
+          subject: [],
+          actions: [
+            {
+              id: "delete",
+              label: "Delete",
+              operation: { op: "task.delete", input: { id: TASK_ID } },
+            },
+          ],
+          status: "open",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        return yield* actAs(
+          USER,
+          Effect.flatMap(NotificationService, (notifications) => notifications.read(stored.id)),
+        );
+      }),
+    );
+
+    expect(notification.actions[0]!.describeLine).toEqual([
+      {
+        kind: "text",
+        text: "Cannot be taken: An answer cannot run task.delete. An answer can run one of: task.update, run.start, session.input, session.respond.",
+      },
+    ]);
+  });
+});
+
+describe("decide", () => {
+  const API_KEY_USER: Actor = {
+    ...USER,
+    credential: { kind: "apiKey", id: "0199e0e7-0002-7000-8000-000000000000", tokenHash: "y" },
+  };
+
+  it("resolves an open decision as decided with the answer, stamped with the actor and where it was taken", async () => {
+    const results = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const decideAs = (actor: Actor) =>
+          Effect.gen(function* () {
+            const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
+            const decided = yield* actAs(actor, notifications.decide(notificationId, "start"));
+            const again = yield* actAs(actor, notifications.decide(notificationId, "dismiss"));
+            return {
+              decided,
+              again,
+              stored: yield* actAs(USER, notifications.read(notificationId)),
+            };
+          });
+        return {
+          login: yield* decideAs(USER),
+          apiKey: yield* decideAs(API_KEY_USER),
+          session: yield* decideAs(OTHER_SESSION),
+          entries: yield* readEventsOfKind("notification.decided"),
+        };
+      }),
+    );
+
+    const expectations = [
+      [results.login, "user", "web"],
+      [results.apiKey, "user", "api"],
+      [results.session, `session:${OTHER_SESSION_ID}`, `session:${OTHER_SESSION_ID}`],
+    ] as const;
+    for (const [result, actor, origin] of expectations) {
+      expect(result.decided, origin).toBe(true);
+      // The second answer finds the decision resolved, and changes nothing.
+      expect(result.again, origin).toBe(false);
+      expect(result.stored.status, origin).toBe("resolved");
+      expect(result.stored.resolution, origin).toEqual({
+        kind: "decided",
+        actionId: "start",
+        actor,
+        origin,
+        at: result.stored.resolution!.at,
+      });
+    }
+    expect(results.entries.map((entry) => [entry.actor, entry.payload])).toEqual(
+      expectations.map(([result, actor]) => [
+        actor,
+        {
+          notificationId: result.stored.id,
+          actionId: "start",
+          op: "run.start",
+          producer: { type: "session", sessionId: PLAIN_SESSION_ID },
+        },
+      ]),
+    );
+  });
+
+  it("returns false for a notification that does not exist", async () => {
+    const decided = await run(
+      Effect.flatMap(NotificationService, (notifications) =>
+        actAs(USER, notifications.decide(UNKNOWN_ID, "start")),
+      ),
+    );
+
+    expect(decided).toBe(false);
+  });
+
+  it("returns false and writes nothing for an answer the decision does not offer", async () => {
+    const { decided, stored, entries } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
+        return {
+          decided: yield* actAs(USER, notifications.decide(notificationId, "nothing-like-it")),
+          stored: yield* actAs(USER, notifications.read(notificationId)),
+          entries: yield* readEventsOfKind("notification.decided"),
+        };
+      }),
+    );
+
+    expect(decided).toBe(false);
+    expect(stored.status).toBe("open");
+    expect(entries).toEqual([]);
+  });
+});
+
+describe("resolveDecisionsAnsweredBy", () => {
+  const REQUEST: NotificationSubject = {
+    kind: "request",
+    sessionId: PLAIN_SESSION_ID,
+    requestId: "req-1",
+  };
+
+  /** Builds the `session.respond` answer to the request `REQUEST` with one decision. */
+  const buildRespond = (decision: "allow" | "deny") => ({
+    op: "session.respond" as const,
+    input: { sessionId: PLAIN_SESSION_ID, requestId: "req-1", decision },
+  });
+
+  /**
+   * Raises a core decision about `subject` that answers `REQUEST`, titled
+   * `title`, the way the core raises one for each approval request.
+   */
+  const raiseApproval = (title: string, subject: ReadonlyArray<NotificationSubject>) =>
+    Effect.flatMap(NotificationService, (notifications) =>
+      notifications.createCoreNotification({
+        kind: "core.approval",
+        title,
+        subject,
+        actions: [
+          { id: "allow", label: "Allow", operation: buildRespond("allow") },
+          { id: "deny", label: "Deny", operation: buildRespond("deny") },
+        ],
+      }),
+    );
+
+  it("resolves the open decisions about the subject that offer the operation, as decided with that answer", async () => {
+    const { outcome, byTitle, entries } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        yield* raiseApproval("about the request", [REQUEST]);
+        yield* raiseApproval("about another request", [{ ...REQUEST, requestId: "req-2" }]);
+        yield* actAs(
+          PLAIN_SESSION,
+          notifications.create({ ...DECISION, title: "offers no such answer", subject: [REQUEST] }),
+        );
+
+        const outcome = yield* actAs(
+          USER,
+          notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("deny")),
+        );
+
+        const all = (yield* actAs(USER, notifications.query({}))).items;
+        return {
+          outcome,
+          byTitle: new Map(all.map((notification) => [notification.title, notification])),
+          entries: yield* readEventsOfKind("notification.decided"),
+        };
+      }),
+    );
+
+    expect(outcome).toBe("resolved");
+    const decided = byTitle.get("about the request")!;
+    expect(decided.resolution).toEqual({
+      kind: "decided",
+      actionId: "deny",
+      actor: "user",
+      origin: "web",
+      at: decided.resolution!.at,
+    });
+    expect(byTitle.get("about another request")!.status).toBe("open");
+    expect(byTitle.get("offers no such answer")!.status).toBe("open");
+    expect(entries.map((entry) => entry.payload)).toEqual([
+      {
+        notificationId: decided.id,
+        actionId: "deny",
+        op: "session.respond",
+        producer: { type: "core" },
+      },
+    ]);
+  });
+
+  it("reports a question already settled when the only decision about the subject is resolved", async () => {
+    const { first, second } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        yield* raiseApproval("about the request", [REQUEST]);
+        const answer = notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("allow"));
+        return { first: yield* actAs(USER, answer), second: yield* actAs(USER, answer) };
+      }),
+    );
+
+    expect(first).toBe("resolved");
+    expect(second).toBe("already-resolved");
+  });
+
+  it("reports none when no decision lists the subject", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        // An informational notification is resolved from the start, but it
+        // asks nothing, so it does not settle the question.
+        yield* notifications.createCoreNotification({ ...CORE, subject: [REQUEST] });
+        return yield* actAs(
+          USER,
+          notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("allow")),
+        );
+      }),
+    );
+
+    expect(outcome).toBe("none");
   });
 });

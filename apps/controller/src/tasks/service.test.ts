@@ -12,15 +12,18 @@ import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
-import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
+import {
+  insertOpenDecision,
+  NotificationServiceTestLayer,
+  readStoredNotification,
+} from "../notifications/testing";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer, type QueryInput, type TaskPage } from "./index";
 
 type Deps = TaskService | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
-  Layer.provideMerge(NotificationServiceLayer),
+  Layer.provideMerge(NotificationServiceTestLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest } from "@hercule/contract";
+import { formatDescribeLine } from "../notifications";
 import { buildApprovalCard } from "./approval";
 
 const COMMAND: OpenRequest = {
@@ -20,30 +21,30 @@ const COMMAND: OpenRequest = {
 };
 
 describe("buildApprovalCard", () => {
-  it("offers one row per decision the request lists, in order, each with its own label and description", () => {
+  it("offers one row per decision the request lists, in order, each with its own label and describe line", () => {
     const card = buildApprovalCard(COMMAND);
 
-    expect(card.rows.map((row) => row.decision)).toEqual([
-      "allow",
-      "allow_always",
-      "deny",
-      "cancel",
-    ]);
+    expect(card.rows.map((row) => row.id)).toEqual(["allow", "allow_always", "deny", "cancel"]);
     expect(card.title.trim()).not.toBe("");
     for (const row of card.rows) {
-      expect(row.label.trim(), `${row.decision} has no label`).not.toBe("");
-      expect(row.describe.trim(), `${row.decision} has no describe line`).not.toBe("");
+      expect(row.label.trim(), `${row.id} has no label`).not.toBe("");
+      expect(
+        formatDescribeLine(row.describeLine).trim(),
+        `${row.id} has no describe line`,
+      ).not.toBe("");
     }
     // The user cannot choose between answers that read the same, so every
-    // label and every description must be different.
+    // label and every describe line must be different.
     expect(new Set(card.rows.map((row) => row.label)).size).toBe(4);
-    expect(new Set(card.rows.map((row) => row.describe)).size).toBe(4);
+    expect(new Set(card.rows.map((row) => formatDescribeLine(row.describeLine))).size).toBe(4);
+    // No answer to an approval carries more weight than the others.
+    expect(card.rows.every((row) => !row.primary)).toBe(true);
   });
 
   it("offers no allow-always row when the request does not list that decision", () => {
     const card = buildApprovalCard({ ...COMMAND, decisions: ["allow", "deny", "cancel"] });
 
-    expect(card.rows.map((row) => row.decision)).toEqual(["allow", "deny", "cancel"]);
+    expect(card.rows.map((row) => row.id)).toEqual(["allow", "deny", "cancel"]);
   });
 
   it("uses a command_approval's command as its subject, and marks it as code", () => {
@@ -110,7 +111,7 @@ describe("buildApprovalCard", () => {
     };
     const card = buildApprovalCard(request);
 
-    expect(card.rows.map((row) => row.decision)).toEqual(["deny", "cancel"]);
+    expect(card.rows.map((row) => row.id)).toEqual(["deny", "cancel"]);
     // A question asks for answers rather than permission, so its title says
     // that instead of using an approval's "Run this?".
     expect(card.title).toBe("The agent needs answers.");

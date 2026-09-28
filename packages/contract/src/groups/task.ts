@@ -267,6 +267,18 @@ export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(refuseEmp
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
 
+/**
+ * One call of `task.update` as a single object: the task's id, which an HTTP
+ * request sends in its path, and the changes. A workflow step and a bound
+ * answer have no path, so both send this shape. The check is the operation's
+ * own, so all three reject an update that changes no field.
+ */
+export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS }).check(
+  refuseEmptyTaskUpdate,
+);
+
+export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {

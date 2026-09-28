@@ -98,6 +98,19 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
   }
 };
 
+/** An event that can open or close the request a session waits on. */
+export type RequestEvent = Extract<
+  ProviderEvent,
+  { readonly _tag: "request.opened" | "request.resolved" | "turn.completed" | "session.exited" }
+>;
+
+/** Checks whether an event can open or close the request a session waits on. */
+export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
+  event._tag === "request.opened" ||
+  event._tag === "request.resolved" ||
+  event._tag === "turn.completed" ||
+  event._tag === "session.exited";
+
 /**
  * Returns the session's open request after this event, given the request open
  * now. Returns:
@@ -114,7 +127,7 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
  * alone.
  */
 export const computeOpenRequestAfter = (
-  event: ProviderEvent,
+  event: RequestEvent,
   open: OpenRequest | null,
 ): OpenRequest | null | undefined => {
   switch (event._tag) {
@@ -125,8 +138,6 @@ export const computeOpenRequestAfter = (
     case "turn.completed":
     case "session.exited":
       return open === null ? undefined : null;
-    default:
-      return undefined;
   }
 };
 

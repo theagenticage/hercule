@@ -20,7 +20,7 @@ import {
 } from "../sessions/testing";
 import type { NotificationPage } from "./index";
 
-/** Starting the fleet is the slow part of each case; the timeout allows three waits. */
+/** Starting the fleet is the slow part of each case, so a case gets several wait deadlines. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** A well-formed UUIDv7 that matches no notification on this controller. */
@@ -126,7 +126,10 @@ describe("a session", () => {
         body: DECISION.body,
         producer: { type: "session", sessionId: agent.session.id },
         subject: [],
-        actions: DECISION.actions,
+        actions: DECISION.actions!.map((action) => ({
+          ...action,
+          describeLine: [{ kind: "text", text: "Does nothing" }],
+        })),
         status: "open",
       });
       expect(stored.resolution).toBeUndefined();
@@ -138,8 +141,10 @@ describe("a session", () => {
       expect(withdrawn.status, await withdrawn.clone().text()).toBe(200);
       const resolved = (await withdrawn.json()) as Notification;
       const stamp = `session:${agent.session.id}`;
+      // A resolved decision's answers can no longer be taken, so they carry no describe line.
       expect(resolved).toEqual({
         ...stored,
+        actions: DECISION.actions,
         status: "resolved",
         resolution: {
           kind: "withdrawn",
@@ -217,14 +222,14 @@ describe("a session", () => {
       expect(created.status, noGrant.text).toBe(403);
       expect(noGrant).toMatchObject({ code: "forbidden", grant: "notification.write" });
 
-      for (const token of [other.token, arranged.token]) {
-        const response = await requestWithdraw(base, token, id, "not mine");
-        const refused = await readErrorBody(response);
-        expect(response.status, refused.text).toBe(403);
-        expect(refused.code).toBe("forbidden");
-        expect(refused.message).toMatch(/only the producer/);
-      }
-      expect((await readOrFail(base, reader.token, id)).status).toBe("open");
+      const hidden = await requestWithdraw(base, other.token, id, "not mine");
+      expect(hidden.status).toBe(404);
+      const response = await requestWithdraw(base, arranged.token, id, "not mine");
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(403);
+      expect(refused.code).toBe("forbidden");
+      expect(refused.message).toMatch(/only the producer/);
+      expect((await readOrFail(base, arranged.token, id)).status).toBe("open");
 
       const missing = await requestWithdraw(base, producer.token, ABSENT_ID, "gone");
       expect(missing.status).toBe(404);
