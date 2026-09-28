@@ -123,7 +123,7 @@ import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from 
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
@@ -342,7 +342,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const executor = yield* RunExecutor;
   const workspaceSteps = yield* WorkspaceSteps;
   const platformEvents = yield* PlatformEvents;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
@@ -399,9 +399,7 @@ export const makeRunEngine = Effect.gen(function* () {
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
         if (outcome.status === "failed") {
-          yield* notifications.createCoreNotification(
-            buildRunFailedNotification(run, outcome, eventId),
-          );
+          yield* notifier.createCoreNotification(buildRunFailedNotification(run, outcome, eventId));
         }
       }
       yield* settleWorkspaceSteps(run, wasRunning);

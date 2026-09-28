@@ -19,14 +19,13 @@ import type {
 import { connectionRepository } from "../../connections";
 import { mintUuid, uuidToString } from "../../db";
 import { TestDatabase } from "../../db/testing";
-import { BoundOperationDescriber } from "../../notifications";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
-import { BoundOperationDescriberLayer } from "./describer";
+import { makeDescribe } from "./describer";
 
-const layer = BoundOperationDescriberLayer.pipe(Layer.provideMerge(TestDatabase));
+const layer = TestDatabase;
 
 const AT = "2026-09-07T10:00:00.000Z";
 
@@ -44,8 +43,8 @@ const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
 const describeOperation = (operation: BindableOperation) =>
-  Effect.flatMap(BoundOperationDescriber, (describer) =>
-    Effect.map(describer.describe([operation]), (lines) => lines[0]!),
+  Effect.flatMap(makeDescribe, (describe) =>
+    Effect.map(describe([operation]), (lines) => lines[0]!),
   );
 
 /** Inserts a workflow with this definition and returns its id. */
@@ -482,8 +481,8 @@ describe("describing the answers of one decision", () => {
         const taskId = yield* insertTask("Fix the login page");
         const sessionId = yield* insertSession("Refactor the parser");
         return yield* Effect.provideService(
-          Effect.flatMap(BoundOperationDescriber, (describer) =>
-            describer.describe([
+          Effect.flatMap(makeDescribe, (describe) =>
+            describe([
               { op: "task.update", input: { taskId, status: "done" } },
               { op: "task.update", input: { taskId, status: "cancelled" } },
               { op: "session.input", input: { sessionId, text: "yes" } },

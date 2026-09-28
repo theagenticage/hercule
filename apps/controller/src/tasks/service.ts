@@ -49,7 +49,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { announce, nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { taskRepository, type TaskEdit, type TaskOrder } from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tasks = yield* taskRepository;
   const audit = yield* AuditLog;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const platformEvents = yield* PlatformEvents;
 
   const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
@@ -361,7 +361,7 @@ const make = Effect.gen(function* () {
               payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
               at,
             });
-            yield* notifications.withdrawDecisionsAbout([{ kind: "task", id }], "task deleted");
+            yield* notifier.withdrawDecisionsAbout([{ kind: "task", id }], "task deleted");
             return {};
           }),
         );
@@ -377,5 +377,5 @@ export class TaskService extends Context.Service<TaskService, Effect.Success<typ
 export const TaskServiceLayer: Layer.Layer<
   TaskService,
   never,
-  SqlClient.SqlClient | AuditLog | PlatformEvents | NotificationService
+  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier
 > = Layer.effect(TaskService)(make);

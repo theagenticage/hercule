@@ -73,7 +73,7 @@ import {
 } from "../db";
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
@@ -358,7 +358,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const observer = yield* SessionObserver;
   const workspaces = yield* WorkspaceService;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -505,7 +505,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     session.openRequest === null
       ? Effect.void
-      : notifications.withdrawDecisionsAbout(
+      : notifier.withdrawDecisionsAbout(
           [buildRequestSubject(session.id, session.openRequest.requestId)],
           reason,
         );
@@ -532,7 +532,7 @@ const make = Effect.gen(function* () {
       yield* withdrawOpenRequestNotification(session, reason);
       const notification =
         request === null ? undefined : buildApprovalNotification(session, request);
-      if (notification !== undefined) yield* notifications.createCoreNotification(notification);
+      if (notification !== undefined) yield* notifier.createCoreNotification(notification);
     });
 
   /**
@@ -973,7 +973,7 @@ const make = Effect.gen(function* () {
       decision: ApprovalDecision,
     ): Effect.Effect<void, InvalidState | SqlError> =>
       Effect.flatMap(
-        notifications.answerDecisionsAbout(
+        notifier.answerDecisionsAbout(
           buildRequestSubject(sessionId, requestId),
           APPROVAL_ANSWER_IDS[decision],
         ),
@@ -1726,7 +1726,7 @@ export const SessionServiceLayer: Layer.Layer<
   | PluginHost
   | SessionObserver
   | WorkspaceService
-  | NotificationService
+  | Notifier
 > = Layer.effect(SessionService)(make);
 
 /**

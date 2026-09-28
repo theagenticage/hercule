@@ -495,43 +495,51 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Runs `writes` and then sends `frame` to a runner, in one transaction.
-   * Fails with `InvalidState` when the runner is not connected. The failure
-   * rolls the writes back, so nothing is recorded for a frame that was never
-   * sent.
+   * Runs `writes` in a transaction, and sends `frame` to a runner once that
+   * transaction commits. Fails with `InvalidState`, and writes nothing, when
+   * the runner is not connected.
    *
-   * Sending the frame inside the transaction is safe: sending only writes to
-   * the socket and never waits for a reply. The runner's report of what the
-   * frame did is applied in a later transaction, which cannot start before
-   * this one commits, so that report always finds these writes. For example,
-   * the `request.resolved` that follows an answer finds the approval
-   * notification already resolved, and does not withdraw it.
+   * The transaction may be the caller's: `notification.act` runs an answer
+   * and resolves its decision in one transaction. The frame then waits for
+   * the caller's commit, and is never sent if the caller rolls back. So the
+   * runner is never told about a change the database does not hold.
+   *
+   * The runner can still drop off between the check and the send. The frame
+   * is then lost, as it would be if the socket closed just after the send;
+   * the failure is logged.
+   *
+   * The runner's report of what the frame did is applied in a later
+   * transaction, after this one commits, so that report always finds these
+   * writes. For example, the `request.resolved` that follows an answer finds
+   * the approval notification already resolved, and does not withdraw it.
    */
   const writeThenTellRunner = <E>(
     runnerId: string,
     frame: ControllerToRunner,
     writes: Effect.Effect<void, E>,
   ): Effect.Effect<void, E | InvalidState | SqlError> =>
-    // A caller that hangs up after the frame was sent must not roll back the
-    // writes that record it.
-    Effect.uninterruptible(
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          yield* writes;
-          if (!(yield* connections.tell(runnerId, frame))) {
-            return yield* Effect.fail(createInvalidStateError(GONE));
-          }
-        }),
-      ),
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        if (!(yield* connections.holdsConnection(runnerId))) {
+          return yield* Effect.fail(createInvalidStateError(GONE));
+        }
+        yield* writes;
+        yield* forkAfterCommit(
+          "Could not send a frame to a session's runner",
+          Effect.flatMap(connections.tell(runnerId, frame), (told) =>
+            told ? Effect.void : Effect.logWarning(`${GONE}; the frame was not sent`),
+          ),
+        );
+      }),
     );
 
   /**
    * Tells the session's runner to end the running turn, as the actor behind
-   * the current request. In the same transaction, writes the
-   * `session.interrupted` audit entry and withdraws the approval
-   * notification about the request the turn waits on, if any, because the
-   * interrupt ends that wait.
+   * the current request. Writes the `session.interrupted` audit entry and
+   * withdraws the approval notification about the request the turn waits on,
+   * if any, because the interrupt ends that wait. The runner is told once
+   * those writes commit.
    * Fails with `InvalidState` when the runner is not connected.
    */
   const interruptTurn = (session: StoredSession): Effect.Effect<void, InvalidState | SqlError> =>
@@ -905,6 +913,9 @@ const make = Effect.gen(function* () {
      * as `decided`, in the same transaction, stamped with the caller. So the
      * notification shows the request as answered, whether the user answered
      * it here or from the notification.
+     *
+     * The runner is told the answer once the transaction commits, so an
+     * answer the database does not hold never reaches the harness.
      */
     respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {

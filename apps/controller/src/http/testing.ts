@@ -42,7 +42,6 @@ import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
-  BoundOperationDescriberLayer,
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
   Live,
@@ -61,7 +60,7 @@ import {
   type AuditKind,
   type PlatformEventKind,
 } from "../events";
-import { NotificationServiceLayer } from "../notifications";
+import { NotifierLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
@@ -151,8 +150,7 @@ const buildServices = (home: string) =>
         ),
       ),
     ),
-    // The real describer, so tests read the same Describe Lines the binary writes.
-    Layer.provideMerge(NotificationServiceLayer.pipe(Layer.provide(BoundOperationDescriberLayer))),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,

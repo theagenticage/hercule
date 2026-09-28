@@ -42,10 +42,10 @@ import {
   ConnectionTypes,
   ConnectionTypesLayer,
 } from "./connections";
-import { BoundOperationDescriberLayer, cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
+import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
-import { NotificationService, NotificationServiceLayer } from "./notifications";
+import { Notifier, NotifierLayer } from "./notifications";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
 import {
@@ -236,7 +236,7 @@ export type ControllerServices =
   | Secrets
   | AuditLog
   | PlatformEvents
-  | NotificationService
+  | Notifier
   | Settings
   | PermissionProfiles
   | SessionTokens
@@ -282,14 +282,11 @@ export const bootWith = <A, E>(
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
-    // the code that runs after the boot needs it too. The notification
-    // service sits on the audit log, and beside the repositories rather than
-    // above the plugin host, because the plugin host and the fleet raise
-    // notifications of their own. The notification service gets the Describe
-    // Lines of its answers from the controller daemon's describer. The
-    // describer reads only the database, so it can sit this low too.
-    const repositories = NotificationServiceLayer.pipe(
-      Layer.provide(BoundOperationDescriberLayer),
+    // the code that runs after the boot needs it too. The notifier sits on
+    // the audit log, and beside the repositories rather than above the plugin
+    // host, because the plugin host and the fleet raise notifications of
+    // their own.
+    const repositories = NotifierLayer.pipe(
       Layer.provideMerge(
         Layer.mergeAll(
           controllerIdentityLayer,

@@ -26,9 +26,9 @@
  * - `runners/`: sending a runner that connects the work owed to it, handling
  *   what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
- * - `notifications/`: running the Bound Action of the answer the user chooses
- *   on a decision Notification (`notification.act`), and writing the Describe
- *   Line of each answer;
+ * - `notifications/`: the notifications domain's Bindable Operations port,
+ *   which runs the operation of the answer the user takes on a decision
+ *   Notification, and writes the Describe Line of each answer;
  * - `workflows/`: what the workflows domain reads from the runs domain;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
  *   Workspace Steps, which hands a workspace step to its runner and stops it.
@@ -56,7 +56,7 @@ export {
   Pipeline,
   PipelineLayer,
 } from "./events";
-export { Answering, AnsweringLayer, BoundOperationDescriberLayer } from "./notifications";
+export { BindableOperationsLayer } from "./notifications";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export {
   Arrival,

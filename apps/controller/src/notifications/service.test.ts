@@ -1,8 +1,8 @@
 /**
  * Tests the notification service against a migrated in-memory database: who
  * may create and withdraw a notification, what the service stamps on it, how
- * the list filters and pages, and the two methods the core calls for its
- * own notifications.
+ * the list filters and pages, and the `Notifier` methods the core calls for
+ * its own notifications and to settle decisions.
  *
  * The mute key comes from the caller: a session's actor names the assistant it
  * speaks for, and a run's actor names the workflow it was started from.
@@ -22,11 +22,11 @@ import { withTransaction, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { NotificationService, type CoreNotification } from "./index";
+import { NotificationService, Notifier, type CoreNotification } from "./index";
 import { notificationRepository } from "./repository";
 import { NotificationServiceTestLayer } from "./testing";
 
-type Deps = NotificationService | SqlClient.SqlClient;
+type Deps = NotificationService | Notifier | SqlClient.SqlClient;
 
 const layer = NotificationServiceTestLayer.pipe(
   Layer.provideMerge(AuditLogLayer),
@@ -776,8 +776,9 @@ describe("createCoreNotification", () => {
     const { notification, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         // No actor: only the controller calls this, and it checks no grant.
-        yield* notifications.createCoreNotification(CORE);
+        yield* notifier.createCoreNotification(CORE);
         const [notification] = (yield* actAs(USER, notifications.query({}))).items;
         return {
           notification: notification!,
@@ -808,11 +809,12 @@ describe("createCoreNotification", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         const failure = yield* Effect.flip(
           withTransaction(
             sql,
             Effect.andThen(
-              notifications.createCoreNotification(CORE),
+              notifier.createCoreNotification(CORE),
               Effect.fail("the change the notification reports failed"),
             ),
           ),
@@ -857,9 +859,10 @@ describe("createCoreNotification with unlessRaisedSince", () => {
     run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
-        yield* notifications.createCoreNotification(RAISED);
+        const notifier = yield* Notifier;
+        yield* notifier.createCoreNotification(RAISED);
         const [raised] = (yield* actAs(USER, notifications.query({}))).items;
-        yield* notifications.createCoreNotification(candidate, {
+        yield* notifier.createCoreNotification(candidate, {
           unlessRaisedSince: shiftIso(raised!.createdAt, offsetMs),
         });
         return (yield* actAs(USER, notifications.query({}))).items.length === 2;
@@ -920,6 +923,7 @@ describe("withdrawDecisionsAbout", () => {
     const { byTitle, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         yield* createDecisionAbout("about the task", [{ kind: "task", id: TASK_ID }]);
         yield* createDecisionAbout("about two tasks", [
           { kind: "task", id: OTHER_TASK_ID },
@@ -954,7 +958,7 @@ describe("withdrawDecisionsAbout", () => {
         );
 
         // No actor: only the controller calls this, and it checks no grant.
-        yield* notifications.withdrawDecisionsAbout(
+        yield* notifier.withdrawDecisionsAbout(
           [{ kind: "task", id: TASK_ID }, TRIGGER],
           "the task was deleted",
         );
@@ -1014,10 +1018,11 @@ describe("withdrawDecisionsAbout", () => {
     const { stored, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         const { notificationId } = yield* createDecisionAbout("about the task", [
           { kind: "task", id: TASK_ID },
         ]);
-        yield* notifications.withdrawDecisionsAbout([], "nothing was removed");
+        yield* notifier.withdrawDecisionsAbout([], "nothing was removed");
         return {
           stored: yield* actAs(USER, notifications.read(notificationId)),
           entries: yield* readEventsOfKind("notification.withdrawn"),
@@ -1342,11 +1347,12 @@ describe("decide", () => {
     const results = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         const decideAs = (actor: Actor) =>
           Effect.gen(function* () {
             const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
-            const decided = yield* actAs(actor, notifications.decide(notificationId, "start"));
-            const again = yield* actAs(actor, notifications.decide(notificationId, "dismiss"));
+            const decided = yield* actAs(actor, notifier.decide(notificationId, "start"));
+            const again = yield* actAs(actor, notifier.decide(notificationId, "dismiss"));
             return {
               decided,
               again,
@@ -1395,9 +1401,7 @@ describe("decide", () => {
 
   it("returns false for a notification that does not exist", async () => {
     const decided = await run(
-      Effect.flatMap(NotificationService, (notifications) =>
-        actAs(USER, notifications.decide(UNKNOWN_ID, "start")),
-      ),
+      Effect.flatMap(Notifier, (notifier) => actAs(USER, notifier.decide(UNKNOWN_ID, "start"))),
     );
 
     expect(decided).toBe(false);
@@ -1407,9 +1411,10 @@ describe("decide", () => {
     const { decided, stored, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         const { notificationId } = yield* actAs(PLAIN_SESSION, notifications.create(DECISION));
         return {
-          decided: yield* actAs(USER, notifications.decide(notificationId, "nothing-like-it")),
+          decided: yield* actAs(USER, notifier.decide(notificationId, "nothing-like-it")),
           stored: yield* actAs(USER, notifications.read(notificationId)),
           entries: yield* readEventsOfKind("notification.decided"),
         };
@@ -1441,8 +1446,8 @@ describe("answerDecisionsAbout", () => {
    * request.
    */
   const raiseApproval = (title: string, subject: ReadonlyArray<NotificationSubject>) =>
-    Effect.flatMap(NotificationService, (notifications) =>
-      notifications.createCoreNotification({
+    Effect.flatMap(Notifier, (notifier) =>
+      notifier.createCoreNotification({
         kind: "core.approval",
         title,
         subject,
@@ -1457,6 +1462,7 @@ describe("answerDecisionsAbout", () => {
     const { outcome, byTitle, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         yield* raiseApproval("about the request", [REQUEST]);
         yield* raiseApproval("about another request", [{ ...REQUEST, requestId: "req-2" }]);
         yield* actAs(
@@ -1464,7 +1470,7 @@ describe("answerDecisionsAbout", () => {
           notifications.create({ ...DECISION, title: "offers no such answer", subject: [REQUEST] }),
         );
 
-        const outcome = yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "deny"));
+        const outcome = yield* actAs(USER, notifier.answerDecisionsAbout(REQUEST, "deny"));
 
         const all = (yield* actAs(USER, notifications.query({}))).items;
         return {
@@ -1499,9 +1505,9 @@ describe("answerDecisionsAbout", () => {
   it("reports a question already decided when the only decision about the subject was decided", async () => {
     const { first, second } = await run(
       Effect.gen(function* () {
-        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         yield* raiseApproval("about the request", [REQUEST]);
-        const answer = notifications.answerDecisionsAbout(REQUEST, "allow");
+        const answer = notifier.answerDecisionsAbout(REQUEST, "allow");
         return { first: yield* actAs(USER, answer), second: yield* actAs(USER, answer) };
       }),
     );
@@ -1514,10 +1520,11 @@ describe("answerDecisionsAbout", () => {
     const { outcome, stored } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         yield* raiseApproval("about the request", [REQUEST]);
-        yield* notifications.withdrawDecisionsAbout([REQUEST], "the turn was interrupted");
+        yield* notifier.withdrawDecisionsAbout([REQUEST], "the turn was interrupted");
         return {
-          outcome: yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "allow")),
+          outcome: yield* actAs(USER, notifier.answerDecisionsAbout(REQUEST, "allow")),
           stored: (yield* actAs(USER, notifications.query({}))).items[0]!,
         };
       }),
@@ -1531,11 +1538,11 @@ describe("answerDecisionsAbout", () => {
   it("reports none when no decision lists the subject", async () => {
     const outcome = await run(
       Effect.gen(function* () {
-        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
         // An informational notification is resolved from the start, but it
         // asks nothing, so it does not settle the question.
-        yield* notifications.createCoreNotification({ ...CORE, subject: [REQUEST] });
-        return yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "allow"));
+        yield* notifier.createCoreNotification({ ...CORE, subject: [REQUEST] });
+        return yield* actAs(USER, notifier.answerDecisionsAbout(REQUEST, "allow"));
       }),
     );
 

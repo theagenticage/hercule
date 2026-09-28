@@ -27,7 +27,7 @@ import { currentStamp, requireGrant } from "../../actor";
 import { withTransaction } from "../../db";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
-import type { NotificationService } from "../../notifications";
+import type { Notifier } from "../../notifications";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 
@@ -106,5 +106,5 @@ export class Enrichment extends Context.Service<Enrichment, Effect.Success<typeo
 export const EnrichmentLayer: Layer.Layer<
   Enrichment,
   never,
-  SqlClient.SqlClient | AuditLog | EventService | EventRouter | SessionService | NotificationService
+  SqlClient.SqlClient | AuditLog | EventService | EventRouter | SessionService | Notifier
 > = Layer.effect(Enrichment)(make);

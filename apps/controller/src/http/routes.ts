@@ -36,8 +36,7 @@ import {
 } from "../conversations";
 import { Controller, ControllerLayer } from "../controller";
 import {
-  Answering,
-  AnsweringLayer,
+  BindableOperationsLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
   DispatchLayer,
@@ -60,7 +59,7 @@ import {
   WorkflowRunsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
-import { NotificationService } from "../notifications";
+import { NotificationService, NotificationServiceLayer } from "../notifications";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -214,7 +213,6 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
 const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) =>
   Effect.gen(function* () {
     const notifications = yield* NotificationService;
-    const answering = yield* Answering;
     return handlers
       .handle("query", ({ query }) => withApiErrors(notifications.query(query)))
       .handle("read", ({ params }) => withApiErrors(notifications.read(params.id)))
@@ -223,7 +221,7 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
         withApiErrors(notifications.withdraw({ id: params.id, ...payload })),
       )
       .handle("act", ({ params, payload }) =>
-        withApiErrors(answering.act({ id: params.id, ...payload })),
+        withApiErrors(notifications.act({ id: params.id, ...payload })),
       );
   }),
 );
@@ -634,12 +632,16 @@ export const operationLayers = Layer.mergeAll(
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
-  // `Answering` runs the Bound Action of a chosen answer, which can be a task,
-  // run or live session operation. So it gets the run layers, which include
-  // the task service, and sits in this group, which provides `Live`.
+  // The notification service runs the operation of a chosen answer through
+  // the controller daemon's `BindableOperations`, and the operation can be a
+  // task, run or live session operation. So the port gets the run layers,
+  // which include the task service, and sits in this group, which provides
+  // `Live`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunLayers)),
-    AnsweringLayer.pipe(Layer.provide(RunLayers)),
+    NotificationServiceLayer.pipe(
+      Layer.provide(BindableOperationsLayer.pipe(Layer.provide(RunLayers))),
+    ),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events

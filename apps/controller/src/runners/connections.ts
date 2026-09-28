@@ -50,7 +50,7 @@ import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
 
   const reachable = new Map<string, Reachable>();
   // Unbounded, so a runner's hello never waits for a slow subscriber. It
@@ -649,7 +649,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           for (const runner of yield* runners.listUnreachableSeenBefore(cutoff)) {
-            yield* notifications.createCoreNotification(
+            yield* notifier.createCoreNotification(
               {
                 kind: "core.runner-unreachable",
                 title: `Runner ${runner.name} is unreachable`,
@@ -687,5 +687,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog | NotificationService
+  SqlClient.SqlClient | AuditLog | Notifier
 > = Layer.effect(RunnerConnections)(make);

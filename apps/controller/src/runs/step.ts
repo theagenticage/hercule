@@ -44,7 +44,7 @@ import {
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
 } from "../plugins";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { TaskService } from "../tasks";
 import { runRepository, StepRecordEnded } from "./repository";
 import { buildRunContext } from "./run-context";
@@ -256,7 +256,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const tasks = yield* TaskService;
-    const notifications = yield* NotificationService;
+    const notifier = yield* Notifier;
     const host = yield* PluginHost;
 
     /**
@@ -289,7 +289,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
       "task.query": { inTransaction: true, execute: (input) => tasks.query(input as TaskFilter) },
       "notification.create": {
         inTransaction: true,
-        execute: (input) => notifications.create(input as NotificationCreateInput),
+        execute: (input) => notifier.create(input as NotificationCreateInput),
       },
       "run.start": { inTransaction: true, execute: (input) => start(input as RunStartCall) },
       wait: {

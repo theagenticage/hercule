@@ -14,9 +14,9 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SessionInput, SessionRespond } from "@hercule/protocol";
 import type { BoundAction, Notification, Session, Task } from "@hercule/contract";
-import { completeSetup, get, post, readErrorBody, withServer } from "../../http/testing";
-import type { ServerHarness } from "../../http/testing";
-import { insertOpenDecision } from "../../notifications/testing";
+import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
+import type { ServerHarness } from "../http/testing";
+import { insertOpenDecision } from "./testing";
 import {
   WAIT_DEADLINE_MS,
   at,
@@ -30,9 +30,9 @@ import {
   waitUntil,
   withAgentFleet,
   type Arranged,
-} from "../../sessions/testing";
-import { buildFileTaskSource, createWorkflowOrFail } from "../../workflows/testing";
-import { runEffect } from "../testing";
+} from "../sessions/testing";
+import { buildFileTaskSource, createWorkflowOrFail } from "../workflows/testing";
+import { runEffect } from "../daemon/testing";
 
 /** Gives each case three wait deadlines, plus ten seconds for starting the fleet, the slow part of a session case. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });

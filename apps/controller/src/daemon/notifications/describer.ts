@@ -1,8 +1,8 @@
 /**
  * The describe line of an answer: what taking it does, written from its
  * operation with the current names of what the operation acts on, such as
- * "Start a run of Bugfix". This implements the notifications domain's
- * `BoundOperationDescriber` port.
+ * "Start a run of Bugfix". This is the `describe` half of the notifications
+ * domain's `BindableOperations` port.
  *
  * It reads the tasks, projects, workflows, sessions and Connections an
  * operation names, and those domains depend on the notifications domain, so
@@ -26,7 +26,6 @@
  * so a screen can set them apart; everything else is `text`.
  */
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -43,7 +42,6 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
-import { BoundOperationDescriber } from "../../notifications";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
@@ -175,7 +173,18 @@ const describeProvenance = (
     "; ",
   );
 
-const make = Effect.gen(function* () {
+/**
+ * Builds the `describe` function of the `BindableOperations` port, which
+ * reads the rows of the entities each operation names. It needs only the
+ * database.
+ */
+export const makeDescribe: Effect.Effect<
+  (
+    operations: ReadonlyArray<BindableOperation>,
+  ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const projects = yield* projectRepository;
   const workflows = yield* workflowRepository;
@@ -371,23 +380,11 @@ const make = Effect.gen(function* () {
     } satisfies BindableOperationHandlers<Effect.Effect<DescribeLine, SqlError>>;
   };
 
-  return BoundOperationDescriber.of({
-    describe: (operations: ReadonlyArray<BindableOperation>) =>
-      Effect.suspend(() => {
-        const describers = buildDescribers();
-        return Effect.forEach(operations, (operation) =>
-          dispatchBindableOperation(describers, operation),
-        );
-      }),
-  });
+  return (operations: ReadonlyArray<BindableOperation>) =>
+    Effect.suspend(() => {
+      const describers = buildDescribers();
+      return Effect.forEach(operations, (operation) =>
+        dispatchBindableOperation(describers, operation),
+      );
+    });
 });
-
-/**
- * The describe lines of answers, read from the rows of the entities each
- * operation names. It needs only the database.
- */
-export const BoundOperationDescriberLayer: Layer.Layer<
-  BoundOperationDescriber,
-  never,
-  SqlClient.SqlClient
-> = Layer.effect(BoundOperationDescriber)(make);

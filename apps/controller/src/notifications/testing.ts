@@ -7,35 +7,52 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { BoundAction, Notification, NotificationSubject } from "@hercule/contract";
-import { BoundOperationDescriber } from "./describer";
+import type {
+  BindableOperation,
+  BoundAction,
+  Notification,
+  NotificationSubject,
+} from "@hercule/contract";
 import { AuditLog } from "../events";
+import { BindableOperations, type BindableOperationError } from "./bindable-operations";
+import { Notifier, NotifierLayer } from "./notifier";
 import { notificationRepository } from "./repository";
 import { NotificationService, NotificationServiceLayer } from "./service";
 
 /**
- * A describer that writes each answer's operation id as its describe line,
- * such as "run.start". The real one lives in the controller daemon, which a
- * domain's test cannot import; a test that checks the real lines runs the
- * controller over HTTP.
+ * Builds a fake of the `BindableOperations` port. `run` calls the given
+ * function, which succeeds without doing anything by default. `describe`
+ * writes each operation's id as its describe line, such as "run.start".
+ *
+ * The real port lives in the controller daemon, which a domain's test cannot
+ * import. A test that checks the real lines, or what an operation really
+ * does, runs the controller over HTTP.
  */
-export const OperationIdDescriberLayer: Layer.Layer<BoundOperationDescriber> = Layer.succeed(
-  BoundOperationDescriber,
-  BoundOperationDescriber.of({
-    describe: (operations) =>
-      Effect.succeed(operations.map((operation) => [{ kind: "text", text: operation.op }])),
-  }),
-);
+export const buildFakeBindableOperationsLayer = (
+  run: (operation: BindableOperation) => Effect.Effect<void, BindableOperationError> = () =>
+    Effect.void,
+): Layer.Layer<BindableOperations> =>
+  Layer.succeed(
+    BindableOperations,
+    BindableOperations.of({
+      run,
+      describe: (operations) =>
+        Effect.succeed(operations.map((operation) => [{ kind: "text", text: operation.op }])),
+    }),
+  );
 
 /**
- * The notification service for a domain's tests, with the describer above.
- * It still needs the database and the audit log.
+ * The notification service and the notifier for a domain's tests, over the
+ * fake port above. They still need the database and the audit log.
  */
 export const NotificationServiceTestLayer: Layer.Layer<
-  NotificationService,
+  NotificationService | Notifier,
   never,
   SqlClient.SqlClient | AuditLog
-> = NotificationServiceLayer.pipe(Layer.provide(OperationIdDescriberLayer));
+> = NotificationServiceLayer.pipe(
+  Layer.provide(buildFakeBindableOperationsLayer()),
+  Layer.provideMerge(NotifierLayer),
+);
 
 /** The session every decision these helpers insert comes from. */
 const PRODUCER_SESSION_ID = "0199e0e7-5555-7000-8000-000000000000";

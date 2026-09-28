@@ -1,7 +1,6 @@
 /**
- * Answering decisions: taking an answer of a decision, which runs operations
- * of domains above the notifications domain, and the describe line of an
- * answer, which reads their rows.
+ * The notifications domain's `BindableOperations` port: running the operation
+ * an answer carries, and writing its describe line, both of which reach
+ * domains above the notifications domain.
  */
-export { Answering, AnsweringLayer } from "./answering";
-export { BoundOperationDescriberLayer } from "./describer";
+export { BindableOperationsLayer } from "./bindable-operations";
