@@ -308,15 +308,24 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Checks whether any resource acts through the connection. The check
-     * decides whether the connection may be deleted.
+     * Returns every resource that acts through the connection, with its name:
+     * a repo's remote, or a folder's or mailbox's label, which may be `null`.
+     * Sorted by name, then by id. The list decides whether the connection may
+     * be deleted, and names the resources in the refusal.
      */
-    usesConnection: (connectionId: string): Effect.Effect<boolean, SqlError> =>
+    listActingThroughConnection: (
+      connectionId: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly name: string | null }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM resources WHERE connection_id = ${uuidFromString(connectionId)} LIMIT 1
+        sql<{ readonly id: Uint8Array; readonly name: string | null }>`
+          SELECT id, COALESCE(remote, label) AS name FROM resources
+          WHERE connection_id = ${uuidFromString(connectionId)}
+          ORDER BY name, id
         `,
-        (rows) => rows.length > 0,
+        (rows) => rows.map((row) => ({ id: uuidToString(row.id), name: row.name })),
       ),
 
     /**

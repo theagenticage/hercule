@@ -26,7 +26,8 @@
  * - `runners/`: sending a runner that connects the work owed to it, handling
  *   what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
- * - `connections/`: deleting a Connection;
+ * - `connections/`: what the connections domain reads from the resources and
+ *   workflows domains;
  * - `workflows/`: what the workflows domain reads from the runs domain, and
  *   the Scheduler, which fires cron triggers;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
@@ -53,7 +54,7 @@ export {
   Pipeline,
   PipelineLayer,
 } from "./events";
-export { ConnectionRemoval, ConnectionRemovalLayer } from "./connections";
+export { ConnectionReferencesLayer } from "./connections";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export {
   Arrival,

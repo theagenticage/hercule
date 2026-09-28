@@ -4,6 +4,7 @@
  * plugin.
  */
 export { PluginConfigs } from "./plugin-configs";
+export { ConnectionReferences, type ConnectionReference } from "./references";
 export {
   connectionRepository,
   GITHUB_CONNECTION_TYPE,

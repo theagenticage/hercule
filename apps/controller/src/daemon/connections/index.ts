@@ -1,5 +1,6 @@
 /**
- * Connections: deleting a Connection, which must first check that no
- * resource acts through it and no workflow trigger names it.
+ * Connections: what the connections domain needs from other domains and
+ * cannot import itself: the resources and workflow triggers that name a
+ * Connection, which block its delete.
  */
-export { ConnectionRemoval, ConnectionRemovalLayer } from "./connection-removal";
+export { ConnectionReferencesLayer } from "./references";

@@ -72,6 +72,7 @@ import {
   type Outcome,
 } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
+import { ConnectionReferences, type ConnectionReference } from "./references";
 import {
   connectionRepository,
   type ConnectionSortField,
@@ -116,6 +117,37 @@ const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
 
 const NO_SUCH_CONNECTION = "no such connection";
 
+/**
+ * Builds the refusal for a connection that other records still name. It lists
+ * every one of them, so the user can change them all before trying again.
+ */
+const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string => {
+  // A resource is named by its id too, because the id is what the user
+  // passes to update it, and because a folder's label can be cleared.
+  const resources = named.flatMap((each) =>
+    each.kind === "resource"
+      ? [each.resourceName === null ? each.resourceId : `${each.resourceName} (${each.resourceId})`]
+      : [],
+  );
+  const triggers = named.flatMap((each) =>
+    each.kind === "trigger" ? [`${each.triggerId} in the workflow ${each.workflowName}`] : [],
+  );
+  const parts: Array<string> = [];
+  if (resources.length > 0) {
+    parts.push(
+      `resources act through this connection: ${resources.join(", ")}; ` +
+        "point those resources at another connection before deleting this one",
+    );
+  }
+  if (triggers.length > 0) {
+    parts.push(
+      `workflow triggers start runs on events from this connection: ${triggers.join(", ")}; ` +
+        "point those triggers at another connection, or delete them, before deleting this one",
+    );
+  }
+  return parts.join("; ");
+};
+
 /** A connection type as the host registered it: the catalog entry, plus its `validate` function. */
 type Contribution = RegisteredConnectionType["contribution"];
 
@@ -141,6 +173,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
+  const references = yield* ConnectionReferences;
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -731,19 +764,30 @@ const make = Effect.gen(function* () {
     /**
      * Deletes the connection and every secret it owns, in one transaction,
      * and records the deletion in the audit log. Fails with `NotFound` when
-     * no connection has the id.
+     * no connection has the id, and with `InvalidState` while a resource or a
+     * trigger still names the connection, because deleting it would break
+     * that record.
      *
-     * It checks neither the caller's grant nor whether a resource or a
-     * trigger still names the connection. The `connection.delete` operation
-     * is the controller daemon's `ConnectionRemoval`, which checks both first
-     * and then calls this. Any other caller must do the same checks.
+     * The check runs in the delete's transaction. Otherwise a resource or a
+     * workflow saved between the check and the delete would name a
+     * connection that no longer exists.
      */
-    deleteUnchecked: (id: Id): Effect.Effect<Record<string, never>, NotFound | SqlError> =>
+    delete: (
+      id: Id,
+    ): Effect.Effect<
+      Record<string, never>,
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
+        yield* requireGrant("connection.delete");
         const row = yield* readStoredConnectionOrFail(id);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const named = yield* references.list(id);
+            if (named.length > 0) {
+              return yield* Effect.fail(createInvalidStateError(buildNamedByMessage(named)));
+            }
             const at = yield* nowIso;
             const owner = buildSecretOwner(id);
             const names =
@@ -780,5 +824,5 @@ export class ConnectionService extends Context.Service<
 export const ConnectionServiceLayer: Layer.Layer<
   ConnectionService,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes | PluginConfigs
+  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes | PluginConfigs | ConnectionReferences
 > = Layer.effect(ConnectionService)(make);

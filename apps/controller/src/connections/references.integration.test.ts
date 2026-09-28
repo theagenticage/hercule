@@ -1,21 +1,24 @@
 /**
- * Tests `connection.delete` against the workflow triggers that name a
+ * Tests `connection.delete` against the records in other domains that name a
  * Connection, over HTTP on a set-up controller with the local GitHub plugin.
+ * The connections domain reads those records through its
+ * `ConnectionReferences` port, which the controller daemon provides.
  *
  * A trigger that names a Connection starts runs only on events from that
  * Connection. If the Connection were deleted, the trigger would never match
  * again and the workflow would go quiet without telling anyone, so the delete
- * is refused while such a trigger exists. The resource guard of the same
- * operation is tested in the resources suite.
+ * is refused while such a trigger exists. The same holds for a resource that
+ * acts through the Connection. Clearing a resource's Connection is tested in
+ * the resources suite.
  */
 import { describe, expect, it } from "vitest";
-import { del, get, readErrorBody } from "../../http/testing";
+import { del, get, post, readErrorBody } from "../http/testing";
 import {
   ACCEPTED_GITHUB_TOKEN,
   createConnection,
   createWorkflowOrFail,
   withSetUpController,
-} from "../../workflows/testing";
+} from "../workflows/testing";
 
 /**
  * Returns the source of a workflow named `name` with one start trigger, `id`,
@@ -110,6 +113,42 @@ describe("connection.delete with a trigger on any Connection", () => {
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect(await readConnectionStatus(base, token, connectionId)).toBe(404);
+    });
+  });
+});
+
+describe("connection.delete while a resource and a trigger both name the Connection", () => {
+  it("refuses with one message that names the resource and the trigger, and what to do about each", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const connectionId = await createConnection(base, token, "github/github", {
+        pat: ACCEPTED_GITHUB_TOKEN,
+      });
+      const created = await post(
+        base,
+        "/api/v1/resources",
+        { kind: "repo", remote: "https://github.com/acme/web.git", connectionId },
+        token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const resourceId = ((await created.json()) as { id: string }).id;
+      await createWorkflowOrFail(base, token, {
+        source: buildLabeledWorkflowSource("Label triage", "labeled", connectionId),
+      });
+
+      const response = await deleteConnection(base, token, connectionId);
+
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(409);
+      expect(refusal.code).toBe("invalid_state");
+      expect(refusal.message).toBe(
+        "resources act through this connection: " +
+          `https://github.com/acme/web.git (${resourceId}); ` +
+          "point those resources at another connection before deleting this one; " +
+          "workflow triggers start runs on events from this connection: " +
+          "labeled in the workflow Label triage; " +
+          "point those triggers at another connection, or delete them, before deleting this one",
+      );
+      expect(await readConnectionStatus(base, token, connectionId)).toBe(200);
     });
   });
 });

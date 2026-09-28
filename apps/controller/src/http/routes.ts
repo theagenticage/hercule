@@ -48,8 +48,6 @@ import {
   PipelineLayer,
   Placement,
   PlacementLayer,
-  ConnectionRemoval,
-  ConnectionRemovalLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
   Provisioning,
@@ -182,10 +180,6 @@ const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
 const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   Effect.gen(function* () {
     const connections = yield* ConnectionService;
-    // A Connection can be deleted only when no resource acts through it and
-    // no trigger names it. Both are other domains' rows, so the delete is a
-    // controller daemon use case.
-    const removal = yield* ConnectionRemoval;
     return handlers
       .handle("query", ({ query }) => withApiErrors(connections.query(query)))
       .handle("read", ({ params }) => withApiErrors(connections.read(params.id)))
@@ -193,7 +187,7 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(connections.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(removal.deleteConnection(params.id)))
+      .handle("delete", ({ params }) => withApiErrors(connections.delete(params.id)))
       .handle("setCredentials", ({ params, payload }) =>
         withApiErrors(connections.setCredentials({ id: params.id, ...payload })),
       )
@@ -610,7 +604,6 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
-  ConnectionRemovalLayer,
   AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,

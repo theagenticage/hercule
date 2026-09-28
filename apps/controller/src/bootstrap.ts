@@ -42,7 +42,7 @@ import {
   ConnectionTypes,
   ConnectionTypesLayer,
 } from "./connections";
-import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
+import { cancelStrandedInputsAndReportLostWakeUps, ConnectionReferencesLayer } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { NotificationService, NotificationServiceLayer } from "./notifications";
@@ -346,13 +346,16 @@ export const bootWith = <A, E>(
      * provided to it. The workspace service asks the runs domain, through
      * the `WorkspaceStepActivity` port, whether a workspace step is running
      * before it hands out a git credential. The workspaces domain cannot
-     * import the runs domain, so the two are joined here.
+     * import the runs domain, so the two are joined here. The connection
+     * service asks the resources and workflows domains, through the
+     * `ConnectionReferences` port, what still names a Connection before it
+     * deletes one, and is joined to them here for the same reason.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
       sessionService,
-      ConnectionServiceLayer,
+      ConnectionServiceLayer.pipe(Layer.provide(ConnectionReferencesLayer)),
     ).pipe(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),

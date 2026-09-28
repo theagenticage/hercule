@@ -42,6 +42,7 @@ import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
   cancelStrandedInputsAndReportLostWakeUps,
+  ConnectionReferencesLayer,
   EventRoutingInterval,
   LostRunnerSweepInterval,
   RunFibers,
@@ -124,7 +125,9 @@ const buildServices = (home: string) =>
           Layer.provide(AssistantSessionObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
-        ConnectionServiceLayer,
+        // As in the real boot: a Connection's delete asks the resources and
+        // workflows domains what still names it.
+        ConnectionServiceLayer.pipe(Layer.provide(ConnectionReferencesLayer)),
         ResourceServiceLayer,
       ).pipe(
         // As in the real boot: sessions take and release workspace leases,
