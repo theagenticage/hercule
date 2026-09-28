@@ -1,9 +1,11 @@
 import { assert, describe, it } from "vitest";
 import type { Notification, Resolution } from "@hercule/contract";
 import {
+  buildBoundActionRows,
   chooseNotificationMark,
   describeProducer,
   describeResolution,
+  formatDescribeLine,
   formatUnseenCount,
   isNotificationMuted,
   parseMuteKind,
@@ -89,6 +91,20 @@ describe("chooseNotificationMark", () => {
     }
   });
 
+  it("marks a session's open approval as a decision and an answered one as done", () => {
+    const approval: Notification = {
+      ...decision,
+      kind: "core.approval",
+      producer: { type: "core" },
+      subject: [{ kind: "request", sessionId: ID, requestId: "req-1" }],
+    };
+    assert.strictEqual(chooseNotificationMark(approval), "decision");
+    assert.strictEqual(
+      chooseNotificationMark({ ...approval, status: "resolved", resolution: resolution({}) }),
+      "done",
+    );
+  });
+
   it("marks a withdrawn decision as withdrawn", () => {
     assert.strictEqual(
       chooseNotificationMark({
@@ -110,6 +126,13 @@ describe("describeResolution", () => {
     assert.strictEqual(
       describeResolution(resolution({ origin: `connection:${ID}` })),
       "decided in a chat channel",
+    );
+  });
+
+  it("says a decision was decided through the API", () => {
+    assert.strictEqual(
+      describeResolution(resolution({ origin: "api" })),
+      "decided through the API",
     );
   });
 
@@ -147,6 +170,80 @@ describe("describeResolution", () => {
 
   it("says withdrawn alone when there is no reason", () => {
     assert.strictEqual(describeResolution(resolution({ kind: "withdrawn" })), "withdrawn");
+  });
+});
+
+describe("buildBoundActionRows", () => {
+  it("keeps each answer's label, describe line and description, in order", () => {
+    const line = [
+      { kind: "text", text: "Start a run of " },
+      { kind: "marked", text: "Bugfix" },
+    ] as const;
+    assert.deepStrictEqual(
+      buildBoundActionRows([
+        {
+          id: "start",
+          label: "Start Bugfix",
+          description: "Opens a session on the task.",
+          operation: { op: "run.start", input: { workflowId: ID } },
+          primary: true,
+          describeLine: line,
+        },
+        {
+          id: "dismiss",
+          label: "Dismiss",
+          operation: null,
+          describeLine: [{ kind: "text", text: "Does nothing" }],
+        },
+      ]),
+      [
+        {
+          id: "start",
+          label: "Start Bugfix",
+          primary: true,
+          describeLine: line,
+          runsNothing: false,
+          description: "Opens a session on the task.",
+        },
+        {
+          id: "dismiss",
+          label: "Dismiss",
+          primary: false,
+          describeLine: [{ kind: "text", text: "Does nothing" }],
+          runsNothing: true,
+          description: undefined,
+        },
+      ],
+    );
+  });
+
+  it("gives an answer without a describe line an empty one", () => {
+    const [row] = buildBoundActionRows([{ id: "start", label: "Start", operation: null }]);
+    assert.deepStrictEqual(row?.describeLine, []);
+  });
+});
+
+describe("formatDescribeLine", () => {
+  it("joins the parts, quoting each marked part in guillemets", () => {
+    assert.strictEqual(
+      formatDescribeLine([
+        { kind: "text", text: "Start a run of " },
+        { kind: "marked", text: "Bugfix" },
+      ]),
+      "Start a run of «Bugfix»",
+    );
+  });
+
+  it("keeps a marked part that reads like the core's words apart from them", () => {
+    assert.strictEqual(
+      formatDescribeLine([
+        { kind: "text", text: "Send " },
+        { kind: "marked", text: "ok to session Chat" },
+        { kind: "text", text: " to session " },
+        { kind: "marked", text: "Design" },
+      ]),
+      "Send «ok to session Chat» to session «Design»",
+    );
   });
 });
 

@@ -17,10 +17,12 @@
  * Spec 10 §7 owns the record, its lifecycle and the router.
  */
 import { PluginId } from "@hercule/plugin-host";
+import { Fact } from "@hercule/protocol";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
+  CapExceeded,
   Forbidden,
   Internal,
   InvalidState,
@@ -89,10 +91,13 @@ export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>;
 export const CORE_KIND_PREFIX = "core.";
 
 /**
- * The kinds the core produces about itself (spec 10 §7.2). Clients that treat
- * one of them specially, such as marking a failed run, name it from here.
+ * The kinds the core produces about itself. Clients that treat one of them
+ * specially, such as marking a failed run, name it from here. `core.approval`
+ * is the decision raised while a session waits for approval to run a command,
+ * change or read files, or use a tool. Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
+  "core.approval",
   "core.run-failed",
   "core.plugin-error",
   "core.runner-unreachable",
@@ -141,7 +146,10 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
 
 /**
  * One thing a notification is about. A trigger has no id of its own, so it is
- * named by its workflow and its id in that workflow's source.
+ * named by its workflow and its id in that workflow's source. A request is
+ * the approval a session waits on, named by its session and its own id, so
+ * the core can resolve the decision about one request without touching other
+ * decisions about the same session.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -154,15 +162,19 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("plugin", PluginId),
   buildIdSubject("event", EventId),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),
 ]);
 
 export type NotificationSubject = Schema.Schema.Type<typeof NotificationSubject>;
 
 /**
  * The operation an answer runs when the user takes it: a contract operation
- * id and its input. The input is stored as given. It is not yet checked
- * against the operation's input schema, and no answer can be taken yet
- * (spec 10 §7.4, ticket #85).
+ * id and its whole input as one object. This schema only bounds its size.
+ * `notification.create` checks that the operation is one an answer may run
+ * and that the input fits it (`decodeBindableOperation`), and `notification.act`
+ * checks again before it runs the operation. A stored answer is read with this
+ * looser schema, so a notification stays readable after the list of bindable
+ * operations or an operation's input schema changes.
  */
 export const BoundOperation = Schema.Struct({
   op: Schema.String.check(
@@ -204,14 +216,55 @@ export const BoundAction = Schema.Struct({
 export type BoundAction = Schema.Schema.Type<typeof BoundAction>;
 
 /**
- * Where a notification was resolved: `web`, `core`, `connection:<id>` (a
- * channel click), `session:<id>` or `plugin:<id>`.
+ * One piece of a describe line. It has one of two kinds:
+ *
+ * - `text` is the ordinary words of the line.
+ * - `marked` is set apart from the words around it; the web app renders it
+ *   in ink. It is either the live name of an entity the answer acts on, such
+ *   as a workflow or a session, or a value the answer sends or sets, such as
+ *   the text of an input or a new title.
+ */
+export const DescribeLinePart = Schema.Struct({
+  kind: Schema.Literals(["text", "marked"]),
+  text: Schema.String,
+});
+
+export type DescribeLinePart = Schema.Schema.Type<typeof DescribeLinePart>;
+
+/**
+ * What taking an answer does, written by the core from the frozen operation
+ * with the current names: "Start a run of Bugfix". The producer can neither
+ * write nor hide it, so a label cannot mislead the user about the click. For
+ * the same reason no value the operation sends is shortened. An answer that
+ * runs nothing reads "Does nothing".
+ */
+export const DescribeLine = Schema.Array(DescribeLinePart);
+
+export type DescribeLine = Schema.Schema.Type<typeof DescribeLine>;
+
+/**
+ * One answer of a stored decision. The core adds the describe line to the
+ * answers of an open decision when it returns one to the user, the only
+ * caller who can take an answer. A resolved decision's answers can no longer
+ * be taken, so they carry none.
+ */
+export const NotificationAction = Schema.Struct({
+  ...BoundAction.fields,
+  describeLine: Schema.optionalKey(DescribeLine),
+});
+
+export type NotificationAction = Schema.Schema.Type<typeof NotificationAction>;
+
+/**
+ * Where a notification was resolved: `web` (the web app), `api` (a client
+ * with an API key, such as the CLI), `core`, `connection:<id>` (a channel
+ * click), `session:<id>` or `plugin:<id>`.
  */
 export const ResolutionOrigin = Schema.String.check(
   Schema.isPattern(
-    /^(web|core|(connection|session):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/,
+    /^(web|api|core|(connection|session):[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|plugin:[a-z0-9][a-z0-9-]*)$/,
     {
-      description: "web, core, connection:<id>, session:<id> or plugin:<id>",
+      description: "web, api, core, connection:<id>, session:<id> or plugin:<id>",
     },
   ),
 );
@@ -254,7 +307,7 @@ export const Notification = Schema.Struct({
   /** Set when the core derived the notification from exactly one event, such as `run.failed`. */
   eventId: Schema.optionalKey(EventId),
   /** Empty for an informational notification; the answers of a decision. */
-  actions: Schema.Array(BoundAction),
+  actions: Schema.Array(NotificationAction),
   status: NotificationStatus,
   /** Set once a decision is resolved. An informational notification never has one. */
   resolution: Schema.optionalKey(Resolution),
@@ -318,6 +371,13 @@ export const NotificationWithdrawInput = Schema.Struct({
 
 export type NotificationWithdrawInput = Schema.Schema.Type<typeof NotificationWithdrawInput>;
 
+/** The payload of `notification.act`: the answer the user takes. */
+export const NotificationActInput = Schema.Struct({
+  actionId: Schema.String.check(Schema.isMaxLength(MAX_ACTION_ID_LENGTH)),
+});
+
+export type NotificationActInput = Schema.Schema.Type<typeof NotificationActInput>;
+
 /**
  * The filters of `notification.query`. A notification must match every field
  * given. `since` keeps notifications created at or after that instant.
@@ -358,6 +418,22 @@ export const notification = HttpApiGroup.make("notification")
       payload: NotificationWithdrawInput,
       success: Notification,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // The errors include every error of the operations an answer may run,
+    // because a failed operation's own error is returned unchanged.
+    HttpApiEndpoint.post("act", "/notifications/:id/act", {
+      params: { id: Id },
+      payload: NotificationActInput,
+      success: Notification,
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Internal,
+      ],
     }),
   )
   .middleware(Authenticated);

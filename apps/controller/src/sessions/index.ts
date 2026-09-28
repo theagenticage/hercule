@@ -9,6 +9,7 @@
  * that a request calls directly. It also builds the frames and makes the
  * status changes that the controller daemon calls while it talks to a runner.
  */
+export type { WaitEndedBy } from "./approval-notification";
 export { SessionObserver, type SessionEndReason, type SessionExit } from "./observer";
 export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
 export {

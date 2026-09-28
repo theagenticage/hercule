@@ -24,7 +24,8 @@
  *   until the session is idle again.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber } from "effect";
+import { Duration, Effect, Exit, Fiber } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   type ModelDescriptor,
   type ProbeRequest,
@@ -44,6 +45,7 @@ import {
   get,
   onSocket,
   post,
+  readErrorBody,
   send,
   waitForLiveToSettle,
   fetchTicket,
@@ -51,13 +53,18 @@ import {
   type Collected,
   type ServerHarness,
 } from "../http/testing";
+import { Live } from "../daemon";
+import { withTransaction } from "../db";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   listFrames,
+  readApprovalNotifications,
   waitForFrames,
+  waitForResolvedApprovalNotification,
   reportEvent,
   spawnSession,
   spawnSessionOrFail,
+  waitForRunnerGone,
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
@@ -433,22 +440,6 @@ const startIdleSession = async (arranged: Arranged, prompt: string): Promise<Ses
 
 const listInputFrames = (wire: Wire): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(wire, "sessionInput");
-
-/**
- * Waits until the controller has noticed the runner's socket close. Once the
- * runner is no longer `online`, the connection map has dropped it, so a
- * delivery then fails for that reason and not because of a race.
- */
-const waitForRunnerGone = (arranged: Arranged): Promise<Runner> =>
-  waitUntil("saw the runner disconnect", async () => {
-    const response = await get(
-      arranged.harness.base,
-      `/api/v1/runners/${arranged.runnerId}`,
-      arranged.token,
-    );
-    const runner = (await response.json()) as Runner;
-    return runner.connectivity === "online" ? undefined : runner;
-  });
 
 const reportExited = (wire: Wire, sessionId: string, seq: number): void =>
   reportEvent(wire, seq, {
@@ -3366,6 +3357,97 @@ describe("sessions a runner's report leaves out", () => {
 });
 
 /**
+ * `queueInput`: the form of `session.input` that stores the input in its
+ * caller's transaction and delivers it only after that transaction commits.
+ * No route calls it, so these tests run it in a transaction of their own.
+ */
+describe("queueInput", () => {
+  /** Runs `queueInput` in a transaction that ends with `after`, as the user. */
+  const queueInputThen = (
+    arranged: Arranged,
+    sessionId: string,
+    text: string,
+    after: Effect.Effect<void, string>,
+  ) =>
+    arranged.harness.runWithLiveSessions(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const live = yield* Live;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const row = yield* live.queueInput({ id: sessionId, text });
+            yield* after;
+            return row;
+          }),
+        );
+      }),
+    );
+
+  it("stores the input and sends it to an idle session once the caller commits", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+
+      const exit = await queueInputThen(arranged, session.id, "after the commit", Effect.void);
+
+      expect(Exit.isSuccess(exit), String(exit)).toBe(true);
+      const row = Exit.isSuccess(exit) ? exit.value : undefined;
+      expect(row).toMatchObject({ sessionId: session.id, text: "after the commit" });
+      const frame = await waitUntil("sent the queued input", () =>
+        listInputFrames(arranged.wire).find((one) => one.requestId === row?.id),
+      );
+      expect(frame.input.text).toBe("after the commit");
+    });
+  });
+
+  it("stores and sends nothing when the caller's transaction rolls back", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      const before = listInputFrames(arranged.wire).length;
+
+      const exit = await queueInputThen(
+        arranged,
+        session.id,
+        "never committed",
+        Effect.fail("a later write in the caller's transaction failed"),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listInputFrames(arranged.wire)).toHaveLength(before);
+      expect((await listInputs(arranged, session.id)).map((one) => one.text)).not.toContain(
+        "never committed",
+      );
+    });
+  });
+
+  it("resumes an exited session once the caller commits, and sends the input when it starts", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startAndEndSession(arranged, "hello");
+
+      const exit = await queueInputThen(arranged, session.id, "still there?", Effect.void);
+
+      expect(Exit.isSuccess(exit), String(exit)).toBe(true);
+      const row = Exit.isSuccess(exit) ? exit.value : undefined;
+      expect(row?.status).toBe("queued");
+      const sent = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
+      expect(sent[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+
+      reportEvent(arranged.wire, 3, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      const frame = await waitUntil("sent the input to the resumed session", () =>
+        listInputFrames(arranged.wire).find((one) => one.requestId === row?.id),
+      );
+      expect(frame.input.text).toBe("still there?");
+    });
+  });
+});
+
+/**
  * Input into a session whose harness has exited: the input is stored, the same
  * session id is resumed on the runner that still has its transcript, and the
  * input is delivered once the process reports it has started. The tests check
@@ -3963,6 +4045,243 @@ describe("session.respond", () => {
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect(listRespondFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+      // The answer was never delivered, so the question is still open.
+      expect((await readApprovalNotifications(arranged, session.id))[0]?.status).toBe("open");
+    });
+  });
+});
+
+/**
+ * The approval notification a request raises in the notification center. It
+ * follows the request: raised when the session parks on it, resolved as
+ * `decided` when the request is answered through the controller, and
+ * withdrawn when the request stops waiting any other way.
+ */
+describe("session approval notifications", () => {
+  it("raises one notification with the answers the request accepts when the session parks", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      const notifications = await readApprovalNotifications(arranged, session.id);
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toMatchObject({
+        title: "Run `ls -la`?",
+        producer: { type: "core" },
+        status: "open",
+        subject: [
+          { kind: "session", id: session.id },
+          { kind: "request", sessionId: session.id, requestId: REQUEST_ID },
+        ],
+      });
+      expect(
+        notifications[0]?.actions.map((action) => [action.id, action.label, action.operation]),
+      ).toEqual(
+        [
+          ["allow", "Allow", "allow"],
+          ["allow-always", "Allow always", "allow_always"],
+          ["deny", "Deny", "deny"],
+          ["cancel", "Cancel", "cancel"],
+        ].map(([id, label, decision]) => [
+          id,
+          label,
+          {
+            op: "session.respond",
+            input: { sessionId: session.id, requestId: REQUEST_ID, decision },
+          },
+        ]),
+      );
+    });
+  });
+
+  it("resolves the notification as decided when the request is answered in the session view", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow_always",
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // Resolved by the answer itself, before the runner reports anything.
+      const [decided] = await readApprovalNotifications(arranged, session.id);
+      expect(decided).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "decided", actionId: "allow-always", actor: "user", origin: "web" },
+      });
+
+      // The runner's report that the request is resolved comes after the
+      // answer, and leaves the notification as it was.
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.resolved",
+        requestId: REQUEST_ID,
+        decision: "allow_always",
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequest === null);
+      expect(await readApprovalNotifications(arranged, session.id)).toEqual([decided]);
+    });
+  });
+
+  it("refuses a second answer to a request, and sends the runner only the first", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+      const first = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+      expect(first.status, await first.clone().text()).toBe(200);
+
+      // The runner has not reported the request resolved yet, so the session
+      // still shows it open.
+      const second = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "deny",
+      });
+
+      expect(second.status, await second.clone().text()).toBe(409);
+      expect(await readErrorBody(second)).toMatchObject({
+        code: "invalid_state",
+        message:
+          "that request was already answered, so this answer was not sent; " +
+          "read the session again to see whether it is waiting on a request now",
+      });
+      await delay(250);
+      expect(listRespondFrames(arranged.wire).map((frame) => frame.decision)).toEqual(["allow"]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(1);
+    });
+  });
+
+  it("refuses an answer after the user interrupted the turn, and sends the runner nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+      const interrupted = await interruptSession(arranged, session.id);
+      expect(interrupted.status, await interrupted.clone().text()).toBe(200);
+
+      // The runner has not reported the turn's end yet, so the session still
+      // shows the request open.
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message:
+          "that request no longer waits for an answer: the turn was interrupted, the session was stopped, " +
+          "or the harness moved on, so this answer was not sent; " +
+          "read the session again to see whether it is waiting on a request now",
+      });
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toEqual([]);
+    });
+  });
+
+  it("withdraws the notification when the harness settles the request without an answer", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.resolved",
+        requestId: REQUEST_ID,
+        decision: "deny",
+      });
+
+      expect(
+        (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
+      ).toMatchObject({
+        kind: "withdrawn",
+        origin: "core",
+        reason: "The harness settled the request without this answer.",
+      });
+    });
+  });
+
+  it("withdraws the notification when the turn ends", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+
+      expect(
+        (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
+      ).toMatchObject({
+        kind: "withdrawn",
+        reason: "The turn ended before the request was answered.",
+      });
+    });
+  });
+
+  it("withdraws the notification when the session exits", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      reportExited(arranged.wire, session.id, 4);
+
+      expect(
+        (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
+      ).toMatchObject({
+        kind: "withdrawn",
+        reason: "The session ended before the request was answered.",
+      });
+    });
+  });
+
+  it("withdraws the notification when the runner no longer has the session", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+      arranged.wire.close();
+      await waitForRunnerGone(arranged);
+      const again = await arranged.reconnect();
+      again.send({ _tag: "sessionsReport", sessions: [] });
+
+      expect(
+        (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
+      ).toMatchObject({
+        kind: "withdrawn",
+        reason: "The session ended before the request was answered.",
+      });
+    });
+  });
+
+  it("raises no notification for a question", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      reportEvent(arranged.wire, 2, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.opened",
+        request: {
+          requestId: REQUEST_ID,
+          itemId: "i1",
+          kind: "question",
+          decisions: ["cancel"],
+          detail: {
+            questions: [
+              { question: "Which one?", header: "Pick", options: [], multiSelect: false },
+            ],
+          },
+        },
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequest !== null);
+
+      expect(await readApprovalNotifications(arranged, session.id)).toEqual([]);
     });
   });
 });
@@ -4049,6 +4368,83 @@ const reportWorkspaceReady = (arranged: Arranged, workspace: WorkspaceRow): void
       defaultBranch: "main",
     })),
   } as never);
+
+/**
+ * `session.respond`, `session.interrupt` and `session.stop` send their frame
+ * once their transaction commits. `notification.act` runs them inside its own
+ * transaction, so the frame has to wait for that commit, and must never be
+ * sent when it rolls back.
+ */
+describe("a frame whose caller's transaction rolls back", () => {
+  /** Runs `operation` as the user, in a transaction that then fails. */
+  const runThenRollBack = (
+    arranged: Arranged,
+    operation: (live: Live["Service"]) => Effect.Effect<unknown, unknown>,
+  ) =>
+    arranged.harness.runWithLiveSessions(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const live = yield* Live;
+        yield* withTransaction(
+          sql,
+          Effect.andThen(
+            operation(live),
+            Effect.fail("a later write in the caller's transaction failed"),
+          ),
+        );
+      }),
+    );
+
+  it("sends no answer and records none, so the request can still be answered", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      const exit = await runThenRollBack(arranged, (live) =>
+        live.respond({ id: session.id, requestId: REQUEST_ID, decision: "allow" }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toEqual([]);
+      const [notification] = await readApprovalNotifications(arranged, session.id);
+      expect(notification?.status).toBe("open");
+
+      const retried = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+      expect(retried.status, await retried.clone().text()).toBe(200);
+      await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+    });
+  });
+
+  it("sends no interrupt and records none", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      const exit = await runThenRollBack(arranged, (live) => live.interrupt(session.id));
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listFrames<SessionInterruptFrame>(arranged.wire, "sessionInterrupt")).toEqual([]);
+      expect(await arranged.harness.audit("session.interrupted")).toEqual([]);
+    });
+  });
+
+  it("sends no stop and records none", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      const exit = await runThenRollBack(arranged, (live) => live.stop(session.id));
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listFrames<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
+      expect(await arranged.harness.audit("session.stopped")).toEqual([]);
+    });
+  });
+});
 
 describe("session.spawn into a workspace", () => {
   it("gives a thread its own worktree of one repo, on a branch named after it", async () => {

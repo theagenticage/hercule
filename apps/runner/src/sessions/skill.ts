@@ -3,11 +3,11 @@
  * same for every provider; each adapter delivers it to its harness in the way
  * that harness reads skills (spec 06 section 9.3).
  *
- * The text is kept minimal on purpose (spec 11 section 6.3, "Progressive
- * disclosure"). The CLI's own help is generated from the contract, so it is
- * always current, while anything written out here is a second copy that can go
- * stale. So the skill names the three help forms and nothing else, and
- * `skill.test.ts` checks that against the contract's CLI table.
+ * The text is kept minimal on purpose. The CLI's own help is generated from
+ * the contract, so it is always current, while anything written out here is a
+ * second copy that can go stale. So the skill names the three help forms and
+ * nothing else, and `skill.test.ts` checks that against the contract's CLI
+ * table. Spec 11 section 6.3 owns the rule.
  */
 export const HERCULE_SKILL = `# hercule
 

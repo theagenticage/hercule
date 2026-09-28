@@ -236,8 +236,8 @@ describe("probing a machine that is not logged in", () => {
 describe("probing a machine with a credential in the environment", () => {
   // These are the two account shapes SDK 0.3.263 really returns when the
   // config directory has no login but the environment has a credential.
-  // Neither includes an account, and both work: spec 06 section 3.2 asks
-  // whether there is a usable login, not whose login it is.
+  // Neither includes an account, and both work: a probe checks whether there
+  // is a usable login, not whose login it is (spec 06 section 3.2).
   it("counts an OAuth token as a login, with no identity", async () => {
     const { result } = probeWith({
       accountInfo: () =>
@@ -606,7 +606,7 @@ describe("a Claude Code session", () => {
     expect(options?.includePartialMessages).toBe(true);
     expect(options?.model).toBe(SPEC.modelSelection.model);
     expect(options?.effort).toBe("high");
-    // The access mode mapping is defined by spec 06 section 8.1.
+    // `auto-accept-edits` maps to Claude's `acceptEdits` (spec 06 section 8.1).
     expect(options?.permissionMode).toBe("acceptEdits");
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
@@ -628,7 +628,9 @@ describe("a Claude Code session", () => {
     expect(options?.settingSources).toEqual([]);
   });
 
-  // The mapping is defined by spec 06 section 8.1; the full-access row matters most.
+  // The Claude permission mode for each access mode (spec 06 section 8.1). The
+  // full-access row matters most: it is the one mode that turns off every
+  // approval, and it needs `allowDangerouslySkipPermissions` as well.
   const MODES: ReadonlyArray<readonly [SessionSpec["accessMode"], string, boolean | undefined]> = [
     ["approval-required", "default", undefined],
     ["auto-accept-edits", "acceptEdits", undefined],
@@ -1648,8 +1650,8 @@ describe("a park that is still open when the turn or the session ends", () => {
 
 /**
  * The fields an Agent adds to a session spec: its own instructions, disallowed
- * tool families, and a schema every turn's output must match (spec 06 section
- * 7).
+ * tool families, and a schema every turn's output must match. Spec 06 section 7
+ * owns structured output.
  */
 const OUTPUT_SCHEMA: OutputSchema = {
   type: "object",

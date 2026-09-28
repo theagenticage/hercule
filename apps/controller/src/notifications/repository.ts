@@ -83,14 +83,24 @@ const make = Effect.gen(function* () {
   /**
    * Builds the condition that one element of a notification's subject list,
    * `subject.value`, is the given subject. A trigger is named by its workflow
-   * and its id in that workflow; everything else by its id.
+   * and its id in that workflow, a request by its session and its id in that
+   * session, and everything else by its id.
    */
-  const buildSubjectMatch = (subject: NotificationSubject) =>
-    subject.kind === "trigger"
-      ? sql`subject.value ->> 'kind' = 'trigger'
-            AND subject.value ->> 'workflowId' = ${subject.workflowId}
-            AND subject.value ->> 'triggerId' = ${subject.triggerId}`
-      : sql`subject.value ->> 'kind' = ${subject.kind} AND subject.value ->> 'id' = ${subject.id}`;
+  const buildSubjectMatch = (subject: NotificationSubject) => {
+    switch (subject.kind) {
+      case "trigger":
+        return sql`subject.value ->> 'kind' = 'trigger'
+                   AND subject.value ->> 'workflowId' = ${subject.workflowId}
+                   AND subject.value ->> 'triggerId' = ${subject.triggerId}`;
+      case "request":
+        return sql`subject.value ->> 'kind' = 'request'
+                   AND subject.value ->> 'sessionId' = ${subject.sessionId}
+                   AND subject.value ->> 'requestId' = ${subject.requestId}`;
+      default:
+        return sql`subject.value ->> 'kind' = ${subject.kind}
+                   AND subject.value ->> 'id' = ${subject.id}`;
+    }
+  };
 
   return {
     /** Writes a new notification and returns it with its id. */
@@ -136,24 +146,46 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids of the open notifications whose subject lists any of
-     * these subjects. Only a decision is ever open.
+     * Returns the open notifications whose subject lists any of these
+     * subjects, oldest first. Only a decision is ever open.
      */
-    listOpenDecisionIdsAbout: (
+    listOpenDecisionsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<Notification>, SqlError> =>
       subjects.length === 0
         ? Effect.succeed([])
         : Effect.map(
-            sql<{ readonly id: Uint8Array }>`
-              SELECT notifications.id FROM notifications
+            sql<NotificationRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM notifications
               WHERE notifications.status = 'open'
                 AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
                             WHERE ${sql.or(subjects.map(buildSubjectMatch))})
               ORDER BY notifications.created_at, notifications.id
             `,
-            (rows) => rows.map((row) => uuidToString(row.id)),
+            (rows) => rows.map(parseRow),
           ),
+
+    /**
+     * Returns how the most recently resolved decision that lists this subject
+     * was resolved: `decided`, `handled` or `withdrawn`. Returns none when no
+     * resolved decision lists it. An informational notification is resolved
+     * from the start, but it has no answers, so it does not count.
+     */
+    readLatestResolutionKindAbout: (
+      subject: NotificationSubject,
+    ): Effect.Effect<Option.Option<Resolution["kind"]>, SqlError> =>
+      Effect.map(
+        sql<{ readonly kind: Resolution["kind"] }>`
+          SELECT notifications.resolution ->> 'kind' AS kind FROM notifications
+          WHERE notifications.status = 'resolved'
+            AND json_array_length(notifications.actions) > 0
+            AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                        WHERE ${buildSubjectMatch(subject)})
+          ORDER BY notifications.resolution ->> 'at' DESC, notifications.id DESC
+          LIMIT 1
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.kind),
+      ),
 
     /**
      * Checks whether a notification of this kind was created after `since`

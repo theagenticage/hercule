@@ -5,14 +5,14 @@ import { Phrases } from "./phrases";
 import { SelectorShell } from "./selector-shell";
 
 /**
- * The lip's second selector: the branch a main workspace switches to, or the
- * ref a new worktree starts from (spec 14 §The composer, the Branch
- * selector). Which of the two applies depends on the picked workspace and is
- * decided in `buildBranchField`; this component only renders the field.
+ * Renders the lip's second selector: the branch a main workspace switches to,
+ * or the ref a new worktree starts from. Which of the two applies depends on
+ * the picked workspace and is decided in `buildBranchField`; this component
+ * only renders the field.
  *
  * A field with nothing to choose from is shown as read-only text. Examples: a
  * repo no machine has cloned, or a multi-repo worktree (a base per repo comes
- * after v1).
+ * after v1). Spec 14 §The composer owns the selector.
  */
 export function BranchSelector({
   field,
@@ -31,8 +31,8 @@ export function BranchSelector({
   return (
     <SelectorShell
       // The branch mark is part of the value, not a decoration beside it: the
-      // mark and the name together are the value (spec 14 §Measurements, the
-      // Lip). The mark is centred vertically on the name.
+      // mark and the name together are the value. The mark is centred
+      // vertically on the name. Spec 14 §Measurements sets its size.
       label={
         field.glyph ? (
           <span className="flex items-center gap-1 font-mono text-[11px]">

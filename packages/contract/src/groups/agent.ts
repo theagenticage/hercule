@@ -5,8 +5,8 @@
  * provider instance, a permission profile, an access mode, a model and a list
  * of tool restrictions. It holds no state, it has no status axis, and it runs
  * nothing itself. A spawn copies every value it uses onto the Session and
- * never reads back through the Agent afterwards (ADR 0030), so an edit changes
- * only the sessions spawned after the edit.
+ * never reads back through the Agent afterwards, so an edit changes only the
+ * sessions spawned after the edit (ADR 0030).
  *
  * `unenforced` lists what a provider ignores. A provider may store a spec field
  * it does not act on, and the record lists that field, so the caller does not

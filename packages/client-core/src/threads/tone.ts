@@ -7,8 +7,8 @@ import type { Project } from "@hercule/contract";
 
 /**
  * The identity hue of a project's dot. The design language defines two hues
- * (§Color doctrine), and they alternate: a hue tells two neighbouring projects
- * apart, it does not identify a project.
+ * (docs/design-language.md §Color doctrine), and they alternate: a hue tells
+ * two neighbouring projects apart, it does not identify a project.
  *
  * That is why the hue follows the project's position in the project list, not
  * anything about the project itself. Hashing the id gave two projects the same

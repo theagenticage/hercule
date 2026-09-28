@@ -36,7 +36,7 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
-import { afterCommit, nowIso } from "../db";
+import { afterCommit, nowIso, withTransaction } from "../db";
 import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
@@ -44,7 +44,6 @@ import { workflowRepository, WorkflowService } from "../workflows";
 import { runRepository } from "./repository";
 import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
-import { commitUninterruptibly } from "./transaction";
 
 /**
  * How many runs deep a run may be when the controller's `run.nestingLimit`
@@ -244,10 +243,7 @@ export const makeRunStart = (executeInBackground: (runId: string) => void) =>
       origin: RunOrigin,
       refusals: RefusalMessages,
     ): Effect.Effect<RunStarted, E | Validation | CapExceeded | SettingError | SqlError> =>
-      // Uninterruptible, because it only touches the local database: a
-      // caller that disconnects while it commits must not leave a committed
-      // run that was never handed to the Run Executor.
-      commitUninterruptibly(
+      withTransaction(
         sql,
         Effect.gen(function* () {
           const {

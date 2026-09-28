@@ -1,13 +1,15 @@
 /**
  * How the notification center shows a notification: who produced it, which
- * mark it gets, how a resolved decision was resolved, and whether its producer
- * is muted. Spec 10 §7 owns the record; spec 14 §Notification center owns the
- * screen.
+ * mark it gets, what each answer of a decision does, how a resolved decision
+ * was resolved, and whether its producer is muted. Spec 10 §7 owns the
+ * record; spec 14 §Notification center owns the screen.
  */
 import type {
   CoreNotificationKind,
+  DescribeLine,
   MuteKey,
   Notification,
+  NotificationAction,
   NotificationProducer,
   Resolution,
   ResolutionOrigin,
@@ -55,12 +57,14 @@ export const chooseNotificationMark = (notification: Notification): Notification
 
 /**
  * Returns where a decision was answered, as the words after "decided": "in the
- * web app", "in a chat channel", "in session 7c82ebeb", "in the gmail plugin",
- * or "by Hercule" for the core. A chat channel is not named, because the
- * resolution holds only the Connection's id.
+ * web app", "through the API" for a client with an API key such as the CLI,
+ * "in a chat channel", "in session 7c82ebeb", "in the gmail plugin", or "by
+ * Hercule" for the core. A chat channel is not named, because the resolution
+ * holds only the Connection's id.
  */
 const describeOrigin = (origin: ResolutionOrigin): string => {
   if (origin === "web") return "in the web app";
+  if (origin === "api") return "through the API";
   if (origin.startsWith("connection:")) return "in a chat channel";
   if (origin.startsWith("session:"))
     return `in session ${toIdTail(origin.slice("session:".length))}`;
@@ -84,6 +88,53 @@ export const describeResolution = (resolution: Resolution): string => {
       return resolution.reason === undefined ? "withdrawn" : `withdrawn: ${resolution.reason}`;
   }
 };
+
+/**
+ * One answer of a decision as the answer ledger shows it: the label, what
+ * taking the answer does, and the producer's description of it. Spec 14
+ * §Answers as a ledger owns the layout.
+ */
+export interface BoundActionRow {
+  /** The answer's id, which `notification.act` takes. */
+  readonly id: string;
+  readonly label: string;
+  /** Whether this is the decision's primary answer, which the ledger sets apart. */
+  readonly primary: boolean;
+  /**
+   * What taking the answer does, as the core wrote it, with the names of the
+   * entities it acts on and the values it carries marked. Empty when the core
+   * sent none, which it does only for a resolved decision.
+   */
+  readonly describeLine: DescribeLine;
+  /** Whether the answer runs nothing. Its describe line then reads "Does nothing". */
+  readonly runsNothing: boolean;
+  /** The producer's description of the answer, when it wrote one. */
+  readonly description: string | undefined;
+}
+
+/** Builds the ledger rows of a decision's answers, in the order the producer gave them. */
+export const buildBoundActionRows = (
+  actions: ReadonlyArray<NotificationAction>,
+): ReadonlyArray<BoundActionRow> =>
+  actions.map((action) => ({
+    id: action.id,
+    label: action.label,
+    primary: action.primary === true,
+    describeLine: action.describeLine ?? [],
+    runsNothing: action.operation === null,
+    description: action.description,
+  }));
+
+/**
+ * Formats a describe line as plain text, such as "Start a run of «Bugfix»",
+ * for places that cannot style parts, such as a terminal. Each marked part is
+ * wrapped in guillemets. A marked part is a name or value someone else wrote,
+ * often an agent, so without the marks a value such as "ok to session Chat"
+ * could pass for the core's own words. The text parts already carry the
+ * spaces between parts.
+ */
+export const formatDescribeLine = (line: DescribeLine): string =>
+  line.map((part) => (part.kind === "marked" ? `«${part.text}»` : part.text)).join("");
 
 /** The kind of producer a mute key names. */
 export type MuteKind = "workflow" | "plugin" | "assistant";

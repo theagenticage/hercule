@@ -108,7 +108,7 @@ export const REPROMPT = `You must call ${SUBMIT_RESULT_TOOL} with your answer; d
 /**
  * How many times the runner re-prompts one turn before it reports that the
  * turn gave no answer. More re-prompts would risk a session that never ends.
- * This is the "default 2 retries" of the pi row in spec 06 section 7.
+ * Two is the default spec 06 section 7 sets for pi.
  */
 const MAX_REPROMPTS = 2;
 
@@ -121,8 +121,8 @@ const MAX_REPROMPTS = 2;
  * five minutes. A few tries are enough for a model that only made a mistake.
  * After that the turn ends, and its last answer is validated as the result.
  *
- * This is the second of the two limits in the pi row of spec 06 section 7.
- * `MAX_REPROMPTS` above is the first.
+ * This is one of the two limits on a pi turn with an output schema;
+ * `MAX_REPROMPTS` above is the other (spec 06 section 7).
  */
 const MAX_REFUSED_ANSWERS = 3;
 

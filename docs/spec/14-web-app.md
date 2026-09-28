@@ -304,6 +304,8 @@ Backward-looking monitoring of delegated work: what is running, what happened to
 
 No prefix glyph on the describe line (a "→" was tried and rejected as ugly). Rows are separated by hairlines; hover reveals the soft background, the pinned quiet affordance. Navigation is never an answer: "Open →" on the AGENT field opens the session; answers are bound actions only. The same hierarchy - describe line over description - applies wherever an answer renders with its texts: the Intake proposal dossier and the notification center. Rejected on the record: *Peek* (quiet button row plus one describe line that follows hover, description in a hover card - hides what a click does until the pointer arrives) and *Commit* (a Confirm / Back step after choosing - two clicks per decision); both remain in the prototype.
 
+*(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* The core sends the describe line as parts, `{ kind: "text" | "marked", text }`; a `marked` part, a live name or a value the answer sends or sets, is what renders in ink. An answer whose operation no longer passes the core's check reads "Cannot be taken: <why>" in the same place ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4). The notification center is the first surface built with the ledger; the check-in view ([#88](https://github.com/theagenticage/hercule/issues/88)) and the Intake dossier ([#91](https://github.com/theagenticage/hercule/issues/91)) reuse it.
+
 ### Anatomy
 
 Top to bottom:
@@ -523,7 +525,8 @@ The Notifications screen is an in-app sink under [ADR 0012](../adr/0012-notifica
 - The sidebar counts the notifications created since `lastChecked.notifications`, up to "99+", and follows the `notification` live topic.
 - A resolution line names only what the record holds: "decided in a chat channel" rather than "decided in Discord", and "handled by an assistant" rather than "handled by *Ada* in #ops". Naming the Connection or the assistant needs a lookup the screen does not make yet.
 - The mute toggle is a quiet per-row button, "Mute workflow" or "Unmute workflow" (plugin and assistant alike), on each notification whose producer has a mute key. A muted notification still shows, marked "muted".
-- Bound actions are not rendered yet; answering from the screen is [#85](https://github.com/theagenticage/hercule/issues/85).
+- ~~Bound actions are not rendered yet; answering from the screen is [#85](https://github.com/theagenticage/hercule/issues/85).~~ *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* An open decision shows its answers as the ledger of [Answers as a ledger](#principles): label, then the describe line with the names in ink, then the producer's description as fine print. Each row is the button, rows are separated by hairlines, and hover shows the quiet soft background. Choosing a row calls `notification.act`. While the call runs, the decision's rows are disabled. If it fails, the error shows inline under the answers and the decision stays open, so the user can try again or choose another answer; on success the decision shows its resolution line.
+- A resolved decision shows its resolution line and no answers, because they can no longer be taken. A decision answered with an API key, such as from the CLI, reads "decided through the API". *(Added 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)*
 
 ## Design language
 

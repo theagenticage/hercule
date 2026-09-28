@@ -114,6 +114,9 @@ export const afterCommit = (settle: () => void): Effect.Effect<void> =>
  * and publishes the changes. An effect that already runs inside such a list
  * adds to the outer list instead, so only the outermost transaction, the one
  * that commits, publishes.
+ *
+ * The caller runs it uninterruptibly (`withTransaction` does), so an interrupt
+ * cannot land between the commit and the settle callbacks.
  */
 export const withAnnouncements = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -126,19 +129,10 @@ export const withAnnouncements = <A, E, R>(
           const changes: Array<Change> = [];
           const settles: Array<() => void> = [];
           const value = yield* Effect.provideService(effect, Pending, { changes, settles });
-          // Uninterruptible, because the write is already durable. If a client
-          // disconnected here, the change would never be announced and a screen
-          // would stay stale until it is reloaded. The settle callbacks run
-          // first, so a listener can never read state the commit has made
-          // stale.
-          yield* Effect.uninterruptible(
-            Effect.andThen(
-              Effect.sync(() => {
-                for (const settle of settles) settle();
-              }),
-              publishNow(changes),
-            ),
-          );
+          // The settle callbacks run first, so a listener can never read state
+          // the commit has made stale.
+          for (const settle of settles) settle();
+          yield* publishNow(changes);
           return value;
         }),
       onSome: (outer) =>

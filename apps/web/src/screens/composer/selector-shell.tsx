@@ -15,8 +15,8 @@ const holdFocus = (event: Event): void => {
  *   handling would flip these menus downwards, off the page. A trigger on the
  *   right therefore needs `align="end"` to stay on screen.
  * - A locked field is plain text with the reason as its tooltip, not a
- *   disabled button, because there is nothing left to open (spec 14 §What
- *   locks at start).
+ *   disabled button, because there is nothing left to open. Spec 14 §What
+ *   locks at start lists the fields that lock once a thread starts.
  */
 export function SelectorShell({
   keyLabel,

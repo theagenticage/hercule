@@ -232,7 +232,7 @@ line (time + summary) closes the page. Owner: spec 10 §2-3.
 Amended 2026-09-01 by ticket #50 (Prototype: rendering bound actions in the Focus card): a
 decision's answers render as a **ledger** - one full-width row per answer, the row is the
 button: label in the left column (ink for the primary answer) · the core's **describe line**
-at metadata size with entity names in ink · the producer's **description** as fine print
+at metadata size with entity names and the values it sends or sets in ink · the producer's **description** as fine print
 under it. Nothing behind hover or a confirm step; no glyph prefix on describe lines. The
 card's height follows its answers ("uniform-height" above is withdrawn); the arrow row stays
 below the card. Chat sinks use the same hierarchy: "label · describe", description as

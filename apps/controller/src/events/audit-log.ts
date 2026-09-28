@@ -90,6 +90,7 @@ export const AUDIT_KINDS = [
   "session.continued",
   "session.reconciled",
   "notification.created",
+  "notification.decided",
   "notification.withdrawn",
 ] as const;
 
@@ -151,6 +152,7 @@ const RECORD_KINDS = {
   "session.continued": "created",
   "session.reconciled": "updated",
   "notification.created": "created",
+  "notification.decided": "updated",
   "notification.withdrawn": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 

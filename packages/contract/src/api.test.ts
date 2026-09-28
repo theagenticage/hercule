@@ -132,6 +132,12 @@ const NEW_OPERATIONS = [
     method: "POST",
     path: "/api/v1/notifications/:id/withdraw",
   },
+  {
+    id: "notification.act",
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications/:id/act",
+  },
   { id: "project.query", requires: "project.read", method: "GET", path: "/api/v1/projects" },
   { id: "project.read", requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   { id: "project.create", requires: "project.write", method: "POST", path: "/api/v1/projects" },

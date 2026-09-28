@@ -594,8 +594,10 @@ const make = Effect.gen(function* () {
      * The highest sequence is a high-water mark, not proof that every lower
      * number was written. A merged delta row stores the sequence of its last
      * delta, so a plain event can be written with a higher sequence while
-     * lower delta text is still only held in memory. Nothing replays today;
-     * the outbox of spec 03 section 2.3 will need more than this.
+     * lower delta text is still only held in memory. Nothing replays today.
+     * When the runner gets its disk-backed outbox, which replays every frame
+     * after the last acknowledged one on reconnect, that replay will need
+     * more than this mark. Spec 03 section 2.3 describes the outbox.
      */
     ingestState: (sessionId: string): Effect.Effect<IngestState, SqlError> =>
       Effect.map(

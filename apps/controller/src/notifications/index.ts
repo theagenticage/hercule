@@ -1,8 +1,16 @@
 /** Notifications: the core's one record of what the user should know or decide. */
+export { BindableOperations, type BindableOperationError } from "./bindable-operations";
+export {
+  Notifier,
+  NotifierLayer,
+  type AnsweredDecisionsOutcome,
+  type CoreAction,
+  type CoreNotification,
+} from "./notifier";
 export {
   NotificationService,
   NotificationServiceLayer,
-  type CoreNotification,
+  type ActInput,
   type NotificationPage,
   type QueryInput,
   type WithdrawInput,

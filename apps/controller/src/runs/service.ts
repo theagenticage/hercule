@@ -33,7 +33,7 @@ import {
 import { requireGrant } from "../actor";
 import { buildPageInputFields, refuseCursor, type AfterCommit } from "../db";
 import type { PlatformEvents } from "../events";
-import type { NotificationService } from "../notifications";
+import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
 import type { TaskService } from "../tasks";
@@ -135,7 +135,7 @@ export const RunServiceLayer: Layer.Layer<
   | WorkspaceService
   | WorkspaceSteps
   | PlatformEvents
-  | NotificationService
+  | Notifier
 > = Layer.effect(RunService)(make);
 
 /**

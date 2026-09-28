@@ -6,9 +6,10 @@
  * - the models of the current account, with its older models collapsed;
  * - one row for every other account.
  *
- * A catalog belongs to one instance on one runner (spec 06 §3.1), so every
- * model here is read from the runner the thread is placed on. Switching
- * runners rebuilds the whole menu.
+ * A catalog belongs to one instance on one runner, because each runner has
+ * its own copy of the harness, with its own version and login (spec 06 §3.1).
+ * So every model here is read from the runner the thread is placed on.
+ * Switching runners rebuilds the whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
 import {

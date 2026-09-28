@@ -16,6 +16,7 @@
  * manual: what the command does and when to use it, what it returns, and
  * what to call next, by its exact spelling. A field's line is one line.
  */
+import { OWN_SESSION_ALIAS } from "./bound-operations";
 import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
 
@@ -491,7 +492,7 @@ export const CLI = {
 
   "notification.query": {
     command: "notification list",
-    help: "Lists notifications, newest first, open decisions and resolved ones alike. Use it to find the id that `hercule notification read` and `hercule notification withdraw` take.",
+    help: "Lists notifications, newest first, open decisions and resolved ones alike. Use it to find the id that `hercule notification read`, `hercule notification act` and `hercule notification withdraw` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--kind", "triage.unsure", "--since", "2026-09-15T00:00:00.000Z"] },
@@ -510,7 +511,7 @@ export const CLI = {
   },
   "notification.read": {
     command: "notification read",
-    help: "Reads one notification in full: its body, what it is about, its answers, and how it was resolved.",
+    help: "Reads one notification in full: its body, what it is about, its answers, and how it was resolved. Each answer of an open decision shows what taking it does; take one with `hercule notification act`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -522,7 +523,7 @@ export const CLI = {
   },
   "notification.create": {
     command: "notification create",
-    help: "Raises a notification for the user. With --action it is a decision the user answers; without, it is informational. The body is markdown. Returns the notification's id.",
+    help: `Raises a notification for the user. With --action it is a decision the user answers; without, it is informational. The body is markdown. An answer runs one operation as the user when the user takes it: task.update, run.start or session.input, with the operation's whole input as one object, ids included. A session binds session.input only to itself: to ask the user a question and get the answer back as your next input, use sessionId "${OWN_SESSION_ALIAS}". A session in an assistant's conversation asks in the conversation instead. Returns the notification's id.`,
     examples: [
       {
         args: ["--kind", "triage.fyi", "--title", "Dependabot opened three PRs", "--body-stdin"],
@@ -535,7 +536,15 @@ export const CLI = {
           "--title",
           "Which architecture for the ordering module?",
           "--action",
-          '{"id":"event-sourced","label":"Event-sourced","operation":null,"primary":true}',
+          JSON.stringify({
+            id: "event-sourced",
+            label: "Event-sourced",
+            operation: {
+              op: "session.input",
+              input: { sessionId: OWN_SESSION_ALIAS, text: "Event-sourced" },
+            },
+            primary: true,
+          }),
           "--action",
           '{"id":"neither","label":"Neither","operation":null}',
         ],
@@ -554,7 +563,7 @@ export const CLI = {
       },
       actions: {
         flag: "action",
-        help: "A JSON answer: id, label, optional description and primary, and operation, a contract operation and its input, or null to run nothing. Repeat it for each answer.",
+        help: 'A JSON answer: id, label, optional description and primary, and operation, {"op":"<operation>","input":{...}} or null to run nothing. Repeat it for each answer.',
       },
       subject: {
         flag: "subject",
@@ -573,6 +582,19 @@ export const CLI = {
         resolves: "notification.query",
       },
       reason: { flag: "reason", help: "One line the user reads under the withdrawn decision." },
+    },
+  },
+  "notification.act": {
+    command: "notification act",
+    help: "Takes one answer of an open decision: runs its operation as you and resolves the decision. If the operation fails, the decision stays open and the error is returned. Read the answers and what each one does with `hercule notification read`.",
+    examples: [{ args: ["1f3a9c2e", "--action", "event-sourced"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The notification's id, or a tail of eight or more characters.",
+        resolves: "notification.query",
+      },
+      actionId: { flag: "action", help: "The id of the answer to take." },
     },
   },
 
@@ -2670,7 +2692,7 @@ export const NOUNS = {
   notification: {
     summary:
       "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
-    flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
+    flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification act to answer a decision, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",

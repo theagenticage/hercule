@@ -69,8 +69,8 @@ const MAX_TARGET_LENGTH = 200;
  * Returns the field of an item's `detail` that is worth showing in a row: the
  * command a shell item ran, the path a file item changed, or a tool call's
  * description. Returns `undefined` when none of these is present, and the
- * caller then shows the raw JSON. `detail` is JSON owned by the adapter
- * (spec 06 §6.3), so every field is optional.
+ * caller then shows the raw JSON. Each provider adapter shapes `detail` its
+ * own way, so every field is optional (spec 06 §6.3).
  */
 const findDetailText = (detail: Record<string, unknown>): string | undefined => {
   const input = readJsonObject(detail.input);
@@ -158,8 +158,8 @@ export const buildTurns = (
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          // A steered input adds a second `user_message` to the running turn
-          // (spec 06 §5), so its text is appended to the first, never replaces it.
+          // A steered input adds a second `user_message` to the running turn,
+          // so its text is appended to the first and never replaces it.
           const detail = event.detail as { text?: string } | undefined;
           const text = detail?.text ?? "";
           turn.user = turn.user === "" ? text : `${turn.user}\n\n${text}`;
@@ -186,10 +186,9 @@ export const buildTurns = (
       case "content.delta": {
         if (event.streamKind !== "assistant_text") break;
         const turn = findOrStartTurn(event.turnId, event.at);
-        // A turn can make any number of model calls (spec 06 §6.2), so its
-        // text can come from several assistant_message items. Start each new
-        // item on a new paragraph, so two items never run together as one
-        // sentence.
+        // A turn can make any number of model calls, so its text can come
+        // from several assistant_message items. Start each new item on a new
+        // paragraph, so two items never run together as one sentence.
         if (turn.lastAssistantItemId !== null && turn.lastAssistantItemId !== event.itemId) {
           turn.assistantText += "\n\n";
         }

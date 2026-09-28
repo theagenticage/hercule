@@ -13,7 +13,7 @@ import { Effect, Layer } from "effect";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
+import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionTypesLayer } from "./runtime";
@@ -36,7 +36,7 @@ const buildStack = () => {
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(NotificationServiceLayer),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

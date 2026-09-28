@@ -25,8 +25,10 @@ import {
   listFrames,
   listInputs,
   listSessions,
+  readApprovalNotifications,
   reportEvent,
   waitForFrames,
+  waitForResolvedApprovalNotification,
   waitForSession,
   waitUntil,
   withAgentFleet,
@@ -72,6 +74,27 @@ const startBusySession = async (arranged: Arranged): Promise<Session> => {
     turnId: "t1",
   });
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
+};
+
+/**
+ * Parks a busy session on a command approval, with the runner's sequence
+ * number 3, and waits until the request is stored.
+ */
+const parkOnRequest = async (arranged: Arranged, session: Session): Promise<void> => {
+  reportEvent(arranged.wire, 3, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "request.opened",
+    request: {
+      requestId: REQUEST_ID,
+      itemId: "i1",
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command: "ls -la" },
+    },
+  });
+  await waitForSession(arranged, session.id, (one) => one.openRequest !== null);
 };
 
 /**
@@ -227,20 +250,7 @@ describe("the operations a conversation's session allows, as for a Thread", () =
   it("answers the request the session is parked on", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startBusySession(arranged);
-      reportEvent(arranged.wire, 3, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "request.opened",
-        request: {
-          requestId: REQUEST_ID,
-          itemId: "i1",
-          kind: "command_approval",
-          decisions: ["allow", "deny"],
-          detail: { command: "ls -la" },
-        },
-      });
-      await waitForSession(arranged, session.id, (one) => one.openRequest !== null);
+      await parkOnRequest(arranged, session);
 
       const response = await post(
         arranged.harness.base,
@@ -255,6 +265,62 @@ describe("the operations a conversation's session allows, as for a Thread", () =
         sessionId: session.id,
         requestId: REQUEST_ID,
         decision: "allow",
+      });
+      // The response itself resolves the approval notification, with the
+      // answer that sends the same decision.
+      const [decided] = await readApprovalNotifications(arranged, session.id);
+      expect(decided).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "decided", actionId: "allow", actor: "user", origin: "web" },
+      });
+    });
+  });
+
+  it("withdraws the approval notification when the turn is interrupted", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startBusySession(arranged);
+      await parkOnRequest(arranged, session);
+
+      const response = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/interrupt`,
+        { token: arranged.token },
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      // Withdrawn by the interrupt itself, before the runner reports the
+      // turn's end.
+      const [withdrawn] = await readApprovalNotifications(arranged, session.id);
+      expect(withdrawn).toMatchObject({
+        status: "resolved",
+        resolution: {
+          kind: "withdrawn",
+          origin: "core",
+          reason: "The turn was interrupted before the request was answered.",
+        },
+      });
+    });
+  });
+
+  it("withdraws the approval notification when the session is stopped", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startBusySession(arranged);
+      await parkOnRequest(arranged, session);
+
+      const response = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/stop`,
+        { token: arranged.token },
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(
+        (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
+      ).toMatchObject({
+        kind: "withdrawn",
+        reason: "The session was stopped before the request was answered.",
       });
     });
   });
