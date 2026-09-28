@@ -8,7 +8,7 @@ import {
   type NotificationMark,
 } from "@hercule/client-core";
 import type { Notification } from "@hercule/contract";
-import { Button, CancelledMark, DecisionMark, DoneMark, FailedMark } from "@hercule/ui";
+import { Button, CancelledMark, DecisionMark, DoneMark, FailedMark, cn } from "@hercule/ui";
 import { Markdown } from "../markdown";
 
 /** Renders the mark for a notification's row, or nothing for an informational one. */
@@ -32,7 +32,12 @@ function NotificationMarkGlyph({ mark }: { readonly mark: NotificationMark }): J
  * who produced it and, for a resolved decision, how it was resolved, then its
  * body as markdown and its age. A notification whose producer can be muted
  * has a button that mutes or unmutes that producer, and a muted one says so.
- * The answers of a decision are not shown yet.
+ *
+ * An open decision lists its answers as a ledger (spec 14 §Answers as a
+ * ledger): one full-width row per answer, the label in the left column and
+ * the producer's description beside it. The rows are disabled, with the reason
+ * below them, because answering from this screen is not built yet. They are
+ * shown rather than hidden so the user can see what the decision offers.
  */
 export function NotificationRow({
   notification,
@@ -68,6 +73,35 @@ export function NotificationRow({
             <Markdown text={notification.body} />
           </div>
         )}
+        {notification.status === "open" && notification.actions.length > 0 ? (
+          <div className="mt-2">
+            {/* Each row extends 8px past this column on both sides, so the
+                label stays on the title's left edge. */}
+            <div className="flex flex-col divide-y divide-line-soft">
+              {notification.actions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  disabled
+                  className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left disabled:cursor-not-allowed"
+                >
+                  <span
+                    className={cn(
+                      "text-meta font-emph",
+                      action.primary === true ? "text-ink" : "text-muted",
+                    )}
+                  >
+                    {action.label}
+                  </span>
+                  {/* `--muted`, not `--faint`: 12px `--faint` text is too low
+                      in contrast to read, as on the permission card. */}
+                  <span className="text-fine text-muted">{action.description}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-fine text-muted">Answering from here is not built yet.</p>
+          </div>
+        ) : null}
       </div>
       {muted ? <span className="shrink-0 text-meta leading-5 text-faint">muted</span> : null}
       {notification.muteKey === undefined ? null : (

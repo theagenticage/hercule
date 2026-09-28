@@ -208,6 +208,47 @@ describe("Notifications > the list", () => {
     expect(getRow("Reconnect gmail?").querySelector("[data-mark=cancelled]")).not.toBeNull();
   });
 
+  it("lists an open decision's answers as disabled rows, and a resolved decision's not at all", async () => {
+    const actions = [
+      {
+        id: "start",
+        label: "Start Bugfix",
+        description: "Opens a session on the task.",
+        operation: null,
+        primary: true,
+      },
+      { id: "dismiss", label: "Dismiss", operation: null },
+    ];
+    const { api } = buildController({
+      notifications: [
+        buildNotification(1, 10, { actions, title: "Start Bugfix?", status: "open" }),
+        buildNotification(2, 20, {
+          actions,
+          title: "Merge PR #94?",
+          resolution: {
+            kind: "decided",
+            actor: "user",
+            origin: "web",
+            at: buildTimestampMinutesAgo(15),
+          },
+        }),
+      ],
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    const open = getRow("Start Bugfix?");
+    const answers = within(open).getAllByRole("button", { name: /Start Bugfix|Dismiss/ });
+    expect(answers.map((answer) => readPageText(answer))).toEqual([
+      "Start BugfixOpens a session on the task.",
+      "Dismiss",
+    ]);
+    for (const answer of answers) expect(answer).toHaveProperty("disabled", true);
+    expect(readPageText(open)).toContain("Answering from here is not built yet.");
+    const resolved = getRow("Merge PR #94?");
+    expect(within(resolved).queryByRole("button", { name: /Start Bugfix|Dismiss/ })).toBeNull();
+    expect(readPageText(resolved)).not.toContain("not built yet");
+  });
+
   it("pages through the list with Load more", async () => {
     const notifications = Array.from({ length: 51 }, (_, n) => buildNotification(n, n + 1));
     const { api } = buildController({ notifications });
