@@ -1,17 +1,28 @@
 /**
- * A start trigger's health: the error its filter or input mapping last failed
- * with, while the failures go on, and when the user hears about them.
+ * A start trigger's health: the error the trigger last failed with, while the
+ * failures go on, and when the user hears about them.
  *
- * The event router records a failure on the trigger each time an evaluation
- * fails, and clears it when an evaluation of the trigger succeeds again. A
- * trigger's health is shown on its row, so the user sees it there at any
- * time. The notification is for the user who is not looking: it is raised
- * when a streak of failures starts, and at most once per
- * `TRIGGER_NOTIFICATION_QUIET_PERIOD` for the same trigger, so a filter that
- * fails on every other event does not raise a notification per event.
+ * A trigger fails in one of three places:
+ *
+ * - the event router cannot evaluate its filter or input mapping on an event;
+ * - the Scheduler cannot compute a cron trigger's next time, because its
+ *   timezone is no longer a known one;
+ * - the delivery cannot start the run of a match, because of a bug.
+ *
+ * Each failure is recorded on the trigger. The event router clears it when an
+ * evaluation of the trigger succeeds again, and the Scheduler clears it when
+ * it computes the next time of a trigger it could not schedule before. A
+ * trigger's health is shown on its row, so
+ * the user sees it there at any time. The notification is for the user who is
+ * not looking: it is raised when a streak of failures starts, and at most once
+ * per `TRIGGER_NOTIFICATION_QUIET_PERIOD` for the same trigger, so a filter
+ * that fails on every other event does not raise a notification per event.
  */
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { TriggerKey } from "@hercule/contract";
 import { announce, nowIso } from "../db";
@@ -25,15 +36,17 @@ import { workflowRepository } from "./repository";
  */
 export const TRIGGER_NOTIFICATION_QUIET_PERIOD: Duration.Duration = Duration.hours(1);
 
-/**
- * Returns the instant a notification must have been raised after to hold
- * back the next one about the same trigger: `TRIGGER_NOTIFICATION_QUIET_PERIOD`
- * before `now`.
- */
-export const computeTriggerQuietSince = (now: string): string =>
-  new Date(Date.parse(now) - Duration.toMillis(TRIGGER_NOTIFICATION_QUIET_PERIOD)).toISOString();
+/** Where a start trigger failed, as the module comment lists. */
+export type TriggerFailureStage = "evaluation" | "scheduling" | "start";
 
-export const makeTriggerHealth = Effect.gen(function* () {
+/** The title of the notification that starts a streak of failures, for each stage. */
+const NOTIFICATION_TITLES: Record<TriggerFailureStage, string> = {
+  evaluation: "A trigger's filter or inputs could not be evaluated",
+  scheduling: "A trigger's next scheduled time could not be computed",
+  start: "A trigger could not start its run",
+};
+
+const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const notifications = yield* NotificationService;
 
@@ -43,36 +56,46 @@ export const makeTriggerHealth = Effect.gen(function* () {
 
   return {
     /**
-     * Records that a start trigger's filter or input mapping failed with
-     * `message`. When this failure starts a streak, it also raises a
-     * `core.trigger-filter-error` notification, unless one about the trigger
-     * was raised within the quiet period. Joins the caller's transaction.
+     * Records that a start trigger failed at `stage` with `message`. When this
+     * failure starts a streak, it also raises a `core.trigger-filter-error`
+     * notification, unless one about the trigger was raised within the quiet
+     * period. Joins the caller's transaction.
      */
-    recordTriggerEvaluationFailure: (
+    recordFailure: (
       key: TriggerKey,
+      stage: TriggerFailureStage,
       message: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* nowIso;
-        const startedStreak = yield* workflows.recordTriggerEvaluationFailure(key, message, at);
+        const startedStreak = yield* workflows.recordTriggerFailure(key, message, yield* nowIso);
         if (!startedStreak) return;
         yield* announceTriggerChange(key);
         yield* notifications.createCoreNotification(
           {
             kind: "core.trigger-filter-error",
-            title: "A trigger's filter or inputs could not be evaluated",
+            title: NOTIFICATION_TITLES[stage],
             body: message,
             subject: [{ kind: "trigger", workflowId: key.workflowId, triggerId: key.triggerId }],
           },
-          { unlessRaised: { since: computeTriggerQuietSince(at) } },
+          { unlessRaised: { within: TRIGGER_NOTIFICATION_QUIET_PERIOD } },
         );
       }),
 
-    /** Clears a start trigger's recorded evaluation error. Joins the caller's transaction. */
-    clearTriggerEvaluationFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
+    /** Clears a start trigger's recorded error. Joins the caller's transaction. */
+    clearFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        yield* workflows.clearTriggerEvaluationFailure(key);
+        yield* workflows.clearTriggerFailure(key);
         yield* announceTriggerChange(key);
       }),
   };
 });
+
+export class TriggerHealth extends Context.Service<TriggerHealth, Effect.Success<typeof make>>()(
+  "hercule/controller/workflows/TriggerHealth",
+) {}
+
+export const TriggerHealthLayer: Layer.Layer<
+  TriggerHealth,
+  never,
+  SqlClient.SqlClient | NotificationService
+> = Layer.effect(TriggerHealth)(make);

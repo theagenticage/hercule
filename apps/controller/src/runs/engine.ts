@@ -413,7 +413,7 @@ export const makeRunEngine = Effect.gen(function* () {
         if (outcome.status === "failed") {
           yield* notifications.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
-            { unlessRaised: decideRunFailedUnlessRaised(run, outcome, at) },
+            { unlessRaised: decideRunFailedUnlessRaised(run, outcome) },
           );
         }
       }

@@ -13,7 +13,7 @@ import type {
 } from "@hercule/contract";
 import type { PlatformEvent } from "../events";
 import type { CoreNotification, UnlessRaised } from "../notifications";
-import { computeTriggerQuietSince } from "../workflows";
+import { TRIGGER_NOTIFICATION_QUIET_PERIOD } from "../workflows";
 import type { RunOutcome } from "./repository";
 
 /**
@@ -141,9 +141,9 @@ export const buildRunFailedNotification = (
 };
 
 /**
- * Decides when the `core.run-failed` notification of a run that failed at
- * `at` is held back, as the `unlessRaised` option of `createCoreNotification`.
- * A run a start trigger started that failed validation is held back when a
+ * Decides when the `core.run-failed` notification of a failed run is held
+ * back, as the `unlessRaised` option of `createCoreNotification`. A run a
+ * start trigger started that failed validation is held back when a
  * notification about a run of the same trigger was raised within the
  * trigger quiet period. Returns `undefined` for every other failed run,
  * whose notification is always raised.
@@ -155,9 +155,8 @@ export const buildRunFailedNotification = (
 export const decideRunFailedUnlessRaised = (
   run: Run,
   outcome: FailedOutcome,
-  at: string,
 ): UnlessRaised | undefined => {
   const trigger = buildStartingTriggerSubject(run);
   if (trigger === undefined || outcome.failureReason !== "validation-error") return undefined;
-  return { since: computeTriggerQuietSince(at), about: [trigger] };
+  return { within: TRIGGER_NOTIFICATION_QUIET_PERIOD, about: [trigger] };
 };

@@ -1,13 +1,14 @@
 /**
  * Starting a run: what `run.start` and `run.rerun` check before they write a
  * run, and the write itself. The run engine (`engine.ts`) serves both
- * operations, the `run.start` action and the runs start triggers start
+ * operations, the `run.start` action, and the runs that start triggers start
  * through this, and hands each run to the Run Executor once it commits.
  *
  * Starting a run reads the workflows domain, the action catalog, the fleet's
  * runners and the controller's settings. All four sit below runs in the
  * domain graph.
  */
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -46,6 +47,7 @@ import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import {
   triggerEffectRepository,
+  TriggerHealth,
   workflowRepository,
   WorkflowService,
   type PendingTriggerEffect,
@@ -235,6 +237,7 @@ export const makeRunStart = (
     const storedWorkflows = yield* workflowRepository;
     const triggerEffects = yield* triggerEffectRepository;
     const workflows = yield* WorkflowService;
+    const health = yield* TriggerHealth;
     const host = yield* PluginHost;
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
@@ -264,9 +267,9 @@ export const makeRunStart = (
     /**
      * Checks that `plan` can run with `unresolvedInputs`, and returns the
      * inputs with their defaults applied. It validates the plan again,
-     * refuses what runs cannot execute yet and what no runner can run, and
-     * resolves the inputs. Fails with `Validation` when any check fails, with
-     * the message from `refusals` where it has one.
+     * refuses what runs cannot execute yet, and resolves the inputs. Fails
+     * with `Validation` when any check fails, with the message from
+     * `refusals` where it has one.
      */
     const checkRunnable = (
       plan: WorkflowDefinition,
@@ -284,21 +287,6 @@ export const makeRunStart = (
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }
-        // A retired runner never takes the run, and neither does a reserved
-        // one, because a run names no runner. An offline or draining one
-        // may come back, and the run waits for it.
-        const missingRunner = describeMissingCapableRunner(
-          listWorkspaceActionIds(plan),
-          yield* runners.listPlacementCandidates(),
-        );
-        if (missingRunner !== undefined) {
-          return yield* Effect.fail(
-            createValidationError(
-              [{ path: [], message: missingRunner }],
-              "no runner can run this workflow",
-            ),
-          );
-        }
         const inputs = yield* workflows.resolveRunInputs(plan, unresolvedInputs);
         if (Result.isFailure(inputs)) {
           return yield* Effect.fail(createValidationError(inputs.failure, refusals.invalidInputs));
@@ -307,12 +295,36 @@ export const makeRunStart = (
       });
 
     /**
+     * Checks that some runner can run the workspace steps of `plan`. Fails
+     * with `Validation` when none can. A retired runner never takes the run,
+     * and neither does a reserved one, because a run names no runner. An
+     * offline or draining one may come back, and the run waits for it.
+     */
+    const checkCapableRunner = (
+      plan: WorkflowDefinition,
+    ): Effect.Effect<void, Validation | SqlError> =>
+      Effect.gen(function* () {
+        const missingRunner = describeMissingCapableRunner(
+          listWorkspaceActionIds(plan),
+          yield* runners.listPlacementCandidates(),
+        );
+        if (missingRunner === undefined) return;
+        return yield* Effect.fail(
+          createValidationError(
+            [{ path: [], message: missingRunner }],
+            "no runner can run this workflow",
+          ),
+        );
+      });
+
+    /**
      * Writes the run `readRunToWrite` returns: checks that it can run (see
-     * `checkRunnable`), checks how deep the run is nested, and writes the run
+     * `checkRunnable`), that a runner can run it (see `checkCapableRunner`),
+     * checks how deep the run is nested, and writes the run
      * and its entry step records. Returns the run's id at once, without
      * waiting for any step. Fails, starting no run, with:
      *
-     * - `Validation` when `checkRunnable` refuses the run;
+     * - `Validation` when `checkRunnable` or `checkCapableRunner` refuses the run;
      * - `CapExceeded` when the run is nested too deep;
      * - whatever `readRunToWrite` fails with.
      *
@@ -332,6 +344,7 @@ export const makeRunStart = (
         Effect.gen(function* () {
           const { plan, workflowId, inputs, originalRunId } = yield* readRunToWrite;
           const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
+          yield* checkCapableRunner(plan);
           yield* checkNesting(origin);
           const runId = yield* runs.insert(
             {
@@ -520,7 +533,14 @@ export const makeRunStart = (
      * a message that says what did not validate. The failure raises its
      * notification like any failed run, so the user learns that the
      * trigger's runs are failing. The checks are those of `run.start`,
-     * except the nesting limit: a triggered run is 1 deep.
+     * except two:
+     *
+     * - the nesting limit, because a triggered run is 1 deep;
+     * - the capable runner. A run no runner can run starts, and its first
+     *   workspace step fails with `workspace-failed`, as for a run whose
+     *   runners were retired after it started. Which
+     *   runners exist says nothing about the workflow, so the failure is
+     *   not held back like a validation error.
      *
      * The caller must have read the workflow's id from a row that its
      * transaction holds, so the workflow exists.
@@ -579,23 +599,37 @@ export const makeRunStart = (
       });
 
     /**
-     * Starts the run of one pending trigger effect, and marks the effect
-     * spawned, in one transaction. So a run starts exactly once per match: a
-     * crash before the commit leaves the effect pending and no run, and after
-     * it the effect is no longer pending.
-     *
-     * The effect is read again inside the transaction, because it may have
-     * been delivered, or deleted with its trigger, since it was listed. An
-     * effect whose run can no longer start is marked discarded, and the log
-     * says why:
-     *
-     * - its trigger was paused, or its workflow disabled, since the match;
-     * - its event is no longer in the log.
-     *
-     * There is no grant check: the controller starts the run on nobody's
-     * behalf, after the workflow's author saved the trigger.
+     * Discards a pending trigger effect whose start died with `cause`, and
+     * records the failure on its trigger's health, in a transaction of its
+     * own. The cause is logged in full; the health gets its first line.
      */
-    const startTriggeredRun = (effectId: number): Effect.Effect<void, SqlError> =>
+    const discardAfterDefect = (
+      effectId: number,
+      cause: Cause.Cause<SqlError>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* Effect.logError(
+          `Starting the run of the trigger effect ${String(effectId)} failed, so it is discarded`,
+          cause,
+        );
+        yield* commitUninterruptibly(
+          sql,
+          Effect.gen(function* () {
+            const discarded = yield* triggerEffects.discardIfPending(effectId, yield* nowIso);
+            if (Option.isNone(discarded)) return;
+            const effect = discarded.value;
+            const defect = Cause.squash(cause);
+            yield* health.recordFailure(
+              effect,
+              "start",
+              `The run for the event ${String(effect.eventId)} could not start, because of a bug in the controller: ${defect instanceof Error ? defect.message : String(defect)}. The match was dropped, and the controller's log has the details.`,
+            );
+          }),
+        );
+      });
+
+    /** Starts the run of one pending trigger effect, as `startTriggeredRun` describes. */
+    const startRunOfEffect = (effectId: number): Effect.Effect<void, SqlError> =>
       commitUninterruptibly(
         sql,
         Effect.gen(function* () {
@@ -623,6 +657,36 @@ export const makeRunStart = (
           const runId = yield* writeTriggeredRun(effect, event.value, at);
           yield* triggerEffects.markSpawned(effect.id, runId, at);
         }),
+      );
+
+    /**
+     * Starts the run of one pending trigger effect, and marks the effect
+     * spawned, in one transaction. So a run starts exactly once per match: a
+     * crash before the commit leaves the effect pending and no run, and after
+     * it the effect is no longer pending.
+     *
+     * The effect is read again inside the transaction, because it may have
+     * been delivered, or deleted with its trigger, since it was listed. An
+     * effect whose run can no longer start is marked discarded, and the log
+     * says why:
+     *
+     * - its trigger was paused, or its workflow disabled, since the match;
+     * - its event is no longer in the log.
+     *
+     * Fails only with `SqlError`, which leaves the effect pending, so the
+     * next delivery tries again. A start that dies instead, because of a bug,
+     * would die the same way on every try, so the effect is discarded and
+     * the failure recorded on its trigger's health (see
+     * `discardAfterDefect`).
+     *
+     * There is no grant check: the controller starts the run on nobody's
+     * behalf, after the workflow's author saved the trigger.
+     */
+    const startTriggeredRun = (effectId: number): Effect.Effect<void, SqlError> =>
+      Effect.catchCause(startRunOfEffect(effectId), (cause) =>
+        Cause.hasInterrupts(cause) || !Cause.hasDies(cause)
+          ? Effect.failCause(cause)
+          : discardAfterDefect(effectId, cause),
       );
 
     return { start, rerun, startTriggeredRun };

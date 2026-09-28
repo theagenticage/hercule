@@ -86,8 +86,8 @@ export interface RoutableStartTrigger extends TriggerKey {
   readonly filter: string | undefined;
   /** Each input name to an expression over `event`. Empty when the trigger maps nothing. */
   readonly inputs: Readonly<Record<string, string>>;
-  /** Whether the trigger's health records an evaluation error. */
-  readonly inEvaluationError: boolean;
+  /** Whether the trigger's health records an error. */
+  readonly hasHealthError: boolean;
 }
 
 /** A cron trigger's schedule and the Scheduler's state for it. */
@@ -102,6 +102,8 @@ export interface CronTrigger extends TriggerKey {
   /** The timezone `nextFireAt` was computed in. */
   readonly nextFireZone: string | undefined;
   readonly lastFiredAt: string | undefined;
+  /** The error the trigger's health records, if any. */
+  readonly healthErrorMessage: string | undefined;
 }
 
 /**
@@ -619,7 +621,7 @@ const make = Effect.gen(function* () {
             connectionId: row.connection_id ?? undefined,
             filter: row.filter ?? undefined,
             inputs: row.inputs === null ? {} : (JSON.parse(row.inputs) as Record<string, string>),
-            inEvaluationError: row.health_error_message !== null,
+            hasHealthError: row.health_error_message !== null,
           })),
       ),
 
@@ -640,13 +642,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that a start trigger's filter or input mapping failed on an
-     * event, with the error message and when it happened. Returns true when
+     * Records that a start trigger failed, with the error message and when it
+     * happened. Returns true when
      * this failure starts a streak: the trigger was healthy until now. A
      * failure while the trigger is already in error replaces the message and
      * keeps the time the streak started.
      */
-    recordTriggerEvaluationFailure: (
+    recordTriggerFailure: (
       key: TriggerKey,
       message: string,
       at: string,
@@ -667,8 +669,8 @@ const make = Effect.gen(function* () {
         return false;
       }),
 
-    /** Clears a start trigger's recorded evaluation error. */
-    clearTriggerEvaluationFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
+    /** Clears a start trigger's recorded error. */
+    clearTriggerFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE triggers SET health_error_message = NULL, health_error_at = NULL
         WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
@@ -744,10 +746,12 @@ const make = Effect.gen(function* () {
           readonly next_fire_at: string | null;
           readonly next_fire_zone: string | null;
           readonly last_fired_at: string | null;
+          readonly health_error_message: string | null;
         }>`
           SELECT triggers.schedule, triggers.timezone,
                  triggers.status = 'active' AND workflows.enabled = 1 AS can_fire,
-                 triggers.next_fire_at, triggers.next_fire_zone, triggers.last_fired_at
+                 triggers.next_fire_at, triggers.next_fire_zone, triggers.last_fired_at,
+                 triggers.health_error_message
           FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
           WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
             AND triggers.trigger_id = ${key.triggerId}
@@ -763,6 +767,7 @@ const make = Effect.gen(function* () {
             nextFireAt: row.next_fire_at ?? undefined,
             nextFireZone: row.next_fire_zone ?? undefined,
             lastFiredAt: row.last_fired_at ?? undefined,
+            healthErrorMessage: row.health_error_message ?? undefined,
           })),
       ),
 
@@ -784,6 +789,16 @@ const make = Effect.gen(function* () {
         WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
       `);
     },
+
+    /**
+     * Clears a cron trigger's next scheduled time, and the timezone it was
+     * computed in, so the Scheduler computes both again.
+     */
+    unscheduleCronTrigger: (key: TriggerKey): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE triggers SET next_fire_at = NULL, next_fire_zone = NULL
+        WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+      `),
   };
 });
 

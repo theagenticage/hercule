@@ -300,7 +300,7 @@ describe("a start trigger's health across a second save", () => {
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow("Healthy", [declareTrigger("a")], FIRST_SAVE);
-        yield* workflows.recordTriggerEvaluationFailure(
+        yield* workflows.recordTriggerFailure(
           { workflowId, triggerId: "a" },
           "payload has no field title",
           FIRST_SAVE,
@@ -424,16 +424,8 @@ describe("recording a start trigger's evaluation failures", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow("Failing", [declareTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
-        const first = yield* workflows.recordTriggerEvaluationFailure(
-          key,
-          "first error",
-          FIRST_SAVE,
-        );
-        const second = yield* workflows.recordTriggerEvaluationFailure(
-          key,
-          "second error",
-          SECOND_SAVE,
-        );
+        const first = yield* workflows.recordTriggerFailure(key, "first error", FIRST_SAVE);
+        const second = yield* workflows.recordTriggerFailure(key, "second error", SECOND_SAVE);
         return { first, second, health: (yield* readStoredTrigger(key)).health };
       }),
     );
@@ -449,10 +441,10 @@ describe("recording a start trigger's evaluation failures", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow("Failing", [declareTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
-        yield* workflows.recordTriggerEvaluationFailure(key, "first error", FIRST_SAVE);
-        yield* workflows.clearTriggerEvaluationFailure(key);
+        yield* workflows.recordTriggerFailure(key, "first error", FIRST_SAVE);
+        yield* workflows.clearTriggerFailure(key);
         const healthAfterClear = (yield* readStoredTrigger(key)).health;
-        const reported = yield* workflows.recordTriggerEvaluationFailure(key, "again", SECOND_SAVE);
+        const reported = yield* workflows.recordTriggerFailure(key, "again", SECOND_SAVE);
         return { healthAfterClear, reported, health: (yield* readStoredTrigger(key)).health };
       }),
     );
@@ -488,7 +480,7 @@ describe("listing the routable start triggers", () => {
           "paused",
           SECOND_SAVE,
         );
-        yield* workflows.recordTriggerEvaluationFailure(
+        yield* workflows.recordTriggerFailure(
           { workflowId: enabledId, triggerId: "unmapped" },
           "boom",
           SECOND_SAVE,
@@ -510,7 +502,7 @@ describe("listing the routable start triggers", () => {
         connectionId: ANY_CONNECTION,
         filter: "event.payload.id > 3",
         inputs: { id: "event.payload.id" },
-        inEvaluationError: false,
+        hasHealthError: false,
       },
       {
         workflowId: enabledId,
@@ -519,7 +511,7 @@ describe("listing the routable start triggers", () => {
         connectionId: undefined,
         filter: undefined,
         inputs: {},
-        inEvaluationError: true,
+        hasHealthError: true,
       },
     ]);
   });

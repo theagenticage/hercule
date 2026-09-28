@@ -2,12 +2,7 @@
  * The workflow operations: `workflow.query`, `read`, `create`, `update`,
  * `delete` and `validate`; `trigger.query`, which lists the triggers that
  * the stored workflows declare; `trigger.pause` and `trigger.resume`,
- * which set a start trigger's status. And two things the controller daemon
- * calls:
- *
- * - scheduling the cron triggers, for the Scheduler (`cron-triggers.ts`);
- * - recording a start trigger's evaluation failures, for the event router
- *   (`trigger-health.ts`).
+ * which set a start trigger's status.
  *
  * The YAML source is the source of truth (ADR 0029). The stored source is
  * either the YAML a caller sent, or the YAML generated from the definition
@@ -81,9 +76,6 @@ import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../
 import { AuditLog, EventKinds } from "../events";
 import { NotificationService } from "../notifications";
 import { PluginHost } from "../plugins";
-import type { Settings } from "../settings";
-import { makeCronTriggerScheduler } from "./cron-triggers";
-import { makeTriggerHealth } from "./trigger-health";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
 import {
@@ -289,8 +281,6 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const eventKinds = yield* EventKinds;
   const runs = yield* WorkflowRuns;
-  const cronTriggerScheduler = yield* makeCronTriggerScheduler;
-  const triggerHealth = yield* makeTriggerHealth;
 
   /**
    * Reads from the database and the plugin host what validating the definition
@@ -367,9 +357,6 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    ...cronTriggerScheduler,
-    ...triggerHealth,
-
     /**
      * Validates a parsed definition with the same rules as a save, against
      * what exists on the controller now. Returns every error and warning.
@@ -700,11 +687,5 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  | SqlClient.SqlClient
-  | AuditLog
-  | NotificationService
-  | PluginHost
-  | EventKinds
-  | WorkflowRuns
-  | Settings
+  SqlClient.SqlClient | AuditLog | NotificationService | PluginHost | EventKinds | WorkflowRuns
 > = Layer.effect(WorkflowService)(make);

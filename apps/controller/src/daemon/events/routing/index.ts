@@ -16,7 +16,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { NotificationService } from "../../../notifications";
 import type { RunService } from "../../../runs";
 import type { SessionService } from "../../../sessions";
-import type { WorkflowService } from "../../../workflows";
+import type { TriggerHealth } from "../../../workflows";
 import type { Delivery, RoutingTable } from "../event-router";
 import { Live } from "../../sessions";
 import { queuedInputDelivery } from "./queued-input-delivery";
@@ -32,7 +32,7 @@ import { triggerRoutingTable } from "./trigger-routing-table";
 export const buildRoutingTables: Effect.Effect<
   ReadonlyArray<RoutingTable>,
   never,
-  SqlClient.SqlClient | SessionService | NotificationService | WorkflowService
+  SqlClient.SqlClient | SessionService | NotificationService | TriggerHealth
 > = Effect.all([sessionRoutingTable, triggerRoutingTable]);
 
 /** Builds every delivery that sends the rows waiting to go out, whoever wrote them. */

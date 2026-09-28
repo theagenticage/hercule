@@ -22,6 +22,7 @@
  * key is recorded on the notification and nothing reads it here.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -93,13 +94,17 @@ export interface NotificationPage {
 
 /**
  * When a core notification is held back: when one of the same kind was
- * created after `since` about every subject in `about`. `about` is every
- * subject of the new notification when left out.
+ * created about every subject in `about`, either
+ *
+ * - after `since`, such as the instant a lasting condition began, or
+ * - `within` this long before now: a quiet period, for a condition that comes
+ *   back again and again.
+ *
+ * `about` is every subject of the new notification when left out.
  */
-export interface UnlessRaised {
-  readonly since: string;
+export type UnlessRaised = ({ readonly since: string } | { readonly within: Duration.Duration }) & {
   readonly about?: ReadonlyArray<NotificationSubject>;
-}
+};
 
 /** A notification the core raises about itself. */
 export interface CoreNotification {
@@ -364,14 +369,13 @@ const make = Effect.gen(function* () {
      * is always one `notification.query` can return.
      *
      * With `unlessRaised`, it creates nothing when a notification of the
-     * same kind was created after `since` about every subject in `about`,
-     * which is every subject of this notification when left out. A condition
-     * that lasts, such as a runner that stays away, is checked again and
-     * again; the option lets the caller report it once each time it occurs
-     * rather than on every check. The caller passes the instant the condition
-     * began, such as when the runner was last seen. `about` names fewer
-     * subjects when each notification also names something of its own, such
-     * as the run in a failed run's notification.
+     * same kind was already created about every subject in `about`, which is
+     * every subject of this notification when left out, recently enough (see
+     * `UnlessRaised`). A condition that lasts, such as a runner that stays
+     * away, is checked again and again; the option lets the caller report it
+     * once each time it occurs rather than on every check. `about` names
+     * fewer subjects when each notification also names something of its own,
+     * such as the run in a failed run's notification.
      */
     createCoreNotification: (
       notification: CoreNotification,
@@ -380,13 +384,16 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
+          const now = yield* nowIso;
           const unlessRaised = options?.unlessRaised;
           if (
             unlessRaised !== undefined &&
             (yield* notifications.hasNotificationAboutSince(
               notification.kind,
               unlessRaised.about ?? notification.subject,
-              unlessRaised.since,
+              "since" in unlessRaised
+                ? unlessRaised.since
+                : new Date(Date.parse(now) - Duration.toMillis(unlessRaised.within)).toISOString(),
             ))
           ) {
             return;
@@ -403,7 +410,7 @@ const make = Effect.gen(function* () {
               ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
               actions: [],
               status: "resolved",
-              createdAt: yield* nowIso,
+              createdAt: now,
             },
             SYSTEM_ACTOR,
           );

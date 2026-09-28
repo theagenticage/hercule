@@ -370,7 +370,7 @@ The Queued Input the Event Router writes for a holder session when a route's con
 _Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
 
 **Trigger Effect**:
-One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`; a delivery starts its run later, in a transaction of its own, and marks it `spawned` with the run's id, or `discarded` when its event was pruned, or its trigger paused or its workflow disabled, before then. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
+One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`; a delivery starts its run later, in a transaction of its own, and marks it `spawned` with the run's id, or `discarded` when its event was pruned, or its trigger paused or its workflow disabled, before then, or when its start died of a bug. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
 _Avoid_: pending run (the run does not exist until the effect is delivered)
 
 **Expression**:

@@ -1,10 +1,10 @@
 /**
  * The Scheduler: the loop that fires cron triggers.
  *
- * Every interval it lists the cron triggers the workflow service has work for,
- * and has the service schedule each one: fire it, skip the times it missed,
- * or compute its next time. The rule is the workflow service's
- * (`workflows/cron-triggers.ts`); this loop only sets when it runs. A fired
+ * Every interval it lists the cron triggers that have work, and schedules
+ * each one: fire it, skip the times it missed, or compute its next time. The
+ * rule is the workflows domain's (`CronTriggerScheduler`); this loop only
+ * sets when it runs. A fired
  * trigger appends a `cron.tick` event, and the event pipeline starts the run
  * from there, like for any other event.
  */
@@ -13,7 +13,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { WorkflowService } from "../../workflows";
+import { CronTriggerScheduler } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 
 /**
@@ -35,18 +35,18 @@ export const SchedulerInterval = Context.Reference<Duration.Duration>(
  * that fails is logged and the others still fire. A pass whose listing fails
  * is logged too, and the next one runs.
  */
-export const runScheduler: Effect.Effect<never, SqlError, WorkflowService> = Effect.gen(
+export const runScheduler: Effect.Effect<never, SqlError, CronTriggerScheduler> = Effect.gen(
   function* () {
-    const workflows = yield* WorkflowService;
+    const scheduler = yield* CronTriggerScheduler;
     const interval = yield* SchedulerInterval;
 
     /** Schedules every cron trigger that has work at `now`, each on its own. */
     const scheduleDueTriggers = (now: Date): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        for (const key of yield* workflows.listCronTriggersToSchedule(now)) {
+        for (const key of yield* scheduler.listTriggersToSchedule(now)) {
           yield* absorbFailures(
             `Scheduling the cron trigger ${key.triggerId} of the workflow ${key.workflowId} failed`,
-            workflows.scheduleCronTrigger(key, now),
+            scheduler.scheduleTrigger(key, now),
           );
         }
       });

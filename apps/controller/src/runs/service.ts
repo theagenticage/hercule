@@ -38,7 +38,7 @@ import type { NotificationService } from "../notifications";
 import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
 import type { TaskService } from "../tasks";
-import type { WorkflowService } from "../workflows";
+import type { TriggerHealth, WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
@@ -129,6 +129,7 @@ export const RunServiceLayer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | WorkflowService
+  | TriggerHealth
   | TaskService
   | PluginHost
   | Settings

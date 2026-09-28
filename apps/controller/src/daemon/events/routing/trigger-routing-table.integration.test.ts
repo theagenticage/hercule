@@ -215,6 +215,60 @@ describe("a start trigger that matches an event", () => {
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([eventId]);
     });
   });
+
+  it("starts a run that no runner can run, which fails at its workspace step with workspace-failed", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const repo = await post(
+        base,
+        "/api/v1/resources",
+        { kind: "repo", remote: "https://github.com/o/r.git" },
+        token,
+      );
+      expect(repo.status, await repo.clone().text()).toBe(200);
+      const { id: repoId } = (await repo.json()) as { readonly id: string };
+      // A git.commit step runs only on a runner, and this controller has none.
+      const workflow = await createWorkflowOrFail(base, token, {
+        source: [
+          "name: Commit on a label",
+          "workspace:",
+          "  kind: ephemeral",
+          "  checkouts:",
+          `    - resourceId: ${repoId}`,
+          "triggers:",
+          `  - id: ${TRIGGER_ID}`,
+          "    kind: start",
+          "    source:",
+          "      kind: github.pr.labeled",
+          "      connectionId: any",
+          "steps:",
+          "  - id: commit",
+          "    kind: action",
+          "    action: git.commit",
+          "    params:",
+          "      message: Save",
+          "",
+        ].join("\n"),
+      });
+      await enableWorkflow(base, token, workflow.id);
+
+      const eventId = await emitLabeledEvent(base, token, { added: ["triage"] });
+      const run = await waitForRunStartedBy(controller, workflow.id, eventId);
+
+      // Which runners exist says nothing about the workflow, so the run is
+      // not refused like one whose inputs do not validate.
+      if (run.status !== "failed" || run.failureReason !== "workspace-failed") {
+        expect.fail(`the run did not fail with workspace-failed: ${JSON.stringify(run)}`);
+      }
+      expect(run.failedStepId).toBe("commit");
+      const [step] = run.steps;
+      if (step?.status !== "failed") expect.fail(`the step did not fail: ${JSON.stringify(run)}`);
+      expect(step.error).toEqual({
+        code: "workspace_failed",
+        message: "No runner can run git.commit; update a runner to this version.",
+      });
+    });
+  });
 });
 
 describe("a start trigger that does not match an event", () => {
@@ -399,6 +453,75 @@ describe("a start trigger's match whose run has not started yet", () => {
         return rows[0]?.state === "discarded" ? true : undefined;
       });
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
+    });
+  });
+
+  it("starts no run, and is discarded, when its event is no longer in the log", async () => {
+    await withTriggerController(async (controller) => {
+      const { harness } = controller;
+      const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
+      // Retention prunes only old events, so the test writes a match for an
+      // event id the log never had, which reads the same as a pruned one.
+      const prunedEventId = 1_000_000;
+      await runEffect(harness.sql`
+        INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, at)
+        VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${prunedEventId}, 'pending',
+                ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`);
+
+      await waitUntil("the match was discarded", async () => {
+        const rows = await runEffect(harness.sql<{ readonly state: string }>`
+          SELECT state FROM trigger_effects
+          WHERE workflow_id = ${uuidFromString(workflowId)} AND event_id = ${prunedEventId}`);
+        return rows[0]?.state === "discarded" ? true : undefined;
+      });
+      expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
+      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+    });
+  });
+
+  it("is discarded, and records the error on the trigger's health once, when its start fails because of a bug", async () => {
+    await withTriggerController(async (controller) => {
+      const { harness, base, token } = controller;
+      const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
+      // A stored definition with no steps is one the controller never
+      // writes, so starting a run of it dies instead of failing.
+      const [stored] = await runEffect(harness.sql<{ readonly definition: string }>`
+        SELECT definition FROM workflows WHERE id = ${uuidFromString(workflowId)}`);
+      await runEffect(harness.sql`
+        UPDATE workflows SET definition = '{}' WHERE id = ${uuidFromString(workflowId)}`);
+
+      const first = await emitLabeledEvent(base, token, { added: ["triage"] });
+      const second = await emitLabeledEvent(base, token, { added: ["triage"] });
+      await waitUntil("both matches were discarded", async () => {
+        const rows = await runEffect(harness.sql<{ readonly state: string }>`
+          SELECT state FROM trigger_effects
+          WHERE workflow_id = ${uuidFromString(workflowId)} AND event_id IN (${first}, ${second})`);
+        return rows.length === 2 && rows.every((row) => row.state === "discarded")
+          ? true
+          : undefined;
+      });
+      // Reading the trigger reads its workflow's definition too.
+      await runEffect(harness.sql`
+        UPDATE workflows SET definition = ${stored!.definition}
+        WHERE id = ${uuidFromString(workflowId)}`);
+
+      expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
+      const broken = await readTrigger(controller, workflowId);
+      if (broken.health?.state !== "error") {
+        expect.fail(`the trigger's health is not error: ${JSON.stringify(broken)}`);
+      }
+      expect(broken.health.message).toContain(
+        "could not start, because of a bug in the controller",
+      );
+      // Both starts failed, but the user hears about the streak once.
+      const notified = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.trigger-filter-error",
+      );
+      expect(notified.map((notification) => notification.title)).toEqual([
+        "A trigger could not start its run",
+      ]);
     });
   });
 });

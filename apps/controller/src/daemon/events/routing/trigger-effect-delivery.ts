@@ -8,7 +8,8 @@
  *
  * Runs start one at a time, in the order their events matched, each in its
  * own transaction (the run service's `startTriggeredRun`). A start that fails
- * is logged, and the next one still starts. A start only writes to the
+ * on the database is logged, its effect stays pending for the next tick, and
+ * the next one still starts. A start only writes to the
  * database and hands the run to the Run Executor after the commit, so it
  * never waits on a runner and needs no fiber of its own.
  */

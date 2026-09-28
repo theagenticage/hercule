@@ -8,7 +8,7 @@
  * speaks for, and a run's actor names the workflow it was started from.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type {
@@ -888,6 +888,24 @@ describe("createCoreNotification with unlessRaised", () => {
       oneSubjectNotRaisedAbout: true,
       ownSubjectLeftOutOfTheSearch: false,
     });
+  });
+
+  it("creates nothing when one was raised within the quiet period before now, and creates it once the period is over", async () => {
+    /** Raises `RAISED`, then asks to create it again unless raised `within` before now. */
+    const checkCreatedWithin = (within: Duration.Duration): Promise<boolean> =>
+      run(
+        Effect.gen(function* () {
+          const notifications = yield* NotificationService;
+          yield* notifications.createCoreNotification(RAISED);
+          yield* notifications.createCoreNotification(RAISED, { unlessRaised: { within } });
+          return (yield* actAs(USER, notifications.query({}))).items.length === 2;
+        }),
+      );
+
+    expect({
+      withinAnHour: await checkCreatedWithin(Duration.hours(1)),
+      withinNoTime: await checkCreatedWithin(Duration.zero),
+    }).toEqual({ withinAnHour: false, withinNoTime: true });
   });
 });
 

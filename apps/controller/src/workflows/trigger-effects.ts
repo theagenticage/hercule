@@ -13,8 +13,10 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { TriggerKey } from "@hercule/contract";
-import { uuidFromString, uuidToString } from "../db";
+import type { Event, TriggerKey } from "@hercule/contract";
+import { nowIso, uuidFromString, uuidToString } from "../db";
+import { evaluateMapping, type ExpressionError } from "../expressions";
+import type { RoutableStartTrigger } from "./repository";
 
 /** A start trigger's match on one event, waiting for its run to start. */
 export interface PendingTriggerEffect extends TriggerKey {
@@ -88,6 +90,30 @@ const make = Effect.gen(function* () {
         WHERE id = ${id}
       `),
 
+    /**
+     * Moves a row to `discarded` if it is still pending, and returns its
+     * trigger and event. Returns `None`, changing nothing, when the row is
+     * gone or no longer pending. Unlike `readPending`, it does not read the
+     * row's inputs, so it works on a row whose inputs cannot be parsed.
+     */
+    discardIfPending: (
+      id: number,
+      at: string,
+    ): Effect.Effect<Option.Option<TriggerKey & { readonly eventId: number }>, SqlError> =>
+      Effect.map(
+        sql<Pick<PendingRow, "workflow_id" | "trigger_id" | "event_id">>`
+          UPDATE trigger_effects SET state = 'discarded', at = ${at}
+          WHERE id = ${id} AND state = 'pending'
+          RETURNING workflow_id, trigger_id, event_id
+        `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            triggerId: row.trigger_id,
+            eventId: row.event_id,
+          })),
+      ),
+
     /** Moves a pending row to `discarded`: its run will never start. */
     markDiscarded: (id: number, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -98,3 +124,31 @@ const make = Effect.gen(function* () {
 
 /** The repository of the `trigger_effects` table. */
 export const triggerEffectRepository = make;
+
+/**
+ * Records that a start trigger matched `event`: maps the event onto the
+ * workflow's inputs with the trigger's input mapping, evaluated against
+ * `context`, and writes a pending trigger effect for the delivery to start.
+ * Fails with `ExpressionError`, writing nothing, when an input's expression
+ * fails on the event. Joins the caller's transaction.
+ *
+ * The inputs are not checked against the workflow here: the run's start
+ * checks them, and a run whose inputs do not validate fails where the user
+ * can see it.
+ */
+export const recordTriggerMatch = (
+  trigger: RoutableStartTrigger,
+  event: Event,
+  context: Record<string, unknown>,
+): Effect.Effect<void, ExpressionError | SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const inputs = yield* evaluateMapping(trigger.inputs, context);
+    const triggerEffects = yield* triggerEffectRepository;
+    yield* triggerEffects.insertPending({
+      workflowId: trigger.workflowId,
+      triggerId: trigger.triggerId,
+      eventId: event.id,
+      inputs,
+      at: yield* nowIso,
+    });
+  });

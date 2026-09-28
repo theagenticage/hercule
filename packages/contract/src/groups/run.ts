@@ -90,7 +90,8 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
  * - `workspace-failed`: the run's workspace could not be set up, for example
- *   because a setup command failed, or the runner that holds it was retired.
+ *   because a setup command failed, the runner that holds it was retired, or
+ *   no runner can run the workspace steps of a run a start trigger started.
  *   `failedStepId` names the workspace step that was running, if one was.
  *
  * The list grows as runs learn to do more; a client shows a reason it does not

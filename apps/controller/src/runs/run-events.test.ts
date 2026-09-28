@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Run } from "@hercule/contract";
+import { TRIGGER_NOTIFICATION_QUIET_PERIOD } from "../workflows";
 import {
   buildRunEndedEvent,
   buildRunFailedNotification,
@@ -278,23 +279,24 @@ describe("the core.run-failed notification of a run a start trigger started", ()
     ]);
   });
 
-  it("is held back for an hour after one about the same trigger, when the run failed validation", () => {
-    expect(decideRunFailedUnlessRaised(TRIGGERED_RUN, VALIDATION_ERROR, FINISHED_AT)).toStrictEqual(
-      { since: "2026-09-27T09:05:00.000Z", about: [TRIGGER_SUBJECT] },
-    );
+  it("is held back within the trigger quiet period after one about the same trigger, when the run failed validation", () => {
+    expect(decideRunFailedUnlessRaised(TRIGGERED_RUN, VALIDATION_ERROR)).toStrictEqual({
+      within: TRIGGER_NOTIFICATION_QUIET_PERIOD,
+      about: [TRIGGER_SUBJECT],
+    });
   });
 
   it("is always raised when the run failed another way", () => {
     expect(
-      decideRunFailedUnlessRaised(
-        TRIGGERED_RUN,
-        { status: "failed", failureReason: "step-failed", failedStepId: "create" },
-        FINISHED_AT,
-      ),
+      decideRunFailedUnlessRaised(TRIGGERED_RUN, {
+        status: "failed",
+        failureReason: "step-failed",
+        failedStepId: "create",
+      }),
     ).toBeUndefined();
   });
 
   it("is always raised for a run no trigger started", () => {
-    expect(decideRunFailedUnlessRaised(RUNNING_RUN, VALIDATION_ERROR, FINISHED_AT)).toBeUndefined();
+    expect(decideRunFailedUnlessRaised(RUNNING_RUN, VALIDATION_ERROR)).toBeUndefined();
   });
 });

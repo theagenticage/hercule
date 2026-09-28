@@ -1,6 +1,6 @@
 /**
- * Tests the Scheduler's rule for cron triggers, `listCronTriggersToSchedule`
- * and `scheduleCronTrigger`, on a migrated in-memory database. Both take the
+ * Tests the Scheduler's rule for cron triggers, `listTriggersToSchedule` and
+ * `scheduleTrigger`, on a migrated in-memory database. Both take the
  * current time as an argument, so each test moves time on by running a pass
  * with a later `now`.
  *
@@ -13,14 +13,24 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TriggerKey } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
+import { AuditLogLayer } from "../events";
+import { NotificationServiceLayer } from "../notifications";
 import { Settings, SettingsLayer } from "../settings";
-import { decideFiring, makeCronTriggerScheduler } from "./cron-triggers";
+import { CronTriggerScheduler, CronTriggerSchedulerLayer, decideFiring } from "./cron-triggers";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
+import { TriggerHealthLayer } from "./trigger-health";
 
-const layer = SettingsLayer.pipe(Layer.provideMerge(TestDatabase));
+const layer = CronTriggerSchedulerLayer.pipe(
+  Layer.provide(TriggerHealthLayer),
+  Layer.provide(NotificationServiceLayer),
+  Layer.provide(AuditLogLayer),
+  Layer.provideMerge(SettingsLayer),
+  Layer.provideMerge(TestDatabase),
+);
 
-const run = <A, E>(effect: Effect.Effect<A, E, Settings | SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(layer), Effect.orDie));
+const run = <A, E>(
+  effect: Effect.Effect<A, E, CronTriggerScheduler | Settings | SqlClient.SqlClient>,
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(layer), Effect.orDie));
 
 const SAVED_AT = "2026-09-22T10:00:00.000Z";
 /** The time of the first pass in most tests: after 09:00 in Amsterdam, before 09:00 in New York. */
@@ -63,15 +73,15 @@ const storeWorkflow = (triggers: ReadonlyArray<DeclaredTrigger>, enabled = true)
 /** Lists the cron triggers that have work at `now`, and returns them with the scheduler. */
 const listTriggersToSchedule = (now: string) =>
   Effect.gen(function* () {
-    const scheduler = yield* makeCronTriggerScheduler;
-    return { scheduler, keys: yield* scheduler.listCronTriggersToSchedule(new Date(now)) };
+    const scheduler = yield* CronTriggerScheduler;
+    return { scheduler, keys: yield* scheduler.listTriggersToSchedule(new Date(now)) };
   });
 
 /** Runs one pass of the Scheduler at `now`: lists the triggers that have work, and schedules each. */
 const firePass = (now: string) =>
   Effect.gen(function* () {
     const { scheduler, keys } = yield* listTriggersToSchedule(now);
-    for (const key of keys) yield* scheduler.scheduleCronTrigger(key, new Date(now));
+    for (const key of keys) yield* scheduler.scheduleTrigger(key, new Date(now));
   });
 
 /** Inserts a user created at `createdAt` and sets their timezone setting. */
@@ -281,7 +291,7 @@ describe("a cron trigger that changed after it was listed", () => {
         const now = "2026-09-23T07:00:30.000Z";
         const { scheduler, keys } = yield* listTriggersToSchedule(now);
         for (const key of [...keys, ...keys]) {
-          yield* scheduler.scheduleCronTrigger(key, new Date(now));
+          yield* scheduler.scheduleTrigger(key, new Date(now));
         }
         return yield* readCronTicks;
       }),
@@ -300,7 +310,7 @@ describe("a cron trigger that changed after it was listed", () => {
         const now = "2026-09-23T07:00:30.000Z";
         const { scheduler, keys } = yield* listTriggersToSchedule(now);
         yield* workflows.setTriggerStatus(key, "paused", now);
-        for (const listed of keys) yield* scheduler.scheduleCronTrigger(listed, new Date(now));
+        for (const listed of keys) yield* scheduler.scheduleTrigger(listed, new Date(now));
         return { state: yield* readScheduleState(key), ticks: yield* readCronTicks };
       }),
     );
@@ -513,6 +523,69 @@ describe("a cron trigger that cannot fire", () => {
 
     expect(ticks).toEqual([]);
     expect(state).toEqual({ ...MOVED_ON_WITHOUT_A_NOTE, next_fire_at: "2026-09-27T07:00:00.000Z" });
+  });
+});
+
+describe("a cron trigger whose timezone is not a known one", () => {
+  /** Reads the trigger's recorded error and the notifications raised about triggers. */
+  const readHealth = (key: TriggerKey) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const [trigger] = yield* sql<{
+        readonly health_error_message: string | null;
+        readonly health_error_at: string | null;
+      }>`
+        SELECT health_error_message, health_error_at FROM triggers
+        WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}`;
+      const notifications = yield* sql<{ readonly title: string; readonly body: string }>`
+        SELECT title, body FROM notifications WHERE kind = 'core.trigger-filter-error'`;
+      return { ...trigger!, notifications };
+    });
+
+  it("gets no next time and records the error on its health once, then is scheduled and cleared once the timezone is known", async () => {
+    const { broken, again, fixed } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const workflowId = yield* storeWorkflow([declareCronTrigger("nightly")]);
+        const key = { workflowId, triggerId: "nightly" };
+        // Saving a workflow refuses an unknown timezone, so the test writes
+        // one the way a newer timezone database would drop a known one.
+        yield* sql`UPDATE triggers SET timezone = 'Mars/Olympus_Mons'
+                   WHERE workflow_id = ${uuidFromString(workflowId)}`;
+        yield* firePass(FIRST_PASS);
+        const broken = { state: yield* readScheduleState(key), ...(yield* readHealth(key)) };
+        yield* firePass("2026-09-22T12:00:01.000Z");
+        const again = yield* readHealth(key);
+        yield* sql`UPDATE triggers SET timezone = 'Europe/Amsterdam'
+                   WHERE workflow_id = ${uuidFromString(workflowId)}`;
+        yield* firePass("2026-09-22T12:00:02.000Z");
+        const fixed = { state: yield* readScheduleState(key), ...(yield* readHealth(key)) };
+        return { broken, again, fixed };
+      }),
+    );
+
+    expect(broken.state).toMatchObject({ next_fire_at: null, next_fire_zone: null });
+    expect(broken.health_error_message).toMatch(
+      /^The schedule "0 9 \* \* \*" cannot be read in the timezone Mars\/Olympus_Mons: .+\. Set a known timezone on the trigger in the workflow\.$/,
+    );
+    expect(broken.notifications).toEqual([
+      {
+        title: "A trigger's next scheduled time could not be computed",
+        body: broken.health_error_message,
+      },
+    ]);
+    // A later pass fails the same way and writes nothing, so the error keeps
+    // the time it was first recorded and the user hears about it once.
+    expect(again).toEqual({
+      health_error_message: broken.health_error_message,
+      health_error_at: broken.health_error_at,
+      notifications: broken.notifications,
+    });
+    expect(fixed.state).toMatchObject({
+      next_fire_at: NEXT_MORNING,
+      next_fire_zone: "Europe/Amsterdam",
+    });
+    expect(fixed).toMatchObject({ health_error_message: null, health_error_at: null });
   });
 });
 

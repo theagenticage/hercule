@@ -51,8 +51,8 @@ export interface Route {
   readonly admits: (event: Event) => boolean;
   /** The expression source, or `undefined` to match every admitted event. The router compiles it once per pass. */
   readonly condition: string | undefined;
-  /** Whether the route carried an evaluation error when the pass began. */
-  readonly inEvaluationError: boolean;
+  /** Whether the route's health recorded an error when the pass began. */
+  readonly hasHealthError: boolean;
   /**
    * Writes the row for a matched event. `context` is what the condition was
    * evaluated against, for a route that evaluates more of its own
@@ -105,7 +105,7 @@ interface RouteInPass {
    * set, so a pass over a hundred events writes nothing for a route that was
    * healthy all along.
    */
-  inEvaluationError: boolean;
+  hasHealthError: boolean;
 }
 
 /** The router's name in the cursor table. It is the only consumer today. */
@@ -186,22 +186,22 @@ const make = Effect.gen(function* () {
       const inPass: ReadonlyArray<RouteInPass> = routes.map((route) => ({
         route,
         program: undefined,
-        inEvaluationError: route.inEvaluationError,
+        hasHealthError: route.hasHealthError,
       }));
 
       /** Records one route's failure, and remembers that the route is in error. */
       const recordFailure = (entry: RouteInPass, message: string): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
           yield* entry.route.recordEvaluationFailure(message);
-          entry.inEvaluationError = true;
+          entry.hasHealthError = true;
         });
 
       /** Clears one route's recorded failure, if it has one. */
       const clearFailure = (entry: RouteInPass): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
-          if (!entry.inEvaluationError) return;
+          if (!entry.hasHealthError) return;
           yield* entry.route.clearEvaluationFailure();
-          entry.inEvaluationError = false;
+          entry.hasHealthError = false;
         });
 
       /**

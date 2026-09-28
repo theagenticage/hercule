@@ -20,7 +20,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { NotificationService } from "../../notifications";
 import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
-import type { WorkflowService } from "../../workflows";
+import type { TriggerHealth } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
@@ -76,7 +76,7 @@ export const PipelineLayer: Layer.Layer<
   | EventRouter
   | SessionService
   | NotificationService
-  | WorkflowService
+  | TriggerHealth
   | Live
   | RunService
   | SqlClient.SqlClient

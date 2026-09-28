@@ -107,7 +107,7 @@ export const sessionRoutingTable: Effect.Effect<
         .map((subscription): Route => ({
           admits: () => true,
           condition: subscription.condition,
-          inEvaluationError: subscription.healthErrorMessage !== null,
+          hasHealthError: subscription.healthErrorMessage !== null,
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
               const written = yield* sessions.storeMatchedInput({

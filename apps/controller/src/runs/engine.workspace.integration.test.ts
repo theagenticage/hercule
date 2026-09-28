@@ -24,7 +24,12 @@ import { buildPluginStack, USER } from "../plugins/testing";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "../workflows";
+import {
+  TriggerHealthLayer,
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+} from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
@@ -89,6 +94,7 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
         ),
       ),
     ),
+    Layer.provideMerge(TriggerHealthLayer),
     Layer.provideMerge(TaskServiceLayer),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
