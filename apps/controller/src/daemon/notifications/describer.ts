@@ -11,11 +11,11 @@
  * read of the task or session on the caller's behalf, so their grant checks do
  * not apply.
  *
- * Because it reads the rows directly, no read rule a service enforces applies
- * here unless this module repeats it, as it does by reading a deleted task or
- * project as missing. A read rule added to a service later must be added here
- * too, or a describe line could name a row the service would hide from the
- * user.
+ * Because it reads the rows directly, a read rule a service enforces applies
+ * here only if this module repeats it. This module repeats one: a deleted task
+ * or project reads as missing. A read rule added to a service later must be
+ * added here too, or a describe line could name a row the service would hide
+ * from the user.
  *
  * The user decides from this line, so it shows everything the operation will
  * run in full: the text an answer sends, every changed field, every run input.
@@ -67,10 +67,10 @@ const formatLabels = (labels: ReadonlyArray<string>): string =>
   `${labels.length === 1 ? "label" : "labels"} ${labels.join(", ")}`;
 
 /**
- * Returns `read` wrapped so that each id is read at most once. The results are
- * kept as long as the returned function is, so one is built per `describe`
- * call: the answers of one decision usually name the same entity, and a name
- * read for one call must not go stale in the next.
+ * Returns `read` wrapped so that each id is read at most once. The returned
+ * function keeps its results for as long as it exists, so a new one is built
+ * for each `describe` call: the answers of one decision usually name the same
+ * entity, and a name read for one call must not go stale in the next.
  */
 const readOncePerId = <A>(read: (id: string) => Effect.Effect<A, SqlError>) => {
   const results = new Map<string, A>();
@@ -111,10 +111,10 @@ const listPaths = (paths: ReadonlyArray<string>): DescribeLine =>
 
 /**
  * Returns the describe line of one approval answer, in the words of the
- * approval card's answers (`describeApprovalAnswer` in the contract).
- * `allow_always` says "while the session keeps running" rather than "for the
- * rest of the session", because a resumed session is a new harness process
- * that does not keep the rule.
+ * approval card's answers (`describeApprovalAnswer` in the contract). The
+ * line for `allow_always` reads "while the session keeps running", not "for
+ * the rest of the session", because a resumed session is a new harness
+ * process that does not keep the rule.
  */
 const describeDecision = (
   decision: ApprovalDecision,
@@ -221,9 +221,9 @@ const make = Effect.gen(function* () {
     );
 
     /**
-     * Returns a session's name as a `marked` part - its title, or its id once
-     * it is gone - and the request it waits on, or `null` when it waits on
-     * none.
+     * Returns a session's name as a `marked` part, and the request the session
+     * waits on, or `null` when it waits on none. The name is the session's
+     * title, or its id once the session is gone.
      */
     const readSessionNameAndRequest = readOncePerId((id) =>
       Effect.map(sessions.one(id), (found) => ({

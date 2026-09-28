@@ -3,12 +3,12 @@
  * an answer: what taking the answer does, with the current names of what it
  * acts on, such as "Start a run of Bugfix".
  *
- * Writing the line reads the tasks, workflows and sessions an operation names,
- * and those domains depend on this one, so this domain cannot read them
- * itself without making the domain graph a cycle. So the domain declares what
- * it needs as this service, and the controller daemon provides it from their
- * rows. This is the second step of the cycle ladder in ADR 0033: invert the
- * control.
+ * Writing the line reads the tasks, workflows and sessions an operation names.
+ * Those domains depend on the notifications domain, so reading them from here
+ * would make the domain graph a cycle. Instead, the notifications domain
+ * declares what it needs as this service, and the controller daemon
+ * implements it by reading their rows. ADR 0033 owns the rules for breaking a
+ * cycle between domains.
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";

@@ -3372,13 +3372,6 @@ describe("sessions a runner's report leaves out", () => {
 });
 
 /**
- * Input into a session whose harness has exited: the input is stored, the same
- * session id is resumed on the runner that still has its transcript, and the
- * input is delivered once the process reports it has started. The tests check
- * what the caller can see (the status, the frames the runner got, and the
- * input), because a resume goes through the same path as a spawn.
- */
-/**
  * `queueInput`: the form of `session.input` that stores the input in its
  * caller's transaction and delivers it only after that transaction commits.
  * No route calls it, so these tests run it in a transaction of their own.
@@ -3469,6 +3462,13 @@ describe("queueInput", () => {
   });
 });
 
+/**
+ * Input into a session whose harness has exited: the input is stored, the same
+ * session id is resumed on the runner that still has its transcript, and the
+ * input is delivered once the process reports it has started. The tests check
+ * what the caller can see (the status, the frames the runner got, and the
+ * input), because a resume goes through the same path as a spawn.
+ */
 describe("session.input into an exited session", () => {
   it("resumes the same session on its runner and delivers the input once it has started", async () => {
     await withFleet(async (arranged) => {

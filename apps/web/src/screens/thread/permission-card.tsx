@@ -6,18 +6,18 @@ import { AnswerLedger, cn, DecisionMark } from "@hercule/ui";
 import { readErrorMessage } from "../save-status";
 
 /**
- * The permission card: the request the session is parked on, docked onto the
- * composer. It always appears in the same place and is never repeated in the
- * transcript (spec 14 §The thread surface). The answers form the same ledger
- * as a decision's answers in the notification center (spec 14 §Answers as a
- * ledger).
+ * Renders the permission card: the request the session is parked on, docked
+ * onto the composer. The card always appears in the same place and is never
+ * repeated in the transcript. Its answers form the same ledger as a
+ * decision's answers in the notification center.
  *
  * The dock mirrors the composer's bottom lip above the card: the same 14px
  * inset, the same `--surface` on a `--line-soft` border, a 10px radius on the
  * two corners away from the card, and 8px hidden under the card. The card
- * keeps its own radius, border and shadow (spec 14 §Measurements, amended
- * 2026-09-14). A second raised card would look like a separate surface; a lip
- * looks like part of the composer, which is what the dock is.
+ * keeps its own radius, border and shadow. A second raised card would look
+ * like a separate surface; a lip looks like part of the composer, which is
+ * what the dock is. Spec 14 §The thread surface and §Measurements own the
+ * layout.
  *
  * A `question` request is not a permission request. It shows one block per
  * question (its chip, its prose, and its options, read-only) where a command

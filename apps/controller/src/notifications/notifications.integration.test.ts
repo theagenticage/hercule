@@ -20,7 +20,7 @@ import {
 } from "../sessions/testing";
 import type { NotificationPage } from "./index";
 
-/** Starting the fleet is the slow part of each case, so a case gets several wait deadlines. */
+/** Gives each case three wait deadlines, plus ten seconds for starting the fleet, the slow part of a case. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** A well-formed UUIDv7 that matches no notification on this controller. */

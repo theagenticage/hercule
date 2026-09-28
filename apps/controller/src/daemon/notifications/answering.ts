@@ -3,14 +3,14 @@
  * answer's operation runs as the user, and the decision is resolved as
  * decided with that answer.
  *
- * This operation is a controller daemon use case rather than a method of the
- * notifications domain behind a port, the usual way out of a cycle
- * (ADR 0033), because a port cannot be wired here:
+ * This operation lives in the controller daemon, not in the notifications
+ * domain. A domain usually breaks a cycle by declaring a port that a higher
+ * layer implements, but that does not work here:
  *
- * - it runs operations of the task service, the run service and the `Live`
- *   use case, and all three are built on top of `NotificationService`. A port
+ * - the operation calls the task service, the run service and the `Live` use
+ *   case, and all three are built on top of `NotificationService`. A port
  *   that `NotificationService` needs, implemented with those services, would
- *   make the layers a cycle: none could be built before the others;
+ *   make the layers depend on each other, so none could be built first;
  * - `session.input` and `session.respond` reach a runner through `Live`, and
  *   talking to a runner is controller daemon work.
  *
@@ -28,15 +28,14 @@
  *   transaction as the resolution, so both commit or neither does.
  *   `session.input` only stores the input there; it is sent to the runner
  *   after the commit, so a decision that cannot be resolved sends nothing.
- * - `session.respond` sends its frame before it returns, and a sent frame
- *   cannot be rolled back, so it cannot share the resolution's transaction.
- *   It resolves the decision itself instead, in the transaction that records
- *   the answer and before the frame is sent, and nothing is resolved after
- *   it returns. Only the core binds `session.respond`, to the approval
- *   decision about the request it answers, so that decision is always the
- *   one being answered.
+ * - `session.respond` sends a frame to the runner before it returns, and a
+ *   sent frame cannot be rolled back, so it cannot share the resolution's
+ *   transaction. It resolves the decision itself, in the transaction that
+ *   records the answer, before the frame is sent. Only the core binds
+ *   `session.respond`, and only to the approval decision about the request
+ *   it answers, so the decision it resolves is always the one being answered.
  *
- * Spec 10 §7.4 owns the rules.
+ * Spec 10 §7.4 owns the rules; ADR 0033 owns where operations live.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -92,7 +91,7 @@ type OperationError =
   | SqlError;
 
 /**
- * What resolves the decision when an answer runs each operation:
+ * Who resolves the decision, for each operation an answer may run:
  *
  * - `answer-transaction`: the operation runs in one transaction with the
  *   resolution, so both commit or neither does. Everything the operation does
@@ -134,9 +133,8 @@ const make = Effect.gen(function* () {
   const tasks = yield* TaskService;
   const runs = yield* RunService;
   const live = yield* Live;
-  // A second click on the same notification, while the first one's operation
-  // still runs, would otherwise read it as open and run an operation a second
-  // time.
+  // Without this set of held ids, a second click during a slow operation would
+  // find the decision still open and run an operation a second time.
   const notificationIdsBeingActedOn = yield* Ref.make<ReadonlySet<string>>(new Set());
 
   /** Runs each bindable operation as the user, from an answer's input. */

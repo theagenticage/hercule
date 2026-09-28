@@ -42,8 +42,8 @@ const PRODUCER_SESSION_ID = "0199e0e7-5555-7000-8000-000000000000";
 
 /**
  * Inserts an open decision about one subject, straight into the table, and
- * returns its id. The answers are stored as given, unchecked, so a test can
- * store one that `notification.create` would refuse today. A test of a
+ * returns its id. The answers are stored as given, without any check, so a
+ * test can store one that `notification.create` would reject. A test of a
  * delete uses it to check that the delete withdraws the decisions about what
  * it deleted.
  */

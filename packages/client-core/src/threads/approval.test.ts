@@ -1,7 +1,7 @@
 /**
  * Tests `buildApprovalCard(openRequest)`, which builds all the text of the
  * permission card: its title, what the request is about, and one row per
- * offered decision ([#70](https://github.com/theagenticage/hercule/issues/70)).
+ * offered decision.
  * No code in `apps/web` writes any of this text.
  *
  * The fixtures are the five kinds of `OpenRequest` a session can have, typed

@@ -266,8 +266,8 @@ describe("the operations a conversation's session allows, as for a Thread", () =
         requestId: REQUEST_ID,
         decision: "allow",
       });
-      // The answer resolves the approval notification about the request in the same
-      // operation, with the answer that sends the same decision.
+      // The response itself resolves the approval notification, with the
+      // answer that sends the same decision.
       const [decided] = await readApprovalNotifications(arranged, session.id);
       expect(decided).toMatchObject({
         status: "resolved",

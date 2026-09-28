@@ -290,7 +290,7 @@ export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>
 /**
  * One call of `session.respond` as a single object: the session's id, which
  * an HTTP request sends in its path, and the answer. The core binds it to the
- * four answers of a tool approval's decision.
+ * answers of the `core.approval` decision it raises for each approval.
  */
 export const SessionRespondCall = closedStruct({ sessionId: Id, ...SESSION_RESPOND_FIELDS });
 

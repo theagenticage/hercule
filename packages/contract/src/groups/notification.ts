@@ -91,10 +91,10 @@ export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>;
 export const CORE_KIND_PREFIX = "core.";
 
 /**
- * The kinds the core produces about itself (spec 10 §7.2). Clients that treat
- * one of them specially, such as marking a failed run, name it from here.
- * `core.approval` is a decision: a session asks to run a command, change or
- * read files, or use a tool, and waits for the answer.
+ * The kinds the core produces about itself. Clients that treat one of them
+ * specially, such as marking a failed run, name it from here. `core.approval`
+ * is the decision raised while a session waits for approval to run a command,
+ * change or read files, or use a tool. Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
@@ -169,11 +169,12 @@ export type NotificationSubject = Schema.Schema.Type<typeof NotificationSubject>
 
 /**
  * The operation an answer runs when the user takes it: a contract operation
- * id and its whole input as one object. The schema only bounds its size.
+ * id and its whole input as one object. This schema only bounds its size.
  * `notification.create` checks that the operation is one an answer may run
  * and that the input fits it (`decodeBindableOperation`), and `notification.act`
  * checks again before it runs the operation. A stored answer is read with this
- * looser schema, so a notification stays readable when that list changes.
+ * looser schema, so a notification stays readable after the list of bindable
+ * operations or an operation's input schema changes.
  */
 export const BoundOperation = Schema.Struct({
   op: Schema.String.check(
@@ -234,8 +235,8 @@ export type DescribeLinePart = Schema.Schema.Type<typeof DescribeLinePart>;
  * What taking an answer does, written by the core from the frozen operation
  * with the current names: "Start a run of Bugfix". The producer can neither
  * write nor hide it, so a label cannot mislead the user about the click. For
- * the same reason nothing the operation will run is cut short: every value
- * appears in full. An answer that runs nothing reads "Does nothing".
+ * the same reason no value the operation sends is shortened. An answer that
+ * runs nothing reads "Does nothing".
  */
 export const DescribeLine = Schema.Array(DescribeLinePart);
 
@@ -419,7 +420,7 @@ export const notification = HttpApiGroup.make("notification")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // The errors include every error of the operations an answer may run,
-    // because a failed operation's own error is returned as it is.
+    // because a failed operation's own error is returned unchanged.
     HttpApiEndpoint.post("act", "/notifications/:id/act", {
       params: { id: Id },
       payload: NotificationActInput,

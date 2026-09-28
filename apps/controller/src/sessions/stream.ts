@@ -4,16 +4,18 @@
  * is pure. The service does the rest: it writes the rows, and it decides
  * whether to trust the event.
  *
- * Deltas are never stored per token (spec 04, Streaming). They are held per
- * (item, stream kind) and flushed as one row when:
+ * Deltas are never stored per token, so a streaming reply writes a handful of
+ * rows instead of one per token. They are held per (item, stream kind) and
+ * flushed as one row when:
  *
  * - the item completes,
  * - the turn completes,
  * - the session exits,
- * - the held text reaches `DELTA_FLUSH_BYTES`. Spec 04 left the flush rule
- *   inside an item open; this is the rule chosen here.
+ * - the held text reaches `DELTA_FLUSH_BYTES`, so a long item is stored in
+ *   pieces and a crash loses only its tail.
  *
- * Every other event becomes its own row.
+ * Every other event becomes its own row. Spec 04 (Streaming) owns the rule
+ * that deltas are not stored per token.
  */
 import type { OpenRequest, ProviderEvent, StreamKind } from "@hercule/protocol";
 import type { SessionStatus } from "@hercule/contract";

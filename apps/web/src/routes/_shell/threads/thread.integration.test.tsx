@@ -1021,10 +1021,10 @@ describe("Thread: token tap", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
-      // The coalescing rule flushes a row when an item completes (spec 04
-      // §Streaming deltas are coalesced), so the row and the item's
-      // completion arrive together. The completion ends the item as the open
-      // one, so a later tap for it has no effect.
+      // Coalescing flushes a row when an item completes, so the row and the
+      // item's completion arrive together. The completion ends the item as
+      // the open one, so a later tap for it has no effect. Spec 04 §Streaming
+      // deltas are coalesced owns the rule.
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
@@ -1071,10 +1071,10 @@ describe("Thread: token tap", () => {
   });
 
   it("replaces the buffer with a coalesced :stream row for a still-open item, and keeps showing the taps after it", async () => {
-    // The 4KB flush (spec 04 §Streaming deltas are coalesced) writes a
-    // `content.delta` row while the item is still open. The row replaces what
-    // the tail held, and the item keeps streaming into the same tail. Any
-    // answer longer than 4KB goes through this path.
+    // The store also flushes a `content.delta` row once 4KB of deltas build
+    // up, while the item is still open. The row replaces what the tail held, and the item keeps
+    // streaming into the same tail. Any answer longer than 4KB goes through
+    // this path. Spec 04 §Streaming deltas are coalesced owns the rule.
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
@@ -1704,10 +1704,9 @@ describe("Thread: auto-scroll follows new content", () => {
       turnId: "t3",
     });
 
-  // Added in review round 1 of #92 slice 3 (F-72). The hook stored the
-  // scrolling element in a `useEffect`, which runs after the screen's mount
-  // `useLayoutEffect`, so the first follow found no element and the thread
-  // opened at its top.
+  // Guards against the thread opening at its top. A hook that stores the
+  // scrolling element in a `useEffect` gets it only after the screen's mount
+  // `useLayoutEffect`, so the first follow finds no element.
   it("opens on the latest turn", async () => {
     geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
 
@@ -1954,8 +1953,8 @@ describe("Thread: input queue", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3 (F-73). `isPending` reaches the
-  // composer a tick after `mutate`, so two Enters in one tick both sent.
+  // `isPending` reaches the composer a tick after `mutate`, so two Enters in
+  // one tick could both send.
   it("sends once when Enter is pressed twice before the first input is answered", async () => {
     const user = userEvent.setup();
     let release = (): void => {};
@@ -1980,8 +1979,8 @@ describe("Thread: input queue", () => {
     release();
   });
 
-  // Added in review round 1 of #92 slice 3: the box was cleared on success
-  // even when the user had typed more while the input was in flight.
+  // Guards against clearing the box on success when the user typed more
+  // while the input was in flight.
   it("keeps text typed while an input is in flight", async () => {
     const user = userEvent.setup();
     let release = (): void => {};
@@ -2587,7 +2586,7 @@ describe("Composer: fields that locked when the thread started explain why", () 
 
 /**
  * Tests for the permission card docked above the composer (spec 14 §The
- * thread surface, ticket #70). All the card's text comes from
+ * thread surface). All the card's text comes from
  * `buildApprovalCard` in `client-core`, so these tests read the labels from
  * there instead of repeating text that `apps/web` does not own.
  */
@@ -2709,9 +2708,9 @@ describe("Thread: the permission card", () => {
     ).toBeTruthy();
 
     // The dock is a mirror image of the lip, placed above the card. The card
-    // keeps its 14px radius in every state and the dock tucks under it (spec
-    // 14 §Measurements, amended 2026-09-14). jsdom can only check the
-    // classes; whether the two look flush needs a manual check.
+    // keeps its 14px radius in every state and the dock tucks under it. jsdom
+    // can only check the classes; whether the two look flush needs a manual
+    // check. Spec 14 §Measurements owns the sizes.
     expect(getComposerCard().className).toContain("rounded-[14px]");
     const dock = allow.closest<HTMLElement>('[class*="rounded-t-[10px]"]');
     expect(dock, "the dock is not the lip mirrored").not.toBeNull();
@@ -2861,12 +2860,12 @@ describe("Thread: the permission card", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Tests for the thread's header (#72):
+ * Tests for the thread's header:
  * - The header shows the project the thread belongs to.
  * - The workspace's other threads are tabs next to the title.
  * - A thread in a workspace offers a link to start a new thread there.
  *
- * The spec gives the text but not how to find these elements. These
+ * The spec defines the text but not how to find these elements. These
  * tests assume:
  * - The header is still the breadcrumb's parent element, as above.
  * - A sibling tab is a link to that thread, so the tab strip is found
@@ -3184,9 +3183,9 @@ describe("Thread: the session view of an assistant's session", () => {
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
   });
 
-  // Added in the branch review of #92: the controller refuses input.update and
-  // input.cancel on a conversation's session, because the conversation
-  // already shows a queued input as the owner's message.
+  // The controller rejects input.update and input.cancel on a conversation's
+  // session, because the conversation already shows a queued input as the
+  // owner's message.
   it("shows a queued input with no Steer and no Cancel", async () => {
     const fixture = buildAssistantSession({ status: "busy" });
     await openApp(fixture, buildTwoCompletedTurns(), {
@@ -3227,11 +3226,10 @@ describe("Thread: the session view of an assistant's session", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3 (D-82): a busy assistant's session
-  // can be stopped from its session view, as a thread can from its composer.
-  // Extended in review round 2 (D-92). The interrupt answers while the agent
-  // is still stopping, so the session is still busy; Stop goes only when the
-  // live connection reports the session idle.
+  // A busy assistant's session can be stopped from its session view, as a
+  // thread can from its composer. The interrupt call returns while the agent
+  // is still stopping, so the session is still busy; Stop goes away only when
+  // the live connection reports the session idle.
   it("offers Stop while the session is busy, calls session.interrupt, and removes Stop once the session is idle", async () => {
     const user = userEvent.setup();
     const fixture = buildAssistantSession({ status: "busy" });
@@ -3279,8 +3277,8 @@ describe("Thread: the session view of an assistant's session", () => {
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
-  // Added in review round 1 of #92 slice 3 (D-81): a session outlives its
-  // assistant, so the view must still open after the assistant is deleted.
+  // A session outlives its assistant, so the view must still open after the
+  // assistant is deleted.
   it("still opens after the assistant was deleted, with a plain crumb and no link to a conversation", async () => {
     const fixture = buildAssistantSession({ status: "idle" });
     await openApp(fixture, buildTwoCompletedTurns(), {
@@ -3303,8 +3301,8 @@ describe("Thread: the session view of an assistant's session", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  // Added in review round 1 of #92 slice 3 (D-85): the sidebar marks the
-  // assistant whose session is open, as it marks the open thread.
+  // The sidebar marks the assistant whose session is open, as it marks the
+  // open thread.
   it("marks the assistant's row in the sidebar as the open one", async () => {
     const fixture = buildAssistantSession({ status: "idle" });
     await openApp(fixture, buildTwoCompletedTurns(), {

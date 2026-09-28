@@ -16,14 +16,13 @@ import { absorbFailures } from "../absorbing";
  * transaction the effect is scheduled at once.
  *
  * The effect runs on a fiber of the layer that makes the function, not of the
- * request. The request's context holds its transaction's connection, which is
- * gone by the time the effect runs. A failure is logged with the given
- * message, not returned: the caller's write is already durable, and the
- * dispatch and flush passes retry.
+ * request, because the request's context holds its transaction's connection,
+ * which is gone by the time the effect runs. The fiber still runs as the
+ * request's actor, so the audit entries the effect writes, such as a stop's,
+ * name the person who asked for it.
  *
- * The forked fiber does not inherit the request's context, so the actor
- * behind the request is carried over explicitly. The audit entries the effect
- * writes, such as a stop's, name the person who asked for it.
+ * A failure is logged with `failureMessage`, not returned: the caller's write
+ * is already durable, and the dispatch and flush passes retry.
  */
 export const makeForkAfterCommit: Effect.Effect<
   (failureMessage: string, effect: Effect.Effect<void, unknown>) => Effect.Effect<void>,

@@ -269,9 +269,9 @@ const USER_ONLY = "only the user may make this call; no grant confers it";
  * Runs the grant check for an operation only the user may call, such as one
  * that acts on the caller's own rows. Returns the user actor.
  *
- * `refusal` is the message a session or a run is refused with. Pass one when
- * the operation has its own reason to refuse them, so the caller learns why
- * holding the grant does not help.
+ * `refusal` is the message of the `Forbidden` error a session or a run gets.
+ * Pass one when the operation has its own reason to refuse sessions and runs,
+ * so the caller learns why holding the grant does not help.
  *
  * Fails with:
  *

@@ -496,16 +496,15 @@ const make = Effect.gen(function* () {
 
   /**
    * Runs `writes` and then sends `frame` to a runner, in one transaction.
-   * Fails with `InvalidState` when the runner is not connected, and the
-   * failure rolls the writes back, so nothing is recorded for a frame that
-   * was never sent.
+   * Fails with `InvalidState` when the runner is not connected. The failure
+   * rolls the writes back, so nothing is recorded for a frame that was never
+   * sent.
    *
-   * The frame is sent last, inside the transaction. Sending only writes to
-   * the socket and never waits for a reply, so the transaction still waits
-   * on nothing outside the database. The runner's report of what the frame
-   * did is applied in a later transaction, which cannot start before this
-   * one commits. So that report always finds these writes: a
-   * `request.resolved` that follows an answer finds its approval
+   * Sending the frame inside the transaction is safe: sending only writes to
+   * the socket and never waits for a reply. The runner's report of what the
+   * frame did is applied in a later transaction, which cannot start before
+   * this one commits, so that report always finds these writes. For example,
+   * the `request.resolved` that follows an answer finds the approval
    * notification already resolved, and does not withdraw it.
    */
   const writeThenTellRunner = <E>(
@@ -529,10 +528,10 @@ const make = Effect.gen(function* () {
 
   /**
    * Tells the session's runner to end the running turn, as the actor behind
-   * the current request. In the same transaction, it writes the
+   * the current request. In the same transaction, writes the
    * `session.interrupted` audit entry and withdraws the approval
-   * notification about the request the turn is waiting on, if any: the
-   * interrupt ends the wait.
+   * notification about the request the turn waits on, if any, because the
+   * interrupt ends that wait.
    * Fails with `InvalidState` when the runner is not connected.
    */
   const interruptTurn = (session: StoredSession): Effect.Effect<void, InvalidState | SqlError> =>
@@ -639,9 +638,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Stops a session that has not exited, as the actor behind the current
-   * request, and writes the `session.stopped` audit entry. A session told to
-   * stop also has the approval notification about the request it waits on
-   * withdrawn, if any. Returns what happened:
+   * request, and writes the `session.stopped` audit entry. Also withdraws the
+   * approval notification about the request the session waits on, if any.
+   * Returns what happened:
    *
    * - `ended`: the session was queued, so no runner held it, and it has
    *   exited now;
@@ -815,13 +814,13 @@ const make = Effect.gen(function* () {
 
     /**
      * Stores one turn's input to a session, like `input`, and returns the
-     * stored input without waiting for the runner. It runs in the caller's
-     * transaction when there is one, or in its own otherwise. Nothing is sent
-     * to the runner unless that transaction commits, so a caller that rolls
-     * back sends nothing.
+     * stored input without waiting for the runner. Checks the `session.input`
+     * grant, like `input`. Runs in the caller's transaction, or in its own
+     * when there is none, and sends nothing to the runner unless that
+     * transaction commits.
      *
-     * After the commit, on a fiber of its own, the input is delivered as
-     * `input` delivers it:
+     * After the commit, a fiber of its own delivers the input as `input`
+     * would:
      *
      * - an idle session is sent the input, which was stored already claimed;
      * - an exited session that this input resumed is dispatched, and the
@@ -829,9 +828,8 @@ const make = Effect.gen(function* () {
      * - a session with any other status keeps the input queued until it is
      *   next idle.
      *
-     * A delivery that fails is logged, and the input stays queued for the
-     * next flush, because the caller has already returned. Checks the
-     * `session.input` grant, like `input`.
+     * A failed delivery is logged, not returned, because the caller has
+     * already returned. The input stays queued for the next flush.
      */
     queueInput: (input: InputInput): Effect.Effect<StoredInput, InputError> =>
       withTransaction(
@@ -896,14 +894,17 @@ const make = Effect.gen(function* () {
      *
      * Every check runs before anything is sent to the runner, because an
      * answer applied to the wrong request is the one mistake this operation
-     * must never make. It fails when the session has exited, has no open
-     * request, is waiting on a different request, or the decision is not one
-     * the request accepts.
+     * must never make. It fails when:
+     *
+     * - the session has exited;
+     * - the session has no open request, or waits on a different request;
+     * - the decision is not one the request accepts;
+     * - the request was already answered, or its wait already ended.
      *
      * The answer also resolves the approval notification about the request
      * as `decided`, in the same transaction, stamped with the caller. So the
-     * notification shows the request answered whether it was answered here or
-     * from the notification.
+     * notification shows the request as answered, whether the user answered
+     * it here or from the notification.
      */
     respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -940,9 +941,9 @@ const make = Effect.gen(function* () {
               payload: { sessionId: id, runnerId: session.runnerId, requestId, decision },
               at: yield* nowIso,
             });
-            // The request is answered, wherever it was answered, so the
-            // approval notification about it is resolved with the answer that
-            // was given.
+            // Resolving the notification in this transaction also refuses a
+            // second answer to the same request, wherever the first one came
+            // from.
             yield* sessions.resolveApprovalNotification(id, requestId, decision);
           }),
         );

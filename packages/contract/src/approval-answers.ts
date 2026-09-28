@@ -1,7 +1,7 @@
 /**
  * The words of the answers to an approval: the label of each decision, and
- * the sentence that says what answering with it does. The permission card in
- * the session view and the core's approval decision in the notification
+ * the sentence describing what answering with it does. The permission card in
+ * the session view and the `core.approval` decision in the notification
  * center both use them, so an answer reads the same wherever it is given.
  */
 import type { ApprovalDecision, OpenRequest } from "./groups/session";
@@ -15,9 +15,8 @@ export const APPROVAL_ANSWER_LABELS: Readonly<Record<ApprovalDecision, string>> 
 };
 
 /**
- * The subject of each request kind, as the answer sentences refer to it.
- * Without a subject, the sentences for a request kind would say nothing
- * useful, so every kind has one.
+ * The words the answer sentences use for what each request kind asks about,
+ * such as "the command".
  */
 const REQUEST_SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
   command_approval: "the command",
@@ -28,7 +27,7 @@ const REQUEST_SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
 };
 
 /**
- * Returns the sentence that says what answering a request of `requestKind`
+ * Returns a sentence describing what answering a request of `requestKind`
  * with `decision` does, such as "Runs the command this once; the agent asks
  * again next time."
  */

@@ -31,11 +31,11 @@ const readIssues = (exit: Exit.Exit<BindableOperation, unknown>) => {
 };
 
 /**
- * Returns the error schemas of every endpoint, keyed by operation id, such
- * as `notification.act`. Each set holds the schemas of every status code, as
- * their syntax trees: the reflection wraps each schema in a new object, but
- * the tree inside is the declared schema's own, so two endpoints that declare
- * the same error share it.
+ * Returns the errors each endpoint declares across all its status codes,
+ * keyed by operation id such as `notification.act`. Each error is kept as its
+ * schema's AST, because `HttpApi.reflect` wraps every schema in a new object
+ * but keeps the AST inside it. Two endpoints that declare the same error then
+ * hold the same AST.
  */
 const listEndpointErrors = (): ReadonlyMap<string, ReadonlySet<Schema.Top["ast"]>> => {
   const found = new Map<string, ReadonlySet<Schema.Top["ast"]>>();

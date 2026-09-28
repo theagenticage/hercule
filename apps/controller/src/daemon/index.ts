@@ -12,9 +12,9 @@
  * - the ports that break a cycle between two domains, and, as the last
  *   resort, an operation whose domains could not be untangled otherwise.
  *
- * See ADR 0033, amendment of 2026-09-25. There is one file per use case,
- * grouped in one folder per concern. Each folder's `index.ts` is what the rest
- * of the controller daemon imports it through:
+ * There is one file per use case, grouped in one folder per concern. Each
+ * folder's `index.ts` is what the rest of the controller daemon imports it
+ * through:
  *
  * - `sessions/`: placing a session, starting queued sessions on a runner with
  *   room, the operations that reach a live session, and the sweep that ends
@@ -26,8 +26,9 @@
  * - `runners/`: sending a runner that connects the work owed to it, handling
  *   what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
- * - `notifications/`: taking an answer of a decision (`notification.act`),
- *   and writing the describe line of an answer;
+ * - `notifications/`: running the Bound Action of the answer the user chooses
+ *   on a decision Notification (`notification.act`), and writing the Describe
+ *   Line of each answer;
  * - `workflows/`: what the workflows domain reads from the runs domain;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
  *   Workspace Steps, which hands a workspace step to its runner and stops it.
@@ -42,6 +43,8 @@
  *   (`providers/resolved.ts`);
  * - a check that only controller daemon use cases share belongs here, in the
  *   folder of those use cases (`sessions/resuming.ts`).
+ *
+ * ADR 0033 records this layout.
  */
 export { cancelStrandedInputsAndReportLostWakeUps } from "./boot";
 export {

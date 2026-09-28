@@ -685,7 +685,10 @@ describe("hercule run", () => {
 
 describe("hercule notification", () => {
   const NOTIFICATION = "0199e0e7-1111-7000-8000-00000000abcd";
-  /** The answers as the controller stores them; an open decision's also carry describe lines. */
+  /**
+   * The answers as the controller stores them. The controller adds describe
+   * lines only when it returns an open decision.
+   */
   const stored = [
     {
       id: "event-sourced",

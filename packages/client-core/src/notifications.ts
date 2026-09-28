@@ -90,9 +90,9 @@ export const describeResolution = (resolution: Resolution): string => {
 };
 
 /**
- * One answer of a decision as the answer ledger shows it (spec 14 §Answers as
- * a ledger): the label, what taking the answer does, and the producer's
- * description of it.
+ * One answer of a decision as the answer ledger shows it: the label, what
+ * taking the answer does, and the producer's description of it. Spec 14
+ * §Answers as a ledger owns the layout.
  */
 export interface BoundActionRow {
   /** The answer's id, which `notification.act` takes. */
@@ -127,12 +127,11 @@ export const buildBoundActionRows = (
 
 /**
  * Formats a describe line as plain text, such as "Start a run of «Bugfix»",
- * for a place that cannot set parts apart by style, such as a terminal. Each
- * marked part is quoted in guillemets. A marked part is a name or a value
- * written by whoever named the entity or wrote the answer, often an agent, so
- * without the marks a part such as "ok to session Chat" would read as part of
- * the core's own words. The core writes the spaces between parts into the
- * text parts, so the parts are joined as they are.
+ * for places that cannot style parts, such as a terminal. Each marked part is
+ * wrapped in guillemets. A marked part is a name or value someone else wrote,
+ * often an agent, so without the marks a value such as "ok to session Chat"
+ * could pass for the core's own words. The text parts already carry the
+ * spaces between parts.
  */
 export const formatDescribeLine = (line: DescribeLine): string =>
   line.map((part) => (part.kind === "marked" ? `«${part.text}»` : part.text)).join("");

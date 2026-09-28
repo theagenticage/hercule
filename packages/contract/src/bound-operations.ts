@@ -2,21 +2,22 @@
  * The operations an answer to a decision may run, and the check that an
  * answer's operation is one of them with an input that fits.
  *
- * Proposing is not doing: a producer binds an operation to an answer, and it
- * runs as the user when the user takes that answer. The producer's own grants
- * are not checked, because the user's click is the authorisation. So the list
- * below is a guardrail. It is short on purpose, and an operation is added only
- * when a user would sensibly run it from one click. These never belong on it,
- * and `bound-operations.test.ts` refuses them:
+ * A producer binds an operation to an answer, and the operation runs as the
+ * user when the user takes that answer. The producer's own grants are not
+ * checked, because the user's click is the authorisation. So the list below
+ * is a guardrail. It is short on purpose, and an operation is added only when
+ * a user would sensibly run it from one click. These never belong on it, and
+ * `bound-operations.test.ts` fails when one is added:
  *
  * - operations of the `credential`, `secret`, `infra` and `permission`
  *   families, and those that need `connection.manage`;
  * - operations that destroy in bulk: every `*.delete` and `*.purge`.
  *
- * Each entry is the operation's whole input as one object, because an answer
- * has no path to carry an id in. The core checks an answer against this list
- * when the notification is created and again when the answer is taken, since
- * the list or a schema may have changed in between.
+ * Each entry's schema covers the operation's whole input as one object, ids
+ * included, because an answer has no URL path to carry an id in. The core
+ * checks an answer against this list when the notification is created and
+ * again when the answer is taken, since the list or a schema may have changed
+ * in between.
  *
  * Spec 10 §7.4 and spec 11 §3.2 own the rules.
  */

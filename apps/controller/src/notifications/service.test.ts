@@ -1328,7 +1328,7 @@ describe("describe lines", () => {
     const notification = await run(
       Effect.gen(function* () {
         // An operation that was bindable when the notification was created,
-        // and no longer is. Only a straight insert can store one now.
+        // and no longer is. Only a direct insert into the table can store one.
         const stored = yield* (yield* notificationRepository).insert({
           kind: "triage.proposal",
           title: "Delete the duplicate?",
@@ -1464,8 +1464,9 @@ describe("answerDecisionsAbout", () => {
   });
 
   /**
-   * Raises a core decision about `subject` that answers `REQUEST`, titled
-   * `title`, the way the core raises one for each approval request.
+   * Raises a core decision about `subject`, titled `title`, whose answers
+   * respond to `REQUEST`, the way the core raises one for each approval
+   * request.
    */
   const raiseApproval = (title: string, subject: ReadonlyArray<NotificationSubject>) =>
     Effect.flatMap(NotificationService, (notifications) =>

@@ -634,9 +634,9 @@ export const operationLayers = Layer.mergeAll(
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
-  // Taking an answer of a decision runs task, run and live session
-  // operations, so `Answering` is given the run layers, which hold the task
-  // service too, and sits in this group for `Live`.
+  // `Answering` runs the Bound Action of a chosen answer, which can be a task,
+  // run or live session operation. So it gets the run layers, which include
+  // the task service, and sits in this group, which provides `Live`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunLayers)),
     AnsweringLayer.pipe(Layer.provide(RunLayers)),

@@ -66,7 +66,7 @@ const TERMINAL_CONTROLS =
  * tabs and line breaks. Much of what the CLI prints was written by someone
  * other than the user, such as an agent's notification or an answer's label.
  * Printed as it is, an escape sequence in that text could erase or hide a
- * line, such as the line that says what an answer does.
+ * line, such as the line describing what an answer does.
  */
 export const removeTerminalControls = (text: string): string => text.replace(TERMINAL_CONTROLS, "");
 
@@ -505,12 +505,12 @@ const renderNotification = (notification: Notification): ReadonlyArray<string> =
 
 /**
  * Returns the line printed after `notification act`: how the decision was
- * resolved. `notification.act` returns only a resolved decision, because an
- * answer whose operation fails fails the call instead. Taking an answer
- * resolves the decision with it, and the line names the answer by its label.
- * When the decision was resolved another way first, such as withdrawn because
- * its question stopped existing, the line says how instead, so it never names
- * an answer that did not run.
+ * resolved. `notification.act` returns only a resolved decision, because a
+ * failed operation fails the call instead. When an answer resolved the
+ * decision, the line names that answer by its label. When the decision was
+ * resolved another way first, such as withdrawn because its question stopped
+ * existing, the line describes that resolution, so it never names an answer
+ * that did not run.
  */
 const renderNotificationDecided = (
   notification: Notification & { readonly resolution: Resolution },
@@ -524,7 +524,10 @@ const renderNotificationDecided = (
   return [`notification ${formatCell(notification.id)} ${outcome}`];
 };
 
-/** Returns the lines for a successful command without `--json`, as the value holds them. */
+/**
+ * Returns the lines for a successful command without `--json`, before
+ * `renderHuman` removes the characters a terminal would act on.
+ */
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
   // items of `run.query` are run summaries and those of `notification.query`

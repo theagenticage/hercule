@@ -4,9 +4,10 @@
  * answers are the decisions the request accepts, each bound to
  * `session.respond`.
  *
- * The session service later looks the notification up by the subject and
- * the answer id built here: an answer given in the session view resolves the
- * notification's answer with the id of the decision it sends.
+ * The session service finds the notification again by the request subject
+ * and the answer ids built here. When the user answers in the session view,
+ * the service resolves the notification with the answer whose id matches the
+ * decision sent.
  *
  * A `question` request raises no notification: `session.respond` sends a
  * decision, not answers to questions, so no answer could be bound to it.
@@ -37,12 +38,12 @@ const MAX_TITLE_TEXT_LENGTH = 80;
 /**
  * The most paths the body lists. The rest are counted in a last line.
  *
- * The limit keeps the body under the notification body limit, so the body is
- * never cut in the middle of a path's inline code. A path is at most 512
- * characters, and its fence at most one longer, so one line is at most about
- * 1.5 KB and twenty lines stay far below the 64 KB limit. A command needs no
- * such limit: it is at most 4096 characters, so even a fence as long as the
- * command keeps its code block far below that limit.
+ * The limit keeps the body under the 64 KB notification body limit, so the
+ * body is never cut in the middle of a path. A path is at most 512
+ * characters and each of its two fences at most 513, so a line is at most
+ * about 1.5 KB, and twenty lines stay far below 64 KB. A command needs no
+ * such limit: it is at most 4096 characters, so its code block stays far
+ * below 64 KB even with fences as long as the command.
  */
 const MAX_LISTED_PATHS = 20;
 
@@ -120,8 +121,8 @@ const formatPathList = (paths: ReadonlyArray<string>): string => {
 };
 
 /**
- * Returns the title, and the text that shows exactly what the harness asks
- * about, of an approval request. Returns `undefined` for a `question`
+ * Returns the title of an approval request, and the detail text that shows
+ * exactly what the harness asks about. Returns `undefined` for a `question`
  * request, which raises no notification.
  */
 const buildRequestTitleAndDetail = (

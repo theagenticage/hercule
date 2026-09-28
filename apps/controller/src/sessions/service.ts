@@ -564,8 +564,8 @@ const make = Effect.gen(function* () {
           yield* inputs.cancelQueued(session.id, cancelReason);
         }
         // For an exit the harness reported, `applyReport` has already
-        // withdrawn the notification when it cleared the open request, and
-        // this finds nothing open. Every other end clears the request here.
+        // withdrawn the notification, so this call finds it resolved and does
+        // nothing. For every other end, the notification is withdrawn here.
         yield* withdrawOpenRequestNotification(session, WITHDRAW_REASON_SESSION_ENDED);
         // Read again after the exit and the cancel: whether the guard holds
         // the session depends on the input that is still waiting.
@@ -951,13 +951,13 @@ const make = Effect.gen(function* () {
     /**
      * Resolves the approval notification about a session's request as
      * decided, with the answer that sends `decision`, stamped with the
-     * current actor. The daemon calls it in the transaction that answers the
-     * request, so the notification says the request was answered, wherever
-     * it was answered. Does nothing when no open notification offers that
-     * answer, as for a `question` request, which raises none.
+     * current actor. The controller daemon calls it in the transaction that
+     * answers the request, so the notification shows the request as answered,
+     * wherever the answer came from. Does nothing when no open notification
+     * offers that answer, as for a `question` request, which raises none.
      *
      * Fails with `InvalidState` when the notification about the request is
-     * already resolved, with a message that says which case it is:
+     * already resolved, with a different message for each case:
      *
      * - the request was answered before;
      * - its wait ended without an answer: the user interrupted the turn or
@@ -994,8 +994,8 @@ const make = Effect.gen(function* () {
     /**
      * Withdraws the approval notification about the request a session waits
      * on, because the user ended the wait without answering: by interrupting
-     * the turn or by stopping the session. The reason stored on the
-     * notification says which. Reads the session in the caller's
+     * the turn or by stopping the session. The withdraw reason stored on the
+     * notification names which of the two. Reads the session in the caller's
      * transaction, so it sees the request that is open when the transaction
      * runs. Does nothing when no request is open or its notification is
      * already resolved.
@@ -1579,8 +1579,8 @@ const make = Effect.gen(function* () {
         ) {
           yield* workspaces.touched(session.workspaceId, at);
         }
-        // `exited` is final (spec 06 section 4.1), so a stray event after it
-        // is still recorded but never brings the session back to life.
+        // `exited` is final, so a stray event after it is still recorded but
+        // never brings the session back to life. Spec 06 §4.1 owns the rule.
         const moved =
           folded.status === undefined || folded.status === before || before === "exited"
             ? undefined

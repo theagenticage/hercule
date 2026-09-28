@@ -285,9 +285,9 @@ export const bootWith = <A, E>(
     // the code that runs after the boot needs it too. The notification
     // service sits on the audit log, and beside the repositories rather than
     // above the plugin host, because the plugin host and the fleet raise
-    // notifications of their own. The describe lines of its answers come from
-    // the controller daemon's describer, which reads only the database, so it
-    // can sit this low too.
+    // notifications of their own. The notification service gets the Describe
+    // Lines of its answers from the controller daemon's describer. The
+    // describer reads only the database, so it can sit this low too.
     const repositories = NotificationServiceLayer.pipe(
       Layer.provide(BoundOperationDescriberLayer),
       Layer.provideMerge(

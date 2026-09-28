@@ -151,7 +151,7 @@ const buildServices = (home: string) =>
         ),
       ),
     ),
-    // The real describer, so a request reads the describe lines the binary writes.
+    // The real describer, so tests read the same Describe Lines the binary writes.
     Layer.provideMerge(NotificationServiceLayer.pipe(Layer.provide(BoundOperationDescriberLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
@@ -244,14 +244,14 @@ const makeRepeatable = <A, E, R>(
 
 /**
  * Runs an effect as the user against the running controller's live session
- * operations and its database, and returns how the effect ended. For a test
- * of a `Live` method that no route calls.
+ * operations and its database, and returns the effect's `Exit`. Tests use it
+ * for a `Live` method that no route calls.
  */
 export type LiveSessionsRunner = <A, E>(
   effect: Effect.Effect<A, E, Live | SqlClient.SqlClient>,
 ) => Promise<Exit.Exit<A, E>>;
 
-/** The user, as `LiveSessionsRunner` runs an effect. */
+/** The user that `LiveSessionsRunner` runs an effect as. */
 const TEST_USER: Actor = {
   _tag: "user",
   userId: "0199e0e7-0000-7000-8000-000000000000",

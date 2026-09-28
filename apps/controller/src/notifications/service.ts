@@ -249,7 +249,7 @@ const checkProducerMayBind = (
   if (operation.input.sessionId !== caller.sessionId) {
     return refuse("input", SESSION_INPUT_ONLY_TO_ITSELF);
   }
-  // A session speaks for an assistant exactly when it belongs to a conversation.
+  // A session has an assistant id exactly when it belongs to an assistant's conversation.
   if (caller.assistantId !== null) return refuse("input", CONVERSATION_SESSION_CANNOT_TAKE_INPUT);
   return Effect.void;
 };
@@ -300,22 +300,22 @@ const isInScope = (notification: Notification, scope: ProducerScope): boolean =>
 };
 
 /**
- * An answer's operation after the check at read time: decoded, or refused
- * with the describe line that says why the answer cannot be taken.
+ * An answer's operation after the check at read time: decoded, or refused,
+ * with a describe line that shows the user why the answer cannot be taken.
  */
 type CheckedOperation =
   | { readonly _tag: "decoded"; readonly operation: BindableOperation }
   | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
 
 /**
- * What `answerDecisionsAbout` found about a subject, and did:
+ * The result of `answerDecisionsAbout` for one subject:
  *
- * - `decided`: at least one open decision about it offered the answer, and is
- *   now decided with that answer;
+ * - `decided`: at least one open decision about the subject offered the
+ *   answer, and is now decided with that answer;
  * - `already-decided`, `already-handled`, `already-withdrawn`: no decision
- *   about it is open, and the one resolved last was resolved that way. The
- *   question was settled by an answer or by an assistant, or it stopped
- *   existing;
+ *   about the subject is open, and the most recently resolved one was
+ *   resolved that way. Its question was answered, handled by an assistant, or
+ *   stopped existing;
  * - `none`: nothing was decided and nothing was resolved before. Either no
  *   decision lists the subject, or the open ones do not offer the answer.
  */
@@ -332,7 +332,7 @@ const make = Effect.gen(function* () {
    * Checks an answer's stored operation again before it is described. A
    * stored answer whose operation no longer passes the check, because the
    * list of operations an answer may run or a schema changed since it was
-   * created, cannot be taken, and its describe line says why.
+   * created, cannot be taken, and its describe line shows the user why.
    */
   const checkStoredOperation = (operation: BoundOperation): Effect.Effect<CheckedOperation> =>
     decodeBindableOperation(operation, []).pipe(
@@ -614,8 +614,9 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const notification = yield* readOrFail(input.id);
-            // Another session cannot read this notification, so it is told
-            // the notification does not exist, the same answer a read gives.
+            // A session may not read another session's notifications, so it
+            // gets the same `NotFound` a read returns, and cannot learn that
+            // the notification exists.
             const scope = buildReadableScope(caller);
             if (scope !== undefined && !isInScope(notification, scope)) {
               return yield* Effect.fail(createNotFoundError(NO_SUCH_NOTIFICATION));
@@ -698,7 +699,7 @@ const make = Effect.gen(function* () {
           yield* insertAndAudit(
             {
               kind: notification.kind,
-              // `truncateText` appends three dots, so it keeps three characters fewer.
+              // `truncateText` appends "..." after `max` characters, so `max` is the limit minus three.
               title: truncateText(notification.title, MAX_NOTIFICATION_TITLE_LENGTH - 3),
               ...(notification.body === undefined || notification.body === ""
                 ? {}
@@ -736,11 +737,12 @@ const make = Effect.gen(function* () {
 
     /**
      * Resolves the open decisions about a subject that offer the answer
-     * `actionId`, as decided with that answer. The question was answered
-     * some other way, such as an approval answered in the session view, so
-     * the notification says which answer was taken. Returns what it found
-     * and did (`AnsweredDecisionsOutcome`), so the caller can refuse a second
-     * answer to a question that is already settled or no longer exists.
+     * `actionId`, as decided with that answer. The controller calls it when
+     * the question was answered somewhere else, such as an approval answered
+     * in the session view, so the notification records which answer was
+     * taken. Returns an `AnsweredDecisionsOutcome`, so the caller can reject a
+     * second answer to a question that is already settled or no longer
+     * exists.
      *
      * It runs in the caller's transaction, the one that records the answer,
      * and is stamped with the current actor. There is no grant check: only
@@ -800,8 +802,8 @@ const make = Effect.gen(function* () {
             open,
             ({ id }) =>
               Effect.gen(function* () {
-                // A decision resolved since it was listed keeps that
-                // resolution, and nothing was withdrawn to record.
+                // A decision resolved since it was listed keeps its
+                // resolution, so there is no withdrawal to audit.
                 if (!(yield* notifications.resolve(id, resolution))) return;
                 yield* audit.append({
                   kind: "notification.withdrawn",

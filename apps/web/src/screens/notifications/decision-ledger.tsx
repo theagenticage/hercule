@@ -33,8 +33,8 @@ export function DecisionLedger({
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.notifications() }),
   });
   // One answer per decision. The rows stay locked after a success until the
-  // listing read again replaces the open decision with the resolved one, so a
-  // second click cannot send an answer the controller would refuse.
+  // refetched notifications replace the open decision with the resolved one,
+  // so a second click cannot send an answer the controller would reject.
   const rowsLocked = take.isPending || take.isSuccess;
 
   return (

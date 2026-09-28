@@ -22,13 +22,12 @@ export interface AnswerLedgerRow<Id extends string> {
 }
 
 /**
- * Renders the answers of a decision as a ledger (spec 14 §Answers as a
- * ledger): one full-width row per answer, and the row is the button. Each row
- * shows, in a fixed order:
+ * Renders the answers of a decision as a ledger: one full-width row per
+ * answer, and the row is the button. Each row shows, in a fixed order:
  *
  * - the label in the left column, in ink for the primary answer and muted
  *   otherwise;
- * - the describe line at metadata size, which says what the click does, with
+ * - the describe line at metadata size, describing what the click does, with
  *   its marked parts in ink;
  * - the description, when there is one, as fine print under it.
  *
@@ -38,7 +37,7 @@ export interface AnswerLedgerRow<Id extends string> {
  *
  * Each row extends 8px past its column on both sides, so the hover background
  * has room around the label while the label stays on the left edge of the
- * text above the ledger.
+ * text above the ledger. Spec 14 §Answers as a ledger owns the layout.
  */
 export function AnswerLedger<Id extends string>({
   rows,
@@ -91,7 +90,7 @@ export function AnswerLedger<Id extends string>({
             {/* `--muted`, not the spec's `--faint`: 12px `--faint` on
                 `--surface` has a contrast of about 2.9:1 in dark mode and
                 2.4:1 in light mode, too low for readable text. The smaller
-                size keeps it below the describe line. The description is
+                size still ranks it below the describe line. The description is
                 shown as plain text, not markdown, because a button may hold
                 only inline content. */}
             {row.description === undefined ? null : (

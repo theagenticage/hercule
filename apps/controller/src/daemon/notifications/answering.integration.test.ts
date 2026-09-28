@@ -4,7 +4,7 @@
  * that answer. When anything goes wrong, the decision stays open.
  *
  * Most decisions are inserted straight into the table, so a test can store an
- * answer that `notification.create` would refuse today. The task an answer
+ * answer that `notification.create` would reject. The task an answer
  * updates is created over HTTP like any other. The cases with a session run
  * against a fake runner, and create their decisions the way the core or an
  * agent does.
@@ -34,7 +34,7 @@ import {
 import { buildFileTaskSource, createWorkflowOrFail } from "../../workflows/testing";
 import { runEffect } from "../testing";
 
-/** Starting the fleet is the slow part of each session case, so a case gets several wait deadlines. */
+/** Gives each case three wait deadlines, plus ten seconds for starting the fleet, the slow part of a session case. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** A well-formed UUIDv7 that matches no row on this controller. */
@@ -143,9 +143,9 @@ const mintApiKeyOrFail = async (base: string, token: string): Promise<string> =>
 };
 
 /**
- * Reports the end of the turn a freshly spawned agent's prompt opened, at
- * sequence numbers 2 and 3, and waits until the session is idle. The
- * runner's next sequence number is 4.
+ * Reports, as the runner, that the turn opened by a newly spawned agent's
+ * prompt started and completed, at sequence numbers 2 and 3. Then waits until
+ * the session is idle. The runner's next sequence number is 4.
  */
 const finishFirstTurn = async (arranged: Arranged, session: Session): Promise<void> => {
   const base = { sessionId: session.id, at, turnId: "t1" };
@@ -492,8 +492,8 @@ describe("an agent's question", () => {
         (await listInputs(arranged, agent.session.id)).map((input) => input.text),
       ).not.toContain("Yes, deploy it.");
 
-      // The same answer, once nothing withdraws the decision, is stored and
-      // sent. So the frame that is missing above would have been sent.
+      // With the trigger dropped, the same answer is stored and sent. This
+      // shows that the missing frame above would have been sent if stored.
       await executeSql(harness, "DROP TRIGGER withdraw_while_acting");
       await actOrFail(harness.base, token, id, "yes");
       await waitUntil("sent the answer to the session", () =>
