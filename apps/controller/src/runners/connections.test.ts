@@ -23,13 +23,13 @@ import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { NotificationServiceTestLayer } from "../notifications/testing";
+import { NotifierLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
 import { mintConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
-  Layer.provideMerge(NotificationServiceTestLayer),
+  Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );

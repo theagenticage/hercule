@@ -27,7 +27,9 @@ import type { SettingError } from "../settings";
 
 /**
  * Every error a bindable operation can fail with. `notification.act` returns
- * it unchanged, so the contract lists these errors on the endpoint.
+ * it unchanged. The API errors reach the caller as they are, so the contract
+ * lists each of them on the `notification.act` endpoint. The others (a
+ * setting, schema or database error) reach the caller as an internal error.
  */
 export type BindableOperationError =
   | Unauthenticated

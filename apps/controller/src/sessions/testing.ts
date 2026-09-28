@@ -30,7 +30,7 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
-import type { Grant, Input, Notification, Profile, Session } from "@hercule/contract";
+import type { Grant, Input, Notification, Profile, Runner, Session } from "@hercule/contract";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -509,6 +509,24 @@ export const waitForSession = (
   waitUntil("moved the session", async () => {
     const session = await readSession(arranged, id);
     return ready(session) ? session : undefined;
+  });
+
+/**
+ * Waits until the controller has seen the runner's socket close, and returns
+ * the runner. Once the runner no longer reads `online`, the controller has
+ * dropped its connection, so a frame sent then fails for that reason and not
+ * because of a race. A socket that closes without a goodbye leaves the runner
+ * `unreachable`.
+ */
+export const waitForRunnerGone = (arranged: Arranged): Promise<Runner> =>
+  waitUntil("saw the runner disconnect", async () => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/runners/${arranged.runnerId}`,
+      arranged.token,
+    );
+    const runner = (await response.json()) as Runner;
+    return runner.connectivity === "online" ? undefined : runner;
   });
 
 /**

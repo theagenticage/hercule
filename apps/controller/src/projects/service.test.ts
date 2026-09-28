@@ -7,7 +7,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
-import { NotificationServiceTestLayer } from "../notifications/testing";
+import { NotifierLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput } from "./index";
@@ -16,7 +16,7 @@ type Deps = ProjectService | TaskService | SqlClient.SqlClient;
 
 const layer = ProjectServiceLayer.pipe(
   Layer.provideMerge(TaskServiceLayer),
-  Layer.provideMerge(NotificationServiceTestLayer),
+  Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

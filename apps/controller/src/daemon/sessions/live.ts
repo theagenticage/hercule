@@ -506,7 +506,12 @@ const make = Effect.gen(function* () {
    *
    * The runner can still drop off between the check and the send. The frame
    * is then lost, as it would be if the socket closed just after the send;
-   * the failure is logged.
+   * the failure is logged. Nothing sends the frame again:
+   *
+   * - a lost interrupt or stop can simply be asked for again;
+   * - a lost answer leaves the harness waiting on its request, and a second
+   *   answer is refused because the approval notification is already
+   *   decided. The user interrupts or stops the session to end the wait.
    *
    * The runner's report of what the frame did is applied in a later
    * transaction, after this one commits, so that report always finds these
@@ -652,8 +657,8 @@ const make = Effect.gen(function* () {
    *
    * - `ended`: the session was queued, so no runner held it, and it has
    *   exited now;
-   * - `told`: the runner was told to stop the session, and the session exits
-   *   when the runner reports the exit;
+   * - `told`: the stop is written, the runner is told once the transaction
+   *   commits, and the session exits when the runner reports the exit;
    * - `exited`: the session was read as queued, but something else ended it
    *   before this stop could, so nothing was sent and nothing was written;
    * - `unreachable`: the runner is not connected, so nothing was sent and

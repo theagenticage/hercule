@@ -5,9 +5,11 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { LockTimeoutError, SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { afterCommit } from "./after-commit";
 import { createDatabaseError, openDatabase, withTransaction } from "./client";
 
 let home: string;
@@ -108,5 +110,34 @@ describe("one controller per home", () => {
 
     await Effect.runPromise(Effect.provide(open, openDatabase(file)));
     await Effect.runPromise(Effect.provide(open, openDatabase(file)));
+  });
+});
+
+describe("withTransaction", () => {
+  it("runs a committed transaction's after-commit work when the caller is interrupted as it commits", async () => {
+    let settled = false;
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        // Interrupts the caller the moment the commit returns, as a client
+        // that hangs up at that moment would.
+        const interruptedOnCommit = {
+          ...sql,
+          withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+            Effect.tap(sql.withTransaction(effect), () =>
+              Effect.withFiber((fiber) => Effect.sync(() => fiber.interruptUnsafe())),
+            ),
+        } as unknown as SqlClient.SqlClient;
+        yield* withTransaction(
+          interruptedOnCommit,
+          afterCommit(() => {
+            settled = true;
+          }),
+        );
+      }).pipe(Effect.provide(openDatabase(file))),
+    );
+
+    expect(Exit.hasInterrupts(exit)).toBe(true);
+    expect(settled).toBe(true);
   });
 });

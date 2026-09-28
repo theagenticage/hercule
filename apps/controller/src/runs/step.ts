@@ -36,7 +36,7 @@ import {
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { renderTemplates } from "../expressions";
 import {
   isBuiltInControllerActionId,
@@ -49,7 +49,6 @@ import { TaskService } from "../tasks";
 import { runRepository, StepRecordEnded } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
-import { commitUninterruptibly } from "./transaction";
 
 /**
  * The codes of the step errors the engine writes itself. A step whose action
@@ -446,17 +445,15 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             actor,
           );
           execute = builtIn.inTransaction
-            ? commitUninterruptibly(sql, Effect.flatMap(called, writeCompletion))
-            : Effect.flatMap(called, (output) =>
-                commitUninterruptibly(sql, writeCompletion(output)),
-              );
+            ? withTransaction(sql, Effect.flatMap(called, writeCompletion))
+            : Effect.flatMap(called, (output) => withTransaction(sql, writeCompletion(output)));
         } else if (pluginExecute !== undefined) {
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {
               runId: run.id,
               stepId: attempt.stepId,
             }),
-            (output) => commitUninterruptibly(sql, writeCompletion(output)),
+            (output) => withTransaction(sql, writeCompletion(output)),
           );
         } else {
           return yield* failRun(

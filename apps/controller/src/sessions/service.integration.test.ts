@@ -26,7 +26,7 @@ import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { NotificationServiceTestLayer } from "../notifications/testing";
+import { NotifierLayer } from "../notifications";
 import { SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
@@ -53,7 +53,7 @@ const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClie
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(secrets),
-    Layer.provideMerge(NotificationServiceTestLayer),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
   );
 

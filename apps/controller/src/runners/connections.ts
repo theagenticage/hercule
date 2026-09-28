@@ -418,8 +418,9 @@ const make = Effect.gen(function* () {
     /**
      * Checks whether this runner has an open connection right now. For a
      * caller deciding whether to start work only a connected runner can
-     * finish. A caller that just has a frame to send uses `tell`, which finds
-     * out by trying.
+     * finish, or whether to commit a change that a frame will then carry to
+     * the runner. A caller whose frame goes with no write uses `tell`, which
+     * finds out by trying.
      */
     holdsConnection: (id: string): Effect.Effect<boolean> => Effect.sync(() => reachable.has(id)),
 

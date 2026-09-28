@@ -64,6 +64,7 @@ import {
   reportEvent,
   spawnSession,
   spawnSessionOrFail,
+  waitForRunnerGone,
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
@@ -439,22 +440,6 @@ const startIdleSession = async (arranged: Arranged, prompt: string): Promise<Ses
 
 const listInputFrames = (wire: Wire): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(wire, "sessionInput");
-
-/**
- * Waits until the controller has noticed the runner's socket close. Once the
- * runner is no longer `online`, the connection map has dropped it, so a
- * delivery then fails for that reason and not because of a race.
- */
-const waitForRunnerGone = (arranged: Arranged): Promise<Runner> =>
-  waitUntil("saw the runner disconnect", async () => {
-    const response = await get(
-      arranged.harness.base,
-      `/api/v1/runners/${arranged.runnerId}`,
-      arranged.token,
-    );
-    const runner = (await response.json()) as Runner;
-    return runner.connectivity === "online" ? undefined : runner;
-  });
 
 const reportExited = (wire: Wire, sessionId: string, seq: number): void =>
   reportEvent(wire, seq, {
@@ -4383,6 +4368,83 @@ const reportWorkspaceReady = (arranged: Arranged, workspace: WorkspaceRow): void
       defaultBranch: "main",
     })),
   } as never);
+
+/**
+ * `session.respond`, `session.interrupt` and `session.stop` send their frame
+ * once their transaction commits. `notification.act` runs them inside its own
+ * transaction, so the frame has to wait for that commit, and must never be
+ * sent when it rolls back.
+ */
+describe("a frame whose caller's transaction rolls back", () => {
+  /** Runs `operation` as the user, in a transaction that then fails. */
+  const runThenRollBack = (
+    arranged: Arranged,
+    operation: (live: Live["Service"]) => Effect.Effect<unknown, unknown>,
+  ) =>
+    arranged.harness.runWithLiveSessions(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const live = yield* Live;
+        yield* withTransaction(
+          sql,
+          Effect.andThen(
+            operation(live),
+            Effect.fail("a later write in the caller's transaction failed"),
+          ),
+        );
+      }),
+    );
+
+  it("sends no answer and records none, so the request can still be answered", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+
+      const exit = await runThenRollBack(arranged, (live) =>
+        live.respond({ id: session.id, requestId: REQUEST_ID, decision: "allow" }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toEqual([]);
+      const [notification] = await readApprovalNotifications(arranged, session.id);
+      expect(notification?.status).toBe("open");
+
+      const retried = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+      expect(retried.status, await retried.clone().text()).toBe(200);
+      await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+    });
+  });
+
+  it("sends no interrupt and records none", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      const exit = await runThenRollBack(arranged, (live) => live.interrupt(session.id));
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listFrames<SessionInterruptFrame>(arranged.wire, "sessionInterrupt")).toEqual([]);
+      expect(await arranged.harness.audit("session.interrupted")).toEqual([]);
+    });
+  });
+
+  it("sends no stop and records none", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      const exit = await runThenRollBack(arranged, (live) => live.stop(session.id));
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      await delay(250);
+      expect(listFrames<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
+      expect(await arranged.harness.audit("session.stopped")).toEqual([]);
+    });
+  });
+});
 
 describe("session.spawn into a workspace", () => {
   it("gives a thread its own worktree of one repo, on a branch named after it", async () => {

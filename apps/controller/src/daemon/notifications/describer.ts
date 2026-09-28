@@ -178,7 +178,7 @@ const describeProvenance = (
  * reads the rows of the entities each operation names. It needs only the
  * database.
  */
-export const makeDescribe: Effect.Effect<
+export const buildDescribe: Effect.Effect<
   (
     operations: ReadonlyArray<BindableOperation>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,

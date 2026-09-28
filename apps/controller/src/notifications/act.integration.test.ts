@@ -26,6 +26,7 @@ import {
   reportEvent,
   spawnAgentWithGrants,
   waitForFrames,
+  waitForRunnerGone,
   waitForSession,
   waitUntil,
   withAgentFleet,
@@ -380,34 +381,45 @@ describe("an answer that cannot be taken", () => {
 });
 
 describe("an answer of the core's approval decision", () => {
+  /**
+   * Starts an agent's session in a turn that waits on one command approval,
+   * and returns the session with the approval decision the core raised.
+   */
+  const startParkedAgent = async (
+    arranged: Arranged,
+  ): Promise<{ readonly session: Session; readonly approval: Notification }> => {
+    const { session } = await spawnAgentWithGrants(arranged, "workers", []);
+    reportEvent(arranged.wire, 2, {
+      eventId: crypto.randomUUID(),
+      sessionId: session.id,
+      at,
+      _tag: "turn.started",
+      turnId: "t1",
+    });
+    reportEvent(arranged.wire, 3, {
+      eventId: crypto.randomUUID(),
+      sessionId: session.id,
+      at,
+      _tag: "request.opened",
+      request: {
+        requestId: "req-1",
+        itemId: "i1",
+        kind: "command_approval",
+        decisions: ["allow", "deny"],
+        detail: { command: "ls -la" },
+      },
+    });
+    const approval = await waitUntil("raised the approval decision", async () => {
+      const [raised] = await readApprovalNotifications(arranged, session.id);
+      return raised?.status === "open" ? raised : undefined;
+    });
+    return { session, approval };
+  };
+
   it("sends the answer to the runner and resolves the decision with it", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const { session } = await spawnAgentWithGrants(arranged, "workers", []);
-      reportEvent(arranged.wire, 2, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "turn.started",
-        turnId: "t1",
-      });
-      reportEvent(arranged.wire, 3, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "request.opened",
-        request: {
-          requestId: "req-1",
-          itemId: "i1",
-          kind: "command_approval",
-          decisions: ["allow", "deny"],
-          detail: { command: "ls -la" },
-        },
-      });
-      const approval = await waitUntil("raised the approval decision", async () => {
-        const [raised] = await readApprovalNotifications(arranged, session.id);
-        return raised?.status === "open" ? raised : undefined;
-      });
+      const { session, approval } = await startParkedAgent(arranged);
 
       const returned = await actOrFail(harness.base, token, approval.id, "allow");
 
@@ -420,6 +432,26 @@ describe("an answer of the core's approval decision", () => {
         origin: "web",
       });
       expect(await harness.audit("notification.decided")).toHaveLength(1);
+    });
+  });
+
+  it("is refused while the session's runner is not connected, and leaves the decision open", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { harness, token } = arranged;
+      const { approval } = await startParkedAgent(arranged);
+      arranged.wire.close();
+      await waitForRunnerGone(arranged);
+
+      const response = await requestAct(harness.base, token, approval.id, "allow");
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message: "that session's runner is no longer connected",
+      });
+      expect((await readNotificationOrFail(harness.base, token, approval.id)).status).toBe("open");
+      expect(await harness.audit("session.responded")).toEqual([]);
+      expect(await harness.audit("notification.decided")).toEqual([]);
     });
   });
 });

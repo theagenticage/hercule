@@ -633,8 +633,8 @@ export const operationLayers = Layer.mergeAll(
   //
   // The inbound driver hands a workspace step's result to the run service.
   // The notification service runs the operation of a chosen answer through
-  // the controller daemon's `BindableOperations`, and the operation can be a
-  // task, run or live session operation. So the port gets the run layers,
+  // its `BindableOperations` port, which the controller daemon implements,
+  // and the operation can be a task, run or live session operation. So the port gets the run layers,
   // which include the task service, and sits in this group, which provides
   // `Live`.
   Layer.mergeAll(

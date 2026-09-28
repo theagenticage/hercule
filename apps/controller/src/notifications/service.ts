@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
     action: BoundAction,
   ): Effect.Effect<void, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
-      if (yield* notifier.decide(notification.id, action.id)) return;
+      if (yield* notifier.decide(notification, action)) return;
       const { resolution } = yield* readOrFail(notification.id);
       if (resolution?.kind === "decided" && resolution.actionId === action.id) return;
       return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
@@ -344,7 +344,8 @@ const make = Effect.gen(function* () {
      *   the operation's writes and the resolution commit together or not at
      *   all. The operation sends nothing to a runner before the commit.
      *   Transactions run one at a time, so a second answer to the same
-     *   decision waits for the first and then finds it resolved.
+     *   decision waits for the first. It finds the decision resolved if the
+     *   first succeeded, and runs if the first failed.
      *
      * Fails with:
      *
@@ -360,36 +361,31 @@ const make = Effect.gen(function* () {
     act: (input: ActInput): Effect.Effect<Notification, BindableOperationError> =>
       Effect.gen(function* () {
         yield* requireUserActor("notification.act", ONLY_THE_USER);
-        // Uninterruptible because the operation's work after the commit, such
-        // as handing a new run to its executor, must not be lost to a caller
-        // that hangs up.
-        yield* Effect.uninterruptible(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const notification = yield* readOrFail(input.id);
-              if (notification.status !== "open") {
-                return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
-              }
-              const action = notification.actions.find(
-                (candidate) => candidate.id === input.actionId,
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const notification = yield* readOrFail(input.id);
+            if (notification.status !== "open") {
+              return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
+            }
+            const action = notification.actions.find(
+              (candidate) => candidate.id === input.actionId,
+            );
+            if (action === undefined) {
+              const offered = notification.actions.map((offer) => offer.id).join(", ");
+              return yield* Effect.fail(
+                createNotFoundError(
+                  `the notification has no answer "${input.actionId}"; its answers are ${offered}`,
+                ),
               );
-              if (action === undefined) {
-                const offered = notification.actions.map((offer) => offer.id).join(", ");
-                return yield* Effect.fail(
-                  createNotFoundError(
-                    `the notification has no answer "${input.actionId}"; its answers are ${offered}`,
-                  ),
-                );
-              }
-              if (action.operation !== null) {
-                yield* operations.run(
-                  yield* decodeBindableOperation(action.operation, ["operation"]),
-                );
-              }
-              yield* decideOrFail(notification, action);
-            }),
-          ),
+            }
+            if (action.operation !== null) {
+              yield* operations.run(
+                yield* decodeBindableOperation(action.operation, ["operation"]),
+              );
+            }
+            yield* decideOrFail(notification, action);
+          }),
         );
         return yield* readOrFail(input.id);
       }),

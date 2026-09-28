@@ -15,7 +15,7 @@ import { BindableOperations, type BindableOperationError } from "../../notificat
 import { RunService } from "../../runs";
 import { TaskService } from "../../tasks";
 import { Live } from "../sessions";
-import { makeDescribe } from "./describer";
+import { buildDescribe } from "./describer";
 
 const make = Effect.gen(function* () {
   const tasks = yield* TaskService;
@@ -25,7 +25,7 @@ const make = Effect.gen(function* () {
   // Each runs in the caller's transaction and sends nothing to a runner until
   // it commits: `queueInput` stores the input and delivers it afterwards, and
   // `respond` sends its frame afterwards.
-  const runners: BindableOperationHandlers<Effect.Effect<unknown, BindableOperationError>> = {
+  const handlers: BindableOperationHandlers<Effect.Effect<unknown, BindableOperationError>> = {
     "task.update": ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
     "run.start": (input) => runs.start(input),
     "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
@@ -33,8 +33,8 @@ const make = Effect.gen(function* () {
   };
 
   return BindableOperations.of({
-    run: (operation) => Effect.asVoid(dispatchBindableOperation(runners, operation)),
-    describe: yield* makeDescribe,
+    run: (operation) => Effect.asVoid(dispatchBindableOperation(handlers, operation)),
+    describe: yield* buildDescribe,
   });
 });
 

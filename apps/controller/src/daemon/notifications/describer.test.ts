@@ -23,7 +23,7 @@ import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
-import { makeDescribe } from "./describer";
+import { buildDescribe } from "./describer";
 
 const layer = TestDatabase;
 
@@ -43,7 +43,7 @@ const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
 const describeOperation = (operation: BindableOperation) =>
-  Effect.flatMap(makeDescribe, (describe) =>
+  Effect.flatMap(buildDescribe, (describe) =>
     Effect.map(describe([operation]), (lines) => lines[0]!),
   );
 
@@ -481,7 +481,7 @@ describe("describing the answers of one decision", () => {
         const taskId = yield* insertTask("Fix the login page");
         const sessionId = yield* insertSession("Refactor the parser");
         return yield* Effect.provideService(
-          Effect.flatMap(makeDescribe, (describe) =>
+          Effect.flatMap(buildDescribe, (describe) =>
             describe([
               { op: "task.update", input: { taskId, status: "done" } },
               { op: "task.update", input: { taskId, status: "cancelled" } },

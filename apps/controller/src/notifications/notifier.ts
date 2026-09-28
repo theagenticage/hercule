@@ -442,23 +442,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Resolves an open decision as decided with the answer `actionId`,
-     * stamped with the current actor. `notification.act` calls it when the
-     * user takes an answer. It reads the decision in its own transaction, or
-     * in the caller's when there is one. Returns false, and writes nothing,
-     * when the decision does not exist, is no longer open or has no such
-     * answer. There is no grant check: only the controller calls it.
+     * Resolves an open decision as decided with one of its answers, stamped
+     * with the current actor. `notification.act` calls it when the user takes
+     * an answer. It runs in the caller's transaction if there is one. Returns
+     * false, and writes nothing, when the decision is no longer open. There is
+     * no grant check: only the controller calls it.
      */
-    decide: (notificationId: string, actionId: string): Effect.Effect<boolean, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const found = yield* notifications.read(notificationId);
-          if (Option.isNone(found)) return false;
-          const action = found.value.actions.find((candidate) => candidate.id === actionId);
-          return action === undefined ? false : yield* resolveAsDecided(found.value, action);
-        }),
-      ),
+    decide: resolveAsDecided,
 
     /**
      * Resolves the open decisions about a subject that offer the answer

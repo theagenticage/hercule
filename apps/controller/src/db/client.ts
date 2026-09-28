@@ -184,8 +184,16 @@ export const openDatabase = (
  *
  * The changes the write set announced are published after the commit and
  * thrown away on a rollback (`./after-commit.ts`).
+ *
+ * Only the write set can be interrupted. An interrupt that arrives during it
+ * rolls the transaction back. One that arrives later, such as a client that
+ * hangs up while the transaction commits, takes effect once the after-commit
+ * work has run: the write is durable by then, and dropping that work would
+ * leave the controller's memory and every live screen out of step with the
+ * database.
  */
 export const withTransaction = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | SqlError, R> => withAnnouncements(sql.withTransaction(effect));
+): Effect.Effect<A, E | SqlError, R> =>
+  Effect.uninterruptibleMask((restore) => withAnnouncements(sql.withTransaction(restore(effect))));
