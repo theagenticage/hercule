@@ -151,7 +151,7 @@ Ruled out as core bounds, on the record:
 | Quiet hours | Pausing a workflow covers it. |
 | Action allowlists / approval gates | Live with access modes ([./06-providers.md](./06-providers.md)) and permission profiles ([./13-security.md](./13-security.md)), not with triage. |
 
-A trigger whose filter fails raises one `core.trigger-filter-error` Notification per failure streak, on the health flip; mechanism in [./08-events-and-connections.md](./08-events-and-connections.md) section 4.
+A trigger whose filter fails raises one `core.trigger-filter-error` Notification per failure streak, on the health flip; mechanism in [./08-events-and-connections.md](./08-events-and-connections.md) section 4. *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): `core.trigger-filter-error` arrives with the trigger routing table in [#82](https://github.com/theagenticage/hercule/issues/82). A subscription whose condition fails raises `core.subscription-condition-error` by the same rule.)*
 
 ## 6. Built-in workflow actions
 
@@ -213,6 +213,17 @@ interface Resolution {
 - Decisions are phrased as questions; the actions are the answers ([../design-language.md](../design-language.md), Monitoring semantics).
 - `producer` is what producer-side muting keys on (Section 7.2).
 
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* The record as built in `@hercule/contract` differs from the sketch above in four places:
+
+- `subject` is always present, possibly empty, and each entry is a typed subject: `{ kind, id }` for a task, run, session, workflow, connection, runner, subscription, plugin or event, and `{ kind: "trigger", workflowId, triggerId }` for a trigger, because a trigger id is unique only inside its workflow ([./08-events-and-connections.md](./08-events-and-connections.md) section 4).
+- `eventId` is the event log's integer id.
+- `muteKey?: string` holds the mute key the producer resolved to when the notification was created (Section 7.2). It is absent for the core, and for a producer with nothing to mute it by: a run of a sent workflow, or a session that speaks for no assistant.
+- `kind` is producer-namespaced as above, and only the core may use `core.*`: `notification.create` refuses such a kind. The core kinds built so far are `core.run-failed`, `core.plugin-error`, `core.runner-unreachable` and `core.subscription-condition-error`.
+
+Bound actions are stored and checked for shape (unique ids, at most one primary). Rendering them and executing them through `notification.act` are [#85](https://github.com/theagenticage/hercule/issues/85).
+
+An informational notification may also be born resolved with a `handled` resolution, when an assistant covers what it reports (Section 7.5). The table allows that one resolution on an informational row and refuses every other.
+
 ### 7.2 Producers and muting
 
 | Producer | Path | Examples |
@@ -225,6 +236,15 @@ interface Resolution {
 All four land in the same record through the same service-layer operation.
 
 **Muting** is a delivery fact, never a record state. The user mutes a producer in the notification center; the mute list lives in the user settings store as `notifications.muted: string[]` with keys `workflow:<id>`, `plugin:<id>`, `assistant:<id>` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `settings`). The router resolves each new record's `producer` to one of those keys (a run to its workflow, a session to its assistant when it has one; core is not mutable) and, on a match, **records the notification, lists it in the center, and pushes it to no sink** - the same path as `handled` (Section 7.5). The record's `status` is unaffected: a muted decision is still `open` and still needs-you. Sink-side toggles (delivery per channel Connection, Section 7.3) are a separate control.
+
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* The mute key is resolved once, when the notification is created, and stored on the record as `muteKey` (Section 7.1), so the router and the notification center read it without resolving it again. The router's fan-out to sinks, and so the only place a mute takes effect, is [#99](https://github.com/theagenticage/hercule/issues/99).
+
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* The core producers built so far, all informational:
+
+- **Run failed** (`core.run-failed`): raised in the transaction that ends a run as `failed`, with the run and its workflow as subjects and the `run.failed` event as `eventId`. The body says which step or edge failed and why.
+- **Plugin error** (`core.plugin-error`): raised when a plugin's activation or deactivation fails and the host marks it `errored`. A plugin refused at registration raises none: it never became a plugin the user enabled.
+- **Runner unreachable** (`core.runner-unreachable`): raised once per outage, when a runner has stayed `unreachable` for two minutes. A controller sweep checks every 30 seconds and asks the database whether a notification about the runner was created since it was last seen, so it survives a controller restart and needs no timers. It is informational and never withdrawn: a reconnect makes it history, not a wrong question.
+- **Subscription condition error** (`core.subscription-condition-error`): see [./08-events-and-connections.md](./08-events-and-connections.md) section 4.
 
 ### 7.3 Router and sinks
 
@@ -273,9 +293,9 @@ interface BoundOperation {             // the same shape `permission.request` ca
 }
 ```
 
-- **Declared** at creation as a contract operation plus its input, frozen with the record. The input is validated against the op's input schema when the notification is created, so a malformed action fails the producer, never the user's click. Only contract operations (including plugin actions invoked through the contract) can be bound; there is no free-form code.
+- **Declared** at creation as a contract operation plus its input, frozen with the record. The input is validated against the op's input schema when the notification is created, so a malformed action fails the producer, never the user's click. *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): `notification.create` checks the actions' shape only (Section 7.1). Checking `op` against the operation table and `input` against its schema arrives with [#85](https://github.com/theagenticage/hercule/issues/85), which must also check both again when the user clicks, because a record created before #85 was never checked.)* Only contract operations (including plugin actions invoked through the contract) can be bound; there is no free-form code.
 - **A null operation** is an answer that resolves the notification and executes nothing; its describe line reads "Does nothing". Any producer may bind it. It is how an offer gets its Dismiss and an agent question its "Neither".
-- **Bindable operations.** The core may bind any operation. For the other producers (`session`, `run`, `plugin`) the operations of the `credential`, `secret`, `infra` and `permission` grant families, `connection.manage` operations, and operations tagged bulk-destructive ([./13-security.md](./13-security.md) section 6.1) are **not bindable**: a one-line rendering cannot make "rotate this secret" or "retire runner X" an informed click, and nothing in Intake or check-in needs them. The contract's operation table carries a `bindable` flag, default true ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2); binding a non-bindable op fails `notification.create`. The Permission Request's "add to profile" answer is a core-bound `permission.decide`, which is why the core keeps them.
+- **Bindable operations.** The core may bind any operation. For the other producers (`session`, `run`, `plugin`) the operations of the `credential`, `secret`, `infra` and `permission` grant families, `connection.manage` operations, and operations tagged bulk-destructive ([./13-security.md](./13-security.md) section 6.1) are **not bindable**: a one-line rendering cannot make "rotate this secret" or "retire runner X" an informed click, and nothing in Intake or check-in needs them. The contract's operation table carries a `bindable` flag, default true ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2); binding a non-bindable op fails `notification.create` *(amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): the `bindable` flag and its check arrive with [#85](https://github.com/theagenticage/hercule/issues/85), on creation and on the click, as above)*. The Permission Request's "add to profile" answer is a core-bound `permission.decide`, which is why the core keeps them.
 - **Not bounded by the producer's profile.** Authoring is *not* checked against the producer's permission profile: a `worker` session that lacks ~~`workflow.run`~~ `run.start` may still propose "Start Bugfix"; only the click runs it, under the user's parity. The conservative reading (validate the operation against the producer's profile at creation) was rejected: the shipped Triage agent runs as `worker` and lacks ~~`workflow.run`~~ `run.start` and `github/pr.merge`, and proposing work it may not do itself is the one thing Intake exists for.
 - **Informed click: two lines, two authors.** Each answer renders with its `label`, the producer's `description` when present (what the choice *means* - only the producer knows), and a **core-rendered describe line** (what the click *does* to the system). Every contract operation declares `describe(input) -> string` ("Run workflow *Bugfix* with task *#118 Fix login timeout*", "Reply *Event-sourced* to session *Design ordering module*"); the core renders it from the frozen input with live names, the producer never supplies or suppresses it, and it is present on every surface that can execute the action (web app, interactive channel sink). The notification's `body` frames the question. A producer cannot mislabel its way past the describe line. Rendering is pinned by [Prototype: rendering bound actions](https://github.com/theagenticage/hercule/issues/50): in the web app every answer is a ledger row - label · describe line · description as fine print ([./14-web-app.md](./14-web-app.md) section The check-in view); on chat sinks one line per answer, "label · describe line", the description as subtext ([./12-assistants.md](./12-assistants.md) section 11.6).
 - **Executed** when the user decides: `notification.act { notificationId, actionId }` from the web app or from an interactive channel sink (Section 7.3). The service layer executes the frozen operation as actor `user`, full parity, no grant check. The event log entry carries the notification id, its `producer` and, for a channel click, the channel connection, so audit shows who decided, who proposed and where. Success resolves the notification (`resolution = { kind: "decided", actionId, actor: user, origin }`); a resolved notification's actions are inert (one-shot).
@@ -292,6 +312,8 @@ Mechanism, pinned by [Assistant runtime](https://github.com/theagenticage/hercul
 - **Holding** = a live session Subscription whose typed target matches the event by the pipeline's ordinary matcher, held by a session with a `conversationId`. Exact match only (run `r_3` covers `r_3`); no task-level target exists in v1.
 - **Covered producers**: only core notifications derived from a pipeline event (v1: the `run.failed` notification). `notification.create` steps are the workflow's own message and are never suppressed; breaker trips, permission requests and update notices derive from nothing an assistant can hold.
 - **Suppressed = recorded, not pushed.** The router creates the record already `resolved` with `resolution = { kind: "handled", actor: core, origin: "core", conversationId }`, lists it in the notification center as handled by that assistant (linking the conversation), and delivers it to no sink. ADR 0012's "the inbox always records it" holds; single path means one push.
+
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* Not built yet: every `core.run-failed` notification is recorded with no resolution. The table already accepts an informational record born `handled` (Section 7.1). The rule lands with the router in [#99](https://github.com/theagenticage/hercule/issues/99), because it is the router that decides whether a record is pushed; it needs the assistant runtime's live session subscriptions to decide what is held.
 
 ### 7.6 Permission requests
 
@@ -313,7 +335,7 @@ The core implements this for its own kinds by resolving the notification inside 
 
 Withdrawn (`withdrawn`, `reason` one line):
 
-- **Core**: the subject is gone - the session ended before its approval was answered, the trigger or workflow was deleted, the runner was retired while "unreachable" was open. Same hook as above, in the operation that removes the subject.
+- **Core**: the subject is gone - the session ended before its approval was answered, the trigger or workflow was deleted~~, the runner was retired while "unreachable" was open~~. Same hook as above, in the operation that removes the subject. *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): runner unreachable is informational (Section 7.2), so there is nothing open to withdraw when the runner is retired. Built so far: deleting a task withdraws the open decisions about it ("task deleted"); deleting a workflow withdraws those about it and about each of its triggers ("workflow deleted"); an update that removes a trigger withdraws those about that trigger ("trigger removed"). The core's withdrawals are stamped with the actor `system` and the origin `core`.)*
 - **Plugins**: `withdraw(notificationId, reason)` on the `notifications` capability ([./05-plugins.md](./05-plugins.md) section 11) - "token refreshed", "connection reconnected".
 - **Sessions**: `notification.withdraw { notificationId, reason }` (`hercule notification withdraw`) - an agent whose question the user answered by typing in the session withdraws its own question.
 - Both non-core producers may withdraw **only notifications they produced** (`producer` match); anything else is refused. Runs cannot withdraw: their notifications are their message to the user, and the run has ended.

@@ -289,6 +289,8 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
 
 `notification.create` is the operation the tickets called `notify`; the built-in action carries the operation's name. `notification.act` decides a decision notification and executes its bound operation (section 3.2). `notification.withdraw` resolves a decision as `withdrawn` when its question has stopped existing; a producer may withdraw only what it produced, and there is no other mutation - records are immutable apart from resolution, and there is no per-record read state ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) sections 7.1, 7.7).
 
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* `notification.create` refuses the user with `forbidden`, although the user holds every grant: a notification is a message to the user, so only a session or a run's `notification.create` step creates one. Its `kind` may not start with `core.`. `notification.withdraw` refuses a run with `forbidden`, and a notification that is already resolved, informational ones included, with `invalid_state`. `notification.query` pages by `createdAt`, newest first unless `sort=createdAt:asc`.
+
 Two per-operation facts in the contract's operation table serve bound actions ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4): a **`bindable`** flag, default true, `false` for the `credential`, `secret`, `infra` and `permission` families, `connection.manage` and bulk-destructive-tagged operations (the core may still bind those; other producers may not), and a **`describe(input) -> string`** renderer, the core-rendered line shown on every bound action so the click is informed.
 
 ### event
