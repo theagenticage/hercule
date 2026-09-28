@@ -7,7 +7,7 @@
  * A notification for each of those would be noise, so the user is told only
  * about a runner that is still unreachable two minutes after it was last seen.
  *
- * The rule itself is `RunnerConnections.notifyUnreachableRunners`. It reads
+ * The rule itself is `RunnerConnections.reportUnreachableRunners`. It reads
  * everything it needs from the database, so a runner that was already away
  * when the controller restarted is still reported.
  *
@@ -38,13 +38,13 @@ export const sweepUnreachableRunners: Effect.Effect<never, SqlError, RunnerConne
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const pass = Effect.flatMap(Clock.currentTimeMillis, (millis) =>
-      connections.notifyUnreachableRunners(
+      connections.reportUnreachableRunners(
         new Date(millis - Duration.toMillis(UNREACHABLE_GRACE)).toISOString(),
       ),
     );
     yield* Effect.sleep(UNREACHABLE_GRACE);
     while (true) {
-      yield* absorbFailures("Notifying about unreachable runners failed", pass);
+      yield* absorbFailures("Reporting unreachable runners failed", pass);
       yield* Effect.sleep(CHECK_INTERVAL);
     }
   });

@@ -1,8 +1,7 @@
 /**
  * The notification operations: `notification.query`, `read`, `create` and
- * `withdraw`, plus three the controller calls for the core's own
- * notifications: `createCoreNotification`, `hasCoreNotificationSince` and
- * `withdrawDecisionsAbout`.
+ * `withdraw`, plus two the controller calls for the core's own
+ * notifications: `createCoreNotification` and `withdrawDecisionsAbout`.
  *
  * The producer and its mute key are stamped from the caller, never taken from
  * the payload:
@@ -121,7 +120,8 @@ const NOT_THE_PRODUCER = "only the producer of a notification may withdraw it";
 /**
  * Returns the status a new notification starts in. A decision is open until it
  * is resolved; an informational notification has nothing to answer, so it is
- * resolved from the start and never gets a resolution.
+ * resolved from the start. The only resolution it may carry is `handled`: an
+ * assistant covered what it reports, so it was recorded without being pushed.
  */
 const decideInitialStatus = (actions: ReadonlyArray<BoundAction>) =>
   actions.length > 0 ? ("open" as const) : ("resolved" as const);
@@ -345,48 +345,57 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates an informational notification the core raises about itself, and
-     * returns its id. It runs in the caller's transaction, so the notification
-     * commits with the change it reports. There is no grant check: only the
-     * controller calls it.
+     * Creates an informational notification the core raises about itself. It
+     * runs in the caller's transaction, so the notification commits with the
+     * change it reports. There is no grant check: only the controller calls it.
      *
      * A title or body longer than the contract allows is shortened, and an
      * empty body is left out, so a notification built from an error message
      * is always one `notification.query` can return.
+     *
+     * With `unlessRaisedSince`, it creates nothing when a notification of the
+     * same kind, about every subject of this one, was created after that
+     * instant. A condition that lasts, such as a runner that stays away, is
+     * checked again and again; the option lets the caller report it once
+     * each time it occurs rather than on every check. The caller passes the
+     * instant the condition began, such as when the runner was last seen.
      */
-    createCoreNotification: (notification: CoreNotification): Effect.Effect<Id, SqlError> =>
-      Effect.gen(function* () {
-        const stored = yield* insertAndAudit(
-          {
-            kind: notification.kind,
-            title: shortenTo(notification.title, MAX_NOTIFICATION_TITLE_LENGTH),
-            ...(notification.body === undefined || notification.body === ""
-              ? {}
-              : { body: shortenTo(notification.body, MAX_NOTIFICATION_BODY_LENGTH) }),
-            producer: { type: "core" },
-            subject: notification.subject,
-            ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
-            actions: [],
-            status: "resolved",
-            createdAt: yield* nowIso,
-          },
-          SYSTEM_ACTOR,
-        );
-        return stored.id;
-      }),
-
-    /**
-     * Checks whether the core raised a notification of this kind about this
-     * subject after `since`. The core asks before it raises one about a
-     * condition that lasts, so the condition is reported once and not on
-     * every check. There is no grant check: only the controller calls it.
-     */
-    hasCoreNotificationSince: (
-      kind: CoreNotificationKind,
-      subject: NotificationSubject,
-      since: string,
-    ): Effect.Effect<boolean, SqlError> =>
-      notifications.hasNotificationAboutSince(kind, subject, since),
+    createCoreNotification: (
+      notification: CoreNotification,
+      options?: { readonly unlessRaisedSince?: string },
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const since = options?.unlessRaisedSince;
+          if (
+            since !== undefined &&
+            (yield* notifications.hasNotificationAboutSince(
+              notification.kind,
+              notification.subject,
+              since,
+            ))
+          ) {
+            return;
+          }
+          yield* insertAndAudit(
+            {
+              kind: notification.kind,
+              title: shortenTo(notification.title, MAX_NOTIFICATION_TITLE_LENGTH),
+              ...(notification.body === undefined || notification.body === ""
+                ? {}
+                : { body: shortenTo(notification.body, MAX_NOTIFICATION_BODY_LENGTH) }),
+              producer: { type: "core" },
+              subject: notification.subject,
+              ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
+              actions: [],
+              status: "resolved",
+              createdAt: yield* nowIso,
+            },
+            SYSTEM_ACTOR,
+          );
+        }),
+      ),
 
     /**
      * Withdraws every open decision about any of these subjects, because the

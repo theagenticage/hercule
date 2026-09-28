@@ -1,7 +1,7 @@
 /**
  * Tests the notification service against a migrated in-memory database: who
  * may create and withdraw a notification, what the service stamps on it, how
- * the list filters and pages, and the three methods the core calls for its
+ * the list filters and pages, and the two methods the core calls for its
  * own notifications.
  *
  * The mute key comes from the caller: a session's actor names the assistant it
@@ -750,9 +750,10 @@ describe("createCoreNotification", () => {
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
         // No actor: only the controller calls this, and it checks no grant.
-        const id = yield* notifications.createCoreNotification(CORE);
+        yield* notifications.createCoreNotification(CORE);
+        const [notification] = (yield* actAs(USER, notifications.query({}))).items;
         return {
-          notification: yield* actAs(USER, notifications.read(id)),
+          notification: notification!,
           entries: yield* readEventsOfKind("notification.created"),
         };
       }),
@@ -803,66 +804,74 @@ describe("createCoreNotification", () => {
   });
 });
 
-describe("hasCoreNotificationSince", () => {
+describe("createCoreNotification with unlessRaisedSince", () => {
   const RUNNER_ID = "0199e0e7-0000-7000-8000-00000000ba01";
+  const RUNNER: NotificationSubject = { kind: "runner", id: RUNNER_ID };
+  const RUN: NotificationSubject = { kind: "run", id: WORKFLOW_RUN_ID };
+
+  /** The notification raised first in every case: about a run and a runner. */
+  const RAISED: CoreNotification = {
+    ...CORE,
+    kind: "core.runner-unreachable",
+    subject: [RUN, RUNNER],
+  };
 
   /** Returns `iso` moved by `ms` milliseconds, as an ISO timestamp. */
   const shiftIso = (iso: string, ms: number): string =>
     new Date(new Date(iso).getTime() + ms).toISOString();
 
-  it("finds a core notification of that kind about that subject created after `since`, and nothing else", async () => {
-    const found = await run(
+  /**
+   * Raises `RAISED` on a fresh database, then asks to create `candidate`
+   * unless a matching notification was raised since `offsetMs` milliseconds
+   * from the moment `RAISED` was created. Returns whether `candidate` was
+   * created.
+   */
+  const checkCreated = (candidate: CoreNotification, offsetMs: number): Promise<boolean> =>
+    run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
-        const id = yield* notifications.createCoreNotification({
-          ...CORE,
-          kind: "core.runner-unreachable",
-          subject: [
-            { kind: "run", id: WORKFLOW_RUN_ID },
-            { kind: "runner", id: RUNNER_ID },
-          ],
+        yield* notifications.createCoreNotification(RAISED);
+        const [raised] = (yield* actAs(USER, notifications.query({}))).items;
+        yield* notifications.createCoreNotification(candidate, {
+          unlessRaisedSince: shiftIso(raised!.createdAt, offsetMs),
         });
-        const createdAt = (yield* actAs(USER, notifications.read(id))).createdAt;
-        const before = shiftIso(createdAt, -1);
-        const runner: NotificationSubject = { kind: "runner", id: RUNNER_ID };
-        return {
-          // The subject is listed second, so this also checks that every subject is searched.
-          before: yield* notifications.hasCoreNotificationSince(
-            "core.runner-unreachable",
-            runner,
-            before,
-          ),
-          atCreation: yield* notifications.hasCoreNotificationSince(
-            "core.runner-unreachable",
-            runner,
-            createdAt,
-          ),
-          otherKind: yield* notifications.hasCoreNotificationSince(
-            "core.run-failed",
-            runner,
-            before,
-          ),
-          otherSubject: yield* notifications.hasCoreNotificationSince(
-            "core.runner-unreachable",
-            { kind: "runner", id: UNKNOWN_ID },
-            before,
-          ),
-          sameIdOtherKindOfSubject: yield* notifications.hasCoreNotificationSince(
-            "core.runner-unreachable",
-            { kind: "session", id: RUNNER_ID },
-            before,
-          ),
-        };
+        return (yield* actAs(USER, notifications.query({}))).items.length === 2;
       }),
     );
 
-    expect(found).toEqual({
-      before: true,
-      // `since` itself is excluded: only a notification created after it counts.
-      atCreation: false,
-      otherKind: false,
-      otherSubject: false,
-      sameIdOtherKindOfSubject: false,
+  it("creates nothing when one of that kind about every subject was raised after the instant, and creates it otherwise", async () => {
+    const aboutRunner: CoreNotification = { ...RAISED, subject: [RUNNER] };
+
+    const created = {
+      // The runner is listed second in `RAISED`, so this also checks that
+      // every subject of the stored notification is searched.
+      sameKindAndSubject: await checkCreated(aboutRunner, -1),
+      everySubjectInAnotherOrder: await checkCreated({ ...RAISED, subject: [RUNNER, RUN] }, -1),
+      raisedAtTheInstant: await checkCreated(aboutRunner, 0),
+      otherKind: await checkCreated({ ...aboutRunner, kind: "core.run-failed" }, -1),
+      otherSubject: await checkCreated(
+        { ...RAISED, subject: [{ kind: "runner", id: UNKNOWN_ID }] },
+        -1,
+      ),
+      sameIdOtherKindOfSubject: await checkCreated(
+        { ...RAISED, subject: [{ kind: "session", id: RUNNER_ID }] },
+        -1,
+      ),
+      oneSubjectNotRaisedAbout: await checkCreated(
+        { ...RAISED, subject: [RUNNER, { kind: "runner", id: UNKNOWN_ID }] },
+        -1,
+      ),
+    };
+
+    expect(created).toEqual({
+      sameKindAndSubject: false,
+      everySubjectInAnotherOrder: false,
+      // The instant itself is excluded: only a notification raised after it counts.
+      raisedAtTheInstant: true,
+      otherKind: true,
+      otherSubject: true,
+      sameIdOtherKindOfSubject: true,
+      oneSubjectNotRaisedAbout: true,
     });
   });
 });

@@ -156,20 +156,26 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Checks whether a notification of this kind about this subject was
-     * created after `since`.
+     * Checks whether a notification of this kind was created after `since`
+     * whose subject lists every one of these subjects. It may list more. With
+     * no subjects, any notification of the kind created after `since` counts.
      */
     hasNotificationAboutSince: (
       kind: string,
-      subject: NotificationSubject,
+      subjects: ReadonlyArray<NotificationSubject>,
       since: string,
     ): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT notifications.id FROM notifications
           WHERE notifications.kind = ${kind} AND notifications.created_at > ${since}
-            AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
-                        WHERE ${buildSubjectMatch(subject)})
+            AND ${sql.and(
+              subjects.map(
+                (subject) =>
+                  sql`EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                              WHERE ${buildSubjectMatch(subject)})`,
+              ),
+            )}
           LIMIT 1
         `,
         (rows) => rows.length > 0,

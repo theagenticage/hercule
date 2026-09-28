@@ -644,27 +644,20 @@ const make = Effect.gen(function* () {
      * one that stays away raises one notification however long it stays away,
      * and one more the next time it is lost after it came back.
      */
-    notifyUnreachableRunners: (cutoff: string): Effect.Effect<void, SqlError> =>
+    reportUnreachableRunners: (cutoff: string): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           for (const runner of yield* runners.listUnreachableSeenBefore(cutoff)) {
-            const subject = { kind: "runner", id: runner.id } as const;
-            if (
-              yield* notifications.hasCoreNotificationSince(
-                "core.runner-unreachable",
-                subject,
-                runner.lastSeenAt,
-              )
-            ) {
-              continue;
-            }
-            yield* notifications.createCoreNotification({
-              kind: "core.runner-unreachable",
-              title: `Runner ${runner.name} is unreachable`,
-              body: "Its connection dropped without a goodbye, and it has not reconnected. Work placed on it waits until it does.",
-              subject: [subject],
-            });
+            yield* notifications.createCoreNotification(
+              {
+                kind: "core.runner-unreachable",
+                title: `Runner ${runner.name} is unreachable`,
+                body: "Its connection dropped without a goodbye, and it has not reconnected. Work placed on it waits until it does.",
+                subject: [{ kind: "runner", id: runner.id }],
+              },
+              { unlessRaisedSince: runner.lastSeenAt },
+            );
           }
         }),
       ),

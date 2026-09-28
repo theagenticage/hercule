@@ -110,7 +110,7 @@ describe("the fleet a stopped controller left behind", () => {
   });
 });
 
-describe("notifyUnreachableRunners", () => {
+describe("reportUnreachableRunners", () => {
   it("raises one notification per runner unreachable since before the cutoff, and one more after it came back", async () => {
     // The notifications are stamped with the test clock, pinned at `start`,
     // and a runner last seen after a notification was raised about it has
@@ -138,13 +138,13 @@ describe("notifyUnreachableRunners", () => {
           (rows) => rows.map((row) => row.title),
         );
 
-        yield* connections.notifyUnreachableRunners(atMinute(-28));
+        yield* connections.reportUnreachableRunners(atMinute(-28));
         const first = yield* listTitles;
-        yield* connections.notifyUnreachableRunners(atMinute(-20));
+        yield* connections.reportUnreachableRunners(atMinute(-20));
         const second = yield* listTitles;
         // The early runner came back, and was lost again.
         yield* runners.touch(early!.id, atMinute(1));
-        yield* connections.notifyUnreachableRunners(atMinute(2));
+        yield* connections.reportUnreachableRunners(atMinute(2));
         const third = yield* listTitles;
         return { first, second, third };
       }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.orDie),
