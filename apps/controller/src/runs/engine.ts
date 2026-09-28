@@ -119,7 +119,7 @@ import {
   type WorkspacePolicy,
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
-import { CurrentActor, currentStampOrSystem, requireGrant, type RunActor } from "../actor";
+import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
@@ -593,12 +593,7 @@ export const makeRunEngine = Effect.gen(function* () {
         return ENDED;
       }
       const { runnerId } = chosen;
-      const actor: RunActor = {
-        _tag: "run",
-        runId: run.id,
-        stepId: record.stepId,
-        workflowId: run.workflowId,
-      };
+      const actor = buildRunActor(run, record.stepId);
       const opened = yield* Effect.result(
         Effect.provideService(
           workspaces.openFor({

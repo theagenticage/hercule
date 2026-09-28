@@ -33,7 +33,7 @@ import {
   type TaskFilter,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
-import { CurrentActor, type RunActor } from "../actor";
+import { buildRunActor, CurrentActor } from "../actor";
 import { nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
@@ -398,12 +398,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             "step-failed",
           );
         }
-        const actor: RunActor = {
-          _tag: "run",
-          runId: run.id,
-          stepId: attempt.stepId,
-          workflowId: run.workflowId,
-        };
+        const actor = buildRunActor(run, attempt.stepId);
         const writeCompletion = (output: unknown) =>
           Effect.gen(function* () {
             const finishedAt = yield* nowIso;

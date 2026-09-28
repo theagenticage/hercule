@@ -24,6 +24,7 @@ import {
   type Grant,
   type OperationId,
   type Requirement,
+  type Run,
   type Unauthenticated,
 } from "@hercule/contract";
 
@@ -127,6 +128,18 @@ export const SYSTEM_ACTOR = "system";
  * from its turn, is stamped with it.
  */
 export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
+
+/**
+ * Returns the actor a run's step executes as. The run engine executes both
+ * action steps and agent steps as this actor, so both read the run's fields the
+ * same way, and a notification a step creates is muted by the run's workflow.
+ */
+export const buildRunActor = (run: Pick<Run, "id" | "workflowId">, stepId: string): RunActor => ({
+  _tag: "run",
+  runId: run.id,
+  stepId,
+  workflowId: run.workflowId,
+});
 
 /**
  * Returns the actor stamp for an actor: `session:<id>` for a session,
