@@ -1,51 +1,49 @@
 /**
- * The "since you last checked" marker of a view (spec 10 §8), wired to the
- * URL and the settings store. `@hercule/client-core` decides what the pin and
- * the marker mean; this hook does the navigation and the write.
+ * The notification center's "since you last checked" marker (spec 10 §8),
+ * wired to the URL and the settings store. `@hercule/client-core` decides what
+ * the pin and the marker mean; this hook does the navigation and the write.
  */
 import { useEffect, useRef } from "react";
 import { useMutation, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import { chooseNewSince, choosePinOnOpen, type HerculeClient } from "@hercule/client-core";
-import { settingsQuery } from "./queries";
+import { settingsQuery } from "../../../app/queries";
 
-/** The user settings that hold a view's marker. */
-export type SinceMarker = "lastChecked.intake" | "lastChecked.notifications";
+/** The user setting that holds the notification center's marker. */
+const MARKER = "lastChecked.notifications";
 
 /**
- * Opens a view that counts from a "since you last checked" marker, and
- * returns the instant it counts new items from (`undefined` when every item is
- * new), with the error of the marker write if that write failed.
+ * Opens the notification center, and returns the instant it counts new
+ * notifications from (`undefined` when every notification is new), with the
+ * error of the marker write if that write failed.
  *
  * On opening, while the URL has no pin, the hook:
  *
  * 1. pins the stored marker in the URL through `pinInUrl`, so a refresh keeps
- *    the same items new;
+ *    the same notifications new;
  * 2. then writes now as the stored marker, so the next visit counts from this
  *    one.
  *
- * The pin lands before the write, so the view never counts from the new
+ * The pin lands before the write, so the screen never counts from the new
  * marker. This runs in an effect, not in the route's loader, because the router
  * preloads a route when the pointer rests on a link to it, and resting on a
- * link is not opening the view.
+ * link is not opening the screen.
  */
 export function useSinceMarker({
   client,
   queryClient,
-  marker,
   pin,
   pinInUrl,
 }: {
   readonly client: HerculeClient;
   readonly queryClient: QueryClient;
-  readonly marker: SinceMarker;
   /** The URL's `since`, parsed by `parseSincePin`. */
   readonly pin: string | undefined;
   /** Replaces the URL's `since` with the given pin, without a new history entry. */
   readonly pinInUrl: (pin: string) => Promise<void>;
 }): { readonly since: string | undefined; readonly advanceError: Error | null } {
-  const stored = useSuspenseQuery(settingsQuery(client)).data.user[marker];
+  const stored = useSuspenseQuery(settingsQuery(client)).data.user[MARKER];
   const { mutateAsync: advance, error } = useMutation({
-    mutationFn: (now: string) => client.settings.update({ payload: { user: { [marker]: now } } }),
+    mutationFn: (now: string) => client.settings.update({ payload: { user: { [MARKER]: now } } }),
     onSuccess: (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
     },
@@ -60,7 +58,7 @@ export function useSinceMarker({
     const now = new Date().toISOString();
     pinInUrl(choosePinOnOpen(stored))
       .then(() => advance(now))
-      // A failed write is returned as `advanceError` for the view to show.
+      // A failed write is returned as `advanceError` for the screen to show.
       .catch(() => undefined)
       .finally(() => {
         opening.current = false;

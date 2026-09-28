@@ -1,12 +1,11 @@
 import type { JSX } from "react";
-import { Link, useMatches, type StaticDataRouteOption } from "@tanstack/react-router";
+import { Link, useMatches, useSearch, type StaticDataRouteOption } from "@tanstack/react-router";
 import {
   chooseNewSince,
   FALLBACK_TIMEZONE,
   formatSince,
   formatTimeContext,
   isSupportedTimezone,
-  parseSincePin,
 } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import { useMinuteClock } from "@hercule/ui";
@@ -34,6 +33,8 @@ import { useMinuteClock } from "@hercule/ui";
  */
 export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element | null {
   const matches = useMatches();
+  // The screen's route has already parsed its `since` pin in `validateSearch`.
+  const pin = useSearch({ strict: false }).since;
   const now = useMinuteClock();
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
   const known = isSupportedTimezone(stored);
@@ -56,12 +57,7 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
   const title = framing?.staticData.title ?? "";
   const sinceMarker = framing?.staticData.sinceMarker;
   const lastCheckedAt =
-    sinceMarker === undefined
-      ? undefined
-      : chooseNewSince(
-          parseSincePin((framing?.search as Readonly<Record<string, unknown>>)["since"]),
-          settings.user[sinceMarker],
-        );
+    sinceMarker === undefined ? undefined : chooseNewSince(pin, settings.user[sinceMarker]);
   const since =
     lastCheckedAt === undefined ? undefined : formatSince(new Date(lastCheckedAt), timezone);
 

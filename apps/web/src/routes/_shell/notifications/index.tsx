@@ -13,10 +13,10 @@ import type { MuteKey, Notification } from "@hercule/contract";
 import { Button, EmptyState, cn, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { notificationsQuery, settingsQuery } from "../../../app/queries";
-import { useSinceMarker } from "../../../app/since-marker";
 import { NotificationRow } from "../../../screens/notifications/notification-row";
 import { readErrorMessage } from "../../../screens/save-status";
 import { NoNotifications } from "./-no-notifications";
+import { useSinceMarker } from "./-since-marker";
 
 export const Route = createFileRoute("/_shell/notifications/")({
   staticData: { title: "Notifications", sinceMarker: "lastChecked.notifications" },
@@ -48,7 +48,6 @@ function Notifications(): JSX.Element | null {
   const { since, advanceError } = useSinceMarker({
     client,
     queryClient,
-    marker: "lastChecked.notifications",
     pin: Route.useSearch().since,
     pinInUrl: (pin) => navigate({ search: { since: pin }, replace: true }),
   });
