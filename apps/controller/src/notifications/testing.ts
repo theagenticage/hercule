@@ -4,7 +4,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Notification, NotificationSubject } from "@hercule/contract";
 import { notificationRepository } from "./repository";
@@ -49,17 +49,17 @@ export const readStoredNotification = (
  * because `notification.query` cannot filter by subject.
  */
 export const readNotificationBodiesAbout = (
-  sql: SqlClient.SqlClient,
   kind: string,
   subject: Exclude<NotificationSubject, { readonly kind: "trigger" }>,
-): Effect.Effect<ReadonlyArray<string | null>, SqlError> =>
-  Effect.map(
-    sql<{ readonly body: string | null }>`
+): Effect.Effect<ReadonlyArray<string | null>, SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly body: string | null }>`
       SELECT notifications.body FROM notifications
       WHERE notifications.kind = ${kind}
         AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
                     WHERE subject.value ->> 'kind' = ${subject.kind}
                       AND subject.value ->> 'id' = ${subject.id})
-      ORDER BY notifications.created_at, notifications.id`,
-    (rows) => rows.map((row) => row.body),
-  );
+      ORDER BY notifications.created_at, notifications.id`;
+    return rows.map((row) => row.body);
+  });

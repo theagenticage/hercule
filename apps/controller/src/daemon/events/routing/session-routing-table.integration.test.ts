@@ -7,7 +7,8 @@
  * when the row it wrote reaches the session waiting for it.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration } from "effect";
+import { Duration, Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   at,
   readSession,
@@ -159,10 +160,14 @@ describe("a condition the router cannot evaluate", () => {
       // transaction, and carries the first failure's message.
       expect(
         await runEffect(
-          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
-            kind: "subscription",
-            id: subscriptionId,
-          }),
+          Effect.provideService(
+            readNotificationBodiesAbout("core.subscription-condition-error", {
+              kind: "subscription",
+              id: subscriptionId,
+            }),
+            SqlClient.SqlClient,
+            arranged.harness.sql,
+          ),
         ),
       ).toEqual([failed.message]);
 
@@ -173,10 +178,14 @@ describe("a condition the router cannot evaluate", () => {
       await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "ok");
       expect(
         await runEffect(
-          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
-            kind: "subscription",
-            id: subscriptionId,
-          }),
+          Effect.provideService(
+            readNotificationBodiesAbout("core.subscription-condition-error", {
+              kind: "subscription",
+              id: subscriptionId,
+            }),
+            SqlClient.SqlClient,
+            arranged.harness.sql,
+          ),
         ),
       ).toHaveLength(1);
 
@@ -186,10 +195,14 @@ describe("a condition the router cannot evaluate", () => {
       await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "error");
       expect(
         await runEffect(
-          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
-            kind: "subscription",
-            id: subscriptionId,
-          }),
+          Effect.provideService(
+            readNotificationBodiesAbout("core.subscription-condition-error", {
+              kind: "subscription",
+              id: subscriptionId,
+            }),
+            SqlClient.SqlClient,
+            arranged.harness.sql,
+          ),
         ),
       ).toHaveLength(2);
     });

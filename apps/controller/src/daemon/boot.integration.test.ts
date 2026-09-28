@@ -8,6 +8,8 @@
  * find out.
  */
 import { describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { del, type ServerHarness } from "../http/testing";
 import { at, waitUntil, WAIT_DEADLINE_MS, type Agent, type Arranged } from "../sessions/testing";
 import {
@@ -180,10 +182,14 @@ describe("an input that was being delivered when the controller restarted", () =
       expect(failed.health.message ?? "").not.toBe("");
       expect(
         await runEffect(
-          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
-            kind: "subscription",
-            id: lost.subscriptionId,
-          }),
+          Effect.provideService(
+            readNotificationBodiesAbout("core.subscription-condition-error", {
+              kind: "subscription",
+              id: lost.subscriptionId,
+            }),
+            SqlClient.SqlClient,
+            arranged.harness.sql,
+          ),
         ),
       ).toHaveLength(1);
 

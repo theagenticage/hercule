@@ -4,7 +4,7 @@
  * raises. The run engine writes them from the single place a run ends
  * (`writeRunEnding` in `engine.ts`), in the transaction that ends it.
  */
-import type { EventId, FailureReason, Run } from "@hercule/contract";
+import type { EventId, FailureReason, Run, StepRecord } from "@hercule/contract";
 import type { PlatformEvent } from "../events";
 import type { CoreNotification } from "../notifications";
 import type { RunOutcome } from "./repository";
@@ -82,9 +82,10 @@ const describeRunFailure = (
     return `The run stopped after step \`${stepId}\`: ${outcome.failedEdge.message}`;
   }
   const failed = run.steps.findLast(
-    (record) => record.stepId === stepId && record.status === "failed",
+    (record): record is Extract<StepRecord, { readonly status: "failed" }> =>
+      record.stepId === stepId && record.status === "failed",
   );
-  return failed?.status === "failed"
+  return failed !== undefined
     ? `Step \`${stepId}\` failed: ${failed.error.message}`
     : FAILURE_SENTENCES[outcome.failureReason];
 };
