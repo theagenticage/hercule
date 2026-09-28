@@ -8,6 +8,7 @@
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import type { RouterContext } from "./context";
+import type { SinceMarker } from "./since-marker";
 import { NotFound, RenderFailure } from "../screens/fallbacks";
 
 export const createAppRouter = (context: RouterContext, history: RouterHistory) =>
@@ -38,7 +39,7 @@ declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     readonly title?: string;
     /** The last-checked marker the screen is based on, if it has one. */
-    readonly sinceMarker?: "lastChecked.intake";
+    readonly sinceMarker?: SinceMarker;
     /** Set by a screen that renders its own top bar, so the shell does not render one. */
     readonly ownsTopBar?: true;
   }

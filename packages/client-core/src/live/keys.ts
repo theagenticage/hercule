@@ -9,7 +9,12 @@
  * under. If the two were written apart they would drift, and the only symptom
  * would be a screen that silently stops updating.
  */
-import type { MutableLiveTopic, RunFilter, TaskFilter } from "@hercule/contract";
+import type {
+  MutableLiveTopic,
+  NotificationFilter,
+  RunFilter,
+  TaskFilter,
+} from "@hercule/contract";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
@@ -93,6 +98,20 @@ export const queryKeys = {
       : ["conversation-messages", conversationId],
   runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
   run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
+  /** The notification center's pages, keyed on the filter. */
+  notifications: (filter?: NotificationFilter): LiveQueryKey =>
+    filter === undefined ? ["notifications"] : ["notifications", filter],
+  /**
+   * The one page the sidebar reads to count the notifications created since
+   * `since`. It is a plain read, not pages, so its key must differ from the
+   * center's: the two would otherwise share a key when neither filters. It
+   * shares the `notifications` prefix, so an invalidation reaches both.
+   */
+  unseenNotifications: (since: string | undefined): LiveQueryKey => [
+    "notifications",
+    "unseen",
+    since ?? null,
+  ],
   /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
@@ -177,6 +196,9 @@ export const buildQueryKeys = (
           ...ids.map((id) => queryKeys.conversationMessages(id)),
         ];
   }
+  // Notifications are read only as lists: the notification center's pages
+  // and the sidebar's count. Any change refetches both, whatever their filter.
+  if (topic === "notification") return [queryKeys.notifications()];
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed.
   if (topic === "plugin") return [queryKeys.plugins()];
