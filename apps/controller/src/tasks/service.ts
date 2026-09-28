@@ -49,6 +49,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { announce, nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
+import { NotificationService } from "../notifications";
 import { taskRepository, type TaskEdit, type TaskOrder } from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
@@ -123,6 +124,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tasks = yield* taskRepository;
   const audit = yield* AuditLog;
+  const notifications = yield* NotificationService;
   const platformEvents = yield* PlatformEvents;
 
   const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
@@ -333,9 +335,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Soft-deletes a task. The row stays, so the log and the runs that
-     * reference the task still point at something. Fails with `NotFound` if
-     * the task does not exist or is already deleted.
+     * Soft-deletes a task, and withdraws the open decisions about it. The row
+     * stays, so the log and the runs that reference the task still point at
+     * something. Fails with `NotFound` if the task does not exist or is
+     * already deleted.
      */
     delete: (
       id: Id,
@@ -358,6 +361,7 @@ const make = Effect.gen(function* () {
               payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
               at,
             });
+            yield* notifications.withdrawDecisionsAbout([{ kind: "task", id }], "task deleted");
             return {};
           }),
         );
@@ -373,5 +377,5 @@ export class TaskService extends Context.Service<TaskService, Effect.Success<typ
 export const TaskServiceLayer: Layer.Layer<
   TaskService,
   never,
-  SqlClient.SqlClient | AuditLog | PlatformEvents
+  SqlClient.SqlClient | AuditLog | PlatformEvents | NotificationService
 > = Layer.effect(TaskService)(make);

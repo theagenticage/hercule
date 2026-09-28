@@ -24,6 +24,7 @@ import {
   type Grant,
   type OperationId,
   type Requirement,
+  type Run,
   type Unauthenticated,
 } from "@hercule/contract";
 
@@ -61,6 +62,12 @@ export interface SessionActor {
   readonly sessionId: string;
   readonly profileId: string;
   readonly grants: ReadonlyArray<Grant>;
+  /**
+   * The assistant the session speaks for, or null when the session is not
+   * part of an assistant's conversation. A notification the session creates
+   * is muted by this assistant.
+   */
+  readonly assistantId: string | null;
 }
 
 /**
@@ -76,6 +83,11 @@ export interface RunActor {
   readonly runId: string;
   /** The step that is executing, for code that records which step made a change. */
   readonly stepId: string;
+  /**
+   * The stored workflow the run was started from, or null for a run of a sent
+   * workflow. A notification the step creates is muted by this workflow.
+   */
+  readonly workflowId: string | null;
 }
 
 /** No caller was resolved: an unauthenticated route, or an in-process caller. */
@@ -116,6 +128,18 @@ export const SYSTEM_ACTOR = "system";
  * from its turn, is stamped with it.
  */
 export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
+
+/**
+ * Returns the actor a run's step executes as. The run engine executes both
+ * action steps and agent steps as this actor, so both read the run's fields the
+ * same way, and a notification a step creates is muted by the run's workflow.
+ */
+export const buildRunActor = (run: Pick<Run, "id" | "workflowId">, stepId: string): RunActor => ({
+  _tag: "run",
+  runId: run.id,
+  stepId,
+  workflowId: run.workflowId,
+});
 
 /**
  * Returns the actor stamp for an actor: `session:<id>` for a session,

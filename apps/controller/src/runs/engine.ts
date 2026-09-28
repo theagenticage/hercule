@@ -119,10 +119,11 @@ import {
   type WorkspacePolicy,
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
-import { CurrentActor, currentStampOrSystem, requireGrant, type RunActor } from "../actor";
+import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
+import { NotificationService } from "../notifications";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
@@ -134,7 +135,7 @@ import {
   listCapableRunners,
   listWorkspaceActionIds,
 } from "./runner-capabilities";
-import { buildRunEndedEvent } from "./run-events";
+import { buildRunEndedEvent, buildRunFailedNotification } from "./run-events";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -341,6 +342,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const executor = yield* RunExecutor;
   const workspaceSteps = yield* WorkspaceSteps;
   const platformEvents = yield* PlatformEvents;
+  const notifications = yield* NotificationService;
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
@@ -365,6 +367,8 @@ export const makeRunEngine = Effect.gen(function* () {
    * The run's platform event (`run.completed`, `run.failed` or
    * `run.cancelled`) is emitted here too, in the same transaction, so every
    * way a run ends emits exactly one event, and only if the ending commits.
+   * A failed run also raises its `core.run-failed` notification here, for
+   * the same reason.
    * The event's actor is whoever's request ended the run: the user or a
    * session cancelling it, or a run whose step cancelled it. A run that ends
    * on its own ends with no request behind it, so its event is stamped
@@ -391,9 +395,14 @@ export const makeRunEngine = Effect.gen(function* () {
         if (run.workspaceId !== undefined) {
           yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
         }
-        yield* platformEvents.emit(
+        const eventId = yield* platformEvents.emit(
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
+        if (outcome.status === "failed") {
+          yield* notifications.createCoreNotification(
+            buildRunFailedNotification(run, outcome, eventId),
+          );
+        }
       }
       yield* settleWorkspaceSteps(run, wasRunning);
     });
@@ -584,7 +593,7 @@ export const makeRunEngine = Effect.gen(function* () {
         return ENDED;
       }
       const { runnerId } = chosen;
-      const actor: RunActor = { _tag: "run", runId: run.id, stepId: record.stepId };
+      const actor = buildRunActor(run, record.stepId);
       const opened = yield* Effect.result(
         Effect.provideService(
           workspaces.openFor({

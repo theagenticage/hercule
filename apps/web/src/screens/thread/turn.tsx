@@ -13,7 +13,7 @@ import type { JSX, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";
 import { OwnerBubble } from "../bubble";
 import { TimeSeparator } from "../time-separator";
-import { Markdown } from "./markdown";
+import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 
 export function Turn({

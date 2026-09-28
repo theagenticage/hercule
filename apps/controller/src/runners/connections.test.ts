@@ -11,21 +11,25 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
   RunnerFacts,
   RunnerLifecycle,
   RunnerWatermark,
 } from "@hercule/contract";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
+import { NotificationServiceLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
 import { mintConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(NotificationServiceLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );
@@ -103,6 +107,58 @@ describe("the fleet a stopped controller left behind", () => {
       { actor: "system", state: "unreachable" },
       { actor: "system", state: "unreachable" },
     ]);
+  });
+});
+
+describe("reportUnreachableRunners", () => {
+  it("raises one notification per runner unreachable since before the cutoff, and one more after it came back", async () => {
+    // The notifications are stamped with the test clock, pinned at `start`,
+    // and a runner last seen after a notification was raised about it has
+    // come back since.
+    const start = Date.parse("2026-09-01T12:00:00.000Z");
+    const atMinute = (minutes: number) => new Date(start + minutes * 60_000).toISOString();
+    const titles = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(start);
+        const sql = yield* SqlClient.SqlClient;
+        const connections = yield* RunnerConnections;
+        const runners = yield* runnerRepository;
+        const [early, late, offline, retired] = yield* insertFleet([
+          { connectivity: "unreachable" },
+          { connectivity: "unreachable" },
+          { connectivity: "offline" },
+          { connectivity: "unreachable", lifecycle: "retired" },
+        ]);
+        yield* runners.touch(early!.id, atMinute(-30));
+        yield* runners.touch(late!.id, atMinute(-25));
+        yield* runners.touch(offline!.id, atMinute(-60));
+        yield* runners.touch(retired!.id, atMinute(-60));
+        const listTitles = Effect.map(
+          sql<{ readonly title: string }>`SELECT title FROM notifications ORDER BY created_at, id`,
+          (rows) => rows.map((row) => row.title),
+        );
+
+        yield* connections.reportUnreachableRunners(atMinute(-28));
+        const first = yield* listTitles;
+        yield* connections.reportUnreachableRunners(atMinute(-20));
+        const second = yield* listTitles;
+        // The early runner came back, and was lost again.
+        yield* runners.touch(early!.id, atMinute(1));
+        yield* connections.reportUnreachableRunners(atMinute(2));
+        const third = yield* listTitles;
+        return { first, second, third };
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.orDie),
+    );
+
+    expect(titles).toEqual({
+      first: ["Runner runner-0 is unreachable"],
+      second: ["Runner runner-0 is unreachable", "Runner runner-1 is unreachable"],
+      third: [
+        "Runner runner-0 is unreachable",
+        "Runner runner-1 is unreachable",
+        "Runner runner-0 is unreachable",
+      ],
+    });
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * Tests how the thread's markdown handles unusual input.
+ * Tests how the markdown renderer handles unusual input.
  *
  * The thread screen's tests cover how an answer looks. These tests cover edge
  * cases only this component is responsible for: a parse that overflows, a

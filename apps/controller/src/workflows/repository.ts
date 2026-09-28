@@ -263,17 +263,30 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes a workflow. Returns its name, or `None` if no workflow has the
-     * id. The foreign key deletes its trigger rows too.
+     * Deletes a workflow. Returns its name and the ids of the triggers deleted
+     * with it, or `None` if no workflow has the id. The foreign key deletes
+     * the trigger rows.
      */
-    delete: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly name: string }>`
-          DELETE FROM workflows WHERE id = ${uuidFromString(id)}
+    delete: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly name: string; readonly triggerIds: ReadonlyArray<string> }>,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const workflow = uuidFromString(id);
+        const triggers = yield* sql<{ readonly trigger_id: string }>`
+          SELECT trigger_id FROM triggers WHERE workflow_id = ${workflow}
+        `;
+        const rows = yield* sql<{ readonly name: string }>`
+          DELETE FROM workflows WHERE id = ${workflow}
           RETURNING ${sql.literal(NAME_FROM_DEFINITION)} AS name
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.name),
-      ),
+        `;
+        return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+          name: row.name,
+          triggerIds: triggers.map((trigger) => trigger.trigger_id),
+        }));
+      }),
 
     list: (
       request: WorkflowPageRequest,
@@ -326,19 +339,34 @@ const make = Effect.gen(function* () {
      *   trigger, because a start trigger and a signal trigger are different
      *   things. It gets a new `created_at`, and a start trigger is `active`
      *   again.
+     *
+     * Returns the ids of the triggers that no longer exist: the deleted ones,
+     * and the ones whose kind changed, since those were replaced.
      */
     reconcileTriggers: (
       workflowId: string,
       triggers: ReadonlyArray<DeclaredTrigger>,
       savedAt: string,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
         const workflow = uuidFromString(workflowId);
         const kept = triggers.map((trigger) => trigger.triggerId);
-        yield* sql`
+        const kindsBefore = new Map(
+          (yield* sql<{ readonly trigger_id: string; readonly kind: string }>`
+            SELECT trigger_id, kind FROM triggers WHERE workflow_id = ${workflow}
+          `).map((row) => [row.trigger_id, row.kind]),
+        );
+        const replaced = triggers
+          .filter((trigger) => {
+            const kindBefore = kindsBefore.get(trigger.triggerId);
+            return kindBefore !== undefined && kindBefore !== trigger.kind;
+          })
+          .map((trigger) => trigger.triggerId);
+        const deleted = yield* sql<{ readonly trigger_id: string }>`
           DELETE FROM triggers
           WHERE workflow_id = ${workflow}
             AND ${kept.length === 0 ? sql`1 = 1` : sql`trigger_id NOT IN ${sql.in(kept)}`}
+          RETURNING trigger_id
         `;
         for (const trigger of triggers) {
           yield* sql`
@@ -369,6 +397,7 @@ const make = Effect.gen(function* () {
                        excluded.filter, excluded.schedule, excluded.timezone)
           `;
         }
+        return [...deleted.map((row) => row.trigger_id), ...replaced];
       }),
 
     listTriggers: (

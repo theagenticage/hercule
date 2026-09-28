@@ -8,10 +8,11 @@
  * find out.
  */
 import { describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { del, type ServerHarness } from "../http/testing";
 import { at, waitUntil, WAIT_DEADLINE_MS, type Agent, type Arranged } from "../sessions/testing";
 import {
-  buildRecordingNotifier,
   emitManualEvent,
   OTHER_REF,
   readCursorAndHead,
@@ -25,9 +26,9 @@ import {
   waitForSubscription,
   UNRESOLVABLE,
   withPipeline,
-  type Notified,
   type ReadSubscription,
 } from "./testing";
+import { readNotificationBodiesAbout } from "../notifications/testing";
 
 /** Long enough for a fleet, a session and a reboot. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 20_000 });
@@ -164,42 +165,47 @@ describe("an input that was being delivered when the controller restarted", () =
   });
 
   it("keeps the lost wake-up next to an evaluation error, and clears each one on its own", async () => {
-    const calls: Array<Notified> = [];
-    await withPipeline(
-      async (arranged) => {
-        const lost = await withALostWakeUp(arranged, "wake-up-holder");
+    await withPipeline(async (arranged) => {
+      const lost = await withALostWakeUp(arranged, "wake-up-holder");
 
-        // A condition that fails to evaluate is recorded in the health, a
-        // separate field from the lost wake-up.
-        await storeCondition(arranged.harness, lost.subscriptionId, UNRESOLVABLE);
-        await emitManualEvent(arranged, [REF], "cannot be evaluated");
-        const failed = await waitForSubscription(
-          arranged,
-          lost.agent,
-          lost.subscriptionId,
-          (one) => one.health.state === "error",
-        );
-        expect(failed.lostWakeUp).toEqual(lost.subscription.lostWakeUp);
-        expect(failed.health.message ?? "").not.toBe("");
-        await waitUntil("reported the evaluation error", () =>
-          calls.some((call) => call.subscriptionId === lost.subscriptionId) ? calls : undefined,
-        );
+      // A condition that fails to evaluate is recorded in the health, a
+      // separate field from the lost wake-up.
+      await storeCondition(arranged.harness, lost.subscriptionId, UNRESOLVABLE);
+      await emitManualEvent(arranged, [REF], "cannot be evaluated");
+      const failed = await waitForSubscription(
+        arranged,
+        lost.agent,
+        lost.subscriptionId,
+        (one) => one.health.state === "error",
+      );
+      expect(failed.lostWakeUp).toEqual(lost.subscription.lostWakeUp);
+      expect(failed.health.message ?? "").not.toBe("");
+      expect(
+        await runEffect(
+          Effect.provideService(
+            readNotificationBodiesAbout("core.subscription-condition-error", {
+              kind: "subscription",
+              id: lost.subscriptionId,
+            }),
+            SqlClient.SqlClient,
+            arranged.harness.sql,
+          ),
+        ),
+      ).toHaveLength(1);
 
-        // The condition works again and matches, which clears both: the clean
-        // evaluation clears the health error, and the new wake-up clears the
-        // lost wake-up.
-        await storeCondition(arranged.harness, lost.subscriptionId, "true");
-        await emitManualEvent(arranged, [REF], "the next one");
-        const repaired = await waitForSubscription(
-          arranged,
-          lost.agent,
-          lost.subscriptionId,
-          (one) => one.health.state === "ok" && one.lostWakeUp === null,
-        );
-        expect(repaired.health).toEqual({ state: "ok" });
-      },
-      { evaluationErrorNotifier: buildRecordingNotifier(calls) },
-    );
+      // The condition works again and matches, which clears both: the clean
+      // evaluation clears the health error, and the new wake-up clears the
+      // lost wake-up.
+      await storeCondition(arranged.harness, lost.subscriptionId, "true");
+      await emitManualEvent(arranged, [REF], "the next one");
+      const repaired = await waitForSubscription(
+        arranged,
+        lost.agent,
+        lost.subscriptionId,
+        (one) => one.health.state === "ok" && one.lostWakeUp === null,
+      );
+      expect(repaired.health).toEqual({ state: "ok" });
+    });
   });
 
   it("records no lost wake-up on an ended subscription, because it has no holder left", async () => {

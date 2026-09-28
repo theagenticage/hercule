@@ -1,7 +1,12 @@
 import { useState, type JSX } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import type { QueryClient } from "@tanstack/react-query";
-import { resolveThreadRowsMode, type HerculeClient, type Live } from "@hercule/client-core";
+import { useQuery, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
+import {
+  formatUnseenCount,
+  resolveThreadRowsMode,
+  type HerculeClient,
+  type Live,
+} from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import {
   Logo,
@@ -11,33 +16,32 @@ import {
   ThemeSelector,
   cn,
 } from "@hercule/ui";
+import { useLiveInvalidation } from "../app/live-invalidation";
+import { settingsQuery, unseenNotificationsQuery } from "../app/queries";
 import { ORCHESTRATION_NAV, SEPARATOR, chooseFaceForPath, type Face, type NavItem } from "./nav";
 import { Pulse } from "./pulse";
 import { ThreadsFace } from "./threads-face";
 
 /**
- * The count shown beside each nav item that has one. Nothing counts proposals,
- * decisions or unseen notifications yet, so every count is empty. The styling,
- * including the attention hue on the check-in count, is ready for the
- * operations that will fill them.
+ * The count shown beside each nav item that has one, already formatted, such
+ * as "3" or "99+". Only the notifications count is filled: nothing counts
+ * proposals or decisions yet. The styling, including the attention hue on the
+ * check-in count, is ready for the operations that will fill them.
  */
-type Counts = Partial<Record<NonNullable<NavItem["count"]>, number>>;
-
-const NO_COUNTS: Counts = {};
+type Counts = Partial<Record<NonNullable<NavItem["count"]>, string | undefined>>;
 
 /**
- * A number beside a nav item, hidden when it is zero or missing. `attention`
- * draws it in the attention hue, which the check-in count uses wherever it
- * appears.
+ * A count beside a nav item, hidden when it is missing. `attention` draws it
+ * in the attention hue, which the check-in count uses wherever it appears.
  */
 function Count({
   value,
   attention = false,
 }: {
-  readonly value: number | undefined;
+  readonly value: string | undefined;
   readonly attention?: boolean;
 }): JSX.Element | null {
-  if (value === undefined || value === 0) return null;
+  if (value === undefined) return null;
   return (
     <span
       className={cn(
@@ -87,13 +91,33 @@ function NavLink({
   );
 }
 
+/**
+ * The orchestration nav. It counts the notifications created since the user
+ * last opened the notification center, and follows the `notification` topic so
+ * the count moves as they arrive. A count that cannot be read shows no count:
+ * the notification center says why when the user opens it.
+ */
 function OrchestrationFace({
   pathname,
-  counts,
+  client,
+  queryClient,
+  live,
 }: {
   readonly pathname: string;
-  readonly counts: Counts;
+  readonly client: HerculeClient;
+  readonly queryClient: QueryClient;
+  readonly live: Live;
 }): JSX.Element {
+  useLiveInvalidation(live, queryClient, "notification");
+  const settings = useSuspenseQuery(settingsQuery(client)).data;
+  const unseen = useQuery(
+    unseenNotificationsQuery(client, settings.user["lastChecked.notifications"]),
+  );
+  const counts: Counts = {
+    notifications:
+      unseen.data === undefined ? undefined : formatUnseenCount(unseen.data.items.length),
+  };
+
   return (
     <nav className="flex flex-col gap-px" aria-label="Hercule">
       {ORCHESTRATION_NAV.map((item, index) =>
@@ -122,8 +146,7 @@ function OrchestrationFace({
 /**
  * The sidebar, with two faces: threads and orchestration. The current screen
  * picks the face. The segmented switch overrides that choice until the user
- * navigates to another path. The check-in count sits on the Hercule segment,
- * so it stays visible while the user works on the threads face.
+ * navigates to another path.
  */
 export function Sidebar({
   settings,
@@ -157,13 +180,7 @@ export function Sidebar({
         }}
       >
         <SegmentedControlItem value="threads">Threads</SegmentedControlItem>
-        <SegmentedControlItem
-          value="orchestration"
-          className="inline-flex items-center justify-center gap-1.5"
-        >
-          Hercule
-          <Count value={NO_COUNTS.checkin} attention />
-        </SegmentedControlItem>
+        <SegmentedControlItem value="orchestration">Hercule</SegmentedControlItem>
       </SegmentedControl>
 
       {face === "threads" ? (
@@ -175,7 +192,12 @@ export function Sidebar({
           live={live}
         />
       ) : (
-        <OrchestrationFace pathname={pathname} counts={NO_COUNTS} />
+        <OrchestrationFace
+          pathname={pathname}
+          client={client}
+          queryClient={queryClient}
+          live={live}
+        />
       )}
 
       <div className="mt-auto flex flex-col gap-1.5 pt-2.5">

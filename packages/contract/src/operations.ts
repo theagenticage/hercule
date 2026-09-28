@@ -92,6 +92,27 @@ const TABLE = {
   "task.update": { requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
 
+  "notification.query": {
+    requires: "notification.read",
+    method: "GET",
+    path: "/api/v1/notifications",
+  },
+  "notification.read": {
+    requires: "notification.read",
+    method: "GET",
+    path: "/api/v1/notifications/:id",
+  },
+  "notification.create": {
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications",
+  },
+  "notification.withdraw": {
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications/:id/withdraw",
+  },
+
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   "project.create": { requires: "project.write", method: "POST", path: "/api/v1/projects" },

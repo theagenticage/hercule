@@ -14,7 +14,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
 import { ActionError } from "@hercule/plugin-host";
+import type { Notification } from "@hercule/contract";
 import { runEffect } from "../daemon/testing";
+import { get } from "../http/testing";
 import { buildActionPlugin } from "../plugins/testing";
 import { readPipelineEvent, readPipelineEventsAfter } from "../events";
 import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
@@ -188,6 +190,37 @@ describe("the event a run emits when it ends on its own", () => {
         },
       ]);
       expect(await harness.platformEvents("run.completed")).toEqual([]);
+    });
+  });
+
+  it("raises a core.run-failed notification about the run and its workflow, linked to its run.failed event", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, { definition: FAILING_DEFINITION });
+
+      const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+
+      expectStatus(run, "failed");
+      const [event] = await harness.platformEvents("run.failed");
+      const response = await get(base, "/api/v1/notifications", token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const { items } = (await response.json()) as { readonly items: ReadonlyArray<Notification> };
+      expect(items).toEqual([
+        {
+          id: expect.any(String) as unknown,
+          kind: "core.run-failed",
+          title: "Run of Update a missing task failed",
+          body: expect.stringMatching(/^Step `update` failed: /) as unknown,
+          producer: { type: "core" },
+          subject: [
+            { kind: "run", id: run.id },
+            { kind: "workflow", id: workflow.id },
+          ],
+          eventId: event!.id,
+          actions: [],
+          status: "resolved",
+          createdAt: expect.any(String) as unknown,
+        },
+      ]);
     });
   });
 

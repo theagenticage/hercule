@@ -517,6 +517,14 @@ A Task's provenance never points at a pruned event while the Task exists, so the
 
 The Notifications screen is an in-app sink under [ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md): it records everything the core routes, subscribed through a live topic, and executes a Notification's bound actions through ordinary API operations. It is dumb: routing decisions stay in the core. It shows every Notification; the check-in view's needs-you module shows the actionable subset of the same records. There is no per-record read state: a "new" divider at the `lastChecked.notifications` marker (advanced on opening the screen) separates what arrived since the last visit. Resolved decisions show their outcome line from the `Resolution` ("decided in Discord", "handled by *Ada* in #ops", "withdrawn: token refreshed"); the per-producer mute toggles (`notifications.muted` in the settings store) live here. There is no Web Push in v1 (the browser's Service Worker API needs a secure context the plain-HTTP LAN default does not give); push beyond the browser is what channels are for.
 
+*(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* As built:
+
+- Opening the screen pins the previous marker in the URL as `since` before it advances the stored marker, so a refresh keeps the same notifications new. A visit by a user who had never opened the screen pins `since=never`, and everything shows as new. The top bar's "since" line reads the pin.
+- The sidebar counts the notifications created since `lastChecked.notifications`, up to "99+", and follows the `notification` live topic.
+- A resolution line names only what the record holds: "decided in a chat channel" rather than "decided in Discord", and "handled by an assistant" rather than "handled by *Ada* in #ops". Naming the Connection or the assistant needs a lookup the screen does not make yet.
+- The mute toggle is a quiet per-row button, "Mute workflow" or "Unmute workflow" (plugin and assistant alike), on each notification whose producer has a mute key. A muted notification still shows, marked "muted".
+- Bound actions are not rendered yet; answering from the screen is [#85](https://github.com/theagenticage/hercule/issues/85).
+
 ## Design language
 
 All screens are built in the pinned language in [../design-language.md](../design-language.md) (ticket [#33](https://github.com/theagenticage/hercule/issues/33)). In five lines:

@@ -1,5 +1,6 @@
 /**
- * The thread's prose, rendered as markdown.
+ * Prose written by an agent, a user or a notification's producer, rendered as
+ * markdown: a thread's answers, a message bubble, a notification's body.
  *
  * `react-markdown` builds React elements rather than an HTML string, so a
  * `<script>` from an agent is shown as plain text. This safety needs no
@@ -172,7 +173,7 @@ class Legible extends Component<
 }
 
 /**
- * The thread's prose, rendered as markdown.
+ * Renders markdown prose.
  *
  * The thread rebuilds every turn from the transcript whenever a new row
  * arrives, and parsing is the expensive part of rendering a turn. The React

@@ -45,6 +45,7 @@ import {
 import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
+import { NotificationService, NotificationServiceLayer } from "./notifications";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
 import {
@@ -235,6 +236,7 @@ export type ControllerServices =
   | Secrets
   | AuditLog
   | PlatformEvents
+  | NotificationService
   | Settings
   | PermissionProfiles
   | SessionTokens
@@ -280,20 +282,27 @@ export const bootWith = <A, E>(
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
-    // the code that runs after the boot needs it too.
-    const repositories = Layer.mergeAll(
-      controllerIdentityLayer,
-      SettingsLayer,
-      PermissionProfilesLayer,
-      SessionTokensLayer,
-      UsersLayer,
-      CredentialsLayer,
-      AuditLogLayer,
-      PlatformEventsLayer,
-      JoinTokensLayer,
-    ).pipe(
+    // the code that runs after the boot needs it too. The notification
+    // service sits on the audit log, and beside the repositories rather than
+    // above the plugin host, because the plugin host and the fleet raise
+    // notifications of their own.
+    const repositories = NotificationServiceLayer.pipe(
       Layer.provideMerge(
-        secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),
+        Layer.mergeAll(
+          controllerIdentityLayer,
+          SettingsLayer,
+          PermissionProfilesLayer,
+          SessionTokensLayer,
+          UsersLayer,
+          CredentialsLayer,
+          AuditLogLayer,
+          PlatformEventsLayer,
+          JoinTokensLayer,
+        ).pipe(
+          Layer.provideMerge(
+            secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),
+          ),
+        ),
       ),
     );
 

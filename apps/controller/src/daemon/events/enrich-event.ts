@@ -27,7 +27,7 @@ import { currentStamp, requireGrant } from "../../actor";
 import { withTransaction } from "../../db";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
-import { EvaluationErrorNotifier } from "../../subscriptions";
+import type { NotificationService } from "../../notifications";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 
@@ -65,7 +65,7 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeEnrich(input), createDecodeValidationError);
         const actor = yield* currentStamp;
 
-        const { amended, reports } = yield* withTransaction(
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const amended = yield* events.amend(decoded);
@@ -90,11 +90,10 @@ const make = Effect.gen(function* () {
             // here because this call runs on the request's fiber, which ends as
             // soon as the response is written, and would cut a delivery off
             // half way.
-            return { amended, reports: yield* router.rerouteEvent(decoded.id, routingTables) };
+            yield* router.rerouteEvent(decoded.id, routingTables);
+            return amended;
           }),
         );
-        yield* reports;
-        return amended;
       }),
   };
 });
@@ -107,10 +106,5 @@ export class Enrichment extends Context.Service<Enrichment, Effect.Success<typeo
 export const EnrichmentLayer: Layer.Layer<
   Enrichment,
   never,
-  | SqlClient.SqlClient
-  | AuditLog
-  | EventService
-  | EventRouter
-  | SessionService
-  | EvaluationErrorNotifier
+  SqlClient.SqlClient | AuditLog | EventService | EventRouter | SessionService | NotificationService
 > = Layer.effect(Enrichment)(make);

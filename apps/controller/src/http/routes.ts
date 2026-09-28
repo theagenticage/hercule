@@ -58,6 +58,7 @@ import {
   WorkflowRunsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
+import { NotificationService } from "../notifications";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -205,6 +206,19 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
         withApiErrors(tasks.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
+  }),
+);
+
+const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) =>
+  Effect.gen(function* () {
+    const notifications = yield* NotificationService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(notifications.query(query)))
+      .handle("read", ({ params }) => withApiErrors(notifications.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(notifications.create(payload)))
+      .handle("withdraw", ({ params, payload }) =>
+        withApiErrors(notifications.withdraw({ id: params.id, ...payload })),
+      );
   }),
 );
 
@@ -575,10 +589,6 @@ const RunLayers = RunServiceLayer.pipe(
  * instance would have no plugins, no connections and none of the state a
  * session's stream is coalesced in, and would write over the same rows the
  * drivers use. The handlers get them from the boot.
- *
- * `EvaluationErrorNotifier` is left to the caller for a related reason: a
- * test checks what a routing table reported by passing in its own notifier,
- * which a layer provided here would prevent.
  */
 export const operationLayers = Layer.mergeAll(
   AuthLayer,
@@ -666,6 +676,7 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  notificationRoutes,
   agentRoutes,
   assistantRoutes,
   conversationRoutes,

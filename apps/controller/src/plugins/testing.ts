@@ -23,6 +23,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
+import { NotificationServiceLayer } from "../notifications";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionTypesLayer } from "../connections";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
@@ -77,6 +78,7 @@ export const buildPluginStack = () => {
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(NotificationServiceLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

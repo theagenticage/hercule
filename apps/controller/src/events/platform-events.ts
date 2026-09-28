@@ -23,6 +23,7 @@ import {
   TaskCreatedEventPayload,
   TaskUpdatedEventPayload,
   type Actor,
+  type EventId,
 } from "@hercule/contract";
 import { appendPlatformSourceEvent } from "./platform-source-event";
 
@@ -68,15 +69,18 @@ const make = Effect.gen(function* () {
      * It announces a change to the log's Live Topic only. The domain the
      * event is about announces the change to its own record, as it does for
      * every other write to that record.
+     *
+     * Returns the event's id, so a record derived from the event, such as
+     * the notification of a failed run, can point at it.
      */
-    emit: (event: PlatformEvent): Effect.Effect<void, SqlError> =>
+    emit: (event: PlatformEvent): Effect.Effect<EventId, SqlError> =>
       Effect.gen(function* () {
         // The payload's type already matches its schema. Encoding turns it
         // into the JSON the log stores.
         const payload = yield* Effect.orDie(
           Schema.encodeUnknownEffect(PLATFORM_EVENT_PAYLOADS[event.kind])(event.payload),
         );
-        yield* appendPlatformSourceEvent(sql, {
+        return yield* appendPlatformSourceEvent(sql, {
           kind: event.kind,
           actor: event.actor,
           payload,

@@ -287,7 +287,7 @@ export const buildKeyset = (
  * The query reads one row more than the caller asked for. If that extra row
  * came back, there is a next page, so no list needs a count query. `items`
  * converts the page's rows into the values the caller receives. It returns an
- * effect because a row can need a second query to become a value. `cursorOf`
+ * effect because a row can need a second query to become a value. `encodeNextCursor`
  * encodes the last value into the cursor the next page starts from.
  *
  * `items` must return one value per row, in the same order. The cursor is built
@@ -301,13 +301,13 @@ export const buildPage = <Row, A, E, R>(
   rows: ReadonlyArray<Row>,
   limit: number,
   items: (rows: ReadonlyArray<Row>) => Effect.Effect<ReadonlyArray<A>, E, R>,
-  cursorOf: (last: A) => string,
+  encodeNextCursor: (last: A) => string,
 ): Effect.Effect<Page<A>, E, R> =>
   Effect.map(items(rows.slice(0, limit)), (page) => {
     const last = page[page.length - 1];
     return {
       items: page,
-      nextCursor: rows.length > limit && last !== undefined ? cursorOf(last) : undefined,
+      nextCursor: rows.length > limit && last !== undefined ? encodeNextCursor(last) : undefined,
     };
   });
 

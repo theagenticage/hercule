@@ -1,6 +1,7 @@
 import type { JSX } from "react";
-import { Link, useMatches, type StaticDataRouteOption } from "@tanstack/react-router";
+import { Link, useMatches, useSearch, type StaticDataRouteOption } from "@tanstack/react-router";
 import {
+  chooseNewSince,
   FALLBACK_TIMEZONE,
   formatSince,
   formatTimeContext,
@@ -15,8 +16,9 @@ import { useMinuteClock } from "@hercule/ui";
  * - The title comes from the deepest route match that has one, so a nested
  *   screen sets the title and its layout does not have to.
  * - The time context is the current time in the user's zone. A screen with a
- *   `sinceMarker` shows the time the user last checked instead, and shows the
- *   current time until that marker is stored.
+ *   `sinceMarker` shows the time the user last checked instead: the `since`
+ *   pinned in its URL, or the stored marker before the screen pins one. It
+ *   shows the current time while the user had never checked the screen.
  * - A stored zone this browser cannot format (written by another client, or by
  *   a browser with a newer zone database) falls back to UTC. The bar then shows
  *   a warning that links to the Profile settings, where the zone is set.
@@ -31,6 +33,8 @@ import { useMinuteClock } from "@hercule/ui";
  */
 export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.Element | null {
   const matches = useMatches();
+  // The screen's route has already parsed its `since` pin in `validateSearch`.
+  const pin = useSearch({ strict: false }).since;
   const now = useMinuteClock();
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
   const known = isSupportedTimezone(stored);
@@ -49,11 +53,13 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
   }
 
   const deepest = [...matches].reverse();
-  const framing = deepest.find((match) => match.staticData.title !== undefined)?.staticData;
-  const title = framing?.title ?? "";
-  const marker =
-    framing?.sinceMarker === undefined ? undefined : settings.user[framing.sinceMarker];
-  const since = marker === undefined ? undefined : formatSince(new Date(marker), timezone);
+  const framing = deepest.find((match) => match.staticData.title !== undefined);
+  const title = framing?.staticData.title ?? "";
+  const sinceMarker = framing?.staticData.sinceMarker;
+  const lastCheckedAt =
+    sinceMarker === undefined ? undefined : chooseNewSince(pin, settings.user[sinceMarker]);
+  const since =
+    lastCheckedAt === undefined ? undefined : formatSince(new Date(lastCheckedAt), timezone);
 
   return (
     <header className="flex items-baseline gap-3.5 px-8 pt-[22px]">

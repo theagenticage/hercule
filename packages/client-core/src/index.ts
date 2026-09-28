@@ -114,10 +114,28 @@ export {
 export { createLive, type Live } from "./live/live";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
+export {
+  chooseNotificationMark,
+  describeProducer,
+  describeResolution,
+  formatUnseenCount,
+  isNotificationMuted,
+  parseMuteKind,
+  toggleMuteKey,
+  UNSEEN_COUNT_READ_LIMIT,
+  type NotificationMark,
+} from "./notifications";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export {
+  chooseNewSince,
+  choosePinOnOpen,
+  NEVER_CHECKED,
+  parseSincePin,
+  splitBySince,
+} from "./since-marker";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
   chooseStamps,

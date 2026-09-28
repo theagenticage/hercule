@@ -43,6 +43,7 @@ import conversationMessages from "./0032-conversation-messages";
 import runWorkspace from "./0033-run-workspace";
 import workspaceLeases from "./0034-workspace-leases";
 import originalRunId from "./0035-original-run-id";
+import notifications from "./0036-notifications";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -80,6 +81,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [33, "run-workspace", Effect.succeed(runWorkspace)],
   [34, "workspace-leases", Effect.succeed(workspaceLeases)],
   [35, "original-run-id", Effect.succeed(originalRunId)],
+  [36, "notifications", Effect.succeed(notifications)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

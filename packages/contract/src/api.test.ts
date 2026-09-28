@@ -99,7 +99,7 @@ describe("the HttpApi declaration", () => {
 });
 
 /**
- * The Task, Project, Event, Runner, Plugin, Session and Controller operations:
+ * The Task, Notification, Project, Event, Runner, Plugin, Session and Controller operations:
  * the operation table row and the endpoint that serves it.
  */
 const NEW_OPERATIONS = [
@@ -108,6 +108,30 @@ const NEW_OPERATIONS = [
   { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
   { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
   { id: "task.delete", requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
+  {
+    id: "notification.query",
+    requires: "notification.read",
+    method: "GET",
+    path: "/api/v1/notifications",
+  },
+  {
+    id: "notification.read",
+    requires: "notification.read",
+    method: "GET",
+    path: "/api/v1/notifications/:id",
+  },
+  {
+    id: "notification.create",
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications",
+  },
+  {
+    id: "notification.withdraw",
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications/:id/withdraw",
+  },
   { id: "project.query", requires: "project.read", method: "GET", path: "/api/v1/projects" },
   { id: "project.read", requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   { id: "project.create", requires: "project.write", method: "POST", path: "/api/v1/projects" },

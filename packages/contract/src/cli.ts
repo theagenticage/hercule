@@ -489,6 +489,93 @@ export const CLI = {
     },
   },
 
+  "notification.query": {
+    command: "notification list",
+    help: "Lists notifications, newest first, open decisions and resolved ones alike. Use it to find the id that `hercule notification read` and `hercule notification withdraw` take.",
+    examples: [
+      { args: ["--status", "open"] },
+      { args: ["--kind", "triage.unsure", "--since", "2026-09-15T00:00:00.000Z"] },
+    ],
+    fields: {
+      kind: { flag: "kind", help: "Only notifications of this kind, such as core.run-failed." },
+      status: {
+        flag: "status",
+        help: "open for decisions that still want an answer; resolved for everything else.",
+      },
+      since: {
+        flag: "since",
+        help: "Only notifications created at or after this UTC instant, with milliseconds: 2026-09-15T00:00:00.000Z.",
+      },
+    },
+  },
+  "notification.read": {
+    command: "notification read",
+    help: "Reads one notification in full: its body, what it is about, its answers, and how it was resolved.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The notification's id, or a tail of eight or more characters.",
+        resolves: "notification.query",
+      },
+    },
+  },
+  "notification.create": {
+    command: "notification create",
+    help: "Raises a notification for the user. With --action it is a decision the user answers; without, it is informational. The body is markdown. Returns the notification's id.",
+    examples: [
+      {
+        args: ["--kind", "triage.fyi", "--title", "Dependabot opened three PRs", "--body-stdin"],
+        stdin: "All three bump dev dependencies only; nothing to do yet.",
+      },
+      {
+        args: [
+          "--kind",
+          "triage.unsure",
+          "--title",
+          "Which architecture for the ordering module?",
+          "--action",
+          '{"id":"event-sourced","label":"Event-sourced","operation":null,"primary":true}',
+          "--action",
+          '{"id":"neither","label":"Neither","operation":null}',
+        ],
+      },
+    ],
+    fields: {
+      kind: {
+        flag: "kind",
+        help: "A dotted kind in your own namespace, such as triage.fyi. core.* kinds are the core's own.",
+      },
+      title: { flag: "title", help: "One line saying what this is about; not a paragraph." },
+      body: {
+        stdin: true,
+        flag: "body",
+        help: "The markdown body. On a decision it frames the question.",
+      },
+      actions: {
+        flag: "action",
+        help: "A JSON answer: id, label, optional description and primary, and operation, a contract operation and its input, or null to run nothing. Repeat it for each answer.",
+      },
+      subject: {
+        flag: "subject",
+        help: 'A JSON reference to what this is about, such as {"kind":"task","id":"<id>"}. Repeat it for each subject.',
+      },
+    },
+  },
+  "notification.withdraw": {
+    command: "notification withdraw",
+    help: "Withdraws an open decision you raised yourself, because its question no longer exists. The user sees it resolved with your reason.",
+    examples: [{ args: ["1f3a9c2e", "--reason", "answered in the session"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The notification's id, or a tail of eight or more characters.",
+        resolves: "notification.query",
+      },
+      reason: { flag: "reason", help: "One line the user reads under the withdrawn decision." },
+    },
+  },
+
   "project.query": {
     command: "project list",
     help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id that `hercule task create --project` takes.",
@@ -2579,6 +2666,11 @@ export const NOUNS = {
   task: {
     summary: "Tasks: units of human intent, work-type-agnostic and never executions themselves.",
     flow: "hercule task list to find work, hercule task read for the whole of one, hercule task create to record new intent, hercule task update as it moves.",
+  },
+  notification: {
+    summary:
+      "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
+    flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",

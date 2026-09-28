@@ -27,6 +27,7 @@ import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
+import { MuteKey } from "./notification";
 
 /**
  * The session-level access mode a provider adapter enforces. Re-exported so
@@ -59,13 +60,6 @@ const PositiveCount = Schema.Int.check(Schema.isGreaterThan(0));
  * by the field that holds it, and documented there.
  */
 export const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
-
-/** The target of a notification mute. */
-const MuteTarget = Schema.NonEmptyString.check(
-  Schema.isPattern(/^(workflow|plugin|assistant):.+$/, {
-    description: "`workflow:<id>`, `plugin:<id>` or `assistant:<id>`",
-  }),
-);
 
 /**
  * The workspace a thread opens in, unless the draft chooses another. There are
@@ -136,7 +130,7 @@ export const SETTING_VALUES = {
     /** The IANA zone the user reads times in, chosen during setup. */
     timezone: Timezone,
     "topics.order": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
-    "notifications.muted": atMost(MuteTarget, MAX_SETTING_LIST),
+    "notifications.muted": atMost(MuteKey, MAX_SETTING_LIST),
     "lastChecked.intake": Timestamp,
     "lastChecked.checkin": Timestamp,
     "lastChecked.notifications": Timestamp,

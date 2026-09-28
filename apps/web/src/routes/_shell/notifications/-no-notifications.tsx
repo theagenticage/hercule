@@ -1,14 +1,12 @@
 import type { JSX } from "react";
-import { createFileRoute } from "@tanstack/react-router";
 import { EmptyState } from "@hercule/ui";
-import { ConnectRows } from "../../screens/connect-rows";
+import { ConnectRows } from "../../../screens/connect-rows";
 
-export const Route = createFileRoute("/_shell/notifications")({
-  staticData: { title: "Notifications" },
-  component: Notifications,
-});
-
-function Notifications(): JSX.Element {
+/**
+ * Renders the notification center while it holds no notification: what will
+ * land here, and the chat channels that carry it further.
+ */
+export function NoNotifications(): JSX.Element {
   return (
     <EmptyState
       headline="Decisions and outcomes will land here."

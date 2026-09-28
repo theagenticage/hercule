@@ -18,6 +18,7 @@ import {
   listLoopbackEndpoints,
   queryKeys,
   RUNNING_STATUSES,
+  UNSEEN_COUNT_READ_LIMIT,
   type HerculeClient,
 } from "@hercule/client-core";
 import {
@@ -422,6 +423,33 @@ export const runsQuery = (client: HerculeClient, filter: RunFilter) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
     placeholderData: (previous) => previous,
+  });
+
+/** Reads every notification, newest first, a page at a time, for the notification center. */
+export const notificationsQuery = (client: HerculeClient) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.notifications({}),
+    queryFn: ({ pageParam }) =>
+      client.notification.query({ query: pageParam === undefined ? {} : { cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+
+/**
+ * Reads the notifications created at or after `since`, or all of them without
+ * it, up to one more than the sidebar shows as a number. The sidebar counts
+ * them; the count needs only the length of this one page.
+ */
+export const unseenNotificationsQuery = (client: HerculeClient, since: string | undefined) =>
+  queryOptions({
+    queryKey: queryKeys.unseenNotifications(since),
+    queryFn: () =>
+      client.notification.query({
+        query: {
+          limit: UNSEEN_COUNT_READ_LIMIT,
+          ...(since === undefined ? {} : { since }),
+        },
+      }),
   });
 
 /**

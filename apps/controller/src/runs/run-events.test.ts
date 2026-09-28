@@ -2,11 +2,12 @@
  * Tests the platform event a run emits when it ends: the payload
  * `buildRunEndedEvent` builds for each way a run ends, stamped with the actor
  * it is given. Which actor the run engine passes is tested over HTTP, in
- * `engine.events.integration.test.ts`.
+ * `engine.events.integration.test.ts`. Also tests the text of the
+ * `core.run-failed` notification `buildRunFailedNotification` builds.
  */
 import { describe, expect, it } from "vitest";
 import type { Run } from "@hercule/contract";
-import { buildRunEndedEvent } from "./run-events";
+import { buildRunEndedEvent, buildRunFailedNotification } from "./run-events";
 
 const RUN_ID = "0199f0b7-0000-7000-8000-00000000e001";
 const WORKFLOW_ID = "0199f0b7-0000-7000-8000-00000000e002";
@@ -176,5 +177,78 @@ describe("buildRunEndedEvent", () => {
       inputs: {},
       finishedAt: FINISHED_AT,
     });
+  });
+});
+
+describe("buildRunFailedNotification", () => {
+  const EVENT_ID = 42;
+
+  it("names the failed edge's message when the run failed at an edge", () => {
+    const notification = buildRunFailedNotification(
+      RUNNING_RUN,
+      {
+        status: "failed",
+        failureReason: "expression-error",
+        failedStepId: "start",
+        failedEdge: { index: 1, message: "No such key: no_such_field" },
+      },
+      EVENT_ID,
+    );
+
+    expect(notification).toStrictEqual({
+      kind: "core.run-failed",
+      title: "Run of File a task failed",
+      body: "The run stopped after step `start`: No such key: no_such_field",
+      subject: [
+        { kind: "run", id: RUN_ID },
+        { kind: "workflow", id: WORKFLOW_ID },
+      ],
+      eventId: EVENT_ID,
+    });
+  });
+
+  it("names the error of the failed step's last record when the run failed at a step", () => {
+    const run: Run = {
+      ...RUNNING_RUN,
+      steps: [
+        {
+          stepId: "create",
+          iteration: 1,
+          status: "failed",
+          startedAt: STARTED_AT,
+          finishedAt: FINISHED_AT,
+          error: { code: "first", message: "The first try timed out." },
+        },
+        {
+          stepId: "create",
+          iteration: 2,
+          status: "failed",
+          startedAt: STARTED_AT,
+          finishedAt: FINISHED_AT,
+          error: { code: "second", message: "The tracker refused the title." },
+        },
+      ],
+    };
+
+    const notification = buildRunFailedNotification(
+      run,
+      { status: "failed", failureReason: "step-failed", failedStepId: "create" },
+      EVENT_ID,
+    );
+
+    expect(notification.body).toBe("Step `create` failed: The tracker refused the title.");
+  });
+
+  it("falls back to the sentence for the failure reason, and leaves out the workflow of a sent run", () => {
+    const notification = buildRunFailedNotification(
+      { ...PENDING_RUN, workflowId: null },
+      { status: "failed", failureReason: "controller-error" },
+      EVENT_ID,
+    );
+
+    expect(notification.body).toBe(
+      "The controller could not carry out the run. Its log has the details.",
+    );
+    expect(notification.subject).toStrictEqual([{ kind: "run", id: RUN_ID }]);
   });
 });

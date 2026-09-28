@@ -47,17 +47,15 @@ export interface RoutingTable {
    * routes. Joins the caller's transaction.
    */
   readonly prepare: () => Effect.Effect<ReadonlyArray<Route>, SqlError>;
-  /** Records a failed evaluation. Returns true when this failure put the route's health into error. */
+  /**
+   * Records a failed evaluation on the route's health, and tells the user when
+   * this failure is the first of a streak. Joins the caller's transaction.
+   */
   readonly recordEvaluationFailure: (
     routeId: string,
     message: string,
-  ) => Effect.Effect<boolean, SqlError>;
+  ) => Effect.Effect<void, SqlError>;
   readonly clearEvaluationFailure: (routeId: string) => Effect.Effect<void, SqlError>;
-  /**
-   * Tells whoever should know that a route's health went to error. Run after
-   * the commit, once per route per new error.
-   */
-  readonly notifyEvaluationError: (routeId: string, message: string) => Effect.Effect<void>;
 }
 
 /** Reads and delivers one kind of row that a routing table writes. */
@@ -65,14 +63,6 @@ export interface Delivery {
   readonly name: string;
   readonly deliverWaiting: () => Effect.Effect<void, SqlError>;
 }
-
-/**
- * The notifications a pass must send outside the database: one for each route
- * whose health went to error. The pass returns them as an effect instead of
- * running them, because the pass runs inside a transaction, and nobody may be
- * notified until that transaction has committed.
- */
-type PendingReports = Effect.Effect<void>;
 
 /** One routing table's routes, and which of them are in an evaluation error. */
 interface PreparedTable {
@@ -156,8 +146,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Evaluates each event against each route, and writes a row for every
-   * match. Returns the notifications for routes whose health went to error,
-   * for the caller to run after its commit.
+   * match.
    *
    * Joins the caller's transaction and waits on nothing but SQL and CPU: the
    * evaluator is synchronous and reads nothing outside the context it gets.
@@ -170,22 +159,20 @@ const make = Effect.gen(function* () {
   const routeEvents = (
     prepared: ReadonlyArray<PreparedTable>,
     batch: ReadonlyArray<Event>,
-  ): Effect.Effect<PendingReports, SqlError> =>
+  ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       // A route's health is about how it handled events, so a pass with no
       // events must not change it.
-      if (batch.length === 0) return Effect.void;
-      const reports: Array<Effect.Effect<void>> = [];
+      if (batch.length === 0) return;
 
-      /** Records one route's failure, and keeps its notification if the route just went to error. */
+      /** Records one route's failure, and remembers that the route is in error. */
       const recordFailure = (
         owner: PreparedTable,
         routeId: string,
         message: string,
       ): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
-          const began = yield* owner.table.recordEvaluationFailure(routeId, message);
-          if (began) reports.push(owner.table.notifyEvaluationError(routeId, message));
+          yield* owner.table.recordEvaluationFailure(routeId, message);
           owner.inEvaluationError.add(routeId);
         });
 
@@ -224,14 +211,12 @@ const make = Effect.gen(function* () {
           yield* route.writeOnMatch(event);
         }
       }
-      return Effect.forEach(reports, (report) => report, { discard: true });
     });
 
   /**
    * Runs one pass: prepares the tables, reads the next batch of events after
    * the cursor, writes a row for every match, and moves the cursor. Returns
-   * the pending notifications, and whether the pass reached the end of the
-   * log.
+   * whether the pass reached the end of the log.
    *
    * The whole pass is one transaction, which gives two guarantees:
    *
@@ -239,8 +224,7 @@ const make = Effect.gen(function* () {
    * - a route created or removed during the pass is seen either fully or not
    *   at all, so no event is skipped for a route that existed all along.
    *
-   * Nothing in the transaction waits on anything but SQL and CPU. Notifying
-   * anything outside the database happens after the commit.
+   * Nothing in the transaction waits on anything but SQL and CPU.
    *
    * The cursor moves even when nothing matched. When the batch is empty, it
    * moves to the end of the log as read inside the transaction. So events that
@@ -248,27 +232,23 @@ const make = Effect.gen(function* () {
    */
   const routeOnePass = (
     tables: ReadonlyArray<RoutingTable>,
-  ): Effect.Effect<
-    { readonly reports: PendingReports; readonly reachedTheEnd: boolean },
-    SqlError
-  > =>
+  ): Effect.Effect<{ readonly reachedTheEnd: boolean }, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
         const prepared = yield* prepareTables(tables);
         const position = yield* readConsumerPosition(sql, ROUTER);
         const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
-        const reports = yield* routeEvents(prepared, batch);
+        yield* routeEvents(prepared, batch);
         const reached = batch.at(-1)?.id ?? (yield* readLogHead(sql));
         if (reached > position) yield* advanceConsumerCursor(sql, ROUTER, reached);
-        return { reports, reachedTheEnd: batch.length < EVENTS_PER_PASS };
+        return { reachedTheEnd: batch.length < EVENTS_PER_PASS };
       }),
     );
 
   return {
     /**
-     * Routes every event after the cursor, in passes of `EVENTS_PER_PASS`, and
-     * sends each pass's notifications after its commit.
+     * Routes every event after the cursor, in passes of `EVENTS_PER_PASS`.
      *
      * A full batch means more events are waiting. Waiting a whole interval
      * before each next batch would make a burst of a thousand events take ten
@@ -286,8 +266,7 @@ const make = Effect.gen(function* () {
     routeNewEvents: (tables: ReadonlyArray<RoutingTable>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         for (let pass = 0; pass < MAX_PASSES_PER_TICK; pass++) {
-          const { reports, reachedTheEnd } = yield* routeOnePass(tables);
-          yield* reports;
+          const { reachedTheEnd } = yield* routeOnePass(tables);
           if (reachedTheEnd) break;
         }
       }),
@@ -305,19 +284,18 @@ const make = Effect.gen(function* () {
      * whose destination is gone, so an event cannot reach such a route here
      * either.
      *
-     * Joins the caller's transaction and only writes rows. Returns the pending
-     * notifications, which the caller runs after its transaction commits.
+     * Joins the caller's transaction and only writes rows.
      */
     rerouteEvent: (
       eventId: number,
       tables: ReadonlyArray<RoutingTable>,
-    ): Effect.Effect<PendingReports, SqlError> =>
+    ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const prepared = yield* prepareTables(tables);
-        if (prepared.every(({ routes }) => routes.length === 0)) return Effect.void;
+        if (prepared.every(({ routes }) => routes.length === 0)) return;
         const event = yield* readPipelineEvent(sql, eventId);
-        if (Option.isNone(event)) return Effect.void;
-        return yield* routeEvents(prepared, [event.value]);
+        if (Option.isNone(event)) return;
+        yield* routeEvents(prepared, [event.value]);
       }),
   };
 });
