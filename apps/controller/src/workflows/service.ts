@@ -33,6 +33,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import {
+  type NotificationSubject,
   createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
@@ -70,6 +71,7 @@ import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, EventKinds } from "../events";
+import { NotificationService } from "../notifications";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
@@ -226,6 +228,13 @@ const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<De
     timezone: trigger.kind === "start" ? trigger.timezone : undefined,
   }));
 
+/** Builds the notification subjects that name these triggers of a workflow. */
+const buildTriggerSubjects = (
+  workflowId: string,
+  triggerIds: ReadonlyArray<string>,
+): ReadonlyArray<NotificationSubject> =>
+  triggerIds.map((triggerId) => ({ kind: "trigger", workflowId, triggerId }));
+
 /** The errors that every method of the service can fail with. */
 type CallError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -249,6 +258,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
+  const notifications = yield* NotificationService;
   const agents = yield* agentRepository;
   const connections = yield* connectionRepository;
   const host = yield* PluginHost;
@@ -493,10 +503,14 @@ const make = Effect.gen(function* () {
               ),
             );
             if (parsedSource !== undefined) {
-              yield* workflows.reconcileTriggers(
+              const removed = yield* workflows.reconcileTriggers(
                 stored.id,
                 buildDeclaredTriggers(parsedSource.definition),
                 savedAt,
+              );
+              yield* notifications.withdrawDecisionsAbout(
+                buildTriggerSubjects(stored.id, removed),
+                "trigger removed",
               );
             }
             yield* audit.append({
@@ -545,7 +559,11 @@ const make = Effect.gen(function* () {
               );
             }
             const deletedAt = yield* nowIso;
-            const name = yield* failIfWorkflowNotFound(workflows.delete(id));
+            const { name, triggerIds } = yield* failIfWorkflowNotFound(workflows.delete(id));
+            yield* notifications.withdrawDecisionsAbout(
+              [{ kind: "workflow", id }, ...buildTriggerSubjects(id, triggerIds)],
+              "workflow deleted",
+            );
             yield* audit.append({
               kind: "workflow.deleted",
               actor: yield* currentStamp,
@@ -608,5 +626,5 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  SqlClient.SqlClient | AuditLog | PluginHost | EventKinds | WorkflowRuns
+  SqlClient.SqlClient | AuditLog | NotificationService | PluginHost | EventKinds | WorkflowRuns
 > = Layer.effect(WorkflowService)(make);

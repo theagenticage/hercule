@@ -17,12 +17,13 @@ import {
 } from "@hercule/plugin-host";
 import { CurrentActor } from "../actor";
 import { readEventsOfKind } from "../events/testing";
+import { NotificationService } from "../notifications";
 import { Secret, Secrets } from "../secrets";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import { asUser, createPluginFixture, buildPluginStack, USER, type Fixture } from "./testing";
 
-type Services = Plugins | PluginHost | Secret | Secrets | SqlClient.SqlClient;
+type Services = Plugins | PluginHost | NotificationService | Secret | Secrets | SqlClient.SqlClient;
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
@@ -306,6 +307,30 @@ describe("a plugin whose activate fails", () => {
     });
   });
 
+  it("raises one core.plugin-error notification about the plugin", async () => {
+    const flaky = createPluginFixture({ id: "flaky", activateFailures: 1 });
+
+    const page = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([flaky.plugin]));
+        return yield* Effect.flatMap(NotificationService, (notifications) =>
+          notifications.query({}),
+        );
+      }),
+    );
+
+    expect(page.items).toEqual([
+      expect.objectContaining({
+        kind: "core.plugin-error",
+        title: "Plugin flaky could not start",
+        body: "The error is shown on the plugin's card under Settings > Plugins.",
+        producer: { type: "core" },
+        subject: [{ kind: "plugin", id: "flaky" }],
+        status: "resolved",
+      }),
+    ]);
+  });
+
   it("runs activate once more when the user retries, and comes up active", async () => {
     const flaky = createPluginFixture({ id: "flaky", activateFailures: 1 });
 
@@ -373,6 +398,26 @@ describe("a plugin whose deactivate fails", () => {
       phase: "deactivate",
       message: "the poll loop would not stop",
     });
+  });
+
+  it("raises a core.plugin-error notification that says the plugin could not stop", async () => {
+    const stuck = createPluginFixture({
+      id: "stuck",
+      deactivateFails: "the poll loop would not stop",
+    });
+
+    const titles = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([stuck.plugin]));
+        yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("stuck"));
+        const page = yield* Effect.flatMap(NotificationService, (notifications) =>
+          notifications.query({ kind: "core.plugin-error" }),
+        );
+        return page.items.map((notification) => notification.title);
+      }),
+    );
+
+    expect(titles).toEqual(["Plugin stuck could not stop"]);
   });
 });
 

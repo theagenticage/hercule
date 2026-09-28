@@ -45,6 +45,7 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { NotificationService } from "../notifications";
 import { currentStampOrSystem } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
@@ -75,6 +76,9 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "event-sources",
   "workflow-actions",
 ];
+
+/** The body of a `core.plugin-error` notification. */
+const PLUGIN_ERROR_BODY = "The error is shown on the plugin's card under Settings > Plugins.";
 
 export interface LoadedPlugin {
   readonly id: string;
@@ -371,6 +375,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
+  const notifications = yield* NotificationService;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
@@ -433,14 +438,27 @@ const make = Effect.gen(function* () {
       // system rather than blaming whoever logged in last. Every other call
       // comes from a request, and is stamped with its actor.
       const actor = yield* currentStampOrSystem;
+      const displayName = (yield* Ref.get(entries)).get(id)?.displayName ?? id;
       yield* withTransaction(
         sql,
-        audit.append({
-          kind: "plugin.errored",
-          actor,
-          payload: { pluginId: id, phase, message },
-          record: { topic: "plugin", id },
-          at,
+        Effect.gen(function* () {
+          yield* audit.append({
+            kind: "plugin.errored",
+            actor,
+            payload: { pluginId: id, phase, message },
+            record: { topic: "plugin", id },
+            at,
+          });
+          yield* notifications.createCoreNotification({
+            kind: "core.plugin-error",
+            title: `${displayName} could not ${phase === "activate" ? "start" : "stop"}`,
+            // The plugin's own error text stays out of the notification:
+            // agent profiles read notifications, and the text is the
+            // plugin's, so it may carry a credential. The plugin card
+            // shows it to the user.
+            body: PLUGIN_ERROR_BODY,
+            subject: [{ kind: "plugin", id }],
+          });
         }),
       );
     });
@@ -790,7 +808,7 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 export const PluginHostLayer: Layer.Layer<
   PluginHost,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes
+  SqlClient.SqlClient | Secrets | AuditLog | NotificationService | ConnectionTypes
 > = Layer.effect(PluginHost)(make);
 
 /**

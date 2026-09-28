@@ -14,9 +14,9 @@ import type { Event } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
 import { nowIso } from "../../../db";
 import { SessionService, sessionRepository } from "../../../sessions";
+import { NotificationService } from "../../../notifications";
 import {
   buildHolderEndedReason,
-  EvaluationErrorNotifier,
   subscriptionRepository,
   type StoredSubscription,
 } from "../../../subscriptions";
@@ -27,12 +27,12 @@ import { renderEventInput } from "./render-event-input";
 export const sessionRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | SessionService | EvaluationErrorNotifier
+  SqlClient.SqlClient | SessionService | NotificationService
 > = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const sessionRows = yield* sessionRepository;
   const subscriptions = yield* subscriptionRepository;
-  const notifier = yield* EvaluationErrorNotifier;
+  const notifications = yield* NotificationService;
 
   /**
    * Ends every subscription whose holder session has ended for good. Returns
@@ -67,13 +67,29 @@ export const sessionRoutingTable: Effect.Effect<
       return swept;
     });
 
+  /**
+   * Records a failed evaluation on the subscription's health. The first
+   * failure of a streak also raises one notification, in the same write, so
+   * the user hears about a broken condition once and not once per event.
+   */
   const recordEvaluationFailure = (
     subscriptionId: string,
     message: string,
-  ): Effect.Effect<boolean, SqlError> =>
-    Effect.flatMap(nowIso, (at) =>
-      subscriptions.recordEvaluationFailure(subscriptionId, message, at),
-    );
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const began = yield* subscriptions.recordEvaluationFailure(
+        subscriptionId,
+        message,
+        yield* nowIso,
+      );
+      if (!began) return;
+      yield* notifications.createCoreNotification({
+        kind: "core.subscription-condition-error",
+        title: "A subscription's condition could not be evaluated",
+        body: message,
+        subject: [{ kind: "subscription", id: subscriptionId }],
+      });
+    });
 
   /**
    * Ends the subscriptions whose holder is gone, then returns the live
@@ -115,6 +131,5 @@ export const sessionRoutingTable: Effect.Effect<
     prepare,
     recordEvaluationFailure,
     clearEvaluationFailure: subscriptions.clearEvaluationFailure,
-    notifyEvaluationError: notifier.notifyEvaluationError,
   };
 });

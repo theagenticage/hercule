@@ -24,7 +24,6 @@ import {
   waitForHealth,
   readMatchedInputRows,
   READS_RAW,
-  buildRecordingNotifier,
   REF,
   waitForMatchedInputRows,
   runEffect,
@@ -38,8 +37,8 @@ import {
   UNRESOLVABLE,
   readCursorAndHead,
   withPipeline,
-  type Notified,
 } from "../../testing";
+import { readNotificationBodiesAbout } from "../../../notifications/testing";
 
 /** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
@@ -133,54 +132,67 @@ describe("the session routing table's sweep", () => {
 
 describe("a condition the router cannot evaluate", () => {
   it("is reported once per error, keeps the subscription live, and is cleared by a clean evaluation", async () => {
-    const calls: Array<Notified> = [];
-    await withPipeline(
-      async (arranged) => {
-        const agent = await spawnSubscriber(arranged, "subscribers");
-        const subscriptionId = await subscribeAgent(arranged, agent, REF);
-        await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
+    await withPipeline(async (arranged) => {
+      const agent = await spawnSubscriber(arranged, "subscribers");
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
 
-        await emitManualEvent(arranged, [REF], "the first failure");
-        const failed = await waitForHealth(
-          arranged,
-          agent,
-          subscriptionId,
-          (health) => health.state === "error",
-        );
-        expect(failed.message ?? "").not.toBe("");
-        expect(failed.at ?? "").not.toBe("");
+      await emitManualEvent(arranged, [REF], "the first failure");
+      const failed = await waitForHealth(
+        arranged,
+        agent,
+        subscriptionId,
+        (health) => health.state === "error",
+      );
+      expect(failed.message ?? "").not.toBe("");
+      expect(failed.at ?? "").not.toBe("");
 
-        // A second failed evaluation updates the message and sends no
-        // notification.
-        const second = await emitManualEvent(arranged, [REF], "the second failure");
-        await waitUntil("walked past the second event", async () => {
-          const seen = await readCursorAndHead(arranged.harness);
-          return seen.position !== null && seen.position >= second ? seen.position : undefined;
-        });
-        expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
-        expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
-        expect(calls[0]!.message).toBe(failed.message);
+      // A second failed evaluation updates the message and sends no
+      // notification.
+      const second = await emitManualEvent(arranged, [REF], "the second failure");
+      await waitUntil("walked past the second event", async () => {
+        const seen = await readCursorAndHead(arranged.harness);
+        return seen.position !== null && seen.position >= second ? seen.position : undefined;
+      });
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+      // The notification is written with the health, in the same
+      // transaction, and carries the first failure's message.
+      expect(
+        await runEffect(
+          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
+            kind: "subscription",
+            id: subscriptionId,
+          }),
+        ),
+      ).toEqual([failed.message]);
 
-        // A clean evaluation sets the health back to ok, and sends no
-        // notification.
-        await storeCondition(arranged.harness, subscriptionId, "true");
-        await emitManualEvent(arranged, [REF], "the clean one");
-        await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "ok");
-        expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
+      // A clean evaluation sets the health back to ok, and sends no
+      // notification.
+      await storeCondition(arranged.harness, subscriptionId, "true");
+      await emitManualEvent(arranged, [REF], "the clean one");
+      await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "ok");
+      expect(
+        await runEffect(
+          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
+            kind: "subscription",
+            id: subscriptionId,
+          }),
+        ),
+      ).toHaveLength(1);
 
-        // The next failure is a new error, and is notified again.
-        await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
-        await emitManualEvent(arranged, [REF], "the new error");
-        await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "error");
-        await waitUntil("reported the new error", () =>
-          calls.filter((call) => call.subscriptionId === subscriptionId).length === 2
-            ? calls
-            : undefined,
-        );
-        expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(2);
-      },
-      { evaluationErrorNotifier: buildRecordingNotifier(calls) },
-    );
+      // The next failure is a new error, and is notified again.
+      await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
+      await emitManualEvent(arranged, [REF], "the new error");
+      await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "error");
+      expect(
+        await runEffect(
+          readNotificationBodiesAbout(arranged.harness.sql, "core.subscription-condition-error", {
+            kind: "subscription",
+            id: subscriptionId,
+          }),
+        ),
+      ).toHaveLength(2);
+    });
   });
 
   it("counts as no match for that subscription only, and every other one is still evaluated and delivered", async () => {

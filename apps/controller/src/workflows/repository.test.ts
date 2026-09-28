@@ -131,6 +131,31 @@ describe("saving a workflow's triggers a second time", () => {
   });
 });
 
+describe("the trigger ids a second save returns", () => {
+  it("are those it deleted and those whose kind changed, not those it kept or added", async () => {
+    const ended = await Effect.runPromise(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const workflowId = yield* storeWorkflow(
+          "Twice saved",
+          [declareTrigger("kept"), declareTrigger("dropped"), declareTrigger("flipped")],
+          FIRST_SAVE,
+        );
+        return yield* workflows.reconcileTriggers(
+          workflowId,
+          [
+            declareTrigger("kept", { filter: "event.payload.id > 3" }),
+            declareTrigger("flipped", { kind: "signal" }),
+            declareTrigger("added"),
+          ],
+          SECOND_SAVE,
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+    expect([...ended].sort()).toEqual(["dropped", "flipped"]);
+  });
+});
+
 describe("listing triggers page by page", () => {
   it("returns each trigger once, in order, when a page ends among triggers with the same created_at", async () => {
     const { listed, workflowIds } = await Effect.runPromise(

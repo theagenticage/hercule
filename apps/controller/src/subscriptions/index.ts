@@ -4,6 +4,5 @@
  * the expression the event router evaluates, and only this domain's service
  * calls it.
  */
-export { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "./evaluation-errors";
 export { subscriptionRepository, type StoredSubscription } from "./repository";
 export { buildHolderEndedReason, SubscriptionService, SubscriptionServiceLayer } from "./service";

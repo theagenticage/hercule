@@ -29,6 +29,7 @@ import {
   type RunStartInput,
   type StepError,
   type TaskCreateInput,
+  type NotificationCreateInput,
   type TaskFilter,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
@@ -41,6 +42,7 @@ import {
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
 } from "../plugins";
+import { NotificationService } from "../notifications";
 import { TaskService } from "../tasks";
 import { runRepository, StepRecordEnded } from "./repository";
 import { buildRunContext } from "./run-context";
@@ -252,6 +254,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const tasks = yield* TaskService;
+    const notifications = yield* NotificationService;
     const host = yield* PluginHost;
 
     /**
@@ -262,7 +265,8 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * They are here rather than on the action catalog's entries (plugins
      * domain) because an action's code must reach the domain it acts on, and
      * the catalog sits below those domains. The runs domain sits above tasks
-     * in the domain graph, so it calls the task service directly.
+     * and notifications in the domain graph, so it calls their services
+     * directly.
      */
     const builtInActions: Record<BuiltInControllerActionId, BuiltInActionHandler> = {
       "task.create": {
@@ -281,6 +285,10 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
       // The action returns the first page. A step reads it to decide what the
       // run does next, and the first page is enough for that.
       "task.query": { inTransaction: true, execute: (input) => tasks.query(input as TaskFilter) },
+      "notification.create": {
+        inTransaction: true,
+        execute: (input) => notifications.create(input as NotificationCreateInput),
+      },
       "run.start": { inTransaction: true, execute: (input) => start(input as RunStartInput) },
       wait: {
         inTransaction: false,
@@ -390,7 +398,12 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             "step-failed",
           );
         }
-        const actor: RunActor = { _tag: "run", runId: run.id, stepId: attempt.stepId };
+        const actor: RunActor = {
+          _tag: "run",
+          runId: run.id,
+          stepId: attempt.stepId,
+          workflowId: run.workflowId,
+        };
         const writeCompletion = (output: unknown) =>
           Effect.gen(function* () {
             const finishedAt = yield* nowIso;

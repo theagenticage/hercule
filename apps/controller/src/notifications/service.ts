@@ -1,8 +1,11 @@
 /**
  * The notification operations: `notification.query`, `read`, `create` and
- * `withdraw`, plus the two the core uses for its own notifications.
+ * `withdraw`, plus three the controller calls for the core's own
+ * notifications: `createCoreNotification`, `hasCoreNotificationSince` and
+ * `withdrawDecisionsAbout`.
  *
- * The producer is stamped from the caller, never taken from the payload:
+ * The producer and its mute key are stamped from the caller, never taken from
+ * the payload:
  *
  * - a session produces as itself, and its mute key is `assistant:<id>` when
  *   the session speaks for an assistant;
@@ -32,11 +35,14 @@ import {
   createInvalidStateError,
   createNotFoundError,
   DEFAULT_PAGE_LIMIT,
+  MAX_NOTIFICATION_BODY_LENGTH,
+  MAX_NOTIFICATION_TITLE_LENGTH,
   NOTIFICATION_SORT_FIELDS,
   NotificationCreateInput,
   NotificationFilter,
   NotificationWithdrawInput,
   type BoundAction,
+  type CoreNotificationKind,
   type EventId,
   type Forbidden,
   type Id,
@@ -56,6 +62,7 @@ import {
   requireGrant,
   SYSTEM_ACTOR,
   type Actor,
+  type RunActor,
   type SessionActor,
 } from "../actor";
 import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
@@ -84,13 +91,6 @@ export interface NotificationPage {
   readonly items: ReadonlyArray<Notification>;
   readonly nextCursor?: string;
 }
-
-/** The kinds the core produces. Every other producer is refused a `core.*` kind. */
-export type CoreNotificationKind =
-  | "core.run-failed"
-  | "core.plugin-error"
-  | "core.runner-unreachable"
-  | "core.subscription-condition-error";
 
 /** A notification the core raises about itself. */
 export interface CoreNotification {
@@ -126,6 +126,28 @@ const NOT_THE_PRODUCER = "only the producer of a notification may withdraw it";
 const decideInitialStatus = (actions: ReadonlyArray<BoundAction>) =>
   actions.length > 0 ? ("open" as const) : ("resolved" as const);
 
+/**
+ * Returns the key that mutes a notification from this caller: the assistant a
+ * session speaks for, or the stored workflow a run was started from. Returns
+ * undefined when there is nothing to mute by: a session in no assistant's
+ * conversation, or a run of a sent workflow.
+ */
+const decideMuteKey = (caller: SessionActor | RunActor): MuteKey | undefined => {
+  if (caller._tag === "session") {
+    return caller.assistantId === null ? undefined : `assistant:${caller.assistantId}`;
+  }
+  return caller.workflowId === null ? undefined : `workflow:${caller.workflowId}`;
+};
+
+/**
+ * Shortens text to at most `max` characters, ending it with an ellipsis when
+ * it had to be cut. The core builds titles and bodies from names and error
+ * messages it does not control, and a stored notification longer than the
+ * contract allows could not be returned by `notification.query` at all.
+ */
+const shortenTo = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
 /** Checks whether a caller is the session that produced a notification. */
 const isProducer = (actor: Actor, producer: NotificationProducer): actor is SessionActor =>
   actor._tag === "session" && producer.type === "session" && producer.sessionId === actor.sessionId;
@@ -145,36 +167,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the key that mutes a producer: the workflow of a run, the
-   * assistant of a session. Returns none when there is nothing to mute by: a
-   * run of a sent workflow, or a session that speaks for no assistant.
-   */
-  const decideMuteKey = (
-    producer: NotificationProducer,
-  ): Effect.Effect<Option.Option<MuteKey>, SqlError> => {
-    switch (producer.type) {
-      case "run":
-        return Effect.map(
-          notifications.readRunWorkflowId(producer.runId),
-          Option.map((id) => `workflow:${id}`),
-        );
-      case "session":
-        return Effect.map(
-          notifications.readSessionAssistantId(producer.sessionId),
-          Option.map((id) => `assistant:${id}`),
-        );
-      case "plugin":
-        return Effect.succeed(Option.some(`plugin:${producer.pluginId}`));
-      case "core":
-        return Effect.succeed(Option.none());
-    }
-  };
-
-  /**
    * Writes a notification with its audit entry and announcement, in the
    * caller's transaction if there is one.
    */
-  const insert = (
+  const insertAndAudit = (
     notification: NewNotification,
     actor: string,
   ): Effect.Effect<Notification, SqlError> =>
@@ -231,8 +227,14 @@ const make = Effect.gen(function* () {
     /**
      * Creates a notification as the calling session or run step, and returns
      * its id. With actions it is an open decision; without, it is
-     * informational and resolved from the start. Fails with `Forbidden` for
-     * the user, who is who notifications are for.
+     * informational and resolved from the start.
+     *
+     * Fails with:
+     *
+     * - `Forbidden` for the user, because notifications are messages to the
+     *   user;
+     * - `Validation` if the payload does not match the contract, which
+     *   includes a `core.*` kind.
      */
     create: (
       input: NotificationCreateInput,
@@ -242,38 +244,31 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("notification.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const producer: NotificationProducer | undefined =
-          caller._tag === "session"
-            ? { type: "session", sessionId: caller.sessionId }
-            : caller._tag === "run"
-              ? { type: "run", runId: caller.runId, stepId: caller.stepId }
-              : undefined;
-        if (producer === undefined) {
+        if (caller._tag !== "session" && caller._tag !== "run") {
           return yield* Effect.fail(createForbiddenError("notification.write", USER_CANNOT_CREATE));
         }
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        const producer: NotificationProducer =
+          caller._tag === "session"
+            ? { type: "session", sessionId: caller.sessionId }
+            : { type: "run", runId: caller.runId, stepId: caller.stepId };
+        const muteKey = decideMuteKey(caller);
         const actions = decoded.actions ?? [];
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const muteKey = yield* decideMuteKey(producer);
-            const stored = yield* insert(
-              {
-                kind: decoded.kind,
-                title: decoded.title,
-                ...(decoded.body === undefined ? {} : { body: decoded.body }),
-                producer,
-                ...Option.match(muteKey, { onNone: () => ({}), onSome: (key) => ({ muteKey: key }) }),
-                subject: decoded.subject ?? [],
-                actions,
-                status: decideInitialStatus(actions),
-                createdAt: yield* nowIso,
-              },
-              yield* currentStamp,
-            );
-            return { notificationId: stored.id };
-          }),
+        const stored = yield* insertAndAudit(
+          {
+            kind: decoded.kind,
+            title: decoded.title,
+            ...(decoded.body === undefined ? {} : { body: decoded.body }),
+            producer,
+            ...(muteKey === undefined ? {} : { muteKey }),
+            subject: decoded.subject ?? [],
+            actions,
+            status: decideInitialStatus(actions),
+            createdAt: yield* nowIso,
+          },
+          yield* currentStamp,
         );
+        return { notificationId: stored.id };
       }),
 
     /**
@@ -283,8 +278,9 @@ const make = Effect.gen(function* () {
      *
      * Fails with:
      *
+     * - `Validation` if the reason is empty or longer than one line;
+     * - `Forbidden` if the caller is a run, or did not produce it;
      * - `NotFound` if the notification does not exist;
-     * - `Forbidden` if the caller did not produce it, or is a run;
      * - `InvalidState` if it is already resolved, which includes every
      *   informational notification.
      */
@@ -296,6 +292,11 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("notification.withdraw");
+        if (caller._tag === "run") {
+          return yield* Effect.fail(
+            createForbiddenError("notification.write", RUN_CANNOT_WITHDRAW),
+          );
+        }
         const { reason } = yield* Effect.mapError(
           decodeWithdraw({ reason: input.reason }),
           createDecodeValidationError,
@@ -304,20 +305,15 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const notification = yield* readOrFail(input.id);
-            if (caller._tag === "run") {
+            if (!isProducer(caller, notification.producer)) {
               return yield* Effect.fail(
-                createForbiddenError("notification.write", RUN_CANNOT_WITHDRAW),
+                createForbiddenError("notification.write", NOT_THE_PRODUCER),
               );
             }
-            if (!isProducer(caller, notification.producer)) {
-              return yield* Effect.fail(createForbiddenError("notification.write", NOT_THE_PRODUCER));
-            }
-            if (notification.status !== "open") {
+            if (notification.actions.length === 0) {
               return yield* Effect.fail(
                 createInvalidStateError(
-                  notification.actions.length === 0
-                    ? "an informational notification has no question to withdraw"
-                    : "the notification is already resolved",
+                  "an informational notification has no question to withdraw",
                 ),
               );
             }
@@ -329,7 +325,13 @@ const make = Effect.gen(function* () {
               reason,
               at: yield* nowIso,
             };
-            yield* notifications.resolve(input.id, resolution);
+            // The status is checked by the write itself, so a resolution that
+            // lands between the read above and this write still wins.
+            if (!(yield* notifications.resolve(input.id, resolution))) {
+              return yield* Effect.fail(
+                createInvalidStateError("the notification is already resolved"),
+              );
+            }
             yield* audit.append({
               kind: "notification.withdrawn",
               actor,
@@ -347,14 +349,20 @@ const make = Effect.gen(function* () {
      * returns its id. It runs in the caller's transaction, so the notification
      * commits with the change it reports. There is no grant check: only the
      * controller calls it.
+     *
+     * A title or body longer than the contract allows is shortened, and an
+     * empty body is left out, so a notification built from an error message
+     * is always one `notification.query` can return.
      */
     createCoreNotification: (notification: CoreNotification): Effect.Effect<Id, SqlError> =>
       Effect.gen(function* () {
-        const stored = yield* insert(
+        const stored = yield* insertAndAudit(
           {
             kind: notification.kind,
-            title: notification.title,
-            ...(notification.body === undefined ? {} : { body: notification.body }),
+            title: shortenTo(notification.title, MAX_NOTIFICATION_TITLE_LENGTH),
+            ...(notification.body === undefined || notification.body === ""
+              ? {}
+              : { body: shortenTo(notification.body, MAX_NOTIFICATION_BODY_LENGTH) }),
             producer: { type: "core" },
             subject: notification.subject,
             ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
@@ -366,6 +374,19 @@ const make = Effect.gen(function* () {
         );
         return stored.id;
       }),
+
+    /**
+     * Checks whether the core raised a notification of this kind about this
+     * subject after `since`. The core asks before it raises one about a
+     * condition that lasts, so the condition is reported once and not on
+     * every check. There is no grant check: only the controller calls it.
+     */
+    hasCoreNotificationSince: (
+      kind: CoreNotificationKind,
+      subject: NotificationSubject,
+      since: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      notifications.hasNotificationAboutSince(kind, subject, since),
 
     /**
      * Withdraws every open decision about any of these subjects, because the
@@ -380,7 +401,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const ids = yield* notifications.listOpenAbout(subjects);
+          const ids = yield* notifications.listOpenDecisionIdsAbout(subjects);
           if (ids.length === 0) return;
           const at = yield* nowIso;
           const resolution = {

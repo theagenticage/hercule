@@ -589,10 +589,6 @@ const RunLayers = RunServiceLayer.pipe(
  * instance would have no plugins, no connections and none of the state a
  * session's stream is coalesced in, and would write over the same rows the
  * drivers use. The handlers get them from the boot.
- *
- * `EvaluationErrorNotifier` is left to the caller for a related reason: a
- * test checks what a routing table reported by passing in its own notifier,
- * which a layer provided here would prevent.
  */
 export const operationLayers = Layer.mergeAll(
   AuthLayer,

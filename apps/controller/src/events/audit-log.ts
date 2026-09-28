@@ -207,12 +207,12 @@ const make = Effect.gen(function* () {
      */
     append: (entry: AuditEntry): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        yield* Effect.asVoid(appendPlatformSourceEvent(sql, {
+        yield* appendPlatformSourceEvent(sql, {
           kind: entry.kind,
           actor: entry.actor,
           payload: entry.payload,
           at: entry.at ?? (yield* nowIso),
-        }));
+        });
         // A row about a record is also announced as a change to that record.
         if (entry.record !== undefined) {
           yield* announce({

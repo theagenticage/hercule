@@ -12,12 +12,15 @@ import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { NotificationServiceLayer } from "../notifications";
+import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer, type QueryInput, type TaskPage } from "./index";
 
 type Deps = TaskService | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
+  Layer.provideMerge(NotificationServiceLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );
@@ -272,6 +275,31 @@ describe("task.delete", () => {
     expect(snapshot.deletedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("withdraws the open decisions about the task, and leaves the others open", async () => {
+    const { about, other } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const deleted = yield* tasks.create({ title: "Delete me", description: "d" });
+        const kept = yield* tasks.create({ title: "Keep me", description: "d" });
+        const about = yield* insertOpenDecision({ kind: "task", id: deleted.id });
+        const other = yield* insertOpenDecision({ kind: "task", id: kept.id });
+        yield* tasks.delete(deleted.id);
+        return {
+          about: yield* readStoredNotification(about),
+          other: yield* readStoredNotification(other),
+        };
+      }),
+    );
+    expect(about.status).toBe("resolved");
+    expect(about.resolution).toMatchObject({
+      kind: "withdrawn",
+      actor: "system",
+      origin: "core",
+      reason: "task deleted",
+    });
+    expect(other.status).toBe("open");
+  });
+
   it("returns not_found the second time", async () => {
     const error = await runError(
       Effect.gen(function* () {
@@ -495,7 +523,7 @@ describe("provenance", () => {
   describe("of a task a run's step creates", () => {
     const RUN_ID = "0199e0e7-0002-7000-8000-000000000000";
     const OTHER_RUN_ID = "0199e0e7-0003-7000-8000-000000000000";
-    const RUN: Actor = { _tag: "run", runId: RUN_ID, stepId: "file" };
+    const RUN: Actor = { _tag: "run", runId: RUN_ID, stepId: "file", workflowId: null };
 
     /** Creates a task as the run, with `provenance` as the step's params give it, and returns the task's provenance as refs and run ids. */
     const createAsRun = async (provenance: TaskCreateInput["provenance"]) => {

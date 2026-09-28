@@ -38,6 +38,7 @@ interface Row {
   readonly id: Uint8Array;
   readonly permission_profile_id: Uint8Array;
   readonly grants: string;
+  readonly assistant_id: Uint8Array | null;
 }
 
 const decodeGrants = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(GrantSchema)));
@@ -69,9 +70,10 @@ const make = Effect.gen(function* () {
         if (cached !== undefined) return Option.some(cached);
         const before = dropped;
         const rows = yield* sql<Row>`
-          SELECT s.id, s.permission_profile_id, p.grants
+          SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id
           FROM sessions s
           JOIN permission_profiles p ON p.id = s.permission_profile_id
+          LEFT JOIN conversations c ON c.id = s.conversation_id
           WHERE s.token_hash = ${tokenHash} AND s.status IN ('starting', 'idle', 'busy')
         `;
         const row = rows[0];
@@ -81,6 +83,7 @@ const make = Effect.gen(function* () {
           sessionId: uuidToString(row.id),
           profileId: uuidToString(row.permission_profile_id),
           grants: decodeGrants(row.grants),
+          assistantId: row.assistant_id === null ? null : uuidToString(row.assistant_id),
         };
         if (dropped === before) held.set(tokenHash, actor);
         return Option.some(actor);

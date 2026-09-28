@@ -16,13 +16,12 @@
  * was written for.
  */
 import { expect } from "vitest";
-import { Duration, Effect, Layer } from "effect";
+import { Duration, Effect } from "effect";
 import type { ModelDescriptor, RunnerFacts, SessionInput } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { get, post, type ServerHarness } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
-import { EvaluationErrorNotifier } from "../subscriptions";
 import {
   spawnAgentWithGrants,
   at,
@@ -100,27 +99,6 @@ export const buildPlugins = (): ReadonlyArray<Plugin> => [
   github,
 ];
 
-/** The arguments of one call to the evaluation-error stub. */
-export interface Notified {
-  readonly subscriptionId: string;
-  readonly message: string;
-}
-
-/**
- * Returns an evaluation-error notifier that records each call in `calls`.
- * Until notifications are built the real notifier does nothing, and this one
- * lets a test check that a notification happens once per error.
- */
-export const buildRecordingNotifier = (
-  calls: Array<Notified>,
-): Layer.Layer<EvaluationErrorNotifier> =>
-  Layer.succeed(EvaluationErrorNotifier, {
-    notifyEvaluationError: (subscriptionId: string, message: string) =>
-      Effect.sync(() => {
-        calls.push({ subscriptionId, message });
-      }),
-  });
-
 /**
  * Runs `body` against a controller whose pipeline ticks every few
  * milliseconds.
@@ -138,7 +116,6 @@ export const withPipeline = (
     ...options
   }: {
     readonly expressionBudget?: Duration.Duration;
-    readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
     readonly eventRoutingInterval?: Duration.Duration;
     readonly additionalPlugins?: ReadonlyArray<Plugin>;
   } = {},

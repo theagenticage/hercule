@@ -1,8 +1,8 @@
 /**
  * Integration tests for the built-in actions a run calls beyond `task.create`
  * and `task.update`, driven over HTTP against a real controller: `task.query`,
- * `run.start`, which starts a child run, `wait`, and the action that stays unknown,
- * `notification.create`. Also checks that a run calls a built-in action
+ * `run.start`, which starts a child run, `wait`, and `notification.create`. Also
+ * checks that a run calls a built-in action
  * without the grant checks its starter would face.
  *
  * A child run is held at `running` by a plugin action that waits until the
@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@hercule/contract";
-import { post, send } from "../http/testing";
+import { get, post, send } from "../http/testing";
 import { spawnAgentWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import {
   ABSENT_ID,
@@ -317,26 +317,63 @@ describe("wait", () => {
 });
 
 describe("notification.create", () => {
-  it("is refused at save as an unknown action", async () => {
+  it("creates a notification produced by the run's step, muted with its workflow, and outputs its id", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: {
+          name: "Notify",
+          steps: [
+            {
+              id: "notify",
+              kind: "action",
+              action: "notification.create",
+              params: { kind: "deploy.done", title: "Deployed", body: "All green" },
+            },
+          ],
+        },
+      });
+
+      const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+
+      expect(run.status, JSON.stringify(run)).toBe("completed");
+      const { notificationId } = expectStatus(findStepRecords(run, "notify")[0], "completed")
+        .output as { readonly notificationId: string };
+      const response = await get(base, `/api/v1/notifications/${notificationId}`, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({
+        id: notificationId,
+        kind: "deploy.done",
+        title: "Deployed",
+        body: "All green",
+        producer: { type: "run", runId: run.id, stepId: "notify" },
+        muteKey: `workflow:${workflow.id}`,
+        subject: [],
+        actions: [],
+        status: "resolved",
+        createdAt: expect.any(String) as unknown,
+      });
+    });
+  });
+
+  it("is refused at save when its kind is one the core reserves", async () => {
     await withSetUpController(async ({ base, token }) => {
       const issues = await readIssues(
         await createWorkflow(base, token, {
           definition: {
-            name: "Notify",
+            name: "Pretend to be the core",
             steps: [
               {
                 id: "notify",
                 kind: "action",
                 action: "notification.create",
-                params: { title: "Done" },
+                params: { kind: "core.run-failed", title: "Fake" },
               },
             ],
           },
         }),
       );
 
-      expect(issues.map((issue) => issue.path)).toEqual([["steps", "0", "action"]]);
-      expect(issues[0]!.message).toMatch(/not a known action/);
+      expect(issues.map((issue) => issue.path)).toEqual([["steps", "0", "params", "kind"]]);
     });
   });
 });

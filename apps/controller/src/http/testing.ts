@@ -77,7 +77,6 @@ import { SessionServiceLayer } from "../sessions";
 import { AssistantSessionObserverLayer } from "../assistants";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
-import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
@@ -108,13 +107,12 @@ export const USERNAME = "rogier";
  * routes must share one instance: a request must read the status the boot's
  * activation wrote.
  */
-const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) =>
+const buildServices = (home: string) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
   // provided to it rather than merged next to it, just as the real boot
   // provides what `withPlugins` built to the operation layers.
   operationLayers.pipe(
-    Layer.provide(notifier),
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
@@ -298,11 +296,6 @@ export interface ServerOptions {
    */
   readonly expressionBudget?: Duration.Duration;
   /**
-   * Where notifications of evaluation errors go. The default notifier does
-   * nothing, so a test that checks notifications passes its own.
-   */
-  readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
-  /**
    * The plugin registry. The real one is compiled in, so a test passes its
    * own. A provider plugin is added when none of these offers providers.
    */
@@ -418,7 +411,7 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        buildServices(home, options.evaluationErrorNotifier ?? EvaluationErrorNotifierLayer).pipe(
+        buildServices(home).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.

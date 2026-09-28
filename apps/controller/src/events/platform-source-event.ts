@@ -12,7 +12,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Actor } from "@hercule/contract";
+import type { Actor, EventId } from "@hercule/contract";
 import { announce } from "../db";
 
 /** One event the controller logs about itself, as it goes into the log. */
@@ -33,7 +33,7 @@ export interface PlatformSourceEventToAppend {
 export const appendPlatformSourceEvent = (
   sql: SqlClient.SqlClient,
   event: PlatformSourceEventToAppend,
-): Effect.Effect<number, SqlError> =>
+): Effect.Effect<EventId, SqlError> =>
   Effect.gen(function* () {
     // `dedup_key` is an emitter's idempotency key, and the controller needs
     // none: two logins a second apart are two facts, not one repeated, and a

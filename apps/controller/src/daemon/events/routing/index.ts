@@ -14,7 +14,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SessionService } from "../../../sessions";
-import { EvaluationErrorNotifier } from "../../../subscriptions";
+import type { NotificationService } from "../../../notifications";
 import type { Delivery, RoutingTable } from "../event-router";
 import { Live } from "../../sessions";
 import { queuedInputDelivery } from "./queued-input-delivery";
@@ -28,7 +28,7 @@ import { sessionRoutingTable } from "./session-routing-table";
 export const buildRoutingTables: Effect.Effect<
   ReadonlyArray<RoutingTable>,
   never,
-  SqlClient.SqlClient | SessionService | EvaluationErrorNotifier
+  SqlClient.SqlClient | SessionService | NotificationService
 > = Effect.map(sessionRoutingTable, (table) => [table]);
 
 /** Builds every delivery that sends the rows waiting to go out, whoever wrote them. */

@@ -70,6 +70,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 const BUILT_IN_ACTION_IDS = [
   "git.commit",
   "git.push",
+  "notification.create",
   "run.start",
   "task.create",
   "task.query",

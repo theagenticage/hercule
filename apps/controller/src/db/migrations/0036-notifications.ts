@@ -30,8 +30,11 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       -- An open decision has no resolution yet.
       CHECK (status = 'resolved' OR resolution IS NULL),
-      -- An informational notification is born resolved and is never resolved again.
-      CHECK (actions <> '[]' OR (status = 'resolved' AND resolution IS NULL))
+      -- An informational notification is born resolved and is never resolved
+      -- again. Its only resolution is "handled": an assistant covered what it
+      -- reports, so it was recorded without being pushed (spec 10 §7.5).
+      CHECK (actions <> '[]' OR (status = 'resolved' AND
+                                 (resolution IS NULL OR resolution ->> 'kind' = 'handled')))
     )
   `;
   // Serves the notification list, newest first.
@@ -39,5 +42,7 @@ export default Effect.gen(function* () {
   // Serves the lookup of the open decisions about a subject, which the core
   // runs when it removes that subject. Open decisions are few, so the partial
   // index keeps that lookup small however long the list grows.
-  yield* sql`CREATE INDEX notifications_open ON notifications (created_at) WHERE status = 'open'`;
+  yield* sql`
+    CREATE INDEX notifications_open ON notifications (created_at, id) WHERE status = 'open'
+  `;
 });

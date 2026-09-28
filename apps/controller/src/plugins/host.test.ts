@@ -554,6 +554,7 @@ describe("the workflow action catalog", () => {
     expect(rows.sort()).toEqual([
       "core git.commit",
       "core git.push",
+      "core notification.create",
       "core run.start",
       "core task.create",
       "core task.query",
@@ -587,6 +588,7 @@ describe("the workflow action catalog", () => {
     expect(statuses.actions.map((action) => action.id)).toEqual([
       "git.commit",
       "git.push",
+      "notification.create",
       "run.start",
       "task.create",
       "task.query",

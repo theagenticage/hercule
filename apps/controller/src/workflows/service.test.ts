@@ -1,7 +1,7 @@
 /**
- * Tests two rules of the workflow service that the HTTP tests cannot check
- * well: the default sort order of the workflow list, and what the event log
- * records about each write.
+ * Tests three rules of the workflow service that the HTTP tests cannot check
+ * well: the default sort order of the workflow list, what the event log
+ * records about each write, and which open decisions a write withdraws.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -11,9 +11,10 @@ import { CurrentActor, type Actor } from "../actor";
 import { EventKindsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
+import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
 import { buildPluginStack } from "../plugins/testing";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "./index";
-import { buildFileTaskSource } from "./testing";
+import { buildFileTaskSource, buildTaskStep } from "./testing";
 
 type Deps = WorkflowService | PluginHost | SqlClient.SqlClient;
 
@@ -125,5 +126,89 @@ describe("event log entries for workflow writes", () => {
     );
 
     expect(changes).toEqual([[], ["enabled"], ["source"]]);
+  });
+});
+
+/** Returns a source with one step and a start trigger for each id in `triggerIds`. */
+const buildTriggeredSource = (name: string, triggerIds: ReadonlyArray<string>): string =>
+  [
+    `name: ${name}`,
+    "triggers:",
+    ...triggerIds.flatMap((id) => [
+      `  - id: ${id}`,
+      "    kind: start",
+      "    source:",
+      "      kind: task.created",
+    ]),
+    "steps:",
+    buildTaskStep("file_task"),
+    "",
+  ].join("\n");
+
+describe("open decisions about a workflow", () => {
+  it("are withdrawn when the workflow is deleted, together with those about its triggers", async () => {
+    const { aboutWorkflow, aboutTrigger, aboutOther } = await run(
+      Effect.gen(function* () {
+        const workflows = yield* WorkflowService;
+        const deleted = yield* workflows.create({
+          source: buildTriggeredSource("Deleted", ["on_create"]),
+        });
+        const kept = yield* workflows.create({ source: buildSource("Kept") });
+        const workflowId = deleted.workflow.id;
+        const aboutWorkflow = yield* insertOpenDecision({ kind: "workflow", id: workflowId });
+        const aboutTrigger = yield* insertOpenDecision({
+          kind: "trigger",
+          workflowId,
+          triggerId: "on_create",
+        });
+        const aboutOther = yield* insertOpenDecision({ kind: "workflow", id: kept.workflow.id });
+        yield* workflows.delete(workflowId);
+        return {
+          aboutWorkflow: yield* readStoredNotification(aboutWorkflow),
+          aboutTrigger: yield* readStoredNotification(aboutTrigger),
+          aboutOther: yield* readStoredNotification(aboutOther),
+        };
+      }),
+    );
+    for (const withdrawn of [aboutWorkflow, aboutTrigger]) {
+      expect(withdrawn.resolution).toMatchObject({
+        kind: "withdrawn",
+        origin: "core",
+        reason: "workflow deleted",
+      });
+    }
+    expect(aboutOther.status).toBe("open");
+  });
+
+  it("are withdrawn for a trigger an update removes, and kept for a trigger it keeps", async () => {
+    const { removed, kept } = await run(
+      Effect.gen(function* () {
+        const workflows = yield* WorkflowService;
+        const created = yield* workflows.create({
+          source: buildTriggeredSource("Two triggers", ["first", "second"]),
+        });
+        const workflowId = created.workflow.id;
+        const removed = yield* insertOpenDecision({
+          kind: "trigger",
+          workflowId,
+          triggerId: "first",
+        });
+        const kept = yield* insertOpenDecision({
+          kind: "trigger",
+          workflowId,
+          triggerId: "second",
+        });
+        yield* workflows.update({
+          id: workflowId,
+          source: buildTriggeredSource("Two triggers", ["second"]),
+        });
+        return {
+          removed: yield* readStoredNotification(removed),
+          kept: yield* readStoredNotification(kept),
+        };
+      }),
+    );
+    expect(removed.resolution).toMatchObject({ kind: "withdrawn", reason: "trigger removed" });
+    expect(kept.status).toBe("open");
   });
 });

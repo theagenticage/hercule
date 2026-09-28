@@ -13,6 +13,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
   BoundAction,
   Notification,
+  NotificationFilter,
   NotificationProducer,
   NotificationStatus,
   NotificationSubject,
@@ -31,14 +32,6 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
-
-/** The filter of a listing. A notification must match every field given. */
-export interface NotificationFilter {
-  readonly kind?: string;
-  readonly status?: NotificationStatus;
-  /** Keeps notifications created at or after this instant. */
-  readonly since?: string;
-}
 
 /** The page size, cursor and direction of a listing, which is always by `createdAt`. */
 export interface NotificationPageRequest {
@@ -142,8 +135,11 @@ const make = Effect.gen(function* () {
         (rows) => rows.length === 1,
       ),
 
-    /** Returns the ids of the open notifications whose subject lists any of these subjects. */
-    listOpenAbout: (
+    /**
+     * Returns the ids of the open notifications whose subject lists any of
+     * these subjects. Only a decision is ever open.
+     */
+    listOpenDecisionIdsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       subjects.length === 0
@@ -159,25 +155,24 @@ const make = Effect.gen(function* () {
             (rows) => rows.map((row) => uuidToString(row.id)),
           ),
 
-    /** Returns the id of the workflow a run was started from, or none for a run of a sent workflow. */
-    readRunWorkflowId: (runId: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly workflow_id: Uint8Array | null }>`
-          SELECT workflow_id FROM runs WHERE id = ${uuidFromString(runId)}`,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]?.workflow_id), uuidToString),
-      ),
-
     /**
-     * Returns the id of the assistant a session speaks for, or none for a
-     * session that is not part of an assistant's conversation.
+     * Checks whether a notification of this kind about this subject was
+     * created after `since`.
      */
-    readSessionAssistantId: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    hasNotificationAboutSince: (
+      kind: string,
+      subject: NotificationSubject,
+      since: string,
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.map(
-        sql<{ readonly assistant_id: Uint8Array | null }>`
-          SELECT conversations.assistant_id FROM sessions
-          JOIN conversations ON conversations.id = sessions.conversation_id
-          WHERE sessions.id = ${uuidFromString(sessionId)}`,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]?.assistant_id), uuidToString),
+        sql<{ readonly id: Uint8Array }>`
+          SELECT notifications.id FROM notifications
+          WHERE notifications.kind = ${kind} AND notifications.created_at > ${since}
+            AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                        WHERE ${buildSubjectMatch(subject)})
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /** Returns one page of the notifications that match a filter, ordered by `createdAt`. */

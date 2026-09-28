@@ -39,6 +39,8 @@ import {
   RunStarted,
   Task,
   TaskCreateInput,
+  NotificationCreateInput,
+  NotificationCreateResult,
   TaskFilter,
   TaskUpdateInput,
   type OperationId,
@@ -298,6 +300,15 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     // which is not built yet.
     input: Schema.Struct({ workflowId: Id, inputs: Schema.optionalKey(RunInputs) }),
     output: RunStarted,
+  },
+  {
+    id: "notification.create",
+    runsIn: "controller",
+    displayName: "Send a notification",
+    description:
+      "Sends the user a Notification with a title and an optional markdown body. The run is its producer, so muting the workflow mutes it. With actions it is a decision that stays open until it is resolved; without, it is informational. The output holds the new Notification's id.",
+    input: NotificationCreateInput,
+    output: NotificationCreateResult,
   },
   {
     id: "wait",

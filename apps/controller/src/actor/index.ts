@@ -61,6 +61,12 @@ export interface SessionActor {
   readonly sessionId: string;
   readonly profileId: string;
   readonly grants: ReadonlyArray<Grant>;
+  /**
+   * The assistant the session speaks for, or null when the session is not
+   * part of an assistant's conversation. A notification the session creates
+   * is muted by this assistant.
+   */
+  readonly assistantId: string | null;
 }
 
 /**
@@ -76,6 +82,11 @@ export interface RunActor {
   readonly runId: string;
   /** The step that is executing, for code that records which step made a change. */
   readonly stepId: string;
+  /**
+   * The stored workflow the run was started from, or null for a run of a sent
+   * workflow. A notification the step creates is muted by this workflow.
+   */
+  readonly workflowId: string | null;
 }
 
 /** No caller was resolved: an unauthenticated route, or an in-process caller. */

@@ -3,7 +3,6 @@ export {
   NotificationService,
   NotificationServiceLayer,
   type CoreNotification,
-  type CoreNotificationKind,
   type NotificationPage,
   type QueryInput,
   type WithdrawInput,
