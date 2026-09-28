@@ -59,6 +59,7 @@ export {
   InboundLayer,
   Retirement,
   RetirementLayer,
+  sweepUnreachableRunners,
 } from "./runners";
 export { RunExecutorLayer, RunFibers, WorkspaceStepsLayer } from "./runs";
 export {

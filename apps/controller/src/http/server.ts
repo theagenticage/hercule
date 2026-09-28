@@ -52,7 +52,14 @@ import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
-import { Arrival, Inbound, Pipeline, Provisioning, sweepSessionsOnLostRunners } from "../daemon";
+import {
+  Arrival,
+  Inbound,
+  Pipeline,
+  Provisioning,
+  sweepSessionsOnLostRunners,
+  sweepUnreachableRunners,
+} from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
@@ -209,6 +216,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // not connected, and until the reset every runner the last process held
     // still reads `online`.
     yield* Effect.forkScoped(sweepSessionsOnLostRunners);
+    // Also after the reset, so a runner the last process left `online` is
+    // reported once it has been gone for the grace, like any other.
+    yield* Effect.forkScoped(sweepUnreachableRunners);
     // Forked before the listener binds, and the arrivals stream replays the
     // rest, so no runner's hello is missed. The probe driver also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.

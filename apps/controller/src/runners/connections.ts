@@ -50,6 +50,7 @@ import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { NotificationService } from "../notifications";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -184,6 +185,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
+  const notifications = yield* NotificationService;
 
   const reachable = new Map<string, Reachable>();
   // Unbounded, so a runner's hello never waits for a slow subscriber. It
@@ -635,6 +637,39 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Raises one `core.runner-unreachable` notification for each runner that
+     * is unreachable and was last seen at or before `cutoff`, unless one was
+     * already raised about it since it was last seen. A runner that drops and
+     * comes back within the grace the caller's cutoff allows raises nothing;
+     * one that stays away raises one notification however long it stays away,
+     * and one more the next time it is lost after it came back.
+     */
+    notifyUnreachableRunners: (cutoff: string): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          for (const runner of yield* runners.listUnreachableSeenBefore(cutoff)) {
+            const subject = { kind: "runner", id: runner.id } as const;
+            if (
+              yield* notifications.hasCoreNotificationSince(
+                "core.runner-unreachable",
+                subject,
+                runner.lastSeenAt,
+              )
+            ) {
+              continue;
+            }
+            yield* notifications.createCoreNotification({
+              kind: "core.runner-unreachable",
+              title: `Runner ${runner.name} is unreachable`,
+              body: "Its connection dropped without a goodbye, and it has not reconnected. Work placed on it waits until it does.",
+              subject: [subject],
+            });
+          }
+        }),
+      ),
+
+    /**
      * Marks every runner still `online` as `unreachable`, at boot. No
      * connection survives the process that held it, and only a connection
      * moves its runner off `online`. Without this, a controller that was
@@ -659,5 +694,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog
+  SqlClient.SqlClient | AuditLog | NotificationService
 > = Layer.effect(RunnerConnections)(make);

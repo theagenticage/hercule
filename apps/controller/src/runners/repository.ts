@@ -239,6 +239,32 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
+    /**
+     * Returns the runners that are unreachable and were last seen at or before
+     * `cutoff`, with their names and when they were last seen. A retired
+     * runner is left out: nobody waits for it to come back.
+     */
+    listUnreachableSeenBefore: (
+      cutoff: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly name: string; readonly lastSeenAt: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly name: string; readonly last_seen_at: string }>`
+          SELECT id, name, last_seen_at FROM runners
+          WHERE connectivity = 'unreachable' AND lifecycle <> 'retired'
+            AND last_seen_at <= ${cutoff}
+          ORDER BY last_seen_at, id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            name: row.name,
+            lastSeenAt: row.last_seen_at,
+          })),
+      ),
+
     connected: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`SELECT id FROM runners WHERE connectivity = 'online'`,
