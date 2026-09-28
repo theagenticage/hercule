@@ -4,11 +4,9 @@
  * answers are the decisions the request accepts, each bound to
  * `session.respond`.
  *
- * The same functions build the subject and the bound operation that the
- * session service later looks the notification up by. An answer given in the
- * session view resolves the notification only when its operation is
- * deep-equal to the one stored on an answer, so both sides must build it the
- * same way.
+ * The session service later looks the notification up by the subject and
+ * the answer id built here: an answer given in the session view resolves the
+ * notification's answer with the id of the decision it sends.
  *
  * A `question` request raises no notification: `session.respond` sends a
  * decision, not answers to questions, so no answer could be bound to it.
@@ -16,15 +14,17 @@
 import {
   APPROVAL_ANSWER_LABELS,
   describeApprovalAnswer,
-  type BindableOperation,
   type NotificationSubject,
 } from "@hercule/contract";
 import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
 import type { CoreAction, CoreNotification } from "../notifications";
 import type { RequestEvent } from "./stream";
 
-/** The id of each answer. Ids are kebab-case, so `allow_always` becomes `allow-always`. */
-const ANSWER_IDS: Readonly<Record<ApprovalDecision, string>> = {
+/**
+ * The id of the approval notification's answer that sends each decision. Ids
+ * are kebab-case, so `allow_always` becomes `allow-always`.
+ */
+export const APPROVAL_ANSWER_IDS: Readonly<Record<ApprovalDecision, string>> = {
   allow: "allow",
   allow_always: "allow-always",
   deny: "deny",
@@ -71,16 +71,6 @@ export const buildRequestSubject = (sessionId: string, requestId: string): Notif
   kind: "request",
   sessionId,
   requestId,
-});
-
-/** Returns the `session.respond` call that answers one request with one decision. */
-export const buildRespondOperation = (
-  sessionId: string,
-  requestId: string,
-  decision: ApprovalDecision,
-): BindableOperation => ({
-  op: "session.respond",
-  input: { sessionId, requestId, decision },
 });
 
 /**
@@ -185,10 +175,13 @@ export const buildApprovalNotification = (
       ? "A session is waiting for your answer."
       : `The session "${session.title}" is waiting for your answer.`;
   const actions = request.decisions.map((decision): CoreAction => ({
-    id: ANSWER_IDS[decision],
+    id: APPROVAL_ANSWER_IDS[decision],
     label: APPROVAL_ANSWER_LABELS[decision],
     description: describeApprovalAnswer(decision, request.kind),
-    operation: buildRespondOperation(session.id, request.requestId, decision),
+    operation: {
+      op: "session.respond",
+      input: { sessionId: session.id, requestId: request.requestId, decision },
+    },
   }));
   return {
     kind: "core.approval",

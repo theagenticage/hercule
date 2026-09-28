@@ -57,6 +57,34 @@ export type BindableOperation = {
 }[BindableOperationId];
 
 /**
+ * A table with one function for each operation an answer may run, each taking
+ * that operation's decoded input and returning an `R`. The describe line and
+ * the execution of an answer are both written as such a table, so a new
+ * operation on the list fails to compile until every table handles it.
+ */
+export type BindableOperationHandlers<R> = {
+  readonly [Op in BindableOperationId]: (input: BindableOperationInput<Op>) => R;
+};
+
+/**
+ * Calls the handler for an operation's `op` with the operation's input, and
+ * returns what the handler returns.
+ */
+export const dispatchBindableOperation = <R>(
+  handlers: BindableOperationHandlers<R>,
+  operation: BindableOperation,
+): R => {
+  // TypeScript cannot tell that `operation.op` and `operation.input` belong
+  // to the same member of the union, so it rejects the call. The handler is
+  // widened to take any bindable input; `BindableOperationHandlers` is what
+  // ties each operation to a handler for its own input.
+  const handler = handlers[operation.op] as (
+    input: BindableOperationInput<BindableOperationId>,
+  ) => R;
+  return handler(operation.input);
+};
+
+/**
  * The session id a session writes in an answer's input to name itself. An
  * agent binds `session.input` to itself this way to get the user's answer
  * back as its next input, without having to know its own id. The core

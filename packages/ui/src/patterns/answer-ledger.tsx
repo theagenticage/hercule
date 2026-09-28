@@ -9,11 +9,12 @@ export interface AnswerLedgerRow<Id extends string> {
   /** Whether this is the primary answer, whose label is in ink rather than muted. */
   readonly primary: boolean;
   /**
-   * What clicking the row does, as parts. A `name` part is the name of
-   * something the answer acts on, and is set apart in ink. The parts are
-   * joined as they are, so the text parts carry the spaces between them.
+   * What clicking the row does, as parts. A `marked` part is the name of
+   * something the answer acts on, or a value the answer sends or sets, and
+   * is set apart in ink. The parts are joined as they are, so the text parts
+   * carry the spaces between them.
    */
-  readonly describeLine: ReadonlyArray<{ readonly kind: "text" | "name"; readonly text: string }>;
+  readonly describeLine: ReadonlyArray<{ readonly kind: "text" | "marked"; readonly text: string }>;
   /** Whether the answer runs nothing. Its describe line is then set in italics. */
   readonly runsNothing?: boolean;
   /** Fine print under the describe line, when there is any. */
@@ -28,7 +29,7 @@ export interface AnswerLedgerRow<Id extends string> {
  * - the label in the left column, in ink for the primary answer and muted
  *   otherwise;
  * - the describe line at metadata size, which says what the click does, with
- *   names in ink;
+ *   its marked parts in ink;
  * - the description, when there is one, as fine print under it.
  *
  * Nothing is hidden behind a hover, so the user reads what each click does
@@ -60,7 +61,7 @@ export function AnswerLedger<Id extends string>({
           onClick={() => onSelect(row.id)}
           className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
         >
-          {/* Labels, names and descriptions can be long and may hold no
+          {/* Labels, marked parts and descriptions can be long and may hold no
               spaces, such as a shell command or a path. They wrap at any
               character rather than push the row wider than its column. */}
           <span
@@ -74,8 +75,8 @@ export function AnswerLedger<Id extends string>({
           <span className="flex min-w-0 flex-col">
             <span className={cn("text-meta text-muted wrap-anywhere", row.runsNothing && "italic")}>
               {row.describeLine.map((part, index) =>
-                part.kind === "name" ? (
-                  // A name is isolated for bidirectional text, so a
+                part.kind === "marked" ? (
+                  // A marked part is isolated for bidirectional text, so a
                   // right-to-left mark inside it cannot reorder the words
                   // after it. It keeps its own line breaks, so a multi-line
                   // text reads as it was written.

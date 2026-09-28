@@ -814,10 +814,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stores one turn's input to a session, like `input`, but inside the
-     * caller's transaction, and returns the stored input without waiting for
-     * the runner. It must be called inside a transaction: the input is written
-     * there, and nothing is sent unless that transaction commits.
+     * Stores one turn's input to a session, like `input`, and returns the
+     * stored input without waiting for the runner. It runs in the caller's
+     * transaction when there is one, or in its own otherwise. Nothing is sent
+     * to the runner unless that transaction commits, so a caller that rolls
+     * back sends nothing.
      *
      * After the commit, on a fiber of its own, the input is delivered as
      * `input` delivers it:

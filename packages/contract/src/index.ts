@@ -27,8 +27,10 @@ export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily }
 
 export {
   decodeBindableOperation,
+  dispatchBindableOperation,
   OWN_SESSION_ALIAS,
   type BindableOperation,
+  type BindableOperationHandlers,
   type BindableOperationId,
   type BindableOperationInput,
 } from "./bound-operations";

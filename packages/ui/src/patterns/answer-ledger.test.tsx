@@ -10,7 +10,7 @@ const ROWS: ReadonlyArray<AnswerLedgerRow<"start" | "dismiss">> = [
     primary: true,
     describeLine: [
       { kind: "text", text: "Start a run of " },
-      { kind: "name", text: "Bugfix" },
+      { kind: "marked", text: "Bugfix" },
     ],
     description: "Opens a session on the task.",
   },
@@ -44,10 +44,10 @@ describe("AnswerLedger", () => {
     expect(within(start!).getByText(/Start a run of/).className).not.toContain("italic");
   });
 
-  it("isolates each name for bidirectional text and keeps its line breaks", () => {
-    // A right-to-left override inside a name would otherwise reverse the
-    // words that follow it.
-    const name = "evil‮txt\nsecond line";
+  it("isolates each marked part for bidirectional text and keeps its line breaks", () => {
+    // A right-to-left override inside a marked part would otherwise reverse
+    // the words that follow it.
+    const sentText = "evil‮txt\nsecond line";
     render(
       <AnswerLedger
         rows={[
@@ -57,9 +57,9 @@ describe("AnswerLedger", () => {
             primary: false,
             describeLine: [
               { kind: "text", text: "Send " },
-              { kind: "name", text: name },
+              { kind: "marked", text: sentText },
               { kind: "text", text: " to session " },
-              { kind: "name", text: "Chat" },
+              { kind: "marked", text: "Chat" },
             ],
           },
         ]}
@@ -68,9 +68,9 @@ describe("AnswerLedger", () => {
       />,
     );
 
-    const names = screen.getByRole("button").querySelectorAll("bdi");
-    expect([...names].map((element) => element.textContent)).toEqual([name, "Chat"]);
-    for (const element of names) {
+    const markedParts = screen.getByRole("button").querySelectorAll("bdi");
+    expect([...markedParts].map((element) => element.textContent)).toEqual([sentText, "Chat"]);
+    for (const element of markedParts) {
       expect(element.className).toContain("text-ink");
       expect(element.className).toContain("whitespace-pre-wrap");
     }

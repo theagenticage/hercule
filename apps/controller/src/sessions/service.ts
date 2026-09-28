@@ -78,9 +78,9 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
+  APPROVAL_ANSWER_IDS,
   buildApprovalNotification,
   buildRequestSubject,
-  buildRespondOperation,
   buildWaitEndedWithdrawReason,
   buildWithdrawReason,
   WITHDRAW_REASON_SESSION_ENDED,
@@ -274,7 +274,18 @@ const ALREADY_SENT = "that input has already been sent to the runner";
  * without this check a second click would send the harness a second answer.
  */
 const ALREADY_ANSWERED =
-  "that request was already answered, or its wait was ended; " +
+  "that request was already answered, so this answer was not sent; " +
+  "read the session again to see whether it is waiting on a request now";
+
+/**
+ * The refusal of an answer to a request whose wait already ended without an
+ * answer: the user interrupted the turn or stopped the session, or the
+ * harness moved on. The runner may still report the request as open for a
+ * moment, but the harness no longer waits for this answer.
+ */
+const WAIT_ENDED =
+  "that request no longer waits for an answer: the turn was interrupted, the session was stopped, " +
+  "or the harness moved on, so this answer was not sent; " +
   "read the session again to see whether it is waiting on a request now";
 
 /**
@@ -946,10 +957,15 @@ const make = Effect.gen(function* () {
      * answer, as for a `question` request, which raises none.
      *
      * Fails with `InvalidState` when the notification about the request is
-     * already resolved: the request was answered before, or the user ended
-     * the wait by interrupting the turn or stopping the session. The failure
-     * rolls back the caller's transaction, so no second answer is recorded or
-     * sent.
+     * already resolved, with a message that says which case it is:
+     *
+     * - the request was answered before;
+     * - its wait ended without an answer: the user interrupted the turn or
+     *   stopped the session, or the harness moved on, and the notification
+     *   was withdrawn.
+     *
+     * The failure rolls back the caller's transaction, so no second answer is
+     * recorded or sent.
      */
     resolveApprovalNotification: (
       sessionId: string,
@@ -957,14 +973,22 @@ const make = Effect.gen(function* () {
       decision: ApprovalDecision,
     ): Effect.Effect<void, InvalidState | SqlError> =>
       Effect.flatMap(
-        notifications.resolveDecisionsAnsweredBy(
+        notifications.answerDecisionsAbout(
           buildRequestSubject(sessionId, requestId),
-          buildRespondOperation(sessionId, requestId, decision),
+          APPROVAL_ANSWER_IDS[decision],
         ),
-        (outcome) =>
-          outcome === "already-resolved"
-            ? Effect.fail(createInvalidStateError(ALREADY_ANSWERED))
-            : Effect.void,
+        (outcome) => {
+          switch (outcome) {
+            case "decided":
+            case "none":
+              return Effect.void;
+            case "already-decided":
+            case "already-handled":
+              return Effect.fail(createInvalidStateError(ALREADY_ANSWERED));
+            case "already-withdrawn":
+              return Effect.fail(createInvalidStateError(WAIT_ENDED));
+          }
+        },
       ),
 
     /**

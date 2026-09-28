@@ -20,6 +20,7 @@ import {
   truncateText,
   formatIssue,
   type Notification,
+  type Resolution,
   type Run,
   type RunOrigin,
   type RunStarted,
@@ -504,22 +505,22 @@ const renderNotification = (notification: Notification): ReadonlyArray<string> =
 
 /**
  * Returns the line printed after `notification act`: how the decision was
- * resolved. Taking an answer resolves the decision with it, and the line names
- * the answer by its label. When the decision was resolved another way first,
- * such as withdrawn because its question stopped existing, the line says how
- * instead, so it never names an answer that did not run.
+ * resolved. `notification.act` returns only a resolved decision, because an
+ * answer whose operation fails fails the call instead. Taking an answer
+ * resolves the decision with it, and the line names the answer by its label.
+ * When the decision was resolved another way first, such as withdrawn because
+ * its question stopped existing, the line says how instead, so it never names
+ * an answer that did not run.
  */
-const renderNotificationDecided = (notification: Notification): ReadonlyArray<string> => {
+const renderNotificationDecided = (
+  notification: Notification & { readonly resolution: Resolution },
+): ReadonlyArray<string> => {
   const { resolution } = notification;
-  const taken = notification.actions.find(
-    (action) => resolution?.kind === "decided" && action.id === resolution.actionId,
-  );
-  const outcome =
-    taken !== undefined
-      ? `decided: ${taken.label}`
-      : resolution === undefined
-        ? `is still ${notification.status}`
-        : describeResolution(resolution);
+  const taken =
+    resolution.kind === "decided"
+      ? notification.actions.find((action) => action.id === resolution.actionId)
+      : undefined;
+  const outcome = taken === undefined ? describeResolution(resolution) : `decided: ${taken.label}`;
   return [`notification ${formatCell(notification.id)} ${outcome}`];
 };
 
@@ -580,7 +581,7 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
     if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     if (command.id === "notification.read") return renderNotification(value as Notification);
     if (command.id === "notification.act") {
-      return renderNotificationDecided(value as Notification);
+      return renderNotificationDecided(value as Notification & { readonly resolution: Resolution });
     }
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just

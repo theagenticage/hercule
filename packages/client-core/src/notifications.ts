@@ -102,8 +102,8 @@ export interface BoundActionRow {
   readonly primary: boolean;
   /**
    * What taking the answer does, as the core wrote it, with the names of the
-   * entities it acts on marked. Empty when the core sent none, which it does
-   * only for a resolved decision.
+   * entities it acts on and the values it carries marked. Empty when the core
+   * sent none, which it does only for a resolved decision.
    */
   readonly describeLine: DescribeLine;
   /** Whether the answer runs nothing. Its describe line then reads "Does nothing". */
@@ -127,15 +127,15 @@ export const buildBoundActionRows = (
 
 /**
  * Formats a describe line as plain text, such as "Start a run of «Bugfix»",
- * for a place that cannot set names apart by style, such as a terminal. Each
- * name is quoted in guillemets. Names are written by whoever named the
- * entity, often an agent, so without the marks a name such as "ok to session
- * Chat" would read as part of the core's own words. The core writes the
- * spaces between parts into the text parts, so the parts are joined as they
- * are.
+ * for a place that cannot set parts apart by style, such as a terminal. Each
+ * marked part is quoted in guillemets. A marked part is a name or a value
+ * written by whoever named the entity or wrote the answer, often an agent, so
+ * without the marks a part such as "ok to session Chat" would read as part of
+ * the core's own words. The core writes the spaces between parts into the
+ * text parts, so the parts are joined as they are.
  */
 export const formatDescribeLine = (line: DescribeLine): string =>
-  line.map((part) => (part.kind === "name" ? `«${part.text}»` : part.text)).join("");
+  line.map((part) => (part.kind === "marked" ? `«${part.text}»` : part.text)).join("");
 
 /** The kind of producer a mute key names. */
 export type MuteKind = "workflow" | "plugin" | "assistant";

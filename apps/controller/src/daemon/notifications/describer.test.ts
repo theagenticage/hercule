@@ -40,7 +40,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof layer>>): Pr
 const mintId = () => uuidToString(mintUuid());
 
 const text = (value: string) => ({ kind: "text", text: value }) as const;
-const name = (value: string) => ({ kind: "name", text: value }) as const;
+const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
 const describeOperation = (operation: BindableOperation) =>
@@ -123,8 +123,8 @@ describe("run.start", () => {
       }),
     );
 
-    expect(lines.bare).toEqual([text("Start a run of "), name("Bugfix")]);
-    expect(lines.missing).toEqual([text("Start a run of "), name(MISSING_ID)]);
+    expect(lines.bare).toEqual([text("Start a run of "), marked("Bugfix")]);
+    expect(lines.missing).toEqual([text("Start a run of "), marked(MISSING_ID)]);
   });
 
   it("lists every input with its whole value", async () => {
@@ -141,19 +141,19 @@ describe("run.start", () => {
 
     expect(line).toEqual([
       text("Start a run of "),
-      name("Bugfix"),
+      marked("Bugfix"),
       text(" with "),
       text("issue "),
-      name("42"),
+      marked("42"),
       text(", "),
       text("title "),
-      name(`"${long}"`),
+      marked(`"${long}"`),
       text(", "),
       text("dryRun "),
-      name("true"),
+      marked("true"),
       text(", "),
       text("extra "),
-      name("1"),
+      marked("1"),
     ]);
   });
 
@@ -186,13 +186,13 @@ describe("run.start", () => {
 
     expect(line).toEqual([
       text("Start a run of "),
-      name("Bugfix"),
+      marked("Bugfix"),
       text(" with "),
       text("repo connection "),
-      name("Acme GitHub"),
+      marked("Acme GitHub"),
       text(", "),
       text("mirror "),
-      name(`"${MISSING_ID}"`),
+      marked(`"${MISSING_ID}"`),
     ]);
   });
 });
@@ -239,15 +239,15 @@ describe("task.update", () => {
 
     expect(lines.changed).toEqual([
       text("Update task "),
-      name("Fix the login page"),
+      marked("Fix the login page"),
       text(": "),
       text("title → "),
-      name("Fix the sign-in page"),
+      marked("Fix the sign-in page"),
       text(", "),
       text("status → done"),
       text(", "),
       text("move to project "),
-      name("Website"),
+      marked("Website"),
       text(", "),
       text("add label urgent"),
       text(", "),
@@ -255,22 +255,22 @@ describe("task.update", () => {
     ]);
     expect(lines.removedFromProject).toEqual([
       text("Update task "),
-      name("Fix the login page"),
+      marked("Fix the login page"),
       text(": "),
       text("description → "),
-      name(longDescription),
+      marked(longDescription),
       text(", "),
       text("priority → high"),
       text(", "),
       text("remove from its project"),
     ]);
-    expect(lines.nothingDescribed).toEqual([text("Update task "), name("Fix the login page")]);
+    expect(lines.nothingDescribed).toEqual([text("Update task "), marked("Fix the login page")]);
     expect(lines.missing).toEqual([
       text("Update task "),
-      name(MISSING_ID),
+      marked(MISSING_ID),
       text(": "),
       text("move to project "),
-      name(MISSING_ID),
+      marked(MISSING_ID),
     ]);
   });
 });
@@ -293,17 +293,17 @@ describe("task.update provenance", () => {
 
     expect(line).toEqual([
       text("Update task "),
-      name("Fix the login page"),
+      marked("Fix the login page"),
       text(": "),
       text("record where it came from: "),
       text("ref "),
-      name("github:issue:acme/web#1"),
+      marked("github:issue:acme/web#1"),
       text(", "),
       text("event "),
-      name("7"),
+      marked("7"),
       text("; "),
       text("run "),
-      name(runId),
+      marked(runId),
     ]);
   });
 });
@@ -338,29 +338,29 @@ describe("session.input", () => {
 
     expect(lines.plain).toEqual([
       text("Send "),
-      name("continue"),
+      marked("continue"),
       text(" to session "),
-      name("Refactor the parser"),
+      marked("Refactor the parser"),
     ]);
     expect(lines.withModel).toEqual([
       text("Send "),
-      name(long),
+      marked(long),
       text(" to session "),
-      name("Refactor the parser"),
+      marked("Refactor the parser"),
       text(" on model "),
-      name("clever"),
+      marked("clever"),
       text(" with model options "),
       text("effort "),
-      name('"high"'),
+      marked('"high"'),
       text(", "),
       text("thinking "),
-      name("true"),
+      marked("true"),
     ]);
     expect(lines.missing).toEqual([
       text("Send "),
-      name("continue"),
+      marked("continue"),
       text(" to session "),
-      name(MISSING_ID),
+      marked(MISSING_ID),
     ]);
   });
 });
@@ -387,8 +387,8 @@ describe("session.respond", () => {
       }),
     );
 
-    const request: DescribeLine = [text("the command "), name("npm test")];
-    const session = name("Refactor the parser");
+    const request: DescribeLine = [text("the command "), marked("npm test")];
+    const session = marked("Refactor the parser");
     expect(lines.allow).toEqual([text("Allow "), ...request, text(" once in session "), session]);
     expect(lines.allowAlways).toEqual([
       text("Allow "),
@@ -446,23 +446,23 @@ describe("session.respond", () => {
     expect(lines.files).toEqual([
       text("Allow "),
       text("the change to "),
-      name("a.ts"),
+      marked("a.ts"),
       text(", "),
-      name("b.ts"),
+      marked("b.ts"),
       text(" once in session "),
-      name("Two files"),
+      marked("Two files"),
     ]);
     expect(lines.otherRequest).toEqual([
       text("Allow "),
       text("the request"),
       text(" once in session "),
-      name("Moved on"),
+      marked("Moved on"),
     ]);
     expect(lines.missing).toEqual([
       text("Deny "),
       text("the request"),
       text(" in session "),
-      name(MISSING_ID),
+      marked(MISSING_ID),
       text("; the agent is told and continues"),
     ]);
   });
@@ -497,10 +497,10 @@ describe("describing the answers of one decision", () => {
     );
 
     expect(lines.map((line) => line[1])).toEqual([
-      name("Fix the login page"),
-      name("Fix the login page"),
-      name("yes"),
-      name("no"),
+      marked("Fix the login page"),
+      marked("Fix the login page"),
+      marked("yes"),
+      marked("no"),
     ]);
     // Reading a task takes two statements, the task and its provenance, so
     // the test counts the statements that read each entity's own table.

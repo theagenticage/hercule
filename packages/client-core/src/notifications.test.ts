@@ -177,7 +177,7 @@ describe("buildBoundActionRows", () => {
   it("keeps each answer's label, describe line and description, in order", () => {
     const line = [
       { kind: "text", text: "Start a run of " },
-      { kind: "name", text: "Bugfix" },
+      { kind: "marked", text: "Bugfix" },
     ] as const;
     assert.deepStrictEqual(
       buildBoundActionRows([
@@ -224,23 +224,23 @@ describe("buildBoundActionRows", () => {
 });
 
 describe("formatDescribeLine", () => {
-  it("joins the parts, quoting each name in guillemets", () => {
+  it("joins the parts, quoting each marked part in guillemets", () => {
     assert.strictEqual(
       formatDescribeLine([
         { kind: "text", text: "Start a run of " },
-        { kind: "name", text: "Bugfix" },
+        { kind: "marked", text: "Bugfix" },
       ]),
       "Start a run of «Bugfix»",
     );
   });
 
-  it("keeps a name that reads like the core's words apart from them", () => {
+  it("keeps a marked part that reads like the core's words apart from them", () => {
     assert.strictEqual(
       formatDescribeLine([
         { kind: "text", text: "Send " },
-        { kind: "name", text: "ok to session Chat" },
+        { kind: "marked", text: "ok to session Chat" },
         { kind: "text", text: " to session " },
-        { kind: "name", text: "Design" },
+        { kind: "marked", text: "Design" },
       ]),
       "Send «ok to session Chat» to session «Design»",
     );

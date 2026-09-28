@@ -263,7 +263,7 @@ describe("Notifications > answering a decision", () => {
       ...stored[0]!,
       describeLine: [
         { kind: "text", text: "Start a run of " },
-        { kind: "name", text: "Bugfix" },
+        { kind: "marked", text: "Bugfix" },
       ],
     },
     { ...stored[1]!, describeLine: [{ kind: "text", text: "Does nothing" }] },

@@ -174,21 +174,25 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Checks whether a resolved decision lists this subject: one that was
-     * decided, handled or withdrawn. An informational notification is
-     * resolved from the start, but it has no answers, so it does not count.
+     * Returns how the most recently resolved decision that lists this subject
+     * was resolved: `decided`, `handled` or `withdrawn`. Returns none when no
+     * resolved decision lists it. An informational notification is resolved
+     * from the start, but it has no answers, so it does not count.
      */
-    hasResolvedDecisionAbout: (subject: NotificationSubject): Effect.Effect<boolean, SqlError> =>
+    readLatestResolutionKindAbout: (
+      subject: NotificationSubject,
+    ): Effect.Effect<Option.Option<Resolution["kind"]>, SqlError> =>
       Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT notifications.id FROM notifications
+        sql<{ readonly kind: Resolution["kind"] }>`
+          SELECT notifications.resolution ->> 'kind' AS kind FROM notifications
           WHERE notifications.status = 'resolved'
             AND json_array_length(notifications.actions) > 0
             AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
                         WHERE ${buildSubjectMatch(subject)})
+          ORDER BY notifications.resolution ->> 'at' DESC, notifications.id DESC
           LIMIT 1
         `,
-        (rows) => rows.length > 0,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.kind),
       ),
 
     /**

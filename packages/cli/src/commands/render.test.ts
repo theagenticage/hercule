@@ -708,7 +708,7 @@ describe("hercule notification", () => {
         ...stored[0],
         describeLine: [
           { kind: "text", text: "Reply to session " },
-          { kind: "name", text: "Design ordering" },
+          { kind: "marked", text: "Design ordering" },
         ],
       },
       { ...stored[1], describeLine: [{ kind: "text", text: "Does nothing" }] },
@@ -854,7 +854,7 @@ describe("hercule notification", () => {
               label: "Event\u202E-sourced",
               describeLine: [
                 { kind: "text", text: "Reply to session " },
-                { kind: "name", text: "Design\u001b[2K\r ordering" },
+                { kind: "marked", text: "Design\u001b[2K\r ordering" },
               ],
             },
           ],

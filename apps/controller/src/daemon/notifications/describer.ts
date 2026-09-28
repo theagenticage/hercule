@@ -11,13 +11,19 @@
  * read of the task or session on the caller's behalf, so their grant checks do
  * not apply.
  *
+ * Because it reads the rows directly, no read rule a service enforces applies
+ * here unless this module repeats it, as it does by reading a deleted task or
+ * project as missing. A read rule added to a service later must be added here
+ * too, or a describe line could name a row the service would hide from the
+ * user.
+ *
  * The user decides from this line, so it shows everything the operation will
  * run in full: the text an answer sends, every changed field, every run input.
  * Nothing is cut short or left out; a screen that runs out of room wraps.
  *
  * An entity that no longer exists is named by its id, so a describe line is
- * always written. Names and the values an answer carries are `name` parts, so
- * a screen can set them apart; everything else is `text`.
+ * always written. Names and the values an answer carries are `marked` parts,
+ * so a screen can set them apart; everything else is `text`.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,8 +33,9 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   isId,
   type ApprovalDecision,
+  dispatchBindableOperation,
   type BindableOperation,
-  type BindableOperationId,
+  type BindableOperationHandlers,
   type BindableOperationInput,
   type DescribeLine,
   type DescribeLinePart,
@@ -42,16 +49,11 @@ import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 
-/** Writes the describe line of one bindable operation from its input. */
-type OperationDescriber<Op extends BindableOperationId> = (
-  input: BindableOperationInput<Op>,
-) => Effect.Effect<DescribeLine, SqlError>;
-
 /** Returns a `text` part: words of the line itself. */
 const buildTextPart = (value: string): DescribeLinePart => ({ kind: "text", text: value });
 
-/** Returns a `name` part: a name or a value the answer carries, in full. */
-const buildNamePart = (value: string): DescribeLinePart => ({ kind: "name", text: value });
+/** Returns a `marked` part: a name or a value the answer carries, in full. */
+const buildMarkedPart = (value: string): DescribeLinePart => ({ kind: "marked", text: value });
 
 /** Joins groups of parts into one line, with `separator` between two groups. */
 const joinParts = (groups: ReadonlyArray<DescribeLine>, separator: string): DescribeLine =>
@@ -88,22 +90,22 @@ const describeOpenRequest = (request: OpenRequest | null, requestId: string): De
   if (request === null || request.requestId !== requestId) return [buildTextPart("the request")];
   switch (request.kind) {
     case "command_approval":
-      return [buildTextPart("the command "), buildNamePart(request.detail.command)];
+      return [buildTextPart("the command "), buildMarkedPart(request.detail.command)];
     case "file_change_approval":
       return [buildTextPart("the change to "), ...listPaths(request.detail.paths)];
     case "file_read_approval":
       return [buildTextPart("the read of "), ...listPaths(request.detail.paths)];
     case "tool_approval":
-      return [buildTextPart("the tool call "), buildNamePart(request.detail.toolName)];
+      return [buildTextPart("the tool call "), buildMarkedPart(request.detail.toolName)];
     case "question":
       return [buildTextPart("the question")];
   }
 };
 
-/** Lists every path as its own `name` part, separated by commas. */
+/** Lists every path as its own `marked` part, separated by commas. */
 const listPaths = (paths: ReadonlyArray<string>): DescribeLine =>
   joinParts(
-    paths.map((path) => [buildNamePart(path)]),
+    paths.map((path) => [buildMarkedPart(path)]),
     ", ",
   );
 
@@ -159,13 +161,13 @@ const describeProvenance = (
     entries.map((entry) =>
       joinParts(
         [
-          ...(entry.ref === undefined ? [] : [[buildTextPart("ref "), buildNamePart(entry.ref)]]),
+          ...(entry.ref === undefined ? [] : [[buildTextPart("ref "), buildMarkedPart(entry.ref)]]),
           ...(entry.eventId === undefined
             ? []
-            : [[buildTextPart("event "), buildNamePart(String(entry.eventId))]]),
+            : [[buildTextPart("event "), buildMarkedPart(String(entry.eventId))]]),
           ...(entry.runId === undefined
             ? []
-            : [[buildTextPart("run "), buildNamePart(entry.runId)]]),
+            : [[buildTextPart("run "), buildMarkedPart(entry.runId)]]),
         ],
         ", ",
       ),
@@ -219,12 +221,13 @@ const make = Effect.gen(function* () {
     );
 
     /**
-     * Returns a session's name part - its title, or its id once it is gone -
-     * and the request it waits on, or `null` when it waits on none.
+     * Returns a session's name as a `marked` part - its title, or its id once
+     * it is gone - and the request it waits on, or `null` when it waits on
+     * none.
      */
     const readSessionNameAndRequest = readOncePerId((id) =>
       Effect.map(sessions.one(id), (found) => ({
-        namePart: buildNamePart(
+        markedName: buildMarkedPart(
           Option.match(found, { onNone: () => id, onSome: (session) => session.title }),
         ),
         openRequest: Option.match(found, {
@@ -245,10 +248,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const described: Array<DescribeLine> = [];
         if (changes.title !== undefined) {
-          described.push([buildTextPart("title → "), buildNamePart(changes.title)]);
+          described.push([buildTextPart("title → "), buildMarkedPart(changes.title)]);
         }
         if (changes.description !== undefined) {
-          described.push([buildTextPart("description → "), buildNamePart(changes.description)]);
+          described.push([buildTextPart("description → "), buildMarkedPart(changes.description)]);
         }
         if (changes.status !== undefined) {
           described.push([buildTextPart(`status → ${changes.status}`)]);
@@ -260,7 +263,7 @@ const make = Effect.gen(function* () {
         if (typeof changes.projectId === "string") {
           described.push([
             buildTextPart("move to project "),
-            buildNamePart(yield* readProjectName(changes.projectId)),
+            buildMarkedPart(yield* readProjectName(changes.projectId)),
           ]);
         }
         if (changes.addLabels !== undefined && changes.addLabels.length > 0) {
@@ -303,8 +306,8 @@ const make = Effect.gen(function* () {
               : Option.none<string>();
           described.push(
             Option.match(label, {
-              onNone: () => [buildTextPart(`${key} `), buildNamePart(JSON.stringify(value))],
-              onSome: (found) => [buildTextPart(`${key} connection `), buildNamePart(found)],
+              onNone: () => [buildTextPart(`${key} `), buildMarkedPart(JSON.stringify(value))],
+              onSome: (found) => [buildTextPart(`${key} connection `), buildMarkedPart(found)],
             }),
           );
         }
@@ -318,7 +321,7 @@ const make = Effect.gen(function* () {
           const described = yield* describeTaskChanges(changes);
           return [
             buildTextPart("Update task "),
-            buildNamePart(title),
+            buildMarkedPart(title),
             ...(described.length === 0 ? [] : [buildTextPart(": "), ...described]),
           ];
         }),
@@ -328,7 +331,7 @@ const make = Effect.gen(function* () {
           const described = yield* describeRunInputs(inputs ?? {}, definition);
           return [
             buildTextPart("Start a run of "),
-            buildNamePart(
+            buildMarkedPart(
               Option.match(definition, { onNone: () => workflowId, onSome: (found) => found.name }),
             ),
             ...(described.length === 0 ? [] : [buildTextPart(" with "), ...described]),
@@ -339,10 +342,10 @@ const make = Effect.gen(function* () {
           const optionEntries = Object.entries(options ?? {});
           return [
             buildTextPart("Send "),
-            buildNamePart(text),
+            buildMarkedPart(text),
             buildTextPart(" to session "),
-            session.namePart,
-            ...(model === undefined ? [] : [buildTextPart(" on model "), buildNamePart(model)]),
+            session.markedName,
+            ...(model === undefined ? [] : [buildTextPart(" on model "), buildMarkedPart(model)]),
             ...(optionEntries.length === 0
               ? []
               : [
@@ -350,7 +353,7 @@ const make = Effect.gen(function* () {
                   ...joinParts(
                     optionEntries.map(([key, value]) => [
                       buildTextPart(`${key} `),
-                      buildNamePart(JSON.stringify(value)),
+                      buildMarkedPart(JSON.stringify(value)),
                     ]),
                     ", ",
                   ),
@@ -362,10 +365,10 @@ const make = Effect.gen(function* () {
           describeDecision(
             decision,
             describeOpenRequest(session.openRequest, requestId),
-            session.namePart,
+            session.markedName,
           ),
         ),
-    } satisfies { readonly [Op in BindableOperationId]: OperationDescriber<Op> };
+    } satisfies BindableOperationHandlers<Effect.Effect<DescribeLine, SqlError>>;
   };
 
   return BoundOperationDescriber.of({
@@ -373,10 +376,7 @@ const make = Effect.gen(function* () {
       Effect.suspend(() => {
         const describers = buildDescribers();
         return Effect.forEach(operations, (operation) =>
-          // TypeScript cannot relate the entry to the input across the union,
-          // so the entry is widened to take any bindable input; the table
-          // above is what ties each operation to its own describer.
-          (describers[operation.op] as OperationDescriber<BindableOperationId>)(operation.input),
+          dispatchBindableOperation(describers, operation),
         );
       }),
   });

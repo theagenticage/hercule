@@ -215,14 +215,16 @@ export const BoundAction = Schema.Struct({
 export type BoundAction = Schema.Schema.Type<typeof BoundAction>;
 
 /**
- * One piece of a describe line: plain text, or a name or a value the answer
- * carries, set apart from the words around it. A name is the live name of an
- * entity the answer acts on, such as a workflow or a session; a value is
- * something the answer sends or sets, such as the text of an input or a new
- * title.
+ * One piece of a describe line. It has one of two kinds:
+ *
+ * - `text` is the ordinary words of the line.
+ * - `marked` is set apart from the words around it; the web app renders it
+ *   in ink. It is either the live name of an entity the answer acts on, such
+ *   as a workflow or a session, or a value the answer sends or sets, such as
+ *   the text of an input or a new title.
  */
 export const DescribeLinePart = Schema.Struct({
-  kind: Schema.Literals(["text", "name"]),
+  kind: Schema.Literals(["text", "marked"]),
   text: Schema.String,
 });
 

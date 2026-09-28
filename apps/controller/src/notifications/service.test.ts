@@ -1450,7 +1450,7 @@ describe("decide", () => {
   });
 });
 
-describe("resolveDecisionsAnsweredBy", () => {
+describe("answerDecisionsAbout", () => {
   const REQUEST: NotificationSubject = {
     kind: "request",
     sessionId: PLAIN_SESSION_ID,
@@ -1480,7 +1480,7 @@ describe("resolveDecisionsAnsweredBy", () => {
       }),
     );
 
-  it("resolves the open decisions about the subject that offer the operation, as decided with that answer", async () => {
+  it("resolves the open decisions about the subject that offer the answer, as decided with that answer", async () => {
     const { outcome, byTitle, entries } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
@@ -1491,10 +1491,7 @@ describe("resolveDecisionsAnsweredBy", () => {
           notifications.create({ ...DECISION, title: "offers no such answer", subject: [REQUEST] }),
         );
 
-        const outcome = yield* actAs(
-          USER,
-          notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("deny")),
-        );
+        const outcome = yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "deny"));
 
         const all = (yield* actAs(USER, notifications.query({}))).items;
         return {
@@ -1505,7 +1502,7 @@ describe("resolveDecisionsAnsweredBy", () => {
       }),
     );
 
-    expect(outcome).toBe("resolved");
+    expect(outcome).toBe("decided");
     const decided = byTitle.get("about the request")!;
     expect(decided.resolution).toEqual({
       kind: "decided",
@@ -1526,18 +1523,36 @@ describe("resolveDecisionsAnsweredBy", () => {
     ]);
   });
 
-  it("reports a question already settled when the only decision about the subject is resolved", async () => {
+  it("reports a question already decided when the only decision about the subject was decided", async () => {
     const { first, second } = await run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
         yield* raiseApproval("about the request", [REQUEST]);
-        const answer = notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("allow"));
+        const answer = notifications.answerDecisionsAbout(REQUEST, "allow");
         return { first: yield* actAs(USER, answer), second: yield* actAs(USER, answer) };
       }),
     );
 
-    expect(first).toBe("resolved");
-    expect(second).toBe("already-resolved");
+    expect(first).toBe("decided");
+    expect(second).toBe("already-decided");
+  });
+
+  it("reports a question withdrawn when the only decision about the subject was withdrawn", async () => {
+    const { outcome, stored } = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        yield* raiseApproval("about the request", [REQUEST]);
+        yield* notifications.withdrawDecisionsAbout([REQUEST], "the turn was interrupted");
+        return {
+          outcome: yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "allow")),
+          stored: (yield* actAs(USER, notifications.query({}))).items[0]!,
+        };
+      }),
+    );
+
+    expect(outcome).toBe("already-withdrawn");
+    // The withdrawal stands: the answer given too late changes nothing.
+    expect(stored.resolution).toMatchObject({ kind: "withdrawn" });
   });
 
   it("reports none when no decision lists the subject", async () => {
@@ -1547,10 +1562,7 @@ describe("resolveDecisionsAnsweredBy", () => {
         // An informational notification is resolved from the start, but it
         // asks nothing, so it does not settle the question.
         yield* notifications.createCoreNotification({ ...CORE, subject: [REQUEST] });
-        return yield* actAs(
-          USER,
-          notifications.resolveDecisionsAnsweredBy(REQUEST, buildRespond("allow")),
-        );
+        return yield* actAs(USER, notifications.answerDecisionsAbout(REQUEST, "allow"));
       }),
     );
 

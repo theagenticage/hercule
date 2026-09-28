@@ -2,7 +2,7 @@
  * The notification operations: `notification.query`, `read`, `create` and
  * `withdraw`, plus the methods the controller calls for the core's own
  * notifications and for decisions answered elsewhere: `createCoreNotification`,
- * `decide`, `resolveDecisionsAnsweredBy` and `withdrawDecisionsAbout`.
+ * `decide`, `answerDecisionsAbout` and `withdrawDecisionsAbout`.
  * `notification.act` runs an answer's operation, which reaches domains above
  * this one, so it lives in the controller daemon and calls `decide`.
  *
@@ -31,7 +31,6 @@
  * notification is pushed to a delivery sink. No sink exists yet, so the mute
  * key is recorded on the notification and nothing reads it here.
  */
-import { isDeepStrictEqual } from "node:util";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -309,17 +308,19 @@ type CheckedOperation =
   | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
 
 /**
- * What `resolveDecisionsAnsweredBy` found about a subject:
+ * What `answerDecisionsAbout` found about a subject, and did:
  *
- * - `resolved`: at least one open decision about it offered an answer running
- *   the operation, and is now decided with that answer;
- * - `already-resolved`: no decision about it is open, and at least one was
- *   resolved before, so the question was already settled;
- * - `none`: nothing was resolved and nothing was settled before. Either no
- *   decision lists the subject, or the open ones offer no answer running the
- *   operation.
+ * - `decided`: at least one open decision about it offered the answer, and is
+ *   now decided with that answer;
+ * - `already-decided`, `already-handled`, `already-withdrawn`: no decision
+ *   about it is open, and the one resolved last was resolved that way. The
+ *   question was settled by an answer or by an assistant, or it stopped
+ *   existing;
+ * - `none`: nothing was decided and nothing was resolved before. Either no
+ *   decision lists the subject, or the open ones do not offer the answer.
  */
-export type AnsweredDecisionOutcome = "resolved" | "already-resolved" | "none";
+export type AnsweredDecisionsOutcome =
+  "decided" | "already-decided" | "already-handled" | "already-withdrawn" | "none";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -734,37 +735,37 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Resolves the open decisions about a subject that offer an answer running
-     * exactly this operation, as decided with that answer. The operation was
-     * run some other way, such as an approval answered in the session view,
-     * so the question is answered and the notification says which answer was
-     * taken. Returns what it found (`AnsweredDecisionOutcome`), so the caller
-     * can refuse a second answer to a question already settled.
+     * Resolves the open decisions about a subject that offer the answer
+     * `actionId`, as decided with that answer. The question was answered
+     * some other way, such as an approval answered in the session view, so
+     * the notification says which answer was taken. Returns what it found
+     * and did (`AnsweredDecisionsOutcome`), so the caller can refuse a second
+     * answer to a question that is already settled or no longer exists.
      *
-     * It runs in the caller's transaction, the one that records the
-     * operation, and is stamped with the current actor. There is no grant
-     * check: only the controller calls it.
+     * It runs in the caller's transaction, the one that records the answer,
+     * and is stamped with the current actor. There is no grant check: only
+     * the controller calls it.
      */
-    resolveDecisionsAnsweredBy: (
+    answerDecisionsAbout: (
       subject: NotificationSubject,
-      operation: BindableOperation,
-    ): Effect.Effect<AnsweredDecisionOutcome, SqlError> =>
+      actionId: string,
+    ): Effect.Effect<AnsweredDecisionsOutcome, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const open = yield* notifications.listOpenDecisionsAbout([subject]);
           if (open.length === 0) {
-            return (yield* notifications.hasResolvedDecisionAbout(subject))
-              ? "already-resolved"
-              : "none";
+            const resolvedKind = yield* notifications.readLatestResolutionKindAbout(subject);
+            return Option.match(resolvedKind, {
+              onNone: (): AnsweredDecisionsOutcome => "none",
+              onSome: (kind): AnsweredDecisionsOutcome => `already-${kind}`,
+            });
           }
-          let outcome: AnsweredDecisionOutcome = "none";
+          let outcome: AnsweredDecisionsOutcome = "none";
           for (const notification of open) {
-            const action = notification.actions.find((candidate) =>
-              isDeepStrictEqual(candidate.operation, operation),
-            );
+            const action = notification.actions.find((candidate) => candidate.id === actionId);
             if (action !== undefined && (yield* resolveAsDecided(notification, action))) {
-              outcome = "resolved";
+              outcome = "decided";
             }
           }
           return outcome;
@@ -799,7 +800,9 @@ const make = Effect.gen(function* () {
             open,
             ({ id }) =>
               Effect.gen(function* () {
-                yield* notifications.resolve(id, resolution);
+                // A decision resolved since it was listed keeps that
+                // resolution, and nothing was withdrawn to record.
+                if (!(yield* notifications.resolve(id, resolution))) return;
                 yield* audit.append({
                   kind: "notification.withdrawn",
                   actor: SYSTEM_ACTOR,

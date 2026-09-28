@@ -5,8 +5,10 @@ import { api } from "./api";
 import {
   BINDABLE_OPERATION_IDS,
   decodeBindableOperation,
+  dispatchBindableOperation,
   OWN_SESSION_ALIAS,
   type BindableOperation,
+  type BindableOperationHandlers,
 } from "./bound-operations";
 import { CLI } from "./cli";
 import { NotificationCreateInput } from "./groups/notification";
@@ -110,6 +112,31 @@ describe("decodeBindableOperation", () => {
       expect(issue.path.slice(0, PATH.length + 1)).toEqual([...PATH, "input"]);
     }
     expect(issues.map((issue) => issue.path)).toContainEqual([...PATH, "input", "workflowId"]);
+  });
+});
+
+describe("dispatchBindableOperation", () => {
+  const handlers: BindableOperationHandlers<string> = {
+    "task.update": ({ taskId }) => `task.update of ${taskId}`,
+    "run.start": ({ workflowId }) => `run.start of ${workflowId}`,
+    "session.input": ({ sessionId, text }) => `session.input of "${text}" to ${sessionId}`,
+    "session.respond": ({ requestId, decision }) =>
+      `session.respond of ${decision} to ${requestId}`,
+  };
+
+  it("calls the handler for the operation with the operation's input", () => {
+    expect(
+      dispatchBindableOperation(handlers, {
+        op: "session.input",
+        input: { sessionId: SESSION_ID, text: "hi" },
+      }),
+    ).toBe(`session.input of "hi" to ${SESSION_ID}`);
+    expect(
+      dispatchBindableOperation(handlers, {
+        op: "session.respond",
+        input: { sessionId: SESSION_ID, requestId: "req-1", decision: "deny" },
+      }),
+    ).toBe("session.respond of deny to req-1");
   });
 });
 

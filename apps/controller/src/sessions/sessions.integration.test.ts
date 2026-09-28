@@ -4161,12 +4161,39 @@ describe("session approval notifications", () => {
       expect(await readErrorBody(second)).toMatchObject({
         code: "invalid_state",
         message:
-          "that request was already answered, or its wait was ended; " +
+          "that request was already answered, so this answer was not sent; " +
           "read the session again to see whether it is waiting on a request now",
       });
       await delay(250);
       expect(listRespondFrames(arranged.wire).map((frame) => frame.decision)).toEqual(["allow"]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(1);
+    });
+  });
+
+  it("refuses an answer after the user interrupted the turn, and sends the runner nothing", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startParkedSession(arranged);
+      const interrupted = await interruptSession(arranged, session.id);
+      expect(interrupted.status, await interrupted.clone().text()).toBe(200);
+
+      // The runner has not reported the turn's end yet, so the session still
+      // shows the request open.
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await readErrorBody(response)).toMatchObject({
+        code: "invalid_state",
+        message:
+          "that request no longer waits for an answer: the turn was interrupted, the session was stopped, " +
+          "or the harness moved on, so this answer was not sent; " +
+          "read the session again to see whether it is waiting on a request now",
+      });
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toEqual([]);
     });
   });
 

@@ -29,16 +29,18 @@
  *   `session.input` only stores the input there; it is sent to the runner
  *   after the commit, so a decision that cannot be resolved sends nothing.
  * - `session.respond` sends its frame before it returns, and a sent frame
- *   cannot be rolled back, so it runs on its own. It resolves the decision
- *   itself, in the transaction that records the answer and before the frame
- *   is sent, so the resolution after it finds the decision resolved already.
+ *   cannot be rolled back, so it cannot share the resolution's transaction.
+ *   It resolves the decision itself instead, in the transaction that records
+ *   the answer and before the frame is sent, and nothing is resolved after
+ *   it returns. Only the core binds `session.respond`, to the approval
+ *   decision about the request it answers, so that decision is always the
+ *   one being answered.
  *
  * Spec 10 §7.4 owns the rules.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -47,9 +49,10 @@ import {
   createInvalidStateError,
   createNotFoundError,
   decodeBindableOperation,
+  dispatchBindableOperation,
   type BindableOperation,
+  type BindableOperationHandlers,
   type BindableOperationId,
-  type BindableOperationInput,
   type CapExceeded,
   type Forbidden,
   type Id,
@@ -62,7 +65,7 @@ import {
 } from "@hercule/contract";
 import { requireUserActor } from "../../actor";
 import { withTransaction } from "../../db";
-import { NotificationService, notificationRepository } from "../../notifications";
+import { NotificationService } from "../../notifications";
 import { RunService } from "../../runs";
 import type { SettingError } from "../../settings";
 import { TaskService } from "../../tasks";
@@ -88,17 +91,23 @@ type OperationError =
   | Schema.SchemaError
   | SqlError;
 
-/** How one bindable operation runs when an answer is taken. */
-interface OperationExecutor<Op extends BindableOperationId> {
-  /**
-   * Whether the operation runs in the same transaction as the resolution:
-   * true when everything it does before it returns can be rolled back. False
-   * for an operation that sends a frame to a runner before it returns, which
-   * no rollback can undo.
-   */
-  readonly inTransaction: boolean;
-  readonly execute: (input: BindableOperationInput<Op>) => Effect.Effect<unknown, OperationError>;
-}
+/**
+ * What resolves the decision when an answer runs each operation:
+ *
+ * - `answer-transaction`: the operation runs in one transaction with the
+ *   resolution, so both commit or neither does. Everything the operation does
+ *   before it returns can be rolled back.
+ * - `operation`: the operation resolves the decision itself, and nothing is
+ *   left to do after it returns. It sends a frame to a runner before it
+ *   returns, which no rollback can undo, so it cannot share a transaction
+ *   with the resolution.
+ */
+const DECISION_RESOLVED_BY = {
+  "task.update": "answer-transaction",
+  "run.start": "answer-transaction",
+  "session.input": "answer-transaction",
+  "session.respond": "operation",
+} as const satisfies Record<BindableOperationId, "answer-transaction" | "operation">;
 
 /**
  * The refusal for a caller who is not the user. A session may hold
@@ -122,7 +131,6 @@ const BEING_TAKEN =
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const notifications = yield* NotificationService;
-  const storedNotifications = yield* notificationRepository;
   const tasks = yield* TaskService;
   const runs = yield* RunService;
   const live = yield* Live;
@@ -131,21 +139,13 @@ const make = Effect.gen(function* () {
   // time.
   const notificationIdsBeingActedOn = yield* Ref.make<ReadonlySet<string>>(new Set());
 
-  const executors = {
-    "task.update": {
-      inTransaction: true,
-      execute: ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
-    },
-    "run.start": { inTransaction: true, execute: (input) => runs.start(input) },
-    "session.input": {
-      inTransaction: true,
-      execute: ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
-    },
-    "session.respond": {
-      inTransaction: false,
-      execute: ({ sessionId, ...answer }) => live.respond({ id: sessionId, ...answer }),
-    },
-  } satisfies { readonly [Op in BindableOperationId]: OperationExecutor<Op> };
+  /** Runs each bindable operation as the user, from an answer's input. */
+  const executors: BindableOperationHandlers<Effect.Effect<unknown, OperationError>> = {
+    "task.update": ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
+    "run.start": (input) => runs.start(input),
+    "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
+    "session.respond": ({ sessionId, ...answer }) => live.respond({ id: sessionId, ...answer }),
+  };
 
   /**
    * Runs `effect` while holding the notification `id`, so no other answer to
@@ -182,41 +182,33 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Runs an answer's operation and resolves the decision with the answer.
-   * Fails with the operation's own error, and the decision stays open.
+   * Runs an answer's operation, and resolves the decision with the answer in
+   * the same transaction unless the operation resolves it itself
+   * (`DECISION_RESOLVED_BY`). Fails with the operation's own error, and the
+   * decision stays open.
    */
   const executeAndDecide = (
     notificationId: Id,
     actionId: string,
     operation: BindableOperation,
   ): Effect.Effect<void, OperationError> => {
-    // TypeScript cannot relate the entry to the input across the union, so
-    // the entry is widened to take any bindable input; the table above is
-    // what ties each operation to its own executor.
-    const executor = executors[operation.op] as OperationExecutor<BindableOperationId>;
-    const execute = executor.execute(operation.input);
-    if (executor.inTransaction) {
-      // A decision resolved since it was read, such as one withdrawn by its
-      // producer, fails the transaction, so the operation rolls back with it.
-      // Uninterruptible because the operation's work after the commit, such
-      // as handing a new run to its executor, must not be lost to a caller
-      // that hangs up.
-      return Effect.uninterruptible(
-        withTransaction(
-          sql,
-          Effect.flatMap(execute, () => decideOrFail(notificationId, actionId)),
-        ),
-      );
+    const execute = dispatchBindableOperation(executors, operation);
+    switch (DECISION_RESOLVED_BY[operation.op]) {
+      case "answer-transaction":
+        // A decision resolved since it was read, such as one withdrawn by its
+        // producer, fails the transaction, so the operation rolls back with
+        // it. Uninterruptible because the operation's work after the commit,
+        // such as handing a new run to its executor, must not be lost to a
+        // caller that hangs up.
+        return Effect.uninterruptible(
+          withTransaction(
+            sql,
+            Effect.flatMap(execute, () => decideOrFail(notificationId, actionId)),
+          ),
+        );
+      case "operation":
+        return Effect.asVoid(execute);
     }
-    // The operation already reached a runner, so the decision is resolved
-    // even if the caller hangs up now. `decide` returns false when the
-    // operation resolved the decision itself, as `session.respond` does for
-    // the approval it answers; the decision is resolved either way.
-    return Effect.uninterruptibleMask((restore) =>
-      Effect.flatMap(restore(execute), () =>
-        Effect.asVoid(notifications.decide(notificationId, actionId)),
-      ),
-    );
   };
 
   return {
@@ -244,13 +236,9 @@ const make = Effect.gen(function* () {
         yield* withNotificationHeld(
           input.id,
           Effect.gen(function* () {
-            // The stored record, without describe lines: only its answers
-            // are needed, and describing them would read other domains' rows.
-            const found = yield* storedNotifications.read(input.id);
-            if (Option.isNone(found)) {
-              return yield* Effect.fail(createNotFoundError("no such notification"));
-            }
-            const notification = found.value;
+            // The caller is the user, who may read every notification, so
+            // this read fails only for a notification that does not exist.
+            const notification = yield* notifications.read(input.id);
             if (notification.status !== "open") {
               return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
             }
