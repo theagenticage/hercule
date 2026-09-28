@@ -539,6 +539,13 @@ const convertToJson = (value: unknown): unknown => {
 };
 
 /**
+ * The end of the message for an expression whose value has no JSON form. It
+ * follows a phrase that names the expression.
+ */
+const NOT_JSON_REFUSAL =
+  "returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.";
+
+/**
  * Renders a template against a run's context (`inputs` and `steps`). Fails
  * with `ExpressionError` if an expression cannot be evaluated, or returns a
  * value with no JSON form.
@@ -574,7 +581,7 @@ export const renderTemplate = (
       if (json === undefined) {
         return yield* Effect.fail(
           new ExpressionError({
-            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.`,
+            message: `${describeSite()} ${NOT_JSON_REFUSAL}`,
           }),
         );
       }
@@ -637,3 +644,34 @@ export const renderTemplates = (
   }
   return Effect.succeed(value);
 };
+
+/**
+ * Evaluates a start trigger's input mapping against an event's context
+ * (`event`), and returns each input name with the JSON value of its
+ * expression. Fails with `ExpressionError` for the first expression that
+ * cannot be evaluated or returns a value with no JSON form; the message names
+ * the input.
+ */
+export const evaluateMapping = (
+  mapping: Readonly<Record<string, string>>,
+  context: Record<string, unknown>,
+): Effect.Effect<Record<string, unknown>, ExpressionError> =>
+  Effect.map(
+    Effect.forEach(Object.entries(mapping), ([name, source]) =>
+      Effect.gen(function* () {
+        const describeSite = (): string => `The expression for the input ${name}`;
+        const value = yield* Effect.mapError(
+          evaluateExpression(source, context),
+          (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),
+        );
+        const json = convertToJson(value);
+        if (json === undefined) {
+          return yield* Effect.fail(
+            new ExpressionError({ message: `${describeSite()} ${NOT_JSON_REFUSAL}` }),
+          );
+        }
+        return [name, json] as const;
+      }),
+    ),
+    (entries) => Object.fromEntries(entries),
+  );

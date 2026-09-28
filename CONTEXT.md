@@ -360,7 +360,7 @@ The one consumer of the event log. It walks the events past its own durable curs
 _Avoid_: matcher, dispatcher, event bus
 
 **Routing Table**:
-The routes one destination owns, one per live subscription today, one per enabled trigger later. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+The routes one kind of destination owns: one per live subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
 The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
@@ -368,6 +368,10 @@ The downstream consumer of one kind of row. It reads its own rows, whoever wrote
 **Matched Input**:
 The Queued Input the Event Router writes for a holder session when a route's condition holds, marked with the subscription and the event. Unique per that pair, so a second pass over the same event writes nothing.
 _Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
+
+**Trigger Effect**:
+One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`; a delivery starts its run later, in a transaction of its own, and marks it `spawned` with the run's id, or `discarded` when its event was pruned, or its trigger paused or its workflow disabled, before then. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
+_Avoid_: pending run (the run does not exist until the effect is delivered)
 
 **Expression**:
 A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.

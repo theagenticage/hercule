@@ -196,6 +196,28 @@ describe("setup.complete", () => {
     expect(existsSync(join(home, "setup-url"))).toBe(false);
   });
 
+  it("fails with validation when the timezone is not an IANA zone name, and writes nothing", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const setup = yield* Setup;
+        const users = yield* Users;
+        const failure = yield* Effect.flip(
+          setup.complete({
+            username: "rogier",
+            password: "correct horse battery staple",
+            timezone: "Mars/Olympus_Mons",
+          }),
+        );
+        return { failure, user: yield* users.findByUsername("rogier") };
+      }),
+    );
+
+    expect(outcome.failure).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["timezone"] }] } },
+    });
+    expect(Option.isNone(outcome.user)).toBe(true);
+  });
+
   it("fails a second time with invalid_state, and writes nothing", async () => {
     const outcome = await run(
       Effect.gen(function* () {

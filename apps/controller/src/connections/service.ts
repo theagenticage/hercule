@@ -116,9 +116,6 @@ const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
 
 const NO_SUCH_CONNECTION = "no such connection";
 
-const NAMED_BY_RESOURCE =
-  "a resource still acts through this connection; point the resource at another connection before deleting this one";
-
 /** A connection type as the host registered it: the catalog entry, plus its `validate` function. */
 type Contribution = RegisteredConnectionType["contribution"];
 
@@ -732,29 +729,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Deletes the connection and every secret it owns, in one transaction.
-     * Fails with `invalid_state` while a resource still acts through the
-     * connection, because deleting it would leave that resource with
-     * credentials that no longer exist.
+     * Deletes the connection and every secret it owns, in one transaction,
+     * and records the deletion in the audit log. Fails with `NotFound` when
+     * no connection has the id.
+     *
+     * It checks neither the caller's grant nor whether a resource or a
+     * trigger still names the connection. The `connection.delete` operation
+     * is the controller daemon's `ConnectionRemoval`, which checks both first
+     * and then calls this. Any other caller must do the same checks.
      */
-    delete: (
-      id: Id,
-    ): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
-    > =>
+    deleteUnchecked: (id: Id): Effect.Effect<Record<string, never>, NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("connection.delete");
         const row = yield* readStoredConnectionOrFail(id);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Check inside the delete's transaction. Otherwise a resource pointed
-            // at this connection between the check and the delete would refer to
-            // a connection that no longer exists.
-            if (yield* connections.namedByResource(id)) {
-              return yield* Effect.fail(createInvalidStateError(NAMED_BY_RESOURCE));
-            }
             const at = yield* nowIso;
             const owner = buildSecretOwner(id);
             const names =

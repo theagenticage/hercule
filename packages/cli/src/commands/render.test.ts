@@ -656,7 +656,10 @@ describe("hercule run", () => {
   });
 
   it("describes who started a run in the words the web app uses", () => {
-    const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
+    const readStartedBy = (
+      origin: Record<string, unknown>,
+      triggerEvent?: Record<string, unknown>,
+    ): string | undefined =>
       renderHuman(
         {
           kind: "value",
@@ -666,6 +669,7 @@ describe("hercule run", () => {
             plan: { name: "Nothing", steps: [] },
             inputs: {},
             origin,
+            ...(triggerEvent === undefined ? {} : { triggerEvent }),
             status: "pending",
             steps: [],
             createdAt: "2026-09-24T10:00:00.000Z",
@@ -679,5 +683,81 @@ describe("hercule run", () => {
     expect(readStartedBy({ kind: "action", parentRunId: RUN, stepId: "spawn" })).toBe(
       "startedBy  run 000000bb at step spawn",
     );
+    expect(
+      readStartedBy(
+        { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+        { kind: "github.issue.opened" },
+      ),
+    ).toBe("startedBy  trigger on_issue on github.issue.opened");
+  });
+
+  it("prints what did not validate for a run a trigger could not start, which has no start time", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "File a task", steps: [] },
+          inputs: {},
+          origin: { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+          status: "failed",
+          failureReason: "validation-error",
+          failureMessage: "The input title is required.",
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.000Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(0, 8)).toEqual([
+      `id              ${RUN}`,
+      "workflow        File a task",
+      "status          failed",
+      "failureReason   validation-error",
+      "failureMessage  The input title is required.",
+      "startedBy       trigger on_issue",
+      "createdAt       2026-09-24T10:00:00.000Z",
+      "finishedAt      2026-09-24T10:00:00.000Z",
+    ]);
+  });
+
+  it("prints a trigger's health and missed scheduled times on one short line each", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            {
+              triggerId: "weekday_morning",
+              status: "active",
+              health: { state: "ok" },
+              nextFireAt: "2026-09-29T07:00:00.000Z",
+              skippedTicks: {
+                from: "2026-09-26T07:00:00.000Z",
+                until: "2026-09-27T07:00:00.000Z",
+              },
+            },
+            {
+              triggerId: "on_issue",
+              status: "paused",
+              health: {
+                state: "error",
+                message: "no such key: labels",
+                at: "2026-09-28T09:00:00.000Z",
+              },
+            },
+          ],
+        },
+      },
+      lookUpCommand("trigger", "list"),
+    );
+    expect(lines).toEqual([
+      "triggerId        status  health                      nextFireAt                skippedTicks",
+      "weekday_morning  active  ok                          2026-09-29T07:00:00.000Z  2026-09-26T07:00:00.000Z to 2026-09-27T07:00:00.000Z",
+      "on_issue         paused  error: no such key: labels",
+    ]);
   });
 });

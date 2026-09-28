@@ -1,8 +1,9 @@
 /**
  * The event log: one append-only table holding pipeline events and audit
- * entries. The audit writer appends audit entries, and the platform event
+ * entries. The audit writer appends audit entries, the platform event
  * writer appends the events the controller emits about its own state into
- * the pipeline; the service implements `event.query`,
+ * the pipeline, and the Scheduler appends a `cron.tick` for each cron trigger
+ * that comes due; the service implements `event.query`,
  * `event.read` and `event.emit`, and amends a pipeline event for the
  * enrichment use case in the controller daemon. Beside them are the internal
  * reads of the log, the cursor a durable consumer uses to keep its place, and
@@ -11,7 +12,14 @@
  */
 export { AUDIT_KINDS, AuditLog, AuditLogLayer, type AuditEntry, type AuditKind } from "./audit-log";
 export { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
-export { CRON_TICK_EVENT_KIND, EventKinds, EventKindsLayer, isCoreEventKind } from "./kinds";
+export { appendCronTickEvent } from "./cron-tick-event";
+export {
+  CRON_TICK_EVENT_KIND,
+  CRON_TICK_SOURCE,
+  EventKinds,
+  EventKindsLayer,
+  isCoreEventKind,
+} from "./kinds";
 export {
   advanceConsumerCursor,
   readConsumerPosition,

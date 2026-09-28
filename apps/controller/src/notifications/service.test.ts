@@ -804,7 +804,7 @@ describe("createCoreNotification", () => {
   });
 });
 
-describe("createCoreNotification with unlessRaisedSince", () => {
+describe("createCoreNotification with unlessRaised", () => {
   const RUNNER_ID = "0199e0e7-0000-7000-8000-00000000ba01";
   const RUNNER: NotificationSubject = { kind: "runner", id: RUNNER_ID };
   const RUN: NotificationSubject = { kind: "run", id: WORKFLOW_RUN_ID };
@@ -826,14 +826,21 @@ describe("createCoreNotification with unlessRaisedSince", () => {
    * from the moment `RAISED` was created. Returns whether `candidate` was
    * created.
    */
-  const checkCreated = (candidate: CoreNotification, offsetMs: number): Promise<boolean> =>
+  const checkCreated = (
+    candidate: CoreNotification,
+    offsetMs: number,
+    about?: ReadonlyArray<NotificationSubject>,
+  ): Promise<boolean> =>
     run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
         yield* notifications.createCoreNotification(RAISED);
         const [raised] = (yield* actAs(USER, notifications.query({}))).items;
         yield* notifications.createCoreNotification(candidate, {
-          unlessRaisedSince: shiftIso(raised!.createdAt, offsetMs),
+          unlessRaised: {
+            since: shiftIso(raised!.createdAt, offsetMs),
+            ...(about === undefined ? {} : { about }),
+          },
         });
         return (yield* actAs(USER, notifications.query({}))).items.length === 2;
       }),
@@ -861,6 +868,13 @@ describe("createCoreNotification with unlessRaisedSince", () => {
         { ...RAISED, subject: [RUNNER, { kind: "runner", id: UNKNOWN_ID }] },
         -1,
       ),
+      // A subject of its own is left out of the search when `about` names
+      // only the shared one.
+      ownSubjectLeftOutOfTheSearch: await checkCreated(
+        { ...RAISED, subject: [RUNNER, { kind: "runner", id: UNKNOWN_ID }] },
+        -1,
+        [RUNNER],
+      ),
     };
 
     expect(created).toEqual({
@@ -872,6 +886,7 @@ describe("createCoreNotification with unlessRaisedSince", () => {
       otherSubject: true,
       sameIdOtherKindOfSubject: true,
       oneSubjectNotRaisedAbout: true,
+      ownSubjectLeftOutOfTheSearch: false,
     });
   });
 });

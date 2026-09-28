@@ -656,7 +656,7 @@ const make = Effect.gen(function* () {
                 body: "Its connection dropped without a goodbye, and it has not reconnected. Work placed on it waits until it does.",
                 subject: [{ kind: "runner", id: runner.id }],
               },
-              { unlessRaisedSince: runner.lastSeenAt },
+              { unlessRaised: { since: runner.lastSeenAt } },
             );
           }
         }),

@@ -91,6 +91,16 @@ export interface NotificationPage {
   readonly nextCursor?: string;
 }
 
+/**
+ * When a core notification is held back: when one of the same kind was
+ * created after `since` about every subject in `about`. `about` is every
+ * subject of the new notification when left out.
+ */
+export interface UnlessRaised {
+  readonly since: string;
+  readonly about?: ReadonlyArray<NotificationSubject>;
+}
+
 /** A notification the core raises about itself. */
 export interface CoreNotification {
   readonly kind: CoreNotificationKind;
@@ -353,27 +363,30 @@ const make = Effect.gen(function* () {
      * empty body is left out, so a notification built from an error message
      * is always one `notification.query` can return.
      *
-     * With `unlessRaisedSince`, it creates nothing when a notification of the
-     * same kind, about every subject of this one, was created after that
-     * instant. A condition that lasts, such as a runner that stays away, is
-     * checked again and again; the option lets the caller report it once
-     * each time it occurs rather than on every check. The caller passes the
-     * instant the condition began, such as when the runner was last seen.
+     * With `unlessRaised`, it creates nothing when a notification of the
+     * same kind was created after `since` about every subject in `about`,
+     * which is every subject of this notification when left out. A condition
+     * that lasts, such as a runner that stays away, is checked again and
+     * again; the option lets the caller report it once each time it occurs
+     * rather than on every check. The caller passes the instant the condition
+     * began, such as when the runner was last seen. `about` names fewer
+     * subjects when each notification also names something of its own, such
+     * as the run in a failed run's notification.
      */
     createCoreNotification: (
       notification: CoreNotification,
-      options?: { readonly unlessRaisedSince?: string },
+      options?: { readonly unlessRaised?: UnlessRaised | undefined },
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const since = options?.unlessRaisedSince;
+          const unlessRaised = options?.unlessRaised;
           if (
-            since !== undefined &&
+            unlessRaised !== undefined &&
             (yield* notifications.hasNotificationAboutSince(
               notification.kind,
-              notification.subject,
-              since,
+              unlessRaised.about ?? notification.subject,
+              unlessRaised.since,
             ))
           ) {
             return;

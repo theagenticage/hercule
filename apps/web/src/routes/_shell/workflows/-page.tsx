@@ -163,6 +163,7 @@ export function WorkflowEditorPage({
         onViewChange={onViewChange}
         isInert={isCreating}
         onNameChange={setName}
+        storedWorkflowId={existingWorkflow?.id}
       />
     </div>
   );

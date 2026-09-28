@@ -1225,6 +1225,44 @@ export const CLI = {
       },
     },
   },
+  "trigger.pause": {
+    command: "trigger pause",
+    help: "Pauses a start trigger, so it starts no run until you resume it with `hercule trigger resume`. Events that arrive while it is paused are dropped, not kept for later, and a cron trigger's scheduled times pass without firing. The workflow's source does not change, and saving a new source keeps the pause. Pausing a paused trigger changes nothing.",
+    examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
+    fields: {
+      workflowId: {
+        positional: true,
+        help: "The trigger's workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      triggerId: {
+        positional: true,
+        help: "The trigger's id in the workflow's source, such as weekday_morning.",
+      },
+    },
+    errors: {
+      invalid_state: "the trigger is a signal trigger, which has no status and cannot be paused",
+    },
+  },
+  "trigger.resume": {
+    command: "trigger resume",
+    help: "Resumes a paused start trigger, so it starts runs again from the next event it matches. Events that arrived while it was paused do not start runs, and a cron trigger fires next at its next scheduled time. Resuming an active trigger changes nothing.",
+    examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
+    fields: {
+      workflowId: {
+        positional: true,
+        help: "The trigger's workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      triggerId: {
+        positional: true,
+        help: "The trigger's id in the workflow's source, such as weekday_morning.",
+      },
+    },
+    errors: {
+      invalid_state: "the trigger is a signal trigger, which has no status and cannot be paused",
+    },
+  },
 
   "workflowAction.query": {
     command: "workflow-action list",

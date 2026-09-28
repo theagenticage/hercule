@@ -95,6 +95,7 @@ const openWorkflowPage = async () => {
     },
     "GET /api/v1/event-kinds": { body: [] },
     "GET /api/v1/agents": { body: { items: [] } },
+    "GET /api/v1/triggers": { body: { items: [] } },
     "GET /api/v1/connections": { body: { items: [] } },
     "POST /api/v1/runs/start": { body: { runId: STARTED_RUN_ID } },
     [`GET /api/v1/runs/${STARTED_RUN_ID}`]: { body: STARTED_RUN },

@@ -10,11 +10,22 @@
  *
  * The list returns every field of each trigger, so there is no operation that
  * reads one trigger. A field the trigger does not have is absent, not null.
+ *
+ * `trigger.pause` and `trigger.resume` change a start trigger's status. They
+ * are the only writes to a trigger that do not go through its workflow's
+ * source.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -36,6 +47,41 @@ export const TriggerStatus = Schema.Literals(["active", "paused"]);
 
 export type TriggerStatus = Schema.Schema.Type<typeof TriggerStatus>;
 
+/**
+ * Whether a start trigger's filter and input mapping could be evaluated
+ * against the last event they were tried on:
+ *
+ * - `ok`: they could, or they have not been tried since the trigger last
+ *   changed.
+ * - `error`: they failed on an event, for example because the filter read a
+ *   field the event does not have. `message` is the latest evaluation error,
+ *   and `at` is when the first failure in the current run of failures
+ *   happened. The trigger matches no event while its filter fails,
+ *   and becomes `ok` again the next time its filter and mapping succeed.
+ *
+ * The user is notified once when a trigger goes from `ok` to `error`, not on
+ * every event that fails.
+ */
+export const TriggerHealth = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("ok") }),
+  Schema.Struct({ state: Schema.Literal("error"), message: Schema.String, at: Timestamp }),
+]);
+
+export type TriggerHealth = Schema.Schema.Type<typeof TriggerHealth>;
+
+/**
+ * The scheduled times a cron trigger let pass without firing, because the
+ * controller was not running when they came due or was too far behind to
+ * fire them on time. A missed time is never fired late: the trigger waits for
+ * its next scheduled time. Only the latest stretch of missed times is kept.
+ *
+ * - `from`: the first scheduled time that was missed.
+ * - `until`: the last scheduled time that was missed.
+ */
+export const SkippedTicks = Schema.Struct({ from: Timestamp, until: Timestamp });
+
+export type SkippedTicks = Schema.Schema.Type<typeof SkippedTicks>;
+
 export const Trigger = Schema.Struct({
   workflowId: Id,
   /** The workflow's name, included so a client can show it without reading the workflow. */
@@ -51,6 +97,18 @@ export const Trigger = Schema.Struct({
   timezone: Schema.optionalKey(Timezone),
   /** Set on start triggers only. */
   status: Schema.optionalKey(TriggerStatus),
+  /** Set on start triggers only. */
+  health: Schema.optionalKey(TriggerHealth),
+  /**
+   * When a cron trigger's schedule next comes due. Absent until the
+   * Scheduler has first read the trigger, which it does within a second of
+   * the trigger being saved.
+   */
+  nextFireAt: Schema.optionalKey(Timestamp),
+  /** When a cron trigger last fired. Absent until it first fires. */
+  lastFiredAt: Schema.optionalKey(Timestamp),
+  /** The latest scheduled times a cron trigger missed, if it ever missed any. */
+  skippedTicks: Schema.optionalKey(SkippedTicks),
   createdAt: Timestamp,
   /** When the trigger itself last changed. Saving its workflow does not always change it. */
   updatedAt: Timestamp,
@@ -69,6 +127,36 @@ export const TriggerFilter = Schema.Struct({
 /** The fields the trigger list can be sorted by. */
 export const TRIGGER_SORT_FIELDS = ["createdAt"] as const;
 
+/**
+ * Names one trigger: its workflow's id and its id in that workflow's source.
+ * Both are needed, because a trigger id is unique only within its workflow.
+ */
+export const TriggerKey = Schema.Struct({ workflowId: Id, triggerId: Schema.String });
+
+export type TriggerKey = Schema.Schema.Type<typeof TriggerKey>;
+
+/**
+ * The payload of `cron.tick`, the event the Scheduler emits when a cron
+ * trigger's schedule comes due. Each tick is for one trigger, and only that
+ * trigger starts a run from it.
+ *
+ * - `scheduledFor`: the scheduled time that came due. The event's
+ *   `occurredAt` is the same instant.
+ * - `previousFiredAt`: when the trigger last fired before this tick, `null`
+ *   for its first. A scheduled time the trigger missed does not count, so a
+ *   workflow can read the whole stretch since it last ran. The field is
+ *   always present, because an input mapping that reads a missing field
+ *   fails.
+ */
+export const CronTickEventPayload = Schema.Struct({
+  workflowId: Id,
+  triggerId: Schema.String,
+  scheduledFor: Timestamp,
+  previousFiredAt: Schema.NullOr(Timestamp),
+});
+
+export type CronTickEventPayload = Schema.Schema.Type<typeof CronTickEventPayload>;
+
 export const trigger = HttpApiGroup.make("trigger")
   .add(
     HttpApiEndpoint.get("query", "/triggers", {
@@ -78,6 +166,27 @@ export const trigger = HttpApiGroup.make("trigger")
       }),
       success: page(Trigger),
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    /**
+     * Pauses a start trigger, so it starts no run until it is resumed, and
+     * returns it. Events that arrive while it is paused are not kept for
+     * later. Pausing a paused trigger changes nothing. Fails with
+     * `invalid_state` for a signal trigger, which cannot be paused.
+     */
+    HttpApiEndpoint.post("pause", "/workflows/:workflowId/triggers/:triggerId/pause", {
+      params: TriggerKey.fields,
+      success: Trigger,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Resumes a paused start trigger and returns it. Resuming an active
+     * trigger changes nothing. Fails with `invalid_state` for a signal
+     * trigger.
+     */
+    HttpApiEndpoint.post("resume", "/workflows/:workflowId/triggers/:triggerId/resume", {
+      params: TriggerKey.fields,
+      success: Trigger,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

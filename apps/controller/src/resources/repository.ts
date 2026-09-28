@@ -308,6 +308,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Checks whether any resource acts through the connection. The check
+     * decides whether the connection may be deleted.
+     */
+    usesConnection: (connectionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM resources WHERE connection_id = ${uuidFromString(connectionId)} LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
      * Returns the given project ids that exist and are not deleted, so a link
      * never points at nothing.
      */

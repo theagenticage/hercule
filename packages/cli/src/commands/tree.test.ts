@@ -284,6 +284,8 @@ describe("the placeholders a usage line shows", () => {
     "conversation read": "<conversation-id>",
     "conversation message list": "<conversation-id>",
     "conversation send": "<conversation-id>",
+    "trigger pause": "<workflow-id> <trigger-id>",
+    "trigger resume": "<workflow-id> <trigger-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

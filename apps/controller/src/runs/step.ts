@@ -22,7 +22,6 @@ import {
   formatIssue,
   isApiError,
   listDecodeIssues,
-  type FailureReason,
   type Run,
   type RunStarted,
   type WorkflowDefinition,
@@ -44,7 +43,7 @@ import {
 } from "../plugins";
 import { NotificationService } from "../notifications";
 import { TaskService } from "../tasks";
-import { runRepository, StepRecordEnded } from "./repository";
+import { runRepository, StepRecordEnded, type ExecutionFailureReason } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
 import { commitUninterruptibly } from "./transaction";
@@ -103,7 +102,7 @@ export const buildActionUnavailableError = (action: string): EngineStepError => 
 /** Why a step's input could not be prepared: the step error, and the reason the run fails. */
 export interface InputFailure {
   readonly error: EngineStepError;
-  readonly failureReason: FailureReason;
+  readonly failureReason: ExecutionFailureReason;
 }
 
 /**
@@ -235,7 +234,7 @@ interface StepExecutionNeeds {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
   ) => Effect.Effect<void, SqlError>;
   /** Routes the run after a step's record ended, inside the caller's transaction. */
   readonly routeAfterStep: (

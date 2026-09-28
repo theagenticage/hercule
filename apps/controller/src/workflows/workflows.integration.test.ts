@@ -9,9 +9,7 @@
  *
  * Every test goes through the public API, because the tests check that the
  * YAML source a person wrote comes back byte for byte, and only a real HTTP
- * round trip can show that. One step bypasses the API: a test sets a start
- * trigger's status directly in the database, because no operation pauses a
- * trigger yet.
+ * round trip can show that.
  *
  * Every source that a test expects to be saved passes all of the controller's
  * validation, not only the schema: its agents and its Connection exist, the
@@ -43,6 +41,7 @@ import {
   spawnAgentUnder,
   readProfileNamed,
   WAIT_DEADLINE_MS,
+  waitUntil,
   withAgentFleet,
 } from "../sessions/testing";
 import {
@@ -56,9 +55,11 @@ import {
   DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
   KEBAB_CASE_STEP_ID_SOURCE,
+  pauseTrigger,
   queryTriggers,
   queryWorkflows,
   readIssues,
+  resumeTrigger,
   SYNTAX_ERROR_SOURCE,
   updateWorkflow,
   withSetUpController,
@@ -707,7 +708,7 @@ describe("workflow.delete", () => {
 
 describe("trigger.query", () => {
   it("lists the triggers of every workflow with all fields, newest first, and filters by each query parameter", async () => {
-    await withSetUpController(async ({ harness, base, token }) => {
+    await withSetUpController(async ({ base, token }) => {
       const connectionId = await createConnection(base, token, "github/github", {
         pat: ACCEPTED_GITHUB_TOKEN,
       });
@@ -719,7 +720,14 @@ describe("trigger.query", () => {
         source: NIGHTLY_SWEEP_SOURCE,
       });
 
-      const allTriggers = await queryTriggers(base, token);
+      // The Scheduler computes a cron trigger's next scheduled time on its
+      // first pass after the save. Waiting for it keeps the listing below
+      // from depending on whether that pass has run yet.
+      const allTriggers = await waitUntil("scheduled both cron triggers", async () => {
+        const items = await queryTriggers(base, token);
+        const cron = items.filter((item) => item.eventKind === "cron.tick");
+        return cron.every((item) => item.nextFireAt !== undefined) ? items : undefined;
+      });
       expect(allTriggers).toHaveLength(4);
       // The Nightly sweep was created last, so its trigger is the newest.
       expect([allTriggers[0]!.workflowId, allTriggers[0]!.triggerId]).toEqual([
@@ -740,6 +748,7 @@ describe("trigger.query", () => {
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       };
+      const scheduleMatchers: Record<"nextFireAt", unknown> = { nextFireAt: expect.any(String) };
       const triggerA = findTrigger(allTriggers, "a");
       expect(triggerA).toEqual({
         workflowId: labelTriage.id,
@@ -750,6 +759,7 @@ describe("trigger.query", () => {
         connectionId,
         filter: LABEL_FILTER,
         status: "active",
+        health: { state: "ok" },
         ...timestampMatchers,
       });
       expect(findTrigger(allTriggers, "b")).toEqual({
@@ -761,6 +771,8 @@ describe("trigger.query", () => {
         schedule: "0 9 * * 1-5",
         timezone: "Europe/Amsterdam",
         status: "active",
+        health: { state: "ok" },
+        ...scheduleMatchers,
         ...timestampMatchers,
       });
       // A signal trigger has no status, because it cannot be paused.
@@ -783,6 +795,8 @@ describe("trigger.query", () => {
         eventKind: "cron.tick",
         schedule: "0 2 * * *",
         status: "active",
+        health: { state: "ok" },
+        ...scheduleMatchers,
         ...timestampMatchers,
       });
 
@@ -805,10 +819,8 @@ describe("trigger.query", () => {
         "nightly",
       ]);
 
-      // No operation pauses a trigger yet, so the test pauses it in the database.
-      await Effect.runPromise(
-        Effect.orDie(harness.sql`UPDATE triggers SET status = 'paused' WHERE trigger_id = 'a'`),
-      );
+      const paused = await pauseTrigger(base, token, labelTriage.id, "a");
+      expect(paused.status, await paused.clone().text()).toBe(200);
       expect(sortTriggerIds(await queryTriggers(base, token, "?status=paused"))).toEqual(["a"]);
 
       await waitForNextMillisecond();
@@ -831,6 +843,135 @@ describe("trigger.query", () => {
       expect(deleteResponse.status, await deleteResponse.clone().text()).toBe(200);
       expect(await queryTriggers(base, token, `?workflowId=${labelTriage.id}`)).toEqual([]);
       expect(sortTriggerIds(await queryTriggers(base, token))).toEqual(["nightly"]);
+    });
+  });
+});
+
+/**
+ * A workflow with one start trigger `c` on a core event kind, so it needs no
+ * Connection and can be saved on a controller without the GitHub plugin.
+ */
+const TASK_TRIGGER_SOURCE = `name: Follow up on tasks
+triggers:
+${TASK_TRIGGER_C_SOURCE}steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    params:
+      title: Follow up
+      description: Filed when a task is created.
+`;
+
+describe("trigger.pause and trigger.resume", () => {
+  it("pauses a start trigger, lists it as paused, and writes one audit entry however often it is paused", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, { source: TASK_TRIGGER_SOURCE });
+
+      for (const attempt of ["first", "second"]) {
+        const response = await pauseTrigger(base, token, workflow.id, "c");
+        expect(response.status, `${attempt}: ${await response.clone().text()}`).toBe(200);
+        expect(((await response.json()) as Trigger).status).toBe("paused");
+      }
+
+      expect(sortTriggerIds(await queryTriggers(base, token, "?status=paused"))).toEqual(["c"]);
+      expect(await queryTriggers(base, token, "?status=active")).toEqual([]);
+      // The second pause changed nothing, so it wrote nothing.
+      const entries = await harness.audit("trigger.paused");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actor: "user",
+        payload: { workflowId: workflow.id, triggerId: "c" },
+      });
+    });
+  });
+
+  it("resumes a paused trigger, and resuming an active trigger changes nothing", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, { source: TASK_TRIGGER_SOURCE });
+      const paused = await pauseTrigger(base, token, workflow.id, "c");
+      expect(paused.status, await paused.clone().text()).toBe(200);
+
+      for (const attempt of ["first", "second"]) {
+        const response = await resumeTrigger(base, token, workflow.id, "c");
+        expect(response.status, `${attempt}: ${await response.clone().text()}`).toBe(200);
+        expect(((await response.json()) as Trigger).status).toBe("active");
+      }
+
+      expect(sortTriggerIds(await queryTriggers(base, token, "?status=active"))).toEqual(["c"]);
+      const entries = await harness.audit("trigger.resumed");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actor: "user",
+        payload: { workflowId: workflow.id, triggerId: "c" },
+      });
+    });
+  });
+
+  it("returns not_found for a workflow or a trigger that does not exist", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, { source: TASK_TRIGGER_SOURCE });
+
+      for (const [workflowId, triggerId] of [
+        [ABSENT_ID, "c"],
+        [workflow.id, "absent"],
+      ] as const) {
+        for (const send of [pauseTrigger, resumeTrigger]) {
+          const response = await send(base, token, workflowId, triggerId);
+          const refusal = await readErrorBody(response);
+          expect(response.status, `${workflowId}/${triggerId}: ${refusal.text}`).toBe(404);
+          expect(refusal.code).toBe("not_found");
+        }
+      }
+    });
+  });
+
+  it("returns invalid_state for a signal trigger, which has no status", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const connectionId = await createConnection(base, token, "github/github", {
+        pat: ACCEPTED_GITHUB_TOKEN,
+      });
+      const workflow = await createWorkflowOrFail(base, token, {
+        source: buildLabelTriageSource(connectionId, ""),
+      });
+
+      for (const send of [pauseTrigger, resumeTrigger]) {
+        const response = await send(base, token, workflow.id, "s");
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(409);
+        expect(refusal.code).toBe("invalid_state");
+        expect(refusal.message).toContain("signal trigger");
+      }
+      const signal = (await queryTriggers(base, token, "?kind=signal"))[0];
+      expect(signal).not.toHaveProperty("status");
+      expect(await harness.audit("trigger.paused")).toEqual([]);
+      expect(await harness.audit("trigger.resumed")).toEqual([]);
+    });
+  });
+
+  it("fails with forbidden and names the grant when the session's profile lacks workflow.write, and changes nothing", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const workflow = await createWorkflowOrFail(base, arranged.token, {
+        source: TASK_TRIGGER_SOURCE,
+      });
+      // The shipped assistant profile has workflow.read but not workflow.write.
+      const assistantSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
+
+      for (const send of [pauseTrigger, resumeTrigger]) {
+        const response = await send(base, assistantSession.token, workflow.id, "c");
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal.code).toBe("forbidden");
+        expect(refusal.grant).toBe("workflow.write");
+      }
+
+      expect(sortTriggerIds(await queryTriggers(base, arranged.token, "?status=active"))).toEqual([
+        "c",
+      ]);
+      expect(await arranged.harness.audit("trigger.paused")).toEqual([]);
     });
   });
 });

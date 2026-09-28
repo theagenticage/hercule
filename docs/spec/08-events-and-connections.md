@@ -27,7 +27,7 @@ One envelope for every event, regardless of source.
 | `kind` | string | emitter | Namespaced by source: `github.issue.opened`, `gmail.message.received`, `cron.tick`, `run.failed`, `task.updated`. Each kind declares a payload schema at plugin registration; the catalog is persisted and readable by workflow validation and UI pickers. |
 | `occurredAt` | timestamp | emitter | When it happened at the source. |
 | `receivedAt` | timestamp | core | When the controller persisted it. |
-| `dedupKey` | string | emitter | Plugin-supplied idempotency key, unique per Connection. A second emit with the same `(connectionId, dedupKey)` is a no-op returning the existing event id. Core emitters supply their own keys (e.g. `cron.tick` = ~~`triggerId + scheduledFor`~~ `workflowId + triggerId + scheduledFor` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78), section 4)*). A platform event's key is random *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81), section 5.5)*. |
+| `dedupKey` | string | emitter | Plugin-supplied idempotency key, unique per Connection. A second emit with the same `(connectionId, dedupKey)` is a no-op returning the existing event id. Core emitters supply their own keys (e.g. `cron.tick` = ~~`triggerId + scheduledFor`~~ `workflowId + triggerId + scheduledFor` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78), section 4)*). A platform event's key is random *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81), section 5.5)*. The key is unique per source as well: a manual event can no longer take a `cron.tick`'s key first and stop the tick from being written *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82))*. |
 | `refs` | ExternalRef[] | emitter, then enrichment (append-only) | This spec's addition. Canonical identities of the things the event is about (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the ref type owns canonicalization; the Connection is not part of the identity. Copied into Task provenance by triage and matched by the `task.query` guard ([./09-tasks.md](./09-tasks.md), [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). |
 | `url` | string or null | emitter, then enrichment | Source URL: where a human opens this event in its system ("Open in GitHub"). |
 | `payload` | object | emitter | Per-kind payload conforming to the declared schema. This is what CEL filters and trigger input mappings read. |
@@ -81,11 +81,21 @@ The warning is a `health` field on the trigger row (and on the subscription row 
 
 *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84).)* A subscription's correlation error raises its own kind, `core.subscription-condition-error`, by the same rule: one informational Notification, with the subscription as its subject and the error as its body, created in the routing transaction that moves the subscription's health from `ok` to `error`. `core.trigger-filter-error` arrives with the trigger routing table in [#82](https://github.com/theagenticage/hercule/issues/82); until then the pipeline evaluates no trigger filter, so there is nothing to raise it for.
 
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Triggers as built.** The event router evaluates start triggers now, through a routing table of its own beside the one for subscriptions ([./07-workflows.md](./07-workflows.md) section 2.1).
+
+- It writes step 4's pending run, a **trigger effect**, in the routing transaction. A delivery starts the run from it later, one effect per transaction, in arrival order.
+- Held-event rows are not written: they arrive with spawn bounds ([#87](https://github.com/theagenticage/hercule/issues/87), section 4.1).
+- `core.trigger-filter-error` is raised now, by the rule above, with one addition: a new streak raises no notification when one about the same trigger was raised in the hour before. A filter that fails on every other event starts a new streak each time, and would otherwise raise one notification per event. As for an unreachable runner ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2), the check reads the notifications already created, so it needs no counter and no timer. The trigger's health still shows every failure. Its subject is the trigger, `{ kind: "trigger", workflowId, triggerId }`, and its body is the error.
+- A trigger has no live topic of its own, so a change to its health is announced on the live topic `workflow`.
+- Saving the workflow returns each of its start triggers to `ok`, without a notification ([./07-workflows.md](./07-workflows.md) section 2).
+
 **Expressions.** All four expression sites (start-trigger filters, signal-trigger correlation keys, step and edge conditions) use CEL, evaluated by `@marcbachmann/cel-js` behind a Hercule-owned wrapper, context variables dyn-typed ([./07-workflows.md](./07-workflows.md); research/expression-language.md (branch `research/expression-language`)). Filters see the whole envelope as `event`; the raw event never leaks into the frozen plan - the trigger's input mapping copies what the run needs.
 
 ### 4.1 Spawn bounds
 
 Spawn bounds live on start triggers: `{ maxRuns, windowSeconds }` per trigger, default ~30 runs per hour. Exceeding it trips the trigger into a paused state; the matcher then writes held-event rows instead of pending runs, so matched events are kept visibly, a Notification fires, and the user resumes with one click (optionally discarding the backlog). The full breaker semantics, the resume operation, and the "Needs a call" surface belong to [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* Not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)): a start trigger starts a run for every event it matches ([./07-workflows.md](./07-workflows.md) section 2.5).
 
 ### 4.2 Enrichment re-match
 
@@ -136,6 +146,8 @@ Cron is core, not a plugin. There is no standalone schedule entity: the schedule
 - A scheduled-task form is sugar over "create workflow {cron trigger, one step}" or "add a cron trigger to an existing workflow"; the one-step shortcut may use the fire-and-forget built-in ~~`workflow.run`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* action. Whether v1's web app ships that form belongs to [./14-web-app.md](./14-web-app.md) (ruled post-v1 there).
 - Assistant heartbeats are a scheduled wake; whether they ride a cron trigger and by what mechanism is Open in [./12-assistants.md](./12-assistants.md).
 
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* The Scheduler as built is in [./07-workflows.md](./07-workflows.md) section 2.2. A tick's `source` and `system` are `cron`, its `connectionId` is null, and its `occurredAt` is its `scheduledFor`. `event.enrich` refuses a tick with `not_found`, as it refuses a platform event: the tick's payload names the one trigger it fires, and an added ref must not widen what it matches.
+
 ### 5.4 Manual (core)
 
 "Manual" is two distinct things:
@@ -164,7 +176,8 @@ The payload set is pinned by [Plugin contribution interfaces](https://github.com
 
 - **`workflowId` is null, not absent,** for a run of a workflow sent with `run.start`, as on the run record ([./07-workflows.md](./07-workflows.md) section 7.2).
 - **`startedAt` is optional.** A run cancelled while it was `pending` never started, and neither did a run the controller could not carry out before its first step.
-- **`triggerId`, `taskId` and `triggerEventId` are not in the payload yet.** Each joins with the ticket that gives a run the field: triggers ([#82](https://github.com/theagenticage/hercule/issues/82)) and the ticket that links a run to a Task.
+- **`triggerId`, `taskId` and `triggerEventId` are not in the payload yet.** Each joins with the ticket that gives a run the field: triggers ([#82](https://github.com/theagenticage/hercule/issues/82)) and the ticket that links a run to a Task. *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): a run a trigger starts carries the trigger's id and the event's id in `origin`, `{ kind: "trigger", triggerId, eventId }`, so the payload has them there; it gains no fields of its own for them)*
+- *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **`run.failed` adds `failureMessage?`**, the run record's sentence that says what did not validate, for a run that failed with `validation-error` ([./07-workflows.md](./07-workflows.md) section 7.1).
 - **`failedEdge` is `{ index, message }`**, the same type as the run record's `failedEdge`: the edge's index in the run's `plan.edges`, and what went wrong there. The event does not carry the plan, so a consumer that needs the edge's steps reads the run with `run.read`. The event keeps the run record's shape rather than a shape of its own, so one concept has one spelling.
 - **The actor.** The envelope's `actor` is the actor whose request ended the run: the user or a session calling `run.cancel`, or `run:<id>` when a step of another run cancelled it. It is `system` when the run ended on its own, by completing or failing, the stamp the controller uses for any write with no request behind it.
 - **Platform events are never enriched.** `event.enrich` refuses a platform event with `not_found`, as it refuses an audit entry: a ref added to a run's event could make it match a subscription it was never about, and the controller's own account of what happened is not the caller's to amend.

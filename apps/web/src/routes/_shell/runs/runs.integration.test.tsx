@@ -428,6 +428,32 @@ describe("Runs > the list", () => {
     expect(readPageText(getRunRow(OF_DELETED.id))).not.toMatch(/step.failed/i);
   });
 
+  it("names the trigger that started a run, and why a run that never started failed", async () => {
+    const byTrigger: RunSummary = {
+      ...OF_DELETED,
+      id: "0199c0ff-2222-7000-8000-000000000004",
+      origin: { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+    };
+    const invalid: RunSummary = {
+      id: "0199c0ff-2222-7000-8000-000000000005",
+      workflowId: NIGHTLY_ID,
+      workflowName: NIGHTLY_NAME,
+      origin: { kind: "trigger", triggerId: "weekdays", eventId: 43 },
+      status: "failed",
+      failureReason: "validation-error",
+      failureMessage: "The input `repo` is required.",
+      createdAt: buildTimestampMinutesAgo(10),
+      finishedAt: buildTimestampMinutesAgo(10),
+    };
+    await openApp({ runs: [invalid, byTrigger] });
+
+    await findRunRow(byTrigger.id);
+    expect(readPageText(getRunRow(byTrigger.id))).toContain("by trigger on_issue");
+    const invalidRow = readPageText(getRunRow(invalid.id));
+    expect(invalidRow).toContain("validation error");
+    expect(invalidRow).toContain("by trigger weekdays");
+  });
+
   it("opens a run's page from its row", async () => {
     const user = userEvent.setup();
     const { router } = await openApp();

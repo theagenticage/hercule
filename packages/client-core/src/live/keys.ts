@@ -71,6 +71,13 @@ export const queryKeys = {
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
   /**
+   * The triggers of one workflow, keyed on its id; without it, the prefix of
+   * every trigger list. Triggers have no topic of their own: a trigger is
+   * part of its workflow, so a change to one is pushed on `workflow`.
+   */
+  triggers: (workflowId?: string): LiveQueryKey =>
+    workflowId === undefined ? ["triggers"] : ["triggers", workflowId],
+  /**
    * Not a live topic. The key includes the source text, so validating the same
    * source again reads the cached result.
    */
@@ -162,12 +169,18 @@ export const buildQueryKeys = (
       ? [queryKeys.connections(), queryKeys.connection()]
       : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
   }
-  // Any workflow change refetches the listing. A workflow's own page is
-  // refetched only when the push lists its id, or when the push lists no ids.
+  // Any workflow change refetches the listing. A workflow's own page and its
+  // triggers are refetched only when the push lists its id, or when the push
+  // lists no ids. A trigger's change, such as a pause or a failing filter, is
+  // pushed with its workflow's id.
   if (topic === "workflow") {
     return ids.length === 0
-      ? [queryKeys.workflows(), queryKeys.workflow()]
-      : [queryKeys.workflows(), ...ids.map((id) => queryKeys.workflow(id))];
+      ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers()]
+      : [
+          queryKeys.workflows(),
+          ...ids.map((id) => queryKeys.workflow(id)),
+          ...ids.map((id) => queryKeys.triggers(id)),
+        ];
   }
   // Any run change refetches the run list, whatever its filter. A run's own
   // page is refetched only when the push lists its id, or when the push

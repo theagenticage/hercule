@@ -13,8 +13,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
 import type {
+  SkippedTicks,
   SortDirection,
   Trigger,
+  TriggerHealth,
+  TriggerKey,
   TriggerKind,
   TriggerStatus,
   Workflow,
@@ -35,6 +38,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { CRON_TICK_EVENT_KIND } from "../events";
 
 /** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
@@ -67,6 +71,59 @@ export interface DeclaredTrigger {
   readonly filter: string | undefined;
   readonly schedule: string | undefined;
   readonly timezone: string | undefined;
+  /** A start trigger's input mapping: each input name to an expression over `event`. */
+  readonly inputs: Readonly<Record<string, string>> | undefined;
+}
+
+/**
+ * A start trigger that can start a run now: it is active and its workflow is
+ * enabled. The event router tests every event against these.
+ */
+export interface RoutableStartTrigger extends TriggerKey {
+  readonly eventKind: string;
+  /** A Connection id, `any`, or `undefined` for a kind the core emits. */
+  readonly connectionId: string | undefined;
+  readonly filter: string | undefined;
+  /** Each input name to an expression over `event`. Empty when the trigger maps nothing. */
+  readonly inputs: Readonly<Record<string, string>>;
+  /** Whether the trigger's health records an evaluation error. */
+  readonly inEvaluationError: boolean;
+}
+
+/** A cron trigger's schedule and the Scheduler's state for it. */
+export interface CronTrigger extends TriggerKey {
+  readonly schedule: string;
+  /** The trigger's own timezone. `undefined` means the user's timezone setting applies. */
+  readonly timezone: string | undefined;
+  /** Whether a tick would start a run now: the trigger is active and its workflow is enabled. */
+  readonly canFire: boolean;
+  /** `undefined` until the Scheduler first computes it, and again after the schedule changes. */
+  readonly nextFireAt: string | undefined;
+  /** The timezone `nextFireAt` was computed in. */
+  readonly nextFireZone: string | undefined;
+  readonly lastFiredAt: string | undefined;
+}
+
+/**
+ * What the Scheduler writes when it moves a cron trigger on to its next
+ * scheduled time.
+ *
+ * - `nextFireAt` and `zone`: the next scheduled time and the timezone it was
+ *   computed in.
+ * - `firedAt`: set when the trigger fired, to the scheduled time it fired for.
+ * - `skipped`: set when the trigger missed scheduled times, to the stretch it
+ *   missed. It replaces the stretch recorded before.
+ */
+export interface CronAdvance {
+  readonly nextFireAt: string;
+  readonly zone: string;
+  readonly firedAt?: string;
+  readonly skipped?: SkippedTicks;
+}
+
+/** A trigger that names a Connection, with its workflow's name for a message. */
+export interface TriggerNamingConnection extends TriggerKey {
+  readonly workflowName: string;
 }
 
 export interface WorkflowPageRequest {
@@ -113,14 +170,32 @@ interface TriggerRow {
   readonly schedule: string | null;
   readonly timezone: string | null;
   readonly status: TriggerStatus | null;
+  readonly health_error_message: string | null;
+  readonly health_error_at: string | null;
+  readonly next_fire_at: string | null;
+  readonly last_fired_at: string | null;
+  readonly skipped_from: string | null;
+  readonly skipped_until: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
-const WORKFLOW_COLUMNS = "id, enabled, source, created_at, updated_at";
-
 /** The workflow's name is not a column. It is read from the stored definition. */
 const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
+
+/** The condition that picks the cron triggers out of the `triggers` table. */
+const IS_CRON_TRIGGER = `triggers.kind = 'start' AND triggers.event_kind = '${CRON_TICK_EVENT_KIND}'
+  AND triggers.schedule IS NOT NULL`;
+
+/** The columns a `TriggerRow` is read from. The query joins `workflows` for the name. */
+const TRIGGER_COLUMNS = `triggers.workflow_id, ${NAME_FROM_DEFINITION} AS workflow_name,
+  triggers.trigger_id, triggers.kind, triggers.event_kind, triggers.connection_id,
+  triggers.filter, triggers.schedule, triggers.timezone, triggers.status,
+  triggers.health_error_message, triggers.health_error_at, triggers.next_fire_at,
+  triggers.last_fired_at, triggers.skipped_from, triggers.skipped_until,
+  triggers.created_at, triggers.updated_at`;
+
+const WORKFLOW_COLUMNS = "id, enabled, source, created_at, updated_at";
 
 const toWorkflow = (row: WorkflowRow): Workflow => ({
   id: uuidToString(row.id),
@@ -138,6 +213,15 @@ const toSummary = (row: SummaryRow): WorkflowSummary => ({
   updatedAt: row.updated_at,
 });
 
+/**
+ * Returns a trigger's health from its two health columns. A check on the table
+ * writes them together, so one without the other cannot happen.
+ */
+const readHealth = (row: TriggerRow): TriggerHealth =>
+  row.health_error_message === null || row.health_error_at === null
+    ? { state: "ok" }
+    : { state: "error", message: row.health_error_message, at: row.health_error_at };
+
 /** Maps a trigger row to a `Trigger`. A NULL column becomes an absent field, not `null`. */
 const toTrigger = (row: TriggerRow): Trigger => ({
   workflowId: uuidToString(row.workflow_id),
@@ -150,6 +234,12 @@ const toTrigger = (row: TriggerRow): Trigger => ({
   ...(row.schedule === null ? {} : { schedule: row.schedule }),
   ...(row.timezone === null ? {} : { timezone: row.timezone }),
   ...(row.status === null ? {} : { status: row.status }),
+  ...(row.kind === "start" ? { health: readHealth(row) } : {}),
+  ...(row.next_fire_at === null ? {} : { nextFireAt: row.next_fire_at }),
+  ...(row.last_fired_at === null ? {} : { lastFiredAt: row.last_fired_at }),
+  ...(row.skipped_from === null || row.skipped_until === null
+    ? {}
+    : { skippedTicks: { from: row.skipped_from, until: row.skipped_until } }),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -334,7 +424,10 @@ const make = Effect.gen(function* () {
      *   trigger and no status for a signal trigger.
      * - A trigger whose id stays keeps its row, `created_at` and status. Its
      *   other fields are overwritten from the source, and `updated_at` changes
-     *   only if one of them changed.
+     *   only if one of them changed. A change also clears the trigger's
+     *   health, because the error it records was about the old filter or
+     *   mapping. A cron trigger whose schedule or timezone changed has its
+     *   next scheduled time cleared, so the Scheduler computes it again.
      * - A trigger whose id stays but whose kind changes counts as a new
      *   trigger, because a start trigger and a signal trigger are different
      *   things. It gets a new `created_at`, and a start trigger is `active`
@@ -372,12 +465,13 @@ const make = Effect.gen(function* () {
           yield* sql`
             INSERT INTO triggers
               (workflow_id, trigger_id, kind, event_kind, connection_id, filter, schedule,
-               timezone, status, created_at, updated_at)
+               timezone, inputs, status, created_at, updated_at)
             VALUES
               (${workflow}, ${trigger.triggerId}, ${trigger.kind},
                ${bindExactText(trigger.eventKind)}, ${trigger.connectionId ?? null},
                ${bindOptionalText(trigger.filter)}, ${bindOptionalText(trigger.schedule)},
                ${bindOptionalText(trigger.timezone)},
+               ${bindOptionalText(trigger.inputs === undefined ? undefined : JSON.stringify(trigger.inputs))},
                ${trigger.kind === "start" ? "active" : null}, ${savedAt}, ${savedAt})
             ON CONFLICT (workflow_id, trigger_id) DO UPDATE SET
               kind = excluded.kind,
@@ -386,15 +480,37 @@ const make = Effect.gen(function* () {
               filter = excluded.filter,
               schedule = excluded.schedule,
               timezone = excluded.timezone,
+              inputs = excluded.inputs,
               status = CASE WHEN triggers.kind = excluded.kind THEN triggers.status
                             ELSE excluded.status END,
               created_at = CASE WHEN triggers.kind = excluded.kind THEN triggers.created_at
                                 ELSE excluded.created_at END,
-              updated_at = excluded.updated_at
+              updated_at = excluded.updated_at,
+              health_error_message = NULL,
+              health_error_at = NULL,
+              next_fire_at = CASE
+                WHEN (triggers.kind, triggers.event_kind, triggers.schedule, triggers.timezone)
+                  IS (excluded.kind, excluded.event_kind, excluded.schedule, excluded.timezone)
+                THEN triggers.next_fire_at END,
+              next_fire_zone = CASE
+                WHEN (triggers.kind, triggers.event_kind, triggers.schedule, triggers.timezone)
+                  IS (excluded.kind, excluded.event_kind, excluded.schedule, excluded.timezone)
+                THEN triggers.next_fire_zone END,
+              -- When it last fired and what it missed stay with the schedule
+              -- only while the trigger is still the same cron trigger.
+              last_fired_at = CASE
+                WHEN (triggers.kind, triggers.event_kind) IS (excluded.kind, excluded.event_kind)
+                THEN triggers.last_fired_at END,
+              skipped_from = CASE
+                WHEN (triggers.kind, triggers.event_kind) IS (excluded.kind, excluded.event_kind)
+                THEN triggers.skipped_from END,
+              skipped_until = CASE
+                WHEN (triggers.kind, triggers.event_kind) IS (excluded.kind, excluded.event_kind)
+                THEN triggers.skipped_until END
             WHERE (triggers.kind, triggers.event_kind, triggers.connection_id, triggers.filter,
-                   triggers.schedule, triggers.timezone)
+                   triggers.schedule, triggers.timezone, triggers.inputs)
                IS NOT (excluded.kind, excluded.event_kind, excluded.connection_id,
-                       excluded.filter, excluded.schedule, excluded.timezone)
+                       excluded.filter, excluded.schedule, excluded.timezone, excluded.inputs)
           `;
         }
         return [...deleted.map((row) => row.trigger_id), ...replaced];
@@ -429,10 +545,7 @@ const make = Effect.gen(function* () {
         }
         if (request.status !== undefined) clauses.push(sql`triggers.status = ${request.status}`);
         const rows = yield* sql<TriggerRow>`
-          SELECT triggers.workflow_id, ${sql.literal(NAME_FROM_DEFINITION)} AS workflow_name,
-                 triggers.trigger_id, triggers.kind, triggers.event_kind, triggers.connection_id,
-                 triggers.filter, triggers.schedule, triggers.timezone, triggers.status,
-                 triggers.created_at, triggers.updated_at
+          SELECT ${sql.literal(TRIGGER_COLUMNS)}
           FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
           WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
@@ -444,6 +557,233 @@ const make = Effect.gen(function* () {
           (last) => encodeOwnedCursor(scope, last.createdAt, last.workflowId, last.triggerId),
         );
       }),
+
+    /** Returns one trigger, or `None` if its workflow declares no trigger with the id. */
+    readTrigger: (key: TriggerKey): Effect.Effect<Option.Option<Trigger>, SqlError> =>
+      Effect.map(
+        sql<TriggerRow>`
+          SELECT ${sql.literal(TRIGGER_COLUMNS)}
+          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
+            AND triggers.trigger_id = ${key.triggerId}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toTrigger),
+      ),
+
+    /**
+     * Sets a start trigger's status. Returns whether the status changed:
+     * setting the status it already has writes nothing, and leaves
+     * `updated_at` as it was.
+     */
+    setTriggerStatus: (
+      key: TriggerKey,
+      status: TriggerStatus,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly trigger_id: string }>`
+          UPDATE triggers SET status = ${status}, updated_at = ${at}
+          WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+            AND kind = 'start' AND status IS NOT ${status}
+          RETURNING trigger_id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns every start trigger that can start a run now: active, on an
+     * enabled workflow. The event router reads them once per pass.
+     */
+    listRoutableStartTriggers: (): Effect.Effect<ReadonlyArray<RoutableStartTrigger>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly workflow_id: Uint8Array;
+          readonly trigger_id: string;
+          readonly event_kind: string;
+          readonly connection_id: string | null;
+          readonly filter: string | null;
+          readonly inputs: string | null;
+          readonly health_error_message: string | null;
+        }>`
+          SELECT triggers.workflow_id, triggers.trigger_id, triggers.event_kind,
+                 triggers.connection_id, triggers.filter, triggers.inputs,
+                 triggers.health_error_message
+          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE triggers.kind = 'start' AND triggers.status = 'active' AND workflows.enabled = 1
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            triggerId: row.trigger_id,
+            eventKind: row.event_kind,
+            connectionId: row.connection_id ?? undefined,
+            filter: row.filter ?? undefined,
+            inputs: row.inputs === null ? {} : (JSON.parse(row.inputs) as Record<string, string>),
+            inEvaluationError: row.health_error_message !== null,
+          })),
+      ),
+
+    /**
+     * Checks whether a start trigger can start a run now: it is active and
+     * its workflow is enabled. A trigger that no longer exists cannot.
+     */
+    isRoutableStartTrigger: (key: TriggerKey): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly trigger_id: string }>`
+          SELECT triggers.trigger_id
+          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
+            AND triggers.trigger_id = ${key.triggerId}
+            AND triggers.kind = 'start' AND triggers.status = 'active' AND workflows.enabled = 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Records that a start trigger's filter or input mapping failed on an
+     * event, with the error message and when it happened. Returns true when
+     * this failure starts a streak: the trigger was healthy until now. A
+     * failure while the trigger is already in error replaces the message and
+     * keeps the time the streak started.
+     */
+    recordTriggerEvaluationFailure: (
+      key: TriggerKey,
+      message: string,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const workflow = uuidFromString(key.workflowId);
+        const startedStreak = yield* sql<{ readonly trigger_id: string }>`
+          UPDATE triggers SET health_error_message = ${message}, health_error_at = ${at}
+          WHERE workflow_id = ${workflow} AND trigger_id = ${key.triggerId}
+            AND health_error_message IS NULL
+          RETURNING trigger_id
+        `;
+        if (startedStreak.length > 0) return true;
+        yield* sql`
+          UPDATE triggers SET health_error_message = ${message}
+          WHERE workflow_id = ${workflow} AND trigger_id = ${key.triggerId}
+        `;
+        return false;
+      }),
+
+    /** Clears a start trigger's recorded evaluation error. */
+    clearTriggerEvaluationFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE triggers SET health_error_message = NULL, health_error_at = NULL
+        WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+      `),
+
+    /**
+     * Returns every trigger that names the Connection, whatever its kind or
+     * status, sorted by workflow name and trigger id.
+     */
+    listTriggersNamingConnection: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<TriggerNamingConnection>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly workflow_id: Uint8Array;
+          readonly workflow_name: string;
+          readonly trigger_id: string;
+        }>`
+          SELECT triggers.workflow_id, ${sql.literal(NAME_FROM_DEFINITION)} AS workflow_name,
+                 triggers.trigger_id
+          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE triggers.connection_id = ${connectionId}
+          ORDER BY workflow_name, triggers.trigger_id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            workflowName: row.workflow_name,
+            triggerId: row.trigger_id,
+          })),
+      ),
+
+    /**
+     * Returns the cron triggers the Scheduler has work for at `now`, the
+     * earliest scheduled first:
+     *
+     * - the ones whose next scheduled time has come;
+     * - the ones with no next scheduled time yet;
+     * - the ones without a timezone of their own whose next scheduled time
+     *   was computed in another timezone than `userZone`, because the user
+     *   changed the setting since.
+     *
+     * Paused triggers and triggers of disabled workflows are included, so
+     * their schedule keeps moving while they cannot fire.
+     */
+    listCronTriggersToSchedule: (
+      now: string,
+      userZone: string,
+    ): Effect.Effect<ReadonlyArray<TriggerKey>, SqlError> =>
+      Effect.map(
+        sql<{ readonly workflow_id: Uint8Array; readonly trigger_id: string }>`
+          SELECT triggers.workflow_id, triggers.trigger_id
+          FROM triggers
+          WHERE ${sql.literal(IS_CRON_TRIGGER)}
+            AND (triggers.next_fire_at IS NULL OR triggers.next_fire_at <= ${now}
+                 OR (triggers.timezone IS NULL AND triggers.next_fire_zone IS NOT ${userZone}))
+          ORDER BY triggers.next_fire_at, triggers.workflow_id, triggers.trigger_id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            triggerId: row.trigger_id,
+          })),
+      ),
+
+    /** Returns a cron trigger with its schedule state, or `None` if it is gone or no longer a cron trigger. */
+    readCronTrigger: (key: TriggerKey): Effect.Effect<Option.Option<CronTrigger>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly schedule: string;
+          readonly timezone: string | null;
+          readonly can_fire: number;
+          readonly next_fire_at: string | null;
+          readonly next_fire_zone: string | null;
+          readonly last_fired_at: string | null;
+        }>`
+          SELECT triggers.schedule, triggers.timezone,
+                 triggers.status = 'active' AND workflows.enabled = 1 AS can_fire,
+                 triggers.next_fire_at, triggers.next_fire_zone, triggers.last_fired_at
+          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
+            AND triggers.trigger_id = ${key.triggerId}
+            AND ${sql.literal(IS_CRON_TRIGGER)}
+        `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            workflowId: key.workflowId,
+            triggerId: key.triggerId,
+            schedule: row.schedule,
+            timezone: row.timezone ?? undefined,
+            canFire: row.can_fire === 1,
+            nextFireAt: row.next_fire_at ?? undefined,
+            nextFireZone: row.next_fire_zone ?? undefined,
+            lastFiredAt: row.last_fired_at ?? undefined,
+          })),
+      ),
+
+    /** Moves a cron trigger on to its next scheduled time, as `CronAdvance` describes. */
+    advanceCronTrigger: (key: TriggerKey, advance: CronAdvance): Effect.Effect<void, SqlError> => {
+      const assignments = [
+        sql`next_fire_at = ${advance.nextFireAt}`,
+        sql`next_fire_zone = ${advance.zone}`,
+        ...(advance.firedAt === undefined ? [] : [sql`last_fired_at = ${advance.firedAt}`]),
+        ...(advance.skipped === undefined
+          ? []
+          : [
+              sql`skipped_from = ${advance.skipped.from}`,
+              sql`skipped_until = ${advance.skipped.until}`,
+            ]),
+      ];
+      return Effect.asVoid(sql`
+        UPDATE triggers SET ${sql.csv(assignments)}
+        WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+      `);
+    },
   };
 });
 

@@ -17,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event } from "@hercule/contract";
@@ -28,16 +29,48 @@ import {
   readPipelineEvent,
   readPipelineEventsAfter,
 } from "../../events";
-import { evaluateExpression, parseExpression, type CompiledExpression } from "../../expressions";
+import {
+  evaluateExpression,
+  parseExpression,
+  type CompiledExpression,
+  type ExpressionError,
+} from "../../expressions";
 
-/** One entry of a routing table: a condition and what to write when it holds. */
+/**
+ * One entry of a routing table: which events it wants, and what to write when
+ * one matches. An event matches when the route admits it and its condition,
+ * if it has one, evaluates to `true`.
+ */
 export interface Route {
-  readonly id: string;
-  /** The expression source. The router compiles it once per pass. */
-  readonly condition: string;
+  /**
+   * Returns whether the route wants this event at all, before any expression
+   * is evaluated. A route whose condition is written for one kind of event
+   * uses it to skip the others, so the condition never fails on an event it
+   * was not written for.
+   */
+  readonly admits: (event: Event) => boolean;
+  /** The expression source, or `undefined` to match every admitted event. The router compiles it once per pass. */
+  readonly condition: string | undefined;
   /** Whether the route carried an evaluation error when the pass began. */
   readonly inEvaluationError: boolean;
-  readonly writeOnMatch: (event: Event) => Effect.Effect<void, SqlError>;
+  /**
+   * Writes the row for a matched event. `context` is what the condition was
+   * evaluated against, for a route that evaluates more of its own
+   * expressions to build the row. Fails with `ExpressionError` when one of
+   * them fails; the router then treats the event as no match and records the
+   * error like a failed condition.
+   */
+  readonly writeOnMatch: (
+    event: Event,
+    context: EvaluationContext,
+  ) => Effect.Effect<void, ExpressionError | SqlError>;
+  /**
+   * Records a failed evaluation on the route's health, and tells the user when
+   * this failure is the first of a streak. Joins the caller's transaction.
+   */
+  readonly recordEvaluationFailure: (message: string) => Effect.Effect<void, SqlError>;
+  /** Clears the route's recorded evaluation error. Joins the caller's transaction. */
+  readonly clearEvaluationFailure: () => Effect.Effect<void, SqlError>;
 }
 
 /** The routes of one kind of destination, prepared inside the routing transaction. */
@@ -47,15 +80,6 @@ export interface RoutingTable {
    * routes. Joins the caller's transaction.
    */
   readonly prepare: () => Effect.Effect<ReadonlyArray<Route>, SqlError>;
-  /**
-   * Records a failed evaluation on the route's health, and tells the user when
-   * this failure is the first of a streak. Joins the caller's transaction.
-   */
-  readonly recordEvaluationFailure: (
-    routeId: string,
-    message: string,
-  ) => Effect.Effect<void, SqlError>;
-  readonly clearEvaluationFailure: (routeId: string) => Effect.Effect<void, SqlError>;
 }
 
 /** Reads and delivers one kind of row that a routing table writes. */
@@ -64,24 +88,24 @@ export interface Delivery {
   readonly deliverWaiting: () => Effect.Effect<void, SqlError>;
 }
 
-/** One routing table's routes, and which of them are in an evaluation error. */
-interface PreparedTable {
-  readonly table: RoutingTable;
-  readonly routes: ReadonlyArray<Route>;
-  /**
-   * The ids of the routes in an evaluation error, as far as this pass knows so
-   * far. A route that evaluates cleanly has its health cleared only if its id
-   * is in this set, so a pass over a hundred events writes nothing for a route
-   * that was healthy all along.
-   */
-  readonly inEvaluationError: Set<string>;
-}
-
-/** A route with its compiled condition, and the prepared table it belongs to. */
-interface CompiledRoute {
-  readonly owner: PreparedTable;
+/**
+ * A route during one pass: its compiled condition, and whether it is in an
+ * evaluation error as far as this pass knows so far.
+ */
+interface RouteInPass {
   readonly route: Route;
-  readonly program: CompiledExpression;
+  /**
+   * The compiled condition. `undefined` until an admitted event first needs
+   * it, and `null` once it failed to parse, so the failure is recorded once
+   * per pass and not once per event.
+   */
+  program: CompiledExpression | null | undefined;
+  /**
+   * A route that evaluates cleanly has its health cleared only when this is
+   * set, so a pass over a hundred events writes nothing for a route that was
+   * healthy all along.
+   */
+  inEvaluationError: boolean;
 }
 
 /** The router's name in the cursor table. It is the only consumer today. */
@@ -115,100 +139,120 @@ const EVENTS_PER_PASS = 100;
  */
 const MAX_PASSES_PER_TICK = 10;
 
+/** What an expression over one event is evaluated against. */
+export type EvaluationContext = Readonly<Record<string, unknown>>;
+
 /**
- * Builds the context a condition is evaluated against: the event without its
- * raw payload. Conditions are written against the normalized fields only,
- * because a condition that read the raw payload would break as soon as the
- * source system changed its format.
+ * Builds the context an expression over `event` is evaluated against: the
+ * event without its raw payload. Expressions are written against the
+ * normalized fields only, because one that read the raw payload would break
+ * as soon as the source system changed its format.
  */
-const buildEvaluationContext = (event: Event): Record<string, unknown> => {
-  const envelope: Record<string, unknown> = { ...event };
-  delete envelope["raw"];
-  return { event: envelope };
-};
+const buildEvaluationContext = (event: Event): EvaluationContext => ({
+  event: Struct.omit(event, ["raw"]),
+});
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  /** Prepares every table inside the caller's transaction. */
-  const prepareTables = (
+  /** Prepares every table inside the caller's transaction, and returns all their routes. */
+  const prepareRoutes = (
     tables: ReadonlyArray<RoutingTable>,
-  ): Effect.Effect<ReadonlyArray<PreparedTable>, SqlError> =>
-    Effect.forEach(tables, (table) =>
-      Effect.map(table.prepare(), (routes) => ({
-        table,
-        routes,
-        inEvaluationError: new Set(
-          routes.filter((route) => route.inEvaluationError).map((route) => route.id),
-        ),
-      })),
+  ): Effect.Effect<ReadonlyArray<Route>, SqlError> =>
+    Effect.map(
+      Effect.forEach(tables, (table) => table.prepare()),
+      (routes) => routes.flat(),
     );
 
   /**
-   * Evaluates each event against each route, and writes a row for every
-   * match.
+   * Evaluates each event against each route that admits it, and writes a row
+   * for every match.
    *
    * Joins the caller's transaction and waits on nothing but SQL and CPU: the
    * evaluator is synchronous and reads nothing outside the context it gets.
    *
    * A condition that fails counts as no match for its own route only. Every
    * other route is still evaluated, and the error is recorded on the route's
-   * health, where callers can read it. A condition that does not parse is
-   * recorded the same way as one that fails while it runs.
+   * health, where callers can read it. A condition that does not parse, and
+   * an expression that fails while the matched row is built, are recorded the
+   * same way. A route whose expressions all evaluate cleanly for an event has
+   * its recorded error cleared.
    */
   const routeEvents = (
-    prepared: ReadonlyArray<PreparedTable>,
+    routes: ReadonlyArray<Route>,
     batch: ReadonlyArray<Event>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      // A route's health is about how it handled events, so a pass with no
-      // events must not change it.
-      if (batch.length === 0) return;
+      const inPass: ReadonlyArray<RouteInPass> = routes.map((route) => ({
+        route,
+        program: undefined,
+        inEvaluationError: route.inEvaluationError,
+      }));
 
       /** Records one route's failure, and remembers that the route is in error. */
-      const recordFailure = (
-        owner: PreparedTable,
-        routeId: string,
-        message: string,
-      ): Effect.Effect<void, SqlError> =>
+      const recordFailure = (entry: RouteInPass, message: string): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
-          yield* owner.table.recordEvaluationFailure(routeId, message);
-          owner.inEvaluationError.add(routeId);
+          yield* entry.route.recordEvaluationFailure(message);
+          entry.inEvaluationError = true;
+        });
+
+      /** Clears one route's recorded failure, if it has one. */
+      const clearFailure = (entry: RouteInPass): Effect.Effect<void, SqlError> =>
+        Effect.gen(function* () {
+          if (!entry.inEvaluationError) return;
+          yield* entry.route.clearEvaluationFailure();
+          entry.inEvaluationError = false;
         });
 
       /**
-       * Every route whose condition parsed, with its compiled program. Each
-       * condition is parsed once for the whole batch rather than once per
+       * Decides whether the route's condition holds for the event. Returns
+       * `undefined` when it could not be decided; the failure is recorded.
+       * Each condition is parsed at most once per pass rather than once per
        * event, because a pass reads up to a hundred events.
        */
-      const compiled: Array<CompiledRoute> = [];
-      for (const owner of prepared) {
-        for (const route of owner.routes) {
-          const program = yield* Effect.result(parseExpression(route.condition));
-          if (Result.isFailure(program)) {
-            yield* recordFailure(owner, route.id, program.failure.message);
-            continue;
+      const decideCondition = (
+        entry: RouteInPass,
+        context: EvaluationContext,
+      ): Effect.Effect<boolean | undefined, SqlError> =>
+        Effect.gen(function* () {
+          const condition = entry.route.condition;
+          if (condition === undefined) return true;
+          if (entry.program === null) return undefined;
+          if (entry.program === undefined) {
+            const parsed = yield* Effect.result(parseExpression(condition));
+            if (Result.isFailure(parsed)) {
+              entry.program = null;
+              yield* recordFailure(entry, parsed.failure.message);
+              return undefined;
+            }
+            entry.program = parsed.success;
           }
-          compiled.push({ owner, route, program: program.success });
-        }
-      }
-
-      for (const event of batch) {
-        const context = buildEvaluationContext(event);
-        for (const { owner, route, program } of compiled) {
-          const answer = yield* Effect.result(evaluateExpression(program, context));
+          const answer = yield* Effect.result(evaluateExpression(entry.program, context));
           if (Result.isFailure(answer)) {
-            yield* recordFailure(owner, route.id, answer.failure.message);
-            continue;
-          }
-          if (owner.inEvaluationError.has(route.id)) {
-            yield* owner.table.clearEvaluationFailure(route.id);
-            owner.inEvaluationError.delete(route.id);
+            yield* recordFailure(entry, answer.failure.message);
+            return undefined;
           }
           // Only a condition that evaluates to `true` matches. A string or a
           // number is not a match, even a truthy one.
-          if (answer.success !== true) continue;
-          yield* route.writeOnMatch(event);
+          return answer.success === true;
+        });
+
+      for (const event of batch) {
+        const context = buildEvaluationContext(event);
+        for (const entry of inPass) {
+          if (!entry.route.admits(event)) continue;
+          const matched = yield* decideCondition(entry, context);
+          if (matched === undefined) continue;
+          if (matched) {
+            const written = yield* entry.route.writeOnMatch(event, context).pipe(
+              Effect.as(true),
+              Effect.catchTag("ExpressionError", (error) =>
+                Effect.as(recordFailure(entry, error.message), false),
+              ),
+            );
+            if (!written) continue;
+          }
+          yield* clearFailure(entry);
         }
       }
     });
@@ -236,10 +280,10 @@ const make = Effect.gen(function* () {
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const prepared = yield* prepareTables(tables);
+        const routes = yield* prepareRoutes(tables);
         const position = yield* readConsumerPosition(sql, ROUTER);
         const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
-        yield* routeEvents(prepared, batch);
+        yield* routeEvents(routes, batch);
         const reached = batch.at(-1)?.id ?? (yield* readLogHead(sql));
         if (reached > position) yield* advanceConsumerCursor(sql, ROUTER, reached);
         return { reachedTheEnd: batch.length < EVENTS_PER_PASS };
@@ -291,11 +335,11 @@ const make = Effect.gen(function* () {
       tables: ReadonlyArray<RoutingTable>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const prepared = yield* prepareTables(tables);
-        if (prepared.every(({ routes }) => routes.length === 0)) return;
+        const routes = yield* prepareRoutes(tables);
+        if (routes.length === 0) return;
         const event = yield* readPipelineEvent(sql, eventId);
         if (Option.isNone(event)) return;
-        yield* routeEvents(prepared, [event.value]);
+        yield* routeEvents(routes, [event.value]);
       }),
   };
 });

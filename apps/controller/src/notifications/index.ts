@@ -5,5 +5,6 @@ export {
   type CoreNotification,
   type NotificationPage,
   type QueryInput,
+  type UnlessRaised,
   type WithdrawInput,
 } from "./service";

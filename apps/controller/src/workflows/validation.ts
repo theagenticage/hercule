@@ -343,8 +343,30 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
       path: [...path, "schedule"],
       message: `This schedule is not a cron expression. ${shortenLibraryMessage(parsed.failure.message)} Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
     });
+  } else if (!comesDue(parsed.success)) {
+    issues.push({
+      path: [...path, "schedule"],
+      message:
+        "This schedule never comes due: no date matches it, such as the 31st of February. " +
+        'Write a date that exists, such as "0 9 1 * *" for 09:00 on the first of each month.',
+    });
   }
   return issues;
+};
+
+/**
+ * Checks that a cron schedule matches at least one future time. A schedule
+ * can parse and still never match, such as one for the 31st of February, and
+ * the Scheduler could then never compute the trigger's next time.
+ */
+const comesDue = (cron: Cron.Cron): boolean => {
+  try {
+    Cron.next(cron);
+    return true;
+  } catch {
+    // `Cron.next` throws when it finds no matching date.
+    return false;
+  }
 };
 
 /**

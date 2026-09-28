@@ -3,11 +3,16 @@
  * `buildRunEndedEvent` builds for each way a run ends, stamped with the actor
  * it is given. Which actor the run engine passes is tested over HTTP, in
  * `engine.events.integration.test.ts`. Also tests the text of the
- * `core.run-failed` notification `buildRunFailedNotification` builds.
+ * `core.run-failed` notification `buildRunFailedNotification` builds, and
+ * when `decideRunFailedUnlessRaised` holds that notification back.
  */
 import { describe, expect, it } from "vitest";
 import type { Run } from "@hercule/contract";
-import { buildRunEndedEvent, buildRunFailedNotification } from "./run-events";
+import {
+  buildRunEndedEvent,
+  buildRunFailedNotification,
+  decideRunFailedUnlessRaised,
+} from "./run-events";
 
 const RUN_ID = "0199f0b7-0000-7000-8000-00000000e001";
 const WORKFLOW_ID = "0199f0b7-0000-7000-8000-00000000e002";
@@ -250,5 +255,46 @@ describe("buildRunFailedNotification", () => {
       "The controller could not carry out the run. Its log has the details.",
     );
     expect(notification.subject).toStrictEqual([{ kind: "run", id: RUN_ID }]);
+  });
+});
+
+describe("the core.run-failed notification of a run a start trigger started", () => {
+  const TRIGGERED_RUN: Run = {
+    ...RUNNING_RUN,
+    origin: { kind: "trigger", triggerId: "labeled", eventId: 7 },
+  };
+  const TRIGGER_SUBJECT = { kind: "trigger", workflowId: WORKFLOW_ID, triggerId: "labeled" };
+  const VALIDATION_ERROR = {
+    status: "failed",
+    failureReason: "validation-error",
+    failureMessage: "The inputs the trigger mapped from the event are not valid.",
+  } as const;
+
+  it("names the trigger in its subject", () => {
+    expect(buildRunFailedNotification(TRIGGERED_RUN, VALIDATION_ERROR, 42).subject).toStrictEqual([
+      { kind: "run", id: RUN_ID },
+      { kind: "workflow", id: WORKFLOW_ID },
+      TRIGGER_SUBJECT,
+    ]);
+  });
+
+  it("is held back for an hour after one about the same trigger, when the run failed validation", () => {
+    expect(decideRunFailedUnlessRaised(TRIGGERED_RUN, VALIDATION_ERROR, FINISHED_AT)).toStrictEqual(
+      { since: "2026-09-27T09:05:00.000Z", about: [TRIGGER_SUBJECT] },
+    );
+  });
+
+  it("is always raised when the run failed another way", () => {
+    expect(
+      decideRunFailedUnlessRaised(
+        TRIGGERED_RUN,
+        { status: "failed", failureReason: "step-failed", failedStepId: "create" },
+        FINISHED_AT,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("is always raised for a run no trigger started", () => {
+    expect(decideRunFailedUnlessRaised(RUNNING_RUN, VALIDATION_ERROR, FINISHED_AT)).toBeUndefined();
   });
 });

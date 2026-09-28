@@ -400,14 +400,19 @@ export {
   StepError,
   StepRecord,
   StepStatus,
+  TriggerEvent,
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
 export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {
+  CronTickEventPayload,
+  SkippedTicks,
   TRIGGER_SORT_FIELDS,
   Trigger,
   TriggerFilter,
+  TriggerHealth,
+  TriggerKey,
   TriggerKind,
   TriggerStatus,
 } from "./groups/trigger";

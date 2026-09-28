@@ -106,7 +106,6 @@ import {
   createNotFoundError,
   Id,
   RunCancelInput,
-  type FailureReason,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -128,14 +127,23 @@ import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { RunExecutor } from "./executor";
-import { runRepository, type RunOutcome, type StepRecordId } from "./repository";
+import {
+  runRepository,
+  type ExecutionFailureReason,
+  type RunOutcome,
+  type StepRecordId,
+} from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
 import {
   describeMissingCapableRunner,
   listCapableRunners,
   listWorkspaceActionIds,
 } from "./runner-capabilities";
-import { buildRunEndedEvent, buildRunFailedNotification } from "./run-events";
+import {
+  buildRunEndedEvent,
+  buildRunFailedNotification,
+  decideRunFailedUnlessRaised,
+} from "./run-events";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -352,8 +360,12 @@ export const makeRunEngine = Effect.gen(function* () {
   const afterCommitListener = yield* AfterCommit;
   // A new run is handed to the Run Executor through a function the engine
   // defines below, which itself calls `start` for the `run.start` action, so
-  // the reference is passed as a function.
-  const { start, rerun } = yield* makeRunStart((runId) => executeInBackground(runId));
+  // the reference is passed as a function. A run that cannot start ends
+  // through `writeRunEnding`, defined below for the same reason.
+  const { start, rerun, startTriggeredRun } = yield* makeRunStart(
+    (runId) => executeInBackground(runId),
+    (runId, outcome, at) => writeRunEnding(runId, outcome, at),
+  );
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -401,6 +413,7 @@ export const makeRunEngine = Effect.gen(function* () {
         if (outcome.status === "failed") {
           yield* notifications.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
+            { unlessRaised: decideRunFailedUnlessRaised(run, outcome, at) },
           );
         }
       }
@@ -431,7 +444,7 @@ export const makeRunEngine = Effect.gen(function* () {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
     at: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -457,7 +470,7 @@ export const makeRunEngine = Effect.gen(function* () {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
   ): Effect.Effect<void, SqlError> =>
     commitUninterruptibly(
       sql,
@@ -1069,6 +1082,9 @@ export const makeRunEngine = Effect.gen(function* () {
 
     /** `run.rerun`: starts a new run that re-runs an ended one (see `start.ts`). */
     rerun,
+
+    /** Starts the run of a pending trigger effect (see `start.ts`). */
+    startTriggeredRun,
 
     /**
      * `run.cancel`: cancels a pending or running run and returns it.

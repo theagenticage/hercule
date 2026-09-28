@@ -45,6 +45,7 @@ import {
   EventRoutingInterval,
   LostRunnerSweepInterval,
   RunFibers,
+  SchedulerInterval,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -288,6 +289,8 @@ export interface ServerOptions {
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
   readonly lostRunnerSweepInterval?: Duration.Duration;
+  /** How often the scheduler looks for cron triggers that are due. The default is a second. */
+  readonly schedulerInterval?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before it is reported as
    * over budget. A test that wants every evaluation reported sets a budget no
@@ -447,6 +450,7 @@ const provideTimings =
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
+    provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(ExpressionBudget, options.expressionBudget);
     return provided;
   };

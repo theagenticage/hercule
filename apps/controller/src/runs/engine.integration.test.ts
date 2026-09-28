@@ -203,7 +203,7 @@ describe("a run of a plugin's action", () => {
       async (run, base, token) => {
         expect(run.status, JSON.stringify(run)).toBe("failed");
         expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
-        expect(expectStatus(run, "failed").failedStepId).toBe("note");
+        expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "note" });
         expect(expectStatus(findStepRecords(run, "note")[0], "failed").error).toEqual({
           code: "rate_limited",
           message: "Too many notes.",
@@ -224,7 +224,7 @@ describe("a run of a plugin's action", () => {
     ] as ReadonlyArray<WorkflowActionContribution["execute"]>) {
       await runNoteAction(execute, async (run, base, token) => {
         expect(run.status, JSON.stringify(run)).toBe("failed");
-        expect(expectStatus(run, "failed").failedStepId).toBe("note");
+        expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "note" });
         expect(expectStatus(findStepRecords(run, "note")[0], "failed").error.code).toBe(
           "unexpected",
         );
@@ -287,7 +287,7 @@ describe("a run whose step fails", () => {
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
       expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
-      expect(expectStatus(run, "failed").failedStepId).toBe("update");
+      expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "update" });
       const [update] = findStepRecords(run, "update");
       expect(update?.status).toBe("failed");
       expect(expectStatus(update, "failed").error.code).toBe("not_found");
@@ -323,7 +323,7 @@ describe("a run whose step fails", () => {
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
       expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
-      expect(expectStatus(run, "failed").failedStepId).toBe("create");
+      expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "create" });
       const [create] = findStepRecords(run, "create");
       expect(create?.status).toBe("failed");
       expect(expectStatus(create, "failed").error.code).toBe("validation");
@@ -355,7 +355,7 @@ describe("a run whose step fails", () => {
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
       expect(expectStatus(run, "failed").failureReason).toBe("expression-error");
-      expect(expectStatus(run, "failed").failedStepId).toBe("update");
+      expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "update" });
     });
   });
 
@@ -375,7 +375,7 @@ describe("a run whose step fails", () => {
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
       expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
-      expect(expectStatus(run, "failed").failedStepId).toBe("create");
+      expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "create" });
       expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
       expect(await listTasks(base, token)).toEqual([]);
     });
@@ -573,7 +573,7 @@ describe("a run interrupted by a restart", () => {
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
       expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
-      expect(expectStatus(run, "failed").failedStepId).toBe("ghost");
+      expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "ghost" });
       expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
     });
   });
@@ -658,7 +658,7 @@ describe("a run interrupted by a restart", () => {
 
         expect(run.status, JSON.stringify(run)).toBe("failed");
         expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
-        expect(expectStatus(run, "failed").failedStepId).toBe("note");
+        expect(expectStatus(run, "failed")).toMatchObject({ failedStepId: "note" });
         expect(run.steps).toHaveLength(1);
         expect(run.steps[0]!.status).toBe("failed");
         expect(expectStatus(run.steps[0], "failed").error.code).toBe("interrupted");
@@ -933,7 +933,7 @@ describe("a routed run interrupted by a restart", () => {
 
         const failed = expectStatus(run, "failed");
         expect(failed.failureReason).toBe("step-failed");
-        expect(failed.failedStepId).toBe("first");
+        expect(failed).toMatchObject({ failedStepId: "first" });
         expect(expectStatus(findStepRecords(run, "first")[0], "failed").error.code).toBe(
           "interrupted",
         );

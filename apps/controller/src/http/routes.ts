@@ -48,6 +48,8 @@ import {
   PipelineLayer,
   Placement,
   PlacementLayer,
+  ConnectionRemoval,
+  ConnectionRemovalLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
   Provisioning,
@@ -180,6 +182,10 @@ const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
 const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   Effect.gen(function* () {
     const connections = yield* ConnectionService;
+    // A Connection can be deleted only when no resource acts through it and
+    // no trigger names it. Both are other domains' rows, so the delete is a
+    // controller daemon use case.
+    const removal = yield* ConnectionRemoval;
     return handlers
       .handle("query", ({ query }) => withApiErrors(connections.query(query)))
       .handle("read", ({ params }) => withApiErrors(connections.read(params.id)))
@@ -187,7 +193,7 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(connections.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(connections.delete(params.id)))
+      .handle("delete", ({ params }) => withApiErrors(removal.deleteConnection(params.id)))
       .handle("setCredentials", ({ params, payload }) =>
         withApiErrors(connections.setCredentials({ id: params.id, ...payload })),
       )
@@ -360,13 +366,17 @@ const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
 
 /**
  * A trigger is declared in its workflow's YAML, and its row is written together
- * with the workflow, so the workflow service lists triggers. The routes are a
- * separate group only because the operation is `trigger.query`.
+ * with the workflow, so the workflow service lists, pauses and resumes
+ * triggers. The routes are a separate group only because the operations are
+ * `trigger.*`.
  */
 const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
   Effect.gen(function* () {
     const workflows = yield* WorkflowService;
-    return handlers.handle("query", ({ query }) => withApiErrors(workflows.queryTriggers(query)));
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(workflows.queryTriggers(query)))
+      .handle("pause", ({ params }) => withApiErrors(workflows.pauseTrigger(params)))
+      .handle("resume", ({ params }) => withApiErrors(workflows.resumeTrigger(params)));
   }),
 );
 
@@ -600,6 +610,7 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
+  ConnectionRemovalLayer,
   AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
@@ -637,13 +648,16 @@ export const operationLayers = Layer.mergeAll(
     // whole controller is assembled. Enrichment writes through the events
     // service, so the events service is provided to it rather than merged
     // next to it. The pipeline and enrichment share one router, so the router
-    // is provided to both.
+    // is provided to both. The pipeline starts the runs of the start triggers
+    // that matched, and both record a start trigger's failed filter through
+    // the workflow service, so the run layers, which hold both services, are
+    // provided to both.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
         Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
       ),
-    ).pipe(Layer.provideMerge(EventRouterLayer)),
+    ).pipe(Layer.provideMerge(EventRouterLayer), Layer.provide(RunLayers)),
   ).pipe(
     Layer.provideMerge(AssistantServiceLayer),
     Layer.provideMerge(ConversationServiceLayer),
