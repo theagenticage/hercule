@@ -6,8 +6,8 @@ import { Markdown } from "../markdown";
 import { TimeSeparator } from "../time-separator";
 
 /**
- * One message of an assistant's conversation, drawn by who wrote it, in the
- * shape of the thread surface (spec 14 §The thread surface):
+ * Renders one message of an assistant's conversation, drawn by who wrote it,
+ * in the same shape as a thread:
  *
  * - the owner's message is a bubble on the right, as in a thread, under a
  *   centred time separator when the screen passes one;
@@ -25,6 +25,8 @@ import { TimeSeparator } from "../time-separator";
  *   without reading class names;
  * - `data-message-id`, so the screen can find a message's row again to keep
  *   the reader's place when earlier messages load above it.
+ *
+ * Spec 14 §The thread surface owns the thread's shape.
  */
 export function ConversationMessageView({
   message,

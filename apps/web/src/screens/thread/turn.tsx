@@ -1,13 +1,14 @@
 /**
- * One turn of the transcript (spec 14 §The thread surface). It shows:
+ * One turn of the transcript. It shows:
  *
  * - a centred time separator, when the screen passes one;
  * - the user's message as a right-aligned bubble;
  * - the assistant's prose at full width;
- * - the divider that says how long the agent worked, or how the turn ended,
- *   when `showsTurnDivider` asks for one.
+ * - the divider that shows how long the agent worked, or how the turn ended,
+ *   when `showsTurnDivider` returns true.
  *
- * Both messages are rendered as markdown.
+ * Both messages are rendered as markdown. Spec 14 §The thread surface owns
+ * the turn's layout.
  */
 import type { JSX, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";

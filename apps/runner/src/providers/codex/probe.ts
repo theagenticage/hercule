@@ -127,8 +127,8 @@ const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
   if (efforts.length > 0) {
     options.push(
       buildSelectOption(
-        // The standard option id (spec 06 section 3.3): the composer recognises
-        // reasoning effort by the id `effort`, whatever the harness calls it.
+        // A well-known option id: the composer recognises reasoning effort by
+        // the id `effort`, whatever the harness calls it (spec 06 section 3.3).
         "effort",
         "Effort",
         efforts.map(({ reasoningEffort }) => ({

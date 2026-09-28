@@ -117,8 +117,8 @@ const NOT_ITS_ACCESS_MODE =
  * call could override them, it would open a session the Agent never
  * described.
  *
- * Every other per-spawn field is an override the Agent allows (spec 02 Agent),
- * so no other field is rejected for having a value. The access mode is an
+ * Every other per-spawn field may override the Agent's value, so no other
+ * field is rejected for having a value. The access mode is an
  * override too. Which modes a caller may ask for depends on the actor, not on
  * the field, and `mayRunOn` below checks that.
  */
@@ -145,7 +145,7 @@ const THREAD_IS_THE_USERS =
 /** The error message when a session continues a session on a different permission profile. */
 const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
 
-/** The shipped profile a thread takes when the user has chosen none (spec 02 Thread). */
+/** The shipped profile a Thread takes when the user has not set `thread.profileId`. */
 const DEFAULT_PROFILE = "unrestricted";
 
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
@@ -385,8 +385,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks whether this actor may open the session with the access mode the
-   * call asked for. A per-spawn `accessMode` is an override the Agent allows
-   * (spec 02 Agent).
+   * call asked for. A per-spawn `accessMode` may override the Agent's access
+   * mode.
    *
    * - The user may ask for any mode.
    * - A session may ask only for the Agent's mode or a less permissive one.
@@ -437,8 +437,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the first provider instance that is logged in on some runner. A
-   * Thread uses it when the user has not set `thread.instanceId` (spec 02
-   * Thread). Fails with an invalid state error when no instance is logged in.
+   * Thread uses it when the user has not set `thread.instanceId`. Fails with
+   * an invalid state error when no instance is logged in.
    */
   const pickLoggedInInstance = (): Effect.Effect<
     string,
@@ -687,11 +687,12 @@ const make = Effect.gen(function* () {
      * one selection.
      *
      * Only the user may open a Thread. A Thread takes its values from the
-     * user's own settings, so letting another actor use them would make the
-     * thread profile a way to escalate (spec 02 Thread). An Agent has a
-     * profile of its own, so any actor may spawn from an Agent, up to the
-     * grants that actor has, and at or below the Agent's access mode. The
-     * user's overrides are unrestricted (spec 13 section 6.3).
+     * user's own settings, including a permission profile that is
+     * `unrestricted` by default. If another actor could open one, it could
+     * gain grants it does not have. An Agent has a profile of its own, so any
+     * actor may spawn from an Agent, up to the grants that actor has, and at
+     * or below the Agent's access mode. The user's overrides are unrestricted
+     * (spec 13 section 6.3).
      *
      * Placement chooses the runner unless the call names one, and the
      * requested workspace is provisioned before the harness starts in it.

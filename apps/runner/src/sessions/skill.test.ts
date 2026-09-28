@@ -2,13 +2,13 @@
  * Checks the skill text an agent reads inside a session against the CLI's
  * command tree.
  *
- * Following progressive disclosure (spec 11 section 6.3), the skill is a
- * skeleton: it names the three help forms and sends the agent to `--help` for
- * everything else. So the test does not only check that every command in the
- * text exists. It checks the stricter rule the spec asks for: the only commands
- * in the text are help commands. A worked example command would be a second
- * copy of the contract, and because the skill text is written by hand, nothing
- * else would catch it going stale.
+ * The skill is a skeleton: it names the three help forms and sends the agent
+ * to `--help` for everything else, so the agent learns the CLI one level at a
+ * time. So the test does not only check that every command in the text exists.
+ * It checks a stricter rule: the only commands in the text are help commands.
+ * A worked example command would be a second copy of the contract, and because
+ * the skill text is written by hand, nothing else would catch it going stale.
+ * Spec 11 section 6.3 owns the rule.
  */
 import { describe, expect, it } from "vitest";
 import { CLI } from "@hercule/contract";
@@ -29,8 +29,8 @@ const isVerb = (noun: string, word: string): boolean =>
   COMMANDS.some((command) => (noun === "<noun>" || command[0] === noun) && command[1] === word);
 
 /**
- * Checks that the words after `hercule` are one of the three help forms spec 11
- * section 6.3 allows: the root help, a noun's help, and a verb's help. Anything
+ * Checks that the words after `hercule` are one of the three help forms the
+ * skill may name: the root help, a noun's help, and a verb's help. Anything
  * else, such as a bare `hercule` or a worked command, belongs in the CLI's own
  * help.
  */

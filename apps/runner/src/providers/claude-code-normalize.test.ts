@@ -365,8 +365,8 @@ describe("normalizing SDK messages one at a time", () => {
       events: ["turn.started", "session.usage.updated", "turn.completed completed"],
     },
     {
-      // Rate limits belong in the snapshot, and status updates hold nothing
-      // useful, so both are dropped on purpose (spec 06 section 6.7).
+      // Rate limits belong in the capability snapshot, and status updates hold
+      // nothing useful, so both are dropped on purpose (spec 06 section 6.7).
       name: "drops informational messages instead of turning them into items",
       messages: [RATE_LIMIT, STATUS],
       events: [],
@@ -568,10 +568,10 @@ describe("item details", () => {
   });
 
   /**
-   * Spec 06 section 6.3 requires `steered` to come from `SendResult`, never to
-   * be guessed, and the harness's repeated message does not show which input
-   * it repeats. So the adapter reports user messages, and the normalizer
-   * reports none.
+   * Whether an input was steered into a running turn is known only from the
+   * adapter's own `SendResult`, and the harness's repeated message does not
+   * show which input it repeats. So the adapter reports user messages, and the
+   * normalizer reports none (spec 06 section 6.3).
    */
   it("makes no user_message item when the harness repeats the input it was sent", () => {
     const buildUserEcho = (content: unknown) => ({

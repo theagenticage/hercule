@@ -1,8 +1,9 @@
 /**
  * Tests `buildAccessModeMenu(declared, providerName)`, which lists the four
- * access modes with their fixed meaning and the downward fallback of spec 06
- * §8.4. A dimmed mode's note names the provider that falls back (spec 14
- * §The composer: `runs as auto-accept-edits on pi`, #70).
+ * access modes with their fixed meaning. A mode the provider does not support
+ * falls back downward, to the nearest less permissive mode it does support
+ * (spec 06 §8.4). A dimmed mode's note names the provider that falls back, as
+ * in `runs as auto-accept-edits on pi`.
  *
  * `AccessMode` is defined in `@hercule/protocol`
  * (packages/protocol/src/sessions.ts) and re-exported unchanged by

@@ -1,8 +1,10 @@
 /**
- * Tests for Settings > System (#70). The access-mode fallback policy is fixed,
- * not configurable (spec 06 §8.4, spec 13 §7), so the screen describes it as
- * read-only text. The retention, backup and HTTPS settings from spec 14's
- * Screens table are still an empty state.
+ * Tests for Settings > System. The access-mode fallback policy is fixed, not
+ * configurable: a thread only ever falls back to a less permissive mode, so
+ * there is nothing for a setting to choose. The screen therefore describes the
+ * policy as read-only text. The retention, backup and HTTPS settings the screen
+ * will hold are still an empty state. Spec 06 §8.4 and spec 13 §7 own the
+ * policy.
  *
  * The tests render the whole app with `renderApp` over a stubbed `fetch`,
  * rather than importing the screen's own modules.
@@ -30,7 +32,7 @@ const openApp = async () => {
   return { ...app, api };
 };
 
-/** The chain of access modes as spec 06 §8.4 gives it, allowing any whitespace between the parts. */
+/** Matches the chain of access modes, least permissive first, with any whitespace between the parts. */
 const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-access/;
 
 describe("Settings > System: the access-mode fallback policy", () => {

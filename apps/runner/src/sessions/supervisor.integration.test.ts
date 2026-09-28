@@ -43,7 +43,10 @@ const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
 /** The adapter's own id for the open request an answer refers to. The controller does not create one. */
 const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
-/** The shipped defaults (spec 03 section 6.2). Only the test clock can reach them. */
+/**
+ * The controller's default inactivity and absolute timeouts, 30 minutes and
+ * 8 hours (spec 03 section 6.2). Only the test clock can reach them.
+ */
 const INACTIVITY_MS = 30 * 60 * 1000;
 const ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
@@ -131,9 +134,9 @@ const createFake = (): Fake => {
       binaryName: "fake-harness",
       /**
        * A PubSub drops events that no subscriber receives, so an event
-       * published before the relay subscribed is lost. That is the missing
-       * outbox (spec 03 section 2.3), and a race in any test that starts a
-       * session. A marker that gets this far proves a relay is listening; it is
+       * published before the relay subscribed is lost. The runner has no
+       * outbox yet that keeps such events for replay, so this is a race in any
+       * test that starts a session. A marker that gets this far proves a relay is listening; it is
        * counted and dropped here, so the relay under test never sees it.
        */
       events: Stream.filter(Stream.fromPubSub(events), (event) => {
@@ -391,8 +394,9 @@ describe("a start the controller sends twice", () => {
         yield* supervisor.start(START);
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
         yield* Effect.sync(() => writeFileSync(join(scratch, "work.txt"), "half a turn"));
-        // The controller re-issues a command it cannot account for after a
-        // reconnect (spec 03 section 2.3), and this one must not be destructive.
+        // After a reconnect the controller sends again every command whose work
+        // the runner did not report, so a start can arrive twice, and the
+        // second must not be destructive (spec 03 section 2.3).
         yield* supervisor.start(START);
         // Wait for the relay to read past the duplicate before counting.
         // Otherwise an event the duplicate wrongly published could still be

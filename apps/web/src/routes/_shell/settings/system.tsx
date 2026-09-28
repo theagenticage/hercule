@@ -8,10 +8,12 @@ export const Route = createFileRoute("/_shell/settings/system")({
 });
 
 /**
- * The System screen: the controller's operational settings, none of them
- * editable yet, below one policy that never will be. The access-mode fallback
- * policy is a property of the system, not a setting (spec 06 §8.4, spec 13
- * §7), so the screen describes it and offers no way to change it.
+ * Renders the System screen: the controller's operational settings, none of
+ * them editable yet, below one policy that never will be. The access-mode
+ * fallback policy is a property of the system, not a setting: a thread only
+ * ever falls back to a less permissive mode, so there is nothing to choose. The
+ * screen describes the policy and offers no way to change it. Spec 06 §8.4 and
+ * spec 13 §7 own the policy.
  */
 function System(): JSX.Element {
   return (

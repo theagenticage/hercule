@@ -1,7 +1,8 @@
 /**
- * The notification center's "since you last checked" marker (spec 10 §8),
- * wired to the URL and the settings store. `@hercule/client-core` decides what
- * the pin and the marker mean; this hook does the navigation and the write.
+ * The notification center's "since you last checked" marker, wired to the URL
+ * and the settings store. `@hercule/client-core` decides what the pin and the
+ * marker mean; this hook does the navigation and the write. Spec 10 §8 owns
+ * the marker's rules.
  */
 import { useEffect, useRef } from "react";
 import { useMutation, useSuspenseQuery, type QueryClient } from "@tanstack/react-query";

@@ -10,11 +10,12 @@ import { cn } from "@hercule/ui";
  *
  * An optional sub-line sits below the name and the note.
  *
- * A dimmed row is not a button. Spec 14 §The composer says a row is "dimmed
- * with the reason, never hidden", so the row stays visible but does nothing
- * when clicked. The one control it may still have, a login, sits in the
- * trailing slot as a separate button, because a button cannot be nested
- * inside another button.
+ * A dimmed row is not a button. A choice that cannot be picked is dimmed with
+ * its reason rather than hidden, so the user sees why it is unavailable; the
+ * row stays visible but does nothing when clicked. The one control it may
+ * still have, a login, sits in the trailing slot as a separate button,
+ * because a button cannot be nested inside another button. Spec 14 §The
+ * composer owns the rule.
  */
 export function MenuRow({
   marker,

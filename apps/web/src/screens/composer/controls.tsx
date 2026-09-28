@@ -90,14 +90,14 @@ export function SendButton({
 }
 
 /**
- * The model pill's content: the provider logo, the account when a provider
- * has two, and the model name.
+ * Renders the model pill's content: the provider logo, the account when a
+ * provider has two, and the model name.
  *
  * The parts are laid out as a flex row rather than inline text, because the
  * logo is an `svg` block and a block inside inline text breaks the line. Only
  * the name may be truncated: a model called `Default (recommended)` gets an
- * ellipsis rather than wrapping the pill onto a second line (spec 14
- * §Measurements, the pill holds still).
+ * ellipsis, so the pill always stays one line high and the controls beside it
+ * do not move. Spec 14 §Measurements sets the pill's size.
  */
 export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
   return (
