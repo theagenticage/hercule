@@ -66,6 +66,7 @@ const COMMANDS: Record<string, string> = {
   "apiKey.create": "api-key create",
   "apiKey.revoke": "api-key revoke",
 
+  "user.read": "user read",
   "user.setPassword": "user set-password",
 
   "settings.read": "settings read",
@@ -538,5 +539,55 @@ describe("the assistant and conversation rows", () => {
       "--limit",
       "1",
     ]);
+  });
+});
+
+/**
+ * The operations only the user may call. The controller refuses a session
+ * token for each of them with 403 `forbidden`, even when the session's profile
+ * holds the operation's grant, so requesting that grant can never help.
+ */
+const USER_ONLY = [
+  "apiKey.query",
+  "apiKey.create",
+  "apiKey.revoke",
+  "user.read",
+  "user.setPassword",
+  "settings.read",
+  "settings.update",
+  "secret.query",
+  "secret.set",
+  "secret.delete",
+  "controller.read",
+  "controller.update",
+];
+
+/**
+ * A session is refused with `forbidden`, never `unauthenticated`: its token is
+ * valid. So the row explains the refusal under `forbidden`, where the help
+ * would otherwise tell the agent to request the grant.
+ */
+describe("the refusals no grant lifts", () => {
+  it.each(USER_ONLY)("tells a session to ask the user to run %s", (id) => {
+    const forbidden = table[id]?.errors?.["forbidden"] ?? "";
+    expect(forbidden, `${id} has no forbidden help`).toContain("only the user may make this call");
+    expect(forbidden).toContain("ask the user to run the command");
+  });
+
+  it("explains no session refusal under unauthenticated", () => {
+    for (const [id, row] of visible) {
+      expect(row.errors?.["unauthenticated"] ?? "", id).not.toContain("session token");
+    }
+  });
+
+  it("names the grant to request and the rule no grant lifts for a spawn and a fork", () => {
+    const spawn = table["session.spawn"]?.errors?.["forbidden"] ?? "";
+    const fork = table["session.continue"]?.errors?.["forbidden"] ?? "";
+    for (const forbidden of [spawn, fork]) {
+      expect(forbidden).toContain("you lack session.spawn, which a Permission Request can get you");
+      expect(forbidden).toContain("ask the user");
+    }
+    expect(spawn).toContain("only the user may start a Thread");
+    expect(fork).toContain("a session may fork only sessions on its own profile");
   });
 });

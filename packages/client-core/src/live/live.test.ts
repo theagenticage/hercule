@@ -728,6 +728,15 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
+  it("keys the thread list under the prefix a session push invalidates", () => {
+    const threads = queryKeys.sessions({ thread: true });
+
+    assert.deepStrictEqual(threads, ["sessions", { thread: true }]);
+    // A query client matches an invalidated key as a prefix of a cached one.
+    const [listPrefix] = buildQueryKeys("session", ["s1"]);
+    assert.deepStrictEqual(threads.slice(0, listPrefix?.length), listPrefix);
+  });
+
   it("maps an assistant push to the assistant list and the page of each assistant in it", () => {
     assert.deepStrictEqual(buildQueryKeys("assistant", ["a1"]), [
       queryKeys.assistants(),

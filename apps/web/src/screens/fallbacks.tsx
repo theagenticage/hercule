@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Link, useMatches } from "@tanstack/react-router";
+import { Link, useParentMatches } from "@tanstack/react-router";
 import { EmptyState } from "@hercule/ui";
 import { HOME_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "./centered-screen";
@@ -22,7 +22,13 @@ import { CenteredScreen } from "./centered-screen";
  *   whole page.
  */
 export function RenderFailure({ error }: { readonly error: Error }): JSX.Element {
-  const inShell = useMatches().some((match) => match.routeId.startsWith("/_shell"));
+  // The router renders this component inside the failed route's match, so
+  // the parent matches are the routes above the one that failed. The shell
+  // among them means the sidebar is still on screen. When the shell itself
+  // failed, it is not among them, and nothing is left standing.
+  const inShell = useParentMatches({
+    select: (parents) => parents.some((match) => match.routeId === "/_shell"),
+  });
 
   const message = (
     <p className="text-fine text-fail" role="alert">

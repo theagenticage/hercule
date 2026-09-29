@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { buildLook, Face, POSES, type Look, type Pose } from ".";
+import { POSES, type Pose } from "@hercule/client-core";
+import { buildLook, Face, type Look } from ".";
 
 afterEach(cleanup);
 
@@ -89,6 +90,20 @@ describe("Face", () => {
     expect(face.getAttribute("height")).toBe("22");
     expect(face.style.getPropertyValue("--hue")).toBe("var(--hue-lime)");
   });
+
+  it.each([false, true])(
+    "hides a decorative face from assistive technology, animated %s",
+    (animated) => {
+      const { container } = render(
+        <Face look={PLAIN} pose="working" size={24} animated={animated} decorative />,
+      );
+      const face = container.firstElementChild!;
+      expect(face.getAttribute("aria-hidden")).toBe("true");
+      expect(face.hasAttribute("role")).toBe(false);
+      expect(face.hasAttribute("aria-label")).toBe(false);
+      expect(screen.queryByRole("img")).toBeNull();
+    },
+  );
 
   // Below 30 px the eyes are 1.2 times larger: the eyes' x radius is 2.4
   // instead of 2, and the glint's radius is 0.84 instead of 0.7.

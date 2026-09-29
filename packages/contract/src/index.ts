@@ -104,6 +104,7 @@ export { Authenticated, SetupToken } from "./security";
 export { SetupPayload, SetupResult, SetupState } from "./groups/setup";
 export { LoginPayload, LoginResult, WsTicket } from "./groups/auth";
 export { ApiKey, MintedApiKey } from "./groups/api-key";
+export { SignedInUser } from "./groups/user";
 export {
   AccessMode,
   ControllerSettings,

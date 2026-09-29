@@ -6,17 +6,26 @@
  * set, with a fake bridge, and run the same routes.
  */
 import type { QueryClient } from "@tanstack/react-query";
-import type { HerculeClient } from "@hercule/client-core";
+import { createLive, type HerculeClient, type Live } from "@hercule/client-core";
 import type { Bridge } from "../../ipc/bridge";
 import { createControllerClient } from "./controller-client";
 import { createQueryClient } from "./query-client";
 import { createDesktopTokenStore } from "./token-store";
 
-/** The controller whose URL is saved in the app's settings, and a client for it. */
+/**
+ * The controller whose URL is saved in the app's settings, a client for it,
+ * and the live connection to it.
+ */
 export interface SavedController {
   /** The controller's origin, for example `http://127.0.0.1:4937`. */
   readonly url: string;
   readonly client: HerculeClient;
+  /**
+   * The live connection to the controller. It is created here and does not
+   * connect until the shell starts it (see `useLiveConnection`). Screens never
+   * touch the socket: pushes invalidate query keys.
+   */
+  readonly live: Live;
 }
 
 export interface RouterContext {
@@ -26,6 +35,20 @@ export interface RouterContext {
   readonly controller: SavedController | null;
   readonly queryClient: QueryClient;
 }
+
+/**
+ * Returns the saved controller at `url`: a client that sends `token` and
+ * stores any change to it through main, and a live connection that is not
+ * started yet.
+ */
+const buildSavedController = (
+  url: string,
+  token: string | null,
+  bridge: Bridge,
+): SavedController => {
+  const client = createControllerClient(url, createDesktopTokenStore(token, bridge));
+  return { url, client, live: createLive({ client, baseUrl: url }) };
+};
 
 /**
  * Reads the saved controller URL and the login token from main, and returns
@@ -42,13 +65,7 @@ export const buildRouterContext = async (bridge: Bridge): Promise<RouterContext>
   ]);
   return {
     bridge,
-    controller:
-      controllerUrl === null
-        ? null
-        : {
-            url: controllerUrl,
-            client: createControllerClient(controllerUrl, createDesktopTokenStore(token, bridge)),
-          },
+    controller: controllerUrl === null ? null : buildSavedController(controllerUrl, token, bridge),
     queryClient: createQueryClient(),
   };
 };

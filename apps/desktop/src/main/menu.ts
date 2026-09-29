@@ -3,6 +3,9 @@
  * items macOS users expect there, and the MainMenu service, through which
  * main enables and disables Sign Out.
  *
+ * Main carries out none of the app's own items itself. It shows the window
+ * and sends the page a menu command, and the page acts on it.
+ *
  * There is no View menu in the packaged app, so it has no page zoom and no
  * reload. In development a View menu adds Reload and Toggle Developer Tools.
  *
@@ -27,8 +30,9 @@ const SIGN_OUT_ITEM_ID = "signOut";
  *   Hide, Hide Others, Show All and Quit. Sign Out sits above Quit, between
  *   separators. It is enabled when `signOutEnabled` is true, and choosing it
  *   calls `signOut`.
- * - File holds Close Window, ⌘W, where macOS users look for it. Closing the
- *   window hides it; the app keeps running.
+ * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
+ *   ⌘W, where macOS users look for it. Closing the window hides it; the app
+ *   keeps running.
  * - Edit and Window are Electron's own.
  * - `development` adds the View menu.
  *
@@ -39,6 +43,7 @@ export const buildMenuTemplate = (options: {
   readonly development: boolean;
   readonly signOutEnabled: boolean;
   readonly signOut: () => void;
+  readonly newThread: () => void;
 }): Array<MenuItemConstructorOptions> => {
   const appMenu: MenuItemConstructorOptions = {
     role: "appMenu",
@@ -67,9 +72,20 @@ export const buildMenuTemplate = (options: {
   };
   return [
     appMenu,
-    // The accelerator is the role's own; it is spelled out so that a test
-    // can check it without Electron.
-    { label: "File", submenu: [{ role: "close", accelerator: "CmdOrCtrl+W" }] },
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "New Thread",
+          accelerator: "CmdOrCtrl+N",
+          click: options.newThread,
+        },
+        { type: "separator" },
+        // The accelerator is the role's own; it is spelled out so that a test
+        // can check it without Electron.
+        { role: "close", accelerator: "CmdOrCtrl+W" },
+      ],
+    },
     { role: "editMenu" },
     ...(options.development ? [view] : []),
     { role: "windowMenu" },
@@ -88,8 +104,9 @@ export class MainMenu extends Context.Service<
 /**
  * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
  * makes it the app's. Sign Out starts enabled when a login token is stored.
- * Choosing it shows the window and sends the page the `signOut` menu command,
- * and the page signs out. `development` adds the View menu.
+ * Choosing Sign Out or New Thread shows the window and sends the page the
+ * `signOut` or `newThread` menu command, and the page carries it out.
+ * `development` adds the View menu.
  *
  * The layer needs the window, which is built only once the app is ready, so
  * the menu is also made the app's only then, as Electron requires.
@@ -110,6 +127,8 @@ export const makeMainMenuLayer = (
           signOutEnabled,
           signOut: () =>
             runFork(Effect.andThen(window.show, window.send("menu.command", "signOut"))),
+          newThread: () =>
+            runFork(Effect.andThen(window.show, window.send("menu.command", "newThread"))),
         }),
       );
       Menu.setApplicationMenu(menu);

@@ -99,9 +99,19 @@ export function lendCredential(home: string, instanceId: string): void {
   chmodSync(path, 0o600);
 }
 
+/** A temporary directory for a test, and the function that removes it. */
+export interface TemporaryHome {
+  readonly home: string;
+  readonly remove: () => void;
+}
+
 /**
  * Creates a temporary Hercule Home, and returns it with a function that
  * removes it.
+ *
+ * Call it in a `beforeAll` or inside a test, never at the top level of a test
+ * file. Vitest runs no hooks for a file whose tests are all skipped, so a home
+ * created on import would never reach the `afterAll` that removes it.
  *
  * With a `gitconfig`, the directory can also be given to a process as `HOME`:
  * it holds none of the git configuration of the developer running the suite -
@@ -113,7 +123,7 @@ export function lendCredential(home: string, instanceId: string): void {
  * so without it the controller cannot boot; git reads nothing under
  * `Library`, so the isolation still holds.
  */
-export function createTemporaryHome(gitconfig?: string): { home: string; remove: () => void } {
+export function createTemporaryHome(gitconfig?: string): TemporaryHome {
   const home = mkdtempSync(join(tmpdir(), "hercule-e2e-"));
   if (gitconfig !== undefined) {
     writeFileSync(join(home, ".gitconfig"), gitconfig);

@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RouterContextProvider } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RenderFailure } from "./fallbacks";
 import { renderApp, stubApi, type Handler } from "../app/testing";
+
+/** Makes the app shell throw while it renders, while `throws` is true. */
+const shell = vi.hoisted(() => ({ throws: false }));
+vi.mock("../shell", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shell")>();
+  return {
+    ...actual,
+    Shell: (props: Parameters<typeof actual.Shell>[0]) => {
+      if (shell.throws) throw new Error("the shell did not render");
+      return <actual.Shell {...props} />;
+    },
+  };
+});
 
 const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/setup": { body: { complete: true } },
@@ -53,6 +66,18 @@ describe("the screen shown after a render failure", () => {
 
     expect(screen.getByText(/The rest of Hercule is still here/)).toBeDefined();
     expect(screen.queryByText("Hercule")).toBeNull();
+  });
+
+  it("takes the whole page when the shell itself fails", async () => {
+    shell.throws = true;
+    onTestFinished(() => {
+      shell.throws = false;
+    });
+    await renderApp({ path: "/tasks", api: stubApi(api).fetch, token: "held" });
+
+    expect((await screen.findByRole("alert")).textContent).toBe("the shell did not render");
+    expect(screen.queryByText(/The rest of Hercule is still here/)).toBeNull();
+    expect(screen.getByText("Hercule")).toBeDefined();
   });
 
   it("takes the whole page when the failure is outside the shell", async () => {

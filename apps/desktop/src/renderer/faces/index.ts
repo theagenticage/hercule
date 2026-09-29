@@ -9,5 +9,4 @@ export {
   type Look,
   type Shape,
 } from "./look";
-export { describePose, POSES, type MarkState, type Pose } from "./pose";
 export { UserAvatar } from "./user-avatar";

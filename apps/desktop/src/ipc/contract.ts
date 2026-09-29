@@ -149,9 +149,12 @@ export interface MainToRendererIpcChannel {
  * page send anything on any channel.
  */
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
-  /** Asks the renderer to carry out a menu item the user chose. */
+  /**
+   * Asks the renderer to carry out a menu item the user chose: Sign Out, or
+   * New Thread.
+   */
   "menu.command": {
-    payload: Schema.Literal("signOut"),
+    payload: Schema.Literals(["signOut", "newThread"]),
   },
 } as const satisfies Record<`${string}.${string}`, MainToRendererIpcChannel>;
 

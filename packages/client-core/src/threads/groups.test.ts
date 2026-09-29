@@ -1,12 +1,17 @@
 /**
  * Tests how the sidebar's threads are grouped. The tests check that:
  *
- * - projects are sorted by activity, so current work is at the top;
+ * - projects are sorted by their latest thread in any workspace group, so
+ *   current work is at the top;
  * - inside a project, worktrees come first in catalog order, then the main
  *   workspace, then the threads with no workspace;
- * - threads with no project come last, however recent they are;
+ * - threads with no project come last, however recent they are, and a thread
+ *   whose project is not in the project list joins them;
+ * - the threads with no project form one unlabelled group, newest first,
+ *   whatever workspaces they are in;
  * - the draft being written sits in the group it will belong to once it
- *   starts.
+ *   starts, and a draft for a project not in the project list sits with the
+ *   threads with no project.
  */
 import { describe, expect, it } from "vitest";
 import { decideDraftPlace, buildThreadGroups } from "./groups";
@@ -137,6 +142,104 @@ describe("buildThreadGroups", () => {
     ]);
   });
 
+  it("sorts projects by their latest thread in any workspace group, not only the first", () => {
+    const groups = buildThreadGroups({
+      sessions: [
+        // webshop's first workspace group, the worktree, holds its oldest
+        // thread. Its latest thread has no workspace, so its group comes last.
+        buildSession({
+          id: "s-tree",
+          projectId: WEBSHOP_PROJECT.id,
+          workspaceId: THREAD_3F1.id,
+          lastActivityAt: buildTimestamp(1),
+        }),
+        buildSession({
+          id: "s-new",
+          projectId: WEBSHOP_PROJECT.id,
+          lastActivityAt: buildTimestamp(8),
+        }),
+        buildSession({ id: "s-ops", projectId: OPS_PROJECT.id, lastActivityAt: buildTimestamp(5) }),
+      ],
+      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+      workspaces: [PRIMARY, THREAD_3F1],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    });
+
+    expect(listLaneLabels(groups[0])).toEqual(["hercule/thread-3f1", "no workspace"]);
+    expect(groups.map((group) => group.name)).toEqual(["webshop", "ops"]);
+  });
+
+  // A deleted project is never listed again, but its threads keep its id. A
+  // group for it would have no name to title it.
+  it("puts a thread whose project is not in the project list with the threads in no project", () => {
+    const groups = buildThreadGroups({
+      sessions: [
+        ...SESSIONS,
+        buildSession({ id: "s-orphan", projectId: "p-deleted", lastActivityAt: buildTimestamp(9) }),
+      ],
+      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+      workspaces: [PRIMARY, THREAD_3F1],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    });
+
+    expect(groups.map((group) => [group.projectId, group.count])).toEqual([
+      [WEBSHOP_PROJECT.id, 3],
+      [OPS_PROJECT.id, 1],
+      [null, 2],
+    ]);
+    expect(groups[2]?.workspaces.flatMap((lane) => lane.rows.map((row) => row.id))).toEqual([
+      "s-orphan",
+      "s-loose",
+    ]);
+  });
+
+  it("keeps the threads with no project in one unlabelled group, newest first, whatever their workspaces", () => {
+    const groups = buildThreadGroups({
+      sessions: [
+        buildSession({
+          id: "s-tree",
+          workspaceId: THREAD_3F1.id,
+          lastActivityAt: buildTimestamp(2),
+        }),
+        buildSession({ id: "s-main", workspaceId: PRIMARY.id, lastActivityAt: buildTimestamp(4) }),
+        buildSession({ id: "s-none", lastActivityAt: buildTimestamp(3) }),
+        buildSession({
+          id: "s-orphan",
+          projectId: "p-deleted",
+          workspaceId: PRIMARY.id,
+          lastActivityAt: buildTimestamp(1),
+        }),
+      ],
+      projects: [WEBSHOP_PROJECT],
+      workspaces: [PRIMARY, THREAD_3F1],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.workspaces).toEqual([
+      {
+        workspaceId: null,
+        label: null,
+        draft: false,
+        rows: [
+          expect.objectContaining({ id: "s-main" }),
+          expect.objectContaining({ id: "s-none" }),
+          expect.objectContaining({ id: "s-tree" }),
+          expect.objectContaining({ id: "s-orphan" }),
+        ],
+      },
+    ]);
+  });
+
   it("puts the worktrees first, then the main workspace, then the threads with no workspace", () => {
     expect(listLaneLabels(buildGroups()[0])).toEqual([
       "hercule/thread-3f1",
@@ -237,6 +340,30 @@ describe("buildThreadGroups", () => {
     })[0];
 
     expect(listLaneLabels(loose)).toContain("no workspace");
+  });
+
+  it("puts a draft with no project in the one group of the threads with no project, whatever its workspace", () => {
+    for (const workspaceId of [null, PRIMARY.id]) {
+      const loose = buildGroups({ projectId: null, workspaceId }).at(-1);
+
+      expect(loose?.projectId).toBeNull();
+      expect(loose?.workspaces.map((lane) => [lane.label, lane.draft])).toEqual([[null, true]]);
+    }
+  });
+
+  // A project created since the project list was read has no name yet, so a
+  // group of its own would have a coloured dot but no name.
+  it("puts a draft for a project not in the project list with the threads with no project", () => {
+    const groups = buildGroups({ projectId: "p-new", workspaceId: null });
+
+    expect(groups.map((group) => [group.projectId, group.tone])).toEqual([
+      [WEBSHOP_PROJECT.id, expect.any(String)],
+      [OPS_PROJECT.id, expect.any(String)],
+      [null, null],
+    ]);
+    expect(groups[2]?.workspaces.map((lane) => [lane.label, lane.draft, lane.rows.length])).toEqual(
+      [[null, true, 1]],
+    );
   });
 
   it("orders a project's threads newest first", () => {

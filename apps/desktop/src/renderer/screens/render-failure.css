@@ -1,0 +1,49 @@
+/* The screen shown when a route fails to load (render-failure.tsx). Built
+   from Bureau's parts, since the book has no page for it: the headline and
+   the lead are the book's empty new-thread page (`.newbie` in
+   desktop/session-empty.html), and the button is the book's .btn. */
+
+/* In the shell, the screen fills the main pane, with its text centred as the
+   book centres the new-thread page's. */
+.render-failure {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 0 24px 64px;
+}
+
+.render-failure-text {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  max-width: 480px;
+  text-align: center;
+}
+.render-failure-headline {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+.render-failure-lead {
+  margin: -6px 0 0;
+  color: var(--muted);
+}
+/* An error message can hold a long word, such as a URL, that would otherwise
+   run past the column. */
+.render-failure-message {
+  margin: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  overflow-wrap: anywhere;
+}
+
+/* In the shell the button keeps the width of its label. In the full-window
+   screen, the centred column stretches it, as it stretches Sign in. */
+.render-failure-retry {
+  margin-top: 20px;
+}

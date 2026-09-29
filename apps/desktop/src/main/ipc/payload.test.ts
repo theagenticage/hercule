@@ -4,8 +4,8 @@ import { Effect, Exit } from "effect";
 import { encodeIpcPayload } from "./payload";
 
 describe("encodeIpcPayload", () => {
-  it("encodes a menu command", () => {
-    expect(Effect.runSync(encodeIpcPayload("menu.command", "signOut"))).toBe("signOut");
+  it.each(["signOut", "newThread"] as const)("encodes the menu command %s", (command) => {
+    expect(Effect.runSync(encodeIpcPayload("menu.command", command))).toBe(command);
   });
 
   it("dies on a payload outside the contract, because only a bug in main sends one", () => {

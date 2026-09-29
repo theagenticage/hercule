@@ -1,6 +1,9 @@
-/* The sidebar: solid, one tone darker than the main pane. It never floats over
-   content, so it is not glass. Class names follow the Bureau book, as in
-   shell.css. */
+/* The sidebar. The rules and class names are the Bureau book's, as its
+   system.css spells them, in the book's order. Each departure from the book,
+   and each rule the book does not have, says why. */
+
+/* Solid, one tone darker than the main pane. It never floats over content,
+   so it is not glass. */
 .side {
   display: flex;
   flex-direction: column;
@@ -9,9 +12,290 @@
   background: var(--bg);
 }
 
-/* The strip along the top of the sidebar, where macOS draws the traffic
-   lights. The shell's drag strip, over it, drags the window. */
+/* The strip along the top of the sidebar. The book draws the traffic lights
+   first in it (`.tl`) and pushes the button to the other end with
+   `space-between`. macOS draws the real traffic lights over the window, so
+   the strip holds only the button, pushed to the end with `flex-end`. */
 .side-top {
-  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   height: 48px;
+  padding: 0 0 0 8px;
+  flex: none;
+}
+
+/* The shell's drag strip covers the top 52px of the window and drags it. A
+   control in that band opts out, so a click reaches it. The New thread row
+   starts at 48px, inside the band. */
+.side-top .icon-btn,
+.side-actions {
+  -webkit-app-region: no-drag;
+}
+
+.side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+}
+.side-actions .nav-row {
+  width: 100%;
+  text-align: left;
+}
+
+/* The list scrolls under a fixed top and foot. Two departures from the book:
+   - The book hides the scroll bar (`scrollbar-width: none`). Spec 17 asks for
+     the system's overlay scroll bars, unstyled, which macOS draws only while
+     the list scrolls.
+   - The book's `padding-bottom: 12px` is the list's `paddingEnd` in
+     sidebar-list.tsx, because the virtualized list sets its own height. */
+.side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 -12px;
+  padding: 0 12px;
+  /* The virtualized list places its items itself. The browser must not also
+     move the scroll position when items mount above the visible part. */
+  overflow-anchor: none;
+}
+
+/* Not in the book, which lays its sections out in flow. The virtualized list
+   mounts only the items near the visible part: they stack in flow, each with
+   the space above it as its top margin and its height set inline, and an
+   empty spacer stands in for the items that are not mounted. `flow-root`
+   keeps the first item's top margin inside the list. */
+.side-list {
+  display: flow-root;
+}
+
+.side-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin: 0;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.side-h > :first-child {
+  flex: 1;
+}
+.side-h--proj {
+  padding-left: 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.side-h--proj .proj {
+  color: var(--muted);
+}
+/* Not in the book, whose project names are short. A long name ellipsizes
+   before the `+`, and the tile keeps its size. */
+.side-h--proj .proj {
+  min-width: 0;
+}
+.side-h--proj .proj::before {
+  flex: none;
+}
+.proj-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A workspace label, under its project's header. The book has no workspace
+   label; this one is designed from the section heading's family:
+   22px, the text where a row's text starts, 12px in the UI face at medium
+   weight, in faint ink. The first part of the name ellipsizes; the machine's
+   name after it never does. The `+` shows on hover and on keyboard focus, and
+   lines up with the project header's `+`. */
+.side-ws {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  margin: 0;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.side-ws-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.side-ws-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* `pre` keeps the space that starts the machine's part, which a flex item
+   would otherwise drop. */
+.side-ws-keep {
+  flex: none;
+  white-space: pre;
+}
+.side-ws .icon-btn {
+  opacity: 0;
+  transition:
+    opacity var(--dur-1),
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.side-ws:hover .icon-btn,
+.side-ws:focus-within .icon-btn {
+  opacity: 1;
+}
+
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 35px;
+  padding: 1px 8px 1px 10px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-1);
+}
+.side-row:hover {
+  background: var(--hover);
+}
+.side-row.is-on {
+  background: var(--selected);
+}
+.side-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.side-name {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-meta,
+.side-ask {
+  font-size: var(--t-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-meta {
+  color: var(--faint);
+}
+.side-ask {
+  color: var(--you-ink);
+}
+/* The right edge of a row: a state mark or an age, in one column. */
+.side-end {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: none;
+  min-width: 26px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.side-row--wait {
+  min-height: 38px;
+  padding-left: 6px;
+}
+.side-row--more {
+  min-height: 28px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The book draws a "more" row as a link, which leads to Intake. Here it
+   expands its section in place and goes nowhere, so it is a button, drawn as
+   the link is: the full width, the text at the start, and the page's text
+   rendering, where Chromium gives a button its own. */
+button.side-row--more {
+  width: 100%;
+  text-align: left;
+  text-rendering: inherit;
+}
+
+/* Not in the book, which always has threads: the line an empty list shows,
+   in a row's second-line style (`side-meta`), where the first section's
+   heading would start. */
+.side-empty {
+  margin: 0;
+  padding: 8px 10px 0;
+}
+
+.side-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+  margin: 0 -12px;
+  padding: 9px 16px 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.side-sum {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.side-sum b {
+  color: var(--muted);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.side-sum .you-ink {
+  color: var(--you-ink);
+}
+.side-me {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.side-me .side-name {
+  flex: 1;
+}
+
+/* A project is a place: a small rug swatch in its tint. */
+.proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.proj::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 3.5px;
+  background: var(--rug);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 14%, transparent);
+  transform: rotate(45deg) scale(0.9);
+}
+.proj--webshop {
+  --rug: var(--proj-webshop);
+}
+.proj--payments {
+  --rug: var(--proj-payments);
+}
+.proj--ops {
+  --rug: var(--proj-ops);
+}
+/* Not in the book, which has no threads outside a project. The heading of
+   the threads in no project draws only the tile's outline, in the same place
+   and at the same size as a project's tile, so "No project" lines up with the
+   other projects' names and still has a mark before it. */
+.proj--none::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
 }

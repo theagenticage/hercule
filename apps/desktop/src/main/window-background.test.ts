@@ -2,20 +2,34 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { WINDOW_BACKGROUND } from "./window-background";
 
-const tokens = readFileSync(new URL("../renderer/styles/tokens.css", import.meta.url), "utf8");
+const readStyles = (name: string): string =>
+  readFileSync(new URL(`../renderer/styles/${name}`, import.meta.url), "utf8");
+const tokens = readStyles("tokens.css");
+const base = readStyles("base.css");
 
 /**
- * Returns the `--bg` of the rule whose selector list includes `selector`, as
- * its oklch lightness, chroma and hue. Fails the test when there is none.
+ * Returns the body of the first rule in `css` whose selector list includes
+ * `selector`, or undefined when there is none.
+ */
+const findRule = (css: string, selector: string): string | undefined =>
+  css.split("}").find((block) => block.slice(0, block.indexOf("{")).includes(selector));
+
+/**
+ * Returns the `--bg` that tokens.css gives the theme `selector`, as its oklch
+ * lightness, chroma and hue. Fails the test when there is none.
  */
 const readBackgroundToken = (selector: string): [number, number, number] => {
-  const rule = tokens
-    .split("}")
-    .find((block) => block.slice(0, block.indexOf("{")).includes(selector));
-  const match = rule?.match(/--bg:\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)/);
+  const match = findRule(tokens, selector)?.match(/--bg:\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)/);
   if (match === null || match === undefined) throw new Error(`No oklch --bg for ${selector}`);
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 };
+
+/**
+ * Returns the hex `--bg` that base.css gives the theme `selector`, or
+ * undefined when base.css gives it none.
+ */
+const readBackgroundOverride = (selector: string): string | undefined =>
+  findRule(base, selector)?.match(/--bg:\s*(#[0-9a-f]{6});/)?.[1];
 
 /**
  * Converts an in-gamut oklch colour to sRGB hex, by the formulas of CSS Color
@@ -56,5 +70,10 @@ describe("the window background", () => {
     expect(WINDOW_BACKGROUND.dark).toBe(
       convertOklchToHex(readBackgroundToken('[data-theme="orient-express"]')),
     );
+  });
+
+  it("is the exact --bg that base.css gives the page in both themes", () => {
+    expect(readBackgroundOverride('[data-theme="whitehaven"]')).toBe(WINDOW_BACKGROUND.light);
+    expect(readBackgroundOverride('[data-theme="orient-express"]')).toBe(WINDOW_BACKGROUND.dark);
   });
 });

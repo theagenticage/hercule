@@ -27,6 +27,8 @@ export type LiveQueryKey = ReadonlyArray<unknown>;
 export const queryKeys = {
   setup: (): LiveQueryKey => ["setup"],
   settings: (): LiveQueryKey => ["settings"],
+  /** Not a live topic: the signed-in user's name never changes, since no operation renames a user. */
+  user: (): LiveQueryKey => ["user"],
   tasks: (filter?: TaskFilter): LiveQueryKey =>
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
@@ -45,11 +47,21 @@ export const queryKeys = {
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**
-   * A filtered listing is keyed on its filter: one runner's sessions for its
-   * page, or one conversation's sessions for its activity row.
+   * A filtered listing is keyed on its filter:
+   *
+   * - one runner's sessions, for its page;
+   * - one conversation's sessions, for its activity row;
+   * - `{ thread: true }`, every Thread and no Agent's session, for the
+   *   desktop app's sidebar.
+   *
+   * Every variant keeps the `sessions` prefix, so a `session` push
+   * invalidates them all.
    */
   sessions: (
-    filter?: { readonly runnerId: string } | { readonly conversationId: string },
+    filter?:
+      | { readonly runnerId: string }
+      | { readonly conversationId: string }
+      | { readonly thread: true },
   ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],

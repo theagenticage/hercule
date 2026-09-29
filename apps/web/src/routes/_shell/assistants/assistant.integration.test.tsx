@@ -580,49 +580,23 @@ describe("Assistant conversation: earlier messages", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3 (F-74). A conversation nudge
-  // that lands while the earlier page loads refetches the page already
-  // shown, and that refetch silently cancels the earlier page's fetch.
-  it("still loads the earlier messages when a conversation nudge arrives while they load", async () => {
+  // Added in review round 1 of #92 slice 3 (F-74), when a nudge cancelled
+  // the load and the screen had to ask for the page again. A nudge now never
+  // cancels a running read: the load finishes, and the list is read again
+  // after it for the nudge's change.
+  it("keeps loading the earlier messages when a conversation nudge arrives, and shows the nudge's message after them", async () => {
     const user = userEvent.setup();
-    const messages = buildMessages(60);
-    const hold = holdFirstCall((call) => pageMessages(messages, call));
-    const { live } = await openConversation(
-      { messages },
-      {
-        [`GET /api/v1/conversations/${WEB.id}/messages`]: (call) =>
-          new URLSearchParams(call.search).get("cursor") === null
-            ? pageMessages(messages, call)
-            : hold.handler(call),
-      },
-    );
-    await findOnScreen("message 60");
-    await waitFor(() => {
-      expect(live.topics()).toContain("conversation");
-    });
-
-    await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
-    act(() => {
-      live.push("conversation", { _tag: "invalidate", ids: [WEB.id], kind: "updated" });
-    });
-
-    expect(await findOnScreen("message 1")).toBeDefined();
-    hold.release();
-  });
-
-  // Added in review round 2 of #92 slice 3 (D-89). One retry was not enough:
-  // a second nudge during the retry lost the click too.
-  it("still loads the earlier messages when a second nudge arrives while the first retry loads", async () => {
-    const user = userEvent.setup();
-    const messages = buildMessages(60);
+    let messages = buildMessages(60);
     const held: (() => void)[] = [];
     const { api, live } = await openConversation(
       { messages },
       {
         [`GET /api/v1/conversations/${WEB.id}/messages`]: (call) => {
-          if (!isEarlierPage(call) || held.length >= 2) return pageMessages(messages, call);
+          // Each read answers with the messages as they were when it arrived.
+          const answer = pageMessages(messages, call);
+          if (!isEarlierPage(call) || held.length > 0) return answer;
           return new Promise((resolve) => {
-            held.push(() => resolve(pageMessages(messages, call)));
+            held.push(() => resolve(answer));
           });
         },
       },
@@ -631,21 +605,52 @@ describe("Assistant conversation: earlier messages", () => {
     await waitFor(() => {
       expect(live.topics()).toContain("conversation");
     });
-    const nudge = (): void => {
-      act(() => {
-        live.push("conversation", { _tag: "invalidate", ids: [WEB.id], kind: "updated" });
-      });
-    };
 
     await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
-    nudge();
     await waitFor(() => {
-      expect(api.calls.filter(isEarlierPage)).toHaveLength(2);
+      expect(held).toHaveLength(1);
     });
-    nudge();
+    messages = [...messages, buildMessage(61)];
+    act(() => {
+      live.push("conversation", { _tag: "invalidate", ids: [WEB.id], kind: "updated" });
+    });
+    await settle();
+    expect(api.calls.filter(isEarlierPage)).toHaveLength(1);
 
+    held[0]!();
     expect(await findOnScreen("message 1")).toBeDefined();
-    for (const release of held) release();
+    expect(await findOnScreen("message 61")).toBeDefined();
+  });
+
+  // Added in review round 2 of #92 slice 3 (D-89) for nudges, which no
+  // longer cancel the load. A send still does: the composer re-reads the
+  // messages already shown, and that re-read cancels the earlier page's load.
+  it("still loads the earlier messages when a send re-reads the list while they load", async () => {
+    const user = userEvent.setup();
+    let messages = buildMessages(60);
+    const hold = holdFirstCall((call) => pageMessages(messages, call));
+    const { api } = await openConversation(
+      {},
+      {
+        [`GET /api/v1/conversations/${WEB.id}/messages`]: (call) =>
+          isEarlierPage(call) ? hold.handler(call) : pageMessages(messages, call),
+        [`POST /api/v1/conversations/${WEB.id}/messages`]: (call) => {
+          const sent = buildMessage(61, { text: (call.body as { text: string }).text });
+          messages = [...messages, sent];
+          return { body: sent };
+        },
+      },
+    );
+    await findOnScreen("message 60");
+
+    await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
+    await user.type(await findComposer(), "hi");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await findOnScreen("hi")).toBeDefined();
+    expect(await findOnScreen("message 1")).toBeDefined();
+    expect(api.calls.filter(isEarlierPage)).toHaveLength(2);
+    hold.release();
   });
 
   // Added in review round 2 of #92 slice 3 (D-88).

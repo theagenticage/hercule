@@ -12,7 +12,19 @@ const listRoles = (items: MenuTemplate): Array<string> =>
 
 /** Builds the template of the packaged app, or of development. */
 const buildTemplate = (development: boolean, signOutEnabled = false): MenuTemplate =>
-  buildMenuTemplate({ development, signOutEnabled, signOut: () => undefined });
+  buildMenuTemplate({
+    development,
+    signOutEnabled,
+    signOut: () => undefined,
+    newThread: () => undefined,
+  });
+
+/** Returns the items of the File menu. */
+const listFileItems = (template: MenuTemplate): MenuTemplate => {
+  const submenu = template.find((item) => item.label === "File")?.submenu;
+  if (!Array.isArray(submenu)) throw new Error("the File menu has no list of items");
+  return submenu;
+};
 
 /** Returns the items of the app menu, the first menu of `template`. */
 const listAppMenuItems = (template: MenuTemplate): MenuTemplate => {
@@ -62,6 +74,7 @@ describe("buildMenuTemplate", () => {
       development: false,
       signOutEnabled: true,
       signOut: () => calls++,
+      newThread: () => undefined,
     });
     const signOut = listAppMenuItems(template).find((item) => item.id === "signOut");
     // Electron passes the item, the focused window and the event; Sign Out
@@ -70,9 +83,28 @@ describe("buildMenuTemplate", () => {
     expect(calls).toBe(1);
   });
 
-  it("closes the window from File with ⌘W", () => {
-    const file = buildTemplate(false).find((item) => item.label === "File");
-    expect(file?.submenu).toEqual([{ role: "close", accelerator: "CmdOrCtrl+W" }]);
+  it("has New Thread with ⌘N, then Close Window with ⌘W, in File", () => {
+    const items = listFileItems(buildTemplate(false));
+    expect(items.map((item) => [item.label ?? item.role ?? item.type, item.accelerator])).toEqual([
+      ["New Thread", "CmdOrCtrl+N"],
+      ["separator", undefined],
+      ["close", "CmdOrCtrl+W"],
+    ]);
+  });
+
+  it("calls newThread when New Thread is chosen", () => {
+    let calls = 0;
+    const template = buildMenuTemplate({
+      development: false,
+      signOutEnabled: false,
+      signOut: () => undefined,
+      newThread: () => calls++,
+    });
+    const newThread = listFileItems(template).find((item) => item.label === "New Thread");
+    // Electron passes the item, the focused window and the event; New Thread
+    // reads none of them.
+    (newThread?.click as () => void)();
+    expect(calls).toBe(1);
   });
 
   it("has no reload, developer tools or zoom in the packaged app", () => {

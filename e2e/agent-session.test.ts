@@ -49,6 +49,7 @@ import {
   createTemporaryHome,
   waitForTranscriptTag,
   type Page,
+  type TemporaryHome,
   type Row,
   type Session,
 } from "./harness";
@@ -56,7 +57,7 @@ import {
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -164,6 +165,7 @@ const runSessionUnderSchema = async (
 
 beforeAll(async () => {
   if (!wanted) return;
+  state = createTemporaryHome();
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
@@ -188,7 +190,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
+  state?.remove();
 });
 
 describe.skipIf(!wanted)("a session spawned from an Agent under an output schema", () => {

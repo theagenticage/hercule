@@ -1,6 +1,6 @@
-/* The controls every screen shares: the text field and the buttons. The rules
-   and class names are the Bureau book's, as its system.css spells them. Each
-   departure from the book says why. */
+/* The controls every screen shares: the buttons, the navigation rows, the
+   counts and the text field. The rules and class names are the Bureau book's,
+   as its system.css spells them. Each departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -74,6 +74,76 @@
    sinks, because pressing it again does nothing. */
 .btn[aria-disabled="true"] {
   pointer-events: none;
+}
+
+/* An icon alone as a button: 28px square, or 22px as --sm, muted until
+   hovered. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.icon-btn--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-xs);
+}
+
+/* ---------- Navigation rows ---------- */
+/* Icon, label, and whatever sits at the right end, such as a key cap. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.nav-row > span {
+  flex: 1;
+}
+.nav-row:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.nav-row.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---------- Counts ---------- */
+/* A number in a pill, such as the count of threads waiting on you. */
+.count {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  display: inline-grid;
+  place-items: center;
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+/* A count of things waiting on you: marigold, the one colour that means "you". */
+.count--you {
+  color: var(--face-ink);
+  background: var(--you);
 }
 
 /* ---------- Inputs ---------- */

@@ -23,9 +23,9 @@ import {
   startController,
   type Controller,
 } from "../scripts/controller-process";
-import { readApiKey, parseJsonOutput, createTemporaryHome } from "./harness";
+import { readApiKey, parseJsonOutput, createTemporaryHome, type TemporaryHome } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -64,6 +64,7 @@ beforeAll(async () => {
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
     );
   }
+  state = createTemporaryHome();
   controller = await startController({ home: state.home, binary });
   url = controller.url;
 
@@ -81,7 +82,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
+  state?.remove();
 });
 
 describe("the binary serving live topics", () => {

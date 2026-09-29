@@ -127,9 +127,9 @@ const apiKeyRoutes = HttpApiBuilder.group(api, "apiKey", (handlers) =>
 const userRoutes = HttpApiBuilder.group(api, "user", (handlers) =>
   Effect.gen(function* () {
     const user = yield* User;
-    return handlers.handle("setPassword", ({ payload }) =>
-      withApiErrors(user.setPassword(payload)),
-    );
+    return handlers
+      .handle("read", () => withApiErrors(user.read()))
+      .handle("setPassword", ({ payload }) => withApiErrors(user.setPassword(payload)));
   }),
 );
 

@@ -61,12 +61,13 @@ import {
   type Instance,
   type Session,
   type Snapshot,
+  type TemporaryHome,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -189,6 +190,7 @@ interface Profile {
 
 beforeAll(async () => {
   if (!wanted) return;
+  state = createTemporaryHome();
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
@@ -212,7 +214,7 @@ afterAll(async () => {
   await controller?.stop().catch(() => -1);
   // The copied credential is in here, so removing the home matters for
   // security, not just tidiness.
-  state.remove();
+  state?.remove();
 });
 
 describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () => {

@@ -44,8 +44,9 @@ interface ReadingPlace {
 
 /**
  * How many times "Show earlier messages" asks for the page before it gives
- * up. A live nudge can cancel the load (see `showEarlierMessages`), and a few
- * nudges in a row should not lose the click.
+ * up. A re-read of the messages can cancel the load (see
+ * `showEarlierMessages`), and a few re-reads in a row should not lose the
+ * click.
  */
 const MAX_PAGE_ATTEMPTS = 3;
 
@@ -119,11 +120,12 @@ export function ConversationScreen({
         };
     }
     const loaded = messages.data.pages.length;
-    // A live nudge that lands while the page loads refetches the pages
-    // already shown, and that refetch cancels this load without an error.
-    // The page is asked for again until it arrives, the load fails, or
-    // `MAX_PAGE_ATTEMPTS` is reached. A failed load is not asked for again:
-    // its error shows beside the button, and the user can click again.
+    // A live nudge never cancels this load, but a re-read of the pages
+    // already shown can: the composer re-reads them after a send, and that
+    // cancels this load without an error. The page is asked for again until
+    // it arrives, the load fails, or `MAX_PAGE_ATTEMPTS` is reached. A failed
+    // load is not asked for again: its error shows beside the button, and the
+    // user can click again.
     for (let attempt = 0; attempt < MAX_PAGE_ATTEMPTS; attempt += 1) {
       const result = await messages.fetchNextPage();
       if ((result.data?.pages.length ?? 0) > loaded) return;

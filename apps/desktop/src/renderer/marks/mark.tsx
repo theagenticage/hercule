@@ -1,6 +1,7 @@
 import type { JSX } from "react";
-import { describePose, type MarkState } from "../faces";
+import { describePose } from "@hercule/client-core";
 import { IconFrame } from "../icons";
+import type { MarkState } from "./mark-state";
 import "./mark.css";
 
 /**
@@ -45,7 +46,9 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
 
 /**
  * Renders a state mark: the state's glyph at `size` (14 by default), in the
- * state's colour, named for assistive technology by the pose words.
+ * state's colour, named for assistive technology by the pose words. A
+ * `decorative` mark is hidden from assistive technology instead, for a place
+ * where the text beside it already says the state.
  *
  * Nothing in a mark moves. The book fades the working mark's dots in turn;
  * the app draws them still. The app allows one continuous animation, the face
@@ -55,12 +58,17 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
 export function Mark({
   state,
   size = 14,
+  decorative = false,
 }: {
   readonly state: MarkState;
   readonly size?: number;
+  readonly decorative?: boolean;
 }): JSX.Element {
+  const accessibility = decorative
+    ? { "aria-hidden": true }
+    : { role: "img", "aria-label": describePose(state) };
   return (
-    <span className={`mark mark--${state}`} role="img" aria-label={describePose(state)}>
+    <span className={`mark mark--${state}`} {...accessibility}>
       <IconFrame size={size}>{MARK_GLYPHS[state]}</IconFrame>
     </span>
   );

@@ -1,6 +1,6 @@
 /**
- * What both specimen sheets do the same way: take their theme from the URL,
- * and tell `pnpm compare:bureau` when they are ready to be captured.
+ * What every captured sheet does the same way: take its theme from the URL,
+ * hold a Bureau book page still, and tell the capture when it is ready.
  */
 import { waitForPresentedFrame } from "../app/presented-frame";
 
@@ -36,4 +36,16 @@ export function applySheetTheme(): void {
 export async function markSheetReady(): Promise<void> {
   await waitForPresentedFrame();
   document.documentElement.dataset.ready = "";
+}
+
+/**
+ * Holds a Bureau book page still for a capture: stops every animation, so a
+ * waiting face shows the frame the app draws, and hides the traffic-light
+ * placeholders (`.tl`), where macOS draws the real ones over the app's
+ * window.
+ */
+export function stillBookPage(): void {
+  const style = document.createElement("style");
+  style.textContent = "* { animation: none !important; } .tl { visibility: hidden; }";
+  document.head.append(style);
 }

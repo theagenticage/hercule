@@ -8,6 +8,33 @@
   box-sizing: border-box;
 }
 
+/* In the two themes the app shows, `--bg` is the exact 8-bit sRGB colour
+   that main gives the native window (src/main/window-background.ts), not the
+   book's oklch value. tokens.css is the book's file and stays unchanged.
+
+   On macOS, Chromium splits the page into tiles, and each tile reaches the
+   screen by one of two paths:
+   - A tile with content in it is drawn by Chromium, which converts its
+     colours to the display's colours itself.
+   - A tile of one flat colour is handed to macOS, which converts that colour,
+     as it converts the native window's background.
+   The two paths round colours differently. An oklch colour falls between two
+   8-bit values, so on a wide-gamut display the band of tiles holding the
+   content showed a step off from the rest of the page. From an exact 8-bit
+   colour, the flat tiles match the native window, and the tiles with content
+   match them too, or at times sit one step off in a single channel. No CSS
+   value removes that last step: macOS's own conversion varies over time.
+
+   Only these two themes, because public/theme-init.js sets no other. A rule
+   on :root would also replace `--bg` in the book's other themes. */
+[data-theme="whitehaven"] {
+  --bg: #f4f3f0;
+}
+
+[data-theme="orient-express"] {
+  --bg: #1a1310;
+}
+
 html,
 body {
   margin: 0;
@@ -36,6 +63,26 @@ button {
   background: none;
   border: 0;
   padding: 0;
+}
+
+/* Two of the book's element rules, copied from its system.css with their
+   selectors. An element rule reaches every screen, whichever file holds it,
+   so they sit here rather than with the first screen that uses them.
+   - A link takes the text around it: the book draws rows and buttons as
+     links, not as underlined text.
+   - A key cap names a shortcut in the UI face, never in monospace. */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+kbd {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: var(--t-11);
+  line-height: 1.6;
 }
 
 html {

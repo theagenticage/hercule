@@ -226,7 +226,7 @@ Pinned by [Prototype: the app shell and navigation](https://github.com/theagenti
 
 **All sessions** is a full page, not a longer sidebar: one headline sentence (`1 running · 1 waiting on you · 2 idle · 2 settled this week`), project filter tabs with Create new thread at their right, lanes **Waiting on you / Running / Idle** (resumes on your next message) **/ Assistants / Settled** with checkout, PR and provider per row. Sessions started by workflows are not threads: they sit behind a fold at the bottom ("show 2 · 1 running · 14 today"), closed by default.
 
-*(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* An exited thread that is resumable is **Idle**, indistinguishable from one whose process is running; only an exited thread that is not resumable is **Settled**.
+*(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* An exited thread that is resumable is **Idle**, indistinguishable from one whose process is running; only an exited thread that is not resumable is **Settled**. *(Note 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): the desktop app draws such a thread's row exactly like an idle one, but names its pose asleep, so its foot counts it apart from idle ones; [./17-desktop-app.md](./17-desktop-app.md) §Design system, a thread's pose.)*
 
 ### The thread surface
 

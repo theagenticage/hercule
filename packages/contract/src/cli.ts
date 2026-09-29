@@ -89,7 +89,12 @@ export type CliRow =
       /** At least one, most common first. */
       readonly examples: ReadonlyArray<CliExample>;
       readonly fields: Record<string, FieldRow>;
-      /** Set only where the error code's generic meaning is not specific enough for this command. */
+      /**
+       * Set only where the error code's generic meaning is not specific enough
+       * for this command. The default `forbidden` meaning tells the caller to
+       * request the operation's grant, so a row whose grant alone does not
+       * allow the call gives its own.
+       */
       readonly errors?: Partial<Record<ErrorCode, string>>;
     };
 
@@ -99,6 +104,14 @@ export interface NounRow {
   /** The usual order its verbs are called in, when the noun has one. */
   readonly flow?: string;
 }
+
+/**
+ * The `forbidden` meaning of an operation only the user may call. The
+ * controller refuses a session token for it with 403 even when the session's
+ * profile holds the grant, so requesting the grant would not help.
+ */
+const USER_ONLY_FORBIDDEN =
+  "only the user may make this call: a session token is refused whatever grants its profile holds, so a Permission Request cannot help; ask the user to run the command instead";
 
 export const CLI = {
   "setup.read": {
@@ -153,7 +166,7 @@ export const CLI = {
     help: "Lists the user's API keys - references only, never the tokens. Use it to find the id of a key to revoke with `hercule api-key revoke`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "apiKey.create": {
     command: "api-key create",
@@ -165,7 +178,7 @@ export const CLI = {
         help: "What to call the key, so `hercule api-key list` shows what it is for.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "apiKey.revoke": {
     command: "api-key revoke",
@@ -178,9 +191,16 @@ export const CLI = {
         resolves: "apiKey.query",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
+  "user.read": {
+    command: "user read",
+    help: "Shows the username of the user the credential belongs to: the name `hercule login` asks for.",
+    examples: [{ args: [] }],
+    fields: {},
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
   "user.setPassword": {
     command: "user set-password",
     help: "Changes the user's password, verifying the current one first. A stolen token alone cannot take the account over.",
@@ -193,7 +213,7 @@ export const CLI = {
       },
       next: { stdin: true, flag: "next", help: "The password to set." },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "settings.read": {
@@ -201,7 +221,7 @@ export const CLI = {
     help: "Reads every setting that is set, in both scopes. `controller` holds the controller's operational settings, `user` the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hercule settings update`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "settings.update": {
     command: "settings update",
@@ -220,7 +240,7 @@ export const CLI = {
         help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), topic order, mutes.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "profile.query": {
@@ -311,7 +331,7 @@ export const CLI = {
       },
       ownerId: { flag: "owner-id", help: "Only secrets of this one owner, by its full id." },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "secret.set": {
     command: "secret set",
@@ -332,7 +352,7 @@ export const CLI = {
       },
       value: { stdin: true, flag: "value", help: "The secret value." },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "secret.delete": {
     command: "secret delete",
@@ -352,7 +372,7 @@ export const CLI = {
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "task.query": {
@@ -1015,7 +1035,7 @@ export const CLI = {
         "the run has already ended, so no event about it will arrive: read it with `hercule run read <id>`. Or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run instead",
       not_found: "no run has the id in a run:<id> target",
       forbidden:
-        "a run target needs the run.read grant, because the events about a run describe it",
+        "you lack subscription.write, or the target is a run and you lack run.read, which a run target needs because the events about a run describe the run; the error names the grant to ask for in a Permission Request",
       validation:
         "the target is not written in one of the forms above, or a run target's id is not a full run id; or a user credential holds no subscription: call this on a session token",
     },
@@ -2399,7 +2419,8 @@ export const CLI = {
       },
     },
     errors: {
-      unauthenticated: "user credential only: a session token is not allowed",
+      forbidden:
+        "you lack session.spawn, which a Permission Request can get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: only the user may start a Thread, so spawn from an Agent with --agent or ask the user to start the Thread; and --access-mode may be no more permissive than the Agent's",
       invalid_state:
         "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose is draining or retired; check with `hercule runner list` and `hercule provider login`",
     },
@@ -2519,7 +2540,8 @@ export const CLI = {
       },
     },
     errors: {
-      unauthenticated: "user credential only: a session token is not allowed",
+      forbidden:
+        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a session may fork only sessions on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },
@@ -2627,7 +2649,7 @@ export const CLI = {
     help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "controller.update": {
     command: "controller update",
@@ -2639,7 +2661,7 @@ export const CLI = {
         help: "The runner to fall back to, by its full id; `null` clears it.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is not allowed" },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 } as const satisfies Record<OperationId, CliRow>;
 
@@ -2653,7 +2675,7 @@ export const NOUNS = {
     summary: "Long-lived user credentials for scripts and operators.",
     flow: "hercule api-key create prints the token once; hercule api-key list finds a key later; hercule api-key revoke ends it.",
   },
-  user: { summary: "The user's own credentials." },
+  user: { summary: "The user's own credentials: the username and the password." },
   settings: { summary: "The controller's operational settings and the user's own preferences." },
   profile: {
     summary: "Permission Profiles: the named grant bundles a session's token carries.",

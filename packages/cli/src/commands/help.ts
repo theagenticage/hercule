@@ -275,10 +275,13 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   const width = Math.max(...command.codes.map((code) => code.length));
   const grant = findRequiredGrant(command.requires);
   for (const code of command.codes) {
+    // The row's own meaning comes first: for an operation only the user may
+    // call, requesting the grant cannot help, and the row says so.
     const meaning =
-      code === "forbidden" && grant !== undefined
+      command.meanings[code] ??
+      (code === "forbidden" && grant !== undefined
         ? `you lack ${grant}; ask with \`hercule permission request ${grant}\``
-        : (command.meanings[code] ?? GENERIC[code]);
+        : GENERIC[code]);
     lines.push(...formatLabelledText(code, width, meaning));
   }
 
@@ -400,7 +403,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",
     "            no credential or no controller.",
     "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
-    "            `hercule permission request <grant>`.",
+    "            `hercule permission request <grant>`, unless the command's help says only the",
+    "            user may make the call: no grant allows that, so ask the user to run it.",
     "",
     "run `hercule <noun> --help` for a noun's verbs, `hercule <noun> <verb> --help` for one command.",
   );

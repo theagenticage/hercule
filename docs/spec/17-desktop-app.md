@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slice 1 is built. Slices 2 to 8 are not.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 4 are built. Slices 5 to 8 are not.
 
 ## Scope of the first milestone
 
@@ -126,6 +126,9 @@ Measured 2026-09-29 against Electron 44.4.5:
 - **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. Slice 6, which adds the composer, gives those two a limit above that wait. A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
 - **Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.
 - **Changing controllers.** Changing the controller deletes the stored token (see [Auth and the token](#auth-and-the-token)).
+- **A screen that fails** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* shows spec 14's "This screen did not load" screen ([./14-web-app.md](./14-web-app.md), the row "A screen that threw while rendering"), with the failure's own message. It covers a read that fails as well as a render that throws. It differs from the web app's in two ways:
+  - It offers **Try again**, which loads every route on screen again, instead of Go to Sessions: the desktop app has no Sessions screen. While the routes load, the button reads "Trying again…" and ignores presses.
+  - When the shell itself failed, the screen fills the window, and its foot reads "Controller at `<url>`" with the Change button that leads to the connect screen. It does not say "Connected to", because the failure may be that the controller stopped answering.
 
 ### Content-Security-Policy
 
@@ -309,7 +312,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 2. **No monospace outside code.** Monospace is kept for code, commands and diffs. Spec 14's monospace time separators, workspace labels and branch values use the UI face.
 3. **Six marks.** Queued, cancelled and skipped lose their marks and become words.
 
-**A thread's face is seeded by its session id,** not by its title. The book derives a face from a name. A thread's title is written by the agent after the first message and can change, and a face must not change when its title does. The book's stored look (its Spec change 3) is for workflows and assistants, and arrives with them.
+**A thread's face is seeded by its session id,** not by its title. The book derives a face from a name. ~~A thread's title is written by the agent after the first message and can change, and a face must not change when its title does.~~ *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): a thread's title is set once, from the opening prompt's first non-empty line, as the contract's `Session.title` says. The id still seeds the face, because two threads can open with the same line, and each is its own colleague.)* The book's stored look (its Spec change 3) is for workflows and assistants, and arrives with them.
 
 **A face shows its colleague's state as a pose.** The eight poses, as the book draws them. Every pose is still, except that the working pose's paws type while its turn runs ([Rules](#rules), rule 2). Slice 4 maps a session's state to a pose in `@hercule/client-core`.
 
@@ -325,6 +328,41 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 | away | can't be reached | offset dots, a dotted mouth, an outlined badge, faded and desaturated | no |
 
 A face's accessible name is its label and its pose's words: "Fix 3-D Secure checkout for EU cards, waiting on you".
+
+**A thread's pose** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* is decided by `decideThreadPose` in `@hercule/client-core`. The first row that matches wins. The sidebar row's end is decided with it (`decideThreadRowEnd`):
+
+| The session | Pose | The row's end |
+|---|---|---|
+| has an open Request | waiting | the waiting mark |
+| is held by the crash-loop guard, or has exited and cannot be resumed | away | its age |
+| runs on a runner that is offline or unreachable | away | the word "offline", or its age once the session has exited |
+| has exited and can be resumed | asleep | its age |
+| is queued | working | the word "queued" |
+| is starting or busy | working | the working mark |
+| is idle | idle | its age |
+
+- Waiting comes first, because Waiting on you is defined by the open Request. A waiting thread on an offline runner stays waiting: the Request is still the user's to answer, though the answer reaches the agent only when the runner returns.
+- A runner the runners list does not hold counts as reachable, because a missing cache entry is not evidence.
+- failed, paused and done are never produced yet: a session does not record why it ended, so the app cannot tell done from failed. A ticket adds the end reason.
+- [./14-web-app.md](./14-web-app.md) (#162) calls an exited, resumable thread Idle, "indistinguishable from one whose process is running". The desktop draws its row exactly like an idle one (its age, no mark), so that holds for what is drawn. It names the pose asleep, the word [CONTEXT.md](../../CONTEXT.md) gives an assistant's session in the same state, so the foot's idle count means threads that are loaded and free, and the accessible name says "asleep".
+
+**The sidebar** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's Threads face and the book's session page, with these differences:
+
+- **Sections are capped, as the book's swarm state draws them.** A "more" row expands its section in place.
+  - Waiting on you shows its 3 newest threads, then "`<n>` more waiting on you".
+  - A project shows at most 5 threads, then "`<n>` more threads". The 5 are chosen in this order: waiting, then working (queued, starting, busy), then the rest; the newest activity first within each, ties broken by session id. The selected thread is always shown as well, so a project can show 6.
+  - Shown rows keep the grouped order. A workspace with no shown thread is left out, with its label.
+  - Expanding is not stored: a relaunch collapses every section. The book draws no way to collapse one, so there is none.
+- **Threads are grouped by project, then by workspace,** as spec 14 says. The book draws no workspace label, so the label is Bureau's lane label, in the UI face (item 2 above). A lane label that follows a row has 8px more space above it than one under a project header, so it does not read as the row's third line. A row's second line is the model's name, because the lane label already names the workspace.
+- **A project header has no thread count,** where spec 14 puts one: the book draws none, and the pages decide what is drawn.
+- **The threads with no project have a header, "No project",** where spec 14 gives them none. In place of the identity tile, it has the tile's outline in `--faint` with no fill. It has no `+`, because a draft always starts in a project. Without a header, a capped project's "more" row sits between two groups and reads as belonging to either.
+- **A waiting thread is listed twice:** in Waiting on you, and in its project with the waiting mark, as the book draws it. In Waiting on you, its second line is the open Request as one question: "Run git push?", "Change adyen.ts?", "Change 3 files?", "Read `<file>`?", "Run `<tool>`?", or a question's first line in the agent's words. With nothing waiting, the section is not drawn.
+- **The foot counts threads by pose:** "`<n>` working · `<n>` waiting · `<n>` idle".
+  - Asleep and away threads are not counted, so a fleet with hundreds of old threads reads "3 working · 2 waiting · 4 idle", not "470 idle".
+  - The book's "paused" count is left out, because no thread is paused yet.
+  - Every count shows at 0. The waiting count takes `--you-ink` only above 0, because the attention hue means something needs the user.
+- **Search `⌘K`, the hide-sidebar button and Settings are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered.
+- **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
 **How the system is carried over:**
 
@@ -392,9 +430,10 @@ These are starting budgets. Slice 5 measures the real thread screen, and each bu
 | Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
 | Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one |
 | Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB |
-| Idle, window visible, no thread working | Renderer: no wakeups from the app except the live connection's 30-second keepalive. GPU: at most 12 wakeups a second, the still-page level |
-| Idle, window hidden or minimized | Renderer: no wakeups from the app |
+| Idle, window visible, no thread working | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
+| Idle, window hidden or minimized | Renderer: no wakeups from the app *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): except the live connection's 30-second keepalive, because rule 3 keeps the `session` topic subscribed while hidden)* |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The tail paints at most once per frame |
+| The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
 | Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts` |
 | Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI |
 
@@ -421,7 +460,7 @@ These rules keep the budgets:
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
 4. **No polling, and no timers while idle:**
-   - Every change reaches the app through a live topic.
+   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. A ticket adds the topics.)*
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
 5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all.
 6. **The first paint is cheap:**
@@ -442,6 +481,8 @@ These rules keep the budgets:
   - **No tool is attached while it reads memory, CPU and wakeups.** It reads them from a plain launch of the app. An attached Playwright makes the renderer read 7 to 14 MB higher.
   - **The plain launch passes three switches:** `--inspect=0` and `--remote-debugging-port=0` open main's Node inspector and a DevTools port, which the script connects to only while it reads, and `--use-mock-keychain` lets the app read the token saved at sign-in without the real Keychain.
   - **The measured launch is the app's third.** On the second, Chromium writes its code cache, and the renderer reads about 7 MB higher.
+    - *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* The measured launch starts 3 seconds after the second one quits. On a machine short of memory, macOS drops the Electron framework's pages about 15 seconds after the app quits. A launch after that reads about 70 MB from disk again and is cold: 600 to 700 ms on the reference machine. Slice 4's first runs let the fixture's work outlast those 15 seconds, and so measured cold launches against the warm budget.
+    - The script prints the steps of each launch: main's Node ready, the GPU and renderer processes started, the page's start, first paint, the first screen, and the window shown. A cold launch is late from its first step.
   - **Memory is read 13 seconds after the page opens,** from outside the app. The budget limits the physical footprint, which `footprint` reports and Activity Monitor shows. The working set, the resident size `ps` reports and the number `app.getAppMetrics()` gives on macOS, is recorded beside it without a budget. It counts the Electron framework's pages, which all four processes share, once in each process, so it reads about 200 MB above the footprint however little the app holds. Slices 1 and 2 were budgeted on the working set, 420 MB summed and 180 MB for the renderer; slice 3 moved the budget to the footprint.
   - **CPU and wakeups** come from `app.getAppMetrics()`, which the script calls in main through its Node inspector, connecting only for each call. A wakeup is the kernel's count of a process's interrupt wakeups. The visible sample starts 30 seconds after the page opens, so it measures the app at rest, not the one-off timers that fire after a page loads.
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
@@ -521,6 +562,36 @@ These rules keep the budgets:
 - **No release screen draws a face, an icon or a mark yet,** so the three folders are not in the release bundle. Each size above is a library build of the folder's `index.ts` with React left out. The sidebar brings them into the first screen in slice 4.
 - **A face draws one or two elements fewer than the book's,** because the port leaves out the two groups that exist only to animate: the eyes' blink group, and the waving arm's group in the waiting pose.
 
+**Slice 4,** measured 2026-09-29 on the reference machine with the perf script, in two runs of three launches each. The window shows the signed-in shell with the sidebar, fed by a fleet of scripted runners: 40 threads, then 500. The load average was 5.8 to 9.2 while measuring.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to window shown, warm | 500 ms | 344 to 381 ms |
+| Launch: spawn to first paint | - | 258 to 310 ms |
+| Launch: spawn to the first screen, the signed-in shell | - | 332 to 370 ms |
+| Processes | 4 | 4 |
+| Memory, summed physical footprint | 220 MB | 194 to 203 MB with 40 threads, 201 to 208 MB with 500: browser 50, GPU 99 to 104, network utility 8, renderer 40 to 46 |
+| Memory, renderer's physical footprint | 100 MB | 40 to 41 MB with 40 threads, 46 MB with 500 |
+| Working set | - | 376 to 383 MB summed; renderer 115 to 123 MB |
+| Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 1 a second, which the script counts as none; GPU 0 |
+| Wakeups while hidden | renderer none | renderer 0 to 1 a second |
+| Age labels, 60 seconds visible | a timer only for an age on screen that shows minutes | 1 fire when the youngest age on screen is 2m; 0 when every age is over an hour |
+| Age labels, 60 seconds hidden | no timer | 0 fires |
+| Renderer main thread per `session` nudge, 500 threads | 16 ms | 10.7 to 11.1 ms |
+| Renderer main thread per `session` nudge, 40 threads | - | 5.7 to 6.8 ms |
+| Renderer CPU and controller CPU per nudge, 500 threads | - | 19.5 ms and 29.5 ms |
+| Thread list reads per nudge | - | 1 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB | 209.1 kB |
+| Main's startup file, minified | 160 kB | 137.6 kB |
+| Elements in the sidebar's list, one project expanded | - | 287 with 40 threads, 298 with 500 |
+| A Request opening, to its Waiting on you row on screen | - | 24 ms |
+
+- **The sidebar brings 39 to 53 MB over slice 3's footprint:** the GPU process reads 27 to 32 MB higher, and the renderer 11 to 17 MB. What in the GPU process grew is not measured yet. The summed footprint has 12 to 26 MB left under its budget for slices 5 to 8.
+- **The list draws only the rows on screen,** so 500 threads cost 11 elements more than 40.
+- **The figures per nudge err high.** Each is the time over 20 nudges divided by 20, idle time included.
+- **The fixture writes the database once.** To give its threads ages, it stops the controller, backdates `last_activity_at`, and starts it again on the same port. The threads and their states come from the fleet. The ages are at most 6 hours 31 minutes, because the lost-runner sweep ends a session on an offline runner once it is older than the 8-hour absolute timeout.
+- **A launch through macOS's launcher is slower.** The budget and the table measure a launch spawned directly. `open`, which the Dock and Finder go through, adds about 100 ms: about 430 ms warm. A relaunch more than 15 seconds after quitting is cold ([Measuring](#measuring)).
+
 ## Slices
 
 Each slice is a reviewable change. Its plan states its performance cost first ([Performance](#performance)).
@@ -573,8 +644,10 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
+  - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* `pnpm --filter @hercule/desktop capture:sidebar-states` captures the sidebar states the book never draws, in both themes, for a check by eye: workspace labels, offline, queued, asleep and away threads, long names, the caps and their "more" rows, and "No project". It writes them to `apps/desktop/out/sidebar-states/`.
 - **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
   - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from `docs/design/crew-bureau/`, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
+  - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's sidebar with the sidebar of the book's `session-active.html`, item by item, with the app fed the book's threads at the book's time.
   - Both sheets render in one Electron, hidden, at DPR 2, in sRGB, with GPU rasterization off. With GPU rasterization, a change in one cell also moved pixels in its neighbours, and the result could vary with the machine's GPU.
   - It fails first if the book's `tokens.css` or font files differ from the app's, or if any cell sits in a different place, so each pixel it reports is a drawing difference.
   - The comparison is exact: no tolerance, on every channel of every device pixel. It writes the reference, the app's capture and a diff image to `apps/desktop/out/bureau-compare/`.

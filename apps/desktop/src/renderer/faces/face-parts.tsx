@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { Pose } from "./pose";
+import type { Pose } from "@hercule/client-core";
 
 // The parts of a face that change with its pose, drawn as the Bureau book's
 // crew.js draws them: `eyes`, `brows`, `mouth`, `extras` and `badge` there.

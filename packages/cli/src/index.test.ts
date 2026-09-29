@@ -189,6 +189,30 @@ describe("hercule session input --help", () => {
   });
 });
 
+// Requesting a grant helps only when the grant is all that is missing, so a
+// command that refuses a session for another reason says so instead.
+describe("the forbidden line of a refusal no grant lifts", () => {
+  /** Returns a command's errors section with its lines joined, so a wrapped phrase reads whole. */
+  const readErrors = async (...words: ReadonlyArray<string>): Promise<string> =>
+    readBetweenSections(await runHelp(...words), "errors:", "operation ").replace(/\s+/g, " ");
+
+  it("tells a session to ask the user when only the user may call the command", async () => {
+    const errors = await readErrors("api-key", "create");
+    expect(errors).toContain("forbidden only the user may make this call");
+    expect(errors).toContain("ask the user to run the command");
+    expect(errors).not.toContain("hercule permission request credential.write");
+    expect(errors).toContain(
+      "unauthenticated no credential, or one this operation does not accept",
+    );
+  });
+
+  it("names the grant to request and the rules no grant lifts when a session may spawn", async () => {
+    const errors = await readErrors("session", "spawn");
+    expect(errors).toContain("you lack session.spawn, which a Permission Request can get you");
+    expect(errors).toContain("only the user may start a Thread");
+  });
+});
+
 describe("hercule task list --help", () => {
   it("shows the paging section and a page's items", async () => {
     const out = await runHelp("task", "list");
@@ -246,6 +270,9 @@ describe("hercule --help", () => {
     expect(text).toContain("--json");
     expect(text).toContain("exit");
     expect(text).toContain("hercule permission request");
+    expect(text.replace(/\s+/g, " ")).toContain(
+      "unless the command's help says only the user may make the call",
+    );
   });
 
   it("has no auth noun at all", async () => {

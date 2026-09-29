@@ -43,9 +43,14 @@ export default defineConfig(({ command }) => {
       // over that on purpose: it holds the launch screens, so the first screen
       // needs no second file. The real limit is the first-paint budget of
       // 250 kB gzipped, which scripts/check-bundle-budget.ts enforces. This
-      // limit sits just above the entry chunk's current size (520 kB), so the
-      // warning still fires if a chunk grows a lot.
-      chunkSizeWarningLimit: 600,
+      // limit sits just above the entry chunk's current size (664 kB, with the
+      // sidebar), so the warning still fires if a chunk grows a lot.
+      chunkSizeWarningLimit: 700,
+      // Writes `.vite/manifest.json`, which maps each chunk to the source file
+      // it came from. scripts/check-bundle-budget.ts reads it to find the
+      // chunks of the routes the first screen renders, so that splitting one
+      // of those routes cannot move bytes out of the budget.
+      manifest: true,
       outDir: fileURLToPath(new URL("./out/renderer", import.meta.url)),
       // The output folder is outside `root`, so Vite empties it only when asked.
       emptyOutDir: true,

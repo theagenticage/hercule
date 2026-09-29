@@ -156,4 +156,16 @@ describe("buildThreadRows", () => {
 
     expect(rows.map((row) => row.id)).toEqual(["newest", "middle", "older"]);
   });
+
+  it("sorts rows active at the same moment by session id, whatever order they come in", () => {
+    const at = "2026-09-08T09:00:00.000Z";
+    const sessions = ["s-c", "s-a", "s-b"].map((id) => buildSession({ id, lastActivityAt: at }));
+
+    expect(buildThreadRows(sessions, "plain").map((row) => row.id)).toEqual(["s-a", "s-b", "s-c"]);
+    expect(buildThreadRows(sessions.toReversed(), "plain").map((row) => row.id)).toEqual([
+      "s-a",
+      "s-b",
+      "s-c",
+    ]);
+  });
 });

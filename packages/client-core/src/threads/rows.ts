@@ -17,6 +17,16 @@ export interface ThreadRow {
   readonly secondLine: string | null;
 }
 
+/**
+ * Compares two rows so that sorting puts the most recently active first, and
+ * two rows active at the same moment in session id order. Ties are common:
+ * ending many sessions at once stamps one time on all of them. Every list of
+ * thread rows sorts with this, so two lists that show the same threads show
+ * them in the same order.
+ */
+export const compareNewestFirst = (a: ThreadRow, b: ThreadRow): number =>
+  Date.parse(b.activityAt) - Date.parse(a.activityAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 /** Returns the state marker for a session's row. */
 export const decideThreadMark = (session: Session): ThreadMark => {
   if (WORKING_STATUSES.has(session.status)) return "working";
@@ -42,18 +52,22 @@ const findModelName = (instances: readonly ProviderInstance[], session: Session)
   return slug;
 };
 
+/**
+ * Returns a row for each session, sorted by `compareNewestFirst`: the most
+ * recently active first, and sessions active at the same moment by id.
+ */
 export const buildThreadRows = (
   sessions: readonly Session[],
   mode: ThreadRows,
   /** The instances whose catalogs give a `meta` row its model name. A plain row shows no model. */
   instances: readonly ProviderInstance[] = [],
 ): readonly ThreadRow[] =>
-  [...sessions]
-    .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
+  sessions
     .map((session) => ({
       id: session.id,
       mark: decideThreadMark(session),
       title: session.title,
       activityAt: session.lastActivityAt,
       secondLine: mode === "meta" ? findModelName(instances, session) : null,
-    }));
+    }))
+    .sort(compareNewestFirst);

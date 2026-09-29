@@ -184,7 +184,7 @@ A profile is a set of grants. Grants are coarse: one family per operation area, 
 | `project` | `project.*` | `read`, `write` |
 | `resource` | `resource.*` | `read`, `write` |
 | `secret` | `secret.*` (references only on read) | `read`, `write` |
-| `credential` | `apiKey.*`, `user.setPassword` | `read`, `write` |
+| `credential` | `apiKey.*`, `user.read` *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))*, `user.setPassword` | `read`, `write` |
 
 The operation-to-grant mapping is an explicit table in the contract package; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 names the grant beside every operation. `permission.request` is granted to every profile and is not itself a grant; `auth.login`, `auth.wsTicket` and `setup.*` are outside the grant model.
 

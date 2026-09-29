@@ -6,28 +6,51 @@
  *     pnpm --filter @hercule/desktop perf
  *
  * It starts a controller from the compiled binary, `./hercule`, in a scratch
- * Hercule Home, and completes its setup. Then it starts the test package
- * three times on one fresh user data directory, with that controller saved:
+ * Hercule Home, completes its setup, and fills it with 40 threads through the
+ * fleet of scripted runners (see `perf-fixture.ts`). Then it starts the test
+ * package on one fresh user data directory, with that controller saved:
  *
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Through Playwright again, signed in, to warm the app up (see
- *    `warmUpApp`).
- * 3. As a plain process, signed in. From this one launch the script reads,
- *    in this order:
+ * 2. Three measured launches: with 40 threads, with 40 threads and one row
+ *    that shows minutes, and, after spawning 460 more, with 500 threads.
+ *    Before each of them the fixture restarts the controller with every idle
+ *    thread's last activity set hours back. Then the script starts the app
+ *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
+ *    then as a plain process, signed in, for the measured launch. From each
+ *    measured launch the script reads, in this order:
  *    - the memory of each of the app's processes, 13 s after the page opens;
+ *    - the age labels on screen, 28 s after the page opens;
  *    - each process's CPU and wakeups over 10 s with the window visible,
  *      from 30 s after the page opens;
- *    - the same over 10 s with the window hidden, from 3 s after hiding it;
+ *    - the same over 10 s with the window hidden, from 3 s after hiding it,
+ *      90 s after the page opens;
+ *    - how often the age clock fired in the 60 s from 30 s after the page
+ *      opened, with the window visible, and in the 60 s after hiding it;
+ *    - with the window shown again, the CPU time of 20 live nudges (see
+ *      `measureNudges`);
  *    - the launch times: how long from spawn until the window was shown,
- *      and until the page's paints that lead up to it.
+ *      and until each step that leads up to it.
+ *
+ * The age clock is the one timer that keeps the age labels on screen
+ * current, and it marks each fire with `performance.mark("age-clock-fire")`.
+ * The kernel's wakeup counter cannot see it, because Chromium wakes an idle
+ * renderer up to twice a second on its own, so the script counts the marks.
+ * With every age on screen hours old, the clock has nothing to change within
+ * the visible 60 s and should fire 0 times. With one row that shows "2m", it
+ * should fire once, when that row turns "3m". The row's next change, to
+ * "4m", falls in the hidden 60 s, where the clock is stopped, so the hidden
+ * count should be 0 in every launch. The page knows it is hidden only because
+ * no Playwright is attached to it (see `launchPlainApp`).
  *
  * Nothing stays attached to the app while memory, CPU and wakeups are read,
  * because an attached tool changes what it measures: with Playwright
  * attached, the renderer's memory read 7 MB higher on slice 1's app and 14 MB
- * higher on slice 2's. Only the launch times need a connection to the page,
- * so they are read last.
+ * higher on slice 2's. The age labels are read over the page's DevTools
+ * connection before the samples start, and the connection is closed again at
+ * once. The age clock's fires are read after the samples, and the launch
+ * times last.
  *
  * Memory is read from outside the app, by process ID. Two numbers are read
  * for each process:
@@ -65,14 +88,21 @@
  *   screen, fonts included, has reached the window. The run fails when main
  *   logs that it showed the window without that report, on its time limit
  *   or after a failure, because the time is then not the first screen's.
- * - From the page, over the Chrome DevTools Protocol, two entries that say
- *   where the time before the show went:
- *   - `first-paint`, when the page first painted, which is when Electron
- *     emits `ready-to-show`;
- *   - `first-screen`, the mark the page sets at the moment the frame that
- *     drew its first screen was presented; the page reports to main after
- *     that. The script checks that the screen is the shell, so the time is a
- *     signed-in launch's and not the connect screen's.
+ * - The steps that say where the time before the show went, in the order
+ *   they happen:
+ *   - From main, through the inspector: when its Node environment was
+ *     ready, before any of the app's own code ran, and when it started the
+ *     GPU process and the renderer process (`app.getAppMetrics()`). A launch
+ *     that is not warm is slow already here: main's Node environment was
+ *     ready after 200 ms or more, against about 90 ms warm.
+ *   - From the page, over the Chrome DevTools Protocol: when the renderer
+ *     started loading the page (`performance.timeOrigin`); `first-paint`,
+ *     when the page first painted, which is when Electron emits
+ *     `ready-to-show`; and `first-screen`, the mark the page sets at the
+ *     moment the frame that drew its first screen was presented. The page
+ *     reports to main after that. The script checks that the screen is the
+ *     shell, so the time is a signed-in launch's and not the connect
+ *     screen's.
  *
  * The plain launch also passes `--inspect=0` and `--use-mock-keychain`. The
  * mock keychain lets the app read the token saved in step 1. While its Node
@@ -82,13 +112,14 @@
  * moves the launch: over six launches each, before the refusal existed, the
  * median was 248 ms without it and 250 ms with it.
  *
- * The third launch finds the app's files in the disk cache and its compiled
- * scripts in Chromium's code cache, as the budget's warm launch assumes.
+ * The warm-up right before each measured launch puts the app's files in
+ * macOS's file cache and its compiled scripts in Chromium's code cache, as
+ * the budget's warm launch assumes (see `warmUpApp`).
  *
- * Launch time depends on how busy the machine is, so the script prints the
- * load average with the results.
+ * Launch time depends on how busy the machine is, so the script prints, for
+ * each launch, the load average over the minute before it was spawned.
  */
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,19 +130,17 @@ import { chromium } from "playwright";
 // The extensions are spelled out because Node runs this script as it is, and
 // Node resolves no import without one.
 import {
-  buildAppArgs,
+  connectInspector,
   evaluateInMain,
-  findExecutable,
   formatTable,
+  launchPlainApp,
   launchTestPackage,
-  MOCK_KEYCHAIN_SWITCH,
   quitApp,
-  runWithScratchController,
   signInOnce,
   stopApp,
   writeSettings,
 } from "./packaged-app.ts";
-import { buildAppEnv } from "./processes.ts";
+import { runWithThreadFixture, type ThreadFixture } from "./perf-fixture.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
 /** The limits of spec 17's budget table that one launch of the app can check. */
@@ -125,6 +154,10 @@ const BUDGET = {
   // on its own, 0 to 2 times a second in the baseline, so that is the most a
   // renderer doing nothing for the app can show.
   rendererWakeups: 2,
+  // One frame at 60 Hz (spec 17 §Budgets). The thread list reads every
+  // thread again on each `session` nudge; past this limit it moves to
+  // updating only the threads the nudge names.
+  rendererMainThreadPerNudgeMs: 16,
 } as const;
 
 /**
@@ -155,6 +188,30 @@ const HIDDEN_SETTLE_MS = 3_000;
 
 /** How long an idle sample lasts. */
 const SAMPLE_MS = 10_000;
+
+/**
+ * When the age labels on screen are read, in milliseconds after the page
+ * opens: just before the visible sample, so the connection that reads them
+ * is closed while the sample runs.
+ */
+const AGES_READ_AT_MS = 28_000;
+
+/**
+ * How long the age clock's fires are counted, with the window visible and
+ * then hidden. The visible count starts with the visible sample, and the
+ * window is hidden when it ends.
+ */
+const FIRE_COUNT_MS = 60_000;
+
+/** How long the window is shown again before the nudges start, so the page has redrawn. */
+const SHOW_SETTLE_MS = 3_000;
+
+/** How many live nudges are measured, and how far apart they are. */
+const NUDGE_COUNT = 20;
+const NUDGE_INTERVAL_MS = 1_000;
+
+/** How long after the last nudge the reading ends, so the last read and render are in it. */
+const NUDGE_SETTLE_MS = 2_000;
 
 /** One process of the app, as `app.getAppMetrics()` reported it at the end of a 10 s sample. */
 interface ProcessUse {
@@ -293,13 +350,28 @@ async function runInScratchUserDataDir<T>(use: (userDataDir: string) => Promise<
 }
 
 /**
- * Starts the signed-in app on `userDataDir`, waits for the shell, and quits.
+ * Starts the signed-in app on `userDataDir`, waits for the shell, quits, and
+ * returns 3 s after the app has quit. Call it right before a measured launch,
+ * so that the measured launch is warm, as the budget sets. It warms two
+ * caches:
  *
- * The measured launch must not be the app's second. On the second launch
- * Chromium writes the renderer's compiled scripts to its code cache (the
- * `Code Cache` folder grew from 24 kB to 628 kB, then stayed there), and on
- * that launch the renderer's working set read about 7 MB higher than on every
- * later one: 103 MB against 96 MB. A user's everyday launch is a later one.
+ * - Chromium's code cache. The measured launch must not be the app's second.
+ *   On the second launch Chromium writes the renderer's compiled scripts to
+ *   its code cache (the `Code Cache` folder grew from 24 kB to 628 kB, then
+ *   stayed there), and on that launch the renderer's working set read about
+ *   7 MB higher than on every later one: 103 MB against 96 MB. A user's
+ *   everyday launch is a later one.
+ * - macOS's file cache. On the reference machine, with most of its memory in
+ *   use, macOS dropped the app's files from memory 14 to 17 s after the app
+ *   quit. A launch after that reads about 70 MB of the Electron framework
+ *   back from disk: main took about 4,500 page faults that read from disk,
+ *   against about 200 warm, and the window showed 606 to 698 ms after spawn,
+ *   against 313 to 350 ms warm, in 12 launches. That is a cold launch. The
+ *   fixture's work before a launch can take longer than 14 s, so the warm-up
+ *   comes after it.
+ *
+ * The 3 s let the quit app's other processes exit, so that the measured
+ * launch does not overlap them, and stay well short of the 14 s.
  */
 async function warmUpApp(userDataDir: string): Promise<void> {
   const app = await launchTestPackage(userDataDir);
@@ -308,16 +380,37 @@ async function warmUpApp(userDataDir: string): Promise<void> {
   } finally {
     await quitApp(app);
   }
+  await sleep(3_000);
 }
 
-/** How long a launch took, in milliseconds from spawn. */
+/** How long a launch took, in milliseconds from spawn, step by step. */
 interface LaunchTimes {
-  /** Until main showed the window. */
-  readonly windowShownMs: number;
+  /** Until main's Node environment was ready, before any of the app's own code ran. */
+  readonly nodeReadyMs: number;
+  /** Until main started the GPU process. */
+  readonly gpuProcessMs: number;
+  /** Until main started the renderer process. */
+  readonly rendererProcessMs: number;
+  /** Until the renderer started loading the page. */
+  readonly pageStartMs: number;
   /** Until the page first painted. */
   readonly firstPaintMs: number;
   /** Until the frame that drew the page's first screen, fonts included, was presented. */
   readonly firstScreenMs: number;
+  /** Until main showed the window. */
+  readonly windowShownMs: number;
+}
+
+/** What 20 live nudges cost, summed over all of them. */
+interface NudgeCost {
+  /** The controller process's CPU time, in milliseconds. */
+  readonly controllerCpuMs: number;
+  /** The renderer process's CPU time, all of its threads, in milliseconds. */
+  readonly rendererCpuMs: number;
+  /** The time the renderer's main thread spent running tasks, in milliseconds. */
+  readonly rendererMainThreadMs: number;
+  /** How many times the page read the thread list. */
+  readonly threadListReads: number;
 }
 
 /** What one plain launch of the app measured. */
@@ -325,102 +418,105 @@ interface PlainLaunch {
   readonly launch: LaunchTimes;
   /** Each process's memory, 13 s after the page opened. */
   readonly memory: ProcessMemory[];
+  /** The age labels on screen 28 s after the page opened, such as "2m" and "3h", top to bottom. */
+  readonly agesOnScreen: string[];
   /** Each process's use over 10 s with the window visible, from 30 s after the page opened. */
   readonly visible: ProcessUse[];
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: ProcessUse[];
+  /** How often the age clock fired in the 60 s from 30 s after the page opened. */
+  readonly firesVisible: number;
+  /** How often the age clock fired in the 60 s after the window was hidden. */
+  readonly firesHidden: number;
+  readonly nudges: NudgeCost;
 }
 
 /**
  * Starts the test package signed in, as a plain process, and measures it:
  *
  * - the memory of each of its processes (see `readProcessMemory`);
+ * - the age labels on screen;
  * - each process's CPU and wakeups with the window visible, then hidden
- *   (see `sampleIdleUse`);
- * - last, how long it took to show its window and to paint its first
- *   screen, the measures that need a connection to main and to the page.
+ *   (see `sampleIdleUse`), and the age clock's fires in each state;
+ * - with the window shown again, what 20 live nudges cost (see
+ *   `measureNudges`);
+ * - last, how long it took to show its window, step by step (see
+ *   `LaunchTimes`), the measures that need a connection to main and to the
+ *   page.
  *
  * Fails when the app does not open its page within 10 s, when the window is
  * not visible while it is sampled, when main showed the window without its
  * first screen, when the first screen is not the shell, or when the app does
  * not quit cleanly afterwards.
  */
-async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
+async function measurePlainLaunch(
+  userDataDir: string,
+  fixture: ThreadFixture,
+): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
-  const child = spawn(
-    findExecutable("test"),
-    [
-      ...buildAppArgs(userDataDir),
-      MOCK_KEYCHAIN_SWITCH,
-      "--inspect=0",
-      "--remote-debugging-port=0",
-    ],
-    { env: buildAppEnv(), stdio: ["ignore", "pipe", "pipe"] },
-  );
-  // Main logs to both streams. Both are kept whole, to be checked for the
-  // error main logs when it shows the window without its first screen, and
-  // reading them to the end keeps a full pipe from blocking the app.
-  let mainOutput = "";
-  const appendMainOutput = (chunk: string) => (mainOutput += chunk);
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", appendMainOutput);
-  child.stderr.on("data", appendMainOutput);
+  const app = await launchPlainApp(userDataDir);
+  const { inspectorUrl, endpoint } = app;
   let measured: PlainLaunch;
   try {
-    // The app prints both addresses on stderr: main's Node inspector as
-    // `Debugger listening on ws://127.0.0.1:<port>/<id>`, and Chromium's
-    // DevTools endpoint as
-    // `DevTools listening on ws://127.0.0.1:<port>/devtools/browser/<id>`.
-    const { inspectorUrl, endpoint } = await new Promise<{
-      inspectorUrl: string;
-      endpoint: string;
-    }>((resolve, reject) => {
-      let output: string | null = "";
-      child.stderr.on("data", (chunk: string) => {
-        if (output === null) return;
-        output += chunk;
-        const inspector = /Debugger listening on (ws:\/\/\S+)/.exec(output);
-        const devTools = /DevTools listening on (ws:\/\/\S+)/.exec(output);
-        if (inspector === null || devTools === null) return;
-        output = null;
-        resolve({ inspectorUrl: inspector[1]!, endpoint: devTools[1]! });
-      });
-      child.once("exit", () =>
-        reject(new Error("the app exited before it opened its inspector and DevTools endpoint")),
-      );
-    });
     const { port } = new URL(endpoint);
     await waitForPageTarget(port);
     const pageOpenedAt = Date.now();
+    const sleepUntil = (msAfterOpen: number) =>
+      sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
 
-    await sleep(MEMORY_READ_AT_MS);
-    const memory = await readProcessMemory(child.pid!);
+    await sleepUntil(MEMORY_READ_AT_MS);
+    const memory = await readProcessMemory(app.process.pid!);
+    const rendererPid = memory.find((sample) => sample.label === "Tab")?.pid;
+    if (rendererPid === undefined) throw new Error("the app has no renderer process");
 
-    await sleep(Math.max(0, pageOpenedAt + VISIBLE_SAMPLE_AT_MS - Date.now()));
+    await sleepUntil(AGES_READ_AT_MS);
+    const agesOnScreen = (await evaluateInPage(port, READ_AGES_ON_SCREEN)) as string[];
+
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS);
+    const visibleCountFrom = Date.now();
     const visible = await sampleIdleUse(inspectorUrl);
     const shown = await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.isVisible()`,
     );
     if (shown !== true) throw new Error("the window was not visible while sampled");
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS + FIRE_COUNT_MS);
     await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.hide()`,
     );
+    const hiddenCountFrom = Date.now();
     await sleep(HIDDEN_SETTLE_MS);
     const hidden = await sampleIdleUse(inspectorUrl);
+    await sleep(Math.max(0, hiddenCountFrom + FIRE_COUNT_MS - Date.now()));
 
-    const windowShownAt = await evaluateInMain(
+    // `showInactive` leaves the focus where it is, so the run does not take
+    // the keyboard from whoever is using the machine.
+    await evaluateInMain(
       inspectorUrl,
-      `performance.timeOrigin + performance.getEntriesByName("window-shown")[0]?.startTime`,
+      `require("electron").BrowserWindow.getAllWindows()[0]?.showInactive()`,
     );
-    if (typeof windowShownAt !== "number" || Number.isNaN(windowShownAt)) {
+    await sleep(SHOW_SETTLE_MS);
+    const fires = (await evaluateInPage(
+      port,
+      `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
+    )) as number[];
+    const countFires = (from: number) =>
+      fires.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
+    const nudges = await measureNudges(port, fixture, rendererPid);
+
+    const mainSteps = (await evaluateInMain(inspectorUrl, READ_MAIN_LAUNCH_STEPS)) as {
+      nodeReady: number;
+      gpuProcess: number;
+      rendererProcess: number;
+      windowShown: number | null;
+    };
+    if (mainSteps.windowShown === null) {
       throw new Error("main has no window-shown mark, so it never showed the window");
     }
-    if (mainOutput.includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
+    if (app.readMainOutput().includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
       throw new Error(
-        `main showed the window without its first screen, so the launch time is not the first screen's. Main's output:\n${mainOutput}`,
+        `main showed the window without its first screen, so the launch time is not the first screen's. Main's output:\n${app.readMainOutput()}`,
       );
     }
 
@@ -440,7 +536,11 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
       const painted = await page.evaluate(() => {
         const readEntry = (name: string): number =>
           performance.timeOrigin + performance.getEntriesByName(name)[0]!.startTime;
-        return { firstPaint: readEntry("first-paint"), firstScreen: readEntry("first-screen") };
+        return {
+          pageStart: performance.timeOrigin,
+          firstPaint: readEntry("first-paint"),
+          firstScreen: readEntry("first-screen"),
+        };
       });
       // Only the shell has a <main>; the connect and sign-in screens do not.
       if ((await page.getByRole("main").count()) === 0) {
@@ -448,24 +548,36 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
       }
       measured = {
         launch: {
-          windowShownMs: windowShownAt - spawnedAt,
+          nodeReadyMs: mainSteps.nodeReady - spawnedAt,
+          gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
+          rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
+          pageStartMs: painted.pageStart - spawnedAt,
           firstPaintMs: painted.firstPaint - spawnedAt,
           firstScreenMs: painted.firstScreen - spawnedAt,
+          windowShownMs: mainSteps.windowShown - spawnedAt,
         },
         memory,
+        agesOnScreen,
         visible,
         hidden,
+        firesVisible: countFires(visibleCountFrom),
+        firesHidden: countFires(hiddenCountFrom),
+        nudges,
       };
     } finally {
       await browser.close();
     }
   } finally {
-    await stopApp(child.pid!);
+    // The PID of a process that has already exited may belong to another
+    // process by now, so only a running app is stopped.
+    if (app.process.exitCode === null && app.process.signalCode === null) {
+      await stopApp(app.process.pid!);
+    }
   }
   // The process has ended, so its exit code is known. Anything but 0, such as
   // a crash while quitting, fails the run: nothing else would notice it.
-  if (child.exitCode !== 0) {
-    const ending = child.signalCode ?? `code ${String(child.exitCode)}`;
+  if (app.process.exitCode !== 0) {
+    const ending = app.process.signalCode ?? `code ${String(app.process.exitCode)}`;
     throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
   }
   return measured;
@@ -487,138 +599,413 @@ async function waitForPageTarget(port: string): Promise<void> {
   throw new Error("the app did not open app://hercule/ within 10 s");
 }
 
+/**
+ * Returns the WebSocket URL of the app's page on the DevTools endpoint on
+ * `port`. Fails when the endpoint lists no page of the app.
+ */
+async function findPageSocketUrl(port: string): Promise<string> {
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+  const targets = (await response.json()) as {
+    type: string;
+    url: string;
+    webSocketDebuggerUrl: string;
+  }[];
+  const page = targets.find(
+    (target) => target.type === "page" && target.url.startsWith("app://hercule/"),
+  );
+  if (page === undefined) throw new Error("the app's page is not among the DevTools targets");
+  return page.webSocketDebuggerUrl;
+}
+
+/**
+ * Evaluates `expression` in the app's page, over the DevTools endpoint on
+ * `port`, and returns the value it evaluates to. The connection lasts only for
+ * the call. Fails when the expression throws.
+ */
+async function evaluateInPage(port: string, expression: string): Promise<unknown> {
+  // The page speaks the same protocol as main's inspector, so the same
+  // connection serves both.
+  const page = await connectInspector(await findPageSocketUrl(port));
+  try {
+    return await page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  } finally {
+    page.close();
+  }
+}
+
+/**
+ * An expression that evaluates, in the page, to the text of every age label
+ * inside the visible part of the thread list, top to bottom. A mounted row
+ * outside that part, in the list's overscan, is left out, because the age
+ * clock does not keep its label current.
+ */
+const READ_AGES_ON_SCREEN = `(() => {
+  const list = document.querySelector(".side-scroll").getBoundingClientRect();
+  return [...document.querySelectorAll(".side-scroll .side-age")]
+    .filter((label) => {
+      const box = label.getBoundingClientRect();
+      return box.bottom > list.top && box.top < list.bottom;
+    })
+    .map((label) => label.textContent);
+})()`;
+
+/**
+ * An expression that evaluates, in main, to the launch steps main knows, in
+ * milliseconds since the epoch: when its Node environment was ready, when it
+ * started the GPU process and the renderer process, and when it showed the
+ * window. The window's time is null when main never showed it.
+ */
+const READ_MAIN_LAUNCH_STEPS = `(() => {
+  const metrics = require("electron").app.getAppMetrics();
+  const findCreationTime = (type) => metrics.find((metric) => metric.type === type).creationTime;
+  const shown = performance.getEntriesByName("window-shown")[0];
+  return {
+    nodeReady: performance.timeOrigin + performance.nodeTiming.environment,
+    gpuProcess: findCreationTime("GPU"),
+    rendererProcess: findCreationTime("Tab"),
+    windowShown: shown === undefined ? null : performance.timeOrigin + shown.startTime,
+  };
+})()`;
+
+/** Minutes per unit of an age label, by the label's last letter. */
+const AGE_UNIT_MINUTES: Readonly<Record<string, number>> = {
+  m: 1,
+  h: 60,
+  d: 60 * 24,
+  w: 60 * 24 * 7,
+};
+
+/** Returns the youngest of the age labels `ages`, such as "2m", or "none" when there are none. */
+function findYoungestAge(ages: readonly string[]): string {
+  const minutes = (age: string) =>
+    age === "now" ? 0 : Number.parseInt(age, 10) * AGE_UNIT_MINUTES[age.at(-1)!]!;
+  return ages.toSorted((a, b) => minutes(a) - minutes(b))[0] ?? "none";
+}
+
+/**
+ * Returns the CPU time the process `pid` has used so far, in milliseconds.
+ * `ps` reports it to the hundredth of a second, as `[hours:]minutes:seconds`.
+ */
+async function readCpuMs(pid: number): Promise<number> {
+  const { stdout } = await runFile("ps", ["-o", "time=", "-p", String(pid)]);
+  return (
+    stdout
+      .trim()
+      .split(":")
+      .reduce((seconds, part) => seconds * 60 + Number(part), 0) * 1_000
+  );
+}
+
+/**
+ * Nudges the app 20 times, 1 s apart, and returns what the nudges cost. A
+ * nudge is one thread moving from busy to idle, or back, so the controller
+ * pushes one change and the page reads the thread list again.
+ *
+ * The cost is read over the whole 22 s, from the first nudge to 2 s after the
+ * last: the controller's and the renderer's CPU time with `ps`, and the time
+ * the renderer's main thread spent in tasks from the page's DevTools
+ * performance metrics. Each also holds whatever the process did while idle
+ * in that time, so the numbers err high. The thread list's reads are counted
+ * from the page's resource timing entries.
+ */
+async function measureNudges(
+  port: string,
+  fixture: ThreadFixture,
+  rendererPid: number,
+): Promise<NudgeCost> {
+  const controllerPid = await fixture.readControllerPid();
+  const page = await connectInspector(await findPageSocketUrl(port));
+  try {
+    await page.send("Performance.enable");
+    const readMainThreadMs = async () => {
+      const { metrics } = (await page.send("Performance.getMetrics")) as {
+        metrics: { name: string; value: number }[];
+      };
+      const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
+      if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
+      return seconds * 1_000;
+    };
+    const readPageNow = async () =>
+      (await page.evaluate("Runtime.evaluate", {
+        expression: "performance.now()",
+        returnByValue: true,
+      })) as number;
+
+    const readsFrom = await readPageNow();
+    const before = {
+      controller: await readCpuMs(controllerPid),
+      renderer: await readCpuMs(rendererPid),
+      mainThread: await readMainThreadMs(),
+    };
+    for (let nudge = 0; nudge < NUDGE_COUNT; nudge += 1) {
+      fixture.nudge();
+      await sleep(NUDGE_INTERVAL_MS);
+    }
+    await sleep(NUDGE_SETTLE_MS);
+    const after = {
+      controller: await readCpuMs(controllerPid),
+      renderer: await readCpuMs(rendererPid),
+      mainThread: await readMainThreadMs(),
+    };
+    const threadListReads = (await page.evaluate("Runtime.evaluate", {
+      expression: `performance.getEntriesByType("resource").filter((entry) => {
+        const url = new URL(entry.name);
+        return entry.startTime >= ${String(readsFrom)} &&
+          url.pathname === "/api/v1/sessions" && url.searchParams.get("thread") === "true";
+      }).length`,
+      returnByValue: true,
+    })) as number;
+    return {
+      controllerCpuMs: after.controller - before.controller,
+      rendererCpuMs: after.renderer - before.renderer,
+      rendererMainThreadMs: after.mainThread - before.mainThread,
+      threadListReads,
+    };
+  } finally {
+    page.close();
+  }
+}
+
 /** Formats a process's CPU and wakeups as table cells, or dashes when it was not running. */
 function formatUse(sample: ProcessUse | undefined): string[] {
   if (sample === undefined) return ["-", "-"];
   return [sample.cpuPercent.toFixed(1), sample.wakeupsPerSecond.toFixed(1)];
 }
 
-const { launch, memory, visible, hidden } = await runWithScratchController((controllerUrl) =>
-  runInScratchUserDataDir(async (userDataDir) => {
-    writeSettings(userDataDir, { controllerUrl });
-    await signInOnce(userDataDir);
-    await warmUpApp(userDataDir);
-    return measurePlainLaunch(userDataDir);
-  }),
-);
-
-const memoryRows = memory.map((sample) => [
-  sample.label,
-  String(sample.pid),
-  sample.workingSetMb.toFixed(1),
-  sample.footprintMb.toFixed(1),
-]);
-const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
-const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
-memoryRows.push(["Sum", "", summedMb.toFixed(1), summedFootprintMb.toFixed(1)]);
-const renderer = memory.find((sample) => sample.label === "Tab");
-const rendererMb = renderer?.workingSetMb ?? 0;
-const rendererFootprintMb = renderer?.footprintMb ?? 0;
-
-// A process that started or exited between the two samples is in one of
-// them only, so the table lists every process either sample saw.
-const seen = [...new Map([...visible, ...hidden].map((sample) => [sample.pid, sample.label]))];
-const useRows = seen.map(([pid, label]) => [
-  label,
-  String(pid),
-  ...formatUse(visible.find((sample) => sample.pid === pid)),
-  ...formatUse(hidden.find((sample) => sample.pid === pid)),
-]);
+/** One measured launch: the threads it ran against, and what it measured. */
+interface MeasuredLaunch extends PlainLaunch {
+  /** The launch's name in the tables, such as "40 threads, run 2". */
+  readonly name: string;
+  readonly threadCount: number;
+  /** Whether one row on screen showed minutes, so the age clock should fire once while visible. */
+  readonly twoMinuteRow: boolean;
+  /** The machine's load average over the minute before the app was spawned. */
+  readonly loadAtSpawn: number;
+}
 
 /** Finds the process of one type in a sample of CPU and wakeups, such as `Tab` for the renderer. */
 const findProcessUse = (samples: readonly ProcessUse[], type: string) =>
   samples.find((sample) => sample.type === type);
-const gpuWakeups = findProcessUse(visible, "GPU")?.wakeupsPerSecond ?? 0;
-const rendererWakeupsVisible = findProcessUse(visible, "Tab")?.wakeupsPerSecond ?? 0;
-const rendererWakeupsHidden = findProcessUse(hidden, "Tab")?.wakeupsPerSecond ?? 0;
-const rendererLimit = `no wakeups from the app (at most ${BUDGET.rendererWakeups}/s)`;
 
-// Budget, limit, measured, and whether the measurement is within the limit,
-// or null for a measure that is recorded but has no budget.
-const budgets: [string, string, string, boolean | null][] = [
-  [
-    "Launch, spawn to window shown",
-    `shown within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
-    `${launch.windowShownMs.toFixed(0)} ms`,
-    launch.windowShownMs <= BUDGET.launchMs,
-  ],
-  ["Launch, first paint", "recorded; not budgeted", `${launch.firstPaintMs.toFixed(0)} ms`, null],
-  [
-    "Launch, first screen",
-    "recorded; no budget until slice 5",
-    `${launch.firstScreenMs.toFixed(0)} ms (the shell)`,
-    null,
-  ],
-  [
-    "Processes",
-    `${BUDGET.processes}: browser, GPU, network utility, renderer`,
-    `${memory.length}: ${memory.map((sample) => sample.label).join(", ")}`,
-    memory.length <= BUDGET.processes,
-  ],
-  [
-    "Footprint, summed",
-    `at most ${BUDGET.summedFootprintMb} MB`,
-    `${summedFootprintMb.toFixed(0)} MB`,
-    summedFootprintMb <= BUDGET.summedFootprintMb,
-  ],
-  [
-    "Footprint, renderer",
-    `at most ${BUDGET.rendererFootprintMb} MB`,
-    `${rendererFootprintMb.toFixed(0)} MB`,
-    rendererFootprintMb <= BUDGET.rendererFootprintMb,
-  ],
-  ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
-  ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
-  [
-    "Idle visible, GPU",
-    `at most ${BUDGET.gpuWakeupsVisible} wakeups/s`,
-    `${gpuWakeups.toFixed(1)}/s`,
-    gpuWakeups <= BUDGET.gpuWakeupsVisible,
-  ],
-  [
-    "Idle visible, renderer",
-    rendererLimit,
-    `${rendererWakeupsVisible.toFixed(1)}/s`,
-    rendererWakeupsVisible <= BUDGET.rendererWakeups,
-  ],
-  [
-    "Idle hidden, renderer",
-    rendererLimit,
-    `${rendererWakeupsHidden.toFixed(1)}/s`,
-    rendererWakeupsHidden <= BUDGET.rendererWakeups,
-  ],
-];
+/** Formats a cost of all the nudges as the cost of one, with the total after it. */
+const formatPerNudge = (totalMs: number) =>
+  `${(totalMs / NUDGE_COUNT).toFixed(1)} ms a nudge (${totalMs.toFixed(0)} ms for ${String(NUDGE_COUNT)})`;
 
-console.log("Memory, 13 s after the page opened:");
-console.log(formatTable(["Process", "PID", "Working set MB", "Footprint MB"], memoryRows));
-console.log();
-console.log(
-  "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
-);
-const useHeader = ["CPU %", "Wakeups/s"];
-console.log(
-  formatTable(
+/**
+ * Prints one launch's memory, CPU and wakeups, and its readings against their
+ * budgets. Returns whether every budgeted reading is within its limit.
+ */
+function reportLaunch(measured: MeasuredLaunch): boolean {
+  const { launch, memory, visible, hidden, nudges } = measured;
+  const memoryRows = memory.map((sample) => [
+    sample.label,
+    String(sample.pid),
+    sample.workingSetMb.toFixed(1),
+    sample.footprintMb.toFixed(1),
+  ]);
+  const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
+  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
+  memoryRows.push(["Sum", "", summedMb.toFixed(1), summedFootprintMb.toFixed(1)]);
+  const renderer = memory.find((sample) => sample.label === "Tab");
+  const rendererMb = renderer?.workingSetMb ?? 0;
+  const rendererFootprintMb = renderer?.footprintMb ?? 0;
+
+  // A process that started or exited between the two samples is in one of
+  // them only, so the table lists every process either sample saw.
+  const seen = [...new Map([...visible, ...hidden].map((sample) => [sample.pid, sample.label]))];
+  const useRows = seen.map(([pid, label]) => [
+    label,
+    String(pid),
+    ...formatUse(visible.find((sample) => sample.pid === pid)),
+    ...formatUse(hidden.find((sample) => sample.pid === pid)),
+  ]);
+
+  const gpuWakeups = findProcessUse(visible, "GPU")?.wakeupsPerSecond ?? 0;
+  const rendererWakeupsVisible = findProcessUse(visible, "Tab")?.wakeupsPerSecond ?? 0;
+  const rendererWakeupsHidden = findProcessUse(hidden, "Tab")?.wakeupsPerSecond ?? 0;
+  const rendererLimit = `no wakeups from the app (at most ${BUDGET.rendererWakeups}/s)`;
+  const expectedFiresVisible = measured.twoMinuteRow ? 1 : 0;
+  // Spec 17 sets the nudge limit for 500 threads; at 40 the cost is recorded
+  // only.
+  const checksNudgeLimit = measured.threadCount === 500;
+
+  // Budget, limit, measured, and whether the measurement is within the limit,
+  // or null for a measure that is recorded but has no budget.
+  const budgets: [string, string, string, boolean | null][] = [
     [
-      "Process",
-      "PID",
-      ...useHeader.map((cell) => `${cell}, visible`),
-      ...useHeader.map((cell) => `${cell}, hidden`),
+      "Launch, spawn to window shown",
+      `shown within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
+      `${launch.windowShownMs.toFixed(0)} ms`,
+      launch.windowShownMs <= BUDGET.launchMs,
     ],
-    useRows,
-  ),
+    [
+      "Processes",
+      `${BUDGET.processes}: browser, GPU, network utility, renderer`,
+      `${memory.length}: ${memory.map((sample) => sample.label).join(", ")}`,
+      memory.length <= BUDGET.processes,
+    ],
+    [
+      "Footprint, summed",
+      `at most ${BUDGET.summedFootprintMb} MB`,
+      `${summedFootprintMb.toFixed(0)} MB`,
+      summedFootprintMb <= BUDGET.summedFootprintMb,
+    ],
+    [
+      "Footprint, renderer",
+      `at most ${BUDGET.rendererFootprintMb} MB`,
+      `${rendererFootprintMb.toFixed(0)} MB`,
+      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+    ],
+    ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
+    ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
+    [
+      "Idle visible, GPU",
+      `at most ${BUDGET.gpuWakeupsVisible} wakeups/s`,
+      `${gpuWakeups.toFixed(1)}/s`,
+      gpuWakeups <= BUDGET.gpuWakeupsVisible,
+    ],
+    [
+      "Idle visible, renderer",
+      rendererLimit,
+      `${rendererWakeupsVisible.toFixed(1)}/s`,
+      rendererWakeupsVisible <= BUDGET.rendererWakeups,
+    ],
+    [
+      "Idle visible, age clock over 60 s",
+      measured.twoMinuteRow
+        ? "1 fire: one row on screen shows minutes"
+        : "0 fires: every age on screen is over an hour",
+      `${String(measured.firesVisible)} (${String(measured.agesOnScreen.length)} ages on screen, the youngest ${findYoungestAge(measured.agesOnScreen)})`,
+      measured.firesVisible === expectedFiresVisible,
+    ],
+    [
+      "Idle hidden, renderer",
+      rendererLimit,
+      `${rendererWakeupsHidden.toFixed(1)}/s`,
+      rendererWakeupsHidden <= BUDGET.rendererWakeups,
+    ],
+    [
+      "Idle hidden, age clock over 60 s",
+      "0 fires: the clock is stopped while hidden",
+      String(measured.firesHidden),
+      measured.firesHidden === 0,
+    ],
+    [
+      "Nudges, renderer main thread",
+      checksNudgeLimit
+        ? `at most ${BUDGET.rendererMainThreadPerNudgeMs} ms a nudge, one frame at 60 Hz`
+        : "recorded; the limit is for 500 threads",
+      formatPerNudge(nudges.rendererMainThreadMs),
+      checksNudgeLimit
+        ? nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs
+        : null,
+    ],
+    ["Nudges, renderer CPU", "recorded; not budgeted", formatPerNudge(nudges.rendererCpuMs), null],
+    [
+      "Nudges, controller CPU",
+      "recorded; not budgeted",
+      formatPerNudge(nudges.controllerCpuMs),
+      null,
+    ],
+    [
+      "Nudges, thread list reads",
+      "recorded; not budgeted",
+      `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
+      null,
+    ],
+  ];
+
+  console.log(`## ${measured.name}`);
+  console.log();
+  console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
+  console.log();
+  console.log(
+    "Launch steps, in ms from spawn (first screen: the shell; not budgeted until slice 5):",
+  );
+  console.log(
+    formatTable(
+      [
+        "Main's Node ready",
+        "GPU process",
+        "Renderer process",
+        "Page start",
+        "First paint",
+        "First screen",
+        "Window shown",
+      ],
+      [
+        [
+          launch.nodeReadyMs,
+          launch.gpuProcessMs,
+          launch.rendererProcessMs,
+          launch.pageStartMs,
+          launch.firstPaintMs,
+          launch.firstScreenMs,
+          launch.windowShownMs,
+        ].map((ms) => ms.toFixed(0)),
+      ],
+    ),
+  );
+  console.log();
+  console.log("Memory, 13 s after the page opened:");
+  console.log(formatTable(["Process", "PID", "Working set MB", "Footprint MB"], memoryRows));
+  console.log();
+  console.log(
+    "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
+  );
+  const useHeader = ["CPU %", "Wakeups/s"];
+  console.log(
+    formatTable(
+      [
+        "Process",
+        "PID",
+        ...useHeader.map((cell) => `${cell}, visible`),
+        ...useHeader.map((cell) => `${cell}, hidden`),
+      ],
+      useRows,
+    ),
+  );
+  console.log();
+  console.log(
+    formatTable(
+      ["Budget", "Limit", "Measured", "Within"],
+      budgets.map(([budget, limit, measuredText, within]) => [
+        budget,
+        limit,
+        measuredText,
+        within === null ? "-" : within ? "yes" : "NO",
+      ]),
+    ),
+  );
+  console.log();
+  return budgets.every(([, , , within]) => within !== false);
+}
+
+const launches = await runWithThreadFixture((fixture) =>
+  runInScratchUserDataDir(async (userDataDir) => {
+    await fixture.growTo(40);
+    writeSettings(userDataDir, { controllerUrl: fixture.url });
+    await signInOnce(userDataDir);
+    const measured: MeasuredLaunch[] = [];
+    const measure = async (threadCount: number, twoMinuteRow: boolean) => {
+      await fixture.prepareLaunch({ twoMinuteRow });
+      await warmUpApp(userDataDir);
+      measured.push({
+        name: `${String(threadCount)} threads, run ${twoMinuteRow ? "2" : "1"}`,
+        threadCount,
+        twoMinuteRow,
+        loadAtSpawn: loadavg()[0]!,
+        ...(await measurePlainLaunch(userDataDir, fixture)),
+      });
+    };
+    await measure(40, false);
+    await measure(40, true);
+    await fixture.growTo(500);
+    await measure(500, false);
+    return measured;
+  }),
 );
-console.log();
-console.log(
-  formatTable(
-    ["Budget", "Limit", "Measured", "Within"],
-    budgets.map(([budget, limit, measured, within]) => [
-      budget,
-      limit,
-      measured,
-      within === null ? "-" : within ? "yes" : "NO",
-    ]),
-  ),
-);
-console.log();
-console.log(`Load average over the last minute: ${loadavg()[0]!.toFixed(2)}`);
-if (budgets.some(([, , , within]) => within === false)) process.exitCode = 1;
+
+let withinBudget = true;
+for (const launch of launches) withinBudget = reportLaunch(launch) && withinBudget;
+if (!withinBudget) process.exitCode = 1;

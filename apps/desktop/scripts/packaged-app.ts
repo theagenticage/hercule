@@ -7,15 +7,19 @@
  *
  * It also holds what the perf script and the first-frame check share beyond
  * that: the connection to main's Node inspector, stopping the app by its
- * process ID, and the Markdown table each prints.
+ * process ID, and the Markdown table each prints. The perf script and one
+ * end-to-end test also start the app as a plain process, with no Playwright
+ * attached (see `launchPlainApp`).
  *
  * The scripts run on plain Node and import this module by its `.ts` path, so
  * the module uses only TypeScript that Node can strip, and imports its
  * neighbours by their full file names too.
  */
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { _electron, type ElectronApplication, type Page } from "playwright";
 import {
@@ -176,6 +180,96 @@ export function launchTestPackage(userDataDir: string): Promise<ElectronApplicat
     // that media query.
     colorScheme: null,
   });
+}
+
+/** The test package, started as a plain process by `launchPlainApp`. */
+export interface PlainApp {
+  readonly process: ChildProcessByStdio<null, Readable, Readable>;
+  /** Main's Node inspector, as `ws://127.0.0.1:<port>/<id>`. */
+  readonly inspectorUrl: string;
+  /** Chromium's DevTools endpoint, as `ws://127.0.0.1:<port>/devtools/browser/<id>`. */
+  readonly endpoint: string;
+  /** Returns everything main has written to its standard output and error so far. */
+  readonly readMainOutput: () => string;
+}
+
+/**
+ * Starts the test package on `userDataDir` as a plain process, on the mock
+ * keychain, with main's Node inspector and Chromium's DevTools endpoint open.
+ * Returns once the app has printed both addresses. Fails when the app cannot
+ * start or exits before that. Fails and stops the app when it has not printed
+ * them within 30 s.
+ *
+ * Nothing attaches to the app until the caller does. Playwright is not used,
+ * for two reasons:
+ *
+ * - it slows the launch down: it holds each new renderer paused until it has
+ *   attached to it;
+ * - it turns on the DevTools protocol's focus emulation for every page, and a
+ *   page under focus emulation reports `document.visibilityState` as
+ *   "visible" even while its window is hidden, so it never runs as a hidden
+ *   page does.
+ *
+ * The app prints both addresses on stderr: the inspector as `Debugger
+ * listening on ws://...`, and the DevTools endpoint as `DevTools listening
+ * on ws://...`. Main's output is kept whole, and reading both streams to the
+ * end keeps a full pipe from blocking the app.
+ */
+export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
+  const child = spawn(
+    findExecutable("test"),
+    [
+      ...buildAppArgs(userDataDir),
+      MOCK_KEYCHAIN_SWITCH,
+      "--inspect=0",
+      "--remote-debugging-port=0",
+    ],
+    { env: buildAppEnv(), stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let mainOutput = "";
+  const appendMainOutput = (chunk: string) => (mainOutput += chunk);
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", appendMainOutput);
+  child.stderr.on("data", appendMainOutput);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const addresses = await new Promise<{ inspectorUrl: string; endpoint: string }>(
+      (resolve, reject) => {
+        const findAddresses = () => {
+          const inspector = /Debugger listening on (ws:\/\/\S+)/.exec(mainOutput);
+          const devTools = /DevTools listening on (ws:\/\/\S+)/.exec(mainOutput);
+          if (inspector === null || devTools === null) return;
+          child.stderr.off("data", findAddresses);
+          resolve({ inspectorUrl: inspector[1]!, endpoint: devTools[1]! });
+        };
+        child.stderr.on("data", findAddresses);
+        child.once("error", reject);
+        child.once("exit", () =>
+          reject(new Error("the app exited before it opened its inspector and DevTools endpoint")),
+        );
+        // An app whose main thread is blocked, such as by a macOS alert, never
+        // prints the addresses, and the caller would wait forever.
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error("the app did not open its inspector and DevTools endpoint within 30 s"),
+            ),
+          30_000,
+        );
+      },
+    );
+    return { process: child, ...addresses, readMainOutput: () => mainOutput };
+  } catch (error) {
+    // A process that failed to start has no PID, and the PID of one that has
+    // exited may belong to another process by now.
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      await stopApp(child.pid);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

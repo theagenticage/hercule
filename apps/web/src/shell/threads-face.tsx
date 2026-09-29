@@ -279,7 +279,7 @@ function WorkspaceLane({
 }): JSX.Element {
   return (
     <div className="group/lane">
-      {projectId === null || lane.label === null ? null : (
+      {lane.label === null ? null : (
         <div className="flex items-center gap-1.5 pt-1.5 pr-1 pb-px pl-2">
           {/* In a narrow sidebar the repo part is truncated and ` · <machine>`
               stays whole, because the machine is what tells two main
@@ -302,7 +302,7 @@ function WorkspaceLane({
               <span className="shrink-0 whitespace-pre">{lane.label.keep}</span>
             </span>
           )}
-          {lane.workspaceId === null ? null : (
+          {lane.workspaceId === null || projectId === null ? null : (
             <Plus
               name={`New thread in ${joinLabelText(lane.label)}`}
               search={{ project: projectId, workspace: lane.workspaceId }}

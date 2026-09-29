@@ -1,0 +1,364 @@
+/**
+ * Turns the sidebar's sections into the flat list of items the virtualized
+ * list draws: section headers, workspace labels, rows and "more" rows, each
+ * with a fixed height and the space the book puts above it.
+ *
+ * Which threads are shown, in which order, and in what pose is decided in
+ * client-core. This file only lays the result out in Bureau's geometry.
+ */
+import {
+  decideThreadPose,
+  decideThreadRowEnd,
+  formatRequestQuestion,
+  pickProjectHue,
+  type ExpandedSections,
+  type Pose,
+  type ProjectGroup,
+  type ProjectSection,
+  type SidebarSections,
+  type ThreadRowEnd,
+  type WaitingSection,
+} from "@hercule/client-core";
+import type { Project, Runner, Session } from "@hercule/contract";
+
+/**
+ * Bureau's three project tints, as the book's `.proj--<tint>` classes name
+ * them. A project's tint follows its position in the project list.
+ */
+const PROJECT_TINTS = ["webshop", "payments", "ops"] as const;
+
+export type ProjectTint = (typeof PROJECT_TINTS)[number];
+
+/**
+ * The end of a thread row, as one string so a memoized row can compare it:
+ *
+ * - `working` or `waiting`: that state's mark;
+ * - `queued` or `offline`: the word;
+ * - `age`: how long ago the thread was last active.
+ */
+export type RowEnd = "working" | "waiting" | "queued" | "offline" | "age";
+
+/** Which section an item belongs to: `waiting`, or `project:<id>`, with `none` for the threads in no project. */
+export type SectionKey = string;
+
+/**
+ * What an item draws. Its `key` is unique in the list, and stays the same for
+ * the same thing across renders.
+ */
+export type SidebarItemContent =
+  | { readonly kind: "waiting-header"; readonly key: string; readonly count: number }
+  | {
+      readonly kind: "waiting-row";
+      readonly key: string;
+      readonly sessionId: string;
+      readonly title: string;
+      readonly question: string;
+    }
+  | {
+      readonly kind: "project-header";
+      readonly key: string;
+      /** `null` for the threads in no project, whose heading has an outline tile and no `+`. */
+      readonly projectId: string | null;
+      readonly name: string;
+      /** `null` for the threads in no project. */
+      readonly tint: ProjectTint | null;
+    }
+  | {
+      readonly kind: "workspace-label";
+      readonly key: string;
+      /** `null` for the threads that work without a checkout. */
+      readonly workspaceId: string | null;
+      readonly clip: string;
+      readonly keep: string;
+    }
+  | {
+      readonly kind: "thread-row";
+      readonly key: string;
+      readonly sessionId: string;
+      readonly title: string;
+      readonly secondLine: string | null;
+      readonly pose: Pose;
+      readonly end: RowEnd;
+      readonly activityAt: string;
+    }
+  | { readonly kind: "more"; readonly key: string; readonly label: string };
+
+/** One entry of the sidebar's list: what it draws, the section it belongs to, and the space above it. */
+export type SidebarItem = SidebarItemContent & {
+  readonly section: SectionKey;
+  /**
+   * The space above the item, in CSS pixels: 8 above a section's first item,
+   * 9 above a workspace label that follows a thread row, 1 above the others.
+   */
+  readonly leading: number;
+};
+
+export type SidebarItemKind = SidebarItem["kind"];
+
+/**
+ * The height of each kind of item, in CSS pixels. Measured with
+ * `getBoundingClientRect` in the Bureau book's `desktop/session-active.html`,
+ * at 1440 x 900 on a 2x display, in Whitehaven and Orient Express (both give
+ * the same numbers):
+ *
+ * - a section header (`h3.side-h`) is 24;
+ * - a Waiting on you row (`.side-row--wait`) is 38;
+ * - a thread row (`.side-row`) is 35;
+ * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
+ *
+ * The book has no workspace label, so its 22 is this app's own design.
+ */
+export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
+  "waiting-header": 24,
+  "waiting-row": 38,
+  "project-header": 24,
+  "workspace-label": 22,
+  "thread-row": 35,
+  more: 28,
+};
+
+/** The space above a section's first item: the book's `.side-sec { padding-top: 8px }`. */
+const SECTION_LEADING = 8;
+
+/** The space between two items of a section: the book's `.side-sec { gap: 1px }`. */
+const ITEM_LEADING = 1;
+
+/**
+ * The space above a workspace label that follows a thread row: the usual gap
+ * plus 8 px, so the label starts a new group of rows instead of reading as the
+ * row's third line. A label right after its project's header keeps the usual
+ * gap. The book draws no workspace label, so this spacing is the design's own.
+ */
+const WORKSPACE_LABEL_LEADING = ITEM_LEADING + 8;
+
+/** Returns the section key of a project's section. */
+export const buildProjectSectionKey = (projectId: string | null): SectionKey =>
+  `project:${projectId ?? "none"}`;
+
+/** Returns the key of a section's header. */
+const buildHeaderKey = (section: SectionKey): string => `header:${section}`;
+
+/** Returns the key of a section's "more" row. */
+const buildMoreRowKey = (section: SectionKey): string => `more:${section}`;
+
+/**
+ * Returns which sections are expanded, in the shape `buildSidebarSections`
+ * takes, from the keys of the sections whose "more" row the user pressed.
+ */
+export const buildExpandedSections = (
+  expanded: ReadonlySet<SectionKey>,
+  groups: readonly ProjectGroup[],
+): ExpandedSections => ({
+  waiting: expanded.has("waiting"),
+  projectIds: new Set(
+    groups
+      .map((group) => group.projectId)
+      .filter((projectId) => expanded.has(buildProjectSectionKey(projectId))),
+  ),
+});
+
+/** Returns the one string a thread row's end is drawn from. */
+const flattenRowEnd = (end: ThreadRowEnd): RowEnd => {
+  switch (end.kind) {
+    case "mark":
+      return end.mark;
+    case "word":
+      return end.word;
+    case "age":
+      return "age";
+  }
+};
+
+/** Returns the text of a section's "more" row, such as "27 more waiting on you" or "1 more thread". */
+const formatMoreLabel = (section: "waiting" | "project", hidden: number): string =>
+  section === "waiting"
+    ? `${String(hidden)} more waiting on you`
+    : `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
+
+/** What the items need to know about the threads, beyond the sections. */
+export interface SidebarItemSources {
+  readonly sections: SidebarSections;
+  readonly sessions: ReadonlyMap<string, Session>;
+  readonly runners: ReadonlyMap<string, Runner>;
+  /** The project list in its own order, which decides each project's tint. */
+  readonly projects: readonly Project[];
+}
+
+/** Returns the space above `content`, which follows `previous` in its section, or starts it when `previous` is undefined. */
+const decideLeading = (
+  content: SidebarItemContent,
+  previous: SidebarItemContent | undefined,
+): number => {
+  if (previous === undefined) return SECTION_LEADING;
+  if (content.kind === "workspace-label" && previous.kind === "thread-row") {
+    return WORKSPACE_LABEL_LEADING;
+  }
+  return ITEM_LEADING;
+};
+
+/** Returns a section's items: its contents, each given the section and the space above it. */
+const placeInSection = (
+  section: SectionKey,
+  contents: readonly SidebarItemContent[],
+): SidebarItem[] =>
+  contents.map((content, index) => ({
+    ...content,
+    section,
+    leading: decideLeading(content, contents[index - 1]),
+  }));
+
+/** Returns what Waiting on you draws: its header, its rows, and its "more" row when it hides some. */
+const buildWaitingContents = (
+  waiting: WaitingSection,
+  sessions: ReadonlyMap<string, Session>,
+): SidebarItemContent[] => {
+  const contents: SidebarItemContent[] = [
+    {
+      kind: "waiting-header",
+      key: buildHeaderKey("waiting"),
+      count: waiting.rows.length + waiting.hiddenCount,
+    },
+  ];
+  for (const row of waiting.rows) {
+    const request = sessions.get(row.id)?.openRequest ?? null;
+    if (request === null) continue;
+    contents.push({
+      kind: "waiting-row",
+      key: `waiting:${row.id}`,
+      sessionId: row.id,
+      title: row.title,
+      question: formatRequestQuestion(request),
+    });
+  }
+  if (waiting.hiddenCount > 0) {
+    contents.push({
+      kind: "more",
+      key: buildMoreRowKey("waiting"),
+      label: formatMoreLabel("waiting", waiting.hiddenCount),
+    });
+  }
+  return contents;
+};
+
+/**
+ * Returns what a project's section draws: its header, then per workspace
+ * group its label (when the group has one) and its rows, then its "more" row
+ * when it hides some. The threads in no project are headed "No project".
+ */
+const buildProjectContents = (
+  project: ProjectSection,
+  { sessions, runners, projects }: SidebarItemSources,
+): SidebarItemContent[] => {
+  const section = buildProjectSectionKey(project.projectId);
+  const contents: SidebarItemContent[] = [
+    {
+      kind: "project-header",
+      key: buildHeaderKey(section),
+      projectId: project.projectId,
+      // Only the group of the threads in no project has no name.
+      name: project.name ?? "No project",
+      tint:
+        project.projectId === null
+          ? null
+          : pickProjectHue(project.projectId, projects, PROJECT_TINTS),
+    },
+  ];
+  for (const lane of project.workspaces) {
+    if (lane.label !== null) {
+      contents.push({
+        kind: "workspace-label",
+        key: `workspace:${section}:${lane.workspaceId ?? "none"}`,
+        workspaceId: lane.workspaceId,
+        clip: lane.label.clip,
+        keep: lane.label.keep,
+      });
+    }
+    for (const row of lane.rows) {
+      const session = sessions.get(row.id);
+      if (session === undefined) continue;
+      const runner = session.runnerId === null ? undefined : runners.get(session.runnerId);
+      contents.push({
+        kind: "thread-row",
+        key: `thread:${row.id}`,
+        sessionId: row.id,
+        title: row.title,
+        secondLine: row.secondLine,
+        pose: decideThreadPose(session, runner),
+        end: flattenRowEnd(decideThreadRowEnd(session, runner)),
+        activityAt: row.activityAt,
+      });
+    }
+  }
+  if (project.hiddenCount > 0) {
+    contents.push({
+      kind: "more",
+      key: buildMoreRowKey(section),
+      label: formatMoreLabel("project", project.hiddenCount),
+    });
+  }
+  return contents;
+};
+
+/**
+ * Returns the sidebar's items, top to bottom: Waiting on you when a thread is
+ * waiting, then each project's section in the order of `sections.projects`.
+ *
+ * A row whose session is missing from `sessions` is left out. The sections
+ * are built from the same list, so this happens only if a caller mixes two
+ * reads of the list.
+ */
+export const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
+  const { sections, sessions } = sources;
+  return [
+    ...(sections.waiting === null
+      ? []
+      : placeInSection("waiting", buildWaitingContents(sections.waiting, sessions))),
+    ...sections.projects.flatMap((project) =>
+      placeInSection(
+        buildProjectSectionKey(project.projectId),
+        buildProjectContents(project, sources),
+      ),
+    ),
+  ];
+};
+
+/**
+ * Returns the key of the item that should take focus when the focused item,
+ * `goneKey`, leaves the list, or `null` when the list is now empty. `before`
+ * is the list that held the item and `after` the list without it. The first
+ * of these that exists wins:
+ *
+ * - when a "more" row leaves, because its section expanded: the first thread
+ *   row the section now shows that it did not show before;
+ * - the section's "more" row;
+ * - the section's header;
+ * - the item that now sits where the gone item sat, or the last item when the
+ *   list is now shorter than that.
+ *
+ * Focus stays in the list, so a keyboard user never lands back at the top of
+ * the page because the thread they were on was answered or finished.
+ */
+export const pickFocusFallback = (
+  goneKey: string,
+  before: readonly SidebarItem[],
+  after: readonly SidebarItem[],
+): string | null => {
+  const index = before.findIndex((item) => item.key === goneKey);
+  const gone = before[index];
+  if (gone !== undefined) {
+    if (gone.kind === "more") {
+      const shownBefore = new Set(before.map((item) => item.key));
+      const shown = after.find(
+        (item) =>
+          item.section === gone.section &&
+          (item.kind === "waiting-row" || item.kind === "thread-row") &&
+          !shownBefore.has(item.key),
+      );
+      if (shown !== undefined) return shown.key;
+    }
+    for (const key of [buildMoreRowKey(gone.section), buildHeaderKey(gone.section)]) {
+      if (after.some((item) => item.key === key)) return key;
+    }
+  }
+  return after[Math.min(Math.max(index, 0), after.length - 1)]?.key ?? null;
+};

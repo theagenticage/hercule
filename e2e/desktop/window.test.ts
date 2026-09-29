@@ -161,7 +161,7 @@ describe("the window", () => {
     ).toBe(true);
   });
 
-  it("puts Close Window, ⌘W, in the File menu", async () => {
+  it("puts New Thread, ⌘N, and Close Window, ⌘W, in the File menu", async () => {
     const { app } = await launchForTest();
 
     // macOS runs the menu item itself, and only for a focused window, which
@@ -170,9 +170,13 @@ describe("the window", () => {
     const file = await app.evaluate(({ Menu }) =>
       Menu.getApplicationMenu()!
         .items.find((item) => item.label === "File")
-        ?.submenu?.items.map(({ label, role, accelerator }) => ({ label, role, accelerator })),
+        ?.submenu?.items.filter((item) => item.type !== "separator")
+        .map(({ label, role, accelerator }) => ({ label, role, accelerator })),
     );
-    expect(file).toEqual([{ label: "Close Window", role: "close", accelerator: "CmdOrCtrl+W" }]);
+    expect(file).toEqual([
+      { label: "New Thread", role: null, accelerator: "CmdOrCtrl+N" },
+      { label: "Close Window", role: "close", accelerator: "CmdOrCtrl+W" },
+    ]);
   });
 
   it("hides when it is closed, the app keeps running, and activating the app shows it again", async () => {

@@ -13,7 +13,8 @@
     "package": "electron-builder --mac && electron-builder --mac --config.directories.output=dist/test --config.electronFuses.enableNodeCliInspectArguments=true",
     "perf": "node scripts/perf.ts",
     "first-frame": "node scripts/first-frame.ts",
-    "compare:bureau": "node scripts/compare-bureau.ts"
+    "compare:bureau": "node scripts/compare-bureau.ts",
+    "capture:sidebar-states": "node scripts/capture-sidebar-states.ts"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",
@@ -23,6 +24,7 @@
     "@rolldown/plugin-babel": "0.2.3",
     "@tanstack/react-query": "5.102.8",
     "@tanstack/react-router": "1.170.32",
+    "@tanstack/react-virtual": "3.14.13",
     "@tanstack/router-plugin": "1.168.35",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.3",

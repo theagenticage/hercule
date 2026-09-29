@@ -2,11 +2,22 @@
  * Groups the sidebar's threads by project, and inside a project by workspace
  * (spec 14 §App shell, amended by #160 and #72).
  *
- * - Projects are sorted newest first by the latest thread in their first
- *   workspace group. The draft's project comes first, and the threads with
+ * - Projects are sorted newest first by their latest thread, in any of their
+ *   workspace groups. The draft's project comes first, and the threads with
  *   no project come last.
+ * - A thread whose project is not in the project list joins the threads with
+ *   no project, and so does the draft being written for such a project. That
+ *   happens to a deleted project, whose threads keep its id, and briefly to a
+ *   project created since the list was read. Without a name the group has
+ *   nothing to title it, and an untitled group in the middle of the list
+ *   would look like part of the project above it.
  * - Inside a project, worktrees come first in catalog order, then the main
  *   workspace, then the threads with no workspace (see `rankLane`).
+ * - The threads with no project are not split by workspace. They form one
+ *   workspace group with no label, newest first. The web app draws no header
+ *   above them, so a workspace label there would read as part of the project
+ *   above. The desktop app draws a "No project" header, and keeps the one
+ *   group so that both apps list these threads the same way.
  *
  * The draft being written joins the group it will belong to once it starts,
  * so the sidebar shows where a thread will go before it exists.
@@ -32,13 +43,21 @@ import {
 } from "./workspaces";
 
 export interface WorkspaceGroup {
+  /**
+   * The workspace the group's threads are in. `null` for the threads with no
+   * workspace, and for the one group that holds every thread with no project.
+   */
   readonly workspaceId: string | null;
   /**
    * The group's label, such as `hercule/thread-3f1`, `webshop · moss` or `no
    * workspace`, split into the two parts a narrow sidebar truncates
-   * separately. `null` for the no-workspace group when it is the project's
-   * only group (the label tells groups apart, and there is nothing to tell
-   * apart), or when it holds only the draft.
+   * separately. `null`:
+   *
+   * - for the no-workspace group when it is the project's only group, because
+   *   the label tells groups apart and there is nothing to tell apart;
+   * - for a group that holds only the draft;
+   * - for the one group of the threads with no project, which is not split
+   *   by workspace.
    */
   readonly label: WorkspaceLabel | null;
   /** Whether the draft being written joins this group. */
@@ -48,9 +67,12 @@ export interface WorkspaceGroup {
 
 export interface ProjectGroup {
   readonly projectId: string | null;
-  /** `null` for the threads that belong to no project: they have no header. */
+  /** `null` for the one group of the threads that belong to no project. */
   readonly name: string | null;
-  /** The identity hue of the project's dot, or `null` when there is no header. */
+  /**
+   * The identity hue of the project's dot, or `null` for the threads that
+   * belong to no project, which have no hue.
+   */
   readonly tone: ProjectTone | null;
   readonly count: number;
   readonly workspaces: readonly WorkspaceGroup[];
@@ -106,8 +128,28 @@ const holdsDraft = (
   workspaceId: string | null,
 ): boolean => draft !== null && joins && draft.workspaceId === workspaceId;
 
-const readRecency = (rows: readonly ThreadRow[]): number =>
-  rows.length === 0 ? 0 : Date.parse(rows[0]!.activityAt);
+/**
+ * Returns the time of a project group's latest thread, in any of its
+ * workspace groups, or 0 when it has none. Each workspace group's rows are
+ * sorted newest first, so its first row is its latest.
+ */
+const findLatestActivity = (group: ProjectGroup): number =>
+  Math.max(
+    0,
+    ...group.workspaces.map((lane) =>
+      lane.rows.length === 0 ? 0 : Date.parse(lane.rows[0]!.activityAt),
+    ),
+  );
+
+/**
+ * Returns the project a thread or the draft is grouped under: its own
+ * project when `listed` holds that project's id, and `null`, the threads
+ * with no project, otherwise.
+ */
+const decideGroupProjectId = (
+  projectId: string | null,
+  listed: ReadonlySet<string>,
+): string | null => (projectId !== null && listed.has(projectId) ? projectId : null);
 
 /**
  * Returns a group's sort rank inside its project: the draft's own group with no
@@ -151,23 +193,48 @@ export const buildThreadGroups = ({
   const threads = sessions.filter((session) => session.agentId === null);
   const rows = buildThreadRows(threads, mode, instances);
   const sessionsById = new Map(threads.map((session) => [session.id, session]));
+  const listedProjectIds = new Set(projects.map((each) => each.id));
+  // A draft for a project the list does not hold joins the threads with no
+  // project, as that project's threads do.
+  const draftPlace =
+    draft === null
+      ? null
+      : { ...draft, projectId: decideGroupProjectId(draft.projectId, listedProjectIds) };
 
   const byProject = new Map<string | null, ThreadRow[]>();
   for (const row of rows) {
-    const projectId = sessionsById.get(row.id)?.projectId ?? null;
+    const projectId = decideGroupProjectId(
+      sessionsById.get(row.id)?.projectId ?? null,
+      listedProjectIds,
+    );
     byProject.set(projectId, [...(byProject.get(projectId) ?? []), row]);
   }
   // The draft's project is shown even when it has no threads yet.
-  if (draft !== null && !byProject.has(draft.projectId)) byProject.set(draft.projectId, []);
+  if (draftPlace !== null && !byProject.has(draftPlace.projectId))
+    byProject.set(draftPlace.projectId, []);
 
   const groups = [...byProject].map(([projectId, held]): ProjectGroup => {
+    const joins = draftPlace !== null && draftPlace.projectId === projectId;
+    const header = {
+      projectId,
+      name: projects.find((each) => each.id === projectId)?.name ?? null,
+      tone: projectId === null ? null : pickProjectTone(projectId, projects),
+      count: held.length,
+    };
+    if (projectId === null) {
+      return {
+        ...header,
+        workspaces: [{ workspaceId: null, label: null, draft: joins, rows: held }],
+      };
+    }
+
     const byWorkspace = new Map<string | null, ThreadRow[]>();
     for (const row of held) {
       const workspaceId = sessionsById.get(row.id)?.workspaceId ?? null;
       byWorkspace.set(workspaceId, [...(byWorkspace.get(workspaceId) ?? []), row]);
     }
-    const joins = draft !== null && draft.projectId === projectId;
-    if (joins && !byWorkspace.has(draft.workspaceId)) byWorkspace.set(draft.workspaceId, []);
+    if (joins && !byWorkspace.has(draftPlace.workspaceId))
+      byWorkspace.set(draftPlace.workspaceId, []);
 
     const alone = byWorkspace.size === 1;
     const lanes = [...byWorkspace].map(([workspaceId, rowsIn]): WorkspaceGroup => {
@@ -180,20 +247,17 @@ export const buildThreadGroups = ({
         // no label.
         label:
           workspace === undefined
-            ? alone || (holdsDraft(draft, joins, workspaceId) && rowsIn.length === 0)
+            ? alone || (holdsDraft(draftPlace, joins, workspaceId) && rowsIn.length === 0)
               ? null
               : { clip: "no workspace", keep: "" }
             : buildWorkspaceLabelParts(workspace, resources, runners),
-        draft: holdsDraft(draft, joins, workspaceId),
+        draft: holdsDraft(draftPlace, joins, workspaceId),
         rows: rowsIn,
       };
     });
 
     return {
-      projectId,
-      name: projects.find((each) => each.id === projectId)?.name ?? null,
-      tone: projectId === null ? null : pickProjectTone(projectId, projects),
-      count: held.length,
+      ...header,
       // The prototype's order: the worktrees first, in catalog order, then the
       // repo's main workspace, then the threads that work without a checkout.
       // A draft with no workspace yet is not in that last group: it sits
@@ -206,7 +270,8 @@ export const buildThreadGroups = ({
   return groups.sort(
     (a, b) =>
       Number(a.projectId === null) - Number(b.projectId === null) ||
-      Number(b.projectId === draft?.projectId) - Number(a.projectId === draft?.projectId) ||
-      readRecency(b.workspaces[0]?.rows ?? []) - readRecency(a.workspaces[0]?.rows ?? []),
+      Number(b.projectId === draftPlace?.projectId) -
+        Number(a.projectId === draftPlace?.projectId) ||
+      findLatestActivity(b) - findLatestActivity(a),
   );
 };

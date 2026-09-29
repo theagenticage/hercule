@@ -1,10 +1,11 @@
 /**
  * Electron's main process for `pnpm compare:bureau`. scripts/compare-bureau.ts
- * starts it, with the address of the specimen sheets as `--sheets-url` and
- * the switches that fix the capture's scale, its colour profile and how its
- * pixels are drawn.
+ * starts it through scripts/sheet-server.ts, which passes the address of the
+ * specimen sheets as `--sheets-url` and the switches that fix the capture's
+ * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it:
+ * For each theme, Whitehaven and Orient Express, it compares two pairs of
+ * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
  *   until each page sets `data-ready`;
@@ -14,6 +15,15 @@
  * - captures both windows, compares them pixel for pixel, and writes
  *   reference.png, app.png and diff.png to out/bureau-compare/<theme>/.
  *
+ * The second pair is the sidebar. It:
+ * - opens the book's session-active.html, edited by
+ *   specimens/sidebar-reference.ts to show the fixture's data, and the app's
+ *   sidebar specimen, drawn from the same fixture;
+ * - captures the sidebar's region of both windows (x 0-272, the full height)
+ *   and writes sidebar-reference.png, sidebar-app.png and sidebar-diff.png;
+ * - checks that both sidebars draw the same items in the same boxes, and
+ *   only then compares the regions pixel for pixel.
+ *
  * Then it prints the report and exits with 0 when every pixel matches, and 1
  * when one does not or anything fails on the way.
  *
@@ -21,7 +31,7 @@
  * only syntax that stripping can erase: no enums, namespaces or parameter
  * properties.
  */
-import { app, BrowserWindow, nativeImage, type NativeImage } from "electron";
+import { app, nativeImage, type BrowserWindow, type NativeImage } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,32 +42,34 @@ import {
   type Bitmap,
   type CellDifference,
 } from "./compare-bitmaps.ts";
-
-/** The window's content size in CSS pixels: the size of a Bureau page. */
-const WIDTH = 1440;
-const HEIGHT = 900;
-/** The device pixel ratio every supported Mac's built-in display shows, forced by a switch. */
-const DPR = 2;
-const THEMES = ["whitehaven", "orient-express"];
-/** How long a sheet may take to draw its cells and load its fonts. */
-const READY_TIMEOUT_MS = 30_000;
+import {
+  captureSheet,
+  DPR,
+  HEIGHT,
+  openSheet,
+  SIDEBAR_REGION,
+  startCaptureApp,
+  THEMES,
+  WIDTH,
+  type Rect,
+} from "./sheet-window.ts";
 
 const repositoryDir = fileURLToPath(new URL("../../../", import.meta.url));
 const outputDir = fileURLToPath(new URL("../out/bureau-compare/", import.meta.url));
-
-/** A rectangle as the page's `getBoundingClientRect()` returns it, in CSS pixels. */
-interface Rect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
 
 /** Where a sheet lays out one cell: the cell's rectangle, and the rectangle of the piece inside it. */
 interface CellLayout {
   readonly name: string;
   readonly cell: Rect;
   readonly piece: Rect;
+}
+
+/** Where a sidebar lays out one of its items, and the item's text, to name it in a report. */
+interface SidebarItem {
+  /** The selector that found the item, and its place among the items that selector found. */
+  readonly name: string;
+  readonly text: string;
+  readonly box: Rect;
 }
 
 /** The outcome of one theme's comparison. */
@@ -68,6 +80,10 @@ interface ThemeResult {
   readonly differences: ReadonlyArray<CellDifference>;
   /** The specimen window's renderer process's working set, in kilobytes. */
   readonly rendererMemoryKb: number;
+  /** How many sidebar items were compared. */
+  readonly sidebarItems: number;
+  /** The differences in the sidebar's region, each named after the smallest item that holds it. */
+  readonly sidebarDifferences: ReadonlyArray<CellDifference>;
 }
 
 // Runs in each sheet: every [data-cell] and its piece, the cell's first
@@ -80,52 +96,57 @@ const READ_LAYOUT = `[...document.querySelectorAll("[data-cell]")].map((cell) =>
   return { name: cell.dataset.cell, cell: measure(cell), piece: measure(cell.firstElementChild) };
 })`;
 
-/**
- * Opens `url` in a hidden window with a 1440 × 900 content area and waits
- * until the page sets `data-ready` on `<html>`. Returns the window. Fails when
- * the page does not load or does not become ready in time; the window is then
- * closed, and the error lists the page's console errors.
- */
-async function openSheet(url: string): Promise<BrowserWindow> {
-  const window = new BrowserWindow({
-    // Hidden, so that the display's size can never shrink the window.
-    show: false,
-    width: WIDTH,
-    height: HEIGHT,
-    useContentSize: true,
-    // A hidden window would otherwise throttle animation frames, and the
-    // page's readiness waits for two of them.
-    webPreferences: { backgroundThrottling: false },
-  });
-  const errors: string[] = [];
-  window.webContents.on("console-message", ({ level, message }) => {
-    if (level === "error") errors.push(message);
-  });
-  try {
-    await window.loadURL(url);
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    while (
-      !(await window.webContents.executeJavaScript(
-        `document.documentElement.hasAttribute("data-ready")`,
-      ))
-    ) {
-      if (Date.now() > deadline) {
-        throw new Error(
-          `${url} did not set data-ready within ${String(READY_TIMEOUT_MS / 1000)} s.`,
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return window;
-  } catch (error) {
-    window.destroy();
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      message + (errors.length > 0 ? `\nThe page's console errors:\n${errors.join("\n")}` : ""),
-      { cause: error },
-    );
-  }
-}
+// Every part of the sidebar whose box is compared, as a selector inside
+// `aside.side`. The two sidebars differ in their markup where the book's
+// differs from what React draws, such as a "more" row that is a button in the
+// app and a link in the book, so the parts are named by class, not by tag.
+const SIDEBAR_PARTS = [
+  ".side-top > .icon-btn",
+  ".side-top > .icon-btn > svg",
+  ".side-actions > .nav-row",
+  ".side-actions > .nav-row > svg",
+  ".side-actions > .nav-row > span",
+  ".side-actions > .nav-row > kbd",
+  ".side-scroll",
+  ".side-h",
+  ".side-h > span:first-child",
+  ".side-h > .count",
+  ".side-h > .icon-btn",
+  ".side-h > .icon-btn > svg",
+  ".side-row",
+  ".side-row > svg",
+  ".side-row .side-name",
+  ".side-row .side-ask",
+  ".side-row .side-meta",
+  ".side-row .side-end",
+  ".side-row .side-end > :not([hidden])",
+  ".side-foot",
+  ".side-sum",
+  ".side-sum > b",
+  ".side-me",
+  ".side-me > svg",
+  ".side-me > .side-name",
+  ".side-me > .icon-btn",
+  ".side-me > .icon-btn > svg",
+];
+
+// Runs in each sidebar page: every drawn element each part's selector finds,
+// in document order, then the sidebar itself. An element that is not drawn,
+// such as one in the book's hidden Hercule tab, has no box and is left out.
+const READ_SIDEBAR_ITEMS = `(() => {
+  const side = document.querySelector("aside.side");
+  const measure = (element) => {
+    const { x, y, width, height } = element.getBoundingClientRect();
+    return { x, y, width, height };
+  };
+  const describe = (element) => element.textContent.replace(/\\s+/g, " ").trim().slice(0, 40);
+  const items = ${JSON.stringify(SIDEBAR_PARTS)}.flatMap((selector) =>
+    [...side.querySelectorAll(selector)]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element, index) => ({ name: selector + " #" + index, text: describe(element), box: measure(element) })),
+  );
+  return [...items, { name: "aside.side", text: "", box: measure(side) }];
+})()`;
 
 /** Returns where the sheet in `window` lays out each of its cells, in document order. */
 async function readLayout(window: BrowserWindow): Promise<ReadonlyArray<CellLayout>> {
@@ -148,8 +169,6 @@ function assertSameLayout(
       `the reference has ${String(reference.length)} cells and the app's sheet ${String(specimen.length)}`,
     );
   }
-  const describeRect = ({ x, y, width, height }: Rect) =>
-    `${String(width)}x${String(height)} at ${String(x)},${String(y)}`;
   reference.forEach((expected, index) => {
     const actual = specimen[index];
     if (actual === undefined) return;
@@ -181,19 +200,113 @@ function assertSameLayout(
   }
 }
 
-/** Captures the hidden window's page. Returns the image and its raw pixels. Fails unless it is exactly 2880 × 1800. */
-async function captureSheet(
-  window: BrowserWindow,
-): Promise<{ image: NativeImage; bitmap: Bitmap }> {
-  const image = await window.webContents.capturePage(undefined, { stayHidden: true });
-  const { width, height } = image.getSize();
-  if (width !== WIDTH * DPR || height !== HEIGHT * DPR) {
+/** Writes the reference, the app's capture and the picture of their differences to `dir`, each file name starting with `prefix`. */
+function writeCaptures(
+  dir: string,
+  prefix: string,
+  reference: { image: NativeImage; bitmap: Bitmap },
+  specimen: { image: NativeImage; bitmap: Bitmap },
+): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${prefix}reference.png`), reference.image.toPNG());
+  writeFileSync(join(dir, `${prefix}app.png`), specimen.image.toPNG());
+  const diff = buildDiffBitmap(reference.bitmap, specimen.bitmap);
+  const diffImage = nativeImage.createFromBitmap(Buffer.from(diff.pixels.buffer), {
+    width: diff.width,
+    height: diff.height,
+  });
+  writeFileSync(join(dir, `${prefix}diff.png`), diffImage.toPNG());
+}
+
+/** Returns the rectangle as the reports print it: its size, then its top-left corner, in CSS pixels. */
+function describeRect({ x, y, width, height }: Rect): string {
+  return `${String(width)}x${String(height)} at ${String(x)},${String(y)}`;
+}
+
+/**
+ * Checks that the two sidebars draw the same items in the same boxes: for
+ * each part, the same number of items, each in the same box. Fails with
+ * "The sidebar's items differ" and the first differences otherwise.
+ */
+function assertSameSidebarItems(
+  reference: ReadonlyArray<SidebarItem>,
+  specimen: ReadonlyArray<SidebarItem>,
+): void {
+  const differences: string[] = [];
+  const specimenItems = new Map(specimen.map((item) => [item.name, item]));
+  const referenceNames = new Set(reference.map(({ name }) => name));
+  for (const expected of reference) {
+    const actual = specimenItems.get(expected.name);
+    if (actual === undefined) {
+      differences.push(`${expected.name} "${expected.text}" is in the book and not in the app`);
+    } else if (describeRect(actual.box) !== describeRect(expected.box)) {
+      differences.push(
+        `${expected.name} "${expected.text}": the book's box is ${describeRect(expected.box)}, the app's ${describeRect(actual.box)}`,
+      );
+    }
+  }
+  for (const actual of specimen) {
+    if (!referenceNames.has(actual.name)) {
+      differences.push(`${actual.name} "${actual.text}" is in the app and not in the book`);
+    }
+  }
+  if (differences.length > 0) {
     throw new Error(
-      `A capture is ${String(width)}x${String(height)} device pixels, not ${String(WIDTH * DPR)}x${String(HEIGHT * DPR)}. ` +
-        "Electron must run with --force-device-scale-factor=2; scripts/compare-bureau.ts passes it.",
+      `The sidebar's items differ (${String(differences.length)}):\n  ${differences.slice(0, 40).join("\n  ")}\n` +
+        "Match the app's item to the book's box, then run pnpm compare:bureau again.",
     );
   }
-  return { image, bitmap: { width, height, pixels: image.toBitmap() } };
+}
+
+/**
+ * Compares the app's sidebar with the book's in `theme`, and writes both
+ * captures of the sidebar's region and the picture of their differences to
+ * `themeDir`. Returns how many items were compared, and the differences,
+ * each named after the smallest item that holds it. Fails when a page does
+ * not load, a capture has the wrong size, or an item's box differs.
+ */
+async function compareSidebar(
+  sheetsUrl: string,
+  theme: string,
+  themeDir: string,
+): Promise<{ items: number; differences: ReadonlyArray<CellDifference> }> {
+  const [reference, specimen] = await Promise.all([
+    openSheet(
+      new URL(`/design/crew-bureau/desktop/session-active.html?theme=${theme}`, sheetsUrl).href,
+      new URL("sidebar-reference.ts", sheetsUrl).href,
+    ),
+    openSheet(`${sheetsUrl}sidebar.html?theme=${theme}`),
+  ]);
+  try {
+    const [referenceItems, specimenItems] = (await Promise.all([
+      reference.webContents.executeJavaScript(READ_SIDEBAR_ITEMS),
+      specimen.webContents.executeJavaScript(READ_SIDEBAR_ITEMS),
+    ])) as [ReadonlyArray<SidebarItem>, ReadonlyArray<SidebarItem>];
+    const referenceCapture = await captureSheet(reference, SIDEBAR_REGION);
+    const specimenCapture = await captureSheet(specimen, SIDEBAR_REGION);
+    writeCaptures(themeDir, "sidebar-", referenceCapture, specimenCapture);
+    assertSameSidebarItems(referenceItems, specimenItems);
+
+    // A pixel is counted for the first item that holds it, so the smallest
+    // items come first: a difference in a row's name is reported as the
+    // name's, not the row's.
+    const cells = [...referenceItems]
+      .sort((a, b) => a.box.width * a.box.height - b.box.width * b.box.height)
+      .map(({ name, text, box }) => ({
+        name: text === "" ? name : `${name} "${text}"`,
+        left: (box.x - SIDEBAR_REGION.x) * DPR,
+        top: (box.y - SIDEBAR_REGION.y) * DPR,
+        width: box.width * DPR,
+        height: box.height * DPR,
+      }));
+    return {
+      items: referenceItems.length,
+      differences: compareBitmaps(referenceCapture.bitmap, specimenCapture.bitmap, cells),
+    };
+  } finally {
+    reference.destroy();
+    specimen.destroy();
+  }
 }
 
 /** Returns the working set of the renderer process behind `window`, in kilobytes, as `app.getAppMetrics()` reports it. */
@@ -207,10 +320,11 @@ function readRendererMemoryKb(window: BrowserWindow): number {
 }
 
 /**
- * Compares the two sheets in `theme`, and writes the reference, the app's
- * capture and the picture of their differences to out/bureau-compare/<theme>/.
- * Returns the theme's result. Fails when a sheet does not load, the layouts
- * differ, or a capture has the wrong size.
+ * Compares the two sheets of pieces in `theme`, then the two sidebars, and
+ * writes each pair's captures and the picture of their differences to
+ * out/bureau-compare/<theme>/. Returns the theme's result. Fails when a page
+ * does not load, the layouts or the sidebar's items differ, or a capture has
+ * the wrong size.
  */
 async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResult> {
   const [reference, specimen] = await Promise.all([
@@ -233,29 +347,48 @@ async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResu
       height: cell.height * DPR,
     }));
     const differences = compareBitmaps(referenceCapture.bitmap, specimenCapture.bitmap, cells);
-
     const themeDir = join(outputDir, theme);
-    mkdirSync(themeDir, { recursive: true });
-    writeFileSync(join(themeDir, "reference.png"), referenceCapture.image.toPNG());
-    writeFileSync(join(themeDir, "app.png"), specimenCapture.image.toPNG());
-    const diff = buildDiffBitmap(referenceCapture.bitmap, specimenCapture.bitmap);
-    const diffImage = nativeImage.createFromBitmap(Buffer.from(diff.pixels.buffer), {
-      width: diff.width,
-      height: diff.height,
-    });
-    writeFileSync(join(themeDir, "diff.png"), diffImage.toPNG());
+    writeCaptures(themeDir, "", referenceCapture, specimenCapture);
+    const rendererMemoryKb = readRendererMemoryKb(specimen);
+    reference.destroy();
+    specimen.destroy();
 
+    const sidebar = await compareSidebar(sheetsUrl, theme, themeDir);
     return {
       theme,
       cells: cells.length,
       faces: cells.filter(({ name }) => name.startsWith("face/")).length,
       differences,
-      rendererMemoryKb: readRendererMemoryKb(specimen),
+      rendererMemoryKb,
+      sidebarItems: sidebar.items,
+      sidebarDifferences: sidebar.differences,
     };
   } finally {
+    // Destroying a window twice does nothing.
     reference.destroy();
     specimen.destroy();
   }
+}
+
+/** Returns the table of `differences`, one line per cell or item, as the report prints it under a theme. */
+function buildDifferenceTable(
+  heading: string,
+  differences: ReadonlyArray<CellDifference>,
+): ReadonlyArray<string> {
+  const nameWidth = Math.max(22, ...differences.map(({ cell }) => cell.length)) + 2;
+  return [
+    `  ${heading.padEnd(nameWidth)}pixels  max diff  box (device px)`,
+    ...differences.map(
+      ({ cell, pixels, maxDiff, box }) =>
+        `  ${cell.padEnd(nameWidth)}${String(pixels).padStart(6)}  ${String(maxDiff).padStart(8)}  ` +
+        `x ${String(box.left)}-${String(box.right)}, y ${String(box.top)}-${String(box.bottom)}`,
+    ),
+  ];
+}
+
+/** Checks whether the theme's pieces and sidebar both match the book's, pixel for pixel. */
+function matchesBook({ differences, sidebarDifferences }: ThemeResult): boolean {
+  return differences.length === 0 && sidebarDifferences.length === 0;
 }
 
 /** Builds the report of every theme's comparison, as `pnpm compare:bureau` prints it. */
@@ -265,70 +398,48 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
   const lines = [
     `Bureau comparison: ${String(first.cells)} cells, ${String(WIDTH)}x${String(HEIGHT)} at DPR ${String(DPR)}, sRGB`,
   ];
-  const failing = results.filter(({ differences }) => differences.length > 0);
   for (const { theme, cells, differences } of results) {
     const differingCells = differences.filter(({ cell }) => cell !== OUTSIDE_CELLS).length;
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
-    if (differences.length === 0) continue;
-    const nameWidth = Math.max(22, ...differences.map(({ cell }) => cell.length)) + 2;
-    lines.push(`  ${"cell".padEnd(nameWidth)}pixels  max diff  box (device px)`);
-    for (const { cell, pixels, maxDiff, box } of differences) {
-      lines.push(
-        `  ${cell.padEnd(nameWidth)}${String(pixels).padStart(6)}  ${String(maxDiff).padStart(8)}  ` +
-          `x ${String(box.left)}-${String(box.right)}, y ${String(box.top)}-${String(box.bottom)}`,
-      );
-    }
+    if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
+  }
+  lines.push(
+    `Sidebar comparison: ${String(first.sidebarItems)} items, x 0-${String(SIDEBAR_REGION.width)} of session-active.html`,
+  );
+  for (const { theme, sidebarDifferences } of results) {
+    const pixels = sidebarDifferences.reduce((sum, { pixels }) => sum + pixels, 0);
+    lines.push(`${theme.padEnd(17)}${String(pixels)} pixels differ`);
+    if (pixels > 0) lines.push(...buildDifferenceTable("item", sidebarDifferences));
   }
   lines.push(
     `Specimen renderer (${String(first.faces)} faces): ${String(Math.round(first.rendererMemoryKb / 1024))} MB (indicative)`,
   );
   const imagesDir = relative(repositoryDir, outputDir);
+  const failing = results.filter((result) => !matchesBook(result));
   const themes = (failing.length > 0 ? failing : results).map(({ theme }) => theme);
   for (const theme of themes) {
-    lines.push(`Images: ${join(imagesDir, theme)}/{reference,app,diff}.png`);
+    lines.push(
+      `Images: ${join(imagesDir, theme)}/{reference,app,diff}.png and sidebar-{reference,app,diff}.png`,
+    );
   }
-  // A cell that differs in both themes is counted once.
-  const differing = new Set(
+  // A cell that differs in both themes is counted once, and so is an item.
+  const differingCells = new Set(
     failing.flatMap(({ differences }) => differences.map(({ cell }) => cell)),
   ).size;
+  const differingItems = new Set(
+    failing.flatMap(({ sidebarDifferences }) => sidebarDifferences.map(({ cell }) => cell)),
+  ).size;
   lines.push(
-    differing === 0
-      ? "PASSED: every cell matches the Bureau book."
-      : `FAILED: ${String(differing)} ${differing === 1 ? "cell differs" : "cells differ"} from the Bureau book.`,
+    failing.length === 0
+      ? "PASSED: every cell and the sidebar match the Bureau book."
+      : `FAILED: ${String(differingCells)} ${differingCells === 1 ? "cell differs" : "cells differ"} ` +
+          `and ${String(differingItems)} sidebar ${differingItems === 1 ? "item differs" : "items differ"} from the Bureau book.`,
   );
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * Writes `text` to `stream` and exits with `code` once the text has been
- * handed to the operating system. Exiting at once could cut the report short,
- * because a pipe on macOS is written asynchronously.
- */
-function writeAndExit(stream: NodeJS.WriteStream, text: string, code: number): void {
-  stream.write(text, () => app.exit(code));
-}
-
-// No Dock icon: the tool's windows are never shown.
-app.dock?.hide();
-// Each theme's windows close before the next theme's open. With no listener
-// for this event, Electron would quit, with exit code 0, as soon as the first
-// theme's windows close.
-app.on("window-all-closed", () => {});
-void app.whenReady().then(async () => {
-  try {
-    const sheetsUrl = app.commandLine.getSwitchValue("sheets-url");
-    if (sheetsUrl === "") {
-      throw new Error("Pass the sheets' address as --sheets-url; scripts/compare-bureau.ts does.");
-    }
-    const results: ThemeResult[] = [];
-    for (const theme of THEMES) results.push(await compareTheme(sheetsUrl, theme));
-    const passed = results.every(({ differences }) => differences.length === 0);
-    writeAndExit(process.stdout, buildReport(results), passed ? 0 : 1);
-  } catch (error) {
-    writeAndExit(
-      process.stderr,
-      `FAILED: ${error instanceof Error ? error.message : String(error)}\n`,
-      1,
-    );
-  }
+startCaptureApp(async (sheetsUrl) => {
+  const results: ThemeResult[] = [];
+  for (const theme of THEMES) results.push(await compareTheme(sheetsUrl, theme));
+  return { report: buildReport(results), passed: results.every(matchesBook) };
 });

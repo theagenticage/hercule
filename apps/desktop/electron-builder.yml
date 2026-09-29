@@ -18,9 +18,11 @@ directories:
   output: dist/release
 
 # Main, the preload and the renderer are bundled into `out/`, so the app needs
-# nothing else: no node_modules, no source.
+# nothing else: no node_modules, no source. The renderer's Vite manifest is
+# left out: only the bundle budget check reads it, at build time.
 files:
   - out/**
+  - "!out/renderer/.vite/**"
   - package.json
 asar: true
 npmRebuild: false

@@ -46,6 +46,7 @@ import {
   isLiveSessionTestEnabled,
   findReleaseBinary,
   createTemporaryHome,
+  type TemporaryHome,
 } from "./harness";
 
 const token = process.env["HERCULE_E2E_GITHUB_TOKEN"];
@@ -60,14 +61,14 @@ const wanted = token !== undefined && repo !== undefined;
  */
 const live = wanted && isLiveSessionTestEnabled();
 
-const state = createTemporaryHome();
-const world = createTemporaryHome();
+let state: TemporaryHome;
+let world: TemporaryHome;
 const binary = findReleaseBinary();
 
 /** The `HOME` both the machine's git and the test's own git read, and nothing else. */
-const gitHome = createTemporaryHome("");
+let gitHome: TemporaryHome;
 /** The repository the push is made from: an empty one, with the remote configured. */
-const sender = join(world.home, "sender");
+let sender: string;
 
 /** The branch this run creates on GitHub, and deletes again. */
 const branch = `hercule-e2e/${Math.random().toString(16).slice(2, 10)}`;
@@ -285,6 +286,10 @@ const readWorkspace = async (id: string): Promise<Workspace> =>
 
 beforeAll(async () => {
   if (!wanted) return;
+  state = createTemporaryHome();
+  world = createTemporaryHome();
+  gitHome = createTemporaryHome("");
+  sender = join(world.home, "sender");
 
   controller = await startController({
     home: state.home,
@@ -326,9 +331,9 @@ afterAll(async () => {
     if (runBranch !== undefined) await removeBranch(runBranch);
   }
   await controller?.stop().catch(() => -1);
-  state.remove();
-  world.remove();
-  gitHome.remove();
+  state?.remove();
+  world?.remove();
+  gitHome?.remove();
 });
 
 describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () => {

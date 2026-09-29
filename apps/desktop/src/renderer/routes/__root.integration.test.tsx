@@ -33,7 +33,7 @@ describe("Sign Out from the app menu", () => {
   it("forgets the token, shows the sign-in screen, empties the caches and revokes the token", async () => {
     const { calls, fake, router, context } = await startSignedIn();
     const clearRouterCache = vi.spyOn(router, "clearCache");
-    fake.sendSignOut();
+    fake.sendMenuCommand("signOut");
     expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
     expect(router.state.location.pathname).toBe("/login");
     expect(context.controller?.client.getToken()).toBeNull();
@@ -43,6 +43,7 @@ describe("Sign Out from the app menu", () => {
         {
           method: "POST",
           path: "/api/v1/auth/logout",
+          query: {},
           body: undefined,
           authorization: "Bearer bearer",
         },
@@ -53,9 +54,47 @@ describe("Sign Out from the app menu", () => {
     expect(clearRouterCache).toHaveBeenCalledOnce();
   });
 
+  it("stops the live connection before it shows the sign-in screen, and empties the caches only once the screen shows", async () => {
+    const { fake, router, context } = await startSignedIn();
+    const controller = context.controller!;
+    const queryClient = context.queryClient;
+    const steps: string[] = [];
+    // The first stop, Sign Out's, never finishes, as with a socket that
+    // does not close. Sign Out must not wait for it.
+    vi.spyOn(controller.live, "stop").mockImplementationOnce(() => {
+      steps.push(`stop live, token ${String(controller.client.getToken())}`);
+      return new Promise(() => {});
+    });
+    const navigate = router.navigate.bind(router);
+    vi.spyOn(router, "navigate").mockImplementation((options) => {
+      steps.push(`navigate to ${String(options.to)}`);
+      return navigate(options);
+    });
+    // Emptied while the shell is still on screen, the cache would make the
+    // sidebar read again at once, with no token.
+    const clear = queryClient.clear.bind(queryClient);
+    vi.spyOn(queryClient, "clear").mockImplementation(() => {
+      const signInShown = screen.queryByRole("textbox", { name: "Username" }) !== null;
+      steps.push(
+        `empty the query cache on ${String(router.state.resolvedLocation?.pathname)}, sign-in screen ${signInShown ? "shown" : "not shown"}`,
+      );
+      clear();
+    });
+
+    fake.sendMenuCommand("signOut");
+    await waitFor(() => {
+      expect(steps).toEqual([
+        "stop live, token null",
+        "navigate to /login",
+        "empty the query cache on /login, sign-in screen shown",
+      ]);
+    });
+    expect(queryClient.getQueryData(CACHED_KEY)).toBeUndefined();
+  });
+
   it("signs out at once when the controller never answers the revoke", async () => {
     const { fake, router, context } = await startSignedIn({ logout: neverAnswer });
-    fake.sendSignOut();
+    fake.sendMenuCommand("signOut");
     // The token is gone from memory and from main's store before anything
     // is awaited.
     expect(context.controller?.client.getToken()).toBeNull();
@@ -73,7 +112,7 @@ describe("Sign Out from the app menu", () => {
           answerRevoke = resolve;
         }),
     });
-    fake.sendSignOut();
+    fake.sendMenuCommand("signOut");
     await screen.findByRole("textbox", { name: "Username" });
     context.controller?.client.setToken("signed in again");
     answerRevoke({ body: {} });
@@ -87,7 +126,7 @@ describe("Sign Out from the app menu", () => {
     const { fake, router, context } = await startSignedIn({
       logout: { status: 500, body: buildErrorBody("internal", "boom") },
     });
-    fake.sendSignOut();
+    fake.sendMenuCommand("signOut");
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/login");
     });
@@ -101,15 +140,17 @@ describe("Sign Out from the app menu", () => {
       setup: refuseConnection,
     });
     expect(router.state.location.pathname).toBe("/connect");
-    fake.sendSignOut();
+    fake.sendMenuCommand("signOut");
     await waitFor(() => {
       expect(fake.tokenWrites).toContain(null);
     });
     expect(context.controller?.client.getToken()).toBeNull();
     // The sign-in screen needs the controller, so the guard sends the user
-    // back to the connect screen.
+    // back to the connect screen. Signed out there, the user's reads are
+    // emptied all the same.
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/connect");
+      expect(context.queryClient.getQueryData(CACHED_KEY)).toBeUndefined();
     });
   });
 });

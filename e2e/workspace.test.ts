@@ -44,11 +44,12 @@ import {
   isLiveSessionTestEnabled,
   findReleaseBinary,
   createTemporaryHome,
+  type TemporaryHome,
 } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 /** Holds the bare remote and the user's own checkout of it. */
-const world = createTemporaryHome();
+let world: TemporaryHome;
 const binary = findReleaseBinary();
 
 /** The URL the resource uses for the repository; it resolves to `bare` through `HOME`. */
@@ -61,10 +62,10 @@ const REMOTE = "https://hercule.test/acme/web";
  */
 const live = isLiveSessionTestEnabled();
 
-const bare = join(world.home, "remote.git");
-const checkout = join(world.home, "web");
+let bare: string;
+let checkout: string;
 /** The `HOME` both the machine's git and the test's own git read, and nothing else. */
-const gitHome = createTemporaryHome("[init]\n\tdefaultBranch = main\n");
+let gitHome: TemporaryHome;
 
 let controller: Controller;
 let url: string;
@@ -169,6 +170,12 @@ const isAnyInstanceLoggedIn = async (): Promise<boolean> => {
 };
 
 beforeAll(async () => {
+  state = createTemporaryHome();
+  world = createTemporaryHome();
+  bare = join(world.home, "remote.git");
+  checkout = join(world.home, "web");
+  gitHome = createTemporaryHome("[init]\n\tdefaultBranch = main\n");
+
   // A bare repository with one commit on `main`, and the user's own working
   // copy of it next to it, which Hercule must never touch.
   runGit(["init", "--bare", "--initial-branch=main", bare], world.home);
@@ -226,9 +233,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
-  world.remove();
-  gitHome.remove();
+  state?.remove();
+  world?.remove();
+  gitHome?.remove();
 });
 
 describe("a repo, its main workspace and a thread's worktree, through the CLI", () => {

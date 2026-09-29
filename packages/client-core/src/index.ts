@@ -153,7 +153,7 @@ export {
 } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
 export { type AccessModeMenuItem } from "./threads/access-modes";
-export { formatAge } from "./threads/age";
+export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
 export { buildApprovalCard } from "./threads/approval";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
 export type { LoginTarget } from "./threads/catalog";
@@ -166,6 +166,7 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
+export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
 export type {
   Thread,
   ThreadCatalogs,
@@ -178,10 +179,20 @@ export { buildHeadline, buildLanes, type Lane, type LaneKind } from "./threads/l
 export { buildThreadModelField } from "./threads/model-field";
 export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
 export { findOpenItem } from "./threads/open-item";
+export {
+  decideThreadPose,
+  decideThreadRowEnd,
+  describePose,
+  POSES,
+  type Pose,
+  type ThreadRowEnd,
+} from "./threads/pose";
 export { mergeTranscript } from "./threads/transcript";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
+export { decideRelatedReads, type RelatedReads } from "./threads/related-reads";
+export { formatRequestQuestion } from "./threads/request-question";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export {
@@ -191,9 +202,16 @@ export {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
+export {
+  buildSidebarSections,
+  type ExpandedSections,
+  type ProjectSection,
+  type SidebarSections,
+  type WaitingSection,
+} from "./threads/sidebar-sections";
 export { buildSiblingTabs, type ThreadTab } from "./threads/siblings";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
-export { pickProjectTone, type ProjectTone } from "./threads/tone";
+export { pickProjectHue, pickProjectTone, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { isClonableRemote, REMOTE_REFUSAL } from "./remote";

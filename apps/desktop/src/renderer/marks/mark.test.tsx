@@ -37,6 +37,15 @@ describe("Mark", () => {
     expect(glyph.getAttribute("height")).toBe("16");
   });
 
+  it("hides a decorative mark from assistive technology", () => {
+    const { container } = render(<Mark state="waiting" decorative />);
+    const mark = container.firstElementChild!;
+    expect(mark.getAttribute("class")).toBe("mark mark--waiting");
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    expect(mark.hasAttribute("role")).toBe(false);
+    expect(mark.hasAttribute("aria-label")).toBe(false);
+  });
+
   it("fills the working mark's three dots", () => {
     render(<Mark state="working" />);
     const dots = screen.getByRole("img", { name: "working" }).querySelectorAll("circle");

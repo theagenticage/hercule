@@ -43,12 +43,51 @@ const createBuild = async (prefix: string, entry = "export const entry = 1;"): P
   return folder;
 };
 
-const checkBudget = (folder: string) =>
-  run("bun", ["run", join(root, "scripts/check-bundle-budget.ts"), folder], { cwd: root });
+/**
+ * Adds to the build in `folder` what a router that splits routes leaves:
+ * `assets/screen.js`, split from `src/routes/screen.tsx`, which imports
+ * `assets/shared.js`, and `assets/other.js`, split from another route. Writes
+ * the Vite manifest that names them, unless `withManifest` is false, and the
+ * source file of the first route. Returns that source file's path.
+ */
+const addSplitRoutes = async (folder: string, { withManifest = true } = {}): Promise<string> => {
+  await writeFile(join(folder, "assets/screen.js"), "export const screen = 1;");
+  await writeFile(join(folder, "assets/shared.js"), "export const shared = 1;");
+  await writeFile(join(folder, "assets/other.js"), "export const other = 1;");
+  if (withManifest) {
+    await mkdir(join(folder, ".vite"));
+    await writeFile(
+      join(folder, ".vite/manifest.json"),
+      JSON.stringify({
+        "index.html": { file: "assets/entry.js", isEntry: true, imports: ["_vendor.js"] },
+        "_vendor.js": { file: "assets/vendor.js" },
+        "routes/screen.tsx?tsr-split=component": {
+          file: "assets/screen.js",
+          isDynamicEntry: true,
+          imports: ["_shared.js", "_vendor.js"],
+        },
+        "_shared.js": { file: "assets/shared.js" },
+        "routes/other.tsx?tsr-split=component": { file: "assets/other.js", isDynamicEntry: true },
+      }),
+    );
+  }
+  const routeFile = join(folder, "src/routes/screen.tsx");
+  await mkdir(join(folder, "src/routes"), { recursive: true });
+  await writeFile(routeFile, "export const Route = {};");
+  return routeFile;
+};
+
+const checkBudget = (folder: string, ...options: ReadonlyArray<string>) =>
+  run("bun", ["run", join(root, "scripts/check-bundle-budget.ts"), folder, ...options], {
+    cwd: root,
+  });
 
 /** Resolves to the error output the check failed with, or fails the test. */
-const readBudgetFailure = async (folder: string): Promise<string> => {
-  const refusal = await checkBudget(folder).then(
+const readBudgetFailure = async (
+  folder: string,
+  ...options: ReadonlyArray<string>
+): Promise<string> => {
+  const refusal = await checkBudget(folder, ...options).then(
     () => undefined,
     (thrown: { readonly stderr: string }) => thrown,
   );
@@ -94,6 +133,39 @@ describe("check-bundle-budget", () => {
     const stderr = await readBudgetFailure(join(tmpdir(), "hercule-no-such-build"));
 
     expect(stderr).toContain("there is no build in");
+  });
+});
+
+describe("check-bundle-budget --route", () => {
+  it("also counts the chunks a named route was split into, and the chunks they import", async () => {
+    const folder = await createBuild("./");
+    const routeFile = await addSplitRoutes(folder);
+
+    const { stdout } = await checkBudget(folder, "--route", routeFile);
+
+    // The entry and its preload, the route's chunk and the chunk it imports:
+    // not the other route's chunk, nor `assets/route.js`, which no route names.
+    expect(stdout).toContain("across 4 chunks, of 6 built");
+    expect(stdout).toMatch(/assets\/screen\.js +\S+ kB +route/);
+    expect(stdout).toMatch(/assets\/shared\.js +\S+ kB +route/);
+  });
+
+  it("fails when a route file does not exist, rather than count nothing for it", async () => {
+    const folder = await createBuild("./");
+    await addSplitRoutes(folder);
+
+    const stderr = await readBudgetFailure(folder, "--route", join(folder, "src/routes/typo.tsx"));
+
+    expect(stderr).toContain("there is no route file at");
+  });
+
+  it("fails when a route is named and the build has no manifest", async () => {
+    const folder = await createBuild("./");
+    const routeFile = await addSplitRoutes(folder, { withManifest: false });
+
+    const stderr = await readBudgetFailure(folder, "--route", routeFile);
+
+    expect(stderr).toContain("has no Vite manifest");
   });
 });
 

@@ -10,7 +10,9 @@
  * name says what it draws, such as `face/waiting/22` or `icon/plus/14`; the
  * tool reports differences by that name.
  */
-import { HUES, POSES, SHAPES, WARDROBE, type Look, type MarkState, type Pose } from "../faces";
+import { POSES, type Pose } from "@hercule/client-core";
+import { HUES, SHAPES, WARDROBE, type Look } from "../faces";
+import type { MarkState } from "../marks";
 
 /**
  * An icon, by the name of its component: `plus` is `PlusIcon`. The Bureau
