@@ -381,6 +381,7 @@ export {
   EventSelector,
   isSchedule,
   Schedule,
+  TriggerFiresOn,
   TriggerOn,
   truncateIssues,
   listEntrySteps,
@@ -435,7 +436,6 @@ export {
   TriggerHealth,
   TriggerKey,
   TriggerKind,
-  TriggerOnShape,
   TriggerStatus,
 } from "./groups/trigger";
 export { readShorthandDecoder } from "./shorthand";

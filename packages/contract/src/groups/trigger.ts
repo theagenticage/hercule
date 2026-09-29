@@ -30,7 +30,7 @@ import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { EventKind } from "./event";
-import { TriggerOn } from "./workflow-definition";
+import { TriggerFiresOn, TriggerOn } from "./workflow-definition";
 
 /** A start trigger starts runs. A signal trigger resumes a live run. */
 export const TriggerKind = Schema.Literals(["start", "signal"]);
@@ -121,21 +121,17 @@ export const Trigger = Schema.Struct({
 
 export type Trigger = Schema.Schema.Type<typeof Trigger>;
 
-/**
- * Whether a trigger fires on events or on a schedule: which of the two shapes
- * its `on` has.
- */
-export const TriggerOnShape = Schema.Literals(["event", "schedule"]);
-
-export type TriggerOnShape = Schema.Schema.Type<typeof TriggerOnShape>;
-
 /** Filters for the trigger list. Each field narrows the list; there is no negation. */
 export const TriggerFilter = Schema.Struct({
   workflowId: Schema.optionalKey(Id),
   kind: Schema.optionalKey(TriggerKind),
   /** `schedule` lists the cron triggers, and `event` every other trigger. */
-  on: Schema.optionalKey(TriggerOnShape),
-  /** Only the triggers that accept events of this kind. A cron trigger accepts none. */
+  on: Schema.optionalKey(TriggerFiresOn),
+  /**
+   * Only the triggers that accept events of this kind. A cron trigger accepts
+   * none, so `cron.tick` is refused: filter with `on` set to `schedule` to
+   * list the cron triggers.
+   */
   eventKind: Schema.optionalKey(EventKind),
   status: Schema.optionalKey(TriggerStatus),
 });

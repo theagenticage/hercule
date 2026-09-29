@@ -43,6 +43,7 @@ describe("describeTrigger", () => {
     expect(describeTrigger(ON_ISSUE, "UTC", true)).toEqual({
       mark: undefined,
       status: { text: "active", tone: "muted" },
+      firesOn: "event",
       firesOnText: "github.issue.opened · any connection",
       nextFireText: undefined,
       healthError: undefined,
@@ -66,6 +67,7 @@ describe("describeTrigger", () => {
 
   it("reads a cron trigger's schedule and next fire time in the display timezone", () => {
     const reading = describeTrigger(WEEKDAYS, "Europe/Amsterdam", true);
+    expect(reading.firesOn).toBe("schedule");
     expect(reading.firesOnText).toBe("0 9 * * 1-5");
     expect(reading.nextFireText).toBe("next 4 Sep 11:00");
   });

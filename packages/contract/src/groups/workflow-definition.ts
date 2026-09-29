@@ -331,6 +331,14 @@ export type TriggerOn = Schema.Schema.Type<typeof TriggerOn>;
 /** Returns whether a trigger's `on` is a schedule rather than an event selector. */
 export const isSchedule = (on: TriggerOn): on is Schedule => "schedule" in on;
 
+/**
+ * Whether a trigger fires on events or on a schedule: `event` when its `on`
+ * is an event selector, `schedule` when it is a schedule.
+ */
+export const TriggerFiresOn = Schema.Literals(["event", "schedule"]);
+
+export type TriggerFiresOn = Schema.Schema.Type<typeof TriggerFiresOn>;
+
 /** A trigger that starts a new run for each event it accepts, or each time its schedule comes due. */
 const StartTrigger = closedStruct({
   id: NodeId,
@@ -635,9 +643,7 @@ const SIGNAL_TRIGGER_HAS_NO_SCHEDULE =
  * - `undefined` when both `kind` and `schedule` are written, or none of the
  *   keys above.
  */
-const readIntendedTriggerOnShape = (
-  on: Readonly<Record<string, unknown>>,
-): "event" | "schedule" | undefined => {
+const inferTriggerFiresOn = (on: Readonly<Record<string, unknown>>): TriggerFiresOn | undefined => {
   const has = (key: string): boolean => Object.hasOwn(on, key);
   if (has("kind") && has("schedule")) return undefined;
   if (has("kind")) return "event";
@@ -651,8 +657,8 @@ const readIntendedTriggerOnShape = (
  * `source`, or `schedule` or `timezone` beside `kind: start`. The advice
  * depends on the rest of the trigger, so that following it does not lead to
  * the next error. For example, a signal trigger cannot move its schedule
- * under `on`, so it is told to remove it. Returns `undefined` for any other
- * key.
+ * under `on`, and neither can a trigger whose `on` already has one, so both
+ * are told to remove it. Returns `undefined` for any other key.
  */
 const describeMovedTriggerKey = (
   trigger: Readonly<Record<string, unknown>>,
@@ -666,7 +672,8 @@ const describeMovedTriggerKey = (
   if (key !== "schedule" && key !== "timezone") return undefined;
   if (trigger["kind"] === "signal") return `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} Remove ${key}.`;
   const on = trigger["on"];
-  if (isRecord(on) && readIntendedTriggerOnShape(on) === "event") {
+  if (isRecord(on) && Object.hasOwn(on, key)) return `on already has a ${key}. Remove this one.`;
+  if (isRecord(on) && inferTriggerFiresOn(on) === "event") {
     return key === "schedule"
       ? "on already accepts events, and a trigger cannot also fire on a schedule. Remove schedule."
       : "Only a schedule has a timezone. Remove timezone.";
@@ -690,7 +697,9 @@ const describeMovedTriggerKey = (
  * - `timezone` in an event selector: say that only a schedule has one;
  * - a schedule under a signal trigger's `on`: say that a signal trigger
  *   accepts only events, and drop the errors that follow from it: that
- *   `kind` is missing, and that `timezone` is not known.
+ *   `kind` is missing, and that `timezone` is not known;
+ * - a timezone without a schedule under a signal trigger's `on`: say that a
+ *   signal trigger cannot fire on a schedule.
  */
 const describeTriggerKeyIssue = (
   issue: SchemaIssue.Issue,
@@ -704,14 +713,15 @@ const describeTriggerKeyIssue = (
   if (path.length === 3) {
     const moved = describeMovedTriggerKey(trigger, key);
     if (moved !== undefined) return [{ path, message: moved }];
-    const isFixedByMove =
+    // The error for the old key already tells the author to write on.
+    const hasOldKeyInPlaceOfOn =
       Object.hasOwn(trigger, "source") ||
       (trigger["kind"] !== "signal" && Object.hasOwn(trigger, "schedule"));
-    return key === "on" && issue._tag === "MissingKey" && isFixedByMove ? [] : undefined;
+    return key === "on" && issue._tag === "MissingKey" && hasOldKeyInPlaceOfOn ? [] : undefined;
   }
   const on = trigger["on"];
   if (path.length !== 4 || key !== "on" || onKey === undefined || !isRecord(on)) return undefined;
-  const shape = readIntendedTriggerOnShape(on);
+  const shape = inferTriggerFiresOn(on);
   if (trigger["kind"] === "signal" && Object.hasOwn(on, "schedule")) {
     if (onKey === "schedule") {
       const fix = Object.hasOwn(on, "kind")
@@ -720,6 +730,9 @@ const describeTriggerKeyIssue = (
       return [{ path, message: `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} ${fix}` }];
     }
     if (onKey === "kind" || (onKey === "timezone" && shape === "schedule")) return [];
+  }
+  if (trigger["kind"] === "signal" && onKey === "timezone") {
+    return [{ path, message: `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} Remove timezone.` }];
   }
   if (onKey === "timezone" && shape === "event") {
     return [{ path, message: "Only a schedule has a timezone. Remove timezone." }];
@@ -764,7 +777,7 @@ const listTriggerOnIssues = (
     const what = written === null ? "on has no value." : `on is ${describeWritten(written)}.`;
     return [{ path, message: `${what} ${TRIGGER_ON_CHOICES}` }];
   }
-  const shape = readIntendedTriggerOnShape(written);
+  const shape = inferTriggerFiresOn(written);
   if (shape === undefined) {
     const keys = Object.keys(written);
     const what =
@@ -830,6 +843,9 @@ const describeDefinitionIssue = (
       ];
     }
     case "AnyOf": {
+      // Matched by identity, so wrapping or annotating `TriggerOn` where a
+      // start trigger uses it would stop this match. The tests that expect
+      // only one shape's errors for a bad `on` fail when that happens.
       if (issue.ast === TriggerOn.ast) {
         return listTriggerOnIssues(readValueAt(value, path), path, value);
       }

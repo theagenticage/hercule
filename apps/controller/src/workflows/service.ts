@@ -73,7 +73,7 @@ import { currentStamp, requireGrant } from "../actor";
 import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
-import { AuditLog, EventKinds } from "../events";
+import { AuditLog, CRON_TICK_EVENT_KIND, EventKinds } from "../events";
 import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
@@ -133,6 +133,10 @@ const SIGNAL_TRIGGER_HAS_NO_STATUS =
 
 const NO_SUCH_TRIGGER =
   "no such trigger; check the workflow id, and the trigger id as the workflow's source spells it";
+
+const CRON_TICK_IS_NO_TRIGGER_EVENT_KIND =
+  `"${CRON_TICK_EVENT_KIND}" is not an event kind a trigger accepts: a cron trigger fires on a schedule. ` +
+  "To list the cron triggers, filter with on set to schedule.";
 
 const SOURCE_AND_DEFINITION_TOGETHER =
   "The request sent both source and definition. Send only one of them: the workflow is stored from one or the other.";
@@ -637,7 +641,13 @@ const make = Effect.gen(function* () {
           : { errors: parsed.failure, warnings: [] };
       }),
 
-    /** Returns one page of triggers across all workflows, the newest first. */
+    /**
+     * Returns one page of triggers across all workflows, the newest first.
+     * Fails with a `Validation` error when the filter names the event kind
+     * `cron.tick`. A cron trigger's row stores that kind, but a cron trigger
+     * fires on a schedule and accepts no events, so a filter on it would
+     * always list nothing. The error points the caller to `on: schedule`.
+     */
     queryTriggers: (input: TriggerQueryInput): Effect.Effect<TriggerPage, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("trigger.query");
@@ -645,6 +655,13 @@ const make = Effect.gen(function* () {
           decodeTriggerQuery(input),
           createDecodeValidationError,
         );
+        if (filter.eventKind === CRON_TICK_EVENT_KIND) {
+          return yield* Effect.fail(
+            createValidationError([
+              { path: ["eventKind"], message: CRON_TICK_IS_NO_TRIGGER_EVENT_KIND },
+            ]),
+          );
+        }
         const listing = yield* refuseCursor(
           workflows.listTriggers({
             limit: limit ?? DEFAULT_PAGE_LIMIT,

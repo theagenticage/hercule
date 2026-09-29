@@ -174,6 +174,30 @@ describe("hercule workflow", () => {
     ]);
   });
 
+  it("prints a trigger's filter in the last column, even when an earlier row has it", () => {
+    const listed = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            { triggerId: "labeled", on: { kind: "task.created", filter: "event.a == 1" } },
+            {
+              triggerId: "nightly",
+              on: { schedule: "0 2 * * *" },
+              nextFireAt: "2026-09-30T02:00:00.000Z",
+            },
+          ],
+        },
+      },
+      lookUpCommand("trigger", "list"),
+    );
+    expect(listed).toEqual([
+      "triggerId  on            nextFireAt                filter",
+      "labeled    task.created                            event.a == 1",
+      "nightly    0 2 * * *     2026-09-30T02:00:00.000Z",
+    ]);
+  });
+
   it("prints one line per error and per warning after validate, or one line when there are none", () => {
     const validate = lookUpCommand("workflow", "validate");
     expect(

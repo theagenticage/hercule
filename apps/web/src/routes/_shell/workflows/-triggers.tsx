@@ -109,7 +109,14 @@ function TriggerRow({
           ) : null}
         </span>
         <span className="shrink-0 font-mono text-fine font-emph text-ink">{triggerId}</span>{" "}
-        <span className="min-w-0 flex-1 truncate font-mono text-fine text-faint">
+        <span
+          className={cn(
+            "flex-1 font-mono text-fine",
+            // A schedule is short and is a cron trigger's main fact, so it is
+            // never cut short. An event kind with its Connection can be long.
+            reading.firesOn === "schedule" ? "shrink-0 text-muted" : "min-w-0 truncate text-faint",
+          )}
+        >
           {reading.firesOnText}
         </span>{" "}
         {reading.nextFireText === undefined ? null : (

@@ -20,7 +20,7 @@ import type {
   TriggerKey,
   TriggerKind,
   TriggerOn,
-  TriggerOnShape,
+  TriggerFiresOn,
   TriggerStatus,
   Workflow,
   WorkflowDefinition,
@@ -155,7 +155,7 @@ export interface TriggerPageRequest {
   readonly workflowId: string | undefined;
   readonly kind: TriggerKind | undefined;
   /** `schedule` lists the cron triggers, and `event` every other trigger. */
-  readonly on: TriggerOnShape | undefined;
+  readonly on: TriggerFiresOn | undefined;
   /** Lists the triggers that accept events of this kind. A cron trigger accepts none. */
   readonly eventKind: string | undefined;
   readonly status: TriggerStatus | undefined;
@@ -209,9 +209,15 @@ const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
  * the events the Scheduler emits for it, its schedule and timezone, and no
  * Connection or filter. Any other trigger is stored with the event kind,
  * Connection and filter of its event selector, and no schedule.
- * `isCronTriggerRow` reads a row by the same rule. This condition is also the
- * condition of the partial index `triggers_cron_next_fire`, so SQLite can use
- * that index only while the two match word for word.
+ * `isCronTriggerRow` reads a row by the same rule.
+ *
+ * This condition must stay the same, term for term, as the condition of the
+ * partial index `triggers_cron_next_fire`. The index writes the columns
+ * without the `triggers.` prefix, which is fine. SQLite uses a partial index
+ * only when it can prove that the query's WHERE implies the index's
+ * condition, and it proves that by matching the terms one by one. A term
+ * written differently here, even with the same meaning, stops SQLite from
+ * using the index.
  */
 const IS_CRON_TRIGGER = `triggers.kind = 'start' AND triggers.event_kind = '${CRON_TICK_EVENT_KIND}'
   AND triggers.schedule IS NOT NULL`;

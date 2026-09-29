@@ -1004,7 +1004,7 @@ describe("listing triggers by what they fire on", () => {
       return page.items.map((item) => item.triggerId).sort();
     });
 
-  it("lists the cron triggers for on schedule, the others for on event, and no cron trigger for an event kind", async () => {
+  it("lists the cron triggers for on schedule, the others for on event, and no cron trigger for the event kind its row stores", async () => {
     const listed = await run(
       Effect.gen(function* () {
         yield* storeWorkflow(

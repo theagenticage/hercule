@@ -1535,6 +1535,26 @@ const LISTENS_FOR_CRON_TICK: InvalidFixture = {
   paths: [["triggers", "0", "on", "kind"]],
 };
 
+/**
+ * A signal trigger that listens for the event the Scheduler emits. A signal
+ * trigger cannot fire on a schedule either, so its error must not say to
+ * write one.
+ */
+const SIGNAL_LISTENS_FOR_CRON_TICK: InvalidFixture = {
+  description: "a signal trigger that listens for cron.tick",
+  build: () =>
+    buildOneTriggerSource(
+      "Waits for ticks",
+      "kind: signal",
+      "on:",
+      "  kind: cron.tick",
+      "correlation:",
+      "  event: event.payload.taskId",
+      "  run: steps.file_task.output.id",
+    ),
+  paths: [["triggers", "0", "on", "kind"]],
+};
+
 /** Two invalid cron schedules: plain words, and an hour past 23. */
 const INVALID_SCHEDULES: InvalidFixture = {
   description: "cron schedules that are not valid",
@@ -1663,6 +1683,7 @@ const TRIGGER_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
   ABSENT_CONNECTION,
   WRONG_TYPE_CONNECTION,
   LISTENS_FOR_CRON_TICK,
+  SIGNAL_LISTENS_FOR_CRON_TICK,
   INVALID_SCHEDULES,
   INVALID_TIMEZONE,
   UNDECLARED_INPUT_MAPPING,
@@ -1795,6 +1816,15 @@ describe("the trigger rules", () => {
       expect(issue!.message).toContain("the Scheduler emits it only for cron triggers");
       expect(issue!.message).toContain("write schedule under on in place of kind");
       expect(issue!.message).not.toContain("The known event kinds are");
+    });
+  });
+
+  it("rejects a signal trigger on cron.tick, with a message that says to name the kind of an event the run waits for", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, SIGNAL_LISTENS_FOR_CRON_TICK);
+      expect(issue!.message).toContain("A signal trigger resumes a run when an event arrives");
+      expect(issue!.message).toContain("The known event kinds are");
+      expect(issue!.message).not.toContain("schedule");
     });
   });
 

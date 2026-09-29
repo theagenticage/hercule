@@ -239,6 +239,30 @@ describe("listWorkflowCompletions", () => {
     expect(completeOn([], "signal")).toEqual(["kind", "connectionId", "filter"]);
   });
 
+  it("narrows a step or a trigger with no kind yet to the shapes that accept the keys written", () => {
+    const stepLabels = listLabels(
+      completeAtEnd(["name: Review", "steps:", "  - id: review", "    prompt: Review it", "    "]),
+    );
+    // Only an agent step has a prompt, so no action step key is offered.
+    expect(stepLabels).toContain("agent");
+    expect(stepLabels).not.toContain("action");
+
+    const triggerLabels = listLabels(
+      completeAtEnd([
+        "name: Review",
+        "steps: []",
+        "triggers:",
+        "  - id: merged",
+        "    correlation:",
+        "      event: event.payload.id",
+        "    ",
+      ]),
+    );
+    // Only a signal trigger has a correlation, so no start trigger key is offered.
+    expect(triggerLabels).toContain("on");
+    expect(triggerLabels).not.toContain("inputs");
+  });
+
   it("offers the catalog's ids after action, agent and the event kind a trigger is on", () => {
     expect(
       completeAtEnd([

@@ -809,8 +809,13 @@ describe("trigger.query", () => {
       expect(sortTriggerIds(await queryTriggers(base, token, "?eventKind=task.updated"))).toEqual([
         "s",
       ]);
-      // A cron trigger accepts no events, so no event kind lists it.
-      expect(await queryTriggers(base, token, "?eventKind=cron.tick")).toEqual([]);
+      // A cron trigger accepts no events, so filtering on its stored event kind is refused.
+      const cronTickResponse = await get(base, "/api/v1/triggers?eventKind=cron.tick", token);
+      const cronTickRefusal = await readErrorBody(cronTickResponse);
+      expect(cronTickResponse.status, cronTickRefusal.text).toBe(400);
+      expect(cronTickRefusal.code).toBe("validation");
+      expect(cronTickRefusal.issues).toEqual([["eventKind"]]);
+      expect(cronTickRefusal.text).toContain("filter with on set to schedule");
       expect(sortTriggerIds(await queryTriggers(base, token, "?status=active"))).toEqual([
         "a",
         "b",

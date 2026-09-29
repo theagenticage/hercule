@@ -210,10 +210,13 @@ const listInputIssues = (
 
 /**
  * Validates the event kind and `connectionId` of a trigger's event selector.
- * `path` is the path of the selector in the definition.
+ * `path` is the path of the selector in the definition, and `triggerKind` is
+ * the kind of the trigger that holds it.
  *
  * - The event kind must exist. `cron.tick` is not one: the Scheduler emits it
- *   only for cron triggers, so its error tells the author to write a schedule.
+ *   only for cron triggers. Its error tells the author of a start trigger to
+ *   write a schedule. A signal trigger cannot fire on a schedule, so its error
+ *   tells the author to name the kind of an event the run waits for.
  * - An event kind of a plugin needs a `connectionId`: the id of a Connection
  *   of the kind's Connection type, or `any`.
  * - A core event kind must have no `connectionId`.
@@ -224,6 +227,7 @@ const listInputIssues = (
 const listEventSelectorIssues = (
   selector: EventSelector,
   path: ReadonlyArray<string>,
+  triggerKind: Trigger["kind"],
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
   const { kind, connectionId } = selector;
@@ -234,11 +238,14 @@ const listEventSelectorIssues = (
         path: [...path, "kind"],
         message:
           `${quoteAuthorText(kind)} is not a known event kind. ` +
-          (kind === CRON_TICK_EVENT_KIND
-            ? `No trigger can listen for ${CRON_TICK_EVENT_KIND}: the Scheduler emits it only for cron triggers. ` +
-              'To fire on a schedule, write schedule under on in place of kind, such as schedule: "0 9 * * 1-5" for 09:00 on weekdays.'
-            : "A trigger can listen for a platform event kind or an event kind of an active plugin. " +
-              `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`),
+          (kind !== CRON_TICK_EVENT_KIND
+            ? "A trigger can listen for a platform event kind or an event kind of an active plugin. " +
+              `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`
+            : triggerKind === "start"
+              ? `No trigger can listen for ${CRON_TICK_EVENT_KIND}: the Scheduler emits it only for cron triggers. ` +
+                'To fire on a schedule, write schedule under on in place of kind, such as schedule: "0 9 * * 1-5" for 09:00 on weekdays.'
+              : "A signal trigger resumes a run when an event arrives, so it names the kind of an event the run waits for. " +
+                `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`),
       },
     ];
   }
@@ -417,7 +424,7 @@ const checkTrigger = (
   if (isSchedule(trigger.on)) {
     issues.push(...listScheduleIssues(trigger.on, onPath));
   } else {
-    issues.push(...listEventSelectorIssues(trigger.on, onPath, references));
+    issues.push(...listEventSelectorIssues(trigger.on, onPath, trigger.kind, references));
     expressionChecks.push(checkFilter(trigger.on, onPath));
   }
   if (trigger.kind === "start") {

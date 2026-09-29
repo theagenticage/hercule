@@ -938,6 +938,49 @@ ${ONE_STEP}`);
       },
     ]);
   });
+
+  it("tells a trigger to remove an old top-level schedule or timezone that on already has", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      schedule: "0 9 * * *"
+      timezone: UTC
+    schedule: "0 2 * * *"
+    timezone: Europe/Amsterdam
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "schedule"],
+        message: "on already has a schedule. Remove this one.",
+      },
+      {
+        path: ["triggers", "0", "timezone"],
+        message: "on already has a timezone. Remove this one.",
+      },
+    ]);
+  });
+
+  it("refuses a timezone under a signal trigger's on, which has no schedule", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: signal
+    on:
+      kind: task.created
+      timezone: UTC
+    correlation:
+      event: event.payload.id
+      run: steps.file_task.output.id
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "timezone"],
+        message:
+          "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule. " +
+          "Remove timezone.",
+      },
+    ]);
+  });
 });
 
 describe("parsing a source with YAML anchors and aliases", () => {

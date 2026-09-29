@@ -3,7 +3,13 @@
  * status, what it fires on, when it fires next, why it failed, which
  * scheduled times it missed, and whether it can be paused or resumed.
  */
-import { ANY_CONNECTION, isSchedule, type Trigger, type TriggerOn } from "@hercule/contract";
+import {
+  ANY_CONNECTION,
+  isSchedule,
+  type Trigger,
+  type TriggerFiresOn,
+  type TriggerOn,
+} from "@hercule/contract";
 import { toIdTail } from "./id-tail";
 import { formatStamp } from "./time-context";
 
@@ -11,6 +17,9 @@ import { formatStamp } from "./time-context";
  * What a page shows about one trigger. A field is `undefined` when there is
  * nothing to show for it.
  *
+ * - `firesOn`: whether the trigger fires on events or on a schedule. A page
+ *   shows a schedule in full, because it is a cron trigger's main fact, and
+ *   lets an event kind's text be cut short.
  * - `firesOnText`: what the trigger fires on. See `describeTriggerOn`.
  * - `nextFireText`: when a cron trigger fires next, "next 4 Sep 09:00". A
  *   paused trigger, or any trigger of a disabled workflow, does not fire, so
@@ -32,6 +41,7 @@ import { formatStamp } from "./time-context";
 export interface TriggerReading {
   readonly mark: "paused" | "failed" | undefined;
   readonly status: { readonly text: string; readonly tone: "muted" | "attn" } | undefined;
+  readonly firesOn: TriggerFiresOn;
   readonly firesOnText: string;
   readonly nextFireText: string | undefined;
   readonly healthError: { readonly message: string; readonly atText: string } | undefined;
@@ -87,6 +97,7 @@ export const describeTrigger = (
       status === undefined
         ? undefined
         : { text: status, tone: status === "paused" ? "attn" : "muted" },
+    firesOn: isSchedule(trigger.on) ? "schedule" : "event",
     firesOnText: describeTriggerOn(trigger.on),
     nextFireText:
       nextFireAt === undefined || status === "paused" || !isWorkflowEnabled

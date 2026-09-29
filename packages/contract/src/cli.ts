@@ -1242,7 +1242,7 @@ export const CLI = {
       },
       eventKind: {
         flag: "event-kind",
-        help: "Only the triggers on this event kind, such as github.pr.labeled. A cron trigger is on no event kind.",
+        help: "Only the triggers on this event kind, such as github.pr.labeled. A cron trigger is on no event kind: use --on schedule to list the cron triggers.",
       },
       status: {
         flag: "status",

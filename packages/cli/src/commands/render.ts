@@ -111,9 +111,15 @@ const keepOnOneLine = (text: string): string => {
   return firstLine.replaceAll("\t", " ");
 };
 
-const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
+  renderTableColumns(rows, listColumns(rows));
+
+/** Same as `renderTable`, but prints only `columns`, in their order. */
+const renderTableColumns = (
+  rows: ReadonlyArray<Record<string, unknown>>,
+  columns: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
-  const columns = listColumns(rows);
   const body = rows.map((row) => columns.map((column) => keepOnOneLine(formatCell(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
@@ -316,8 +322,8 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
  *
  * - `on`: what the trigger fires on, as the web app shows it, such as
  *   "github.pr.labeled · any connection" or "0 9 * * 1-5 in Europe/Amsterdam".
- *   An event trigger's filter gets the last column, because a filter is
- *   often long.
+ * - `filter`: an event trigger's filter. `renderTriggerList` prints it in
+ *   the last column, because a filter is often long.
  * - `health`: `ok`, or `error: ` and the evaluation error.
  * - `skippedTicks`: the first and the last scheduled time a cron trigger
  *   missed.
@@ -338,6 +344,21 @@ const summarizeTrigger = (trigger: Trigger): Record<string, unknown> => ({
     ? {}
     : { filter: trigger.on.filter }),
 });
+
+/**
+ * Returns the lines of `trigger list`: a table with a row per trigger, as
+ * `summarizeTrigger` builds it. The filter column comes last, whichever row
+ * first has a filter, so a long filter never pushes other columns to the
+ * right.
+ */
+const renderTriggerList = (triggers: ReadonlyArray<Trigger>): ReadonlyArray<string> => {
+  const rows = triggers.map(summarizeTrigger);
+  const columns = listColumns(rows);
+  return renderTableColumns(rows, [
+    ...columns.filter((column) => column !== "filter"),
+    ...columns.filter((column) => column === "filter"),
+  ]);
+};
 
 /**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
@@ -578,7 +599,7 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
             renderRunList(items as ReadonlyArray<RunSummary>)
         : command.id === "trigger.query"
           ? (items: ReadonlyArray<Record<string, unknown>>) =>
-              renderTable((items as ReadonlyArray<Trigger>).map(summarizeTrigger))
+              renderTriggerList(items as ReadonlyArray<Trigger>)
           : command.id === "notification.query"
             ? (items: ReadonlyArray<Record<string, unknown>>) =>
                 renderNotificationList(items as unknown as ReadonlyArray<Notification>)
