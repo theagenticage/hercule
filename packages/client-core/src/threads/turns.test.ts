@@ -540,8 +540,8 @@ describe("buildTurns", () => {
         turnId: "t5",
         itemId: "novel1",
         // A kind this build does not know, cast past the type to simulate a
-        // future harness that sends something unmapped (spec 06: "Enums are
-        // open for consumers: unknown kinds render generically, never crash").
+        // future harness that sends something unmapped. An unknown kind must
+        // render as a generic row and never crash the transcript (spec 06 §6).
         kind: novelKind,
         detail: { note: "review mode" },
       }),
@@ -765,7 +765,7 @@ describe("buildTurns", () => {
 /**
  * The item a session's open request is about shows `awaiting approval`
  * instead of `running`, so the transcript line for `openRequest.itemId`
- * matches what the card above the composer is asking about (#70).
+ * matches what the card above the composer is asking about.
  */
 describe("buildTurns: the item an open request is about", () => {
   const buildParkedRows = (): TranscriptRow[] => [

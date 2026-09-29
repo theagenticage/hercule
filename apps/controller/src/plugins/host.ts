@@ -45,7 +45,7 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { currentStampOrSystem } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
@@ -375,7 +375,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
@@ -449,7 +449,7 @@ const make = Effect.gen(function* () {
             record: { topic: "plugin", id },
             at,
           });
-          yield* notifications.createCoreNotification({
+          yield* notifier.createCoreNotification({
             kind: "core.plugin-error",
             title: `${displayName} could not ${phase === "activate" ? "start" : "stop"}`,
             // The plugin's own error text stays out of the notification:
@@ -808,7 +808,7 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 export const PluginHostLayer: Layer.Layer<
   PluginHost,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | NotificationService | ConnectionTypes
+  SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes
 > = Layer.effect(PluginHost)(make);
 
 /**

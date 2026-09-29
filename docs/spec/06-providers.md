@@ -361,7 +361,7 @@ Item ids are native where they exist (Codex item id; Claude `tool_use` id / `mes
 
 *(Amended 2026-09-14, [#73](https://github.com/theagenticage/hercule/issues/73).)* No adapter emits `file_read_approval` in v1: `item/fileRead/requestApproval` is not in the app-server's ServerRequest set at codex 0.154.0, and Codex was the one provider that had it natively. The protocol kind stays as specced, for the adapter or the Codex release that first opens such a request.
 
-A request stays open until `respondToRequest`; the controller surfaces it as a Notification and in the session view ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). `interrupt` on a session with an open request resolves it as `cancel` (spec's consolidated semantics; follows from the park-and-resume abort caveat in section 8.2).
+A request stays open until `respondToRequest`; the controller surfaces it as a Notification and in the session view ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85): an approval surfaces as a `core.approval` decision, and a `question` surfaces in the session view only, because an answer cannot yet carry answers to questions ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.6).)* `interrupt` on a session with an open request resolves it as `cancel` (spec's consolidated semantics; follows from the park-and-resume abort caveat in section 8.2).
 
 ### 6.6 Usage and ops
 

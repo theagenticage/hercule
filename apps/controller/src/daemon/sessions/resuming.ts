@@ -43,8 +43,8 @@ const describeWorkspaceGone = (status: string): string =>
 
 /**
  * Builds the check that every resume and fork goes through. The check returns
- * the session's provider-native session id, or fails with an invalid state
- * error that gives the reason (spec 06 section 5):
+ * the session's provider-native session id. It fails with an invalid state
+ * error, whose message states the reason, when:
  *
  * - the session is still live;
  * - the session answered an assistant's conversation that was deleted;

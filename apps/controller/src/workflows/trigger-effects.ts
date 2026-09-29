@@ -17,7 +17,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import type { Event, TriggerKey } from "@hercule/contract";
-import { commitUninterruptibly, nowIso, uuidFromString, uuidToString } from "../db";
+import { nowIso, uuidFromString, uuidToString, withTransaction } from "../db";
 import { readPipelineEvent } from "../events";
 import { evaluateMapping, type EvaluationContext, type ExpressionError } from "../expressions";
 import { workflowRepository, type RoutableStartTrigger } from "./repository";
@@ -146,7 +146,7 @@ const make = Effect.gen(function* () {
    * whose run can no longer start, and logs why.
    */
   const startPendingRun = (effectId: number): Effect.Effect<void, SqlError> =>
-    commitUninterruptibly(
+    withTransaction(
       sql,
       Effect.gen(function* () {
         const pending = yield* effects.readPending(effectId);
@@ -187,7 +187,7 @@ const make = Effect.gen(function* () {
     failure: unknown,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      const discarded = yield* commitUninterruptibly(
+      const discarded = yield* withTransaction(
         sql,
         Effect.tap(effects.discardIfPending(effectId), (found) =>
           Option.isNone(found)

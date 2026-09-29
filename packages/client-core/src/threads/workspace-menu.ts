@@ -1,9 +1,10 @@
 /**
- * Builds the composer's workspace menu: the workspaces a thread can open in
- * (spec 14 §The composer, the Workspace selector). There is one row per
- * option: each repo's main workspace, a new worktree, and every live worktree
- * of the project. Each row explains itself on its second line, because the
- * rule here is "dimmed with the reason, never hidden".
+ * Builds the composer's workspace menu: the workspaces a thread can open in.
+ * There is one row per option: each repo's main workspace, a new worktree,
+ * and every live worktree of the project. Each row explains itself on its
+ * second line. A row the user cannot pick is dimmed with the reason, never
+ * hidden, so the user learns why it is not available. Spec 14 §The composer
+ * owns the Workspace selector.
  *
  * "None" is usually not offered: a project with a repo always works in one of
  * its workspaces. "None" is the only row when there is no repo, and then the

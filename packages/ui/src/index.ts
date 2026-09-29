@@ -15,6 +15,7 @@ export { Switch } from "./primitives/switch";
 export { SegmentedControl, SegmentedControlItem } from "./primitives/segmented-control";
 export { Textarea } from "./primitives/textarea";
 
+export { AnswerLedger, type AnswerLedgerRow } from "./patterns/answer-ledger";
 export { EmptyState, Field, FormCard, Group, LaneLabel, Row } from "./patterns/patterns";
 
 export {

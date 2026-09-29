@@ -1,28 +1,18 @@
 /**
- * The notification operations: `notification.query`, `read`, `create` and
- * `withdraw`, plus two the controller calls for the core's own
- * notifications: `createCoreNotification` and `withdrawDecisionsAbout`.
+ * The notification operations: `notification.query`, `read`, `create`,
+ * `withdraw` and `act`.
  *
- * The producer and its mute key are stamped from the caller, never taken from
- * the payload:
+ * Every caller with the grant reads every notification. The user creates
+ * none, because a notification is a message to the user. Creating one, and
+ * every other write a producer makes, goes through the `Notifier`, which the
+ * domains below this service use too.
  *
- * - a session produces as itself, and its mute key is `assistant:<id>` when
- *   the session speaks for an assistant;
- * - a run's step produces as that run and step, and its mute key is
- *   `workflow:<id>` when the run was started from a stored workflow;
- * - the core produces its own `core.*` kinds through `createCoreNotification`,
- *   and cannot be muted.
- *
- * The user reads notifications but does not create them: a notification is a
- * message to the user.
- *
- * Every write records one audit entry in the same transaction and announces
- * the change on the `notification` live topic. Muting decides only whether a
- * notification is pushed to a delivery sink. No sink exists yet, so the mute
- * key is recorded on the notification and nothing reads it here.
+ * An open decision is returned to the user with each answer's describe line,
+ * written from the current names by the `BindableOperations` port. Taking an
+ * answer runs its operation through the same port, as the user, in the
+ * transaction that resolves the decision.
  */
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -34,25 +24,23 @@ import {
   createForbiddenError,
   createInvalidStateError,
   createNotFoundError,
+  decodeBindableOperation,
   DEFAULT_PAGE_LIMIT,
-  MAX_NOTIFICATION_BODY_LENGTH,
-  MAX_NOTIFICATION_TITLE_LENGTH,
   NOTIFICATION_SORT_FIELDS,
-  NotificationCreateInput,
   NotificationFilter,
   NotificationWithdrawInput,
+  type BindableOperation,
   type BoundAction,
-  type CoreNotificationKind,
-  type EventId,
+  type BoundOperation,
+  type DescribeLine,
   type Forbidden,
   type Id,
   type InvalidState,
-  type MuteKey,
   type NotFound,
   type Notification,
-  type NotificationCreateResult,
+  type NotificationAction,
+  type NotificationActInput,
   type NotificationProducer,
-  type NotificationSubject,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -60,14 +48,15 @@ import {
   buildSessionStamp,
   currentStamp,
   requireGrant,
-  SYSTEM_ACTOR,
+  requireUserActor,
   type Actor,
-  type RunActor,
   type SessionActor,
 } from "../actor";
 import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { notificationRepository, type NewNotification } from "./repository";
+import { BindableOperations, type BindableOperationError } from "./bindable-operations";
+import { Notifier } from "./notifier";
+import { notificationRepository } from "./repository";
 
 /** The input of `notification.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -82,8 +71,12 @@ export interface WithdrawInput extends NotificationWithdrawInput {
   readonly id: Id;
 }
 
+/** The input of `notification.act`: the notification's id and the answer to take. */
+export interface ActInput extends NotificationActInput {
+  readonly id: Id;
+}
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeCreate = Schema.decodeUnknownEffect(NotificationCreateInput);
 const decodeWithdraw = Schema.decodeUnknownEffect(NotificationWithdrawInput);
 
 /** One page of notifications, in the contract's shape. */
@@ -92,38 +85,7 @@ export interface NotificationPage {
   readonly nextCursor?: string;
 }
 
-/**
- * When a core notification is held back: when one of the same kind was
- * created about every subject in `about`, either
- *
- * - after `since`, such as the instant a lasting condition began, or
- * - `within` this long before now: a quiet period, for a condition that comes
- *   back again and again.
- *
- * `about` is every subject of the new notification when left out.
- */
-export type UnlessRaised = ({ readonly since: string } | { readonly within: Duration.Duration }) & {
-  readonly about?: ReadonlyArray<NotificationSubject>;
-};
-
-/** A notification the core raises about itself. */
-export interface CoreNotification {
-  readonly kind: CoreNotificationKind;
-  readonly title: string;
-  readonly body?: string;
-  readonly subject: ReadonlyArray<NotificationSubject>;
-  /** The one event the notification was derived from, such as a `run.failed`. */
-  readonly eventId?: EventId;
-}
-
 const NO_SUCH_NOTIFICATION = "no such notification";
-
-/**
- * The refusal for a user who calls `notification.create`. The user holds every
- * grant, so the message has to say why the grant does not help.
- */
-const USER_CANNOT_CREATE =
-  "a notification is a message to you, so you cannot create one; a session or a workflow step creates it";
 
 /** The refusal for a run that calls `notification.withdraw`. */
 const RUN_CANNOT_WITHDRAW =
@@ -132,45 +94,90 @@ const RUN_CANNOT_WITHDRAW =
 /** The refusal for a caller who withdraws a notification someone else produced. */
 const NOT_THE_PRODUCER = "only the producer of a notification may withdraw it";
 
-/**
- * Returns the status a new notification starts in. A decision is open until it
- * is resolved; an informational notification has nothing to answer, so it is
- * resolved from the start. The only resolution it may carry is `handled`: an
- * assistant covered what it reports, so it was recorded without being pushed.
- */
-const decideInitialStatus = (actions: ReadonlyArray<BoundAction>) =>
-  actions.length > 0 ? ("open" as const) : ("resolved" as const);
+/** The describe line of an answer that runs nothing. */
+const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does nothing" }];
 
 /**
- * Returns the key that mutes a notification from this caller: the assistant a
- * session speaks for, or the stored workflow a run was started from. Returns
- * undefined when there is nothing to mute by: a session in no assistant's
- * conversation, or a run of a sent workflow.
+ * The refusal for a caller who is not the user taking an answer. A session
+ * may hold `notification.write`, the grant this operation checks, so the
+ * message has to say why the grant does not help.
  */
-const decideMuteKey = (caller: SessionActor | RunActor): MuteKey | undefined => {
-  if (caller._tag === "session") {
-    return caller.assistantId === null ? undefined : `assistant:${caller.assistantId}`;
-  }
-  return caller.workflowId === null ? undefined : `workflow:${caller.workflowId}`;
-};
+const ONLY_THE_USER =
+  "only the user may take an answer: it runs its operation as the user, so a session or a workflow step may not take one; ask the user instead";
 
-/**
- * Shortens text to at most `max` characters, ending it with an ellipsis when
- * it had to be cut. The core builds titles and bodies from names and error
- * messages it does not control, and a stored notification longer than the
- * contract allows could not be returned by `notification.query` at all.
- */
-const shortenTo = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+/** The refusal for an answer to a decision that is no longer open, or never was. */
+const ALREADY_RESOLVED =
+  "the notification is already resolved, so its answers can no longer be taken";
 
 /** Checks whether a caller is the session that produced a notification. */
 const isProducer = (actor: Actor, producer: NotificationProducer): actor is SessionActor =>
   actor._tag === "session" && producer.type === "session" && producer.sessionId === actor.sessionId;
 
+/**
+ * An answer's operation after the check at read time: decoded, or refused,
+ * with a describe line that shows the user why the answer cannot be taken.
+ */
+type CheckedOperation =
+  | { readonly _tag: "decoded"; readonly operation: BindableOperation }
+  | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const notifications = yield* notificationRepository;
   const audit = yield* AuditLog;
+  const notifier = yield* Notifier;
+  const operations = yield* BindableOperations;
+
+  /**
+   * Checks an answer's stored operation again before it is described. A
+   * stored answer whose operation no longer passes the check, because the
+   * list of operations an answer may run or a schema changed since it was
+   * created, cannot be taken, and its describe line shows the user why.
+   */
+  const checkStoredOperation = (operation: BoundOperation): Effect.Effect<CheckedOperation> =>
+    decodeBindableOperation(operation, []).pipe(
+      Effect.match({
+        onFailure: (refused): CheckedOperation => ({
+          _tag: "refused",
+          describeLine: [
+            {
+              kind: "text",
+              text: `Cannot be taken: ${refused.error.details.issues[0]?.message ?? refused.error.message}`,
+            },
+          ],
+        }),
+        onSuccess: (decoded): CheckedOperation => ({ _tag: "decoded", operation: decoded }),
+      }),
+    );
+
+  /**
+   * Returns a notification with the describe line on each answer when it is
+   * an open decision. The operations of all its answers are described in one
+   * call to the describer. A resolved decision's answers can no longer be
+   * taken, so it is returned as stored.
+   */
+  const addDescribeLines = (notification: Notification): Effect.Effect<Notification, SqlError> =>
+    Effect.gen(function* () {
+      if (notification.status !== "open") return notification;
+      const checked = yield* Effect.forEach(notification.actions, (action) =>
+        action.operation === null
+          ? Effect.succeed<CheckedOperation>({
+              _tag: "refused",
+              describeLine: NO_OPERATION_DESCRIBE_LINE,
+            })
+          : checkStoredOperation(action.operation),
+      );
+      const lines = yield* operations.describe(
+        checked.flatMap((entry) => (entry._tag === "decoded" ? [entry.operation] : [])),
+      );
+      let nextLine = 0;
+      const actions = notification.actions.map((action, index): NotificationAction => {
+        const entry = checked[index]!;
+        const describeLine = entry._tag === "refused" ? entry.describeLine : lines[nextLine++]!;
+        return { ...action, describeLine };
+      });
+      return { ...notification, actions };
+    });
 
   const readOrFail = (id: string): Effect.Effect<Notification, NotFound | SqlError> =>
     Effect.flatMap(
@@ -182,39 +189,35 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Writes a notification with its audit entry and announcement, in the
-   * caller's transaction if there is one.
+   * Resolves the decision as decided with the answer the user took. Fails
+   * with `InvalidState` if it was resolved any other way in the meantime.
+   *
+   * An operation may already have resolved the decision itself, with this
+   * same answer: `session.respond` resolves the approval decision about its
+   * request with the answer that carries it. That counts as decided too.
    */
-  const insertAndAudit = (
-    notification: NewNotification,
-    actor: string,
-  ): Effect.Effect<Notification, SqlError> =>
-    withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const stored = yield* notifications.insert(notification);
-        yield* audit.append({
-          kind: "notification.created",
-          actor,
-          record: { topic: "notification", id: stored.id },
-          payload: {
-            notificationId: stored.id,
-            kind: stored.kind,
-            producer: stored.producer,
-          },
-          at: stored.createdAt,
-        });
-        return stored;
-      }),
-    );
+  const decideOrFail = (
+    notification: Notification,
+    action: BoundAction,
+  ): Effect.Effect<void, InvalidState | NotFound | SqlError> =>
+    Effect.gen(function* () {
+      if (yield* notifier.decide(notification, action)) return;
+      const { resolution } = yield* readOrFail(notification.id);
+      if (resolution?.kind === "decided" && resolution.actionId === action.id) return;
+      return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
+    });
 
   return {
-    /** Returns one page of the notifications that match a filter, newest first by default. */
+    /**
+     * Returns one page of the notifications that match a filter, newest
+     * first by default. The describe lines are added only for the user, the
+     * only caller who can take an answer.
+     */
     query: (
       input: QueryInput,
     ): Effect.Effect<NotificationPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("notification.query");
+        const caller = yield* requireGrant("notification.query");
         const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const { limit, cursor, sort, ...filter } = decoded;
         const listing = yield* refuseCursor(
@@ -225,66 +228,30 @@ const make = Effect.gen(function* () {
           }),
         );
         return {
-          items: listing.items,
+          items:
+            caller._tag === "user"
+              ? yield* Effect.forEach(listing.items, addDescribeLines)
+              : listing.items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
 
-    /** Returns one notification by id. Fails with `NotFound` if it does not exist. */
+    /**
+     * Returns one notification by id. For the user, each answer of an open
+     * decision carries its describe line. Fails with `NotFound` if it does
+     * not exist.
+     */
     read: (
       id: Id,
     ): Effect.Effect<Notification, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("notification.read");
-        return yield* readOrFail(id);
+        const caller = yield* requireGrant("notification.read");
+        const notification = yield* readOrFail(id);
+        return caller._tag === "user" ? yield* addDescribeLines(notification) : notification;
       }),
 
-    /**
-     * Creates a notification as the calling session or run step, and returns
-     * its id. With actions it is an open decision; without, it is
-     * informational and resolved from the start.
-     *
-     * Fails with:
-     *
-     * - `Forbidden` for the user, because notifications are messages to the
-     *   user;
-     * - `Validation` if the payload does not match the contract, which
-     *   includes a `core.*` kind.
-     */
-    create: (
-      input: NotificationCreateInput,
-    ): Effect.Effect<
-      NotificationCreateResult,
-      Unauthenticated | Forbidden | Validation | SqlError
-    > =>
-      Effect.gen(function* () {
-        const caller = yield* requireGrant("notification.create");
-        if (caller._tag !== "session" && caller._tag !== "run") {
-          return yield* Effect.fail(createForbiddenError("notification.write", USER_CANNOT_CREATE));
-        }
-        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const producer: NotificationProducer =
-          caller._tag === "session"
-            ? { type: "session", sessionId: caller.sessionId }
-            : { type: "run", runId: caller.runId, stepId: caller.stepId };
-        const muteKey = decideMuteKey(caller);
-        const actions = decoded.actions ?? [];
-        const stored = yield* insertAndAudit(
-          {
-            kind: decoded.kind,
-            title: decoded.title,
-            ...(decoded.body === undefined ? {} : { body: decoded.body }),
-            producer,
-            ...(muteKey === undefined ? {} : { muteKey }),
-            subject: decoded.subject ?? [],
-            actions,
-            status: decideInitialStatus(actions),
-            createdAt: yield* nowIso,
-          },
-          yield* currentStamp,
-        );
-        return { notificationId: stored.id };
-      }),
+    /** Creates a notification as the calling session or run step; see `Notifier.create`. */
+    create: notifier.create,
 
     /**
      * Withdraws an open decision because its question stopped existing, and
@@ -360,103 +327,68 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates an informational notification the core raises about itself. It
-     * runs in the caller's transaction, so the notification commits with the
-     * change it reports. There is no grant check: only the controller calls it.
+     * Takes one answer of an open decision: runs its operation as the user,
+     * resolves the decision as decided with that answer, and returns the
+     * notification as it reads afterwards. An answer that runs nothing only
+     * resolves the decision.
      *
-     * A title or body longer than the contract allows is shortened, and an
-     * empty body is left out, so a notification built from an error message
-     * is always one `notification.query` can return.
+     * The rules:
      *
-     * With `unlessRaised`, it creates nothing when a notification of the
-     * same kind was already created about every subject in `about`, which is
-     * every subject of this notification when left out, recently enough (see
-     * `UnlessRaised`). A condition that lasts, such as a runner that stays
-     * away, is checked again and again; the option lets the caller report it
-     * once each time it occurs rather than on every check. `about` names
-     * fewer subjects when each notification also names something of its own,
-     * such as the run in a failed run's notification.
+     * - Only the user may take an answer. The producer's grants are never
+     *   checked, because the user's click is the authorisation, so an agent
+     *   that could click would run any bindable operation as the user.
+     * - The answer's operation is checked again before it runs, because the
+     *   list of operations an answer may run, or a schema, may have changed
+     *   since the notification was created.
+     * - The read, the operation and the resolution share one transaction, so
+     *   the operation's writes and the resolution commit together or not at
+     *   all. The operation sends nothing to a runner before the commit.
+     *   Transactions run one at a time, so a second answer to the same
+     *   decision waits for the first. It finds the decision resolved if the
+     *   first succeeded, and runs if the first failed.
+     *
+     * Fails with:
+     *
+     * - `Forbidden` for any caller but the user, even one that holds the
+     *   grant;
+     * - `NotFound` if the notification does not exist or has no such answer;
+     * - `InvalidState` if the decision is already resolved, which includes
+     *   every informational notification;
+     * - `Validation` if the answer's operation is no longer one an answer may
+     *   run, or its input no longer fits; the decision stays open;
+     * - the operation's own error when it fails; the decision stays open.
      */
-    createCoreNotification: (
-      notification: CoreNotification,
-      options?: { readonly unlessRaised?: UnlessRaised | undefined },
-    ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const now = yield* nowIso;
-          const unlessRaised = options?.unlessRaised;
-          if (
-            unlessRaised !== undefined &&
-            (yield* notifications.hasNotificationAboutSince(
-              notification.kind,
-              unlessRaised.about ?? notification.subject,
-              "since" in unlessRaised
-                ? unlessRaised.since
-                : new Date(Date.parse(now) - Duration.toMillis(unlessRaised.within)).toISOString(),
-            ))
-          ) {
-            return;
-          }
-          yield* insertAndAudit(
-            {
-              kind: notification.kind,
-              title: shortenTo(notification.title, MAX_NOTIFICATION_TITLE_LENGTH),
-              ...(notification.body === undefined || notification.body === ""
-                ? {}
-                : { body: shortenTo(notification.body, MAX_NOTIFICATION_BODY_LENGTH) }),
-              producer: { type: "core" },
-              subject: notification.subject,
-              ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
-              actions: [],
-              status: "resolved",
-              createdAt: now,
-            },
-            SYSTEM_ACTOR,
-          );
-        }),
-      ),
-
-    /**
-     * Withdraws every open decision about any of these subjects, because the
-     * subject was removed and the question with it. It runs in the caller's
-     * transaction, the one that removes the subject, and is stamped as the
-     * core. There is no grant check: only the controller calls it.
-     */
-    withdrawDecisionsAbout: (
-      subjects: ReadonlyArray<NotificationSubject>,
-      reason: string,
-    ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const ids = yield* notifications.listOpenDecisionIdsAbout(subjects);
-          if (ids.length === 0) return;
-          const at = yield* nowIso;
-          const resolution = {
-            kind: "withdrawn" as const,
-            actor: SYSTEM_ACTOR,
-            origin: "core",
-            reason,
-            at,
-          };
-          yield* Effect.forEach(
-            ids,
-            (id) =>
-              Effect.gen(function* () {
-                yield* notifications.resolve(id, resolution);
-                yield* audit.append({
-                  kind: "notification.withdrawn",
-                  actor: SYSTEM_ACTOR,
-                  record: { topic: "notification", id },
-                  payload: { notificationId: id, reason },
-                  at,
-                });
-              }),
-            { discard: true },
-          );
-        }),
-      ),
+    act: (input: ActInput): Effect.Effect<Notification, BindableOperationError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("notification.act", ONLY_THE_USER);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const notification = yield* readOrFail(input.id);
+            if (notification.status !== "open") {
+              return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
+            }
+            const action = notification.actions.find(
+              (candidate) => candidate.id === input.actionId,
+            );
+            if (action === undefined) {
+              const offered = notification.actions.map((offer) => offer.id).join(", ");
+              return yield* Effect.fail(
+                createNotFoundError(
+                  `the notification has no answer "${input.actionId}"; its answers are ${offered}`,
+                ),
+              );
+            }
+            if (action.operation !== null) {
+              yield* operations.run(
+                yield* decodeBindableOperation(action.operation, ["operation"]),
+              );
+            }
+            yield* decideOrFail(notification, action);
+          }),
+        );
+        return yield* readOrFail(input.id);
+      }),
   };
 });
 
@@ -469,5 +401,5 @@ export class NotificationService extends Context.Service<
 export const NotificationServiceLayer: Layer.Layer<
   NotificationService,
   never,
-  SqlClient.SqlClient | AuditLog
+  SqlClient.SqlClient | AuditLog | Notifier | BindableOperations
 > = Layer.effect(NotificationService)(make);

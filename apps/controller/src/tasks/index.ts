@@ -6,3 +6,4 @@ export {
   type TaskPage,
   type UpdateInput,
 } from "./service";
+export { taskRepository } from "./repository";

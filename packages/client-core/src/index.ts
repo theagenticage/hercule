@@ -117,14 +117,17 @@ export { createLive, type Live } from "./live/live";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
 export {
+  buildBoundActionRows,
   chooseNotificationMark,
   describeProducer,
   describeResolution,
+  formatDescribeLine,
   formatUnseenCount,
   isNotificationMuted,
   parseMuteKind,
   toggleMuteKey,
   UNSEEN_COUNT_READ_LIMIT,
+  type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
 export { describeRefusalReason } from "./plugin-refusal";

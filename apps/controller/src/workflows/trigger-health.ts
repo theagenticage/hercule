@@ -29,7 +29,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { TriggerKey } from "@hercule/contract";
 import { announce, nowIso } from "../db";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { workflowRepository, type TriggerFailureStage } from "./repository";
 
 /**
@@ -47,7 +47,7 @@ const NOTIFICATION_TITLES: Record<TriggerFailureStage, string> = {
 
 const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
 
   /** Tells clients watching the trigger's workflow that the trigger changed. */
   const announceTriggerChange = (key: TriggerKey): Effect.Effect<void> =>
@@ -74,7 +74,7 @@ const make = Effect.gen(function* () {
         );
         if (!turnedToError) return;
         yield* announceTriggerChange(key);
-        yield* notifications.createCoreNotification(
+        yield* notifier.createCoreNotification(
           {
             kind: "core.trigger-error",
             title: NOTIFICATION_TITLES[stage],
@@ -100,8 +100,5 @@ export class TriggerHealth extends Context.Service<TriggerHealth, Effect.Success
   "hercule/controller/workflows/TriggerHealth",
 ) {}
 
-export const TriggerHealthLayer: Layer.Layer<
-  TriggerHealth,
-  never,
-  SqlClient.SqlClient | NotificationService
-> = Layer.effect(TriggerHealth)(make);
+export const TriggerHealthLayer: Layer.Layer<TriggerHealth, never, SqlClient.SqlClient | Notifier> =
+  Layer.effect(TriggerHealth)(make);

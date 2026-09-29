@@ -77,7 +77,7 @@ One user-visible episode of a session: from a user input until the agent goes id
 _Avoid_: exchange, round, iteration
 
 **Request**:
-A provider-held question a session is parked on until an answer arrives; surfaced as the permission card docked on the thread's composer. A request is one of two different things sharing one slot. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respond` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by answers, each either one or more of the offered options or a custom string the user types. Only the rendering is alike.
+A provider-held question a session is parked on until an answer arrives; surfaced as the permission card docked on the thread's composer. A request is one of two different things sharing one slot. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respond` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by answers, each either one or more of the offered options or a custom string the user types. Only the rendering is alike.
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
@@ -450,8 +450,12 @@ A persisted message from Hercule to its user ("run failed", "trigger paused", "a
 _Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer)
 
 **Bound Action**:
-One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions.
+One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions. The operation is one on a short curated list of bindable operations, or none at all; beside its label, every answer shows a **Describe Line**.
 _Avoid_: button (as the domain term), callback, quick action
+
+**Describe Line**:
+The line the core writes under a Bound Action to say what taking it does to the system ("Start a run of *Bugfix*", "Send *continue* to session *Design ordering module*"), built from the frozen operation with the current names of what it acts on. The producer never writes, changes or hides it; that is what makes the user's choice an informed one.
+_Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
 The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Also the name of the view that presents it (confirmed by ticket #30).

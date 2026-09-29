@@ -100,7 +100,9 @@ export const buildConversationTimeouts = (
  *
  * It copies the parent's whole spec rather than picking named fields, so
  * everything an Agent gave the parent also reaches the continuation: the
- * prompt, the disallowed tools, and the output schema (ADR 0030). A fork that
+ * prompt, the disallowed tools, and the output schema. The Agent is not read
+ * again, because it may have been edited since the parent was spawned: a
+ * session's own spec is the record of what shaped it (ADR 0030). A fork that
  * ran under a different prompt than its parent would be a different piece of
  * work.
  */

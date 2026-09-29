@@ -99,8 +99,7 @@ const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: numb
  * Standard CEL keeps whole numbers (int) and decimals (double) apart, and a
  * number read from the context is always a decimal, because the context is
  * plain JSON. So `inputs.count + 1` fails in standard CEL. An author should
- * never have to think about that, so the operators below extend CEL (spec 07,
- * section 5):
+ * never have to think about that, so the operators below extend CEL:
  *
  * - `+ - * / %` between a whole number and a decimal, in either order, give a
  *   decimal. `%` also works between two decimals. Two whole numbers stay whole,
@@ -110,6 +109,8 @@ const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: numb
  * - `+` between a string and a number, in either order, joins them as text. A
  *   whole decimal is written without `.0`, as JavaScript writes it.
  * - A list or map literal may mix value types, such as `[1, inputs.price]`.
+ *
+ * Spec 07 section 5 owns these extensions.
  *
  * Every handler is pure and synchronous. A registered handler is the only way
  * custom code enters the evaluator, and an asynchronous one is the only thing

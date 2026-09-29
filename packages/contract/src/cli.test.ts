@@ -91,6 +91,7 @@ const COMMANDS: Record<string, string> = {
   "notification.read": "notification read",
   "notification.create": "notification create",
   "notification.withdraw": "notification withdraw",
+  "notification.act": "notification act",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -260,6 +261,7 @@ const RESOLVES: Record<string, string> = {
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
+  "notification.act id": "notification.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",

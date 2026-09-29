@@ -12,8 +12,9 @@ import type { PendingTriggerEffect } from "./trigger-effects";
  * workflows domain, so the workflows domain cannot import it back without
  * making the domain graph a cycle. So the workflows domain declares what it
  * needs as this service, and the controller daemon provides it from the runs
- * domain (`WorkflowRunsLayer`). This is the second step of the cycle ladder in
- * ADR 0033: invert the control.
+ * domain (`WorkflowRunsLayer`). The workflows domain keeps the rule about
+ * deleting and only asks the question, so neither domain imports the other.
+ * ADR 0033 describes this way of breaking a cycle between domains.
  */
 export class WorkflowRuns extends Context.Service<
   WorkflowRuns,

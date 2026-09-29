@@ -154,9 +154,9 @@ const INSTANCE_B = buildProviderInstance(
 );
 
 /**
- * The real first-run state: the instance exists (spec 06 §2, one per shipped
- * provider) but nothing has logged in on the one runner yet, so there is no
- * snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
+ * The real first-run state: the instance exists, because the controller
+ * creates one provider instance per shipped provider on first run. Nothing has
+ * logged in on the one runner yet, so there is no snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
  * `defaultRunnerId` is null.
  */
 const INSTANCE_FRESH = buildProviderInstance(
@@ -482,8 +482,8 @@ describe("Composer: model menu", () => {
     await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    // Instance B is collapsed to a one-row summary. Clicking that row is the
-    // "click to switch" of spec 14 §The composer.
+    // Instance B is collapsed to a one-row summary. Clicking that row switches
+    // the pill to instance B's default model.
     await user.click(screen.getByRole("button", { name: /work.*1 models/i }));
 
     await waitFor(() => {
@@ -1116,7 +1116,7 @@ describe("Composer: the model options selector's label", () => {
  * An instance where `auto` is not native, so it runs as the nearest native
  * mode below it. It has a display name different from `INSTANCE_A`'s, so a
  * row that shows "Claude Code Work" must be reading this instance's
- * `displayName` (ticket #70).
+ * `displayName`.
  */
 const NO_AUTO: ProviderInstance = {
   ...INSTANCE_A,
@@ -1154,10 +1154,9 @@ describe("Composer: the access mode menu", () => {
   });
 
   /**
-   * The fallback annotation names the provider that caused the fallback (spec
-   * 14 §The composer, `runs as auto-accept-edits on pi`). It is shown in the
-   * attention color below the mode's meaning, which every row keeps
-   * (ticket #70).
+   * The fallback annotation names the provider instance that caused the
+   * fallback, as in `runs as auto-accept-edits on pi`. It is shown in the
+   * attention color below the mode's meaning, which every row keeps.
    */
   it("shows each mode's meaning and names the provider in the fallback annotation, in the attention color", async () => {
     const user = userEvent.setup();
@@ -1206,10 +1205,10 @@ describe("Draft: the header is the screen's first row", () => {
 
 /* ------------------------------------------------------------------ *
  * Tests for the project picker and the workspace, branch and machine
- * selectors (#72). They drive the app through `renderApp` and the stubbed
+ * selectors. They drive the app through `renderApp` and the stubbed
  * `fetch`, like the tests above.
  *
- * The spec gives the text of these controls but not how to find them.
+ * The spec sets the text of these controls but not how a test finds them.
  * These tests assume:
  * - The picker is the Radix overlay, found as `role="dialog"`, and the
  *   sidebar's "Create new thread" opens it.
@@ -2040,7 +2039,7 @@ describe("Composer: the machine selector follows the workspace", () => {
     // "not cloned" only means a wait, not a blocker, so the row stays a
     // button. The test checks moss, not cove: in this fixture cove is dimmed
     // for another reason (no provider instance was ever probed there), and a
-    // dimmed row is never clickable (#160).
+    // dimmed row is never clickable.
     expect(within(menu).getByRole("button", { name: /moss/ })).toBeDefined();
   });
 });

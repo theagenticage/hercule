@@ -8,8 +8,9 @@
  * - otherwise `null`, when no instance exists.
  *
  * The composer and Settings > Threads both prefill from this rule (through
- * `computeThreadDefaults`). It is the same rule the controller uses for
- * placement (spec 06 §3).
+ * `computeThreadDefaults`). A logged-in instance comes first because the
+ * controller never places a session on a runner where the instance is not
+ * logged in (spec 06 §3.2).
  */
 import type { ProviderInstance } from "@hercule/contract";
 

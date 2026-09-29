@@ -119,10 +119,10 @@ import {
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
-import { AfterCommit, afterCommit, commitUninterruptibly, nowIso, UUID_PATTERN } from "../db";
+import { AfterCommit, afterCommit, nowIso, UUID_PATTERN, withTransaction } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
@@ -349,7 +349,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const executor = yield* RunExecutor;
   const workspaceSteps = yield* WorkspaceSteps;
   const platformEvents = yield* PlatformEvents;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
@@ -410,7 +410,7 @@ export const makeRunEngine = Effect.gen(function* () {
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
         if (outcome.status === "failed") {
-          yield* notifications.createCoreNotification(
+          yield* notifier.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
             { unlessRaised: decideRunFailedUnlessRaised(run, outcome) },
           );
@@ -471,7 +471,7 @@ export const makeRunEngine = Effect.gen(function* () {
     error: StepError,
     failureReason: ExecutionFailureReason,
   ): Effect.Effect<void, SqlError> =>
-    commitUninterruptibly(
+    withTransaction(
       sql,
       Effect.flatMap(nowIso, (at) => writeStepFailure(runId, attempt, error, failureReason, at)),
     );
@@ -668,7 +668,7 @@ export const makeRunEngine = Effect.gen(function* () {
     record: StepRecordKey,
   ): Effect.Effect<StartedRecord, SqlError> =>
     Effect.catchTag(
-      commitUninterruptibly(
+      withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -862,7 +862,7 @@ export const makeRunEngine = Effect.gen(function* () {
           const run = found.value;
           if (!isUnfinished(run.status)) return;
           if (run.status === "pending") {
-            yield* commitUninterruptibly(
+            yield* withTransaction(
               sql,
               Effect.flatMap(nowIso, (at) => runs.start(runId, at)),
             );
@@ -964,7 +964,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * `controller-error` and no failed step: the error was not at any one step.
    */
   const failRunUnexpectedly = (runId: string): Effect.Effect<void, SqlError> =>
-    commitUninterruptibly(
+    withTransaction(
       sql,
       Effect.flatMap(nowIso, (at) =>
         writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
@@ -1120,7 +1120,7 @@ export const makeRunEngine = Effect.gen(function* () {
           decodeCancel(input),
           createDecodeValidationError,
         );
-        return yield* commitUninterruptibly(
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const found = yield* runs.read(id);
@@ -1186,7 +1186,7 @@ export const makeRunEngine = Effect.gen(function* () {
               `Ignored the result of step ${stepId} from runner ${runnerId}: ${runId} is not a run id`,
             );
           }
-          const applied = yield* commitUninterruptibly(
+          const applied = yield* withTransaction(
             sql,
             Effect.gen(function* () {
               const found = yield* runs.read(runId);

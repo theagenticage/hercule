@@ -1,15 +1,16 @@
 import type { JSX, ReactNode } from "react";
 
 /**
- * The card at the bottom of a thread or an assistant's conversation: the
- * thread's composer and the conversation's composer. Its first child is the
- * text line and its second the row of controls; with the same padding, the
- * two cards have the same height and their text sits on the same baseline.
+ * Renders the card at the bottom of a thread or an assistant's conversation:
+ * the thread's composer and the conversation's composer. Its first child is
+ * the text line and its second the row of controls; with the same padding,
+ * the two cards have the same height and their text sits on the same
+ * baseline.
  *
- * The card is stacked above what docks to it (the lip below the thread's
- * composer, a permission request above it), so they tuck under its edge and
- * its radius, border and shadow never change (spec 14 §Measurements, amended
- * 2026-09-14).
+ * The card is stacked above what docks to it: the lip below the thread's
+ * composer, and a permission request above it. Both tuck under the card's
+ * edge, so the card's radius, border and shadow stay the same whether
+ * anything is docked or not. Spec 14 §Measurements sets the sizes.
  */
 export function ComposerCard({ children }: { readonly children: ReactNode }): JSX.Element {
   return (

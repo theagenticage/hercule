@@ -11,13 +11,15 @@ import { ProjectDot } from "./project-dot";
 import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from "../app/queries";
 
 /**
- * The project picker (spec 14 §The composer): "Creating a thread is one step,
- * after the project." It opens over a scrim rather than as a screen of its
- * own, because choosing a project is not a place the user goes. It is a
- * single question asked before the draft opens.
+ * Renders the project picker. The user picks a project before the draft
+ * opens, because the project bounds the repos and workspaces a thread can
+ * use. The picker opens over a scrim rather than as a screen of its own,
+ * because choosing a project is not a place the user goes. It is a single
+ * question asked before the draft opens.
  *
  * A fresh install has no project, so the picker shows only the New project
  * row. Projects are created in the New project dialog, not in the picker.
+ * Spec 14 §The composer owns the picker.
  */
 export function ProjectPicker({
   client,

@@ -35,7 +35,10 @@ const PROVIDERS: ReadonlyArray<ProviderDefinition> = [
 const SYSTEM_PROMPT =
   "You are a personal assistant running inside the user's own controller. The user talks to you in a chat. Answer briefly and plainly. Prefer delegating work over doing it yourself: use the `hercule` CLI to read and create tasks, start workflows and check on sessions. Do not edit files yourself; delegate that work.";
 
-/** The standing heartbeat prompt of spec 12 §8.2, which every new assistant gets. */
+/**
+ * The standing heartbeat prompt every new assistant gets. The scheduler queues
+ * it on the assistant's conversation at each heartbeat. Spec 12 §8.2 owns it.
+ */
 const HEARTBEAT_PROMPT =
   "This is a scheduled heartbeat, not a message from the user. Check what you are waiting on: runs you started, subscriptions you hold, tasks you own, reminders that are due. Do not invent work and do not repeat old tasks from earlier in this conversation. If nothing needs the user's attention, reply exactly `NO_REPLY`. Otherwise write only the message the user should read: what changed, what you propose, plus any small updates worth mentioning alongside it. If a decision is needed, create a notification so it reaches the user wherever they are.";
 

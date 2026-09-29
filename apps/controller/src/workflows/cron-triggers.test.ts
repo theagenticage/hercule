@@ -14,7 +14,7 @@ import type { TriggerKey } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
+import { NotifierLayer } from "../notifications";
 import { Settings, SettingsLayer } from "../settings";
 import { CronTriggerScheduler, CronTriggerSchedulerLayer, decideFiring } from "./cron-triggers";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
@@ -23,7 +23,7 @@ import { TriggerHealthLayer } from "./trigger-health";
 
 const layer = CronTriggerSchedulerLayer.pipe(
   Layer.provide(TriggerHealthLayer),
-  Layer.provide(NotificationServiceLayer),
+  Layer.provide(NotifierLayer),
   Layer.provide(AuditLogLayer),
   Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(TestDatabase),

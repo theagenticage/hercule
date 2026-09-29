@@ -4,13 +4,13 @@ import { MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
 /**
- * The lip's first selector: where the thread works (spec 14 §The composer, the
- * Workspace selector). Each row is an existing workspace or one that would be
- * created, with an explanation on its sub-line.
+ * Renders the lip's first selector: where the thread works. Each row is an
+ * existing workspace or one that would be created, with an explanation on its
+ * sub-line.
  *
  * Projects are not set up from here. For a project with nothing to work in,
  * the selector is locked and its reason tells the user what to do; repos are
- * added in the New project dialog.
+ * added in the New project dialog. Spec 14 §The composer owns the selector.
  */
 export function WorkspaceSelector({
   menu,

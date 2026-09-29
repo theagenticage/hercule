@@ -1,9 +1,15 @@
 /**
  * Decides, in one place, every lock, blocker and pill the composer shows.
- * A thread's placement is copied when it is spawned and never re-read
- * afterwards (spec 02 §Session). So once a thread is active, its access mode,
- * workspace and runner are fixed. Only the model and its options can still
- * change, and only within the instance the thread was spawned on.
+ * Once a thread is active, most of its configuration is fixed:
+ *
+ * - its workspace and runner, because a session stays on the runner it
+ *   started on;
+ * - its access mode, because no provider adapter can switch the mode of a
+ *   running session.
+ *
+ * Only the model and its options can still change, and only within the
+ * instance the thread was spawned on, because the session lives in that
+ * instance's home, with its login.
  */
 import type {
   AccessMode,
@@ -246,9 +252,8 @@ export const buildComposerFields = (
 
 /**
  * Returns the note the composer shows after a model pick on an active thread,
- * until the pick is sent. A pick is only sent with the next message (spec 14
- * §What locks at start: the picks are sent with `session.input`), so until
- * then the thread keeps running its current model.
+ * until the pick is sent. The picks travel with the next message, in
+ * `session.input`, so until then the thread keeps running its current model.
  */
 export const buildPendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
   kind === "active" && picks.model !== undefined ? "model change applies on send" : null;

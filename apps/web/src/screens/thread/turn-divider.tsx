@@ -1,10 +1,10 @@
 /**
- * The divider under a turn that says how long the agent worked, or how the
+ * The divider under a turn that shows how long the agent worked, or how the
  * turn ended; `describeTurnDivider` in client-core picks the words. A turn
  * with tool items can open the divider into a quiet mono list with one
- * `verb · target · result` line per item (spec 14 §The thread surface). A
- * turn with none has nothing to list, so its divider is plain text with no
- * chevron.
+ * `verb · target · result` line per item. A turn with none has nothing to
+ * list, so its divider is plain text with no chevron. Spec 14 §The thread
+ * surface owns the divider.
  *
  * While the turn is live, the time updates every second and shimmers in the
  * live colour. With `prefers-reduced-motion`, the shimmer stops and the colour

@@ -1,13 +1,14 @@
 /**
  * Builds the composer's branch selector, which is two different fields in the
- * same place (spec 14 §The composer, the Branch selector):
+ * same place:
  *
  * - for a main workspace, it picks the branch the checkout switches to;
  * - for a new worktree, it picks the base the thread's new branch starts
  *   from. The new branch's name is generated.
  *
  * Returns `null` for an existing worktree the thread joins (the worktree is
- * named after its branch already), and for a thread with no checkout.
+ * named after its branch already), and for a thread with no checkout. Spec 14
+ * §The composer owns the Branch selector.
  */
 import type { Workspace } from "@hercule/contract";
 import {

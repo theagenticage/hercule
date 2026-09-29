@@ -574,7 +574,7 @@ const describeEmptyValue = (
 
 /**
  * Returns the error for a key the author left out. An input's `required` has
- * no default (spec 07 section 1), so the author decides it for each input,
+ * no default (spec 07 section 1). So the author decides it for each input,
  * and the error asks for that decision instead of naming the key alone.
  */
 const describeMissingKey = (path: ReadonlyArray<string>): string =>

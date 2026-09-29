@@ -95,10 +95,10 @@ export interface ProviderAdapter {
    * session id because the controller assigns it, not the harness. The binding
    * links it to the harness's native session id (spec 06 section 4.1).
    *
-   * Each adapter decides where the native id comes from. Spec 06 section 4.1
-   * says Claude's arrives on the init message, but the CLI sends no init
-   * message until the first turn, so the Claude adapter picks the native
-   * session id itself.
+   * Each adapter decides where the native id comes from. The Claude CLI sends
+   * no init message until the first turn, so waiting for the id there would
+   * block until somebody sent input. The Claude adapter picks the native
+   * session id itself instead.
    */
   readonly startSession: (
     sessionId: string,

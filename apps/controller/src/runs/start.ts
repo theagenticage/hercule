@@ -39,7 +39,7 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
-import { afterCommit, commitUninterruptibly, nowIso } from "../db";
+import { afterCommit, nowIso, withTransaction } from "../db";
 import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
@@ -325,10 +325,7 @@ export const makeRunStart = (
       origin: RunOrigin,
       refusals: RefusalMessages,
     ): Effect.Effect<RunStarted, E | Validation | CapExceeded | SettingError | SqlError> =>
-      // Uninterruptible, because it only touches the local database: a
-      // caller that disconnects while it commits must not leave a committed
-      // run that was never handed to the Run Executor.
-      commitUninterruptibly(
+      withTransaction(
         sql,
         Effect.gen(function* () {
           const { plan, workflowId, inputs, originalRunId } = yield* readRunToWrite;

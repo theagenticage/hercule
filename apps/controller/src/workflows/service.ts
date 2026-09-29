@@ -74,7 +74,7 @@ import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, EventKinds } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
@@ -275,7 +275,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const agents = yield* agentRepository;
   const connections = yield* connectionRepository;
   const host = yield* PluginHost;
@@ -563,7 +563,7 @@ const make = Effect.gen(function* () {
                 buildDeclaredTriggers(parsedSource.definition),
                 savedAt,
               );
-              yield* notifications.withdrawDecisionsAbout(
+              yield* notifier.withdrawDecisionsAbout(
                 buildTriggerSubjects(stored.id, removed),
                 "trigger removed",
               );
@@ -610,7 +610,7 @@ const make = Effect.gen(function* () {
             }
             const deletedAt = yield* nowIso;
             const { name, triggerIds } = yield* failIfWorkflowNotFound(workflows.delete(id));
-            yield* notifications.withdrawDecisionsAbout(
+            yield* notifier.withdrawDecisionsAbout(
               [{ kind: "workflow", id }, ...buildTriggerSubjects(id, triggerIds)],
               "workflow deleted",
             );
@@ -687,5 +687,5 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  SqlClient.SqlClient | AuditLog | NotificationService | PluginHost | EventKinds | WorkflowRuns
+  SqlClient.SqlClient | AuditLog | Notifier | PluginHost | EventKinds | WorkflowRuns
 > = Layer.effect(WorkflowService)(make);

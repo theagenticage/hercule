@@ -3,7 +3,8 @@
  * surface renders. It lives in one module for two reasons:
  *
  * - two adapters reading a vendor's questions into slightly different shapes
- *   would give a card whose content depends on the harness (ADR 0007);
+ *   would give a card whose content depends on the harness, and the
+ *   normalized event stream exists so that no surface does (ADR 0007);
  * - the fallback in `buildQuestionRequest` is the difference between a request
  *   the user can deny and a frame the controller drops.
  *

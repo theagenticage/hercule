@@ -17,7 +17,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { NotificationService } from "../../notifications";
+import type { Notifier } from "../../notifications";
 import type { SessionService } from "../../sessions";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { absorbFailures } from "../absorbing";
@@ -74,7 +74,7 @@ export const PipelineLayer: Layer.Layer<
   never,
   | EventRouter
   | SessionService
-  | NotificationService
+  | Notifier
   | TriggerHealth
   | TriggerEffects
   | Live

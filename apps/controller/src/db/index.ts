@@ -4,7 +4,6 @@
  */
 export { afterCommit, AfterCommit, announce, type Change } from "./after-commit";
 export {
-  commitUninterruptibly,
   DatabaseError,
   createDatabaseError,
   MEMORY,

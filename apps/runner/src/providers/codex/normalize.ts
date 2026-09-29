@@ -1,15 +1,15 @@
 /**
- * Converts the app-server's notifications into normalized provider events
- * (spec 06 section 6). It takes one decoded frame and a small mutable
- * per-session state, and returns events. It uses no process, no socket, and
- * no clock other than the wall clock.
+ * Converts the app-server's notifications into normalized provider events.
+ * It takes one decoded frame and a small mutable per-session state, and
+ * returns events. It uses no process, no socket, and no clock other than the
+ * wall clock. Spec 06 section 6 owns the event taxonomy.
  *
  * The state is mutable because it tracks progress through the session:
  *
  * - `turn/started` has no model at this release, so the state holds the model
  *   the adapter opened the turn with.
- * - One reasoning item arrives on two channels, and only one of them may be
- *   streamed (spec 06 section 6.4).
+ * - One reasoning item arrives on two channels, raw and summary, and only one
+ *   of them is streamed, so the text is not doubled.
  *
  * A notification this build does not handle produces no events: the
  * app-server adds methods between releases, and a live session must survive

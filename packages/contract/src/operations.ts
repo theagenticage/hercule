@@ -112,6 +112,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/notifications/:id/withdraw",
   },
+  "notification.act": {
+    requires: "notification.write",
+    method: "POST",
+    path: "/api/v1/notifications/:id/act",
+  },
 
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },

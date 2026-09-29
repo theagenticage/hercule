@@ -24,7 +24,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { ExitReason } from "@hercule/protocol";
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
-import { post, send } from "../http/testing";
+import { get, post, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
@@ -158,7 +158,16 @@ const expectSessionNotice = async (
   });
 };
 
-/** Reports the start of the turn "hi" opened, at sequence number 2, and waits until the session is busy. */
+/**
+ * Reports the start of the turn "hi" opened, at sequence number 2, and waits
+ * until the controller has written it to the transcript.
+ *
+ * The session already reads `busy` before this report, because "hi" was
+ * waiting for it, so its status cannot show that the report was applied. The
+ * transcript row commits together with every other write for the report,
+ * such as the session's last activity time, so once the row is there nothing
+ * from this report is still to come.
+ */
 const startTurn = async (arranged: Arranged, sessionId: string): Promise<void> => {
   reportEvent(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
@@ -167,7 +176,17 @@ const startTurn = async (arranged: Arranged, sessionId: string): Promise<void> =
     _tag: "turn.started",
     turnId: "t1",
   });
-  await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+  await waitUntil("wrote the turn's start", async () => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/sessions/${sessionId}/transcript`,
+      arranged.token,
+    );
+    const { items } = (await response.json()) as {
+      readonly items: ReadonlyArray<{ readonly event: { readonly _tag: string } }>;
+    };
+    return items.some((row) => row.event._tag === "turn.started") ? true : undefined;
+  });
 };
 
 /** Reports the session's exit at sequence number `seq` and waits until the session has exited. */

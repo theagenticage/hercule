@@ -2,9 +2,9 @@ import type { JSX, ReactNode } from "react";
 import { cn } from "@hercule/ui";
 
 /**
- * The content column below a screen's header row: up to 800px wide and
- * centred, as spec 14 §The thread surface sets it. The thread screen, the new
- * thread screen and an assistant's conversation screen all use it.
+ * Renders the content column below a screen's header row: up to 800px wide
+ * and centred. The thread screen, the new thread screen and an assistant's
+ * conversation screen all use it. Spec 14 §The thread surface sets the width.
  */
 export function ContentColumn({
   className,

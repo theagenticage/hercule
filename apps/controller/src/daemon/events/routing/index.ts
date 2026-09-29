@@ -13,7 +13,7 @@
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { NotificationService } from "../../../notifications";
+import type { Notifier } from "../../../notifications";
 import type { SessionService } from "../../../sessions";
 import type { TriggerEffects, TriggerHealth } from "../../../workflows";
 import type { Delivery, RoutingTable } from "../event-router";
@@ -31,7 +31,7 @@ import { triggerRoutingTable } from "./trigger-routing-table";
 export const buildRoutingTables: Effect.Effect<
   ReadonlyArray<RoutingTable>,
   never,
-  SqlClient.SqlClient | SessionService | NotificationService | TriggerHealth | TriggerEffects
+  SqlClient.SqlClient | SessionService | Notifier | TriggerHealth | TriggerEffects
 > = Effect.all([sessionRoutingTable, triggerRoutingTable]);
 
 /** Builds every delivery that sends the rows waiting to go out, whoever wrote them. */

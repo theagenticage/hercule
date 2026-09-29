@@ -14,7 +14,7 @@ import type { Event } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
 import { nowIso } from "../../../db";
 import { SessionService, sessionRepository } from "../../../sessions";
-import { NotificationService } from "../../../notifications";
+import { Notifier } from "../../../notifications";
 import {
   buildHolderEndedReason,
   subscriptionRepository,
@@ -27,12 +27,12 @@ import { renderEventInput } from "./render-event-input";
 export const sessionRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | SessionService | NotificationService
+  SqlClient.SqlClient | SessionService | Notifier
 > = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const sessionRows = yield* sessionRepository;
   const subscriptions = yield* subscriptionRepository;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
 
   /**
    * Ends every subscription whose holder session has ended for good. Returns
@@ -84,7 +84,7 @@ export const sessionRoutingTable: Effect.Effect<
         yield* nowIso,
       );
       if (!began) return;
-      yield* notifications.createCoreNotification({
+      yield* notifier.createCoreNotification({
         kind: "core.subscription-condition-error",
         title: "A subscription's condition could not be evaluated",
         body: message,

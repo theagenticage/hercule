@@ -13,7 +13,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ConstraintError, LockTimeoutError, SqlError } from "effect/unstable/sql/SqlError";
 import { TestDatabase } from "../db/testing";
 import { appendCronTickEvent, AuditLogLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
+import { NotifierLayer } from "../notifications";
 import { workflowRepository } from "./repository";
 import { declareStartTrigger } from "./testing";
 import { TriggeredRuns } from "./runs";
@@ -247,7 +247,7 @@ describe("starting the run of a pending trigger effect", () => {
           TriggerEffectsLayer.pipe(
             Layer.provide(Layer.succeed(TriggeredRuns)({ start: () => Effect.fail(error) })),
             Layer.provide(TriggerHealthLayer),
-            Layer.provide(NotificationServiceLayer),
+            Layer.provide(NotifierLayer),
             Layer.provide(AuditLogLayer),
             Layer.provideMerge(TestDatabase),
           ),
