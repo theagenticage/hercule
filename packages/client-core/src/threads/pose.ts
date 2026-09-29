@@ -70,7 +70,8 @@ const isRunnerDisconnected = (runner: Runner | undefined): boolean =>
  * - a queued, starting or busy session is `working`.
  *
  * `failed`, `paused` and `done` are never returned: the session record does
- * not say why a session ended, so a row cannot claim any of them.
+ * not say why a session ended, so a row cannot claim any of them. #278 adds
+ * that reason, and `failed` with it.
  */
 export const decideThreadPose = (session: Session, runner: Runner | undefined): Pose => {
   if (session.openRequest !== null) return "waiting";

@@ -5,6 +5,7 @@
  * Those three lists have no live topic, so the thread list, which does, is
  * the only sign that one of them changed. `decideRelatedReads` in client-core
  * holds the rules; this module compares each thread list with the one before.
+ * Both go away once the three lists have live topics (#279).
  */
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";

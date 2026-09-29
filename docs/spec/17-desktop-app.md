@@ -343,7 +343,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 
 - Waiting comes first, because Waiting on you is defined by the open Request. A waiting thread on an offline runner stays waiting: the Request is still the user's to answer, though the answer reaches the agent only when the runner returns.
 - A runner the runners list does not hold counts as reachable, because a missing cache entry is not evidence.
-- failed, paused and done are never produced yet: a session does not record why it ended, so the app cannot tell done from failed. A ticket adds the end reason.
+- failed, paused and done are never produced yet: a session does not record why it ended, so the app cannot tell done from failed. [#278](https://github.com/theagenticage/hercule/issues/278) adds the end reason.
 - [./14-web-app.md](./14-web-app.md) (#162) calls an exited, resumable thread Idle, "indistinguishable from one whose process is running". The desktop draws its row exactly like an idle one (its age, no mark), so that holds for what is drawn. It names the pose asleep, the word [CONTEXT.md](../../CONTEXT.md) gives an assistant's session in the same state, so the foot's idle count means threads that are loaded and free, and the accessible name says "asleep".
 
 **The sidebar** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's Threads face and the book's session page, with these differences:
@@ -460,7 +460,7 @@ These rules keep the budgets:
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
 4. **No polling, and no timers while idle:**
-   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. A ticket adds the topics.)*
+   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)*
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
 5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all.
 6. **The first paint is cheap:**

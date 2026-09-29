@@ -11,12 +11,12 @@
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
  *
- * Projects, workspaces and resources have no live topic. After a reconnect,
- * pushes may have been lost while the connection was down, so they are read
- * again then (the topics' own reads are read again by the live connection
- * itself). A change made elsewhere, such as a project renamed from the CLI,
- * shows at the next reconnect, or when the thread list names a record the
- * cache does not hold (see `useRelatedReads`).
+ * Projects, workspaces and resources have no live topic yet (#279 adds
+ * them). After a reconnect, pushes may have been lost while the connection
+ * was down, so they are read again then (the topics' own reads are read again
+ * by the live connection itself). A change made elsewhere, such as a project
+ * renamed from the CLI, shows at the next reconnect, or when the thread list
+ * names a record the cache does not hold (see `useRelatedReads`).
  */
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
