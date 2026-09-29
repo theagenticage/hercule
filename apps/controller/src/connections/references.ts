@@ -10,9 +10,10 @@ import type { Id } from "@hercule/contract";
  * - `resource`: a resource acts through the Connection, with its credentials.
  *   `resourceName` is the repo's remote, or the folder's or mailbox's label,
  *   and `null` for a folder or mailbox whose label was cleared.
- * - `trigger`: a workflow's trigger starts runs only on events from the
- *   Connection. Without the Connection no event could match the trigger
- *   again, and nothing would tell the user why their workflow went quiet.
+ * - `trigger`: a workflow's trigger, of any kind and status, matches only
+ *   events from the Connection. Without the Connection no event could match
+ *   the trigger again, and nothing would tell the user why their workflow
+ *   went quiet.
  */
 export type ConnectionReference =
   | {
@@ -35,8 +36,12 @@ export type ConnectionReference =
  * domains both depend on the connections domain, so the connections domain
  * cannot import them back without making the domain graph a cycle. So the
  * connections domain declares what it needs as this service, and the
- * controller daemon provides it from those domains (`ConnectionReferencesLayer`).
- * This is the second step of the cycle ladder in ADR 0033: invert the control.
+ * controller daemon provides it from those domains
+ * (`ConnectionServiceWithReferencesLayer`). This is the second step of the
+ * cycle ladder in ADR 0033: invert the control. A plain SQL read of the
+ * `resources` and `triggers` tables from here would avoid the service, but it
+ * would tie this domain to how two other domains store their rows, which the
+ * domain boundary exists to prevent.
  */
 export class ConnectionReferences extends Context.Service<
   ConnectionReferences,

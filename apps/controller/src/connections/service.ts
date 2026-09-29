@@ -141,7 +141,7 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   }
   if (triggers.length > 0) {
     parts.push(
-      `workflow triggers start runs on events from this connection: ${triggers.join(", ")}; ` +
+      `workflow triggers match only events from this connection: ${triggers.join(", ")}; ` +
         "point those triggers at another connection, or delete them, before deleting this one",
     );
   }

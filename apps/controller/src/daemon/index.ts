@@ -54,7 +54,7 @@ export {
   Pipeline,
   PipelineLayer,
 } from "./events";
-export { ConnectionReferencesLayer } from "./connections";
+export { ConnectionServiceWithReferencesLayer } from "./connections";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export {
   Arrival,

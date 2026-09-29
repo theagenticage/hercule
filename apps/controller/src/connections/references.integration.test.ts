@@ -4,10 +4,11 @@
  * The connections domain reads those records through its
  * `ConnectionReferences` port, which the controller daemon provides.
  *
- * A trigger that names a Connection starts runs only on events from that
- * Connection. If the Connection were deleted, the trigger would never match
- * again and the workflow would go quiet without telling anyone, so the delete
- * is refused while such a trigger exists. The same holds for a resource that
+ * A trigger that names a Connection, a start trigger or a signal trigger,
+ * matches only events from that Connection. If the Connection were deleted,
+ * the trigger would never match again and the workflow would go quiet without
+ * telling anyone, so the delete is refused while such a trigger exists, even
+ * a paused one. The same holds for a resource that
  * acts through the Connection. Clearing a resource's Connection is tested in
  * the resources suite.
  */
@@ -69,7 +70,7 @@ describe("connection.delete while workflow triggers name the Connection", () => 
       expect(refusal.code).toBe("invalid_state");
       // Listed by workflow name, so the message reads the same every time.
       expect(refusal.message).toBe(
-        "workflow triggers start runs on events from this connection: " +
+        "workflow triggers match only events from this connection: " +
           "on_label in the workflow Label triage, labeled in the workflow Release notes; " +
           "point those triggers at another connection, or delete them, before deleting this one",
       );
@@ -144,7 +145,7 @@ describe("connection.delete while a resource and a trigger both name the Connect
         "resources act through this connection: " +
           `https://github.com/acme/web.git (${resourceId}); ` +
           "point those resources at another connection before deleting this one; " +
-          "workflow triggers start runs on events from this connection: " +
+          "workflow triggers match only events from this connection: " +
           "labeled in the workflow Label triage; " +
           "point those triggers at another connection, or delete them, before deleting this one",
       );

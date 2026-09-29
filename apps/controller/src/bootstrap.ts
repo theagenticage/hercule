@@ -36,13 +36,11 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
+import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
 import {
-  ConnectionService,
-  ConnectionServiceLayer,
-  ConnectionTypes,
-  ConnectionTypesLayer,
-} from "./connections";
-import { cancelStrandedInputsAndReportLostWakeUps, ConnectionReferencesLayer } from "./daemon";
+  cancelStrandedInputsAndReportLostWakeUps,
+  ConnectionServiceWithReferencesLayer,
+} from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { NotificationService, NotificationServiceLayer } from "./notifications";
@@ -355,7 +353,7 @@ export const bootWith = <A, E>(
       PluginsLayer,
       ProviderServiceLayer,
       sessionService,
-      ConnectionServiceLayer.pipe(Layer.provide(ConnectionReferencesLayer)),
+      ConnectionServiceWithReferencesLayer,
     ).pipe(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),

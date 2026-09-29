@@ -38,11 +38,11 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import { buildHomePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
-import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
+import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
   cancelStrandedInputsAndReportLostWakeUps,
-  ConnectionReferencesLayer,
+  ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
   LostRunnerSweepInterval,
   RunFibers,
@@ -127,7 +127,7 @@ const buildServices = (home: string) =>
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.
-        ConnectionServiceLayer.pipe(Layer.provide(ConnectionReferencesLayer)),
+        ConnectionServiceWithReferencesLayer,
         ResourceServiceLayer,
       ).pipe(
         // As in the real boot: sessions take and release workspace leases,

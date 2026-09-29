@@ -3,4 +3,4 @@
  * cannot import itself: the resources and workflow triggers that name a
  * Connection, which block its delete.
  */
-export { ConnectionReferencesLayer } from "./references";
+export { ConnectionServiceWithReferencesLayer } from "./references";
