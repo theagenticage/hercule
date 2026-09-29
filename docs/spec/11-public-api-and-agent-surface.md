@@ -600,7 +600,7 @@ Rules the CLI follows on every command:
 
 **Standing rule.** An operation added to the contract lands its CLI row in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason in a comment. The row type and the tree tests refuse a contract without it; no ticket ships an operation the CLI cannot explain.
 
-**The skill.** One provider-agnostic skill source describes the CLI; each provider adapter materializes it in that provider's native instruction format (Codex takes instructions only as `AGENTS.md` in the cwd, so a Codex session needs a cwd even when workspace-less). Materialization and provider-home isolation are specified in [./06-providers.md](./06-providers.md).
+**The skill.** One provider-agnostic skill source describes the CLI; each provider adapter materializes it in that provider's native instruction format ~~(Codex takes instructions only as `AGENTS.md` in the cwd, so a Codex session needs a cwd even when workspace-less)~~. *(Amended 2026-09-30: Codex takes it as `developerInstructions` since [#68](https://github.com/theagenticage/hercule/issues/68); a Codex session still gets a scratch cwd, because `thread/start` requires one.)* Materialization and provider-home isolation are specified in [./06-providers.md](./06-providers.md).
 
 ### 6.4 `hercule memory`
 

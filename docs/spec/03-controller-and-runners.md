@@ -220,9 +220,9 @@ Isolation in v1 is provider-native mechanisms (Codex's sandbox, Claude Code's pe
 
 Adapters run sessions in isolated provider homes, one per provider instance, so the machine owner's global instructions, skills and packages never leak into Hercule sessions ([06-providers](./06-providers.md)).
 
-Workspace-less sessions (`workspaceId: null`) get `cwd: null` for Claude Code and pi. Codex alone gets a runner-provisioned scratch directory as its cwd, because `thread/start` needs one and instructions travel as `AGENTS.md` in it. That directory is not a Workspace: it has no id, no status and no teardown rule beyond the runner deleting it when the session exits. [06-providers](./06-providers.md) uses the same words.
+Workspace-less sessions (`workspaceId: null`) get `cwd: null` for Claude Code and pi. Codex alone gets a runner-provisioned scratch directory as its cwd, because `thread/start` needs one ~~and instructions travel as `AGENTS.md` in it~~. *(Amended 2026-09-30: instructions travel as `developerInstructions` on `thread/start`, `thread/resume` and `thread/fork` since [#68](https://github.com/theagenticage/hercule/issues/68), and the scratch directory stays empty; [06-providers](./06-providers.md) section 9.3.)* That directory is not a Workspace: it has no id, no status and no teardown rule beyond the runner deleting it when the session exits. [06-providers](./06-providers.md) uses the same words.
 
-**Verify at build time:** confirm whether the Codex app-server protocol offers a better channel for instructions than `AGENTS.md` in a scratch cwd before relying on the scratch directory for workspace-less Codex sessions.
+~~**Verify at build time:** confirm whether the Codex app-server protocol offers a better channel for instructions than `AGENTS.md` in a scratch cwd before relying on the scratch directory for workspace-less Codex sessions.~~ *(Answered 2026-09-14, [#73](https://github.com/theagenticage/hercule/issues/73): it does, `developerInstructions`.)*
 
 ### 6.2 Session supervision
 
