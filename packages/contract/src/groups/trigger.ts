@@ -48,19 +48,25 @@ export const TriggerStatus = Schema.Literals(["active", "paused"]);
 export type TriggerStatus = Schema.Schema.Type<typeof TriggerStatus>;
 
 /**
- * Whether a start trigger's filter and input mapping could be evaluated
- * against the last event they were tried on:
+ * Whether a start trigger works:
  *
- * - `ok`: they could, or they have not been tried since the trigger last
- *   changed.
- * - `error`: they failed on an event, for example because the filter read a
- *   field the event does not have. `message` is the latest evaluation error,
- *   and `at` is when the first failure in the current run of failures
- *   happened. The trigger matches no event while its filter fails,
- *   and becomes `ok` again the next time its filter and mapping succeed.
+ * - `ok`: nothing failed since a save last changed the trigger, or what
+ *   failed has worked since.
+ * - `error`: the trigger failed at one of three stages:
+ *   - its filter or input mapping could not be evaluated on an event, for
+ *     example because the filter read a field the event does not have. The
+ *     trigger matches no event while its filter fails.
+ *   - a cron trigger's next scheduled time could not be computed, because its
+ *     timezone is no longer a known one. The trigger does not fire until it
+ *     can be computed.
+ *   - the run of a match could not start. That match starts no run.
  *
- * The user is notified once when a trigger goes from `ok` to `error`, not on
- * every event that fails.
+ *   `message` is the latest error, and `at` is when the trigger first failed
+ *   at that stage. The error is cleared when the same stage works again: an
+ *   evaluation succeeds, the next time is computed, or a run starts.
+ *
+ * The user is notified when the health turns to a new error, not on every
+ * failure after it.
  */
 export const TriggerHealth = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ok") }),

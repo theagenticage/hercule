@@ -33,6 +33,7 @@ import {
   evaluateExpression,
   parseExpression,
   type CompiledExpression,
+  type EvaluationContext,
   type ExpressionError,
 } from "../../expressions";
 
@@ -51,8 +52,8 @@ export interface Route {
   readonly admits: (event: Event) => boolean;
   /** The expression source, or `undefined` to match every admitted event. The router compiles it once per pass. */
   readonly condition: string | undefined;
-  /** Whether the route's health recorded an error when the pass began. */
-  readonly hasHealthError: boolean;
+  /** Whether the route's health recorded an evaluation error when the pass began. */
+  readonly hasEvaluationError: boolean;
   /**
    * Writes the row for a matched event. `context` is what the condition was
    * evaluated against, for a route that evaluates more of its own
@@ -66,7 +67,7 @@ export interface Route {
   ) => Effect.Effect<void, ExpressionError | SqlError>;
   /**
    * Records a failed evaluation on the route's health, and tells the user when
-   * this failure is the first of a streak. Joins the caller's transaction.
+   * the route was healthy until this failure. Joins the caller's transaction.
    */
   readonly recordEvaluationFailure: (message: string) => Effect.Effect<void, SqlError>;
   /** Clears the route's recorded evaluation error. Joins the caller's transaction. */
@@ -105,7 +106,7 @@ interface RouteInPass {
    * set, so a pass over a hundred events writes nothing for a route that was
    * healthy all along.
    */
-  hasHealthError: boolean;
+  hasEvaluationError: boolean;
 }
 
 /** The router's name in the cursor table. It is the only consumer today. */
@@ -138,9 +139,6 @@ const EVENTS_PER_PASS = 100;
  * reached only when an emitter writes faster than the router reads.
  */
 const MAX_PASSES_PER_TICK = 10;
-
-/** What an expression over one event is evaluated against. */
-export type EvaluationContext = Readonly<Record<string, unknown>>;
 
 /**
  * Builds the context an expression over `event` is evaluated against: the
@@ -186,22 +184,22 @@ const make = Effect.gen(function* () {
       const inPass: ReadonlyArray<RouteInPass> = routes.map((route) => ({
         route,
         program: undefined,
-        hasHealthError: route.hasHealthError,
+        hasEvaluationError: route.hasEvaluationError,
       }));
 
       /** Records one route's failure, and remembers that the route is in error. */
       const recordFailure = (entry: RouteInPass, message: string): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
           yield* entry.route.recordEvaluationFailure(message);
-          entry.hasHealthError = true;
+          entry.hasEvaluationError = true;
         });
 
       /** Clears one route's recorded failure, if it has one. */
       const clearFailure = (entry: RouteInPass): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
-          if (!entry.hasHealthError) return;
+          if (!entry.hasEvaluationError) return;
           yield* entry.route.clearEvaluationFailure();
-          entry.hasHealthError = false;
+          entry.hasEvaluationError = false;
         });
 
       /**
@@ -273,6 +271,10 @@ const make = Effect.gen(function* () {
    * The cursor moves even when nothing matched. When the batch is empty, it
    * moves to the end of the log as read inside the transaction. So events that
    * no route wants are read once, not on every pass.
+   *
+   * The tables are prepared even when the batch is empty. Preparing the
+   * session table also ends the subscriptions whose holder is gone, and that
+   * should not wait until the next event arrives.
    */
   const routeOnePass = (
     tables: ReadonlyArray<RoutingTable>,

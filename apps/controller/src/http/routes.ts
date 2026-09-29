@@ -55,6 +55,7 @@ import {
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
+  TriggeredRunsLayer,
   WorkflowRunsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
@@ -76,6 +77,7 @@ import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
+  TriggerEffectsLayer,
   TriggerHealthLayer,
   WorkflowService,
   WorkflowServiceLayer,
@@ -555,17 +557,33 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
- * The run service with the services it is built from.
+ * The workflows domain's services: the workflow service, the trigger health,
+ * and the rule the Scheduler applies to cron triggers.
  *
- * - The run service reads workflows and calls the task service from its
- *   steps, so both are provided to it rather than merged next to it.
  * - The workflow service validates each trigger against the same list of
  *   event kinds that `eventKind.query` returns, and asks the runs domain,
  *   through the controller daemon, whether a workflow still has an unfinished
  *   run.
- * - The run service records on a trigger's health a run it could not start.
- *   The event router and the Scheduler record there too, so the trigger
- *   health is merged next to the run service for them.
+ * - The Scheduler records a trigger it cannot schedule on the trigger's
+ *   health. The event router records there too, so the trigger health is
+ *   merged next to the other two.
+ *
+ * The domain's trigger effects start runs, so they are built above the run
+ * domain instead (see the event pipeline below).
+ */
+const WorkflowDomainLayer = Layer.mergeAll(
+  WorkflowServiceLayer.pipe(
+    Layer.provide(EventKindsOperationLayer),
+    Layer.provide(WorkflowRunsLayer),
+  ),
+  CronTriggerSchedulerLayer,
+).pipe(Layer.provideMerge(TriggerHealthLayer));
+
+/**
+ * The run service with the services it is built from.
+ *
+ * - The run service reads workflows and calls the task service from its
+ *   steps, so both domains are provided to it rather than merged next to it.
  * - A run's execution is carried out by the controller daemon's Run Executor,
  *   apart from any request, so the live topics' listener is provided to the
  *   service as well.
@@ -575,14 +593,8 @@ const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCat
  * Several groups below are provided this one layer. A layer is built once
  * however many times it is provided, so they all share one run service.
  */
-const RunLayers = RunServiceLayer.pipe(
-  Layer.provideMerge(
-    WorkflowServiceLayer.pipe(
-      Layer.provide(EventKindsOperationLayer),
-      Layer.provide(WorkflowRunsLayer),
-    ),
-  ),
-  Layer.provideMerge(TriggerHealthLayer),
+const RunDomainLayer = RunServiceLayer.pipe(
+  Layer.provideMerge(WorkflowDomainLayer),
   Layer.provideMerge(TaskServiceLayer),
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(WorkspaceStepsLayer),
@@ -619,10 +631,10 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
   // fails the runs pinned to it, so the run service is provided too.
-  RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer), Layer.provide(RunLayers)),
+  RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer), Layer.provide(RunDomainLayer)),
   // A runner that connects is sent the workspace steps still running on it,
   // and wakes the runs waiting for a runner.
-  ArrivalLayer.pipe(Layer.provide(RunLayers)),
+  ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
   RunnerJoinLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
   // and matched inputs are delivered through `Live` too. Setup creates the
@@ -642,7 +654,7 @@ export const operationLayers = Layer.mergeAll(
   //
   // The inbound driver hands a workspace step's result to the run service.
   Layer.mergeAll(
-    InboundLayer.pipe(Layer.provide(RunLayers)),
+    InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
@@ -650,16 +662,21 @@ export const operationLayers = Layer.mergeAll(
     // whole controller is assembled. Enrichment writes through the events
     // service, so the events service is provided to it rather than merged
     // next to it. The pipeline and enrichment share one router, so the router
-    // is provided to both. The pipeline starts the runs of the start triggers
-    // that matched, and both record a start trigger's failed filter on its
-    // health, so the run layers, which hold both services, are provided to
-    // both.
+    // is provided to both. Both record a start trigger's match as a trigger
+    // effect, and its failed filter on its health. The pipeline also starts
+    // the runs of the matches, and the trigger effects start them through
+    // the run service (`TriggeredRunsLayer`), so the trigger effects are
+    // provided above the run domain.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
         Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
       ),
-    ).pipe(Layer.provideMerge(EventRouterLayer), Layer.provide(RunLayers)),
+    ).pipe(
+      Layer.provideMerge(EventRouterLayer),
+      Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
+      Layer.provide(RunDomainLayer),
+    ),
   ).pipe(
     Layer.provideMerge(AssistantServiceLayer),
     Layer.provideMerge(ConversationServiceLayer),
@@ -671,15 +688,12 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
-  // The subscription service needs the run layers only to check a run
+  // The subscription service needs the run domain only to check a run
   // target: it reads the run through RunService.read to check that the run
   // exists, that the caller may read it, and that it has not ended.
-  SubscriptionServiceLayer.pipe(Layer.provide(RunLayers)),
-  // The Scheduler records a trigger it cannot schedule on the trigger's
-  // health, which the run layers hold.
-  CronTriggerSchedulerLayer.pipe(Layer.provide(RunLayers)),
+  SubscriptionServiceLayer.pipe(Layer.provide(RunDomainLayer)),
   EventKindsOperationLayer,
-  RunLayers,
+  RunDomainLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );

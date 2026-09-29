@@ -57,6 +57,7 @@ import {
   Inbound,
   Pipeline,
   Provisioning,
+  checkSchedulerInterval,
   runScheduler,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
@@ -244,6 +245,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // The Scheduler fires cron triggers into the event log, where the
     // pipeline picks their ticks up. It reads what it needs from the
     // database, so it starts here like the others.
+    yield* checkSchedulerInterval;
     yield* Effect.forkScoped(runScheduler);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.

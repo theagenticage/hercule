@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Struct from "effect/Struct";
-import type { Event, Notification, Run, Trigger } from "@hercule/contract";
+import type { Notification, Run } from "@hercule/contract";
 import { uuidFromString } from "../../../db";
 import { get, post, type ServerHarness } from "../../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../../runs/testing";
@@ -28,11 +28,12 @@ import {
   enableWorkflow,
   LABELED_REPO,
   pauseTrigger,
-  queryTriggers,
+  readTrigger,
   resumeTrigger,
   withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
+import { readEvent } from "../../../events/testing";
 import { readCursorAndHead, runEffect } from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
@@ -148,27 +149,11 @@ const waitForRunStartedBy = async (
   return waitForRunToFinish(base, token, runId);
 };
 
-const readTrigger = async (
-  { base, token }: SetUpController,
-  workflowId: string,
-): Promise<Trigger> => {
-  const triggers = await queryTriggers(base, token, `?workflowId=${workflowId}`);
-  const trigger = triggers.find((item) => item.triggerId === TRIGGER_ID);
-  expect(trigger, JSON.stringify(triggers)).toBeDefined();
-  return trigger!;
-};
-
-const readEvent = async ({ base, token }: SetUpController, id: number): Promise<Event> => {
-  const response = await get(base, `/api/v1/events/${String(id)}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Event;
-};
-
 /** Returns the notifications of `kind` that name the workflow's trigger. */
 const listTriggerNotifications = async (
   { base, token }: SetUpController,
   workflowId: string,
-  kind: "core.trigger-filter-error" | "core.run-failed",
+  kind: "core.trigger-error" | "core.run-failed",
 ): Promise<ReadonlyArray<Notification>> => {
   const response = await get(base, `/api/v1/notifications?kind=${kind}&limit=100`, token);
   expect(response.status, await response.clone().text()).toBe(200);
@@ -198,7 +183,7 @@ describe("a start trigger that matches an event", () => {
       expect(run.inputs).toEqual({ label: "triage", repo: LABELED_REPO });
       // The run keeps its own copy of the event, without the raw vendor
       // payload, which is kept in the log for debugging only.
-      const event = await readEvent(controller, eventId);
+      const event = await readEvent(base, token, eventId);
       expect(run.triggerEvent).toEqual(Struct.omit(event, ["raw"]));
       expect(run.triggerEvent).not.toHaveProperty("raw");
       // The step rendered the mapped input, so the inputs reached the plan.
@@ -340,7 +325,9 @@ describe("a start trigger that does not match an event", () => {
       await waitForRunStartedBy(controller, workflowId, wanted);
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([wanted]);
       // A filter that is false is not an error.
-      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
     });
   });
 
@@ -407,7 +394,9 @@ describe("a start trigger whose mapped inputs fail the workflow's input schema",
       expect(run.inputs).toEqual({ label: "x", repo: LABELED_REPO });
       expect(run.triggerEvent?.id).toBe(eventId);
       // The trigger itself is fine: its filter and mapping evaluated.
-      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
     });
   });
 
@@ -442,7 +431,7 @@ describe("a start trigger's match whose run has not started yet", () => {
       // Write the match the router would have written had the trigger been
       // paused a moment later, between the match and the run's start.
       await runEffect(harness.sql`
-        INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, at)
+        INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, matched_at)
         VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${eventId}, 'pending',
                 ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`);
 
@@ -458,13 +447,13 @@ describe("a start trigger's match whose run has not started yet", () => {
 
   it("starts no run, and is discarded, when its event is no longer in the log", async () => {
     await withTriggerController(async (controller) => {
-      const { harness } = controller;
+      const { harness, base, token } = controller;
       const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
       // Retention prunes only old events, so the test writes a match for an
       // event id the log never had, which reads the same as a pruned one.
       const prunedEventId = 1_000_000;
       await runEffect(harness.sql`
-        INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, at)
+        INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, matched_at)
         VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${prunedEventId}, 'pending',
                 ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`);
 
@@ -475,11 +464,13 @@ describe("a start trigger's match whose run has not started yet", () => {
         return rows[0]?.state === "discarded" ? true : undefined;
       });
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
-      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
     });
   });
 
-  it("is discarded, and records the error on the trigger's health once, when its start fails because of a bug", async () => {
+  it("is discarded, and records the error on the trigger's health once, when its start fails because of a bug, until a run starts again", async () => {
     await withTriggerController(async (controller) => {
       const { harness, base, token } = controller;
       const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
@@ -506,28 +497,30 @@ describe("a start trigger's match whose run has not started yet", () => {
         WHERE id = ${uuidFromString(workflowId)}`);
 
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
-      const broken = await readTrigger(controller, workflowId);
+      const broken = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
       if (broken.health?.state !== "error") {
         expect.fail(`the trigger's health is not error: ${JSON.stringify(broken)}`);
       }
       expect(broken.health.message).toContain(
         "could not start, because of a bug in the controller",
       );
-      // Both starts failed, but the user hears about the streak once.
-      const notified = await listTriggerNotifications(
-        controller,
-        workflowId,
-        "core.trigger-filter-error",
-      );
+      // Both starts failed, but the user is notified once, not once per event.
+      const notified = await listTriggerNotifications(controller, workflowId, "core.trigger-error");
       expect(notified.map((notification) => notification.title)).toEqual([
         "A trigger could not start its run",
       ]);
+
+      const repaired = await emitLabeledEvent(base, token, { added: ["triage"] });
+      await waitForRunStartedBy(controller, workflowId, repaired);
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
     });
   });
 });
 
 describe("a start trigger whose filter cannot be evaluated", () => {
-  it("records the error on the trigger's health, notifies once for a streak of failures, and clears the error on the next event it can evaluate", async () => {
+  it("records the error on the trigger's health, notifies once while it keeps failing, and clears the error on the next event it can evaluate", async () => {
     await withTriggerController(async (controller) => {
       const { harness, base, token } = controller;
       // Reading the first label of an empty list is an evaluation error.
@@ -535,34 +528,36 @@ describe("a start trigger whose filter cannot be evaluated", () => {
         connectionId: "any",
         filter: 'event.payload.added[0] == "triage"',
       });
-      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
 
       const firstFailure = await emitLabeledEvent(base, token, { added: [] });
       await waitUntilRouted(harness, firstFailure);
-      const broken = await readTrigger(controller, workflowId);
+      const broken = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
       if (broken.health?.state !== "error") {
         expect.fail(`the trigger's health is not error: ${JSON.stringify(broken)}`);
       }
       expect(broken.health.message).toContain("index out of bounds");
-      const notified = await listTriggerNotifications(
-        controller,
-        workflowId,
-        "core.trigger-filter-error",
-      );
+      const notified = await listTriggerNotifications(controller, workflowId, "core.trigger-error");
       expect(notified).toHaveLength(1);
       expect(notified[0]!.body).toBe(broken.health.message);
 
       const secondFailure = await emitLabeledEvent(base, token, { added: [] });
       await waitUntilRouted(harness, secondFailure);
-      expect((await readTrigger(controller, workflowId)).health?.state).toBe("error");
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health?.state,
+      ).toBe("error");
       // The user hears about a broken trigger once, not once per event.
       expect(
-        await listTriggerNotifications(controller, workflowId, "core.trigger-filter-error"),
+        await listTriggerNotifications(controller, workflowId, "core.trigger-error"),
       ).toHaveLength(1);
 
       const evaluable = await emitLabeledEvent(base, token, { added: ["triage"] });
       await waitForRunStartedBy(controller, workflowId, evaluable);
-      expect((await readTrigger(controller, workflowId)).health).toEqual({ state: "ok" });
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).health,
+      ).toEqual({ state: "ok" });
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([evaluable]);
     });
   });

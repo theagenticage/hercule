@@ -68,9 +68,10 @@ export const sessionRoutingTable: Effect.Effect<
     });
 
   /**
-   * Records a failed evaluation on the subscription's health. The first
-   * failure of a streak also raises one notification, in the same write, so
-   * the user hears about a broken condition once and not once per event.
+   * Records a failed evaluation on the subscription's health. A failure that
+   * turns the health from ok to error also raises one notification, in the
+   * same write, so the user hears about a broken condition once and not once
+   * per event.
    */
   const recordEvaluationFailure = (
     subscriptionId: string,
@@ -107,7 +108,7 @@ export const sessionRoutingTable: Effect.Effect<
         .map((subscription): Route => ({
           admits: () => true,
           condition: subscription.condition,
-          hasHealthError: subscription.healthErrorMessage !== null,
+          hasEvaluationError: subscription.healthErrorMessage !== null,
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
               const written = yield* sessions.storeMatchedInput({

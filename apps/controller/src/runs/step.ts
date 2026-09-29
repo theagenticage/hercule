@@ -33,7 +33,7 @@ import {
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
-import { nowIso } from "../db";
+import { commitUninterruptibly, nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
   isBuiltInControllerActionId,
@@ -46,7 +46,6 @@ import { TaskService } from "../tasks";
 import { runRepository, StepRecordEnded, type ExecutionFailureReason } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
-import { commitUninterruptibly } from "./transaction";
 
 /**
  * The codes of the step errors the engine writes itself. A step whose action

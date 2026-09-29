@@ -60,11 +60,11 @@ export function TriggersPanel({
 }
 
 /**
- * Renders one trigger: a mark when it is paused or its filter fails, its id,
- * the event kind and Connection it listens on, a cron trigger's schedule and
- * next fire time, and a start trigger's status with a button that pauses or
- * resumes it. Below come why its filter or input mapping failed and which
- * scheduled times it missed, when either happened.
+ * Renders one trigger: a mark when it is paused or its health is an error, its
+ * id, the event kind and Connection it listens on, a cron trigger's schedule
+ * and next fire time, and a start trigger's status with a button that pauses
+ * or resumes it. Below come the error on its health and the scheduled times
+ * it missed, when either exists.
  *
  * The row owns the pause and resume mutation, because nothing above it needs
  * it. It reads the user's display timezone itself; the entry guard has put

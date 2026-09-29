@@ -22,7 +22,7 @@ const buildTrigger = (fields: Partial<RoutableStartTrigger> = {}): RoutableStart
   connectionId: undefined,
   filter: undefined,
   inputs: {},
-  hasHealthError: false,
+  hasEvaluationError: false,
   ...fields,
 });
 

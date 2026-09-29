@@ -24,7 +24,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Struct from "effect/Struct";
-import type { Event, Run, Trigger } from "@hercule/contract";
+import type { Event, Run } from "@hercule/contract";
 import { uuidFromString } from "../../db";
 import { get, post, readErrorBody } from "../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../runs/testing";
@@ -33,10 +33,11 @@ import {
   createWorkflowOrFail,
   emitLabeledEvent,
   enableWorkflow,
-  queryTriggers,
+  readTrigger,
   withSetUpController,
   type SetUpController,
 } from "../../workflows/testing";
+import { readEvent } from "../../events/testing";
 import { runEffect } from "../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
@@ -87,16 +88,6 @@ const withSchedulingController = (body: (controller: SetUpController) => Promise
     schedulerInterval: Duration.millis(10),
   });
 
-const readTrigger = async (
-  { base, token }: SetUpController,
-  workflowId: string,
-): Promise<Trigger> => {
-  const triggers = await queryTriggers(base, token, `?workflowId=${workflowId}`);
-  const trigger = triggers.find((item) => item.triggerId === TRIGGER_ID);
-  expect(trigger, JSON.stringify(triggers)).toBeDefined();
-  return trigger!;
-};
-
 /**
  * Saves and enables the Nightly report workflow, then waits until the
  * Scheduler has computed its trigger's next scheduled time. Returns the
@@ -107,7 +98,10 @@ const saveScheduledWorkflow = async (controller: SetUpController): Promise<strin
   const workflow = await createWorkflowOrFail(base, token, { source: NIGHTLY_REPORT_SOURCE });
   await enableWorkflow(base, token, workflow.id);
   await waitUntil("computed the trigger's next scheduled time", async () => {
-    const trigger = await readTrigger(controller, workflow.id);
+    const trigger = await readTrigger(controller.base, controller.token, {
+      workflowId: workflow.id,
+      triggerId: TRIGGER_ID,
+    });
     return trigger.nextFireAt;
   });
   return workflow.id;
@@ -176,12 +170,6 @@ const listCronTicks = async ({ base, token }: SetUpController): Promise<Readonly
   return ((await response.json()) as { readonly items: ReadonlyArray<Event> }).items;
 };
 
-const readEvent = async ({ base, token }: SetUpController, id: number): Promise<Event> => {
-  const response = await get(base, `/api/v1/events/${String(id)}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Event;
-};
-
 describe("a cron trigger whose scheduled time comes", () => {
   it("fires a cron.tick that starts one run with the scheduled time and the previous firing as inputs", async () => {
     await withSchedulingController(async (controller) => {
@@ -202,7 +190,7 @@ describe("a cron trigger whose scheduled time comes", () => {
       expect(run.origin.triggerId).toBe(TRIGGER_ID);
       // The tick is an event like any other: it is in the log, from the
       // cron source, and happened at the scheduled time.
-      const tick = await readEvent(controller, run.origin.eventId);
+      const tick = await readEvent(base, token, run.origin.eventId);
       expect(tick).toMatchObject({
         kind: "cron.tick",
         source: "cron",
@@ -217,7 +205,7 @@ describe("a cron trigger whose scheduled time comes", () => {
       ]);
 
       // The trigger records the firing and waits for the next 02:00.
-      const fired = await readTrigger(controller, workflowId);
+      const fired = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
       expect(fired.lastFiredAt).toBe(scheduledFor);
       expect(fired.skippedTicks).toBeUndefined();
       expectNextNightlyTime(fired.nextFireAt);
@@ -227,6 +215,7 @@ describe("a cron trigger whose scheduled time comes", () => {
 
   it("fires the first tick of a trigger that never fired with a null previousFiredAt", async () => {
     await withSchedulingController(async (controller) => {
+      const { base, token } = controller;
       const workflowId = await saveScheduledWorkflow(controller);
       const scheduledFor = computeInstantBeforeNow(1000);
 
@@ -241,7 +230,9 @@ describe("a cron trigger whose scheduled time comes", () => {
         scheduledFor,
         previousFiredAt: null,
       });
-      expect((await readTrigger(controller, workflowId)).lastFiredAt).toBe(scheduledFor);
+      expect(
+        (await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).lastFiredAt,
+      ).toBe(scheduledFor);
     });
   });
 
@@ -267,7 +258,7 @@ describe("a cron trigger whose scheduled time comes", () => {
       const ticks = await listCronTicks(controller);
       expect(ticks.map((tick) => tick.dedupKey)).toEqual([tickDedupKey]);
       expect(run.origin).toEqual({ kind: "trigger", triggerId: TRIGGER_ID, eventId: ticks[0]!.id });
-      const manual = await readEvent(controller, manualEventId);
+      const manual = await readEvent(base, token, manualEventId);
       expect(manual).toMatchObject({ source: "manual", dedupKey: tickDedupKey });
     });
   });
@@ -285,7 +276,7 @@ describe("a cron trigger more than a minute late", () => {
 
       await moveSchedule(controller, workflowId, { nextFireAt: missedFrom, lastFiredAt: null });
       const skipped = await waitUntil("recorded the skipped ticks", async () => {
-        const trigger = await readTrigger(controller, workflowId);
+        const trigger = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
         return trigger.skippedTicks === undefined ? undefined : trigger;
       });
 
@@ -328,7 +319,7 @@ describe("event.enrich on a cron tick", () => {
       const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
-      expect(await readEvent(controller, tick!.id)).toEqual(tick);
+      expect(await readEvent(base, token, tick!.id)).toEqual(tick);
     });
   });
 });

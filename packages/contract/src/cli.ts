@@ -1260,7 +1260,7 @@ export const CLI = {
       },
     },
     errors: {
-      invalid_state: "the trigger is a signal trigger, which has no status and cannot be paused",
+      invalid_state: "the trigger is a signal trigger, which has no status and cannot be resumed",
     },
   },
 

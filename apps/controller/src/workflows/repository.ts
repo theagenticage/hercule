@@ -76,6 +76,16 @@ export interface DeclaredTrigger {
 }
 
 /**
+ * Where a start trigger failed:
+ *
+ * - `evaluation`: the event router could not evaluate its filter or input
+ *   mapping on an event;
+ * - `scheduling`: the Scheduler could not compute a cron trigger's next time;
+ * - `start`: the delivery could not start the run of a match.
+ */
+export type TriggerFailureStage = "evaluation" | "scheduling" | "start";
+
+/**
  * A start trigger that can start a run now: it is active and its workflow is
  * enabled. The event router tests every event against these.
  */
@@ -86,8 +96,8 @@ export interface RoutableStartTrigger extends TriggerKey {
   readonly filter: string | undefined;
   /** Each input name to an expression over `event`. Empty when the trigger maps nothing. */
   readonly inputs: Readonly<Record<string, string>>;
-  /** Whether the trigger's health records an error. */
-  readonly hasHealthError: boolean;
+  /** Whether the trigger's health records an error of its filter or input mapping. */
+  readonly hasEvaluationError: boolean;
 }
 
 /** A cron trigger's schedule and the Scheduler's state for it. */
@@ -102,8 +112,8 @@ export interface CronTrigger extends TriggerKey {
   /** The timezone `nextFireAt` was computed in. */
   readonly nextFireZone: string | undefined;
   readonly lastFiredAt: string | undefined;
-  /** The error the trigger's health records, if any. */
-  readonly healthErrorMessage: string | undefined;
+  /** The error the trigger's health records about its schedule, if any. */
+  readonly schedulingErrorMessage: string | undefined;
 }
 
 /**
@@ -427,8 +437,8 @@ const make = Effect.gen(function* () {
      * - A trigger whose id stays keeps its row, `created_at` and status. Its
      *   other fields are overwritten from the source, and `updated_at` changes
      *   only if one of them changed. A change also clears the trigger's
-     *   health, because the error it records was about the old filter or
-     *   mapping. A cron trigger whose schedule or timezone changed has its
+     *   health, because the error it records was about the old definition.
+     *   A trigger that did not change keeps its error, which is still true. A cron trigger whose schedule or timezone changed has its
      *   next scheduled time cleared, so the Scheduler computes it again.
      * - A trigger whose id stays but whose kind changes counts as a new
      *   trigger, because a start trigger and a signal trigger are different
@@ -489,6 +499,7 @@ const make = Effect.gen(function* () {
                                 ELSE excluded.created_at END,
               updated_at = excluded.updated_at,
               health_error_message = NULL,
+              health_error_stage = NULL,
               health_error_at = NULL,
               next_fire_at = CASE
                 WHEN (triggers.kind, triggers.event_kind, triggers.schedule, triggers.timezone)
@@ -605,11 +616,11 @@ const make = Effect.gen(function* () {
           readonly connection_id: string | null;
           readonly filter: string | null;
           readonly inputs: string | null;
-          readonly health_error_message: string | null;
+          readonly health_error_stage: TriggerFailureStage | null;
         }>`
           SELECT triggers.workflow_id, triggers.trigger_id, triggers.event_kind,
                  triggers.connection_id, triggers.filter, triggers.inputs,
-                 triggers.health_error_message
+                 triggers.health_error_stage
           FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
           WHERE triggers.kind = 'start' AND triggers.status = 'active' AND workflows.enabled = 1
         `,
@@ -621,7 +632,7 @@ const make = Effect.gen(function* () {
             connectionId: row.connection_id ?? undefined,
             filter: row.filter ?? undefined,
             inputs: row.inputs === null ? {} : (JSON.parse(row.inputs) as Record<string, string>),
-            hasHealthError: row.health_error_message !== null,
+            hasEvaluationError: row.health_error_stage === "evaluation",
           })),
       ),
 
@@ -642,26 +653,29 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that a start trigger failed, with the error message and when it
-     * happened. Returns true when
-     * this failure starts a streak: the trigger was healthy until now. A
-     * failure while the trigger is already in error replaces the message and
-     * keeps the time the streak started.
+     * Records that a start trigger failed at `stage`, with the error message
+     * and when it happened. Returns true when this failure turns the health
+     * to a new error: the trigger was healthy until now, or its recorded error
+     * was from another stage. A failure at the stage already recorded only
+     * replaces the message, and keeps the time the error began.
      */
     recordTriggerFailure: (
       key: TriggerKey,
+      stage: TriggerFailureStage,
       message: string,
       at: string,
     ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const workflow = uuidFromString(key.workflowId);
-        const startedStreak = yield* sql<{ readonly trigger_id: string }>`
-          UPDATE triggers SET health_error_message = ${message}, health_error_at = ${at}
+        const turnedToError = yield* sql<{ readonly trigger_id: string }>`
+          UPDATE triggers
+          SET health_error_message = ${message}, health_error_stage = ${stage},
+              health_error_at = ${at}
           WHERE workflow_id = ${workflow} AND trigger_id = ${key.triggerId}
-            AND health_error_message IS NULL
+            AND health_error_stage IS NOT ${stage}
           RETURNING trigger_id
         `;
-        if (startedStreak.length > 0) return true;
+        if (turnedToError.length > 0) return true;
         yield* sql`
           UPDATE triggers SET health_error_message = ${message}
           WHERE workflow_id = ${workflow} AND trigger_id = ${key.triggerId}
@@ -669,12 +683,25 @@ const make = Effect.gen(function* () {
         return false;
       }),
 
-    /** Clears a start trigger's recorded error. */
-    clearTriggerFailure: (key: TriggerKey): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE triggers SET health_error_message = NULL, health_error_at = NULL
-        WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
-      `),
+    /**
+     * Clears a start trigger's recorded error if it is from `stage`, and
+     * returns whether it cleared one. An error from another stage stays,
+     * because only that stage can tell when it is over.
+     */
+    clearTriggerFailure: (
+      key: TriggerKey,
+      stage: TriggerFailureStage,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly trigger_id: string }>`
+          UPDATE triggers
+          SET health_error_message = NULL, health_error_stage = NULL, health_error_at = NULL
+          WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+            AND health_error_stage = ${stage}
+          RETURNING trigger_id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Returns every trigger that names the Connection, whatever its kind or
@@ -710,15 +737,15 @@ const make = Effect.gen(function* () {
      * - the ones whose next scheduled time has come;
      * - the ones with no next scheduled time yet;
      * - the ones without a timezone of their own whose next scheduled time
-     *   was computed in another timezone than `userZone`, because the user
-     *   changed the setting since.
+     *   was computed in another timezone than `defaultTimezone`, because the
+     *   user changed the setting since.
      *
      * Paused triggers and triggers of disabled workflows are included, so
      * their schedule keeps moving while they cannot fire.
      */
     listCronTriggersToSchedule: (
       now: string,
-      userZone: string,
+      defaultTimezone: string,
     ): Effect.Effect<ReadonlyArray<TriggerKey>, SqlError> =>
       Effect.map(
         sql<{ readonly workflow_id: Uint8Array; readonly trigger_id: string }>`
@@ -726,7 +753,7 @@ const make = Effect.gen(function* () {
           FROM triggers
           WHERE ${sql.literal(IS_CRON_TRIGGER)}
             AND (triggers.next_fire_at IS NULL OR triggers.next_fire_at <= ${now}
-                 OR (triggers.timezone IS NULL AND triggers.next_fire_zone IS NOT ${userZone}))
+                 OR (triggers.timezone IS NULL AND triggers.next_fire_zone IS NOT ${defaultTimezone}))
           ORDER BY triggers.next_fire_at, triggers.workflow_id, triggers.trigger_id
         `,
         (rows) =>
@@ -746,12 +773,13 @@ const make = Effect.gen(function* () {
           readonly next_fire_at: string | null;
           readonly next_fire_zone: string | null;
           readonly last_fired_at: string | null;
-          readonly health_error_message: string | null;
+          readonly scheduling_error_message: string | null;
         }>`
           SELECT triggers.schedule, triggers.timezone,
                  triggers.status = 'active' AND workflows.enabled = 1 AS can_fire,
                  triggers.next_fire_at, triggers.next_fire_zone, triggers.last_fired_at,
-                 triggers.health_error_message
+                 CASE WHEN triggers.health_error_stage = 'scheduling'
+                      THEN triggers.health_error_message END AS scheduling_error_message
           FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
           WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
             AND triggers.trigger_id = ${key.triggerId}
@@ -767,7 +795,7 @@ const make = Effect.gen(function* () {
             nextFireAt: row.next_fire_at ?? undefined,
             nextFireZone: row.next_fire_zone ?? undefined,
             lastFiredAt: row.last_fired_at ?? undefined,
-            healthErrorMessage: row.health_error_message ?? undefined,
+            schedulingErrorMessage: row.scheduling_error_message ?? undefined,
           })),
       ),
 

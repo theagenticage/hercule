@@ -7,7 +7,7 @@
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Issue, Trigger, Workflow } from "@hercule/contract";
+import type { Issue, Trigger, TriggerKey, Workflow } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -26,6 +26,7 @@ import {
   type ServerOptions,
 } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
 /** A valid UUIDv7 that is not the id of anything on the test controller. */
@@ -265,6 +266,50 @@ export const queryTriggers = async (
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<Trigger> }).items;
 };
+
+/**
+ * Reads one trigger through `trigger.query`. Fails the test when the workflow
+ * has no trigger with the id.
+ */
+export const readTrigger = async (
+  base: string,
+  token: string,
+  key: TriggerKey,
+): Promise<Trigger> => {
+  const triggers = await queryTriggers(base, token, `?workflowId=${key.workflowId}`);
+  const trigger = triggers.find((item) => item.triggerId === key.triggerId);
+  if (trigger === undefined)
+    expect.fail(`no trigger ${key.triggerId}: ${JSON.stringify(triggers)}`);
+  return trigger;
+};
+
+/** Returns a start trigger on `task.created`, as a save declares it, with `fields` replacing the defaults. */
+export const declareStartTrigger = (
+  triggerId: string,
+  fields: Partial<DeclaredTrigger> = {},
+): DeclaredTrigger => ({
+  triggerId,
+  kind: "start",
+  eventKind: "task.created",
+  connectionId: undefined,
+  filter: undefined,
+  schedule: undefined,
+  timezone: undefined,
+  inputs: undefined,
+  ...fields,
+});
+
+/** Returns a start trigger on `cron.tick` at 09:00 every day in Amsterdam, with `fields` replacing the defaults. */
+export const declareCronTrigger = (
+  triggerId: string,
+  fields: Partial<DeclaredTrigger> = {},
+): DeclaredTrigger =>
+  declareStartTrigger(triggerId, {
+    eventKind: "cron.tick",
+    schedule: "0 9 * * *",
+    timezone: "Europe/Amsterdam",
+    ...fields,
+  });
 
 /** Asserts that no workflow and no trigger is stored, for example after a failed save. */
 export const expectNothingStored = async (base: string, token: string): Promise<void> => {

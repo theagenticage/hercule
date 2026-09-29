@@ -7,22 +7,32 @@
  * and moves on. This applies to defects as well as failures: otherwise a bug in
  * handling one item would silently stop the driver for the rest of the
  * process, for every runner. A cause that contains an interrupt means the
- * driver itself is being stopped, so it is passed on unchanged and nothing in
- * it is lost.
+ * driver itself is being stopped, so it is passed on and nothing in it is
+ * lost.
  */
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 
 /**
  * Runs `effect`, and logs its failure with `failureMessage` instead of
- * passing it on. An interrupt is passed on unchanged.
+ * passing it on. Never fails: an interrupt is passed on with the rest of its
+ * cause, where each failure that came with the interrupt becomes a defect, so
+ * the caller has no error left to handle.
  */
 export const absorbFailures = <E>(
   failureMessage: string,
   effect: Effect.Effect<void, E>,
-): Effect.Effect<void, E> =>
+): Effect.Effect<void> =>
   Effect.catchCause(effect, (cause) =>
-    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(failureMessage, cause),
+    Cause.hasInterrupts(cause)
+      ? Effect.failCause(
+          Cause.fromReasons(
+            cause.reasons.map((reason) =>
+              Cause.isFailReason(reason) ? Cause.makeDieReason(reason.error) : reason,
+            ),
+          ),
+        )
+      : Effect.logError(failureMessage, cause),
   );
 
 /**

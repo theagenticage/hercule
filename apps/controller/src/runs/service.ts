@@ -1,6 +1,6 @@
 /**
  * The run operations: `run.start`, `run.rerun`, `run.cancel`, `run.query` and `run.read`,
- * starting a run when a start trigger matches an event, resuming unfinished
+ * writing the run of a start trigger that matched an event, resuming unfinished
  * runs when the controller starts, and what the
  * controller daemon calls about workspace steps: their results, the runners
  * and workspaces that fail under them, and the steps a runner is owed.
@@ -38,7 +38,7 @@ import type { NotificationService } from "../notifications";
 import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
 import type { TaskService } from "../tasks";
-import type { TriggerHealth, WorkflowService } from "../workflows";
+import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
@@ -129,7 +129,6 @@ export const RunServiceLayer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | WorkflowService
-  | TriggerHealth
   | TaskService
   | PluginHost
   | Settings

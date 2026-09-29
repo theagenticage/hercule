@@ -18,9 +18,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { NotificationService } from "../../notifications";
-import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
-import type { TriggerHealth } from "../../workflows";
+import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
@@ -77,7 +76,7 @@ export const PipelineLayer: Layer.Layer<
   | SessionService
   | NotificationService
   | TriggerHealth
+  | TriggerEffects
   | Live
-  | RunService
   | SqlClient.SqlClient
 > = Layer.effect(Pipeline)(make);

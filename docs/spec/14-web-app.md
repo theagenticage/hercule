@@ -376,7 +376,7 @@ The ringfence exists so a visual drag-and-drop editor can replace the module's i
 
 *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Triggers.** Below the Problems region, a stored workflow's page lists its triggers in a **Triggers** panel, one row each, and shows no panel when the workflow declares none. The rows show the triggers as the controller holds them, from the last save, not from the text being typed ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `trigger.query`). A row shows, on one line:
 
-- a paused mark for a paused trigger, else a failed mark while its filter or input mapping fails;
+- a paused mark for a paused trigger, else a failed mark while its health is an error: its filter or input mapping cannot be evaluated, its next scheduled time cannot be computed, or its runs cannot start ([./07-workflows.md](./07-workflows.md));
 - the trigger's id, and the event kind it listens for with its Connection;
 - for a cron trigger, its schedule and its next fire time;
 - for a start trigger, its status, `paused` in the attention hue, and a **Pause** or **Resume** button that calls `trigger.pause` or `trigger.resume`. A signal trigger has no status and no button.

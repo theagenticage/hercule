@@ -2,11 +2,13 @@
  * Tests the rules the trigger effects migration puts in the tables
  * themselves, on a migrated in-memory database:
  *
- * - a trigger effect has one of four states, has a run id exactly when it is
+ * - a trigger effect has one of three states, has a run id exactly when it is
  *   `spawned`, is unique per workflow, trigger and event, and is deleted with
  *   its trigger;
- * - a trigger's two health columns, and its two skipped-ticks columns, are
+ * - a trigger's three health columns, and its two skipped-ticks columns, are
  *   set together or not at all;
+ * - a start trigger saved before the migration gets the input mapping its
+ *   workflow declares;
  * - a run's triggering event is valid JSON;
  * - the dedup key of an event is unique per source and connection, so a
  *   manual event cannot take the key of a `cron.tick`.
@@ -18,7 +20,10 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { MEMORY, openDatabase } from "../client";
+import { runMigrations } from "../migrate";
 import { TestDatabase } from "../testing";
+import { migrations } from "./index";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -71,7 +76,7 @@ interface EffectRow {
 const insertEffect = (row: EffectRow) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     attemptStatement(sql`
-      INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, run_id, at)
+      INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, run_id, matched_at)
       VALUES (${WORKFLOW_ID}, ${row.triggerId ?? "t1"}, ${row.eventId ?? 1}, ${row.state},
               ${row.inputs ?? "{}"}, ${row.runId}, ${at})`),
   );
@@ -100,28 +105,33 @@ const insertEvent = (source: string, connectionId: Uint8Array | null, dedupKey: 
   );
 
 describe("the trigger_effects table", () => {
-  it("accepts a pending, a held and a discarded effect without a run, and a spawned effect with one", async () => {
+  it("accepts a pending and a discarded effect without a run, and a spawned effect with one", async () => {
     const results = await run(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
           insertEffect({ state: "pending", runId: null, eventId: 1 }),
-          insertEffect({ state: "held", runId: null, eventId: 2 }),
-          insertEffect({ state: "discarded", runId: null, eventId: 3 }),
-          insertEffect({ state: "spawned", runId: RUN_ID, eventId: 4 }),
+          insertEffect({ state: "discarded", runId: null, eventId: 2 }),
+          insertEffect({ state: "spawned", runId: RUN_ID, eventId: 3 }),
         ]),
       ),
     );
 
-    expect(results).toEqual(["accepted", "accepted", "accepted", "accepted"]);
+    expect(results).toEqual(["accepted", "accepted", "accepted"]);
   });
 
-  it("refuses a state other than pending, spawned, held and discarded", async () => {
-    expect(
-      await run(
-        Effect.andThen(storeWorkflowWithTriggers, insertEffect({ state: "failed", runId: null })),
+  it("refuses a state other than pending, spawned and discarded", async () => {
+    const results = await run(
+      Effect.andThen(
+        storeWorkflowWithTriggers,
+        Effect.all([
+          insertEffect({ state: "failed", runId: null, eventId: 1 }),
+          insertEffect({ state: "held", runId: null, eventId: 2 }),
+        ]),
       ),
-    ).toContain("CHECK constraint failed");
+    );
+
+    for (const result of results) expect(result).toContain("CHECK constraint failed");
   });
 
   it("refuses a spawned effect without a run, and a run on an effect that is not spawned", async () => {
@@ -195,13 +205,21 @@ describe("the trigger_effects table", () => {
 });
 
 describe("the new columns of the triggers table", () => {
-  it("accepts a health error with its message and time, and clearing both", async () => {
+  it("accepts a health error with its message, stage and time, and clearing all three", async () => {
     const results = await run(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
-          updateTriggerColumns({ health_error_message: "boom", health_error_at: at }),
-          updateTriggerColumns({ health_error_message: null, health_error_at: null }),
+          updateTriggerColumns({
+            health_error_message: "boom",
+            health_error_stage: "start",
+            health_error_at: at,
+          }),
+          updateTriggerColumns({
+            health_error_message: null,
+            health_error_stage: null,
+            health_error_at: null,
+          }),
         ]),
       ),
     );
@@ -209,18 +227,35 @@ describe("the new columns of the triggers table", () => {
     expect(results).toEqual(["accepted", "accepted"]);
   });
 
-  it("refuses a health error message without a time, and a time without a message", async () => {
+  it("refuses a health error with only some of its message, stage and time", async () => {
     const results = await run(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
           updateTriggerColumns({ health_error_message: "boom" }),
           updateTriggerColumns({ health_error_at: at }),
+          updateTriggerColumns({ health_error_stage: "start" }),
+          updateTriggerColumns({ health_error_message: "boom", health_error_at: at }),
         ]),
       ),
     );
 
     for (const result of results) expect(result).toContain("CHECK constraint failed");
+  });
+
+  it("refuses a health error stage that is not evaluation, scheduling or start", async () => {
+    expect(
+      await run(
+        Effect.andThen(
+          storeWorkflowWithTriggers,
+          updateTriggerColumns({
+            health_error_message: "boom",
+            health_error_stage: "routing",
+            health_error_at: at,
+          }),
+        ),
+      ),
+    ).toContain("CHECK constraint failed");
   });
 
   it("accepts a stretch of skipped ticks with both ends, and clearing both", async () => {
@@ -307,5 +342,57 @@ describe("the dedup index of the events table", () => {
     expect(results[1]).toContain("UNIQUE constraint failed");
     expect(results[2]).toBe("accepted");
     expect(results[3]).toContain("UNIQUE constraint failed");
+  });
+});
+
+describe("the input mapping of a start trigger saved before the migration", () => {
+  /**
+   * Stores a workflow whose definition declares a start trigger with an input
+   * mapping, one without, and a signal trigger, on the migrations before this
+   * one. Runs this migration, and returns each trigger's `inputs` column.
+   */
+  const seedAndMigrate = (): Promise<Readonly<Record<string, string | null>>> =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations(migrations.filter(([id]) => id < 37));
+        const source = { kind: "task.created" };
+        const definition = {
+          name: "w",
+          steps: [],
+          triggers: [
+            { id: "mapped", kind: "start", source, inputs: { title: "event.payload.title" } },
+            { id: "unmapped", kind: "start", source },
+            {
+              id: "signal",
+              kind: "signal",
+              source,
+              correlation: { event: "event.id", run: "inputs.id" },
+            },
+          ],
+        };
+        yield* sql`
+          INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
+          VALUES (${WORKFLOW_ID}, 'name: w', ${JSON.stringify(definition)}, 1, ${at}, ${at})`;
+        yield* sql`
+          INSERT INTO triggers (workflow_id, trigger_id, kind, event_kind, status, created_at, updated_at)
+          VALUES (${WORKFLOW_ID}, 'mapped', 'start', 'task.created', 'active', ${at}, ${at}),
+                 (${WORKFLOW_ID}, 'unmapped', 'start', 'task.created', 'active', ${at}, ${at}),
+                 (${WORKFLOW_ID}, 'signal', 'signal', 'task.created', NULL, ${at}, ${at})`;
+        yield* runMigrations();
+        const rows = yield* sql<{
+          readonly trigger_id: string;
+          readonly inputs: string | null;
+        }>`SELECT trigger_id, inputs FROM triggers`;
+        return Object.fromEntries(rows.map((row) => [row.trigger_id, row.inputs]));
+      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    );
+
+  it("is copied from the workflow's definition, and stays empty where none is declared", async () => {
+    const inputs = await seedAndMigrate();
+
+    expect(JSON.parse(inputs["mapped"]!)).toEqual({ title: "event.payload.title" });
+    expect(inputs["unmapped"]).toBeNull();
+    expect(inputs["signal"]).toBeNull();
   });
 });

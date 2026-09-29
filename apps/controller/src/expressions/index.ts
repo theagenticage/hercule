@@ -166,6 +166,12 @@ const environment = buildEnvironment(true);
  */
 export type ExpressionScope = "event" | "run";
 
+/**
+ * The variables one evaluation reads, by name: `event` for an expression over
+ * one event, or `inputs` and `steps` for one inside a run.
+ */
+export type EvaluationContext = Readonly<Record<string, unknown>>;
+
 /** The variables each scope declares. All are `dyn`, as in the evaluation environment. */
 const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
   event: ["event"],
@@ -256,7 +262,7 @@ const describeCheckFailure = (failure: CheckFailure, scope: ExpressionScope): st
 
 /** A source compiled once, called with one context per event. */
 export interface CompiledExpression {
-  (context: Record<string, unknown>): unknown;
+  (context: EvaluationContext): unknown;
 }
 
 /**
@@ -434,7 +440,7 @@ export const validateTemplate = (template: string): Effect.Effect<void, Expressi
  */
 export const evaluateExpression = (
   expression: string | CompiledExpression,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<unknown, ExpressionError> =>
   Effect.gen(function* () {
     const budget = Duration.toMillis(yield* ExpressionBudget);
@@ -472,7 +478,7 @@ export const evaluateExpression = (
  */
 export const evaluateCondition = (
   source: string,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<boolean, ExpressionError> =>
   Effect.flatMap(evaluateExpression(source, context), (value) =>
     typeof value === "boolean"
@@ -558,7 +564,7 @@ const NOT_JSON_REFUSAL =
  */
 export const renderTemplate = (
   template: string,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<unknown, ExpressionError> =>
   Effect.gen(function* () {
     const parsed = parseTemplateExpressions(template);
@@ -615,7 +621,7 @@ export const renderTemplate = (
  */
 export const renderTemplates = (
   value: unknown,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
   path: ReadonlyArray<string> = [],
 ): Effect.Effect<unknown, ExpressionError> => {
   if (typeof value === "string") {
@@ -654,7 +660,7 @@ export const renderTemplates = (
  */
 export const evaluateMapping = (
   mapping: Readonly<Record<string, string>>,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<Record<string, unknown>, ExpressionError> =>
   Effect.map(
     Effect.forEach(Object.entries(mapping), ([name, source]) =>

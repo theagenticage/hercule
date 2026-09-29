@@ -1,8 +1,8 @@
 /**
  * Turns a trigger into what a workflow's page shows about it: its mark and
- * status, which Connection it listens on, its schedule, when it fires next, why its filter
- * or input mapping failed, which scheduled times it missed, and whether it can
- * be paused or resumed.
+ * status, which Connection it listens on, its schedule, when it fires next, why
+ * it failed, which scheduled times it missed, and whether it can be paused or
+ * resumed.
  */
 import { ANY_CONNECTION, type Trigger } from "@hercule/contract";
 import { toIdTail } from "./id-tail";
@@ -19,12 +19,13 @@ import { formatStamp } from "./time-context";
  * - `nextFireText`: when a cron trigger fires next, "next 4 Sep 09:00". A
  *   paused trigger, or any trigger of a disabled workflow, does not fire, so
  *   it has none.
- * - `healthError`: why the trigger's filter or input mapping last failed, and
- *   when. The trigger matches no event until they succeed again.
+ * - `healthError`: the error on the trigger's health, and when it began: its
+ *   filter or input mapping could not be evaluated, its next scheduled time
+ *   could not be computed, or a run could not start.
  * - `skippedTicksText`: the scheduled times a cron trigger missed, such as
  *   "Missed scheduled times from 4 Sep 09:00 to 6 Sep 09:00".
  * - `mark`: the mark beside the trigger's id. `paused` while the trigger is
- *   paused, else `failed` while its filter or input mapping fails.
+ *   paused, else `failed` while its health is an error.
  * - `status`: a start trigger's status and the tone to show it in, `attn`
  *   while it is paused, because a paused trigger starts no runs until the
  *   user resumes it. A signal trigger has no status.

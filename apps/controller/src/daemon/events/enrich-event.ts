@@ -28,7 +28,7 @@ import { withTransaction } from "../../db";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
 import type { NotificationService } from "../../notifications";
-import type { TriggerHealth } from "../../workflows";
+import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 
@@ -114,4 +114,5 @@ export const EnrichmentLayer: Layer.Layer<
   | SessionService
   | NotificationService
   | TriggerHealth
+  | TriggerEffects
 > = Layer.effect(Enrichment)(make);

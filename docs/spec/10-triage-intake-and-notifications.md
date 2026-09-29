@@ -153,7 +153,7 @@ Ruled out as core bounds, on the record:
 | Quiet hours | Pausing a workflow covers it. |
 | Action allowlists / approval gates | Live with access modes ([./06-providers.md](./06-providers.md)) and permission profiles ([./13-security.md](./13-security.md)), not with triage. |
 
-A trigger whose filter fails raises one `core.trigger-filter-error` Notification per failure streak, on the health flip; mechanism in [./08-events-and-connections.md](./08-events-and-connections.md) section 4. *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): `core.trigger-filter-error` arrives with the trigger routing table in [#82](https://github.com/theagenticage/hercule/issues/82). A subscription whose condition fails raises `core.subscription-condition-error` by the same rule.)* *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): `core.trigger-filter-error` is built, Section 7.2.)*
+A trigger whose filter fails raises one `core.trigger-error` Notification when its health turns to a new error; mechanism in [./08-events-and-connections.md](./08-events-and-connections.md) section 4. *(Amended 2026-09-28, [#84](https://github.com/theagenticage/hercule/issues/84): `core.trigger-error` arrives with the trigger routing table in [#82](https://github.com/theagenticage/hercule/issues/82). A subscription whose condition fails raises `core.subscription-condition-error` by the same rule.)* *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): `core.trigger-error` is built, Section 7.2.)*
 
 ## 6. Built-in workflow actions
 
@@ -182,7 +182,7 @@ interface Notification {
   id: string;
   kind: string;                 // dotted producer-namespaced kind: "core.breaker-tripped", "core.run-failed",
                                 // "core.permission-request", "core.update-available", "core.plugin-error",
-                                // "core.trigger-filter-error", "triage.proposal", "triage.offer", "triage.fyi",
+                                // "core.trigger-error", "triage.proposal", "triage.offer", "triage.fyi",
                                 // "triage.unsure", "plugin.gmail.token-expiring", ...
   title: string;
   body?: string;                // markdown; may link Tasks, Runs, Sessions by id; frames the question on a decision
@@ -220,7 +220,7 @@ interface Resolution {
 - `subject` is always present, possibly empty, and each entry is a typed subject: `{ kind, id }` for a task, run, session, workflow, connection, runner, subscription, plugin or event, and `{ kind: "trigger", workflowId, triggerId }` for a trigger, because a trigger id is unique only inside its workflow ([./08-events-and-connections.md](./08-events-and-connections.md) section 4).
 - `eventId` is the event log's integer id.
 - `muteKey?: string` holds the mute key the producer resolved to when the notification was created (Section 7.2). It is absent for the core, and for a producer with nothing to mute it by: a run of a sent workflow, or a session that speaks for no assistant.
-- `kind` is producer-namespaced as above, and only the core may use `core.*`: `notification.create` refuses such a kind. The core kinds built so far are `core.run-failed`, `core.plugin-error`, `core.runner-unreachable` and `core.subscription-condition-error` *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): and `core.trigger-filter-error`)*.
+- `kind` is producer-namespaced as above, and only the core may use `core.*`: `notification.create` refuses such a kind. The core kinds built so far are `core.run-failed`, `core.plugin-error`, `core.runner-unreachable` and `core.subscription-condition-error` *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): and `core.trigger-error`)*.
 
 Bound actions are stored and checked for shape (unique ids, at most one primary). Rendering them and executing them through `notification.act` are [#85](https://github.com/theagenticage/hercule/issues/85).
 
@@ -247,7 +247,7 @@ All four land in the same record through the same service-layer operation.
 - **Plugin error** (`core.plugin-error`): raised when a plugin's activation or deactivation fails and the host marks it `errored`. A plugin refused at registration raises none: it never became a plugin the user enabled.
 - **Runner unreachable** (`core.runner-unreachable`): raised once per outage, when a runner has stayed `unreachable` for two minutes. A controller sweep checks every 30 seconds and asks the database whether a notification about the runner was created since it was last seen, so it survives a controller restart and needs no timers. It is informational and never withdrawn: a reconnect makes it history, not a wrong question.
 - **Subscription condition error** (`core.subscription-condition-error`): see [./08-events-and-connections.md](./08-events-and-connections.md) section 4.
-- *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Trigger filter error** (`core.trigger-filter-error`): raised in the routing transaction that moves a start trigger's health from `ok` to `error`, with the trigger as its subject and the error as its body; see [./08-events-and-connections.md](./08-events-and-connections.md) section 4.
+- *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Trigger error** (`core.trigger-error`): raised in the transaction that turns a start trigger's health to a new error, from `ok` or from an error at another stage, when its filter or input mapping fails, its schedule cannot be computed, or its run cannot start, with the trigger as its subject and the error as its body; see [./08-events-and-connections.md](./08-events-and-connections.md) section 4.
 
 ### 7.3 Router and sinks
 

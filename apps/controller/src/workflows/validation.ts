@@ -21,9 +21,7 @@
  * write see the same rows.
  */
 import * as Cron from "effect/Cron";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
@@ -53,6 +51,7 @@ import {
   type ExpressionScope,
 } from "../expressions";
 import type { RegisteredWorkflowAction, WorkspaceActionId } from "../plugins";
+import { isKnownTimezone } from "../settings";
 import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
 /**
@@ -306,9 +305,11 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
     ];
   }
   const zone =
-    trigger.timezone === undefined ? Option.none() : DateTime.zoneMakeNamed(trigger.timezone);
+    trigger.timezone !== undefined && isKnownTimezone(trigger.timezone)
+      ? trigger.timezone
+      : undefined;
   const issues: Array<Issue> = [];
-  if (trigger.timezone !== undefined && Option.isNone(zone)) {
+  if (trigger.timezone !== undefined && zone === undefined) {
     issues.push({
       path: [...path, "timezone"],
       message:
@@ -337,7 +338,7 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
   }
   // Parse the schedule in the trigger's timezone if the timezone is valid. An
   // invalid timezone is already reported above, so it is not reported again.
-  const parsed = Cron.parse(trigger.schedule, Option.getOrUndefined(zone));
+  const parsed = Cron.parse(trigger.schedule, zone);
   if (Result.isFailure(parsed)) {
     issues.push({
       path: [...path, "schedule"],

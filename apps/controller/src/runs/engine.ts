@@ -119,7 +119,7 @@ import {
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
-import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
+import { AfterCommit, afterCommit, commitUninterruptibly, nowIso, UUID_PATTERN } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
 import { NotificationService } from "../notifications";
@@ -154,7 +154,6 @@ import {
   type StepRecordKey,
 } from "./step";
 import { isUnfinished, listNextStepRecords, type UnfinishedStepRecord } from "./step-records";
-import { commitUninterruptibly } from "./transaction";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
@@ -1083,7 +1082,7 @@ export const makeRunEngine = Effect.gen(function* () {
     /** `run.rerun`: starts a new run that re-runs an ended one (see `start.ts`). */
     rerun,
 
-    /** Starts the run of a pending trigger effect (see `start.ts`). */
+    /** Writes the run of a start trigger that matched an event (see `start.ts`). */
     startTriggeredRun,
 
     /**

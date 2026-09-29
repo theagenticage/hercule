@@ -8,7 +8,6 @@
  * runners and the controller's settings. All four sit below runs in the
  * domain graph.
  */
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -40,22 +39,14 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
-import { afterCommit, nowIso } from "../db";
-import { readPipelineEvent } from "../events";
+import { afterCommit, commitUninterruptibly, nowIso } from "../db";
 import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
-import {
-  triggerEffectRepository,
-  TriggerHealth,
-  workflowRepository,
-  WorkflowService,
-  type PendingTriggerEffect,
-} from "../workflows";
+import { workflowRepository, WorkflowService, type PendingTriggerEffect } from "../workflows";
 import { runRepository, type RunOutcome } from "./repository";
 import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
-import { commitUninterruptibly } from "./transaction";
 
 /**
  * How many runs deep a run may be when the controller's `run.nestingLimit`
@@ -235,9 +226,7 @@ export const makeRunStart = (
     const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const storedWorkflows = yield* workflowRepository;
-    const triggerEffects = yield* triggerEffectRepository;
     const workflows = yield* WorkflowService;
-    const health = yield* TriggerHealth;
     const host = yield* PluginHost;
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
@@ -526,7 +515,8 @@ export const makeRunStart = (
     /**
      * Writes a run of a stored workflow because one of its start triggers
      * matched `event`, and returns the run's id. Joins the caller's
-     * transaction.
+     * transaction, and hands the run to the Run Executor once it commits.
+     * The workflows domain calls it through its `TriggeredRuns` port.
      *
      * Nobody is waiting on this start to refuse it, so a run that cannot
      * start is still written, and fails at once with `validation-error` and
@@ -538,27 +528,22 @@ export const makeRunStart = (
      * - the nesting limit, because a triggered run is 1 deep;
      * - the capable runner. A run no runner can run starts, and its first
      *   workspace step fails with `workspace-failed`, as for a run whose
-     *   runners were retired after it started. Which
-     *   runners exist says nothing about the workflow, so the failure is
-     *   not held back like a validation error.
+     *   runners were retired after it started. Which runners exist says
+     *   nothing about the workflow, so the failure is not held back like a
+     *   validation error.
      *
      * The caller must have read the workflow's id from a row that its
-     * transaction holds, so the workflow exists.
+     * transaction holds, so the workflow exists. There is no grant check:
+     * the controller starts the run on nobody's behalf, after the workflow's
+     * author saved the trigger.
      */
-    const writeTriggeredRun = (
+    const startTriggeredRun = (
       effect: PendingTriggerEffect,
       event: Event,
       at: string,
     ): Effect.Effect<string, SqlError> =>
       Effect.gen(function* () {
-        const plan = yield* Effect.flatMap(
-          storedWorkflows.readDefinition(effect.workflowId),
-          Option.match({
-            onNone: () =>
-              Effect.die(`the workflow ${effect.workflowId} of a matched trigger does not exist`),
-            onSome: Effect.succeed,
-          }),
-        );
+        const plan = Option.getOrThrow(yield* storedWorkflows.readDefinition(effect.workflowId));
         const checked = yield* checkRunnable(plan, effect.inputs, TRIGGERED_RUN_REFUSALS).pipe(
           Effect.map(Result.succeed),
           Effect.catchIf(
@@ -597,97 +582,6 @@ export const makeRunStart = (
         }
         return runId;
       });
-
-    /**
-     * Discards a pending trigger effect whose start died with `cause`, and
-     * records the failure on its trigger's health, in a transaction of its
-     * own. The cause is logged in full; the health gets its first line.
-     */
-    const discardAfterDefect = (
-      effectId: number,
-      cause: Cause.Cause<SqlError>,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        yield* Effect.logError(
-          `Starting the run of the trigger effect ${String(effectId)} failed, so it is discarded`,
-          cause,
-        );
-        yield* commitUninterruptibly(
-          sql,
-          Effect.gen(function* () {
-            const discarded = yield* triggerEffects.discardIfPending(effectId, yield* nowIso);
-            if (Option.isNone(discarded)) return;
-            const effect = discarded.value;
-            const defect = Cause.squash(cause);
-            yield* health.recordFailure(
-              effect,
-              "start",
-              `The run for the event ${String(effect.eventId)} could not start, because of a bug in the controller: ${defect instanceof Error ? defect.message : String(defect)}. The match was dropped, and the controller's log has the details.`,
-            );
-          }),
-        );
-      });
-
-    /** Starts the run of one pending trigger effect, as `startTriggeredRun` describes. */
-    const startRunOfEffect = (effectId: number): Effect.Effect<void, SqlError> =>
-      commitUninterruptibly(
-        sql,
-        Effect.gen(function* () {
-          const pending = yield* triggerEffects.readPending(effectId);
-          if (Option.isNone(pending)) return;
-          const effect = pending.value;
-          const at = yield* nowIso;
-          const triggerDescription = `The trigger ${effect.triggerId} of the workflow ${effect.workflowId}`;
-          if (!(yield* storedWorkflows.isRoutableStartTrigger(effect))) {
-            yield* Effect.logInfo(
-              `${triggerDescription} starts no run for the event ${String(effect.eventId)}, because it was paused, or its workflow disabled, after the event matched.`,
-            );
-            return yield* triggerEffects.markDiscarded(effect.id, at);
-          }
-          const event = yield* readPipelineEvent(sql, effect.eventId);
-          if (Option.isNone(event)) {
-            // Only retention deletes an event, and only one far older than
-            // any effect waits. Starting the run without its event would lose
-            // what started it, so the match is dropped.
-            yield* Effect.logWarning(
-              `${triggerDescription} starts no run for the event ${String(effect.eventId)}, because the event is no longer in the log.`,
-            );
-            return yield* triggerEffects.markDiscarded(effect.id, at);
-          }
-          const runId = yield* writeTriggeredRun(effect, event.value, at);
-          yield* triggerEffects.markSpawned(effect.id, runId, at);
-        }),
-      );
-
-    /**
-     * Starts the run of one pending trigger effect, and marks the effect
-     * spawned, in one transaction. So a run starts exactly once per match: a
-     * crash before the commit leaves the effect pending and no run, and after
-     * it the effect is no longer pending.
-     *
-     * The effect is read again inside the transaction, because it may have
-     * been delivered, or deleted with its trigger, since it was listed. An
-     * effect whose run can no longer start is marked discarded, and the log
-     * says why:
-     *
-     * - its trigger was paused, or its workflow disabled, since the match;
-     * - its event is no longer in the log.
-     *
-     * Fails only with `SqlError`, which leaves the effect pending, so the
-     * next delivery tries again. A start that dies instead, because of a bug,
-     * would die the same way on every try, so the effect is discarded and
-     * the failure recorded on its trigger's health (see
-     * `discardAfterDefect`).
-     *
-     * There is no grant check: the controller starts the run on nobody's
-     * behalf, after the workflow's author saved the trigger.
-     */
-    const startTriggeredRun = (effectId: number): Effect.Effect<void, SqlError> =>
-      Effect.catchCause(startRunOfEffect(effectId), (cause) =>
-        Cause.hasInterrupts(cause) || !Cause.hasDies(cause)
-          ? Effect.failCause(cause)
-          : discardAfterDefect(effectId, cause),
-      );
 
     return { start, rerun, startTriggeredRun };
   });

@@ -18,6 +18,7 @@ import { NotificationServiceLayer } from "../notifications";
 import { Settings, SettingsLayer } from "../settings";
 import { CronTriggerScheduler, CronTriggerSchedulerLayer, decideFiring } from "./cron-triggers";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
+import { declareCronTrigger } from "./testing";
 import { TriggerHealthLayer } from "./trigger-health";
 
 const layer = CronTriggerSchedulerLayer.pipe(
@@ -40,22 +41,6 @@ const NEXT_MORNING = "2026-09-23T07:00:00.000Z";
 
 const ALICE = "0199e0e7-0000-7000-8000-000000000001";
 const BOB = "0199e0e7-0000-7000-8000-000000000002";
-
-/** Returns a start trigger on `cron.tick` at 09:00 every day, with `fields` replacing the defaults. */
-const declareCronTrigger = (
-  triggerId: string,
-  fields: Partial<DeclaredTrigger> = {},
-): DeclaredTrigger => ({
-  triggerId,
-  kind: "start",
-  eventKind: "cron.tick",
-  connectionId: undefined,
-  filter: undefined,
-  schedule: "0 9 * * *",
-  timezone: "Europe/Amsterdam",
-  inputs: undefined,
-  ...fields,
-});
 
 /** Inserts a workflow with the given triggers, enabled unless `enabled` is false. Returns its id. */
 const storeWorkflow = (triggers: ReadonlyArray<DeclaredTrigger>, enabled = true) =>
@@ -538,7 +523,7 @@ describe("a cron trigger whose timezone is not a known one", () => {
         SELECT health_error_message, health_error_at FROM triggers
         WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}`;
       const notifications = yield* sql<{ readonly title: string; readonly body: string }>`
-        SELECT title, body FROM notifications WHERE kind = 'core.trigger-filter-error'`;
+        SELECT title, body FROM notifications WHERE kind = 'core.trigger-error'`;
       return { ...trigger!, notifications };
     });
 

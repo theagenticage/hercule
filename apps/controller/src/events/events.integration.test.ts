@@ -26,6 +26,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { readEvent } from "./testing";
 import {
   spawnAgentUnder,
   createProfile,
@@ -79,12 +80,6 @@ const enrichEventOrFail = async (
   const response = await enrich(base, token, id, body);
   expect(response.ok, await response.clone().text()).toBe(true);
   return response;
-};
-
-const readEvent = async (base: string, token: string, id: number): Promise<Event> => {
-  const response = await get(base, `/api/v1/events/${String(id)}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Event;
 };
 
 /** Returns every entry of one kind in the log, to assert that no row was written. */

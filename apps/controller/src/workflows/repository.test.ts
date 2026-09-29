@@ -17,25 +17,10 @@ import { ANY_CONNECTION, type Trigger, type TriggerKey } from "@hercule/contract
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
+import { declareCronTrigger, declareStartTrigger } from "./testing";
 
 const FIRST_SAVE = "2026-09-22T10:00:00.000Z";
 const SECOND_SAVE = "2026-09-22T11:00:00.000Z";
-
-/** Returns a start trigger on `task.created`, with `fields` replacing the defaults. */
-const declareTrigger = (
-  triggerId: string,
-  fields: Partial<DeclaredTrigger> = {},
-): DeclaredTrigger => ({
-  triggerId,
-  kind: "start",
-  eventKind: "task.created",
-  connectionId: undefined,
-  filter: undefined,
-  schedule: undefined,
-  timezone: undefined,
-  inputs: undefined,
-  ...fields,
-});
 
 /** Inserts a workflow and its triggers, all saved at `savedAt`. Returns the workflow id. */
 const storeWorkflow = (name: string, triggers: ReadonlyArray<DeclaredTrigger>, savedAt: string) =>
@@ -90,14 +75,14 @@ const saveTwice = (
 
 describe("saving a workflow's triggers a second time", () => {
   it("leaves the row of an unchanged trigger untouched", async () => {
-    const triggers = await saveTwice([declareTrigger("a")], [declareTrigger("a")]);
+    const triggers = await saveTwice([declareStartTrigger("a")], [declareStartTrigger("a")]);
     expect(triggers.get("a")).toMatchObject({ createdAt: FIRST_SAVE, updatedAt: FIRST_SAVE });
   });
 
   it("updates the fields and updated_at of a changed trigger, and keeps its created_at and status", async () => {
     const triggers = await saveTwice(
-      [declareTrigger("a")],
-      [declareTrigger("a", { filter: "event.payload.id > 3" })],
+      [declareStartTrigger("a")],
+      [declareStartTrigger("a", { filter: "event.payload.id > 3" })],
       ["a"],
     );
     expect(triggers.get("a")).toMatchObject({
@@ -111,7 +96,10 @@ describe("saving a workflow's triggers a second time", () => {
   it("gives a start trigger a status and a signal trigger no status", async () => {
     const triggers = await saveTwice(
       [],
-      [declareTrigger("a"), declareTrigger("s", { kind: "signal", eventKind: "task.updated" })],
+      [
+        declareStartTrigger("a"),
+        declareStartTrigger("s", { kind: "signal", eventKind: "task.updated" }),
+      ],
     );
     expect(triggers.get("a")?.status).toBe("active");
     expect(Object.keys(triggers.get("s") ?? {})).not.toContain("status");
@@ -119,8 +107,8 @@ describe("saving a workflow's triggers a second time", () => {
 
   it("replaces a trigger whose kind changed with a new row, even when its id is the same", async () => {
     const triggers = await saveTwice(
-      [declareTrigger("a"), declareTrigger("s", { kind: "signal" })],
-      [declareTrigger("a", { kind: "signal" }), declareTrigger("s")],
+      [declareStartTrigger("a"), declareStartTrigger("s", { kind: "signal" })],
+      [declareStartTrigger("a", { kind: "signal" }), declareStartTrigger("s")],
       ["a"],
     );
     // The paused start trigger became a signal trigger, which has no status.
@@ -142,15 +130,19 @@ describe("the trigger ids a second save returns", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow(
           "Twice saved",
-          [declareTrigger("kept"), declareTrigger("dropped"), declareTrigger("flipped")],
+          [
+            declareStartTrigger("kept"),
+            declareStartTrigger("dropped"),
+            declareStartTrigger("flipped"),
+          ],
           FIRST_SAVE,
         );
         return yield* workflows.reconcileTriggers(
           workflowId,
           [
-            declareTrigger("kept", { filter: "event.payload.id > 3" }),
-            declareTrigger("flipped", { kind: "signal" }),
-            declareTrigger("added"),
+            declareStartTrigger("kept", { filter: "event.payload.id > 3" }),
+            declareStartTrigger("flipped", { kind: "signal" }),
+            declareStartTrigger("added"),
           ],
           SECOND_SAVE,
         );
@@ -164,7 +156,7 @@ describe("listing triggers page by page", () => {
   it("returns each trigger once, in order, when a page ends among triggers with the same created_at", async () => {
     const { listed, workflowIds } = await Effect.runPromise(
       Effect.gen(function* () {
-        const triggers = ["a", "b", "c"].map((triggerId) => declareTrigger(triggerId));
+        const triggers = ["a", "b", "c"].map((triggerId) => declareStartTrigger(triggerId));
         const workflowIds = [
           yield* storeWorkflow("First", triggers, FIRST_SAVE),
           yield* storeWorkflow("Second", triggers, FIRST_SAVE),
@@ -238,15 +230,6 @@ const readTriggerColumns = (key: TriggerKey) =>
     ),
   );
 
-/** Returns a cron trigger at 09:00 every day in Amsterdam, with `fields` replacing the defaults. */
-const declareCronTrigger = (triggerId: string, fields: Partial<DeclaredTrigger> = {}) =>
-  declareTrigger(triggerId, {
-    eventKind: "cron.tick",
-    schedule: "0 9 * * *",
-    timezone: "Europe/Amsterdam",
-    ...fields,
-  });
-
 describe("saving a start trigger's input mapping", () => {
   it("stores the mapping as JSON, and no mapping as NULL", async () => {
     const mapping = { title: "event.payload.title", number: "event.payload.number" };
@@ -254,7 +237,7 @@ describe("saving a start trigger's input mapping", () => {
       Effect.gen(function* () {
         const workflowId = yield* storeWorkflow(
           "Mapped",
-          [declareTrigger("mapped", { inputs: mapping }), declareTrigger("unmapped")],
+          [declareStartTrigger("mapped", { inputs: mapping }), declareStartTrigger("unmapped")],
           FIRST_SAVE,
         );
         return [
@@ -274,12 +257,12 @@ describe("saving a start trigger's input mapping", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow(
           "Mapped",
-          [declareTrigger("a", { inputs: { title: "event.payload.title" } })],
+          [declareStartTrigger("a", { inputs: { title: "event.payload.title" } })],
           FIRST_SAVE,
         );
         yield* workflows.reconcileTriggers(
           workflowId,
-          [declareTrigger("a", { inputs: { title: "event.payload.name" } })],
+          [declareStartTrigger("a", { inputs: { title: "event.payload.name" } })],
           SECOND_SAVE,
         );
         return yield* readTriggerColumns({ workflowId, triggerId: "a" });
@@ -299,9 +282,10 @@ describe("a start trigger's health across a second save", () => {
     run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
-        const workflowId = yield* storeWorkflow("Healthy", [declareTrigger("a")], FIRST_SAVE);
+        const workflowId = yield* storeWorkflow("Healthy", [declareStartTrigger("a")], FIRST_SAVE);
         yield* workflows.recordTriggerFailure(
           { workflowId, triggerId: "a" },
+          "evaluation",
           "payload has no field title",
           FIRST_SAVE,
         );
@@ -312,12 +296,12 @@ describe("a start trigger's health across a second save", () => {
 
   it("is ok again after a save that changes the trigger, because the error was about the old trigger", async () => {
     expect(
-      await readHealthAfterResave(declareTrigger("a", { filter: "event.payload.id > 3" })),
+      await readHealthAfterResave(declareStartTrigger("a", { filter: "event.payload.id > 3" })),
     ).toEqual({ state: "ok" });
   });
 
   it("keeps its error after a save that leaves the trigger as it was", async () => {
-    expect(await readHealthAfterResave(declareTrigger("a"))).toEqual({
+    expect(await readHealthAfterResave(declareStartTrigger("a"))).toEqual({
       state: "error",
       message: "payload has no field title",
       at: FIRST_SAVE,
@@ -391,7 +375,7 @@ describe("a cron trigger's schedule state across a second save", () => {
   it("clears every part of the schedule state after a save that changes the event kind", async () => {
     expect(
       await readScheduleStateAfterResave(
-        declareTrigger("nightly", { schedule: undefined, timezone: undefined }),
+        declareStartTrigger("nightly", { schedule: undefined, timezone: undefined }),
       ),
     ).toEqual({
       inputs: null,
@@ -417,15 +401,25 @@ describe("a cron trigger's schedule state across a second save", () => {
   });
 });
 
-describe("recording a start trigger's evaluation failures", () => {
-  it("reports the first failure of a streak and not the next, and keeps the time the streak began", async () => {
+describe("recording a start trigger's failures", () => {
+  it("turns the health to an error on the first failure at a stage and not on the next, and keeps the time the error began", async () => {
     const { first, second, health } = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
-        const workflowId = yield* storeWorkflow("Failing", [declareTrigger("a")], FIRST_SAVE);
+        const workflowId = yield* storeWorkflow("Failing", [declareStartTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
-        const first = yield* workflows.recordTriggerFailure(key, "first error", FIRST_SAVE);
-        const second = yield* workflows.recordTriggerFailure(key, "second error", SECOND_SAVE);
+        const first = yield* workflows.recordTriggerFailure(
+          key,
+          "evaluation",
+          "first error",
+          FIRST_SAVE,
+        );
+        const second = yield* workflows.recordTriggerFailure(
+          key,
+          "evaluation",
+          "second error",
+          SECOND_SAVE,
+        );
         return { first, second, health: (yield* readStoredTrigger(key)).health };
       }),
     );
@@ -435,21 +429,61 @@ describe("recording a start trigger's evaluation failures", () => {
     expect(health).toEqual({ state: "error", message: "second error", at: FIRST_SAVE });
   });
 
-  it("starts a new streak after the failure is cleared", async () => {
-    const { healthAfterClear, reported, health } = await run(
+  it("turns the health to a new error when another stage fails, with the time of that failure", async () => {
+    const { reported, health } = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
-        const workflowId = yield* storeWorkflow("Failing", [declareTrigger("a")], FIRST_SAVE);
+        const workflowId = yield* storeWorkflow("Failing", [declareStartTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
-        yield* workflows.recordTriggerFailure(key, "first error", FIRST_SAVE);
-        yield* workflows.clearTriggerFailure(key);
-        const healthAfterClear = (yield* readStoredTrigger(key)).health;
-        const reported = yield* workflows.recordTriggerFailure(key, "again", SECOND_SAVE);
-        return { healthAfterClear, reported, health: (yield* readStoredTrigger(key)).health };
+        yield* workflows.recordTriggerFailure(key, "evaluation", "bad filter", FIRST_SAVE);
+        const reported = yield* workflows.recordTriggerFailure(key, "start", "no run", SECOND_SAVE);
+        return { reported, health: (yield* readStoredTrigger(key)).health };
       }),
     );
 
-    expect(healthAfterClear).toEqual({ state: "ok" });
+    expect(reported).toBe(true);
+    expect(health).toEqual({ state: "error", message: "no run", at: SECOND_SAVE });
+  });
+
+  it("clears an error only for the stage that recorded it", async () => {
+    const { clearedByOther, healthAfterOther, clearedBySame, healthAfterSame } = await run(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const workflowId = yield* storeWorkflow("Failing", [declareStartTrigger("a")], FIRST_SAVE);
+        const key = { workflowId, triggerId: "a" };
+        yield* workflows.recordTriggerFailure(key, "start", "no run", FIRST_SAVE);
+        const clearedByOther = yield* workflows.clearTriggerFailure(key, "evaluation");
+        const healthAfterOther = (yield* readStoredTrigger(key)).health;
+        const clearedBySame = yield* workflows.clearTriggerFailure(key, "start");
+        const healthAfterSame = (yield* readStoredTrigger(key)).health;
+        return { clearedByOther, healthAfterOther, clearedBySame, healthAfterSame };
+      }),
+    );
+
+    expect(clearedByOther).toBe(false);
+    expect(healthAfterOther).toEqual({ state: "error", message: "no run", at: FIRST_SAVE });
+    expect(clearedBySame).toBe(true);
+    expect(healthAfterSame).toEqual({ state: "ok" });
+  });
+
+  it("turns the health to an error again after the error is cleared", async () => {
+    const { reported, health } = await run(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const workflowId = yield* storeWorkflow("Failing", [declareStartTrigger("a")], FIRST_SAVE);
+        const key = { workflowId, triggerId: "a" };
+        yield* workflows.recordTriggerFailure(key, "evaluation", "first error", FIRST_SAVE);
+        yield* workflows.clearTriggerFailure(key, "evaluation");
+        const reported = yield* workflows.recordTriggerFailure(
+          key,
+          "evaluation",
+          "again",
+          SECOND_SAVE,
+        );
+        return { reported, health: (yield* readStoredTrigger(key)).health };
+      }),
+    );
+
     expect(reported).toBe(true);
     expect(health).toEqual({ state: "error", message: "again", at: SECOND_SAVE });
   });
@@ -463,14 +497,14 @@ describe("listing the routable start triggers", () => {
         const enabledId = yield* storeWorkflow(
           "Enabled",
           [
-            declareTrigger("active", {
+            declareStartTrigger("active", {
               connectionId: ANY_CONNECTION,
               filter: "event.payload.id > 3",
               inputs: { id: "event.payload.id" },
             }),
-            declareTrigger("unmapped"),
-            declareTrigger("paused"),
-            declareTrigger("signal", { kind: "signal" }),
+            declareStartTrigger("unmapped"),
+            declareStartTrigger("paused"),
+            declareStartTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
         );
@@ -482,11 +516,12 @@ describe("listing the routable start triggers", () => {
         );
         yield* workflows.recordTriggerFailure(
           { workflowId: enabledId, triggerId: "unmapped" },
+          "evaluation",
           "boom",
           SECOND_SAVE,
         );
         // A workflow is stored disabled, so this one's active trigger cannot start a run.
-        yield* storeWorkflow("Disabled", [declareTrigger("of-disabled")], FIRST_SAVE);
+        yield* storeWorkflow("Disabled", [declareStartTrigger("of-disabled")], FIRST_SAVE);
         const routable = yield* workflows.listRoutableStartTriggers();
         return { routable, enabledId };
       }),
@@ -502,7 +537,7 @@ describe("listing the routable start triggers", () => {
         connectionId: ANY_CONNECTION,
         filter: "event.payload.id > 3",
         inputs: { id: "event.payload.id" },
-        hasHealthError: false,
+        hasEvaluationError: false,
       },
       {
         workflowId: enabledId,
@@ -511,7 +546,7 @@ describe("listing the routable start triggers", () => {
         connectionId: undefined,
         filter: undefined,
         inputs: {},
-        hasHealthError: true,
+        hasEvaluationError: true,
       },
     ]);
   });
@@ -525,9 +560,9 @@ describe("checking that a start trigger is routable", () => {
         const enabledId = yield* storeWorkflow(
           "Enabled",
           [
-            declareTrigger("active"),
-            declareTrigger("paused"),
-            declareTrigger("signal", { kind: "signal" }),
+            declareStartTrigger("active"),
+            declareStartTrigger("paused"),
+            declareStartTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
         );
@@ -539,7 +574,7 @@ describe("checking that a start trigger is routable", () => {
         );
         const disabledId = yield* storeWorkflow(
           "Disabled",
-          [declareTrigger("of-disabled")],
+          [declareStartTrigger("of-disabled")],
           FIRST_SAVE,
         );
         const check = (workflowId: string, triggerId: string) =>
@@ -569,7 +604,7 @@ describe("setting a trigger's status", () => {
     const { paused, pausedAgain, trigger } = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
-        const workflowId = yield* storeWorkflow("Toggled", [declareTrigger("a")], FIRST_SAVE);
+        const workflowId = yield* storeWorkflow("Toggled", [declareStartTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
         const paused = yield* workflows.setTriggerStatus(key, "paused", SECOND_SAVE);
         const pausedAgain = yield* workflows.setTriggerStatus(
@@ -592,7 +627,7 @@ describe("setting a trigger's status", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow(
           "Signalled",
-          [declareTrigger("s", { kind: "signal" })],
+          [declareStartTrigger("s", { kind: "signal" })],
           FIRST_SAVE,
         );
         const key = { workflowId, triggerId: "s" };
@@ -619,18 +654,18 @@ describe("listing the triggers that name a Connection", () => {
         const betaId = yield* storeWorkflow(
           "Beta",
           [
-            declareTrigger("z", { connectionId: CONNECTION_ID }),
-            declareTrigger("a", { connectionId: CONNECTION_ID, kind: "signal" }),
-            declareTrigger("any", { connectionId: ANY_CONNECTION }),
+            declareStartTrigger("z", { connectionId: CONNECTION_ID }),
+            declareStartTrigger("a", { connectionId: CONNECTION_ID, kind: "signal" }),
+            declareStartTrigger("any", { connectionId: ANY_CONNECTION }),
           ],
           FIRST_SAVE,
         );
         const alphaId = yield* storeWorkflow(
           "Alpha",
           [
-            declareTrigger("m", { connectionId: CONNECTION_ID }),
-            declareTrigger("other", { connectionId: OTHER_CONNECTION_ID }),
-            declareTrigger("none"),
+            declareStartTrigger("m", { connectionId: CONNECTION_ID }),
+            declareStartTrigger("other", { connectionId: OTHER_CONNECTION_ID }),
+            declareStartTrigger("none"),
           ],
           FIRST_SAVE,
         );
@@ -676,7 +711,7 @@ describe("listing the cron triggers to schedule", () => {
             declareCronTrigger("future-user-zone", { timezone: undefined }),
             declareCronTrigger("future-stale-user-zone", { timezone: undefined }),
             // Not cron triggers: the schedule is only read for `cron.tick`.
-            declareTrigger("not-cron", { schedule: "0 9 * * *" }),
+            declareStartTrigger("not-cron", { schedule: "0 9 * * *" }),
             declareCronTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
@@ -777,7 +812,7 @@ describe("listing the cron triggers to schedule", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow(
           "Scheduled",
-          [declareTrigger("not-cron", { schedule: "0 9 * * *" })],
+          [declareStartTrigger("not-cron", { schedule: "0 9 * * *" })],
           FIRST_SAVE,
         );
         return {
@@ -874,7 +909,7 @@ describe("reading a trigger", () => {
       Effect.gen(function* () {
         const workflowId = yield* storeWorkflow(
           "Read",
-          [declareTrigger("start"), declareTrigger("signal", { kind: "signal" })],
+          [declareStartTrigger("start"), declareStartTrigger("signal", { kind: "signal" })],
           FIRST_SAVE,
         );
         return {
@@ -897,7 +932,7 @@ describe("reading a trigger", () => {
     const found = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
-        const workflowId = yield* storeWorkflow("Read", [declareTrigger("a")], FIRST_SAVE);
+        const workflowId = yield* storeWorkflow("Read", [declareStartTrigger("a")], FIRST_SAVE);
         return yield* workflows.readTrigger({ workflowId, triggerId: "absent" });
       }),
     );

@@ -1,11 +1,20 @@
 /**
- * The check of the user timezone setting. Two operations write the setting,
+ * Timezone names: whether the runtime knows one, and the check of the user
+ * timezone setting. Two operations write the setting,
  * `settings.update` and `setup.complete`, and both run this check first.
  */
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { createValidationError, quoteAuthorText, type Validation } from "@hercule/contract";
+
+/**
+ * Checks whether `timezone` is an IANA zone name that this runtime knows, such
+ * as `Europe/Amsterdam`. Each runtime knows its own list of zones, from the
+ * timezone database it ships with.
+ */
+export const isKnownTimezone = (timezone: string): boolean =>
+  Option.isSome(DateTime.zoneMakeNamed(timezone));
 
 /**
  * Checks that `timezone` is an IANA zone name that this runtime knows, such as
@@ -21,7 +30,7 @@ export const validateTimezone = (
   timezone: string,
   path: ReadonlyArray<string>,
 ): Effect.Effect<void, Validation> =>
-  Option.isSome(DateTime.zoneMakeNamed(timezone))
+  isKnownTimezone(timezone)
     ? Effect.void
     : Effect.fail(
         createValidationError([

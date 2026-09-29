@@ -37,7 +37,7 @@ export const appendPlatformSourceEvent = (
   sql: SqlClient.SqlClient,
   event: PlatformSourceEventToAppend,
 ): Effect.Effect<EventId, SqlError> =>
-  Effect.map(
+  Effect.flatMap(
     appendEvent(sql, {
       source: PLATFORM_SOURCE,
       connectionId: null,
@@ -55,6 +55,10 @@ export const appendPlatformSourceEvent = (
       payload: event.payload,
       actor: event.actor,
     }),
-    // A random dedup key never collides, so the insert is never skipped.
-    (id) => id!,
+    // A random dedup key never collides, so the insert is never skipped,
+    // and a skipped insert is a bug.
+    (id) =>
+      id === undefined
+        ? Effect.die(new Error("a platform event with a random dedup key was not written"))
+        : Effect.succeed(id),
   );

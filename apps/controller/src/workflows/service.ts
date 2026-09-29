@@ -325,7 +325,7 @@ const make = Effect.gen(function* () {
    * declares no trigger with the id, and with `InvalidState` for a signal
    * trigger, which has no status.
    */
-  const setTriggerStatus = (
+  const updateTriggerStatus = (
     operation: "trigger.pause" | "trigger.resume",
     key: TriggerKey,
   ): Effect.Effect<Trigger, ChangeByIdError> =>
@@ -671,11 +671,11 @@ const make = Effect.gen(function* () {
      * it. Events that arrive while it is paused are not kept for later.
      */
     pauseTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
-      setTriggerStatus("trigger.pause", key),
+      updateTriggerStatus("trigger.pause", key),
 
     /** `trigger.resume`: lets a paused start trigger start runs again, and returns it. */
     resumeTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
-      setTriggerStatus("trigger.resume", key),
+      updateTriggerStatus("trigger.resume", key),
   };
 });
 

@@ -189,3 +189,20 @@ export const withTransaction = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E | SqlError, R> => withAnnouncements(sql.withTransaction(effect));
+
+/**
+ * Runs a write set in a transaction, as `withTransaction` does, but one that
+ * cannot be interrupted. Returns what the write set returns, and fails with
+ * what it fails with, or with a database error.
+ *
+ * Use it for a write set whose after-commit work must not be lost, such as
+ * handing a run it wrote to the Run Executor. An interrupt that landed after
+ * the commit and before that work would lose the work, and nothing would
+ * retry it: cancelling a run interrupts its execution, and stopping the
+ * controller interrupts every fiber. The write set only touches the local
+ * database, so the interrupt waits a moment at most.
+ */
+export const commitUninterruptibly = <A, E, R>(
+  sql: SqlClient.SqlClient,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | SqlError, R> => Effect.uninterruptible(withTransaction(sql, effect));

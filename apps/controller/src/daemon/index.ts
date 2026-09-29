@@ -77,5 +77,11 @@ export {
   SessionInputDeadline,
   sweepSessionsOnLostRunners,
 } from "./sessions";
-export { runScheduler, SchedulerInterval, WorkflowRunsLayer } from "./workflows";
+export {
+  checkSchedulerInterval,
+  runScheduler,
+  SchedulerInterval,
+  TriggeredRunsLayer,
+  WorkflowRunsLayer,
+} from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
