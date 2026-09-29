@@ -17,15 +17,15 @@
  * reported as `unknown`, with the frame in `raw`, so nothing is lost.
  */
 import type * as Schema from "effect/Schema";
-import {
-  type ItemKind,
-  type ItemStatus,
-  type OutputSchema,
-  type ProviderEvent,
-  type StreamKind,
-  type StructuredResult,
-  type TurnState,
-  type Usage,
+import type {
+  ItemKind,
+  ItemStatus,
+  OutputSchema,
+  ProviderEvent,
+  StreamKind,
+  StructuredResult,
+  TurnState,
+  Usage,
 } from "@hercule/protocol";
 import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";

@@ -1,0 +1,18 @@
+/* The sidebar: solid, one tone darker than the main pane. It never floats over
+   content, so it is not glass. Class names follow the Bureau book, as in
+   shell.css. */
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 12px;
+  background: var(--bg);
+}
+
+/* The strip along the top of the sidebar, where macOS draws the traffic
+   lights. The window is dragged by it. */
+.side-top {
+  flex: none;
+  height: 48px;
+  -webkit-app-region: drag;
+}

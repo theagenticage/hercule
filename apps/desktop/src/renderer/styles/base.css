@@ -1,0 +1,47 @@
+/* The page under the app: rules for the whole document, not for one
+   component. The window is a Mac app, not a web page (spec 17 §Native
+   behaviour), so the page never shows the signs of one. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Painted before React mounts too, so the first frame is already --bg,
+     the colour main gives the window. */
+  background: var(--bg);
+  color: var(--ink);
+}
+
+html {
+  /* The window never bounces as a whole. Scroll areas inside it keep macOS's
+     elastic scrolling. */
+  overscroll-behavior: none;
+  /* The chrome is not text: it cannot be selected, and the pointer is an
+     arrow over it, as over native controls. Links are the one exception to
+     the arrow, handled below. Text a reader may copy, such as the transcript
+     and code, opts back in to selection where it is drawn. */
+  user-select: none;
+  cursor: default;
+}
+
+/* Chromium gives every link the pointing hand, whatever cursor its parent
+   has. The book draws rows and tabs as links, and a native row shows the
+   arrow. */
+:any-link {
+  cursor: default;
+}
+
+/* A focus ring shows only for keyboard focus. Chromium already keeps its own
+   ring to :focus-visible; this draws Bureau's ring in its place. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}

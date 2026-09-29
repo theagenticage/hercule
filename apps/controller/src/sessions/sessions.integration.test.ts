@@ -25,17 +25,17 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
-import {
-  type ModelDescriptor,
-  type ProbeRequest,
-  type ProviderEvent,
-  type RunnerFacts,
-  type SessionInterrupt as SessionInterruptFrame,
-  type SessionStart,
-  type SessionStop as SessionStopFrame,
-  type SessionInput,
-  type OpenRequest,
-  type SessionRespond as SessionRespondFrame,
+import type {
+  ModelDescriptor,
+  ProbeRequest,
+  ProviderEvent,
+  RunnerFacts,
+  SessionInterrupt as SessionInterruptFrame,
+  SessionStart,
+  SessionStop as SessionStopFrame,
+  SessionInput,
+  OpenRequest,
+  SessionRespond as SessionRespondFrame,
 } from "@hercule/protocol";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";

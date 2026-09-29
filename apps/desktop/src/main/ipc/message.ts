@@ -1,0 +1,131 @@
+/**
+ * How main answers one IPC message on a renderer-to-main channel: it checks
+ * who sent the message, decodes the request, runs the channel's handler and
+ * encodes the response. A message that fails a check is refused: main logs it
+ * once and replies with the reason.
+ *
+ * Nothing here imports Electron, so the checks run in unit tests.
+ */
+import { Data, Effect, Schema } from "effect";
+import type { IpcReply, RendererToMainIpcChannel } from "../../ipc/contract";
+import { RENDERER_ORIGIN } from "../renderer-origin";
+
+/** The part of Electron's `WebFrameMain` that the sender check reads. */
+export interface WebFrame {
+  readonly origin: string;
+}
+
+/**
+ * The error main fails with when it refuses an IPC message. `reason` says
+ * why; it goes back to the renderer and into main's log.
+ */
+export class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
+  readonly reason: string;
+}> {}
+
+/**
+ * Checks that an IPC message comes from the window's page: `senderFrame` must
+ * be the main frame of the web contents that sent the message, not a frame
+ * inside the page, and its origin must be `app://hercule`. Fails with
+ * IpcMessageRefused otherwise. `senderFrame` is null when the frame navigated
+ * away or closed before main read the message.
+ *
+ * Electron hands out one `WebFrameMain` object per frame, so comparing the
+ * two objects compares the frames.
+ */
+export const checkIpcSender = (
+  senderFrame: WebFrame | null,
+  mainFrame: WebFrame,
+): Effect.Effect<void, IpcMessageRefused> => {
+  if (senderFrame === null) {
+    return Effect.fail(new IpcMessageRefused({ reason: "the frame that sent it is gone" }));
+  }
+  if (senderFrame !== mainFrame) {
+    return Effect.fail(new IpcMessageRefused({ reason: "it comes from a frame inside the page" }));
+  }
+  if (senderFrame.origin !== RENDERER_ORIGIN) {
+    return Effect.fail(
+      new IpcMessageRefused({
+        reason: `it comes from ${senderFrame.origin}, not ${RENDERER_ORIGIN}`,
+      }),
+    );
+  }
+  return Effect.void;
+};
+
+/**
+ * Decodes the request of one IPC message from its arguments. A message
+ * carries at most one argument, the request, and none when the channel needs
+ * no request. Fails with IpcMessageRefused when there are more arguments or
+ * the request does not match the channel's schema.
+ *
+ * A channel that needs no request is sent with no argument rather than with
+ * `undefined`, because Electron turns an `undefined` argument into `null`.
+ */
+export const decodeIpcRequest = <IpcRequestSchema extends Schema.Top>(
+  schema: IpcRequestSchema,
+  args: ReadonlyArray<unknown>,
+): Effect.Effect<
+  IpcRequestSchema["Type"],
+  IpcMessageRefused,
+  IpcRequestSchema["DecodingServices"]
+> => {
+  if (args.length > 1) {
+    return Effect.fail(
+      new IpcMessageRefused({
+        reason: `it carries ${args.length} arguments, and a message carries at most one, the request`,
+      }),
+    );
+  }
+  return Schema.decodeUnknownEffect(schema)(args[0]).pipe(
+    Effect.mapError(
+      (error) =>
+        new IpcMessageRefused({
+          reason: `its request does not match the contract: ${error.message}`,
+        }),
+    ),
+  );
+};
+
+/** One IPC message as main receives it from Electron. */
+export interface IpcMessage {
+  /** The frame that sent the message: Electron's `event.senderFrame`. */
+  readonly senderFrame: WebFrame | null;
+  /** The main frame of the web contents that sent it: `event.sender.mainFrame`. */
+  readonly mainFrame: WebFrame;
+  /** The arguments the renderer passed after the channel name. */
+  readonly args: ReadonlyArray<unknown>;
+}
+
+/**
+ * Answers one IPC message on the channel `name`: checks its sender, decodes
+ * its request, runs `handler` and encodes the response. Returns the reply for
+ * the renderer, which holds the encoded response, or the reason main refused
+ * the message; a refusal is also logged, once, as a warning.
+ *
+ * A response that does not encode is a bug in main, not the renderer's
+ * fault, so it is a defect rather than a refusal.
+ */
+export const answerIpcMessage = <IpcChannel extends RendererToMainIpcChannel, Services>(
+  name: string,
+  channel: IpcChannel,
+  handler: (
+    request: IpcChannel["request"]["Type"],
+  ) => Effect.Effect<IpcChannel["response"]["Type"], never, Services>,
+  message: IpcMessage,
+): Effect.Effect<
+  IpcReply<IpcChannel["response"]["Encoded"]>,
+  never,
+  Services | IpcChannel["request"]["DecodingServices"] | IpcChannel["response"]["EncodingServices"]
+> =>
+  Effect.gen(function* () {
+    yield* checkIpcSender(message.senderFrame, message.mainFrame);
+    const request = yield* decodeIpcRequest(channel.request, message.args);
+    const response = yield* handler(request);
+    return { response: yield* Effect.orDie(Schema.encodeEffect(channel.response)(response)) };
+  }).pipe(
+    Effect.catchTag("IpcMessageRefused", ({ reason }) => {
+      const refusal = `Main refused a message on ${name}: ${reason}.`;
+      return Effect.as(Effect.logWarning(refusal), { refusal });
+    }),
+  );

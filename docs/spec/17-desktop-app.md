@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** drafted 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275). It is not yet locked, and nothing below is built.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slice 1 is built. Slices 2 to 8 are not.
 
 ## Scope of the first milestone
 
@@ -55,17 +55,18 @@ The desktop app has three layers. Each has one job.
 
 `apps/desktop` (`@hercule/desktop`) is one package with three entry points, `src/main`, `src/preload` and `src/renderer`, plus `src/ipc`, the IPC contract that all three import.
 
-- **Build.** It is the second package with a build of its own, after `apps/web`. `electron-vite` builds the three bundles, and `electron-builder` packages the `.app`.
+- **Build.** It is the second package with a build of its own, after `apps/web`. Vite builds the three bundles, one config per layer, and `electron-builder` packages the `.app`. The repository is on Vite 8, and `electron-vite` 5 supports only Vite 5 to 7, so a small dev script (`apps/desktop/scripts/dev.ts`) does what `electron-vite dev` would: it starts the renderer's dev server, rebuilds main and the preload when they change, and restarts Electron.
 - **Its components are its own.** They live in the renderer. They move into a package of their own only when a second app needs them.
 - **Imports allowed:** `@hercule/contract` and `@hercule/client-core`.
 - **Imports forbidden:** `@hercule/ui`, `@hercule/web`, the controller, the runner, `@hercule/protocol`, `@hercule/plugin-host`, `@hercule/cli` and `@hercule/hercule`.
+  - `@hercule/contract` itself imports `@hercule/protocol` and `@hercule/plugin-host`. The desktop app may therefore reach those two through the contract, but never import them itself. The other six are forbidden even through a library.
 - **Imports forbidden within the layers:**
   - The renderer never imports `electron` or a Node built-in.
   - The preload imports only `electron` and the IPC contract's types.
   - Main never imports React.
 - **`pnpm dep-lint` enforces the import rules.**
 
-Pinned versions at drafting: Electron 44.4.5 (Chromium 152), electron-vite 5.0.0, electron-builder 26.15.3.
+Pinned versions: Electron 44.4.5 (Chromium 152, Node 24), Vite 8.2.2, electron-builder 26.15.3.
 
 ## Reaching the controller
 
@@ -136,14 +137,16 @@ default-src 'self'; script-src 'self'; connect-src <controller> <controller-ws>;
 
 ### Development
 
-In development, the `app` scheme handler forwards each request to the `electron-vite` dev server, so the renderer runs at `app://hercule` in development too. It reaches the controller exactly as the packaged app does. The CORS path is therefore used every day, not only in the end-to-end test.
+In development, the `app` scheme handler forwards each request to the Vite dev server, so the renderer runs at `app://hercule` in development too. It reaches the controller exactly as the packaged app does. The CORS path is therefore used every day, not only in the end-to-end test.
+
+- **The request's headers pass through,** except `Origin`. Vite decides how to answer from `Accept` and `Sec-Fetch-Dest`. An `Origin` of `app://hercule` makes Chromium's network stack fail the forwarded request.
+- **The HMR socket dials the dev server directly.** Vite's `server.ws` option sets its host to `127.0.0.1` and its port to the dev server's. Without it, the HMR client would dial `ws://hercule`. Vite's HMR socket accepts a client whose origin is `app://hercule` (measured 2026-09-29).
 
 The development CSP adds what the dev server needs, and only in development:
 
-- the dev server's HMR socket in `connect-src`
+- the dev server's HMR socket and origin in `connect-src`: `ws://127.0.0.1:<port>` and `http://127.0.0.1:<port>`
 - `'unsafe-inline'` in `script-src`, for the React Refresh preamble
-
-**Verify at build time:** that Vite's HMR socket accepts a client whose origin is `app://hercule`. If it does not, the fallback is the web app's setup: a Vite proxy to the controller, with the renderer's base URL set to the dev server's origin.
+- `'unsafe-inline'` in `style-src`, for the styles Vite injects in development
 
 ## Auth and the token
 
@@ -172,6 +175,7 @@ Only the storage differs:
   - An `http:` or `https:` link opens in the default browser through `shell.openExternal`.
   - Any other scheme is refused.
 - **Permission requests from the renderer are denied,** every one of them: camera, microphone, geolocation, notifications. Main shows notifications itself.
+  - **Local network access is denied too, and the renderer still reaches the controller.** Electron 44 has the permission types `local-network-access`, `local-network` and `loopback-network`, but it turns Chromium's Local Network Access checks off, so they do not gate `fetch` (measured 2026-09-29). An end-to-end test reaches a loopback controller with every permission denied. The day Electron turns the checks on, that test fails, and the permission handler must then grant those three types to `app://hercule` alone.
 - **IPC:**
   - Main answers only messages from a frame whose origin is `app://hercule`.
   - Main decodes every message against the IPC contract, and refuses and logs one that does not decode.
@@ -181,13 +185,17 @@ Only the storage differs:
   - `EnableNodeCliInspectArguments` off
   - `EnableEmbeddedAsarIntegrityValidation` on
   - `OnlyLoadAppFromAsar` on
+  - `GrantFileProtocolExtraPrivileges` off: the app loads nothing over `file://`
+- **The test package differs from the release package in one fuse.** Playwright's Electron driver attaches through `--inspect`, which `EnableNodeCliInspectArguments` turns off. The end-to-end tests and the perf script therefore run a second package with only that fuse on. A packaging test reads every fuse off the release `.app` and checks it.
 
 ## The IPC contract
 
 `apps/desktop/src/ipc` declares every channel in Effect Schema: its name, its request and its response.
 
 - Main decodes each request against it.
-- The preload exposes one typed function per channel, on one object in the renderer's world.
+- The preload exposes one typed function per channel, on one object in the renderer's world: `window.bridge`.
+  - A renderer → main channel `a.b` is called as `window.bridge.a.b(request)` and returns a promise of the response.
+  - A main → renderer channel is declared in a second table. The bridge exposes it as a subscription: `thread.open` becomes `window.bridge.thread.onOpen(listener)`, which returns a function that unsubscribes. The preload passes the listener only the decoded payload, never Electron's IPC event object.
 - Nothing else crosses between the layers.
 
 The first milestone's channels:
@@ -195,7 +203,7 @@ The first milestone's channels:
 | Channel | Direction | Purpose |
 |---|---|---|
 | `token.read` / `token.write` | renderer → main | the stored token (see [Auth and the token](#auth-and-the-token)) |
-| `controller.read` / `controller.connect` | renderer → main | the saved controller URL; checking and saving a new one |
+| `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one and saving it. Not the public API's `controller.read`, which describes the controller itself |
 | `runnerIdentity.read` | renderer → main | the local-runner probe |
 | `badge.set` | renderer → main | the dock badge count |
 | `notification.show` / `notification.close` | renderer → main | a thread's notification, keyed by session id |
@@ -211,16 +219,21 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 
 - **Title bar:**
   - `titleBarStyle: "hiddenInset"`, with the traffic lights sitting in the sidebar's top strip.
+  - `trafficLightPosition: { x: 19, y: 16 }` puts the native lights where the Bureau pages draw them: centres at 26, 46 and 66 pt from the left, 24 pt from the top. The renderer draws no lights of its own.
   - The sidebar's top strip and the thread's chrome row are drag regions. The controls inside them are not.
 - **No flash:**
-  - The window is created hidden, with `backgroundColor` set to `--bg` of the current appearance.
+  - The window is created hidden, with `backgroundColor` set to `--bg` of the current appearance: `#f4f3f0` for Whitehaven and `#1a1310` for Orient Express. These are the sRGB values Chromium draws for the `oklch` tokens, and a unit test derives them from `tokens.css`.
   - It is shown on `ready-to-show`.
   - When the appearance changes, main updates the background colour.
 - **Theme follows the system, live:** Whitehaven when macOS is light, Orient Express when it is dark, through `prefers-color-scheme`. Bureau's other three themes, and a glass setting, arrive with Settings.
 - **Accessibility settings:**
   - Reduce transparency sets `--glass-level` to 0, which removes the blur completely.
   - Reduce motion stops every animation.
+- **Window size:**
+  - The first launch opens a 1440 × 900 pt window, the size of the Bureau pages, centred on the display. On a smaller display it fills the work area.
+  - The window cannot be made smaller than 800 × 500 pt. Below a width of 776 an empty thread's composer no longer fits the main pane, and below a height of 440 its start cards no longer fit.
 - **Window state is remembered:** size, position and full-screen. A position that no longer lands on a display is moved onto the nearest one.
+- **Closing the window hides it.** `⌘W` and the red light hide the window, the dock icon shows it again, and `⌘Q` quits. The app keeps running while the window is hidden, so the dock badge and notifications keep working.
 - **The last open thread reopens at launch.**
 - **Menu:**
   - The standard app, Edit and Window menus, so text editing shortcuts work in every field.
@@ -373,7 +386,26 @@ These rules keep the budgets:
   - the renderer bundle budget
   - the process count
   - no long tasks while streaming the fixture
-- **The rest is recorded per slice.** Launch time, memory and wakeups depend on the machine. They are measured on the reference machine and recorded here, per slice.
+- **The rest is recorded per slice,** in [Measured](#measured). Launch time, memory and wakeups depend on the machine, so they are measured on the reference machine.
+
+### Measured
+
+**Slice 1,** measured 2026-09-29 on the reference machine with the perf script. The window shows the empty shell: the sidebar and the new-thread screen, with no controller. The load average was 7 to 12 while measuring, so launch times on a quiet machine are likely lower.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to first paint, warm | 500 ms | 243 to 283 ms over four runs |
+| Processes | 4 | 4 |
+| Memory, summed working set | 420 MB | 336 to 345 MB |
+| Memory, renderer | 180 MB | 88 to 91 MB |
+| Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 0; GPU 4 a second |
+| Wakeups while hidden | renderer none | renderer 0 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB | 84.6 kB |
+| Main's bundle, minified | - | 107 kB, 37 kB gzipped |
+| The preload, minified | - | 243 bytes |
+
+- **Launch is measured without Playwright.** Playwright holds each new renderer paused until it attaches, which adds its own time to a launch. The perf script spawns the app as a plain process, and reads the page's `first-paint` entry over the Chrome DevTools Protocol once the window is on screen.
+- **The wakeups are an upper bound.** The perf script samples them through Playwright, which keeps a connection to main open. Sampled with `top` on the release package started without Playwright, all four processes showed 0 wakeups a second.
 
 ## Slices
 
@@ -381,6 +413,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
 
 1. **Shell and safety.**
    - the `apps/desktop` package
+   - `tokens.css` and the font files, because the window's background needs `--bg` in both appearances
    - the `app` scheme and the CSP
    - the security baseline
    - the window: title bar, no flash, theme, remembered state, single instance
@@ -394,7 +427,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
    - the stored token
    - sign in and sign out
 3. **Design foundation.**
-   - tokens and fonts
+   - font preloading
    - faces, poses, icons and marks as typed modules
    - the live theme
    - the screenshot comparison against the Bureau pages
@@ -420,7 +453,9 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
   - decoding against the IPC contract
   - that a face's seed always gives the same face
 - **Renderer component tests** work as they do in `apps/web`.
-- **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the packaged app against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. CI runs them on macOS, the target platform.
+- **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the test package (see [Security baseline](#security-baseline)) against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. CI runs them on macOS, the target platform.
+  - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
+  - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
@@ -439,7 +474,7 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 - **Auto-update.**
 - **Several controllers.**
 - **Windows and Linux.** Main keeps the platform calls in one place so they can be swapped.
-- **Destroying the renderer when the window closes,** while main keeps a light watch for the dock badge and notifications. This is a candidate if measurements show that the hidden renderer's memory matters. In the first milestone, `⌘W` hides the window and `⌘Q` quits.
+- **Destroying the renderer when the window closes,** while main keeps a light watch for the dock badge and notifications. This is a candidate if measurements show that the hidden renderer's memory matters. In the first milestone, closing the window hides it ([Native behaviour](#native-behaviour)).
 
 ## Sources
 

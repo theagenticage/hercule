@@ -1,16 +1,23 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Three projects: the two React packages, everything else, and the one suite
- * that runs the release binary. A few tests run in both of the first two; see
- * `bothEngineTests` below.
+ * Six projects: the React code of the web app and the UI library, everything
+ * else, the desktop app's two halves, the suite that runs the release binary,
+ * and the suite that runs the packaged desktop app. A few tests run in both
+ * `react` and `node`; see `bothEngineTests` below.
  *
- * The first two run on different runtimes, which is why `pnpm test` invokes
+ * The projects run on different runtimes, which is why `pnpm test` invokes
  * vitest twice. The `node` project needs Bun: it reaches `bun:sqlite`,
  * `Bun.password` and `Bun.file`. The `react` project must not have it: Bun's
  * `Response` hands back an `ArrayBuffer` from its own realm while jsdom
  * installs another, so a stubbed response decodes as the wrong type. Browser
  * code belongs on Node with jsdom anyway.
+ *
+ * The desktop app runs on no Bun at all. `desktop-main` holds every desktop
+ * test outside the renderer: main runs in Electron's main process, which is
+ * Node, and the IPC contract and the build scripts run there or under plain
+ * Node too. `desktop-renderer` is the renderer's page on jsdom. Both run in the
+ * Node half of `pnpm test`.
  *
  * The `binary` project is out of both, and out of `pnpm test`: `pnpm test:binary`
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
@@ -22,8 +29,29 @@ import { defineConfig } from "vitest/config";
  * `e2e/workflows.test.ts` - are the same program either way, so with no build
  * they run the dispatcher's source instead (`findReleaseBinary` in
  * `e2e/harness.ts`).
+ *
+ * The `desktop` project is out of `pnpm test` too: `pnpm test:desktop` runs it,
+ * after `pnpm build:desktop`. It drives the packaged app with Playwright, which
+ * runs on Node.
  */
-const reactPackages = ["apps/web", "packages/ui"];
+
+/** The source folders whose tests run in the `react` project, on jsdom. */
+const reactSources = ["apps/web/src", "packages/ui/src"];
+
+/** The desktop app's page, whose tests run in the `desktop-renderer` project. */
+const desktopRenderer = "apps/desktop/src/renderer";
+
+/** The settings every project that renders React on jsdom shares. */
+const reactOnJsdom = {
+  environment: "jsdom",
+  // Stylesheets are processed rather than stubbed, so a test can read the
+  // one its workspace ships as its source.
+  css: true,
+  // Testing Library registers its auto-cleanup only when a global `afterEach`
+  // exists, so without this a second render in one file sees the first one
+  // still mounted.
+  globals: true,
+} as const;
 
 /**
  * Tests that run in both the `react` and the `node` project, so that both
@@ -69,24 +97,47 @@ export default defineConfig({
             "**/dist/**",
             // Agent worktrees are whole copies of this repository.
             "**/.claude/**",
-            ...reactPackages.map((p) => `${p}/**`),
+            ...reactSources.map((folder) => `${folder}/**`),
             ...binaryTests,
+            "apps/desktop/**",
+            "e2e/desktop/**",
           ],
         },
       },
       {
         test: {
           name: "react",
-          environment: "jsdom",
-          // Stylesheets are processed rather than stubbed, so a test can read
-          // the one this workspace ships as its source.
-          css: true,
-          // Testing Library registers its auto-cleanup only when a global
-          // `afterEach` exists, so without this a second render in one file
-          // sees the first one still mounted.
-          globals: true,
+          ...reactOnJsdom,
           setupFiles: ["packages/ui/src/test-setup.ts"],
-          include: [...reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`), ...bothEngineTests],
+          include: [
+            ...reactSources.map((folder) => `${folder}/**/*.test.{ts,tsx}`),
+            ...bothEngineTests,
+          ],
+        },
+      },
+      {
+        test: {
+          name: "desktop-main",
+          environment: "node",
+          // A tested module must not import `electron`: under plain Node the
+          // package's main export is the path to the Electron binary, so
+          // `import { app } from "electron"` is undefined. Keep the logic
+          // worth testing in modules that take what they need as arguments.
+          include: ["apps/desktop/**/*.test.ts"],
+          exclude: [
+            "**/node_modules/**",
+            `${desktopRenderer}/**`,
+            "apps/desktop/out/**",
+            "apps/desktop/dist/**",
+          ],
+        },
+      },
+      {
+        test: {
+          name: "desktop-renderer",
+          ...reactOnJsdom,
+          setupFiles: [`${desktopRenderer}/test-setup.ts`],
+          include: [`${desktopRenderer}/**/*.test.{ts,tsx}`],
         },
       },
       {
@@ -94,6 +145,20 @@ export default defineConfig({
           name: "binary",
           environment: "node",
           include: binaryTests,
+        },
+      },
+      {
+        test: {
+          name: "desktop",
+          environment: "node",
+          include: ["e2e/desktop/**/*.test.ts"],
+          // Each test starts the packaged app, which takes seconds.
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
+          // A poll waits for the app to act on something, such as showing
+          // its window. On a slow CI runner, with two apps starting at once,
+          // that can take longer than the default of 1 s.
+          expect: { poll: { timeout: 5_000 } },
         },
       },
     ],

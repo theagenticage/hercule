@@ -1,0 +1,13 @@
+{
+  // The desktop end-to-end suite is its own TypeScript program. It runs on
+  // Node, not Bun, and the functions it hands to `page.evaluate` run in the
+  // app's page, so it needs Node's types and the DOM library. The root program
+  // has neither, and adding the DOM library there would let backend code use
+  // `document` and still typecheck.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

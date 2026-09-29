@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hercule</title>
+    <!-- Blocks the parser on purpose: the theme that matches the macOS
+         appearance is set before the first paint, so a dark Mac never sees a
+         light window first. -->
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

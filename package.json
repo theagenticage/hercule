@@ -6,24 +6,30 @@
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "prepare": "bun run scripts/gen-version.ts && bun run scripts/gen-web-bundle.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc -p apps/desktop/tsconfig.renderer.json && tsc -p apps/desktop/tsconfig.node.json && tsc -p e2e/desktop/tsconfig.json",
     "lint": "NODE_OPTIONS=--max-old-space-size=4096 eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
-    "test": "bun --bun run vitest run --project node && vitest run --project react",
+    "test": "bun --bun run vitest run --project node && vitest run --project react --project desktop-main --project desktop-renderer",
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
-    "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --outfile hercule"
+    "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --outfile hercule",
+    "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer && pnpm --filter @hercule/desktop package",
+    "test:desktop": "vitest run --project desktop"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.112",
+    "@electron/asar": "3.4.1",
+    "@electron/fuses": "1.8.0",
     "@eslint/js": "10.0.1",
     "@types/bun": "1.4.0",
+    "@types/node": "26.4.1",
     "effect": "4.0.0-rc.112",
     "eslint": "10.9.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.12.0",
     "jsdom": "30.0.1",
+    "playwright": "1.63.0",
     "prettier": "3.9.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.69.0",
@@ -36,6 +42,9 @@
     "overrides": {
       "effect": "4.0.0-rc.112",
       "typescript": "5.9.3"
-    }
+    },
+    "ignoredBuiltDependencies": [
+      "electron-winstaller"
+    ]
   }
 }

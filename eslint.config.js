@@ -65,14 +65,14 @@ const effectPattern = { group: ["effect/*"], message: noEffectMessage };
 const routeLocalPattern = {
   group: ["../**/-*", "./*/**/-*", "**/routes/-*", "**/routes/**/-*"],
   message:
-    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hercule/ui.",
+    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in the app's screens/ folder, generic presentation in @hercule/ui.",
 };
 
 /** The shell is the frame; a screen imports presentation, not the frame. */
 const shellPattern = {
   group: ["**/shell", "**/shell/*"],
   message:
-    "Screens import presentation from @hercule/ui or apps/web/src/screens/, never from the shell.",
+    "Screens import presentation from @hercule/ui or the app's screens/ folder, never from the shell. Only a layout route mounts the shell.",
 };
 
 /** The folder of the workflow editor, the one module that holds its libraries. */
@@ -159,14 +159,36 @@ const browserImports = ({ allowed, more = [] } = {}) => [
   },
 ];
 
-/** The dynamic imports and calls a browser file may not make, beside `browserImports`. */
-const browserSyntax = ({ allowed } = {}) => [
+/**
+ * The dynamic imports and calls a browser file may not make, beside
+ * `browserImports`. `allowed` and `more` work as they do there.
+ */
+const browserSyntax = ({ allowed, more = [] } = {}) => [
   "error",
   ...bannedChildProcessCalls,
   ...workflowEditorFenceCalls,
   ...yamlCalls,
   ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
+  ...more,
 ];
+
+/**
+ * Vite turns these two forms into imports while it builds, so the imports
+ * appear in no file's text, and neither eslint nor dep-lint can check what
+ * they reach. The desktop app, whose layers dep-lint holds to a list of what
+ * each may link, uses neither.
+ */
+const viteGlobSyntax = {
+  selector: "MemberExpression[object.type='MetaProperty'][property.name=/^glob/]",
+  message:
+    "Vite turns `import.meta.glob` into one import per matching file, which neither eslint nor dep-lint can see, so the desktop app does not use it. Import each file by name.",
+};
+const viteAssetUrlSyntax = {
+  selector:
+    "NewExpression[callee.name='URL'][arguments.1.object.type='MetaProperty'][arguments.1.property.name='url']",
+  message:
+    "Vite turns `new URL(path, import.meta.url)` into an import of that file, which neither eslint nor dep-lint can see, so the desktop renderer does not use it. Import the file with a `?url` suffix instead.",
+};
 
 export default tseslint.config(
   {
@@ -181,6 +203,8 @@ export default tseslint.config(
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
+      "apps/desktop/src/renderer/routeTree.gen.ts",
+      "apps/desktop/out/**",
       "apps/runner/src/providers/codex/generated/**",
       "/hercule",
     ],
@@ -205,18 +229,26 @@ export default tseslint.config(
         { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
       ],
       "no-restricted-syntax": ["error", ...bannedChildProcessCalls, ...editorLibraryCalls],
+      // `import { type X } from "./x"` keeps an import of `./x` after the types
+      // are removed, because the repository compiles with verbatimModuleSyntax.
+      // `import type { X }` removes the import with them.
+      "@typescript-eslint/no-import-type-side-effects": "error",
     },
   },
   {
-    // The pre-paint theme script is plain browser JavaScript that no build
-    // touches, so it is linted as what it is rather than ignored.
-    files: ["apps/web/public/**/*.js"],
+    // The pre-paint theme scripts are plain browser JavaScript that no build
+    // touches, so they are linted as what they are rather than ignored.
+    files: ["apps/web/public/**/*.js", "apps/desktop/src/renderer/public/**/*.js"],
     languageOptions: {
       globals: globals.browser,
     },
   },
   {
-    files: ["apps/web/**/*.{ts,tsx}", "packages/ui/**/*.{ts,tsx}"],
+    files: [
+      "apps/web/**/*.{ts,tsx}",
+      "packages/ui/**/*.{ts,tsx}",
+      "apps/desktop/src/renderer/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       globals: globals.browser,
     },
@@ -231,15 +263,25 @@ export default tseslint.config(
     },
   },
   {
+    files: ["apps/desktop/src/renderer/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": browserSyntax({ more: [viteGlobSyntax, viteAssetUrlSyntax] }),
+    },
+  },
+  {
     // A screen composes presentation; it does not reach into the frame around
-    // it. Only the two layout routes below mount the shell.
-    files: ["apps/web/src/routes/**/*.tsx"],
+    // it. Only the layout routes below mount the shell.
+    files: ["apps/web/src/routes/**/*.tsx", "apps/desktop/src/renderer/routes/**/*.tsx"],
     rules: {
       "no-restricted-imports": browserImports({ more: [shellPattern] }),
     },
   },
   {
-    files: ["apps/web/src/routes/_shell.tsx", "apps/web/src/routes/_shell/settings.tsx"],
+    files: [
+      "apps/web/src/routes/_shell.tsx",
+      "apps/web/src/routes/_shell/settings.tsx",
+      "apps/desktop/src/renderer/routes/_shell.tsx",
+    ],
     rules: {
       "no-restricted-imports": browserImports(),
     },
@@ -266,9 +308,68 @@ export default tseslint.config(
     },
   },
   {
+    // The desktop app's Node code: main, and the build tooling around it.
+    files: [
+      "apps/desktop/src/main/**/*.ts",
+      "apps/desktop/scripts/**/*.ts",
+      "apps/desktop/vite.*.config.ts",
+    ],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    // The desktop app's code outside the renderer. It keeps the rules every
+    // file follows, because a rule's options here replace the ones above.
+    files: ["apps/desktop/src/{main,preload,ipc}/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...bannedChildProcessCalls,
+        ...editorLibraryCalls,
+        viteGlobSyntax,
+      ],
+    },
+  },
+  {
+    // The preload is only the bridge between the window and main: one function
+    // per IPC channel, and nothing else (spec 17). It needs `electron` for that,
+    // and the IPC contract's types to type each function. Anything more is
+    // logic that belongs in main or the renderer.
+    files: ["apps/desktop/src/preload/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: "^(?!electron$|\\.\\./ipc(/|$))",
+              message:
+                "The preload imports only `electron` and types from ../ipc, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
+            },
+            {
+              regex: "^\\.\\./ipc(/|$)",
+              allowTypeImports: true,
+              message:
+                "The preload uses only the IPC contract's types (spec 17). Write `import type`.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // `spawn()` is the sanctioned way to start another role, and build scripts
-    // are tooling that never ships inside the binary.
-    files: ["packages/hercule/src/spawn.ts", "scripts/**/*.ts"],
+    // are tooling that never ships inside the binary. The desktop end-to-end
+    // suite runs on Node, never inside the binary, and starts a second copy of
+    // the packaged app itself, because Playwright cannot start one that exits
+    // at once.
+    files: [
+      "packages/hercule/src/spawn.ts",
+      "scripts/**/*.ts",
+      "apps/desktop/scripts/**/*.ts",
+      "e2e/desktop/**/*.ts",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",

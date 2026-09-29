@@ -1,0 +1,38 @@
+/* The shell. Its class names follow the Bureau book (`.app`, `.main`, `.side`),
+   so each rule here maps 1:1 to the book's rule of the same name. */
+
+/* The shell (the book's `.app`): the sidebar in a 272px column and the main
+   pane in the rest. */
+.app {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* The main pane: one tone lighter than the sidebar, with a hairline along its
+   left edge. */
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line-soft);
+}
+
+/* The strip along the top of the main pane by which the window is dragged, as
+   by a title bar. It is as tall as the book's top row and paints nothing. A
+   screen marks each control it places over the strip `no-drag`, so that the
+   control can be clicked. */
+.drag-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 52px;
+  -webkit-app-region: drag;
+}

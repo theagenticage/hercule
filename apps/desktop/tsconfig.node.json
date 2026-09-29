@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    // The perf script runs on plain Node, which resolves an import only by its
+    // full file name, so it imports its neighbour as `./packaged-app.ts`.
+    // TypeScript refuses that extension unless this is on.
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/ipc/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.*.config.ts"
+  ]
+}

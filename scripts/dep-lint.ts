@@ -1,17 +1,32 @@
 #!/usr/bin/env bun
 /**
- * Enforces mode isolation (spec 15 section 3, ADR 0018).
+ * Enforces what each entrypoint may link: the runner's mode isolation (spec
+ * 15 section 3, ADR 0018), and the import rules of the desktop app's three
+ * layers (spec 17, Package). `ENTRYPOINT_RULES` below lists every rule.
  *
  * The runner entrypoint's module graph MUST NOT include any controller
- * package: no DB engine, no plugin host, no web bundle. Isolation is a
- * property of the import graph per entrypoint, not of the file on disk, so
- * this script reads the graph Bun actually links: `--sourcemap=external` emits
- * a map whose `sources` array is the module list after tree shaking. Bun has no
- * `--metafile`.
+ * package: no DB engine, no plugin host, no web bundle. Each layer of the
+ * desktop app links no first-party code but its own and, where allowed,
+ * @hercule/contract and @hercule/client-core; each layer also has a list of
+ * things it must not link.
  *
- * The rule reads specifiers, so it cannot see a specifier built at runtime
- * (`await import("bun" + ":sqlite")`). Nothing in the codebase does that, and
- * no scan short of running the code could catch it.
+ * Isolation is a property of the import graph per entrypoint, not of the file
+ * on disk. So this script builds each entrypoint with Bun and reads the
+ * build's metafile: every file the build resolved, stylesheets and fonts
+ * included, and every import between them. A rule is decided on the files an
+ * import resolves to, never on how the import is spelled: a package name, a
+ * relative path and an absolute path that reach one file are one edge.
+ *
+ * Some imports never reach the graph:
+ *
+ * - a specifier built at runtime, such as `await import("bun" + ":sqlite")`;
+ * - Bun's `import.meta.require`, which the metafile does not record;
+ * - Vite's `import.meta.glob`, and `new URL(path, import.meta.url)` in the
+ *   renderer, which Vite turns into imports while it builds. eslint refuses
+ *   both in the desktop app.
+ *
+ * Nothing in the codebase does the first two, and no scan short of running
+ * the code could catch them.
  *
  * A second graph rule is about the controller rather than the runner: its
  * domains form a DAG, with no allowlist of edges. `src/<domain>/index.ts` is
@@ -36,112 +51,422 @@
  * store is read directly, because pnpm links only direct dependencies into
  * `node_modules`.
  *
- * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. `scripts/dep-lint.test.ts`
- * uses the optional entrypoint to point the script at its fixtures.
+ * Usage: `bun run scripts/dep-lint.ts [<layer> <entrypoint>]`. With no
+ * arguments, every rule is checked against its own entrypoint. With a layer,
+ * such as `"desktop renderer"`, only that layer's rule is checked, and it is
+ * checked against the given file instead. `scripts/dep-lint.test.ts` uses
+ * this to point a rule at its fixtures.
  */
-import { readdir, rm } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
+import { mkdtemp, readdir, realpath } from "node:fs/promises";
+import { builtinModules } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BunPlugin } from "bun";
+import ts from "typescript";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
+
+/** One thing an entrypoint must not link. */
+interface Forbidden {
+  /** What the pattern stands for, as the error message names it. */
+  readonly what: string;
+  /**
+   * Matched against a file's path from the repository root, and against an
+   * external import as it is written, such as `bun:sqlite`. A first-party
+   * plugin is `plugins/...`, while a dependency that happens to ship a
+   * `plugins/` directory is under `node_modules/` and does not match.
+   */
+  readonly pattern: RegExp;
+}
 
 /**
- * Each rule describes what it forbids in `what`, which the CI output prints.
- * Patterns are matched against repository-relative paths and bare specifiers,
- * so a first-party plugin is `plugins/...` while a dependency that happens to
- * ship a `plugins/` directory is under `node_modules/` and does not match.
+ * The first-party code a layer may reach. First-party code is every file
+ * outside a `node_modules` folder: this repository's source, or a test
+ * fixture.
  */
-const FORBIDDEN = [
-  { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+interface FirstPartyAllowlist {
+  /** The layer's own folders, relative to the folder of its entrypoint. */
+  readonly own: ReadonlyArray<string>;
+  /**
+   * The workspace packages the layer may import, by their folder name under
+   * `packages/`. What such a package imports in turn is allowed too, because
+   * it is the package's dependency and not the layer's. The same file
+   * reached from the layer by any other path is not.
+   */
+  readonly packages: ReadonlyArray<string>;
+}
+
+/** The rule one entrypoint's module graph must follow. */
+interface EntrypointRule {
+  /** The layer the entrypoint starts. The error message and the command line name the rule by it. */
+  readonly layer: string;
+  /** The entrypoint's path from the repository root. */
+  readonly entrypoint: string;
+  /**
+   * Where the layer runs. Bun resolves each dependency's export conditions
+   * for this target, so the graph read here is the one the layer runs.
+   */
+  readonly target: "bun" | "browser" | "node";
+  /**
+   * The bundler that builds the layer for real. The check always builds with
+   * Bun; for a layer that Vite builds, `readImportsLikeVite` makes Bun read
+   * the imports that Vite would link.
+   */
+  readonly bundler: "bun" | "vite";
+  /** Why the layer must not link what the rule refuses. The error message prints it above the violations. */
+  readonly reason: string;
+  /**
+   * When set, the only first-party code the layer may reach. `forbidden` is
+   * then matched against third-party files and external imports only.
+   */
+  readonly firstParty?: FirstPartyAllowlist;
+  /** Matched against every module the layer reaches that `firstParty` does not decide on. */
+  readonly forbidden: ReadonlyArray<Forbidden>;
+}
+
+/** Why no layer of the desktop app links first-party code but what its rule allows. */
+const DESKTOP_PACKAGES_REASON =
+  "The desktop app links no first-party code but each layer's own files and, where the layer\n" +
+  "allows them, @hercule/contract and @hercule/client-core (spec 17, Package). What\n" +
+  "@hercule/protocol and @hercule/plugin-host define is imported through @hercule/contract,\n" +
+  "which re-exports what a client needs; neither one belongs in apps/desktop/package.json.";
+
+/** The workspace packages a client of the public API may import (spec 17, Package). */
+const CLIENT_PACKAGES = ["contract", "client-core"];
+
+/**
+ * Matches a built-in module of the runtime, with or without the `node:`
+ * prefix, and with a subpath such as `fs/promises`. The list comes from Bun,
+ * which runs this script, so it also holds Bun's own `bun:` modules.
+ */
+const RUNTIME_BUILT_IN = new RegExp(`^(node:.*|(${builtinModules.join("|")})(/.*)?)$`);
+
+const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
   {
-    what: "the plugin host",
-    pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
+    layer: "runner",
+    entrypoint: "apps/runner/src/index.ts",
+    target: "bun",
+    bundler: "bun",
+    reason:
+      "The runner entrypoint's module graph must contain no controller package:\n" +
+      "no DB engine, no plugin host, no web bundle.",
+    forbidden: [
+      { what: "the DB engine", pattern: /@effect[/+]sql|^bun:sqlite$/ },
+      {
+        what: "the plugin host",
+        pattern: /^apps\/controller\/|@hercule[/+]controller|^plugins\//,
+      },
+      {
+        what: "the web bundle",
+        pattern:
+          /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+      },
+    ],
   },
   {
-    what: "the web bundle",
-    pattern: /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+    layer: "desktop main",
+    entrypoint: "apps/desktop/src/main/index.ts",
+    target: "node",
+    bundler: "vite",
+    reason:
+      "Desktop main runs in Electron's browser process and draws nothing, so it never imports React.\n" +
+      DESKTOP_PACKAGES_REASON,
+    // Main decodes every IPC message, so the IPC contract's folder is main's own.
+    firstParty: { own: [".", "../ipc"], packages: CLIENT_PACKAGES },
+    forbidden: [{ what: "React", pattern: /(^|\/)react(-dom)?([/@]|$)/ }],
   },
-] as const;
+  {
+    layer: "desktop preload",
+    entrypoint: "apps/desktop/src/preload/index.ts",
+    target: "node",
+    bundler: "vite",
+    reason:
+      "The desktop preload is the bridge and nothing else, so at runtime it links its own files\n" +
+      "and electron alone. Types are free, such as the IPC contract's, when they are imported\n" +
+      "with `import type`.\n" +
+      DESKTOP_PACKAGES_REASON,
+    firstParty: { own: ["."], packages: [] },
+    forbidden: [{ what: "anything but electron", pattern: /^(?!electron$)/ }],
+  },
+  {
+    layer: "desktop renderer",
+    entrypoint: "apps/desktop/src/renderer/main.tsx",
+    target: "browser",
+    bundler: "vite",
+    reason:
+      "The desktop renderer is a sandboxed web page, so it never imports electron or a Node built-in.\n" +
+      DESKTOP_PACKAGES_REASON,
+    firstParty: { own: ["."], packages: CLIENT_PACKAGES },
+    forbidden: [
+      { what: "electron", pattern: /^electron(\/|$)/ },
+      { what: "a Node or Bun built-in", pattern: RUNTIME_BUILT_IN },
+    ],
+  },
+];
 
-const outdir = `${root}node_modules/.cache/dep-lint`;
-await rm(outdir, { recursive: true, force: true });
+const [onlyLayer, onlyEntrypoint] = process.argv.slice(2);
+const rules =
+  onlyLayer === undefined
+    ? ENTRYPOINT_RULES
+    : ENTRYPOINT_RULES.filter((rule) => rule.layer === onlyLayer);
 
-const built = await Bun.build({
-  entrypoints: [resolve(root, entrypoint)],
-  target: "bun",
-  sourcemap: "external",
-  outdir,
-});
-
-if (!built.success) {
-  console.error(`dep-lint: could not build ${entrypoint}`);
-  for (const log of built.logs) console.error(" ", log.message);
+if (rules.length === 0 || (onlyLayer !== undefined && onlyEntrypoint === undefined)) {
+  console.error(
+    "dep-lint: usage: bun run scripts/dep-lint.ts [<layer> <entrypoint>], where <layer> is one of " +
+      `${ENTRYPOINT_RULES.map((rule) => `"${rule.layer}"`).join(", ")}.`,
+  );
   process.exit(1);
 }
 
-const map = built.outputs.find((o) => o.path.endsWith(".map"));
-if (!map) {
-  console.error("dep-lint: bun emitted no sourcemap; cannot read the module graph");
-  process.exit(1);
+/**
+ * Makes Bun read a layer's imports the way Vite does when it builds the
+ * layer, so that the graph holds what Vite would link:
+ *
+ * - An import whose names are all types, such as `import { type X } from
+ *   "./x"`, stays as an import of `./x`, as it does in Vite, because the
+ *   repository compiles with `verbatimModuleSyntax` (tsconfig.base.json). Bun
+ *   would drop such an import, so TypeScript removes the types here instead,
+ *   with that setting. Only `import type` removes the import as well.
+ * - A query such as Vite's `?url` or `?raw` is dropped, and the file is
+ *   resolved without it, so the file is in the graph whatever Vite makes of it.
+ * - An absolute path in a stylesheet, such as `url(/fonts/a.woff2)`, names a
+ *   file the page's server serves from its public folder. It stays external,
+ *   unless a file exists at that path on disk, which Vite would inline.
+ */
+const readImportsLikeVite: BunPlugin = {
+  name: "read imports like Vite",
+  setup(build) {
+    build.onLoad({ filter: /\.[cm]?tsx?$/ }, async ({ path }) => {
+      const { outputText } = ts.transpileModule(await Bun.file(path).text(), {
+        fileName: path,
+        compilerOptions: {
+          verbatimModuleSyntax: true,
+          module: ts.ModuleKind.Preserve,
+          target: ts.ScriptTarget.ESNext,
+          jsx: ts.JsxEmit.Preserve,
+        },
+      });
+      return { contents: outputText, loader: path.endsWith("x") ? "jsx" : "js" };
+    });
+    build.onResolve({ filter: /\?/ }, ({ path, importer }) => ({
+      path: Bun.resolveSync(path.replace(/\?.*$/, ""), dirname(importer)),
+    }));
+    build.onResolve({ filter: /^\// }, ({ path, importer }) =>
+      importer.endsWith(".css") && !existsSync(path) ? { path, external: true } : undefined,
+    );
+  },
+};
+
+/**
+ * Keeps runtime built-ins external for the browser target. There Bun
+ * replaces `path` or `events` with its own copy, and `node:fs` with an empty
+ * object, so the import would vanish from the graph. The other targets keep
+ * built-ins external already.
+ */
+const keepBuiltInsExternal: BunPlugin = {
+  name: "keep built-ins external",
+  setup(build) {
+    build.onResolve({ filter: RUNTIME_BUILT_IN }, ({ path }) => ({ path, external: true }));
+  },
+};
+
+// Each run builds into a folder of its own, so two runs at once, such as two
+// test suites in one worktree, never delete each other's output.
+const outdir = await mkdtemp(join(tmpdir(), "hercule-dep-lint-"));
+process.on("exit", () => rmSync(outdir, { recursive: true, force: true }));
+
+/**
+ * One import in an entrypoint's graph. `from` is the absolute path of the
+ * file the import is written in. `to` is the absolute path of the file it
+ * resolves to, or, for an external import, the import as written.
+ */
+interface Edge {
+  readonly from: string;
+  readonly to: string;
+  readonly external: boolean;
+  /** The import as it is written in `from`. */
+  readonly written: string;
 }
 
-const { sources } = (await Bun.file(map.path).json()) as { sources: string[] };
-const mapDir = dirname(map.path);
-const linked = sources.map((source) => relative(root, resolve(mapDir, source)));
+/** Checks whether a file is third-party code, which is any file inside a `node_modules` folder. */
+const isThirdParty = (file: string): boolean => file.split(sep).includes("node_modules");
 
 /**
- * A specifier the bundler leaves external, above all `bun:sqlite`, never
- * appears in `sources`, and Bun removes a bare `import "bun:sqlite"`
- * entirely. So the script also reads the imports of our own linked sources,
- * parsed rather than pattern-matched: `scanImports` ignores comments and
- * string literals, and drops `import type`, which creates no runtime edge and
- * so is not a violation.
+ * Returns the name a rule's pattern is matched against: a file's path from
+ * the repository root, or an external import as written.
  */
-const written = (
-  await Promise.all(
-    linked
-      .filter((source) => !source.startsWith("node_modules/"))
-      .map(async (source) => {
-        const path = resolve(root, source);
-        const text = await Bun.file(path)
-          .text()
-          .catch(() => "");
-        const transpiler = new Bun.Transpiler({ loader: path.endsWith("x") ? "tsx" : "ts" });
-        return transpiler.scanImports(text).map((record) => record.path);
-      }),
-  )
-).flat();
+const nameImportTarget = (edge: Edge): string =>
+  edge.external ? edge.to : relative(root, edge.to);
+
+/** Returns how the error message shows a file: from the repository root when it is inside it. */
+const describeFile = (file: string): string =>
+  relative(root, file).startsWith("..") ? file : relative(root, file);
+
+/** Returns how the error message shows one import: the file, what it imports, and where that resolved. */
+const describeEdge = (edge: Edge): string =>
+  `${describeFile(edge.from)} imports "${edge.written}"` +
+  (edge.external ? "" : ` (${describeFile(edge.to)})`);
+
+/** The files a layer reaches, and the imports its rule refuses on the way. */
+interface Trace {
+  /** Every file the walk reached, starting with the entrypoint. */
+  readonly reached: ReadonlySet<string>;
+  /** Each import of the layer's own code into first-party code its rule does not allow. */
+  readonly refused: ReadonlyArray<Edge>;
+}
 
 /**
- * A second check: third-party sources are not scanned above, because their
- * own dead branches are not this repository's violations. The emitted bundle
- * still contains every external they import, so it is scanned for every
- * specifier form.
+ * Follows the imports from the entrypoint, and returns the files the layer
+ * reaches and the imports its first-party allowlist refuses. With no
+ * allowlist, every import is followed and none is refused.
+ *
+ * Only an import written in the layer's own code is held to the allowlist:
+ * what an allowed package or a dependency imports in turn is its business,
+ * not the layer's. So a file reached through @hercule/contract is allowed,
+ * and the same file imported by the layer itself is refused. The walk does
+ * not follow a refused import, because what lies past it would bury the one
+ * import to fix.
  */
-const IMPORT_FORMS = /(?:\b(?:from|import)\s*\(?|require\s*\()\s*["']([^"']+)["']/g;
-const js = built.outputs.find((o) => o.kind === "entry-point");
-const bundled = js ? [...(await js.text()).matchAll(IMPORT_FORMS)].map((m) => m[1]!) : [];
+const traceEntrypoint = (
+  entry: string,
+  edges: ReadonlyArray<Edge>,
+  allowlist: FirstPartyAllowlist | undefined,
+): Trace => {
+  const own = (allowlist?.own ?? []).map((folder) => join(resolve(dirname(entry), folder), sep));
+  const packages = (allowlist?.packages ?? []).map((name) => join(root, "packages", name, sep));
+  const isOwn = (file: string): boolean => own.some((folder) => file.startsWith(folder));
+  const isAllowed = (file: string): boolean =>
+    isThirdParty(file) || isOwn(file) || packages.some((folder) => file.startsWith(folder));
 
-const graph = [...new Set([...linked, ...written, ...bundled])].sort();
-
-const violations = FORBIDDEN.flatMap(({ what, pattern }) => {
-  const hits = graph.filter((source) => pattern.test(source));
-  return hits.length === 0 ? [] : [{ what, hits }];
-});
-
-if (violations.length > 0) {
-  console.error(`dep-lint: ${entrypoint} links what the runner must not link.`);
-  console.error("The runner entrypoint's module graph must contain no controller package:");
-  console.error("no DB engine, no plugin host, no web bundle.\n");
-  for (const { what, hits } of violations) {
-    console.error(`  ${what}:`);
-    for (const hit of hits) console.error(`    ${hit}`);
+  const importsByFile = new Map<string, Array<Edge>>();
+  for (const edge of edges) {
+    const imports = importsByFile.get(edge.from) ?? [];
+    imports.push(edge);
+    importsByFile.set(edge.from, imports);
   }
-  process.exit(1);
-}
 
-console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the graph).`);
+  const refused: Array<Edge> = [];
+  const reached = new Set([entry]);
+  const queue = [entry];
+  for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+    for (const edge of importsByFile.get(file) ?? []) {
+      if (edge.external) continue;
+      // Checked before `reached`: a file the layer may reach through an
+      // allowed package is still refused when the layer imports it itself.
+      if (allowlist !== undefined && isOwn(file) && !isAllowed(edge.to)) {
+        refused.push(edge);
+        continue;
+      }
+      if (reached.has(edge.to)) continue;
+      reached.add(edge.to);
+      queue.push(edge.to);
+    }
+  }
+  return { reached, refused };
+};
+
+/**
+ * Checks one entrypoint's module graph against its rule and prints the
+ * result. Returns false when the entrypoint does not exist, does not build,
+ * or links something the rule refuses.
+ *
+ * A missing entrypoint fails rather than passing: a rule whose file was
+ * renamed would otherwise check nothing, and nobody would notice.
+ */
+const checkEntrypoint = async (rule: EntrypointRule, entrypoint: string): Promise<boolean> => {
+  // The metafile names every file by its real path, and the entry is found
+  // among them by that path.
+  const entry = await realpath(resolve(root, entrypoint)).catch(() => undefined);
+  if (entry === undefined) {
+    console.error(
+      `dep-lint: the ${rule.layer} entrypoint ${entrypoint} does not exist. A rule whose entrypoint ` +
+        "is gone would check nothing, so it fails instead. Point the rule in scripts/dep-lint.ts " +
+        "at the file that replaced it.",
+    );
+    return false;
+  }
+
+  const built = await Bun.build({
+    entrypoints: [entry],
+    target: rule.target,
+    outdir: join(outdir, rule.layer),
+    metafile: true,
+    // Inside Electron, `electron` is the API built into the binary. The npm
+    // package of that name only locates the binary and is never linked.
+    external: ["electron"],
+    plugins: [
+      ...(rule.bundler === "vite" ? [readImportsLikeVite] : []),
+      ...(rule.target === "browser" ? [keepBuiltInsExternal] : []),
+    ],
+    throw: false,
+  });
+
+  if (!built.success || built.metafile === undefined) {
+    console.error(`dep-lint: could not build ${entrypoint}`);
+    for (const log of built.logs) console.error(" ", log.message);
+    return false;
+  }
+
+  // The metafile writes a file's path relative to the working directory, and
+  // an external import as the import was written.
+  const edges: ReadonlyArray<Edge> = Object.entries(built.metafile.inputs).flatMap(
+    ([from, input]) =>
+      input.imports.map((record) => ({
+        from: resolve(from),
+        to: record.external === true ? (record.original ?? record.path) : resolve(record.path),
+        external: record.external === true,
+        written: record.original ?? record.path,
+      })),
+  );
+
+  const { firstParty } = rule;
+  const { reached, refused } = traceEntrypoint(entry, edges, firstParty);
+  // With an allowlist, first-party code is judged by the allowlist alone.
+  const isJudgedByPatterns = (file: string): boolean =>
+    firstParty === undefined || isThirdParty(file);
+  const allowed = [
+    "its own files",
+    ...(firstParty?.packages ?? []).map((name) => `@hercule/${name}`),
+  ];
+  // An import is reported where it enters what a pattern forbids: from a
+  // module the pattern does not match. What the forbidden module imports in
+  // turn is its own business, and listing it would bury the one import to fix.
+  const violations = [
+    { what: `first-party code other than ${allowed.join(", ")}`, hits: refused },
+    ...rule.forbidden.map(({ what, pattern }) => ({
+      what,
+      hits: edges.filter(
+        (edge) =>
+          reached.has(edge.from) &&
+          (edge.external || isJudgedByPatterns(edge.to)) &&
+          pattern.test(nameImportTarget(edge)) &&
+          !(isJudgedByPatterns(edge.from) && pattern.test(relative(root, edge.from))),
+      ),
+    })),
+  ].filter(({ hits }) => hits.length > 0);
+
+  if (violations.length > 0) {
+    console.error(`dep-lint: ${entrypoint} links what the ${rule.layer} must not link.`);
+    console.error(`${rule.reason}\n`);
+    for (const { what, hits } of violations) {
+      console.error(`  ${what}:`);
+      for (const hit of new Set(hits.map(describeEdge))) console.error(`    ${hit}`);
+    }
+    return false;
+  }
+
+  const modules = new Set(edges.flatMap((edge) => [edge.from, edge.to]));
+  console.log(`dep-lint: ${entrypoint} is clean (${modules.size} modules in the graph).`);
+  return true;
+};
+
+let entrypointsPass = true;
+for (const rule of rules) {
+  if (!(await checkEntrypoint(rule, onlyEntrypoint ?? rule.entrypoint))) entrypointsPass = false;
+}
+if (!entrypointsPass) process.exit(1);
 
 /**
  * The controller's domains, as a graph over the folders under `src/`: every

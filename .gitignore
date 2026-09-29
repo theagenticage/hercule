@@ -6,6 +6,7 @@ dist/
 /dist-binary/
 packages/home/src/version.ts
 apps/controller/src/http/bundle.ts
+apps/desktop/out/
 
 # Agent worktrees, created by the tooling and never part of the tree.
 .claude/worktrees/
