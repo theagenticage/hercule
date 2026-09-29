@@ -1,6 +1,8 @@
 /**
  * Measures the packaged desktop app, signed in to a controller, and prints
- * spec 17's budget table (§Performance). Run it after `pnpm build:desktop`
+ * spec 17's budget table (§Performance). A reading over its budget is marked
+ * "over" and does not fail the run, because the budgets are guides during
+ * the first milestone (spec 17 §Budgets). Run it after `pnpm build:desktop`
  * and `pnpm build:binary`:
  *
  *     pnpm --filter @hercule/desktop perf
@@ -791,11 +793,8 @@ const findProcessUse = (samples: readonly ProcessUse[], type: string) =>
 const formatPerNudge = (totalMs: number) =>
   `${(totalMs / NUDGE_COUNT).toFixed(1)} ms a nudge (${totalMs.toFixed(0)} ms for ${String(NUDGE_COUNT)})`;
 
-/**
- * Prints one launch's memory, CPU and wakeups, and its readings against their
- * budgets. Returns whether every budgeted reading is within its limit.
- */
-function reportLaunch(measured: MeasuredLaunch): boolean {
+/** Prints one launch's memory, CPU and wakeups, and its readings against their budgets. */
+function reportLaunch(measured: MeasuredLaunch): void {
   const { launch, memory, visible, hidden, nudges } = measured;
   const memoryRows = memory.map((sample) => [
     sample.label,
@@ -973,12 +972,11 @@ function reportLaunch(measured: MeasuredLaunch): boolean {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "NO",
+        within === null ? "-" : within ? "yes" : "over",
       ]),
     ),
   );
   console.log();
-  return budgets.every(([, , , within]) => within !== false);
 }
 
 const launches = await runWithThreadFixture((fixture) =>
@@ -1006,6 +1004,4 @@ const launches = await runWithThreadFixture((fixture) =>
   }),
 );
 
-let withinBudget = true;
-for (const launch of launches) withinBudget = reportLaunch(launch) && withinBudget;
-if (!withinBudget) process.exitCode = 1;
+for (const launch of launches) reportLaunch(launch);

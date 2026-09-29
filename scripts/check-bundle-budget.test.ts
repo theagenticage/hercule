@@ -121,6 +121,23 @@ describe("check-bundle-budget", () => {
     expect(stderr).toContain("over budget");
   });
 
+  it("with --guide, warns about a first paint over the budget and passes it", async () => {
+    const entry = `export const noise = "${randomBytes(300 * 1024).toString("base64")}";`;
+
+    const { stderr } = await checkBudget(await createBuild("./", entry), "--guide");
+
+    expect(stderr).toContain("over budget");
+    expect(stderr).toContain("The budget is a guide for now, so the check passes.");
+  });
+
+  it("with --guide, still fails a development build", async () => {
+    const entry = 'import { jsxDEV } from "react/jsx-dev-runtime";\nexport const entry = jsxDEV;';
+
+    const stderr = await readBudgetFailure(await createBuild("./", entry), "--guide");
+
+    expect(stderr).toContain('assets/entry.js contains "jsx-dev-runtime"');
+  });
+
   it("fails a development build", async () => {
     const entry = 'import { jsxDEV } from "react/jsx-dev-runtime";\nexport const entry = jsxDEV;';
 
@@ -183,10 +200,12 @@ const createMainBuild = async (startupBytes: number): Promise<string> => {
   return join(folder, "index.js");
 };
 
-const checkMainStartup = (file: string) =>
-  run("bun", ["run", join(root, "scripts/check-bundle-budget.ts"), "--main-startup", file], {
-    cwd: root,
-  });
+const checkMainStartup = (file: string, ...options: ReadonlyArray<string>) =>
+  run(
+    "bun",
+    ["run", join(root, "scripts/check-bundle-budget.ts"), "--main-startup", file, ...options],
+    { cwd: root },
+  );
 
 /** Resolves to the error output the check of main's startup file failed with, or fails the test. */
 const readMainStartupFailure = async (file: string): Promise<string> => {
@@ -214,6 +233,13 @@ describe("check-bundle-budget --main-startup", () => {
       `${relative(root, file)} is 170.0 kB minified, over main's startup budget of 160.0 kB`,
     );
     expect(stderr).toContain(`Spec 17 §Performance owns the number, in the "Main's startup" row`);
+  });
+
+  it("with --guide, warns about a startup file over the budget and passes it", async () => {
+    const { stderr } = await checkMainStartup(await createMainBuild(170 * 1024), "--guide");
+
+    expect(stderr).toContain("over main's startup budget of 160.0 kB");
+    expect(stderr).toContain("The budget is a guide for now, so the check passes.");
   });
 
   it("fails when the startup file does not exist", async () => {

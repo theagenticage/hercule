@@ -376,11 +376,11 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 
 ## Performance
 
-**Performance and resource use come first in every desktop decision.**
+**The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 
-- **Before a slice is built,** its plan states what it will cost and how that cost is measured: processes, memory, work while idle, work per streamed token, and bundle bytes.
-- **After it is built,** the measurement is recorded in this section.
-- **A slice that misses a budget does not merge.**
+- **A slice is not measured against the budgets,** and a reading over one does not stop it. The perf script and the size checks in `pnpm build:desktop` report such a reading and pass.
+- **The [rules](#rules) still apply to every slice.** They say how the app is built, and they cost little when followed from the start and much when added later.
+- **A performance pass** measures the app, records the measurement in [Measured](#measured), and brings the app within the budgets.
 - **Budgets:**
   - Raising a budget is a deliberate change, recorded here with its reason.
   - A budget is lowered once measurements show room to spare.
@@ -423,7 +423,7 @@ The reference setup:
 - a controller on loopback
 - a thread with 500 transcript rows open
 
-These are starting budgets. Slice 5 measures the real thread screen, and each budget then comes down to the measurement plus 10%.
+These are starting budgets. The first performance pass measures the real thread screen, and each budget then comes down to the measurement plus 10%.
 
 | Budget | Limit |
 |---|---|
@@ -473,7 +473,7 @@ These rules keep the budgets:
 
 **Verify at build time:** the cost of glass on the slowest Mac the app supports, before the first release. The M4 Max measurement cannot show that cost.
 
-**Verify at build time, in slice 5:** whether Chromium's `--double-buffer-compositing` switch is worth it. The switch keeps two window-sized frame buffers instead of three, which saves about 20 MB in the GPU process while frames come, as they do whenever a caret blinks ([Baseline](#baseline)). It can also drop frames. The app takes the switch only if a turn streaming at full speed while the transcript scrolls drops no more frames with it than without it.
+**Verify in the first performance pass:** whether Chromium's `--double-buffer-compositing` switch is worth it. The switch keeps two window-sized frame buffers instead of three, which saves about 20 MB in the GPU process while frames come, as they do whenever a caret blinks ([Baseline](#baseline)). It can also drop frames. The app takes the switch only if a turn streaming at full speed while the transcript scrolls drops no more frames with it than without it.
 
 ### Measuring
 
@@ -487,11 +487,11 @@ These rules keep the budgets:
   - **CPU and wakeups** come from `app.getAppMetrics()`, which the script calls in main through its Node inspector, connecting only for each call. A wakeup is the kernel's count of a process's interrupt wakeups. The visible sample starts 30 seconds after the page opens, so it measures the app at rest, not the one-off timers that fire after a page loads.
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
   - **Long tasks** come from a `PerformanceObserver` in the renderer.
-- **CI gates what does not depend on the machine:**
-  - the renderer bundle budget
-  - the process count
-  - no long tasks while streaming the fixture
-- **The rest is recorded per slice,** in [Measured](#measured). Launch time, memory and wakeups depend on the machine, so they are measured on the reference machine.
+- **CI checks what does not depend on the machine:**
+  - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
+  - the process count. A new process fails the test, because it changes the process model, which a slice must justify.
+  - no long tasks while streaming the fixture, once slice 5 streams. While the budgets are guides, it only reports.
+- **The rest is recorded by each performance pass,** in [Measured](#measured). Launch time, memory and wakeups depend on the machine, so they are measured on the reference machine.
 
 ### Measured
 
@@ -594,7 +594,7 @@ These rules keep the budgets:
 
 ## Slices
 
-Each slice is a reviewable change. Its plan states its performance cost first ([Performance](#performance)).
+Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)).
 
 1. **Shell and safety.**
    - the `apps/desktop` package
@@ -619,7 +619,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
    - the screenshot comparison tool, run on the pieces: slice 3 draws no screen that a Bureau page shows
 4. **Sidebar.** Waiting on you, New thread, and threads grouped by project and workspace, kept live.
 5. **Thread view.**
-   - the transcript and streaming. `transcript.read` returns the whole transcript, with no paging, so the slice's plan measures a long thread first.
+   - the transcript and streaming. `transcript.read` returns the whole transcript, with no paging. A performance pass measures a long thread.
    - turn dividers and markdown
    - the Requests dock
    - queued inputs

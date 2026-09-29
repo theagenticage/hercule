@@ -45,6 +45,10 @@
  *   `apps/desktop/src/renderer/routes/_connected/_shell.tsx`.
  * - `bun run scripts/check-bundle-budget.ts --main-startup <file>` checks main's
  *   startup file, `apps/desktop/out/main/index.js`.
+ * - `--guide`, with either form, warns about a build over its budget and
+ *   passes it. The desktop app's budgets are guides during its first
+ *   milestone (spec 17 §Budgets), so its build uses this; the web app's
+ *   budget still fails the build.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -62,11 +66,25 @@ const MAIN_STARTUP_BUDGET_BYTES = 160 * 1024;
 const formatKilobytes = (bytes: number): string => `${(bytes / 1024).toFixed(1)} kB`;
 
 /**
+ * Prints why a build is over its budget. Exits the process with code 1,
+ * unless `guide` is set: then the budget is a guide, and the check passes
+ * after the warning.
+ */
+const reportOverBudget = (message: string, guide: boolean): void => {
+  if (guide) {
+    console.warn(`${message} The budget is a guide for now, so the check passes.`);
+    return;
+  }
+  console.error(message);
+  process.exit(1);
+};
+
+/**
  * Checks the size of the desktop main process's startup file against its
  * budget and prints the result. Exits the process with code 1 when the file
- * does not exist or is over the budget.
+ * does not exist, or is over the budget and `guide` is not set.
  */
-const checkMainStartup = (file: string): void => {
+const checkMainStartup = (file: string, guide: boolean): void => {
   const shown = relative(root, file);
   if (!existsSync(file)) {
     console.error(
@@ -82,15 +100,15 @@ const checkMainStartup = (file: string): void => {
       `the budget is ${formatKilobytes(MAIN_STARTUP_BUDGET_BYTES)}.`,
   );
   if (bytes > MAIN_STARTUP_BUDGET_BYTES) {
-    console.error(
+    reportOverBudget(
       `check-bundle-budget: ${shown} is ${formatKilobytes(bytes)} minified, over main's startup ` +
         `budget of ${formatKilobytes(MAIN_STARTUP_BUDGET_BYTES)} by ` +
         `${formatKilobytes(bytes - MAIN_STARTUP_BUDGET_BYTES)}. Spec 17 §Performance owns the ` +
         `number, in the "Main's startup" row of its budgets. Import what the first window does ` +
         "not need with a dynamic `import()` where it is first used, or raise the budget " +
         "deliberately in spec 17 and say why.",
+      guide,
     );
-    process.exit(1);
   }
 };
 
@@ -150,9 +168,14 @@ const findRouteChunks = (dist: string, routeFiles: ReadonlyArray<string>): Set<s
  * table of the build's chunks. The first screen is the first paint plus the
  * chunks of the given route files (see the top of this file). Exits the
  * process with code 1 when the build folder does not exist, holds no entry,
- * is a development build, or is over the budget.
+ * or is a development build, or when it is over the budget and `guide` is
+ * not set.
  */
-const checkFirstScreen = (dist: string, routeFiles: ReadonlyArray<string>): void => {
+const checkFirstScreen = (
+  dist: string,
+  routeFiles: ReadonlyArray<string>,
+  guide: boolean,
+): void => {
   if (!existsSync(dist)) {
     console.error(
       `check-bundle-budget: there is no build in ${dist}. Build the app first; for the web app, ` +
@@ -242,12 +265,12 @@ const checkFirstScreen = (dist: string, routeFiles: ReadonlyArray<string>): void
   );
 
   if (total > FIRST_SCREEN_BUDGET_BYTES) {
-    console.error(
+    reportOverBudget(
       `check-bundle-budget: over budget by ${formatKilobytes(total - FIRST_SCREEN_BUDGET_BYTES)}. Move what the first ` +
         `screen does not need behind a route it does not render, or raise the budget deliberately and say why ` +
         `in spec 14 (the web app) or spec 17 (the desktop app).`,
+      guide,
     );
-    process.exit(1);
   }
 };
 
@@ -263,6 +286,7 @@ const parseArguments = () => {
       options: {
         "main-startup": { type: "string" },
         route: { type: "string", multiple: true },
+        guide: { type: "boolean", default: false },
       },
       allowPositionals: true,
     });
@@ -274,10 +298,11 @@ const parseArguments = () => {
 
 const { values, positionals } = parseArguments();
 if (values["main-startup"] !== undefined) {
-  checkMainStartup(resolve(values["main-startup"]));
+  checkMainStartup(resolve(values["main-startup"]), values.guide);
 } else {
   checkFirstScreen(
     resolve(positionals[0] ?? join(root, "apps/web/dist")),
     (values.route ?? []).map((file) => resolve(file)),
+    values.guide,
   );
 }

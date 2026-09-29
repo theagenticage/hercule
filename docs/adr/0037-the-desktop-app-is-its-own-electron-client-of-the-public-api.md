@@ -6,6 +6,8 @@ Date: 2026-09-29
 
 Accepted. Decided by [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275). Amends [ADR 0017](./0017-the-web-app-is-a-static-pure-client-of-the-public-api.md): the desktop app no longer reuses `@hercule/ui`. Keeps the rest of ADR 0017: the desktop app is an ordinary client of the public API, and it is not a wrapped webview of the web app.
 
+**Amended 2026-09-29 ([#275](https://github.com/theagenticage/hercule/issues/275)):** performance no longer comes first during the desktop app's first milestone. Slices 1 to 4 were each held to the budgets before they merged. From slice 5 on, the budgets are guides: the milestone's functionality lands first, and performance passes after it bring the app within the budgets. The rules of spec 17 §Performance still apply to every slice, because they cost little when followed from the start and much when added later. The budgets themselves stand, and spec 17 §Performance says how they are checked while they are guides. Everything else here stands.
+
 ## Context
 
 ADR 0017 planned the desktop app as a second consumer of two packages: `client-core` for data and `ui` for components. Its planning assumption was Electron. The final call belonged to the desktop effort, which starts now.
