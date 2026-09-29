@@ -1569,6 +1569,23 @@ const SCHEDULE_WITH_SECONDS: InvalidFixture = {
   paths: [["triggers", "0", "schedule"]],
 };
 
+/**
+ * A schedule that parses but that no date matches: February never has a
+ * 31st, so the Scheduler could never compute when the trigger fires next.
+ */
+const SCHEDULE_THAT_NEVER_COMES_DUE: InvalidFixture = {
+  description: "a cron schedule that no date matches",
+  build: () =>
+    buildOneTriggerSource(
+      "Ticks on the 31st of February",
+      "kind: start",
+      "source:",
+      "  kind: cron.tick",
+      'schedule: "0 0 31 2 *"',
+    ),
+  paths: [["triggers", "0", "schedule"]],
+};
+
 const INVALID_TIMEZONE: InvalidFixture = {
   description: "a timezone that does not exist",
   build: () =>
@@ -1760,6 +1777,14 @@ describe("the trigger rules", () => {
       const [issue] = await expectErrorsAt(controller, SCHEDULE_WITH_SECONDS);
       expect(issue!.message).toContain("six fields");
       expect(issue!.message).toContain("seconds");
+    });
+  });
+
+  it("rejects a schedule that never comes due, with a message that no date matches it", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, SCHEDULE_THAT_NEVER_COMES_DUE);
+      expect(issue!.message).toContain("never comes due");
+      expect(issue!.message).toContain("no date matches it");
     });
   });
 

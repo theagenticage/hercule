@@ -214,7 +214,7 @@ describe("GET /runs", () => {
         failedStepId: "update",
       });
       expect(failed.createdAt).toBeDefined();
-      expect(expectStatus(failed, "failed").startedAt).toBeDefined();
+      expect(expectStatus(failed, "failed")).toHaveProperty("startedAt");
       expect(failed.steps.map((record) => [record.stepId, record.status])).toEqual([
         ["update", "failed"],
       ]);

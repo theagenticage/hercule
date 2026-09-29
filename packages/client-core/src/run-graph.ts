@@ -55,9 +55,12 @@ export interface RunGraphNode extends WorkflowGraphNode {
  * - `notYet`: the run is live, has not followed it, and may still. Its source
  *   step has not finished yet, or can still run again: the step has a pending
  *   or running record, or a step with one has a path of edges to it, as in a
- *   loop that is still going round. An edge from a trigger is `notYet` while
- *   the run is live: a trigger does not fire for a run started by hand or
- *   through the API.
+ *   loop that is still going round.
+ *
+ * An edge from the start trigger that started the run is `fired`, or `active`
+ * while the entry step it leads to runs. An edge from any other trigger is
+ * never followed: it is `notYet` while the run is live, and `notTaken` once
+ * the run has ended, as for a run started by hand or through the API.
  */
 export type EdgeTravel = "fired" | "active" | "notTaken" | "notYet";
 
@@ -131,6 +134,7 @@ export const buildRunGraph = (run: Run): RunGraph => {
     "failedEdge" in run && run.failedEdge !== undefined ? run.failedEdge.index : undefined;
   const isOverLimitRun = run.status === "failed" && run.failureReason === "iteration-limit";
   const isLive = isRunLive(run.status);
+  const startingTriggerId = run.origin.kind === "trigger" ? run.origin.triggerId : undefined;
   // The steps that can still run: those with a pending or running record,
   // and every step they have a path to.
   const canStillRun = collectReachableSteps(
@@ -149,7 +153,10 @@ export const buildRunGraph = (run: Run): RunGraph => {
     );
   /** Decides how far the run has come along an edge, from how often it followed the edge. */
   const decideTravel = (edge: WorkflowGraphEdge, traversals: number): EdgeTravel => {
-    if (traversals > 0) return current.get(edge.to)?.status === "running" ? "active" : "fired";
+    // An edge from a trigger is not in the plan's edges, so it has no count;
+    // the run's origin says whether the run came along it.
+    const wasFollowed = traversals > 0 || edge.from === startingTriggerId;
+    if (wasFollowed) return current.get(edge.to)?.status === "running" ? "active" : "fired";
     const mayStillFollow = !hasFinished(edge.from) || canStillRun.has(edge.from);
     return isLive && mayStillFollow ? "notYet" : "notTaken";
   };

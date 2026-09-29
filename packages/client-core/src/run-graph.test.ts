@@ -250,6 +250,52 @@ describe("buildRunGraph", () => {
     ]);
   });
 
+  it("marks the edge from the start trigger that started the run as travelled, and no other trigger's", () => {
+    const plan: Run["plan"] = {
+      ...PLAN,
+      triggers: [
+        { id: "weekdays", kind: "start", source: { kind: "cron.tick" } },
+        { id: "on_issue", kind: "start", source: { kind: "github.issue.opened" } },
+      ],
+    };
+    const origin = { kind: "trigger", triggerId: "on_issue", eventId: 42 } as const;
+    const creating: Run = {
+      ...RUNNING,
+      plan,
+      origin,
+      steps: [{ stepId: "create", iteration: 1, status: "running", startedAt: at(0) }],
+      edgeTraversals: [0, 0, 0],
+    };
+    assert.deepStrictEqual(listEdgeTravel(creating).slice(0, 2), [
+      "weekdays>create notYet",
+      // The entry step the trigger led to is running, so the edge into it flows.
+      "on_issue>create active",
+    ]);
+    const completed: Run = {
+      ...RUN_FIELDS,
+      plan,
+      origin,
+      status: "completed",
+      startedAt: START,
+      finishedAt: at(40),
+      steps: [
+        {
+          stepId: "create",
+          iteration: 1,
+          status: "completed",
+          startedAt: at(0),
+          finishedAt: at(10),
+          output: null,
+        },
+      ],
+      edgeTraversals: [0, 0, 0],
+    };
+    assert.deepStrictEqual(listEdgeTravel(completed).slice(0, 2), [
+      "weekdays>create notTaken",
+      "on_issue>create fired",
+    ]);
+  });
+
   it("draws the edges of a finished run from how often the run followed each one", () => {
     assert.deepStrictEqual(listEdgeTravel(DEMO_COMPLETED), [
       // `lookup` finished and did not follow this edge: its condition was false.

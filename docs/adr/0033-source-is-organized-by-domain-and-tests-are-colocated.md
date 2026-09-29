@@ -64,7 +64,9 @@ Recorded by [Split the controller daemon into one folder per concern (#247)](htt
   - `workspaces/`: provisioning, disposal and the workspace sweep;
   - `runners/`: handling what runners report (inbound), and runner retirement;
   - `permissions/`: deleting a permission profile;
+  - `connections/`: the connections domain's `ConnectionReferences` port, read from the resources and workflows domains: the records that still name a Connection and block its delete (step 2 of the ladder below). *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)*
   - `runs/`: the run engine.
+  - `workflows/`: the workflows domain's `WorkflowRuns` and `TriggeredRuns` ports, both served by the runs domain: whether a workflow has an unfinished run, and starting the run of a start trigger's match. Also the Scheduler, the loop that fires cron triggers. *(Amended 2026-09-29, [#82](https://github.com/theagenticage/hercule/issues/82).)*
 - **Each folder's `index.ts` is its boundary.** Another folder of the controller daemon imports it through that `index.ts`, the same rule domains follow. `daemon/index.ts` re-exports only what the rest of the controller uses.
 - **The top level keeps only what belongs to no one folder**: `boot.ts`, `index.ts`, `testing.ts`, and helpers more than one folder uses (`absorbing.ts`). A new use case goes in the folder of its concern, and a new concern gets a new folder.
 - **The folders import each other without a cycle**: `events/` and `runners/` use `sessions/`, and every folder may use the top-level helpers.

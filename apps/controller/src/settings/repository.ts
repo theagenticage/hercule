@@ -287,6 +287,24 @@ const make = Effect.gen(function* () {
         (rows) => decodeRows("user", rows),
       ),
 
+    /**
+     * Returns the timezone setting of the controller's user, or `None` when it
+     * is not set. For code that acts for no caller, such as the Scheduler.
+     * Only one user exists, so the oldest user is that user; a second user
+     * would need the caller to say whose timezone it means.
+     */
+    readUserTimezone: (): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<KeyValueRow>`
+          SELECT user_settings.key, user_settings.value
+          FROM user_settings JOIN users ON users.id = user_settings.user_id
+          WHERE user_settings.key = 'timezone'
+          ORDER BY users.created_at LIMIT 1
+        `;
+        const decoded = yield* decodeRows("user", rows);
+        return Option.fromNullishOr(decoded.timezone);
+      }),
+
     /** Writes one of a user's settings, replacing whatever was there. */
     setForUser: <K extends SettingKey<"user">>(
       userId: string,

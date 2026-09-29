@@ -6,7 +6,7 @@
  * reads the notifications these tests start from and check.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { NotificationCreateInput, NotificationSubject } from "@hercule/contract";
@@ -163,7 +163,7 @@ describe("createCoreNotification", () => {
   });
 });
 
-describe("createCoreNotification with unlessRaisedSince", () => {
+describe("createCoreNotification with unlessRaised", () => {
   const RUNNER_ID = "0199e0e7-0000-7000-8000-00000000ba01";
   const RUNNER: NotificationSubject = { kind: "runner", id: RUNNER_ID };
   const RUN: NotificationSubject = { kind: "run", id: WORKFLOW_RUN_ID };
@@ -185,7 +185,11 @@ describe("createCoreNotification with unlessRaisedSince", () => {
    * from the moment `RAISED` was created. Returns whether `candidate` was
    * created.
    */
-  const checkCreated = (candidate: CoreNotification, offsetMs: number): Promise<boolean> =>
+  const checkCreated = (
+    candidate: CoreNotification,
+    offsetMs: number,
+    about?: ReadonlyArray<NotificationSubject>,
+  ): Promise<boolean> =>
     run(
       Effect.gen(function* () {
         const notifications = yield* NotificationService;
@@ -193,7 +197,10 @@ describe("createCoreNotification with unlessRaisedSince", () => {
         yield* notifier.createCoreNotification(RAISED);
         const [raised] = (yield* actAs(USER, notifications.query({}))).items;
         yield* notifier.createCoreNotification(candidate, {
-          unlessRaisedSince: shiftIso(raised!.createdAt, offsetMs),
+          unlessRaised: {
+            since: shiftIso(raised!.createdAt, offsetMs),
+            ...(about === undefined ? {} : { about }),
+          },
         });
         return (yield* actAs(USER, notifications.query({}))).items.length === 2;
       }),
@@ -221,6 +228,13 @@ describe("createCoreNotification with unlessRaisedSince", () => {
         { ...RAISED, subject: [RUNNER, { kind: "runner", id: UNKNOWN_ID }] },
         -1,
       ),
+      // A subject of its own is left out of the search when `about` names
+      // only the shared one.
+      ownSubjectLeftOutOfTheSearch: await checkCreated(
+        { ...RAISED, subject: [RUNNER, { kind: "runner", id: UNKNOWN_ID }] },
+        -1,
+        [RUNNER],
+      ),
     };
 
     expect(created).toEqual({
@@ -232,7 +246,27 @@ describe("createCoreNotification with unlessRaisedSince", () => {
       otherSubject: true,
       sameIdOtherKindOfSubject: true,
       oneSubjectNotRaisedAbout: true,
+      ownSubjectLeftOutOfTheSearch: false,
     });
+  });
+
+  it("creates nothing when one was raised within the quiet period before now, and creates it once the period is over", async () => {
+    /** Raises `RAISED`, then asks to create it again unless raised `within` before now. */
+    const checkCreatedWithin = (within: Duration.Duration): Promise<boolean> =>
+      run(
+        Effect.gen(function* () {
+          const notifications = yield* NotificationService;
+          const notifier = yield* Notifier;
+          yield* notifier.createCoreNotification(RAISED);
+          yield* notifier.createCoreNotification(RAISED, { unlessRaised: { within } });
+          return (yield* actAs(USER, notifications.query({}))).items.length === 2;
+        }),
+      );
+
+    expect({
+      withinAnHour: await checkCreatedWithin(Duration.hours(1)),
+      withinNoTime: await checkCreatedWithin(Duration.zero),
+    }).toEqual({ withinAnHour: false, withinNoTime: true });
   });
 });
 

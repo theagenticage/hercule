@@ -154,6 +154,35 @@ describe("settings.update", () => {
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
+  it("rejects a timezone that is not an IANA zone name, and writes nothing", async () => {
+    // The Scheduler reads cron schedules in this zone, so a name the runtime
+    // does not know would make every such schedule fail to parse.
+    const outcome = await run(
+      Effect.gen(function* () {
+        const settings = yield* SettingsOperations;
+        const failure = yield* Effect.flip(
+          settings.update({ user: { timezone: "Mars/Olympus_Mons", "ui.threadRows": "plain" } }),
+        );
+        return { failure, state: yield* settings.read() };
+      }),
+    );
+    expect(outcome.failure).toMatchObject({
+      error: {
+        code: "validation",
+        details: {
+          issues: [
+            {
+              path: ["user", "timezone"],
+              message:
+                '"Mars/Olympus_Mons" is not a timezone. Write an IANA timezone, such as Europe/Amsterdam.',
+            },
+          ],
+        },
+      },
+    });
+    expect(outcome.state.user).toEqual({});
+  });
+
   it("writes the user scope under the caller's own id", async () => {
     const rows = await run(
       Effect.gen(function* () {

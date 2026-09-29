@@ -209,6 +209,18 @@ const TABLE = {
   // Every trigger belongs to a workflow, so listing triggers needs the workflow
   // read grant. Triggers have no grant family of their own.
   "trigger.query": { requires: "workflow.read", method: "GET", path: "/api/v1/triggers" },
+  // Pausing a trigger changes its workflow's behaviour, so it needs the grant
+  // that changing the workflow needs.
+  "trigger.pause": {
+    requires: "workflow.write",
+    method: "POST",
+    path: "/api/v1/workflows/:workflowId/triggers/:triggerId/pause",
+  },
+  "trigger.resume": {
+    requires: "workflow.write",
+    method: "POST",
+    path: "/api/v1/workflows/:workflowId/triggers/:triggerId/resume",
+  },
 
   // The two catalogs used to write a workflow: the actions a step can call and
   // the event kinds a trigger can listen for. They are only needed to write

@@ -83,6 +83,8 @@ export const AUDIT_KINDS = [
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
+  "trigger.paused",
+  "trigger.resumed",
   "session.spawned",
   "session.interrupted",
   "session.responded",
@@ -147,6 +149,10 @@ const RECORD_KINDS = {
   "workflow.created": "created",
   "workflow.updated": "updated",
   "workflow.deleted": "deleted",
+  // A trigger has no Live Topic of its own. It is part of its workflow, so
+  // the record these entries name is the workflow.
+  "trigger.paused": "updated",
+  "trigger.resumed": "updated",
   "session.spawned": "created",
   // The record it names is the new session, which is what came into being.
   "session.continued": "created",

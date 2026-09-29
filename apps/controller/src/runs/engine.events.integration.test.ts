@@ -50,7 +50,7 @@ const buildExpectedFields = (run: EndedRun) => ({
   workflowId: run.workflowId,
   origin: run.origin,
   inputs: run.inputs,
-  ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
+  ...("startedAt" in run && run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
   finishedAt: run.finishedAt,
 });
 

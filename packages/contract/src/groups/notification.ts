@@ -102,6 +102,7 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.plugin-error",
   "core.runner-unreachable",
   "core.subscription-condition-error",
+  "core.trigger-error",
 ] as const;
 
 export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];

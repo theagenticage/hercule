@@ -21,9 +21,7 @@
  * write see the same rows.
  */
 import * as Cron from "effect/Cron";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
@@ -53,6 +51,7 @@ import {
   type ExpressionScope,
 } from "../expressions";
 import type { RegisteredWorkflowAction, WorkspaceActionId } from "../plugins";
+import { isKnownTimezone } from "../settings";
 import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
 /**
@@ -306,9 +305,11 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
     ];
   }
   const zone =
-    trigger.timezone === undefined ? Option.none() : DateTime.zoneMakeNamed(trigger.timezone);
+    trigger.timezone !== undefined && isKnownTimezone(trigger.timezone)
+      ? trigger.timezone
+      : undefined;
   const issues: Array<Issue> = [];
-  if (trigger.timezone !== undefined && Option.isNone(zone)) {
+  if (trigger.timezone !== undefined && zone === undefined) {
     issues.push({
       path: [...path, "timezone"],
       message:
@@ -337,14 +338,36 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
   }
   // Parse the schedule in the trigger's timezone if the timezone is valid. An
   // invalid timezone is already reported above, so it is not reported again.
-  const parsed = Cron.parse(trigger.schedule, Option.getOrUndefined(zone));
+  const parsed = Cron.parse(trigger.schedule, zone);
   if (Result.isFailure(parsed)) {
     issues.push({
       path: [...path, "schedule"],
       message: `This schedule is not a cron expression. ${shortenLibraryMessage(parsed.failure.message)} Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
     });
+  } else if (!comesDue(parsed.success)) {
+    issues.push({
+      path: [...path, "schedule"],
+      message:
+        "This schedule never comes due: no date matches it, such as the 31st of February. " +
+        'Write a date that exists, such as "0 9 1 * *" for 09:00 on the first of each month.',
+    });
   }
   return issues;
+};
+
+/**
+ * Checks that a cron schedule matches at least one future time. A schedule
+ * can parse and still never match, such as one for the 31st of February, and
+ * the Scheduler could then never compute the trigger's next time.
+ */
+const comesDue = (cron: Cron.Cron): boolean => {
+  try {
+    Cron.next(cron);
+    return true;
+  } catch {
+    // `Cron.next` throws when it finds no matching date.
+    return false;
+  }
 };
 
 /**

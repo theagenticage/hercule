@@ -29,6 +29,7 @@ import type {
   StepError,
   StepRecord,
   StepStatus,
+  TriggerEvent,
   WorkflowDefinition,
   WorkspacePolicy,
 } from "@hercule/contract";
@@ -58,12 +59,20 @@ export interface NewRun {
   readonly entryStepIds: ReadonlyArray<string>;
   /** The run this one re-runs, when `run.rerun` starts it. */
   readonly originalRunId?: string;
+  /** The event that started the run, when a start trigger started it. */
+  readonly triggerEvent?: TriggerEvent;
 }
 
 /** How a step record ends. */
 export type StepOutcome =
   | { readonly status: "completed"; readonly output: unknown }
   | { readonly status: "failed"; readonly error: StepError };
+
+/**
+ * Why a run that passed its start checks can fail: every reason but
+ * `validation-error`, which only a run that failed those checks has.
+ */
+export type ExecutionFailureReason = Exclude<FailureReason, "validation-error">;
 
 /** How a run ends. */
 export type RunOutcome =
@@ -79,7 +88,16 @@ export type RunOutcome =
     }
   | {
       readonly status: "failed";
-      readonly failureReason: Exclude<FailureReason, "controller-error" | "workspace-failed">;
+      readonly failureReason: "validation-error";
+      /** What did not validate, a sentence for a person. */
+      readonly failureMessage: string;
+    }
+  | {
+      readonly status: "failed";
+      readonly failureReason: Exclude<
+        ExecutionFailureReason,
+        "controller-error" | "workspace-failed"
+      >;
       readonly failedStepId: string;
       /** The edge the run failed at, when it failed at one. */
       readonly failedEdge?: FailedEdge;
@@ -141,6 +159,7 @@ interface RunRow {
   readonly failure_message: string | null;
   readonly output: string | null;
   readonly original_run_id: Uint8Array | null;
+  readonly trigger_event: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -157,17 +176,23 @@ interface SummaryRow {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
+  readonly failure_message: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
 }
 
 /**
- * The actor that started a run, as SQL over the `origin` column: the origin's
- * actor, or `run:<id>` for a run that a step of another run started.
+ * The actor that started a run, as SQL over the `origin` column:
+ *
+ * - `run:<id>` for a run that a step of another run started;
+ * - `system` for a run that a start trigger started, because the controller
+ *   started it on nobody's behalf;
+ * - the origin's actor for any other run.
  */
 const STARTING_ACTOR = `CASE json_extract(origin, '$.kind')
   WHEN 'action' THEN 'run:' || json_extract(origin, '$.parentRunId')
+  WHEN 'trigger' THEN 'system'
   ELSE json_extract(origin, '$.actor') END`;
 
 interface StepRow {
@@ -252,6 +277,7 @@ interface StatusColumns {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
+  readonly failure_message: string | null;
   readonly started_at: string | null;
   readonly finished_at: string | null;
 }
@@ -276,6 +302,13 @@ const parseStatusColumns = (row: StatusColumns) => {
       const failedStepIdIfSet =
         row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id };
       switch (failureReason) {
+        case "validation-error":
+          return {
+            status: "failed",
+            failureReason,
+            failureMessage: requireColumn(row.failure_message, "runs", "failure_message"),
+            finishedAt: finishedAt(),
+          } as const;
         case "controller-error":
           return {
             status: "failed",
@@ -325,6 +358,7 @@ const parseRunStatusColumns = (row: RunRow) => {
   }
   if (
     status.status === "failed" &&
+    status.failureReason !== "validation-error" &&
     status.failureReason !== "controller-error" &&
     status.failureReason !== "workspace-failed" &&
     row.failed_edge_index !== null
@@ -360,6 +394,9 @@ const parseRunRow = (
     steps: steps.map(parseStepRow),
     edgeTraversals,
     ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
+    ...(row.trigger_event === null
+      ? {}
+      : { triggerEvent: JSON.parse(row.trigger_event) as TriggerEvent }),
     createdAt: row.created_at,
     ...parseRunStatusColumns(row),
   };
@@ -402,12 +439,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO runs (id, workflow_id, plan, inputs, origin, original_run_id, status, created_at)
+          INSERT INTO runs
+            (id, workflow_id, plan, inputs, origin, original_run_id, trigger_event, status, created_at)
           VALUES (${id},
                   ${run.workflowId === null ? null : uuidFromString(run.workflowId)},
                   ${JSON.stringify(run.plan)}, ${JSON.stringify(run.inputs)},
                   ${JSON.stringify(run.origin)},
                   ${run.originalRunId === undefined ? null : uuidFromString(run.originalRunId)},
+                  ${run.triggerEvent === undefined ? null : JSON.stringify(run.triggerEvent)},
                   'pending', ${at})
         `;
         const runId = uuidToString(id);
@@ -477,7 +516,8 @@ const make = Effect.gen(function* () {
         }
         const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
-                 failure_reason, failed_step_id, created_at, started_at, finished_at
+                 failure_reason, failed_step_id, failure_message, created_at, started_at,
+                 finished_at
           FROM runs WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
@@ -826,13 +866,19 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const failedEdge =
           ending.status === "failed" && "failedEdge" in ending ? ending.failedEdge : undefined;
+        const failureMessage =
+          ending.status === "failed" && ending.failureReason === "validation-error"
+            ? ending.failureMessage
+            : failedEdge?.message;
+        const failedStepId =
+          ending.status === "failed" && "failedStepId" in ending ? ending.failedStepId : undefined;
         yield* sql`
           UPDATE runs SET
             status = ${ending.status},
             failure_reason = ${ending.status === "failed" ? ending.failureReason : null},
-            failed_step_id = ${ending.status === "failed" ? (ending.failedStepId ?? null) : null},
+            failed_step_id = ${failedStepId ?? null},
             failed_edge_index = ${failedEdge?.index ?? null},
-            failure_message = ${failedEdge?.message ?? null},
+            failure_message = ${failureMessage ?? null},
             output = ${ending.status === "completed" && ending.output !== undefined ? JSON.stringify(ending.output) : null},
             finished_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ('pending', 'running')

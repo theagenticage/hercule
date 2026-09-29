@@ -363,6 +363,16 @@ export const workflowQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads the triggers of one workflow, in a single page: a workflow declares
+ * only a handful. The list is empty until the workflow is saved.
+ */
+export const triggersQuery = (client: HerculeClient, workflowId: string) =>
+  queryOptions({
+    queryKey: queryKeys.triggers(workflowId),
+    queryFn: () => client.trigger.query({ query: { workflowId, limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
  * Asks the controller to validate a workflow's source, with the same checks a
  * save runs. Returns the errors and warnings together with the source they
  * belong to. The page keeps showing the previous result while the next source

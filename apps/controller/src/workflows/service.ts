@@ -1,7 +1,8 @@
 /**
  * The workflow operations: `workflow.query`, `read`, `create`, `update`,
- * `delete` and `validate`, and `trigger.query`, which lists the triggers that
- * the stored workflows declare.
+ * `delete` and `validate`; `trigger.query`, which lists the triggers that
+ * the stored workflows declare; `trigger.pause` and `trigger.resume`,
+ * which set a start trigger's status.
  *
  * The YAML source is the source of truth (ADR 0029). The stored source is
  * either the YAML a caller sent, or the YAML generated from the definition
@@ -58,6 +59,8 @@ import {
   type NotFound,
   type SortDirection,
   type Trigger,
+  type TriggerKey,
+  type TriggerStatus,
   type Unauthenticated,
   type Validation,
   type Workflow,
@@ -124,6 +127,12 @@ export interface TriggerPage {
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
 const NO_SUCH_WORKFLOW = "no such workflow";
+
+const SIGNAL_TRIGGER_HAS_NO_STATUS =
+  "a signal trigger has no status and cannot be paused or resumed; it lives only as long as the run it resumes";
+
+const NO_SUCH_TRIGGER =
+  "no such trigger; check the workflow id, and the trigger id as the workflow's source spells it";
 
 const SOURCE_AND_DEFINITION_TOGETHER =
   "The request sent both source and definition. Send only one of them: the workflow is stored from one or the other.";
@@ -226,6 +235,7 @@ const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<De
     filter: trigger.source.filter,
     schedule: trigger.kind === "start" ? trigger.schedule : undefined,
     timezone: trigger.kind === "start" ? trigger.timezone : undefined,
+    inputs: trigger.kind === "start" ? trigger.inputs : undefined,
   }));
 
 /** Builds the notification subjects that name these triggers of a workflow. */
@@ -237,6 +247,13 @@ const buildTriggerSubjects = (
 
 /** The errors that every method of the service can fail with. */
 type CallError = Unauthenticated | Forbidden | Validation | SqlError;
+
+/**
+ * The errors of a method that takes an id and changes what it names: every
+ * method's errors but `Validation`, because the transport has decoded the id,
+ * plus `NotFound` and `InvalidState`.
+ */
+type ChangeByIdError = Exclude<CallError, Validation> | NotFound | InvalidState;
 
 /** Fails with a `Validation` error that lists every error in `problems`, if there are any. */
 const failOnErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
@@ -300,6 +317,44 @@ const make = Effect.gen(function* () {
     Effect.flatMap(readReferences(definition), (references) =>
       validateDefinition(definition, references),
     );
+
+  /**
+   * Sets a start trigger's status for `trigger.pause` or `trigger.resume`, and
+   * returns the trigger. Setting the status the trigger already has changes
+   * nothing and writes no audit entry. Fails with `NotFound` if the workflow
+   * declares no trigger with the id, and with `InvalidState` for a signal
+   * trigger, which has no status.
+   */
+  const updateTriggerStatus = (
+    operation: "trigger.pause" | "trigger.resume",
+    key: TriggerKey,
+  ): Effect.Effect<Trigger, ChangeByIdError> =>
+    Effect.gen(function* () {
+      yield* requireGrant(operation);
+      const status: TriggerStatus = operation === "trigger.pause" ? "paused" : "active";
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const found = yield* workflows.readTrigger(key);
+          if (Option.isNone(found)) {
+            return yield* Effect.fail(createNotFoundError(NO_SUCH_TRIGGER));
+          }
+          if (found.value.kind === "signal") {
+            return yield* Effect.fail(createInvalidStateError(SIGNAL_TRIGGER_HAS_NO_STATUS));
+          }
+          const at = yield* nowIso;
+          if (!(yield* workflows.setTriggerStatus(key, status, at))) return found.value;
+          yield* audit.append({
+            kind: status === "paused" ? "trigger.paused" : "trigger.resumed",
+            actor: yield* currentStamp,
+            record: { topic: "workflow", id: key.workflowId },
+            payload: { workflowId: key.workflowId, triggerId: key.triggerId },
+            at,
+          });
+          return { ...found.value, status, updatedAt: at };
+        }),
+      );
+    });
 
   return {
     /**
@@ -540,12 +595,7 @@ const make = Effect.gen(function* () {
      * that is still acting. A finished run keeps the workflow's id and its own
      * copy of the definition.
      */
-    delete: (
-      id: Id,
-    ): Effect.Effect<
-      Record<string, never>,
-      Exclude<CallError | NotFound | InvalidState, Validation>
-    > =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, ChangeByIdError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
         yield* withTransaction(
@@ -615,6 +665,17 @@ const make = Effect.gen(function* () {
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
+
+    /**
+     * `trigger.pause`: stops a start trigger from starting runs, and returns
+     * it. Events that arrive while it is paused are not kept for later.
+     */
+    pauseTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
+      updateTriggerStatus("trigger.pause", key),
+
+    /** `trigger.resume`: lets a paused start trigger start runs again, and returns it. */
+    resumeTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
+      updateTriggerStatus("trigger.resume", key),
   };
 });
 

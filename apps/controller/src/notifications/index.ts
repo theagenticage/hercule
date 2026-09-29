@@ -6,6 +6,7 @@ export {
   type AnsweredDecisionsOutcome,
   type CoreAction,
   type CoreNotification,
+  type UnlessRaised,
 } from "./notifier";
 export {
   NotificationService,

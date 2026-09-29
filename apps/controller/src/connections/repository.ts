@@ -160,19 +160,6 @@ const make = Effect.gen(function* () {
             (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.type])),
           ),
 
-    /**
-     * Checks whether any resource still acts through this connection. If one
-     * does, the connection cannot be deleted. The query is here rather than in
-     * the resources domain, so the two domains do not import each other.
-     */
-    namedByResource: (id: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM resources WHERE connection_id = ${uuidFromString(id)} LIMIT 1
-        `,
-        (rows) => rows.length > 0,
-      ),
-
     insert: (connection: NewConnection): Effect.Effect<StoredConnection, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();

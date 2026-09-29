@@ -11,13 +11,14 @@ import {
 } from "../../../screens/workflow-editor";
 import { ProblemsPanel } from "./-problems";
 import { isJustCreatedState } from "./-save";
+import { TriggersPanel } from "./-triggers";
 import { useWorkflowValidation } from "./-validation";
 
 /**
- * Renders the part of a workflow's page below the header: the editor, and
- * the problems panel below it. This component runs the controller's
- * validation of the source, passes the result to the editor, and lists the
- * problems that the editor marks.
+ * Renders the part of a workflow's page below the header: the editor, the
+ * problems panel below it, and for a saved workflow its triggers. This
+ * component runs the controller's validation of the source, passes the result
+ * to the editor, and lists the problems that the editor marks.
  */
 export function WorkflowEditorBody({
   client,
@@ -28,6 +29,7 @@ export function WorkflowEditorBody({
   onViewChange,
   isInert,
   onNameChange,
+  storedWorkflowId,
 }: {
   readonly client: HerculeClient;
   readonly live: Live;
@@ -38,6 +40,11 @@ export function WorkflowEditorBody({
   /** Blocks input to the editor, for example while a create is in flight. */
   readonly isInert: boolean;
   readonly onNameChange: (name: string | undefined) => void;
+  /**
+   * The id of the saved workflow the page edits, or `undefined` for a new
+   * workflow or one deleted elsewhere, which have no triggers to show.
+   */
+  readonly storedWorkflowId: string | undefined;
 }): JSX.Element {
   const isJustCreated = useLocation({ select: (location) => isJustCreatedState(location.state) });
   // The route loader already fetched these with `prefetchWorkflowCatalog`,
@@ -93,6 +100,9 @@ export function WorkflowEditorBody({
           editor.current?.moveCursorToLine(issue.line);
         }}
       />
+      {storedWorkflowId === undefined ? null : (
+        <TriggersPanel client={client} workflowId={storedWorkflowId} />
+      )}
     </div>
   );
 }

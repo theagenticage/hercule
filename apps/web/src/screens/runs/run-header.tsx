@@ -23,15 +23,17 @@ const QUIET_LINK =
  * Renders the header of a run's page. The first line is a breadcrumb back to
  * the run list and the workflow's name, with the page's actions on the right.
  * The second line shows where the run is: its status mark and status with its
- * duration, why it failed, who started it and how, when it started and ended,
- * and its id's tail, which the CLI takes. For a run that is a re-run, or that
- * was re-run, the next line links the runs on either side, such as "re-run of
- * run 1f3a9c2e" or "re-run as run 4e5f6a7b, run 8c9d0e1f, run 2b7c4d9a and 2
- * more". Once the run is pinned to a runner, the next line shows where it
- * works: the runner, linked to its page, with whether the controller can
- * reach it, the run's workspace, and the note on what happens to the
- * workspace, such as "Workspace deleted 3 Oct". A run that failed at an edge
- * has a last line: what went wrong there.
+ * duration, why it failed, who or which trigger started it and how, when it
+ * started and ended, and its id's tail, which the CLI takes. For a run that is
+ * a re-run, or that was re-run, the next line links the runs on either side,
+ * such as "re-run of run 1f3a9c2e" or "re-run as run 4e5f6a7b, run 8c9d0e1f,
+ * run 2b7c4d9a and 2 more". Once the run is pinned to a runner, the next line
+ * shows where it works: the runner, linked to its page, with whether the
+ * controller can reach it, the run's workspace, and the note on what happens
+ * to the workspace, such as "Workspace deleted 3 Oct". A run that failed at an
+ * edge has a last line: what went wrong there. So does a run whose trigger's
+ * event did not make valid inputs: the line shows why, and the run has no
+ * start time, so the time shown is when it was created.
  *
  * Below the header's lines, each on a row of its own, come why the controller
  * refused one of the page's actions, and the question shown before an action
@@ -83,7 +85,7 @@ export function RunHeader({
    */
   readonly question?: ReactNode;
 }): JSX.Element {
-  const origin = describeRunOrigin(run.origin);
+  const origin = describeRunOrigin(run);
   const { startedAt, finishedAt } = readTimestamps(run);
   const started = startedAt ?? run.createdAt;
   return (
@@ -136,14 +138,21 @@ export function RunHeader({
             <>
               <FailureText
                 reason={run.failureReason}
-                stepId={run.failedStepId}
+                stepId={run.failureReason === "validation-error" ? undefined : run.failedStepId}
                 edge={findFailedEdge(run)}
               />
               <Dot inline />
             </>
           )}
           {"started by "}
-          <ActorLink actor={origin.starter} plainClassName="text-ink" />
+          {origin.kind === "actor" ? (
+            <ActorLink actor={origin} plainClassName="text-ink" />
+          ) : (
+            <>
+              {"trigger "}
+              <span className="font-mono text-fine leading-none text-ink">{origin.triggerId}</span>
+            </>
+          )}
           {origin.howStarted === undefined ? null : ` ${origin.howStarted}`}
           <Dot inline />
           <span className="font-mono text-fine leading-none tabular-nums">
@@ -236,6 +245,9 @@ export function RunHeader({
       )}
       {"failedEdge" in run && run.failedEdge !== undefined ? (
         <p className="mt-1 text-fine text-fail">{run.failedEdge.message}</p>
+      ) : null}
+      {run.status === "failed" && run.failureReason === "validation-error" ? (
+        <p className="mt-1 text-fine text-pretty text-fail">{run.failureMessage}</p>
       ) : null}
       {refusals.map((refusal) => (
         <p key={refusal} role="alert" className="mt-3 text-fine text-pretty text-fail">

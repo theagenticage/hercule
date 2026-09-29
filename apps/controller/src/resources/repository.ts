@@ -308,6 +308,27 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns every resource that acts through the connection, with its name:
+     * a repo's remote, or a folder's or mailbox's label, which may be `null`.
+     * Sorted by name, then by id. The list decides whether the connection may
+     * be deleted, and names the resources in the refusal.
+     */
+    listActingThroughConnection: (
+      connectionId: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly name: string | null }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly name: string | null }>`
+          SELECT id, COALESCE(remote, label) AS name FROM resources
+          WHERE connection_id = ${uuidFromString(connectionId)}
+          ORDER BY name, id
+        `,
+        (rows) => rows.map((row) => ({ id: uuidToString(row.id), name: row.name })),
+      ),
+
+    /**
      * Returns the given project ids that exist and are not deleted, so a link
      * never points at nothing.
      */

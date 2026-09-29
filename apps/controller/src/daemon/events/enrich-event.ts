@@ -28,6 +28,7 @@ import { withTransaction } from "../../db";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
 import type { Notifier } from "../../notifications";
+import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 
@@ -106,5 +107,12 @@ export class Enrichment extends Context.Service<Enrichment, Effect.Success<typeo
 export const EnrichmentLayer: Layer.Layer<
   Enrichment,
   never,
-  SqlClient.SqlClient | AuditLog | EventService | EventRouter | SessionService | Notifier
+  | SqlClient.SqlClient
+  | AuditLog
+  | EventService
+  | EventRouter
+  | SessionService
+  | Notifier
+  | TriggerHealth
+  | TriggerEffects
 > = Layer.effect(Enrichment)(make);

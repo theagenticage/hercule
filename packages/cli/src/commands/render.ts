@@ -22,10 +22,10 @@ import {
   type Notification,
   type Resolution,
   type Run,
-  type RunOrigin,
   type RunStarted,
   type RunSummary,
   type StructuredResult,
+  type Trigger,
   type Workflow,
   type WorkflowAction,
   type WorkflowIssues,
@@ -309,6 +309,23 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 };
 
 /**
+ * Returns a trigger as a row of `trigger list`: every field, in the order the
+ * contract gives them, with the two nested ones on one short line each. A
+ * trigger whose filter failed shows `error: ` and the evaluation error, and a
+ * cron trigger that missed scheduled times shows the first and the last of
+ * them. `--json` prints when the error happened.
+ */
+const summarizeTrigger = (trigger: Trigger): Record<string, unknown> => ({
+  ...trigger,
+  ...(trigger.health === undefined
+    ? {}
+    : { health: trigger.health.state === "ok" ? "ok" : `error: ${trigger.health.message}` }),
+  ...(trigger.skippedTicks === undefined
+    ? {}
+    : { skippedTicks: `${trigger.skippedTicks.from} to ${trigger.skippedTicks.until}` }),
+});
+
+/**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
  * full id, and the command that subscribes to it. A caller who started a run
  * usually wants to know when it ends, and the subscription wakes it when the
@@ -321,13 +338,15 @@ const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
 ];
 
 /**
- * Describes who started a run, and how when not by hand, in the words the
- * web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e at
- * step spawn".
+ * Describes who or what started a run, and how when not by hand, in the words
+ * the web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e
+ * at step spawn", "trigger on_issue on github.issue.opened". A run summary
+ * holds no copy of the event, so a trigger run's row in `run list` reads
+ * "trigger on_issue".
  */
-const describeOrigin = (origin: RunOrigin): string => {
-  const { starter, howStarted } = describeRunOrigin(origin);
-  return howStarted === undefined ? starter.label : `${starter.label} ${howStarted}`;
+const describeOrigin = (run: Run | RunSummary): string => {
+  const { label, howStarted } = describeRunOrigin(run);
+  return howStarted === undefined ? label : `${label} ${howStarted}`;
 };
 
 /**
@@ -339,7 +358,7 @@ const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
   id: run.id,
   status: run.status === "failed" ? `${run.status} (${run.failureReason})` : run.status,
   workflow: run.workflowName,
-  startedBy: describeOrigin(run.origin),
+  startedBy: describeOrigin(run),
   age: formatAge(run.createdAt, now),
 });
 
@@ -365,10 +384,15 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
  * at as `count -> file`, and what went wrong at that edge, as the fields of
  * `run read`, or no fields for a run that did not fail. A run the controller
  * could not carry out may have failed before it reached any step, and only a
- * run that failed at an edge has a failed edge and its message.
+ * run that failed at an edge has a failed edge and its message. A run a
+ * trigger could not start has no step, only the message saying what did not
+ * validate.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
+  if (run.failureReason === "validation-error") {
+    return { failureReason: run.failureReason, failureMessage: run.failureMessage };
+  }
   const planEdge = findFailedEdge(run);
   return {
     failureReason: run.failureReason,
@@ -431,7 +455,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
       workflow: run.plan.name,
       status: run.status,
       ...describeFailure(run),
-      startedBy: describeOrigin(run.origin),
+      startedBy: describeOrigin(run),
       createdAt: run.createdAt,
       ...readTimestamps(run),
     },
@@ -530,18 +554,21 @@ const renderNotificationDecided = (
  */
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
-  // items of `run.query` are run summaries and those of `notification.query`
-  // are notifications.
+  // items of `run.query` are run summaries, those of `trigger.query` are
+  // triggers, and those of `notification.query` are notifications.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
       : command.id === "run.query"
         ? (items: ReadonlyArray<Record<string, unknown>>) =>
             renderRunList(items as ReadonlyArray<RunSummary>)
-        : command.id === "notification.query"
+        : command.id === "trigger.query"
           ? (items: ReadonlyArray<Record<string, unknown>>) =>
-              renderNotificationList(items as unknown as ReadonlyArray<Notification>)
-          : renderTable;
+              renderTable((items as ReadonlyArray<Trigger>).map(summarizeTrigger))
+          : command.id === "notification.query"
+            ? (items: ReadonlyArray<Record<string, unknown>>) =>
+                renderNotificationList(items as unknown as ReadonlyArray<Notification>)
+            : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 

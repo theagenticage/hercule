@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
-import { evaluateExpression, renderTemplate, renderTemplates } from "./index";
+import { evaluateExpression, evaluateMapping, renderTemplate, renderTemplates } from "./index";
 import { provideUnlimitedBudget } from "./testing";
 
 const CONTEXT = {
@@ -157,5 +157,39 @@ describe("numbers in a template, whatever their CEL type", () => {
   it("accepts a list or a map literal that mixes whole numbers and other values", () => {
     expect(render("{{ [1, inputs.price] }}")).toEqual([1, 2.5]);
     expect(render("{{ {'low': 1, 'high': 2.5} }}")).toEqual({ low: 1, high: 2.5 });
+  });
+});
+
+describe("evaluateMapping", () => {
+  const EVENT_CONTEXT = {
+    event: { kind: "pr.opened", payload: { number: 42, labels: ["bug"], title: "Fix login" } },
+  };
+
+  it("maps each input name to the JSON value of its expression", () => {
+    const inputs = Effect.runSync(
+      provideUnlimitedBudget(
+        evaluateMapping(
+          {
+            prNumber: "event.payload.number",
+            labels: "event.payload.labels",
+            title: "event.payload.title + '!'",
+          },
+          EVENT_CONTEXT,
+        ),
+      ),
+    );
+    expect(inputs).toEqual({ prNumber: 42, labels: ["bug"], title: "Fix login!" });
+  });
+
+  it("names the input whose expression fails", () => {
+    expect(readFailure(evaluateMapping({ author: "event.payload.author" }, EVENT_CONTEXT))).toMatch(
+      /^The expression for the input author: /,
+    );
+  });
+
+  it("refuses a value with no JSON form, naming the input", () => {
+    expect(readFailure(evaluateMapping({ blob: "b'abc'" }, EVENT_CONTEXT))).toMatch(
+      /^The expression for the input blob returns a value that cannot be written as JSON/,
+    );
   });
 });

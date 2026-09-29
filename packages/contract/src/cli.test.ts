@@ -126,7 +126,9 @@ const COMMANDS: Record<string, string> = {
   "workflow.delete": "workflow delete",
   "workflow.validate": "workflow validate",
 
+  "trigger.pause": "trigger pause",
   "trigger.query": "trigger list",
+  "trigger.resume": "trigger resume",
 
   "workflowAction.query": "workflow-action list",
 
@@ -276,7 +278,9 @@ const RESOLVES: Record<string, string> = {
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 
+  "trigger.pause workflowId": "workflow.query",
   "trigger.query workflowId": "workflow.query",
+  "trigger.resume workflowId": "workflow.query",
 
   "run.start workflowId": "workflow.query",
   "run.query workflowId": "workflow.query",

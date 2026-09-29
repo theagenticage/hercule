@@ -4,10 +4,12 @@
  * rows by kind, so the read lives here rather than on the services that write
  * them.
  */
+import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Actor } from "@hercule/contract";
+import type { Actor, Event } from "@hercule/contract";
+import { get } from "../http/testing";
 import type { AuditKind } from "./audit-log";
 import type { PlatformEventKind } from "./platform-events";
 
@@ -45,3 +47,10 @@ export const readEventsOfKind = <Kind extends AuditKind | PlatformEventKind>(
         })),
     ),
   );
+
+/** Reads one event from the log through the API, as any other client does. */
+export const readEvent = async (base: string, token: string, id: number): Promise<Event> => {
+  const response = await get(base, `/api/v1/events/${String(id)}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Event;
+};

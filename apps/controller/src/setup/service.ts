@@ -43,7 +43,7 @@ import { Credentials, hashToken, mintToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import type { GrantsError } from "../permissions";
-import { Settings, type SettingError } from "../settings";
+import { Settings, validateTimezone, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
 
 /** The name of the assistant setup creates. */
@@ -93,16 +93,18 @@ const make = Effect.gen(function* () {
      * returns a bearer token, so the caller is logged in when this returns.
      * The transport gate verifies the setup token before this runs. Fails
      * with `InvalidState` when setup is already complete, or when there is no
-     * provider instance for the assistant to run on. Either failure writes
+     * provider instance for the assistant to run on, and with `Validation`
+     * when the timezone is not an IANA zone name. Every failure writes
      * nothing, so setup can be tried again.
      */
     complete: (
       input: CompleteInput,
     ): Effect.Effect<
       { readonly token: string },
-      InvalidState | SettingError | GrantsError | Schema.SchemaError | SqlError
+      InvalidState | Validation | SettingError | GrantsError | Schema.SchemaError | SqlError
     > =>
       Effect.gen(function* () {
+        yield* validateTimezone(input.timezone, ["timezone"]);
         // Hashing a password takes tens of milliseconds and SQLite has one
         // writer, so it happens before the transaction opens, never inside it.
         const passwordHash = yield* hashPassword(input.password, cost);

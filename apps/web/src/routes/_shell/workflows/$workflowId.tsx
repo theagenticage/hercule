@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { workflowQuery } from "../../../app/queries";
+import { triggersQuery, workflowQuery } from "../../../app/queries";
 import { prefetchWorkflowCatalog } from "./-catalog";
 import { WorkflowEditorPage } from "./-page";
 import { validateWorkflowViewSearch } from "./-view";
@@ -14,8 +14,8 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
   // hides its top bar.
   staticData: { title: "Workflow", ownsTopBar: true },
   validateSearch: validateWorkflowViewSearch,
-  // Loads the workflow and the editor's autocomplete data before the page
-  // renders, so the page never waits on them.
+  // Loads the workflow, its triggers and the editor's autocomplete data before
+  // the page renders, so the page never waits on them.
   loader: async ({ context: { client, queryClient }, params }) => {
     await Promise.all([
       queryClient.ensureQueryData(workflowQuery(client, params.workflowId)).catch((error) => {
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
         // load error.
         throw isNotFound(error) ? notFound() : error;
       }),
+      queryClient.ensureQueryData(triggersQuery(client, params.workflowId)),
       prefetchWorkflowCatalog(client, queryClient),
     ]);
   },

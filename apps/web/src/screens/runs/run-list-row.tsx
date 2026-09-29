@@ -6,10 +6,11 @@ import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
 import { FailureText } from "./step-parts";
 
 /**
- * Renders one run in the run list: its status mark and word, the workflow's name, the
- * failure reason when it failed, who started it, and its age. The whole row
- * links to the run's page. A finished run that did not fail recedes, so the
- * runs still going and the runs that failed stand out.
+ * Renders one run in the run list: its status mark and word, the workflow's
+ * name, the failure reason when it failed, who or which trigger started it,
+ * and its age. The whole row links to the run's page. A finished run that did
+ * not fail recedes, so the runs still going and the runs that failed stand
+ * out.
  */
 export function RunListRow({
   run,
@@ -19,7 +20,7 @@ export function RunListRow({
   /** The time the age counts to. */
   readonly now: Date;
 }): JSX.Element {
-  const { starter } = describeRunOrigin(run.origin);
+  const origin = describeRunOrigin(run);
   return (
     <li>
       <Link
@@ -37,7 +38,10 @@ export function RunListRow({
         <span className="min-w-0 flex-1 truncate font-emph text-ink">{run.workflowName}</span>
         <span className="w-[200px] shrink-0 truncate text-meta">
           {run.status !== "failed" ? null : (
-            <FailureText reason={run.failureReason} stepId={run.failedStepId} />
+            <FailureText
+              reason={run.failureReason}
+              stepId={run.failureReason === "validation-error" ? undefined : run.failedStepId}
+            />
           )}
         </span>
         <span
@@ -45,7 +49,8 @@ export function RunListRow({
         >
           {run.status}
         </span>
-        <span className="w-[132px] shrink-0 truncate text-meta text-muted">{`by ${starter.label}`}</span>
+        {/* Wide enough for "by trigger" and a trigger id of up to 16 characters. */}
+        <span className="w-[184px] shrink-0 truncate text-meta text-muted">{`by ${origin.label}`}</span>
         <span className="w-8 shrink-0 text-right font-mono text-fine text-faint tabular-nums">
           {formatAge(run.createdAt, now)}
         </span>

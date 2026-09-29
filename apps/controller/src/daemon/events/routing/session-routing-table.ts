@@ -68,9 +68,10 @@ export const sessionRoutingTable: Effect.Effect<
     });
 
   /**
-   * Records a failed evaluation on the subscription's health. The first
-   * failure of a streak also raises one notification, in the same write, so
-   * the user hears about a broken condition once and not once per event.
+   * Records a failed evaluation on the subscription's health. A failure that
+   * turns the health from ok to error also raises one notification, in the
+   * same write, so the user hears about a broken condition once and not once
+   * per event.
    */
   const recordEvaluationFailure = (
     subscriptionId: string,
@@ -93,7 +94,8 @@ export const sessionRoutingTable: Effect.Effect<
 
   /**
    * Ends the subscriptions whose holder is gone, then returns the live
-   * subscriptions as routes. The condition is passed on as stored: the router
+   * subscriptions as routes. A subscription admits every event: its condition
+   * is its only test. The condition is passed on as stored: the router
    * parses it, and a condition that no longer parses is recorded as an error
    * of that one subscription, like one that fails while it runs.
    */
@@ -103,10 +105,10 @@ export const sessionRoutingTable: Effect.Effect<
       const swept = yield* sweepEndedHolders(live);
       return live
         .filter((subscription) => !swept.has(subscription.id))
-        .map((subscription) => ({
-          id: subscription.id,
+        .map((subscription): Route => ({
+          admits: () => true,
           condition: subscription.condition,
-          inEvaluationError: subscription.healthErrorMessage !== null,
+          hasEvaluationError: subscription.healthErrorMessage !== null,
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
               const written = yield* sessions.storeMatchedInput({
@@ -124,12 +126,10 @@ export const sessionRoutingTable: Effect.Effect<
               // written, and its health does not change either.
               if (Option.isSome(written)) yield* subscriptions.clearLostWakeUp(subscription.id);
             }),
+          recordEvaluationFailure: (message) => recordEvaluationFailure(subscription.id, message),
+          clearEvaluationFailure: () => subscriptions.clearEvaluationFailure(subscription.id),
         }));
     });
 
-  return {
-    prepare,
-    recordEvaluationFailure,
-    clearEvaluationFailure: subscriptions.clearEvaluationFailure,
-  };
+  return { prepare };
 });

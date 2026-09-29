@@ -39,14 +39,16 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import { buildHomePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
-import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
+import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
   cancelStrandedInputsAndReportLostWakeUps,
+  ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
   Live,
   LostRunnerSweepInterval,
   RunFibers,
+  SchedulerInterval,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -126,7 +128,9 @@ const buildServices = (home: string) =>
           Layer.provide(AssistantSessionObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
-        ConnectionServiceLayer,
+        // As in the real boot: a Connection's delete asks the resources and
+        // workflows domains what still names it.
+        ConnectionServiceWithReferencesLayer,
         ResourceServiceLayer,
       ).pipe(
         // As in the real boot: sessions take and release workspace leases,
@@ -308,6 +312,8 @@ export interface ServerOptions {
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
   readonly lostRunnerSweepInterval?: Duration.Duration;
+  /** How often the scheduler looks for cron triggers that are due. The default is a second. */
+  readonly schedulerInterval?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before it is reported as
    * over budget. A test that wants every evaluation reported sets a budget no
@@ -477,6 +483,7 @@ const provideTimings =
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
+    provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(ExpressionBudget, options.expressionBudget);
     return provided;
   };
