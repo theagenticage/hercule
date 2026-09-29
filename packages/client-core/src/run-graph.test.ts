@@ -8,7 +8,7 @@ const at = (ms: number): string => new Date(Date.parse(START) + ms).toISOString(
 /** A fan-out: `create` leads to `label` and `query`, and `query` leads to `update`. */
 const PLAN: Run["plan"] = {
   name: "Triage a new issue",
-  triggers: [{ id: "weekdays", kind: "start", source: { kind: "cron.tick" } }],
+  triggers: [{ id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } }],
   steps: [
     { id: "create", kind: "action", action: "task.create" },
     { id: "label", kind: "action", action: "task.update" },
@@ -254,8 +254,8 @@ describe("buildRunGraph", () => {
     const plan: Run["plan"] = {
       ...PLAN,
       triggers: [
-        { id: "weekdays", kind: "start", source: { kind: "cron.tick" } },
-        { id: "on_issue", kind: "start", source: { kind: "github.issue.opened" } },
+        { id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } },
+        { id: "on_issue", kind: "start", on: { kind: "github.issue.opened" } },
       ],
     };
     const origin = { kind: "trigger", triggerId: "on_issue", eventId: 42 } as const;

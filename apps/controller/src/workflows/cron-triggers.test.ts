@@ -178,7 +178,7 @@ describe("the first pass over a new cron trigger", () => {
         yield* addUserInZone(BOB, "bob", "2026-02-01T00:00:00.000Z", "Asia/Tokyo");
         yield* addUserInZone(ALICE, "alice", "2026-01-01T00:00:00.000Z", "America/New_York");
         const workflowId = yield* storeWorkflow([
-          declareCronTrigger("nightly", { timezone: undefined }),
+          declareCronTrigger("nightly", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
         return yield* readScheduleState({ workflowId, triggerId: "nightly" });
@@ -195,7 +195,7 @@ describe("the first pass over a new cron trigger", () => {
     const state = await run(
       Effect.gen(function* () {
         const workflowId = yield* storeWorkflow([
-          declareCronTrigger("nightly", { timezone: undefined }),
+          declareCronTrigger("nightly", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
         return yield* readScheduleState({ workflowId, triggerId: "nightly" });
@@ -217,7 +217,7 @@ describe("a change of the user's timezone", () => {
         yield* addUserInZone(ALICE, "alice", "2026-01-01T00:00:00.000Z", "America/New_York");
         const workflowId = yield* storeWorkflow([
           declareCronTrigger("own"),
-          declareCronTrigger("users", { timezone: undefined }),
+          declareCronTrigger("users", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
         yield* settings.setForUser(ALICE, "timezone", "Asia/Tokyo");
@@ -245,7 +245,7 @@ describe("a change of the user's timezone", () => {
         const settings = yield* Settings;
         yield* addUserInZone(ALICE, "alice", "2026-01-01T00:00:00.000Z", "America/New_York");
         const workflowId = yield* storeWorkflow([
-          declareCronTrigger("users", { timezone: undefined }),
+          declareCronTrigger("users", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
         yield* settings.setForUser(ALICE, "timezone", "Asia/Tokyo");
@@ -551,7 +551,7 @@ describe("a cron trigger whose timezone is not a known one", () => {
 
     expect(broken.state).toMatchObject({ next_fire_at: null, next_fire_zone: null });
     expect(broken.health_error_message).toMatch(
-      /^The schedule "0 9 \* \* \*" cannot be read in the timezone Mars\/Olympus_Mons: .+\. Set a known timezone on the trigger in the workflow\.$/,
+      /^The schedule "0 9 \* \* \*" cannot be read in the timezone Mars\/Olympus_Mons: .+\. Set a known timezone under on in the trigger\.$/,
     );
     expect(broken.notifications).toEqual([
       {

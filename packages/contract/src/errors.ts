@@ -234,8 +234,10 @@ const formatStandardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
  * whose members all failed, down to the leaf issues. Options:
  *
  * - `path`: the path of the decoded value. Every returned path starts with it.
- * - `describeLeaf`: returns custom issues for one leaf. Return `undefined` to
- *   keep the schema library's message, or an empty list to drop the leaf.
+ * - `describeIssue`: returns custom issues for one leaf, or for a union whose
+ *   members all failed. Return `undefined` to keep the schema library's
+ *   message for a leaf, or to walk into each member's issues for a union.
+ *   Return an empty list to drop the issue.
  *
  * The workflow validators build their issues with this function, so they all
  * report decode failures the same way.
@@ -244,8 +246,8 @@ export const listSchemaIssues = (
   issue: SchemaIssue.Issue,
   options: {
     readonly path?: ReadonlyArray<string>;
-    readonly describeLeaf?: (
-      leaf: SchemaIssue.Issue,
+    readonly describeIssue?: (
+      issue: SchemaIssue.Issue,
       path: ReadonlyArray<string>,
     ) => ReadonlyArray<Issue> | undefined;
   } = {},
@@ -253,11 +255,14 @@ export const listSchemaIssues = (
   const walk = (node: SchemaIssue.Issue, path: ReadonlyArray<string>): ReadonlyArray<Issue> => {
     if (node._tag === "Pointer") return walk(node.issue, [...path, ...node.path.map(String)]);
     if (node._tag === "Encoding") return walk(node.issue, path);
-    if (node._tag === "Composite" || (node._tag === "AnyOf" && node.issues.length > 0)) {
-      return node.issues.flatMap((child) => walk(child, path));
+    if (node._tag === "Composite") return node.issues.flatMap((child) => walk(child, path));
+    if (node._tag === "AnyOf" && node.issues.length > 0) {
+      return (
+        options.describeIssue?.(node, path) ?? node.issues.flatMap((child) => walk(child, path))
+      );
     }
     return (
-      options.describeLeaf?.(node, path) ??
+      options.describeIssue?.(node, path) ??
       formatStandardIssues(node).issues.map((formatted) => ({
         path: [...path, ...(formatted.path ?? []).map(String)],
         message: formatted.message,

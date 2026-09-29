@@ -12,6 +12,7 @@ import {
   findFailedEdge,
   formatAge,
   describeResolution,
+  describeTriggerOn,
   formatDescribeLine,
   readJsonObject,
   readTimestamps,
@@ -19,6 +20,7 @@ import {
 import {
   truncateText,
   formatIssue,
+  isSchedule,
   type Notification,
   type Resolution,
   type Run,
@@ -310,19 +312,31 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 
 /**
  * Returns a trigger as a row of `trigger list`: every field, in the order the
- * contract gives them, with the two nested ones on one short line each. A
- * trigger whose filter failed shows `error: ` and the evaluation error, and a
- * cron trigger that missed scheduled times shows the first and the last of
- * them. `--json` prints when the error happened.
+ * contract gives them, with the nested ones on one short line each:
+ *
+ * - `on`: what the trigger fires on, as the web app shows it, such as
+ *   "github.pr.labeled · any connection" or "0 9 * * 1-5 in Europe/Amsterdam".
+ *   An event trigger's filter gets the last column, because a filter is
+ *   often long.
+ * - `health`: `ok`, or `error: ` and the evaluation error.
+ * - `skippedTicks`: the first and the last scheduled time a cron trigger
+ *   missed.
+ *
+ * `--json` prints every field as the controller sent it, such as when the
+ * error happened.
  */
 const summarizeTrigger = (trigger: Trigger): Record<string, unknown> => ({
   ...trigger,
+  on: describeTriggerOn(trigger.on),
   ...(trigger.health === undefined
     ? {}
     : { health: trigger.health.state === "ok" ? "ok" : `error: ${trigger.health.message}` }),
   ...(trigger.skippedTicks === undefined
     ? {}
     : { skippedTicks: `${trigger.skippedTicks.from} to ${trigger.skippedTicks.until}` }),
+  ...(isSchedule(trigger.on) || trigger.on.filter === undefined
+    ? {}
+    : { filter: trigger.on.filter }),
 });
 
 /**

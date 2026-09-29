@@ -43,6 +43,7 @@ const readTriggers = Effect.gen(function* () {
     direction: "desc",
     workflowId: undefined,
     kind: undefined,
+    on: undefined,
     eventKind: undefined,
     status: undefined,
   });
@@ -82,11 +83,11 @@ describe("saving a workflow's triggers a second time", () => {
   it("updates the fields and updated_at of a changed trigger, and keeps its created_at and status", async () => {
     const triggers = await saveTwice(
       [declareStartTrigger("a")],
-      [declareStartTrigger("a", { filter: "event.payload.id > 3" })],
+      [declareStartTrigger("a", { on: { kind: "task.created", filter: "event.payload.id > 3" } })],
       ["a"],
     );
     expect(triggers.get("a")).toMatchObject({
-      filter: "event.payload.id > 3",
+      on: { kind: "task.created", filter: "event.payload.id > 3" },
       status: "paused",
       createdAt: FIRST_SAVE,
       updatedAt: SECOND_SAVE,
@@ -98,7 +99,7 @@ describe("saving a workflow's triggers a second time", () => {
       [],
       [
         declareStartTrigger("a"),
-        declareStartTrigger("s", { kind: "signal", eventKind: "task.updated" }),
+        declareStartTrigger("s", { kind: "signal", on: { kind: "task.updated" } }),
       ],
     );
     expect(triggers.get("a")?.status).toBe("active");
@@ -140,7 +141,9 @@ describe("the trigger ids a second save returns", () => {
         return yield* workflows.reconcileTriggers(
           workflowId,
           [
-            declareStartTrigger("kept", { filter: "event.payload.id > 3" }),
+            declareStartTrigger("kept", {
+              on: { kind: "task.created", filter: "event.payload.id > 3" },
+            }),
             declareStartTrigger("flipped", { kind: "signal" }),
             declareStartTrigger("added"),
           ],
@@ -171,6 +174,7 @@ describe("listing triggers page by page", () => {
             direction: "desc",
             workflowId: undefined,
             kind: undefined,
+            on: undefined,
             eventKind: undefined,
             status: undefined,
           });
@@ -296,7 +300,9 @@ describe("a start trigger's health across a second save", () => {
 
   it("is ok again after a save that changes the trigger, because the error was about the old trigger", async () => {
     expect(
-      await readHealthAfterResave(declareStartTrigger("a", { filter: "event.payload.id > 3" })),
+      await readHealthAfterResave(
+        declareStartTrigger("a", { on: { kind: "task.created", filter: "event.payload.id > 3" } }),
+      ),
     ).toEqual({ state: "ok" });
   });
 
@@ -350,34 +356,29 @@ describe("a cron trigger's schedule state across a second save", () => {
     expect(await readScheduleStateAfterResave(declareCronTrigger("nightly"))).toEqual(UNTOUCHED);
   });
 
-  it("keeps the next time after a save that changes only the filter", async () => {
-    expect(
-      await readScheduleStateAfterResave(
-        declareCronTrigger("nightly", { filter: "event.payload.scheduledFor != null" }),
-      ),
-    ).toEqual(UNTOUCHED);
-  });
-
   it("clears the next time, and keeps when it last fired and what it missed, after a save that changes the schedule", async () => {
     expect(
-      await readScheduleStateAfterResave(declareCronTrigger("nightly", { schedule: "0 10 * * *" })),
+      await readScheduleStateAfterResave(
+        declareCronTrigger("nightly", { schedule: "0 10 * * *", timezone: "Europe/Amsterdam" }),
+      ),
     ).toEqual({ ...UNTOUCHED, next_fire_at: null, next_fire_zone: null });
   });
 
   it("clears the next time after a save that changes the timezone, or removes it", async () => {
-    for (const timezone of ["Europe/London", undefined]) {
-      expect(
-        await readScheduleStateAfterResave(declareCronTrigger("nightly", { timezone })),
-      ).toEqual({ ...UNTOUCHED, next_fire_at: null, next_fire_zone: null });
+    for (const on of [
+      { schedule: "0 9 * * *", timezone: "Europe/London" },
+      { schedule: "0 9 * * *" },
+    ]) {
+      expect(await readScheduleStateAfterResave(declareCronTrigger("nightly", on))).toEqual({
+        ...UNTOUCHED,
+        next_fire_at: null,
+        next_fire_zone: null,
+      });
     }
   });
 
-  it("clears every part of the schedule state after a save that changes the event kind", async () => {
-    expect(
-      await readScheduleStateAfterResave(
-        declareStartTrigger("nightly", { schedule: undefined, timezone: undefined }),
-      ),
-    ).toEqual({
+  it("clears every part of the schedule state after a save that replaces the schedule with an event selector", async () => {
+    expect(await readScheduleStateAfterResave(declareStartTrigger("nightly"))).toEqual({
       inputs: null,
       next_fire_at: null,
       next_fire_zone: null,
@@ -389,7 +390,7 @@ describe("a cron trigger's schedule state across a second save", () => {
 
   it("clears every part of the schedule state after a save that makes it a signal trigger", async () => {
     expect(
-      await readScheduleStateAfterResave(declareCronTrigger("nightly", { kind: "signal" })),
+      await readScheduleStateAfterResave(declareStartTrigger("nightly", { kind: "signal" })),
     ).toEqual({
       inputs: null,
       next_fire_at: null,
@@ -498,8 +499,11 @@ describe("listing the routable start triggers", () => {
           "Enabled",
           [
             declareStartTrigger("active", {
-              connectionId: ANY_CONNECTION,
-              filter: "event.payload.id > 3",
+              on: {
+                kind: "task.created",
+                connectionId: ANY_CONNECTION,
+                filter: "event.payload.id > 3",
+              },
               inputs: { id: "event.payload.id" },
             }),
             declareStartTrigger("unmapped"),
@@ -654,17 +658,24 @@ describe("listing the triggers that name a Connection", () => {
         const betaId = yield* storeWorkflow(
           "Beta",
           [
-            declareStartTrigger("z", { connectionId: CONNECTION_ID }),
-            declareStartTrigger("a", { connectionId: CONNECTION_ID, kind: "signal" }),
-            declareStartTrigger("any", { connectionId: ANY_CONNECTION }),
+            declareStartTrigger("z", { on: { kind: "task.created", connectionId: CONNECTION_ID } }),
+            declareStartTrigger("a", {
+              kind: "signal",
+              on: { kind: "task.created", connectionId: CONNECTION_ID },
+            }),
+            declareStartTrigger("any", {
+              on: { kind: "task.created", connectionId: ANY_CONNECTION },
+            }),
           ],
           FIRST_SAVE,
         );
         const alphaId = yield* storeWorkflow(
           "Alpha",
           [
-            declareStartTrigger("m", { connectionId: CONNECTION_ID }),
-            declareStartTrigger("other", { connectionId: OTHER_CONNECTION_ID }),
+            declareStartTrigger("m", { on: { kind: "task.created", connectionId: CONNECTION_ID } }),
+            declareStartTrigger("other", {
+              on: { kind: "task.created", connectionId: OTHER_CONNECTION_ID },
+            }),
             declareStartTrigger("none"),
           ],
           FIRST_SAVE,
@@ -708,11 +719,11 @@ describe("listing the cron triggers to schedule", () => {
             declareCronTrigger("due"),
             declareCronTrigger("due-now"),
             declareCronTrigger("future-own-zone"),
-            declareCronTrigger("future-user-zone", { timezone: undefined }),
-            declareCronTrigger("future-stale-user-zone", { timezone: undefined }),
-            // Not cron triggers: the schedule is only read for `cron.tick`.
-            declareStartTrigger("not-cron", { schedule: "0 9 * * *" }),
-            declareCronTrigger("signal", { kind: "signal" }),
+            declareCronTrigger("future-user-zone", { schedule: "0 9 * * *" }),
+            declareCronTrigger("future-stale-user-zone", { schedule: "0 9 * * *" }),
+            // Not cron triggers: they have event selectors.
+            declareStartTrigger("not-cron"),
+            declareStartTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
         );
@@ -812,7 +823,7 @@ describe("listing the cron triggers to schedule", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow(
           "Scheduled",
-          [declareStartTrigger("not-cron", { schedule: "0 9 * * *" })],
+          [declareStartTrigger("not-cron")],
           FIRST_SAVE,
         );
         return {
@@ -867,6 +878,7 @@ describe("moving a cron trigger on to its next scheduled time", () => {
           direction: "desc",
           workflowId,
           kind: undefined,
+          on: undefined,
           eventKind: undefined,
           status: undefined,
         });
@@ -928,6 +940,36 @@ describe("reading a trigger", () => {
     }
   });
 
+  it("reads a cron trigger's on as its schedule, and any other trigger's as its event selector", async () => {
+    const triggers = await saveTwice(
+      [],
+      [
+        declareCronTrigger("nightly"),
+        declareCronTrigger("user-zone", { schedule: "0 9 * * *" }),
+        declareStartTrigger("events", {
+          on: {
+            kind: "task.created",
+            connectionId: ANY_CONNECTION,
+            filter: "event.payload.id > 3",
+          },
+        }),
+        declareStartTrigger("signal", { kind: "signal", on: { kind: "task.updated" } }),
+      ],
+    );
+
+    expect(triggers.get("nightly")?.on).toEqual({
+      schedule: "0 9 * * *",
+      timezone: "Europe/Amsterdam",
+    });
+    expect(triggers.get("user-zone")?.on).toEqual({ schedule: "0 9 * * *" });
+    expect(triggers.get("events")?.on).toEqual({
+      kind: "task.created",
+      connectionId: ANY_CONNECTION,
+      filter: "event.payload.id > 3",
+    });
+    expect(triggers.get("signal")?.on).toEqual({ kind: "task.updated" });
+  });
+
   it("reads nothing for a trigger id its workflow does not declare", async () => {
     const found = await run(
       Effect.gen(function* () {
@@ -938,5 +980,56 @@ describe("reading a trigger", () => {
     );
 
     expect(Option.isNone(found)).toBe(true);
+  });
+});
+
+describe("listing triggers by what they fire on", () => {
+  /** Lists the ids of the triggers that pass `filter`, sorted. */
+  const listTriggerIds = (filter: {
+    readonly on?: "event" | "schedule";
+    readonly eventKind?: string;
+  }) =>
+    Effect.gen(function* () {
+      const workflows = yield* workflowRepository;
+      const page = yield* workflows.listTriggers({
+        limit: 100,
+        cursor: undefined,
+        direction: "desc",
+        workflowId: undefined,
+        kind: undefined,
+        on: filter.on,
+        eventKind: filter.eventKind,
+        status: undefined,
+      });
+      return page.items.map((item) => item.triggerId).sort();
+    });
+
+  it("lists the cron triggers for on schedule, the others for on event, and no cron trigger for an event kind", async () => {
+    const listed = await run(
+      Effect.gen(function* () {
+        yield* storeWorkflow(
+          "Mixed",
+          [
+            declareCronTrigger("nightly"),
+            declareStartTrigger("created"),
+            declareStartTrigger("signal", { kind: "signal", on: { kind: "task.updated" } }),
+          ],
+          FIRST_SAVE,
+        );
+        return {
+          schedule: yield* listTriggerIds({ on: "schedule" }),
+          event: yield* listTriggerIds({ on: "event" }),
+          cronTick: yield* listTriggerIds({ eventKind: "cron.tick" }),
+          created: yield* listTriggerIds({ eventKind: "task.created" }),
+        };
+      }),
+    );
+
+    expect(listed).toEqual({
+      schedule: ["nightly"],
+      event: ["created", "signal"],
+      cronTick: [],
+      created: ["created"],
+    });
   });
 });

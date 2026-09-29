@@ -13,8 +13,8 @@
  *   the same path, and the text after a `{{` without a closing `}}` cannot be
  *   parsed at all.
  * - An error that follows from another error is not reported. A trigger with
- *   an unknown event kind gets no schedule errors, and an edge whose end is
- *   not a valid node is left out of the graph checks.
+ *   an unknown event kind gets no `connectionId` error, and an edge whose end
+ *   is not a valid node is left out of the graph checks.
  *
  * The checks do no I/O. The service reads what they need into a
  * `ResolvedReferences` inside the save's transaction, so the checks and the
@@ -28,13 +28,16 @@ import * as SchemaAST from "effect/SchemaAST";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import {
   ANY_CONNECTION,
+  isSchedule,
   shortenLibraryMessage,
   isId,
   joinNames,
   truncateIssues,
   listSchemaIssues,
   quoteAuthorText,
+  type EventSelector,
   type Issue,
+  type Schedule,
   type WorkflowDefinition,
   type WorkflowIssues,
   type WorkspacePolicy,
@@ -102,7 +105,7 @@ export const listReferencedAgentIds = (definition: WorkflowDefinition): Readonly
 
 /**
  * Returns the ids of the Connections that a definition refers to, without
- * duplicates: in a trigger's `connectionId`, and as the default of a
+ * duplicates: in the `connectionId` of a trigger's event selector, and as the default of a
  * Connection input. A default that is not a valid id cannot refer to a
  * Connection, so it is skipped.
  */
@@ -111,9 +114,11 @@ export const listReferencedConnectionIds = (
 ): ReadonlyArray<string> => [
   ...new Set([
     ...(definition.triggers ?? []).flatMap((trigger) =>
-      trigger.source.connectionId === undefined || trigger.source.connectionId === ANY_CONNECTION
+      isSchedule(trigger.on) ||
+      trigger.on.connectionId === undefined ||
+      trigger.on.connectionId === ANY_CONNECTION
         ? []
-        : [trigger.source.connectionId],
+        : [trigger.on.connectionId],
     ),
     ...(definition.inputs ?? []).flatMap((input) =>
       input.connection !== undefined && isId(input.default) ? [input.default] : [],
@@ -204,41 +209,36 @@ const listInputIssues = (
 };
 
 /**
- * Validates a trigger's event kind and `connectionId`. `eventKind` is the
- * declared event kind, or `undefined` if no event kind has that name.
+ * Validates the event kind and `connectionId` of a trigger's event selector.
+ * `path` is the path of the selector in the definition.
  *
- * - The event kind must exist.
+ * - The event kind must exist. `cron.tick` is not one: the Scheduler emits it
+ *   only for cron triggers, so its error tells the author to write a schedule.
  * - An event kind of a plugin needs a `connectionId`: the id of a Connection
  *   of the kind's Connection type, or `any`.
  * - A core event kind must have no `connectionId`.
+ *
+ * An unknown event kind gets no `connectionId` error, because which
+ * `connectionId` is right depends on the kind.
  */
-const listEventSourceIssues = (
-  trigger: Trigger,
-  index: number,
-  eventKind: DeclaredEventKindWithConnectionType | undefined,
+const listEventSelectorIssues = (
+  selector: EventSelector,
+  path: ReadonlyArray<string>,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
-  const path = ["triggers", String(index), "source"];
-  const { kind, connectionId } = trigger.source;
+  const { kind, connectionId } = selector;
+  const eventKind = references.eventKinds.get(kind);
   if (eventKind === undefined) {
     return [
       {
         path: [...path, "kind"],
         message:
           `${quoteAuthorText(kind)} is not a known event kind. ` +
-          "A trigger can listen for a core event kind or an event kind of an active plugin. " +
-          `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`,
-      },
-    ];
-  }
-  if (trigger.kind === "signal" && kind === CRON_TICK_EVENT_KIND) {
-    return [
-      {
-        path: [...path, "kind"],
-        message:
-          `A signal trigger cannot listen for ${CRON_TICK_EVENT_KIND}. The Scheduler uses its ticks only to start runs, ` +
-          "never to signal a running run, so this trigger would never fire. " +
-          "Write a start trigger with a schedule, or listen for another event kind.",
+          (kind === CRON_TICK_EVENT_KIND
+            ? `No trigger can listen for ${CRON_TICK_EVENT_KIND}: the Scheduler emits it only for cron triggers. ` +
+              'To fire on a schedule, write schedule under on in place of kind, such as schedule: "0 9 * * 1-5" for 09:00 on weekdays.'
+            : "A trigger can listen for a platform event kind or an event kind of an active plugin. " +
+              `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`),
       },
     ];
   }
@@ -278,75 +278,54 @@ const listEventSourceIssues = (
 };
 
 /**
- * Validates a start trigger's `schedule` and `timezone`. A trigger on
- * `cron.tick` needs a valid schedule, and its timezone, if present, must be
- * valid. A trigger on any other event kind must have neither field.
+ * Validates a cron trigger's schedule. `path` is the path of the schedule's
+ * `on` in the definition.
+ *
+ * - The timezone, if present, must be an IANA timezone.
+ * - The cron expression must have five fields, parse, and come due at least
+ *   once.
  */
-const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray<Issue> => {
-  const path = ["triggers", String(index)];
-  if (trigger.source.kind !== CRON_TICK_EVENT_KIND) {
-    return [
-      ...(trigger.schedule === undefined
-        ? []
-        : [
-            {
-              path: [...path, "schedule"],
-              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} can have a schedule. Remove schedule.`,
-            },
-          ]),
-      ...(trigger.timezone === undefined
-        ? []
-        : [
-            {
-              path: [...path, "timezone"],
-              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} can have a timezone. Remove timezone.`,
-            },
-          ]),
-    ];
-  }
+const listScheduleIssues = (
+  schedule: Schedule,
+  path: ReadonlyArray<string>,
+): ReadonlyArray<Issue> => {
   const zone =
-    trigger.timezone !== undefined && isKnownTimezone(trigger.timezone)
-      ? trigger.timezone
+    schedule.timezone !== undefined && isKnownTimezone(schedule.timezone)
+      ? schedule.timezone
       : undefined;
   const issues: Array<Issue> = [];
-  if (trigger.timezone !== undefined && zone === undefined) {
+  if (schedule.timezone !== undefined && zone === undefined) {
     issues.push({
       path: [...path, "timezone"],
       message:
-        `${quoteAuthorText(trigger.timezone)} is not a timezone. ` +
+        `${quoteAuthorText(schedule.timezone)} is not a timezone. ` +
         "Write an IANA timezone, such as Europe/Amsterdam, or remove timezone to use the timezone of your settings.",
     });
   }
-  if (trigger.schedule === undefined) {
-    issues.push({
-      path: [...path, "schedule"],
-      message: `A trigger on ${CRON_TICK_EVENT_KIND} needs a schedule that sets when it fires. Add schedule, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
-    });
-    return issues;
-  }
+  const schedulePath = [...path, "schedule"];
   // A cron expression has five fields. The parser also accepts six, with
   // seconds first, but a schedule with seconds could start a run every
   // second.
-  if (trigger.schedule.trim().split(/\s+/).length === 6) {
+  if (schedule.schedule.trim().split(/\s+/).length === 6) {
     issues.push({
-      path: [...path, "schedule"],
+      path: schedulePath,
       message:
         "This schedule has six fields. A schedule has five fields: minute, hour, day of the month, month and day of the week, and no field for seconds. " +
         'Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.',
     });
     return issues;
   }
-  // Parse the schedule in the trigger's timezone if the timezone is valid. An
-  // invalid timezone is already reported above, so it is not reported again.
-  const parsed = Cron.parse(trigger.schedule, zone);
+  // Parse the schedule in its timezone if the timezone is valid. An invalid
+  // timezone is already reported above, so it is not reported again.
+  const parsed = Cron.parse(schedule.schedule, zone);
   if (Result.isFailure(parsed)) {
     issues.push({
-      path: [...path, "schedule"],
+      path: schedulePath,
       message: `This schedule is not a cron expression. ${shortenLibraryMessage(parsed.failure.message)} Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
     });
   } else if (!comesDue(parsed.success)) {
     issues.push({
-      path: [...path, "schedule"],
+      path: schedulePath,
       message:
         "This schedule never comes due: no date matches it, such as the 31st of February. " +
         'Write a date that exists, such as "0 9 1 * *" for 09:00 on the first of each month.',
@@ -412,16 +391,17 @@ const listInputMappingIssues = (
 };
 
 /**
- * Checks a trigger's filter. The trigger accepts an event only when the filter
- * is true, so the filter must be a condition that reads only the event.
+ * Checks the filter of a trigger's event selector. `path` is the path of the
+ * selector. The trigger accepts an event only when the filter is true, so the
+ * filter must be a condition that reads only the event.
  */
-const checkFilter = (trigger: Trigger, index: number): Effect.Effect<ReadonlyArray<Issue>> =>
-  trigger.source.filter === undefined
+const checkFilter = (
+  selector: EventSelector,
+  path: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<Issue>> =>
+  selector.filter === undefined
     ? Effect.succeed([])
-    : listCheckIssues(
-        ["triggers", String(index), "source", "filter"],
-        validateCondition(trigger.source.filter, "event"),
-      );
+    : listCheckIssues([...path, "filter"], validateCondition(selector.filter, "event"));
 
 /** Checks one trigger, its expressions included. Returns every issue found. */
 const checkTrigger = (
@@ -431,13 +411,16 @@ const checkTrigger = (
   references: ResolvedReferences,
 ): Effect.Effect<ReadonlyArray<Issue>> => {
   const path = ["triggers", String(index)];
-  const eventKind = references.eventKinds.get(trigger.source.kind);
-  const issues: Array<Issue> = [...listEventSourceIssues(trigger, index, eventKind, references)];
-  const expressionChecks = [checkFilter(trigger, index)];
+  const onPath = [...path, "on"];
+  const issues: Array<Issue> = [];
+  const expressionChecks: Array<Effect.Effect<ReadonlyArray<Issue>>> = [];
+  if (isSchedule(trigger.on)) {
+    issues.push(...listScheduleIssues(trigger.on, onPath));
+  } else {
+    issues.push(...listEventSelectorIssues(trigger.on, onPath, references));
+    expressionChecks.push(checkFilter(trigger.on, onPath));
+  }
   if (trigger.kind === "start") {
-    // The schedule rules depend on the event kind. If the kind is unknown,
-    // that error is already reported, so skip the schedule.
-    if (eventKind !== undefined) issues.push(...listScheduleIssues(trigger, index));
     issues.push(...listInputMappingIssues(trigger, index, definition.inputs ?? []));
     expressionChecks.push(checkExpressionMap(trigger.inputs, "event", [...path, "inputs"]));
   } else {
@@ -548,20 +531,20 @@ const UNKNOWN_PARAM_FIELD =
  * Converts the schema issue from decoding a step's params into a list of
  * issues at their paths in the definition. Skips an issue at a template if it
  * is about the value that a run will render there. `path` is the path of
- * `issue` in the definition, and `templatePaths` holds the path of each
+ * `paramsIssue` in the definition, and `templatePaths` holds the path of each
  * template, as JSON.
  */
 const listParamIssues = (
-  issue: SchemaIssue.Issue,
+  paramsIssue: SchemaIssue.Issue,
   path: ReadonlyArray<string>,
   templatePaths: ReadonlySet<string>,
 ): ReadonlyArray<Issue> =>
-  listSchemaIssues(issue, {
+  listSchemaIssues(paramsIssue, {
     path,
-    describeLeaf: (leaf, leafPath) => {
-      if (isAboutRenderedValue(leaf) && templatePaths.has(JSON.stringify(leafPath))) return [];
-      return leaf._tag === "UnexpectedKey"
-        ? [{ path: leafPath, message: UNKNOWN_PARAM_FIELD }]
+    describeIssue: (issue, issuePath) => {
+      if (isAboutRenderedValue(issue) && templatePaths.has(JSON.stringify(issuePath))) return [];
+      return issue._tag === "UnexpectedKey"
+        ? [{ path: issuePath, message: UNKNOWN_PARAM_FIELD }]
         : undefined;
     },
   });

@@ -61,9 +61,9 @@ export function TriggersPanel({
 
 /**
  * Renders one trigger: a mark when it is paused or its health is an error, its
- * id, the event kind and Connection it listens on, a cron trigger's schedule
- * and next fire time, and a start trigger's status with a button that pauses
- * or resumes it. Below come the error on its health and the scheduled times
+ * id, what it fires on (an event kind and Connection, or a schedule), a cron
+ * trigger's next fire time, and a start trigger's status with a button that
+ * pauses or resumes it. Below come the error on its health and the scheduled times
  * it missed, when either exists.
  *
  * The row owns the pause and resume mutation, because nothing above it needs
@@ -110,13 +110,8 @@ function TriggerRow({
         </span>
         <span className="shrink-0 font-mono text-fine font-emph text-ink">{triggerId}</span>{" "}
         <span className="min-w-0 flex-1 truncate font-mono text-fine text-faint">
-          {reading.connectionText === undefined
-            ? trigger.eventKind
-            : `${trigger.eventKind} · ${reading.connectionText}`}
+          {reading.firesOnText}
         </span>{" "}
-        {reading.scheduleText === undefined ? null : (
-          <span className="shrink-0 font-mono text-fine text-muted">{reading.scheduleText}</span>
-        )}{" "}
         {reading.nextFireText === undefined ? null : (
           <span className="shrink-0 font-mono text-fine text-faint tabular-nums">
             {reading.nextFireText}

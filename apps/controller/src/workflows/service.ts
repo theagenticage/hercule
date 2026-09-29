@@ -225,16 +225,12 @@ const checkAgainstSchema = (
   }
 };
 
-/** Builds one trigger row for each trigger that the definition declares. */
+/** Builds the trigger that the repository stores for each trigger the definition declares. */
 const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<DeclaredTrigger> =>
   (definition.triggers ?? []).map((trigger) => ({
     triggerId: trigger.id,
     kind: trigger.kind,
-    eventKind: trigger.source.kind,
-    connectionId: trigger.source.connectionId,
-    filter: trigger.source.filter,
-    schedule: trigger.kind === "start" ? trigger.schedule : undefined,
-    timezone: trigger.kind === "start" ? trigger.timezone : undefined,
+    on: trigger.on,
     inputs: trigger.kind === "start" ? trigger.inputs : undefined,
   }));
 
@@ -656,6 +652,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? DEFAULT_DIRECTION,
             workflowId: filter.workflowId,
             kind: filter.kind,
+            on: filter.on,
             eventKind: filter.eventKind,
             status: filter.status,
           }),

@@ -18,7 +18,7 @@ const CATALOG: WorkflowCatalog = {
   actions: [{ id: "task.create", displayName: "Create a task", description: "Creates a task." }],
   agents: [{ id: AGENT_ID, name: "Reviewer" }],
   eventKinds: [
-    { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
+    { kind: "task.created", description: "A task was created.", connectionRequired: false },
   ],
 };
 
@@ -192,20 +192,10 @@ describe("listWorkflowCompletions", () => {
         "triggers:",
         "  - id: nightly",
         "    kind: start",
-        "    ",
-      ]),
-    ).toEqual(["schedule"]);
-    expect(
-      listQuotedKeys([
-        "name: Review",
-        "steps: []",
-        "triggers:",
-        "  - id: nightly",
-        "    kind: start",
-        "    source:",
+        "    on:",
         "      ",
       ]),
-    ).toEqual(["filter"]);
+    ).toEqual(["filter", "schedule"]);
     expect(
       listQuotedKeys([
         "name: Review",
@@ -219,7 +209,37 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(["event", "run"]);
   });
 
-  it("offers the catalog's ids after action, agent and a trigger source's kind", () => {
+  it("offers both shapes of a start trigger's on until one of them is written", () => {
+    const completeOn = (written: ReadonlyArray<string>, kind = "start") =>
+      listLabels(
+        completeAtEnd([
+          "name: Review",
+          "steps: []",
+          "triggers:",
+          "  - id: nightly",
+          `    kind: ${kind}`,
+          "    on:",
+          ...written.map((line) => `      ${line}`),
+          "      ",
+        ]),
+      );
+
+    expect(completeOn([])).toEqual(["kind", "connectionId", "filter", "schedule", "timezone"]);
+    expect(completeOn(["kind: task.created"])).toEqual(["connectionId", "filter"]);
+    expect(completeOn(['schedule: "0 9 * * 1-5"'])).toEqual(["timezone"]);
+    // A key neither shape accepts rules out neither, so both are still offered.
+    expect(completeOn(['schedul: "0 9 * * 1-5"'])).toEqual([
+      "kind",
+      "connectionId",
+      "filter",
+      "schedule",
+      "timezone",
+    ]);
+    // A signal trigger accepts only events, so its on has no schedule.
+    expect(completeOn([], "signal")).toEqual(["kind", "connectionId", "filter"]);
+  });
+
+  it("offers the catalog's ids after action, agent and the event kind a trigger is on", () => {
     expect(
       completeAtEnd([
         "name: Review",
@@ -240,11 +260,11 @@ describe("listWorkflowCompletions", () => {
           "triggers:",
           "  - id: nightly",
           "    kind: start",
-          "    source:",
+          "    on:",
           "      kind: ",
         ]),
       ),
-    ).toEqual(["cron.tick"]);
+    ).toEqual(["task.created"]);
   });
 
   it("shows the end of the id for agents that share a name", () => {

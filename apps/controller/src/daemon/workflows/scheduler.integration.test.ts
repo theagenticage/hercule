@@ -62,10 +62,9 @@ inputs:
 triggers:
   - id: ${TRIGGER_ID}
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
-    timezone: UTC
+    on:
+      schedule: "0 2 * * *"
+      timezone: UTC
     inputs:
       scheduledFor: event.payload.scheduledFor
       previousFiredAt: event.payload.previousFiredAt

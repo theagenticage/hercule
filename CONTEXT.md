@@ -186,7 +186,7 @@ _Avoid_: poll
 
 **Scheduled Wake**:
 Waking an assistant at a time rather than on an event: a prompt delivered into one of its conversations by the scheduler. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
-_Avoid_: cron job (reserved for workflow triggers), scheduled task
+_Avoid_: cron job (a workflow's cron trigger is the thing that fires on a cron schedule), scheduled task
 
 **Reminder**:
 A one-shot scheduled wake an assistant sets on itself (or the user sets for it), delivered back into the conversation that created it, so the assistant can act or speak at that time.
@@ -341,7 +341,7 @@ An event emitted by the controller itself rather than an external source (`run.c
 _Avoid_: internal event, system event
 
 **Core Kind**:
-An event kind the core declares rather than a plugin: `cron.tick`, which the Scheduler emits, and the kinds of the Platform Events. A trigger on a core kind names no Connection, because its events arrive through none. No plugin can declare a kind with the name of a core kind.
+An event kind the core declares rather than a plugin: `cron.tick`, which the Scheduler emits for cron triggers, and the kinds of the Platform Events. A trigger on a core kind names no Connection, because its events arrive through none. No trigger names `cron.tick`: a cron trigger writes a Schedule instead, and each tick reaches only the cron trigger it was emitted for. No plugin can declare a kind with the name of a core kind.
 _Avoid_: built-in kind, system kind, internal kind
 
 **Event**:
@@ -382,8 +382,16 @@ A named, stored, editable source of execution plans. Owns its triggers; can be a
 _Avoid_: recipe
 
 **Trigger**:
-A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). Lives inside the workflow, not as a standalone routing entity.
+A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). What a trigger fires on is its `on`: an Event Selector, or for a start trigger a Schedule. A start trigger whose `on` is a Schedule is a **cron trigger**. Lives inside the workflow, not as a standalone routing entity.
 _Avoid_: rule, hook
+
+**Event Selector**:
+The `on` of a trigger that fires on events: an event kind, the Connection selection (a Connection id or `any`, absent for a core kind), and an optional filter expression over `event`. Every signal trigger has one; a start trigger has one or a Schedule.
+_Avoid_: trigger source, source (an Event Source is where an event comes from; the selector says which events a trigger accepts)
+
+**Schedule**:
+The `on` of a cron trigger: a five-field cron expression and an optional timezone, the user's timezone setting when absent. It has no filter, because the cron expression already sets when it fires. When it comes due, the Scheduler appends a `cron.tick` event through the one pipeline, and that event starts the run.
+_Avoid_: cron job, timer, `cron.tick` trigger (no trigger names `cron.tick`)
 
 **Step**:
 One node of an execution plan's graph. Two kinds in v1: an action step (calls a Workflow Action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.

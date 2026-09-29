@@ -378,6 +378,10 @@ export {
   ANY_CONNECTION,
   collectReachableSteps,
   decodeWorkflowDefinition,
+  EventSelector,
+  isSchedule,
+  Schedule,
+  TriggerOn,
   truncateIssues,
   listEntrySteps,
   readFieldNotation,
@@ -431,6 +435,7 @@ export {
   TriggerHealth,
   TriggerKey,
   TriggerKind,
+  TriggerOnShape,
   TriggerStatus,
 } from "./groups/trigger";
 export { readShorthandDecoder } from "./shorthand";

@@ -157,11 +157,21 @@ describe("hercule workflow", () => {
     const triggers = renderHuman(
       {
         kind: "value",
-        value: { items: [{ triggerId: "on_label", filter: "event.a == 1 &&\r\n  event.b == 2" }] },
+        value: {
+          items: [
+            {
+              triggerId: "on_label",
+              on: { kind: "task.created", filter: "event.a == 1 &&\r\n  event.b == 2" },
+            },
+          ],
+        },
       },
       lookUpCommand("trigger", "list"),
     );
-    expect(triggers).toEqual(["triggerId  filter", "on_label   event.a == 1 && ..."]);
+    expect(triggers).toEqual([
+      "triggerId  on            filter",
+      "on_label   task.created  event.a == 1 && ...",
+    ]);
   });
 
   it("prints one line per error and per warning after validate, or one line when there are none", () => {
@@ -214,16 +224,16 @@ describe("a catalog query that returns a plain array", () => {
         {
           kind: "value",
           value: [
-            { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
+            { kind: "task.created", description: "A task was created.", connectionRequired: false },
             { kind: "github.pr.labeled", description: "Labels changed.", connectionRequired: true },
           ],
         },
         lookUpCommand("event-kind", "list"),
       ),
     ).toEqual([
-      "kind               description           connectionRequired",
-      "cron.tick          A schedule came due.  false",
-      "github.pr.labeled  Labels changed.       true",
+      "kind               description          connectionRequired",
+      "task.created       A task was created.  false",
+      "github.pr.labeled  Labels changed.      true",
     ]);
   });
 
@@ -725,7 +735,7 @@ describe("hercule run", () => {
     ]);
   });
 
-  it("prints a trigger's health and missed scheduled times on one short line each", () => {
+  it("prints what a trigger fires on, its health and its missed scheduled times on one short line each", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -733,6 +743,8 @@ describe("hercule run", () => {
           items: [
             {
               triggerId: "weekday_morning",
+              kind: "start",
+              on: { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" },
               status: "active",
               health: { state: "ok" },
               nextFireAt: "2026-09-29T07:00:00.000Z",
@@ -743,6 +755,8 @@ describe("hercule run", () => {
             },
             {
               triggerId: "on_issue",
+              kind: "start",
+              on: { kind: "github.issue.opened", connectionId: "any" },
               status: "paused",
               health: {
                 state: "error",
@@ -756,9 +770,9 @@ describe("hercule run", () => {
       lookUpCommand("trigger", "list"),
     );
     expect(lines).toEqual([
-      "triggerId        status  health                      nextFireAt                skippedTicks",
-      "weekday_morning  active  ok                          2026-09-29T07:00:00.000Z  2026-09-26T07:00:00.000Z to 2026-09-27T07:00:00.000Z",
-      "on_issue         paused  error: no such key: labels",
+      "triggerId        kind   on                                    status  health                      nextFireAt                skippedTicks",
+      "weekday_morning  start  0 9 * * 1-5 in Europe/Amsterdam       active  ok                          2026-09-29T07:00:00.000Z  2026-09-26T07:00:00.000Z to 2026-09-27T07:00:00.000Z",
+      "on_issue         start  github.issue.opened · any connection  paused  error: no such key: labels",
     ]);
   });
 });

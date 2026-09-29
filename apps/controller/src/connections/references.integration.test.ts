@@ -31,7 +31,7 @@ const buildLabeledWorkflowSource = (name: string, id: string, connectionId: stri
 triggers:
   - id: ${id}
     kind: start
-    source:
+    on:
       kind: github.pr.labeled
       connectionId: ${connectionId}
 steps:

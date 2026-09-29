@@ -198,18 +198,38 @@ const readShapeKind = (shape: SchemaAST.Objects): string | undefined => {
   return kind !== undefined && SchemaAST.isLiteral(kind) ? String(kind.literal) : undefined;
 };
 
+/** Returns whether an object schema accepts `key`: it declares the key, or accepts any key. */
+const acceptsKey = (shape: SchemaAST.Objects, key: string): boolean =>
+  shape.indexSignatures.length > 0 ||
+  shape.propertySignatures.some((property) => property.name === key);
+
 /**
- * Returns the object schemas among `types`, keeping only those whose `kind`
- * matches. When `kind` is `undefined` or matches no schema, returns all of
- * them, because the mapping could still become any of them.
+ * Returns the object schemas among `types` that a mapping with the `written`
+ * pairs can still become:
+ *
+ * - When the mapping has a `kind` that some schema has as its literal, only
+ *   those schemas. A step's kind picks its shape this way.
+ * - Of those, only the schemas that accept every written key. A start
+ *   trigger's `on` has no literal to tell its shapes apart, so writing
+ *   `kind` rules out the schedule, and writing `schedule` rules out the event
+ *   selector.
+ *
+ * When a rule would leave no schema, it is skipped, because the mapping
+ * already has an error and every schema is still a guess.
  */
 const narrowShapes = (
   types: ReadonlyArray<SchemaAST.AST>,
-  kind: string | undefined,
+  written: ReadonlyArray<WrittenPair>,
 ): ReadonlyArray<SchemaAST.Objects> => {
   const shapes = types.flatMap(flattenUnion).filter(SchemaAST.isObjects);
-  const written = shapes.filter((shape) => readShapeKind(shape) === kind);
-  return kind !== undefined && written.length > 0 ? written : shapes;
+  const kindValue = written.findLast((pair) => pair.key === "kind")?.value;
+  const kind = isScalar(kindValue) ? String(kindValue.value) : undefined;
+  const ofKind = shapes.filter((shape) => readShapeKind(shape) === kind);
+  const candidates = kind !== undefined && ofKind.length > 0 ? ofKind : shapes;
+  const accepting = candidates.filter((shape) =>
+    written.every((pair) => acceptsKey(shape, pair.key)),
+  );
+  return accepting.length > 0 ? accepting : candidates;
 };
 
 /** Returns the possible types of a key's value across some object schemas. */
@@ -286,7 +306,7 @@ const listCatalogValues = (
       text: agent.id,
     }));
   }
-  if (path.length === 3 && list === "triggers" && field === "source" && key === "kind") {
+  if (path.length === 3 && list === "triggers" && field === "on" && key === "kind") {
     return catalog.eventKinds.map((eventKind) => ({
       label: eventKind.kind,
       detail: eventKind.description,
@@ -317,12 +337,18 @@ const readWrittenKey = (
   return source.slice(findLineStart(lines, range[1] - 1), range[1]).trim();
 };
 
+/** A key of a mapping as written in the source, with its value node. */
+interface WrittenPair {
+  readonly key: string;
+  readonly value: unknown;
+}
+
 /** Returns a mapping's pairs with their keys as written, leaving out the key being typed. */
 const listWrittenPairs = (
   cursorSource: CursorSource,
   mapping: YAMLMap,
   line: CursorLine,
-): ReadonlyArray<{ readonly key: string; readonly value: unknown }> =>
+): ReadonlyArray<WrittenPair> =>
   mapping.items.flatMap((pair) => {
     const key = readWrittenKey(cursorSource, pair.key, line);
     return key === undefined ? [] : [{ key, value: pair.value }];
@@ -352,23 +378,18 @@ export const listWorkflowCompletions = (
   if (place === undefined) return undefined;
   const cursorSource: CursorSource = { source, lines };
 
-  const readKind = (node: unknown): string | undefined => {
-    if (!isMap(node)) return undefined;
-    const kind = listWrittenPairs(cursorSource, node, line).findLast(
-      (pair) => pair.key === "kind",
-    )?.value;
-    return isScalar(kind) ? String(kind.value) : undefined;
-  };
+  const listPairs = (node: unknown): ReadonlyArray<WrittenPair> =>
+    isMap(node) ? listWrittenPairs(cursorSource, node, line) : [];
   let types: ReadonlyArray<SchemaAST.AST> = [WorkflowDefinition.ast];
   for (const [depth, segment] of place.path.entries()) {
     const arrays = types.flatMap(flattenUnion).filter(SchemaAST.isArrays);
     types = [
-      ...readValueTypes(narrowShapes(types, readKind(place.nodes[depth])), segment),
+      ...readValueTypes(narrowShapes(types, listPairs(place.nodes[depth])), segment),
       ...arrays.flatMap((array) => array.rest),
     ];
   }
-  const mapping = place.nodes.at(-1);
-  const shapes = narrowShapes(types, readKind(mapping));
+  const writtenPairs = listPairs(place.nodes.at(-1));
+  const shapes = narrowShapes(types, writtenPairs);
   const from = position - line.typed.length;
   const buildCompletionList = (
     options: ReadonlyArray<CompletionOption>,
@@ -385,9 +406,7 @@ export const listWorkflowCompletions = (
       from + source.slice(from, line.end).search(AFTER_VALUE),
     );
   }
-  const written = new Set(
-    isMap(mapping) ? listWrittenPairs(cursorSource, mapping, line).map((pair) => pair.key) : [],
-  );
+  const written = new Set(writtenPairs.map((pair) => pair.key));
   // Each key once, in schema order, with the notation of its value.
   const keys = new Map<string, FieldNotation | undefined>();
   for (const { name, type } of shapes.flatMap((shape) => shape.propertySignatures)) {

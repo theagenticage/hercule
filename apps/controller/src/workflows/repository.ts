@@ -19,11 +19,14 @@ import type {
   TriggerHealth,
   TriggerKey,
   TriggerKind,
+  TriggerOn,
+  TriggerOnShape,
   TriggerStatus,
   Workflow,
   WorkflowDefinition,
   WorkflowSummary,
 } from "@hercule/contract";
+import { isSchedule } from "@hercule/contract";
 import {
   decodeCursor,
   decodeOwnedCursor,
@@ -62,15 +65,15 @@ export interface WorkflowUpdate {
   readonly changed: ReadonlyArray<"source" | "enabled">;
 }
 
-/** A trigger as the workflow source declares it: the fields of its row that come from the source. */
+/**
+ * A trigger as the workflow source declares it: the fields of its row that
+ * come from the source. How `on` is stored in the row's columns is a detail of
+ * this module; see `isCronTriggerRow`.
+ */
 export interface DeclaredTrigger {
   readonly triggerId: string;
   readonly kind: TriggerKind;
-  readonly eventKind: string;
-  readonly connectionId: string | undefined;
-  readonly filter: string | undefined;
-  readonly schedule: string | undefined;
-  readonly timezone: string | undefined;
+  readonly on: TriggerOn;
   /** A start trigger's input mapping: each input name to an expression over `event`. */
   readonly inputs: Readonly<Record<string, string>> | undefined;
 }
@@ -151,6 +154,9 @@ export interface TriggerPageRequest {
   readonly direction: SortDirection;
   readonly workflowId: string | undefined;
   readonly kind: TriggerKind | undefined;
+  /** `schedule` lists the cron triggers, and `event` every other trigger. */
+  readonly on: TriggerOnShape | undefined;
+  /** Lists the triggers that accept events of this kind. A cron trigger accepts none. */
   readonly eventKind: string | undefined;
   readonly status: TriggerStatus | undefined;
 }
@@ -195,7 +201,18 @@ interface TriggerRow {
 /** The workflow's name is not a column. It is read from the stored definition. */
 const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
 
-/** The condition that picks the cron triggers out of the `triggers` table. */
+/**
+ * The condition that picks the cron triggers out of the `triggers` table.
+ *
+ * A trigger's `on` is stored in its row by one rule. A start trigger whose
+ * `on` is a schedule is stored with the event kind `cron.tick`, the kind of
+ * the events the Scheduler emits for it, its schedule and timezone, and no
+ * Connection or filter. Any other trigger is stored with the event kind,
+ * Connection and filter of its event selector, and no schedule.
+ * `isCronTriggerRow` reads a row by the same rule. This condition is also the
+ * condition of the partial index `triggers_cron_next_fire`, so SQLite can use
+ * that index only while the two match word for word.
+ */
 const IS_CRON_TRIGGER = `triggers.kind = 'start' AND triggers.event_kind = '${CRON_TICK_EVENT_KIND}'
   AND triggers.schedule IS NOT NULL`;
 
@@ -234,17 +251,58 @@ const readHealth = (row: TriggerRow): TriggerHealth =>
     ? { state: "ok" }
     : { state: "error", message: row.health_error_message, at: row.health_error_at };
 
+/**
+ * Checks whether a trigger row holds a cron trigger. It is the same condition
+ * as `IS_CRON_TRIGGER`, which describes how a row stores a trigger's `on`.
+ */
+const isCronTriggerRow = (row: TriggerRow): row is TriggerRow & { readonly schedule: string } =>
+  row.kind === "start" && row.event_kind === CRON_TICK_EVENT_KIND && row.schedule !== null;
+
+/**
+ * Builds a trigger's `on` from its row: a schedule for a cron trigger, and an
+ * event selector for any other trigger. A cron trigger's stored event kind,
+ * `cron.tick`, is left out.
+ */
+const buildTriggerOn = (row: TriggerRow): TriggerOn =>
+  isCronTriggerRow(row)
+    ? {
+        schedule: row.schedule,
+        ...(row.timezone === null ? {} : { timezone: row.timezone }),
+      }
+    : {
+        kind: row.event_kind,
+        ...(row.connection_id === null ? {} : { connectionId: row.connection_id }),
+        ...(row.filter === null ? {} : { filter: row.filter }),
+      };
+
+/**
+ * Converts a trigger's `on` to the columns of its row, by the rule described
+ * at `IS_CRON_TRIGGER`. A signal trigger's `on` is always an event selector.
+ */
+const buildOnColumns = (on: TriggerOn) =>
+  isSchedule(on)
+    ? {
+        eventKind: CRON_TICK_EVENT_KIND,
+        connectionId: undefined,
+        filter: undefined,
+        schedule: on.schedule,
+        timezone: on.timezone,
+      }
+    : {
+        eventKind: on.kind,
+        connectionId: on.connectionId,
+        filter: on.filter,
+        schedule: undefined,
+        timezone: undefined,
+      };
+
 /** Maps a trigger row to a `Trigger`. A NULL column becomes an absent field, not `null`. */
 const toTrigger = (row: TriggerRow): Trigger => ({
   workflowId: uuidToString(row.workflow_id),
   workflowName: row.workflow_name,
   triggerId: row.trigger_id,
   kind: row.kind,
-  eventKind: row.event_kind,
-  ...(row.connection_id === null ? {} : { connectionId: row.connection_id }),
-  ...(row.filter === null ? {} : { filter: row.filter }),
-  ...(row.schedule === null ? {} : { schedule: row.schedule }),
-  ...(row.timezone === null ? {} : { timezone: row.timezone }),
+  on: buildTriggerOn(row),
   ...(row.status === null ? {} : { status: row.status }),
   ...(row.kind === "start" ? { health: readHealth(row) } : {}),
   ...(row.next_fire_at === null ? {} : { nextFireAt: row.next_fire_at }),
@@ -429,7 +487,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Updates a workflow's trigger rows to match the triggers its source
-     * declares:
+     * declares. Each trigger's `on` is stored in the columns of its row by the
+     * rule described at `IS_CRON_TRIGGER`.
      *
      * - A trigger whose id is no longer in the source is deleted.
      * - A trigger with a new id is inserted, with status `active` for a start
@@ -438,8 +497,11 @@ const make = Effect.gen(function* () {
      *   other fields are overwritten from the source, and `updated_at` changes
      *   only if one of them changed. A change also clears the trigger's
      *   health, because the error it records was about the old definition.
-     *   A trigger that did not change keeps its error, which is still true. A cron trigger whose schedule or timezone changed has its
-     *   next scheduled time cleared, so the Scheduler computes it again.
+     *   A trigger that did not change keeps its error, which is still true.
+     * - A cron trigger whose schedule or timezone changed has its next
+     *   scheduled time cleared, so the Scheduler computes it again. A cron
+     *   trigger whose schedule is replaced by an event selector loses all of
+     *   its schedule state.
      * - A trigger whose id stays but whose kind changes counts as a new
      *   trigger, because a start trigger and a signal trigger are different
      *   things. It gets a new `created_at`, and a start trigger is `active`
@@ -474,15 +536,16 @@ const make = Effect.gen(function* () {
           RETURNING trigger_id
         `;
         for (const trigger of triggers) {
+          const columns = buildOnColumns(trigger.on);
           yield* sql`
             INSERT INTO triggers
               (workflow_id, trigger_id, kind, event_kind, connection_id, filter, schedule,
                timezone, inputs, status, created_at, updated_at)
             VALUES
               (${workflow}, ${trigger.triggerId}, ${trigger.kind},
-               ${bindExactText(trigger.eventKind)}, ${trigger.connectionId ?? null},
-               ${bindOptionalText(trigger.filter)}, ${bindOptionalText(trigger.schedule)},
-               ${bindOptionalText(trigger.timezone)},
+               ${bindExactText(columns.eventKind)}, ${columns.connectionId ?? null},
+               ${bindOptionalText(columns.filter)}, ${bindOptionalText(columns.schedule)},
+               ${bindOptionalText(columns.timezone)},
                ${bindOptionalText(trigger.inputs === undefined ? undefined : JSON.stringify(trigger.inputs))},
                ${trigger.kind === "start" ? "active" : null}, ${savedAt}, ${savedAt})
             ON CONFLICT (workflow_id, trigger_id) DO UPDATE SET
@@ -553,8 +616,15 @@ const make = Effect.gen(function* () {
           clauses.push(sql`triggers.workflow_id = ${uuidFromString(request.workflowId)}`);
         }
         if (request.kind !== undefined) clauses.push(sql`triggers.kind = ${request.kind}`);
+        if (request.on === "schedule") clauses.push(sql.literal(IS_CRON_TRIGGER));
+        if (request.on === "event") clauses.push(sql.literal(`NOT (${IS_CRON_TRIGGER})`));
         if (request.eventKind !== undefined) {
-          clauses.push(sql`triggers.event_kind = ${bindExactText(request.eventKind)}`);
+          // A cron trigger's row has the event kind `cron.tick`, but it
+          // accepts no events, so no event kind lists it.
+          clauses.push(
+            sql`triggers.event_kind = ${bindExactText(request.eventKind)}
+              AND NOT (${sql.literal(IS_CRON_TRIGGER)})`,
+          );
         }
         if (request.status !== undefined) clauses.push(sql`triggers.status = ${request.status}`);
         const rows = yield* sql<TriggerRow>`

@@ -10,8 +10,7 @@ const ON_REVIEW: Trigger = {
   workflowName: "triage",
   triggerId: "on_review",
   kind: "signal",
-  eventKind: "github.pull_request.reviewed",
-  connectionId: "any",
+  on: { kind: "github.pull_request.reviewed", connectionId: "any" },
   createdAt: "2026-09-01T08:00:00.000Z",
   updatedAt: "2026-09-01T08:00:00.000Z",
 };
@@ -20,19 +19,18 @@ const ON_ISSUE: Trigger = {
   ...ON_REVIEW,
   triggerId: "on_issue",
   kind: "start",
-  eventKind: "github.issue.opened",
+  on: { kind: "github.issue.opened", connectionId: "any" },
   status: "active",
   health: { state: "ok" },
 };
 
-/** A cron trigger. Its event kind, `cron.tick`, is a core kind, so it names no connection. */
+/** A cron trigger. It fires on a schedule, so it names no event kind and no Connection. */
 const WEEKDAYS: Trigger = {
   workflowId: ON_ISSUE.workflowId,
   workflowName: ON_ISSUE.workflowName,
   triggerId: "weekdays",
   kind: "start",
-  eventKind: "cron.tick",
-  schedule: "0 9 * * 1-5",
+  on: { schedule: "0 9 * * 1-5" },
   status: "active",
   health: { state: "ok" },
   nextFireAt: "2026-09-04T09:00:00.000Z",
@@ -45,8 +43,7 @@ describe("describeTrigger", () => {
     expect(describeTrigger(ON_ISSUE, "UTC", true)).toEqual({
       mark: undefined,
       status: { text: "active", tone: "muted" },
-      connectionText: "any connection",
-      scheduleText: undefined,
+      firesOnText: "github.issue.opened · any connection",
       nextFireText: undefined,
       healthError: undefined,
       skippedTicksText: undefined,
@@ -55,22 +52,29 @@ describe("describeTrigger", () => {
   });
 
   it("names one connection by its id's tail", () => {
+    const on = { kind: "github.issue.opened", connectionId: CONNECTION_ID };
+    expect(describeTrigger({ ...ON_ISSUE, on }, "UTC", true).firesOnText).toBe(
+      "github.issue.opened · connection 22015952",
+    );
+  });
+
+  it("shows only the event kind of a trigger on a kind the core emits", () => {
     expect(
-      describeTrigger({ ...ON_ISSUE, connectionId: CONNECTION_ID }, "UTC", true).connectionText,
-    ).toBe("connection 22015952");
+      describeTrigger({ ...ON_ISSUE, on: { kind: "task.created" } }, "UTC", true).firesOnText,
+    ).toBe("task.created");
   });
 
   it("reads a cron trigger's schedule and next fire time in the display timezone", () => {
     const reading = describeTrigger(WEEKDAYS, "Europe/Amsterdam", true);
-    expect(reading.connectionText).toBeUndefined();
-    expect(reading.scheduleText).toBe("0 9 * * 1-5");
+    expect(reading.firesOnText).toBe("0 9 * * 1-5");
     expect(reading.nextFireText).toBe("next 4 Sep 11:00");
   });
 
-  it("names the timezone the source writes beside the schedule", () => {
-    expect(
-      describeTrigger({ ...WEEKDAYS, timezone: "Europe/Amsterdam" }, "UTC", true).scheduleText,
-    ).toBe("0 9 * * 1-5 in Europe/Amsterdam");
+  it("shows the schedule's timezone beside the schedule", () => {
+    const on = { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" };
+    expect(describeTrigger({ ...WEEKDAYS, on }, "UTC", true).firesOnText).toBe(
+      "0 9 * * 1-5 in Europe/Amsterdam",
+    );
   });
 
   it("marks a paused trigger, shows its status as needing attention, and offers resume", () => {
