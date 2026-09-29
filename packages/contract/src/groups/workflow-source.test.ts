@@ -208,11 +208,19 @@ const buildConnectionInputArbitrary = (name: string) =>
 
 const eventSelectorArbitrary = FastCheck.record(
   {
-    kind: FastCheck.constantFrom("cron.tick", "task.created", "github.pr.labeled"),
+    kind: FastCheck.constantFrom("task.created", "github.pr.labeled"),
     connectionId: FastCheck.constantFrom("any", ENTITY_ID),
     filter: expressionArbitrary,
   },
   { requiredKeys: ["kind"] },
+);
+
+const scheduleArbitrary = FastCheck.record(
+  {
+    schedule: FastCheck.constant("0 9 * * 1-5"),
+    timezone: FastCheck.constant("Europe/Amsterdam"),
+  },
+  { requiredKeys: ["schedule"] },
 );
 
 const buildStartTriggerArbitrary = (id: string) =>
@@ -220,16 +228,14 @@ const buildStartTriggerArbitrary = (id: string) =>
     {
       id: FastCheck.constant(id),
       kind: FastCheck.constant("start"),
-      source: eventSelectorArbitrary,
+      on: FastCheck.oneof(eventSelectorArbitrary, scheduleArbitrary),
       inputs: FastCheck.constant({ pr_number: "event.payload.number" }),
       spawnBound: FastCheck.record({
         maxRuns: FastCheck.integer({ min: 1, max: 100 }),
         windowSeconds: FastCheck.integer({ min: 1, max: 86_400 }),
       }),
-      schedule: FastCheck.constant("0 9 * * 1-5"),
-      timezone: FastCheck.constant("Europe/Amsterdam"),
     },
-    { requiredKeys: ["id", "kind", "source"] },
+    { requiredKeys: ["id", "kind", "on"] },
   );
 
 const buildSignalTriggerArbitrary = (id: string) =>
@@ -237,14 +243,14 @@ const buildSignalTriggerArbitrary = (id: string) =>
     {
       id: FastCheck.constant(id),
       kind: FastCheck.constant("signal"),
-      source: eventSelectorArbitrary,
+      on: eventSelectorArbitrary,
       correlation: FastCheck.record({
         event: FastCheck.constant("event.payload.number"),
         run: FastCheck.constant("steps.review.output.number"),
       }),
       outputs: FastCheck.constant({ merged: "event.payload.merged" }),
     },
-    { requiredKeys: ["id", "kind", "source", "correlation"] },
+    { requiredKeys: ["id", "kind", "on", "correlation"] },
   );
 
 const stepCommonKeyArbitraries = {
@@ -606,16 +612,15 @@ steps:
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
   - id: nightly
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.id
@@ -642,9 +647,8 @@ steps:
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
 `);
     expect(listIssuePaths(issues)).toEqual([["steps", "1", "id"]]);
   });
@@ -665,7 +669,7 @@ steps:
 triggers:
   - id: checks-failed
     kind: start
-    source:
+    on:
       kind: task.created
 steps:
   - id: file_task
@@ -683,6 +687,301 @@ const ONE_STEP = `steps:
     kind: action
     action: task.create
 `;
+
+/** A source with one trigger, whose lines are `trigger`, and one action step. */
+const buildTriggerSource = (trigger: string): string =>
+  `name: one trigger\ntriggers:\n  - id: t\n${trigger}${ONE_STEP}`;
+
+/** The sentence that ends each error about a start trigger's `on` that fits neither shape. */
+const TRIGGER_ON_CHOICES =
+  "Write kind, with connectionId and filter if needed, to accept events of that kind, " +
+  "or write schedule, with timezone if needed, to fire on a schedule.";
+
+describe("parsing what a trigger fires on", () => {
+  it("accepts a start trigger on events and a start trigger on a schedule", () => {
+    const definition = parseDefinition(`name: two triggers
+triggers:
+  - id: labeled
+    kind: start
+    on:
+      kind: github.pr.labeled
+      connectionId: any
+      filter: event.payload.label == "ready"
+  - id: weekdays
+    kind: start
+    on:
+      schedule: "0 9 * * 1-5"
+      timezone: Europe/Amsterdam
+${ONE_STEP}`);
+    expect(definition.triggers?.map((trigger) => trigger.on)).toEqual([
+      { kind: "github.pr.labeled", connectionId: "any", filter: 'event.payload.label == "ready"' },
+      { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" },
+    ]);
+  });
+
+  it("refuses the shape before on, and says where each of its keys goes now", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    source:
+      kind: task.created
+    schedule: "0 2 * * *"
+    timezone: Europe/Amsterdam
+`),
+    );
+    // The error that on is missing is left out: renaming source fixes it.
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "source"],
+        message: "source is now called on. Rename source to on.",
+      },
+      {
+        path: ["triggers", "0", "schedule"],
+        message: "A schedule goes under on, in place of an event kind. Move schedule under on.",
+      },
+      {
+        path: ["triggers", "0", "timezone"],
+        message: "A timezone goes under on, beside the schedule. Move timezone under on.",
+      },
+    ]);
+  });
+
+  it("reports one error at on when it names both an event kind and a schedule", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      kind: task.created
+      schedule: "0 2 * * *"
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on"],
+        message: `on accepts events or fires on a schedule, not both. ${TRIGGER_ON_CHOICES}`,
+      },
+    ]);
+  });
+
+  it("reports one error at on when it is empty or has no value", () => {
+    expect(collectIssues(buildTriggerSource("    kind: start\n    on: {}\n"))).toEqual([
+      { path: ["triggers", "0", "on"], message: `on is empty. ${TRIGGER_ON_CHOICES}` },
+    ]);
+    expect(collectIssues(buildTriggerSource("    kind: start\n    on:\n"))).toEqual([
+      { path: ["triggers", "0", "on"], message: `on has no value. ${TRIGGER_ON_CHOICES}` },
+    ]);
+  });
+
+  it("reports only the schedule's error when a schedule has a filter, not that kind is missing", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      schedule: "0 2 * * *"
+      filter: event.payload.urgent
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "filter"],
+        message:
+          "A schedule has no filter, because the schedule already sets when the trigger fires. Remove filter.",
+      },
+    ]);
+  });
+
+  it("refuses a timezone beside an event kind", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      kind: task.created
+      timezone: Europe/Amsterdam
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "timezone"],
+        message: "Only a schedule has a timezone. Remove timezone.",
+      },
+    ]);
+  });
+
+  it("reports only the event selector's error when an event trigger has a bad Connection id", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      kind: task.created
+      connectionId: nope
+`),
+    );
+    expect(listIssuePaths(issues)).toEqual([["triggers", "0", "on", "connectionId"]]);
+  });
+
+  it("refuses a schedule on a signal trigger, which accepts only events", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: signal
+    on:
+      schedule: "0 2 * * *"
+    correlation:
+      event: event.payload.id
+      run: steps.file_task.output.id
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "schedule"],
+        message:
+          "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule. " +
+          "Write kind in place of schedule, with connectionId and filter if needed.",
+      },
+    ]);
+  });
+
+  it("tells a signal trigger whose on has both kind and schedule to remove the schedule", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: signal
+    on:
+      kind: task.created
+      schedule: "0 2 * * *"
+    correlation:
+      event: event.payload.id
+      run: steps.file_task.output.id
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "schedule"],
+        message:
+          "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule. " +
+          "Remove schedule.",
+      },
+    ]);
+  });
+
+  it("reports one error at on when it has neither kind nor schedule, naming the keys written", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      schedul: "0 2 * * *"
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on"],
+        message: `on has neither kind nor schedule, only "schedul". ${TRIGGER_ON_CHOICES}`,
+      },
+    ]);
+  });
+
+  it("reads a timezone alone as a schedule and a filter alone as an event selector", () => {
+    expect(
+      collectIssues(buildTriggerSource("    kind: start\n    on:\n      timezone: UTC\n")),
+    ).toEqual([
+      { path: ["triggers", "0", "on", "schedule"], message: "Add schedule. It is required here." },
+    ]);
+    expect(
+      collectIssues(buildTriggerSource('    kind: start\n    on:\n      filter: "true"\n')),
+    ).toEqual([
+      { path: ["triggers", "0", "on", "kind"], message: "Add kind. It is required here." },
+    ]);
+  });
+
+  it("tells a trigger that writes both source and on to remove source, and still checks on", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    source:
+      kind: task.created
+    on:
+      kind: task.created
+      timezone: UTC
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "timezone"],
+        message: "Only a schedule has a timezone. Remove timezone.",
+      },
+      {
+        path: ["triggers", "0", "source"],
+        message: "on is already written, and source is its old name. Remove source.",
+      },
+    ]);
+  });
+
+  it("tells a trigger to remove an old top-level schedule or timezone that on cannot take", () => {
+    const signal = collectIssues(
+      buildTriggerSource(`    kind: signal
+    on:
+      kind: task.created
+    schedule: "0 2 * * *"
+    correlation:
+      event: event.payload.id
+      run: steps.file_task.output.id
+`),
+    );
+    expect(signal).toEqual([
+      {
+        path: ["triggers", "0", "schedule"],
+        message:
+          "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule. " +
+          "Remove schedule.",
+      },
+    ]);
+    const event = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      kind: task.created
+    timezone: UTC
+`),
+    );
+    expect(event).toEqual([
+      {
+        path: ["triggers", "0", "timezone"],
+        message: "Only a schedule has a timezone. Remove timezone.",
+      },
+    ]);
+  });
+
+  it("tells a trigger to remove an old top-level schedule or timezone that on already has", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: start
+    on:
+      schedule: "0 9 * * *"
+      timezone: UTC
+    schedule: "0 2 * * *"
+    timezone: Europe/Amsterdam
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "schedule"],
+        message: "on already has a schedule. Remove this one.",
+      },
+      {
+        path: ["triggers", "0", "timezone"],
+        message: "on already has a timezone. Remove this one.",
+      },
+    ]);
+  });
+
+  it("refuses a timezone under a signal trigger's on, which has no schedule", () => {
+    const issues = collectIssues(
+      buildTriggerSource(`    kind: signal
+    on:
+      kind: task.created
+      timezone: UTC
+    correlation:
+      event: event.payload.id
+      run: steps.file_task.output.id
+`),
+    );
+    expect(issues).toEqual([
+      {
+        path: ["triggers", "0", "on", "timezone"],
+        message:
+          "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule. " +
+          "Remove timezone.",
+      },
+    ]);
+  });
+});
 
 describe("parsing a source with YAML anchors and aliases", () => {
   it("rejects an alias to an anchor that does not exist at the alias, without throwing", () => {
@@ -796,12 +1095,12 @@ describe("how much of the source an error message repeats", () => {
 triggers:
   - id: ${longWord}
     kind: start
-    source:
+    on:
       kind: task.created
       connectionId: ${longWord}
   - id: ${longWord}
     kind: start
-    source:
+    on:
       kind: task.created
 steps:
   - id: file_task
@@ -809,7 +1108,7 @@ steps:
 `);
     expect(listIssuePaths(issues)).toEqual([
       ["triggers", "0", "id"],
-      ["triggers", "0", "source", "connectionId"],
+      ["triggers", "0", "on", "connectionId"],
       ["triggers", "1", "id"],
       ["steps", "0", "kind"],
       ["triggers", "1", "id"],
@@ -1182,11 +1481,11 @@ inputs:
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
   - id: pr_merged
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -1234,7 +1533,7 @@ inputs:
 triggers:
   - id: pr_merged
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId

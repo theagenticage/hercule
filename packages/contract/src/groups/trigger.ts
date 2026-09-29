@@ -29,9 +29,8 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { Timezone } from "../strings";
 import { EventKind } from "./event";
-import { ConnectionSelection } from "./workflow-definition";
+import { TriggerFiresOn, TriggerOn } from "./workflow-definition";
 
 /** A start trigger starts runs. A signal trigger resumes a live run. */
 export const TriggerKind = Schema.Literals(["start", "signal"]);
@@ -95,12 +94,12 @@ export const Trigger = Schema.Struct({
   /** The trigger's id in the workflow's source. */
   triggerId: Schema.String,
   kind: TriggerKind,
-  eventKind: EventKind,
-  connectionId: Schema.optionalKey(ConnectionSelection),
-  filter: Schema.optionalKey(Schema.String),
-  schedule: Schema.optionalKey(Schema.String),
-  /** As written in the source. A cron trigger without one uses the user's timezone setting. */
-  timezone: Schema.optionalKey(Timezone),
+  /**
+   * What the trigger fires on, as written in the source: the events it
+   * accepts, or, for a cron trigger, its schedule. A signal trigger always
+   * accepts events.
+   */
+  on: TriggerOn,
   /** Set on start triggers only. */
   status: Schema.optionalKey(TriggerStatus),
   /** Set on start triggers only. */
@@ -126,6 +125,13 @@ export type Trigger = Schema.Schema.Type<typeof Trigger>;
 export const TriggerFilter = Schema.Struct({
   workflowId: Schema.optionalKey(Id),
   kind: Schema.optionalKey(TriggerKind),
+  /** `schedule` lists the cron triggers, and `event` every other trigger. */
+  on: Schema.optionalKey(TriggerFiresOn),
+  /**
+   * Only the triggers that accept events of this kind. A cron trigger accepts
+   * none, so `cron.tick` is refused: filter with `on` set to `schedule` to
+   * list the cron triggers.
+   */
   eventKind: Schema.optionalKey(EventKind),
   status: Schema.optionalKey(TriggerStatus),
 });

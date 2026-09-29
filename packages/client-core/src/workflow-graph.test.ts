@@ -26,7 +26,7 @@ describe("buildWorkflowGraph", () => {
   it("builds a linear workflow, with an edge from the start trigger to the first step", () => {
     const definition: WorkflowDefinition = {
       name: "Review labelled pull requests",
-      triggers: [{ id: "labelled", kind: "start", source: { kind: "github.pr.labeled" } }],
+      triggers: [{ id: "labelled", kind: "start", on: { kind: "github.pr.labeled" } }],
       steps: [
         { id: "open_task", kind: "action", action: "task.create" },
         { id: "review", kind: "agent", agent: AGENT_ID, prompt: "Review the pull request." },
@@ -60,17 +60,17 @@ describe("buildWorkflowGraph", () => {
     const definition: WorkflowDefinition = {
       name: "Implement a task",
       triggers: [
-        { id: "assigned", kind: "start", source: { kind: "task.updated" } },
+        { id: "assigned", kind: "start", on: { kind: "task.updated" } },
         {
           id: "checks_failed",
           kind: "signal",
-          source: { kind: "github.checks.failed", connectionId: "any" },
+          on: { kind: "github.checks.failed", connectionId: "any" },
           correlation: { event: "event.payload.prNumber", run: "steps.open_pr.output.prNumber" },
         },
         {
           id: "pr_merged",
           kind: "signal",
-          source: { kind: "github.pr.merged", connectionId: "any" },
+          on: { kind: "github.pr.merged", connectionId: "any" },
           correlation: { event: "event.payload.prNumber", run: "steps.open_pr.output.prNumber" },
         },
       ],
@@ -135,17 +135,16 @@ describe("buildWorkflowGraph", () => {
     const definition: WorkflowDefinition = {
       name: "Triage and audit",
       triggers: [
-        { id: "labelled", kind: "start", source: { kind: "github.pr.labeled" } },
+        { id: "labelled", kind: "start", on: { kind: "github.pr.labeled" } },
         {
           id: "nightly",
           kind: "start",
-          source: { kind: "cron.tick" },
-          schedule: "0 3 * * *",
+          on: { schedule: "0 3 * * *" },
         },
         {
           id: "merged",
           kind: "signal",
-          source: { kind: "github.pr.merged", connectionId: "any" },
+          on: { kind: "github.pr.merged", connectionId: "any" },
           correlation: { event: "event.payload.prNumber", run: "inputs.prNumber" },
         },
       ],
@@ -177,7 +176,7 @@ describe("buildWorkflowGraph", () => {
     // from the unknown id cannot be drawn.
     const definition: WorkflowDefinition = {
       name: "Triage",
-      triggers: [{ id: "labelled", kind: "start", source: { kind: "github.pr.labeled" } }],
+      triggers: [{ id: "labelled", kind: "start", on: { kind: "github.pr.labeled" } }],
       steps: [
         { id: "triage", kind: "action", action: "task.create" },
         { id: "report", kind: "action", action: "task.update" },

@@ -96,7 +96,7 @@ const TRIAGE_SOURCE = [
   "triggers:",
   "  - id: labeled",
   "    kind: start",
-  "    source:",
+  "    on:",
   "      kind: github.pr.labeled",
   "      connectionId: any",
   "",
@@ -115,9 +115,8 @@ const NIGHTLY_SOURCE = `name: ${NIGHTLY_NAME}
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
 steps:
   - id: sweep
     kind: action
@@ -159,7 +158,7 @@ const PROBLEM_SOURCE = `name: ${TRIAGE_NAME}
 triggers:
   - id: labeled
     kind: start
-    source:
+    on:
       kind: github.pr.labelled
       connectionId: any
 steps:
@@ -184,11 +183,11 @@ const UNKNOWN_ACTION_LINE = findLineNumber(PROBLEM_SOURCE, UNKNOWN_ACTION_LINE_T
 const SECOND_STEP_LINE = findLineNumber(PROBLEM_SOURCE, "  - id: comment");
 
 const UNKNOWN_KIND: Issue = {
-  path: ["triggers", "0", "source", "kind"],
+  path: ["triggers", "0", "on", "kind"],
   message:
     '"github.pr.labelled" is not a known event kind. ' +
-    "A trigger can listen for a core event kind or an event kind of an active plugin. " +
-    "The known event kinds are: cron.tick, task.created, github.pr.labeled.",
+    "A trigger can listen for a platform event kind or an event kind of an active plugin. " +
+    "The known event kinds are: task.created, github.pr.labeled.",
 };
 
 const UNKNOWN_ACTION: Issue = {
@@ -269,7 +268,6 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
 
 /** The event kinds that a trigger can use, as `eventKind.query` returns them. */
 const EVENT_KINDS: readonly DeclaredEventKind[] = [
-  { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
   { kind: "task.created", description: "A task was created.", connectionRequired: false },
   {
     kind: "github.pr.labeled",
@@ -2084,8 +2082,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     workflowName: TRIAGE_NAME,
     triggerId: "on_label",
     kind: "start",
-    eventKind: "github.pull_request.labeled",
-    connectionId: CONNECTION_ID,
+    on: { kind: "github.pull_request.labeled", connectionId: CONNECTION_ID },
     status: "active",
     health: { state: "ok" },
     createdAt: TRIAGE.createdAt,
@@ -2096,9 +2093,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
   const WEEKDAYS: Trigger = {
     ...ON_LABEL,
     triggerId: "weekdays",
-    eventKind: "cron.tick",
-    connectionId: "any",
-    schedule: "0 9 * * 1-5",
+    on: { schedule: "0 9 * * 1-5" },
     nextFireAt: "2026-10-05T07:00:00.000Z",
   };
 
@@ -2107,8 +2102,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     workflowName: TRIAGE_NAME,
     triggerId: "on_review",
     kind: "signal",
-    eventKind: "github.pull_request.reviewed",
-    connectionId: "any",
+    on: { kind: "github.pull_request.reviewed", connectionId: "any" },
     createdAt: TRIAGE.createdAt,
     updatedAt: TRIAGE.updatedAt,
   };
@@ -2184,7 +2178,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(screen.queryByRole("region", { name: "Triggers" })).toBeNull();
   });
 
-  it("lists each trigger in the controller's order, with its event kind, connection and status", async () => {
+  it("lists each trigger in the controller's order, with what it fires on and its status", async () => {
     await openTriggers([ON_LABEL, WEEKDAYS, ON_REVIEW]);
     const panel = await findTriggersPanel();
 
@@ -2207,7 +2201,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     const panel = await findTriggersPanel();
 
     expect(readPageText(getTriggerRow(panel, "weekdays"))).toBe(
-      "weekdays cron.tick · any connection 0 9 * * 1-5 next 5 Oct 09:00 active Pause",
+      "weekdays 0 9 * * 1-5 next 5 Oct 09:00 active Pause",
     );
   });
 
@@ -2219,7 +2213,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
       "Triggers The workflow is disabled, so no trigger fires.",
     );
     expect(readPageText(getTriggerRow(panel, "weekdays"))).toBe(
-      "weekdays cron.tick · any connection 0 9 * * 1-5 active Pause",
+      "weekdays 0 9 * * 1-5 active Pause",
     );
   });
 
@@ -2228,7 +2222,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     const row = getTriggerRow(await findTriggersPanel(), "weekdays");
 
     expect(row.querySelector('[data-mark="paused"]')).not.toBeNull();
-    expect(readPageText(row)).toBe("weekdays cron.tick · any connection 0 9 * * 1-5 paused Resume");
+    expect(readPageText(row)).toBe("weekdays 0 9 * * 1-5 paused Resume");
   });
 
   it("marks a trigger whose filter fails, and says why and when", async () => {

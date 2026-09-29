@@ -357,7 +357,7 @@ describe("the graphs a run accepts", () => {
               {
                 id: "task_changed",
                 kind: "signal",
-                source: { kind: "task.updated" },
+                on: { kind: "task.updated" },
                 correlation: { event: "event.payload.taskId", run: "steps.create.output.id" },
               },
             ],
@@ -388,7 +388,7 @@ describe("the graphs a run accepts", () => {
             {
               id: "task_changed",
               kind: "signal",
-              source: { kind: "task.updated" },
+              on: { kind: "task.updated" },
               correlation: { event: "event.payload.taskId", run: "steps.first.output.id" },
             },
           ],
@@ -584,9 +584,7 @@ describe("the graphs a run accepts", () => {
       const definition = {
         name: "Every accepted shape",
         // A start trigger is frozen into the plan and never fires in a run.
-        triggers: [
-          { id: "weekdays", kind: "start", source: { kind: "cron.tick" }, schedule: "0 9 * * 1-5" },
-        ],
+        triggers: [{ id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } }],
         steps: [
           buildCreateStep("root"),
           buildCreateStep("left"),

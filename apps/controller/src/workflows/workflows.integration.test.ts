@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as Fiber from "effect/Fiber";
 import {
+  isSchedule,
   renderWorkflowSource,
   type Trigger,
   type Workflow,
@@ -146,16 +147,15 @@ const DUPLICATE_TRIGGER_ID_SOURCE = `name: three triggers, two ids
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
   - id: nightly
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.id
@@ -193,16 +193,15 @@ steps:
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
 `;
 
 const KEBAB_CASE_TRIGGER_ID_SOURCE = `name: kebab trigger
 triggers:
   - id: checks-failed
     kind: start
-    source:
+    on:
       kind: task.created
 steps:
   - id: file_task
@@ -219,16 +218,15 @@ const LABEL_FILTER = '"triage" in event.payload.added';
 /** The YAML of start trigger `b`: a weekday schedule in a named timezone. */
 const CRON_TRIGGER_B_SOURCE = `  - id: b
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 9 * * 1-5"
-    timezone: Europe/Amsterdam
+    on:
+      schedule: "0 9 * * 1-5"
+      timezone: Europe/Amsterdam
 `;
 
 /** The YAML of start trigger `c`, which an update puts in place of `b`. */
 const TASK_TRIGGER_C_SOURCE = `  - id: c
     kind: start
-    source:
+    on:
       kind: task.created
 `;
 
@@ -244,13 +242,13 @@ const buildLabelTriageSource = (connectionId: string, secondStartTrigger: string
 triggers:
   - id: a
     kind: start
-    source:
+    on:
       kind: github.pr.labeled
       connectionId: ${connectionId}
       filter: '${LABEL_FILTER}'
 ${secondStartTrigger}  - id: s
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.id
@@ -282,9 +280,8 @@ const NIGHTLY_SWEEP_SOURCE = `name: Nightly sweep
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
 steps:
   - id: sweep
     kind: action
@@ -725,7 +722,7 @@ describe("trigger.query", () => {
       // from depending on whether that pass has run yet.
       const allTriggers = await waitUntil("scheduled both cron triggers", async () => {
         const items = await queryTriggers(base, token);
-        const cron = items.filter((item) => item.eventKind === "cron.tick");
+        const cron = items.filter((item) => isSchedule(item.on));
         return cron.every((item) => item.nextFireAt !== undefined) ? items : undefined;
       });
       expect(allTriggers).toHaveLength(4);
@@ -755,9 +752,7 @@ describe("trigger.query", () => {
         workflowName: "Label triage",
         triggerId: "a",
         kind: "start",
-        eventKind: "github.pr.labeled",
-        connectionId,
-        filter: LABEL_FILTER,
+        on: { kind: "github.pr.labeled", connectionId, filter: LABEL_FILTER },
         status: "active",
         health: { state: "ok" },
         ...timestampMatchers,
@@ -767,9 +762,7 @@ describe("trigger.query", () => {
         workflowName: "Label triage",
         triggerId: "b",
         kind: "start",
-        eventKind: "cron.tick",
-        schedule: "0 9 * * 1-5",
-        timezone: "Europe/Amsterdam",
+        on: { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" },
         status: "active",
         health: { state: "ok" },
         ...scheduleMatchers,
@@ -781,7 +774,7 @@ describe("trigger.query", () => {
         workflowName: "Label triage",
         triggerId: "s",
         kind: "signal",
-        eventKind: "task.updated",
+        on: { kind: "task.updated" },
         ...timestampMatchers,
       });
       // The row copies the trigger from the source, and this source has no
@@ -792,8 +785,7 @@ describe("trigger.query", () => {
         workflowName: "Nightly sweep",
         triggerId: "nightly",
         kind: "start",
-        eventKind: "cron.tick",
-        schedule: "0 2 * * *",
+        on: { schedule: "0 2 * * *" },
         status: "active",
         health: { state: "ok" },
         ...scheduleMatchers,
@@ -809,10 +801,21 @@ describe("trigger.query", () => {
         "b",
         "nightly",
       ]);
-      expect(sortTriggerIds(await queryTriggers(base, token, "?eventKind=cron.tick"))).toEqual([
+      expect(sortTriggerIds(await queryTriggers(base, token, "?on=schedule"))).toEqual([
         "b",
         "nightly",
       ]);
+      expect(sortTriggerIds(await queryTriggers(base, token, "?on=event"))).toEqual(["a", "s"]);
+      expect(sortTriggerIds(await queryTriggers(base, token, "?eventKind=task.updated"))).toEqual([
+        "s",
+      ]);
+      // A cron trigger accepts no events, so filtering on its stored event kind is refused.
+      const cronTickResponse = await get(base, "/api/v1/triggers?eventKind=cron.tick", token);
+      const cronTickRefusal = await readErrorBody(cronTickResponse);
+      expect(cronTickResponse.status, cronTickRefusal.text).toBe(400);
+      expect(cronTickRefusal.code).toBe("validation");
+      expect(cronTickRefusal.issues).toEqual([["eventKind"]]);
+      expect(cronTickRefusal.text).toContain("filter with on set to schedule");
       expect(sortTriggerIds(await queryTriggers(base, token, "?status=active"))).toEqual([
         "a",
         "b",
@@ -833,7 +836,7 @@ describe("trigger.query", () => {
       expect(findTrigger(triggersAfterUpdate, "a").createdAt).toBe(triggerA.createdAt);
       expect(findTrigger(triggersAfterUpdate, "c")).toMatchObject({
         kind: "start",
-        eventKind: "task.created",
+        on: { kind: "task.created" },
         status: "active",
       });
       // The trigger the update added is the newest of all.

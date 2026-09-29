@@ -69,7 +69,7 @@ One **warning**, not an error: a graph with signal nodes and no `terminal` step 
 - Expressions: a filter, a step condition and an edge condition must give a bool. One whose type is known and is not `bool` is refused; one whose type is known only at run time is accepted.
 - Templates: the `prompt` and every string inside `params` that holds `{{`, at any depth, are templates (section 5). Each of their expressions is checked in the scope of a run, and an unclosed `{{` is refused.
 - Actions: an action step names a built-in action, or an action of a plugin that is enabled and started; the refusal lists the actions that can be named. The params rule: every param the action requires is present, and a key its input does not declare is refused, at any depth. A literal value is decoded against its field's schema, together with any rule the input carries as a whole (a `task.update` names a field to change). A template is accepted for a field of any type, because its value is known only when the run renders it, except where the field takes no value at all.
-- Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `cron.tick` start trigger has a five-field `schedule`, with no field for seconds; `timezone` is an IANA zone; neither is allowed on another kind. A signal trigger cannot listen for `cron.tick`.
+- Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `Schedule` has a five-field `schedule`, with no field for seconds, that parses and comes due at least once; its `timezone` is a known IANA zone. *(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276): the rules that kept `schedule` and `timezone` off other kinds, and a signal trigger off `cron.tick`, are gone, because the shape of `on` rules those out.)*
 - Inputs: a Connection input's `connection.type` is a Connection type of a plugin that is enabled and started.
 - Graph: an edge from or into a start trigger is refused, because a start trigger starts runs and does not continue one. The entry-step rules of section 4.3 apply.
 
@@ -96,27 +96,30 @@ A workflow owns its triggers; there is no standalone routing entity. Triggers ar
 ```ts
 type Trigger = StartTrigger | SignalTrigger
 
-interface EventSelector {               // the static condition of a trigger
-  kind: string                         // event kind, namespaced by source: "github.issue.opened", "task.updated", "cron.tick"
+interface EventSelector {               // the events a trigger accepts
+  kind: string                         // event kind: "github.issue.opened", "task.updated"; the part before the first dot is a namespace, not always the Event Source
   connectionId?: string | "any"        // required for plugin-emitted kinds: a Connection id or a deliberate "any"; absent for core-emitted kinds
   filter?: CelExpression               // over `event`; bool
+}
+
+interface Schedule {                    // when a cron trigger fires; no filter, the cron expression already sets when
+  schedule: string                     // five-field cron expression
+  timezone?: string                    // IANA zone; the user's timezone setting when omitted
 }
 
 interface StartTrigger {
   id: string                           // unique inside its workflow; section 1 for the form
   kind: "start"
-  source: EventSelector
+  on: EventSelector | Schedule         // a Schedule makes it a cron trigger
   inputs?: Record<string, CelExpression> // input name -> expression over `event`
   spawnBound?: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
   status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
-  schedule?: string                    // cron triggers only (source.kind == "cron.tick"): cron expression
-  timezone?: string                    // cron triggers only; the user's timezone setting when omitted
 }
 
 interface SignalTrigger {
   id: string                           // referenced as steps.<id> once it has fired (section 2.4)
   kind: "signal"
-  source: EventSelector                // the condition shape
+  on: EventSelector                    // events only: a signal trigger never fires on a schedule
   correlation: {
     event: CelExpression               // over `event`; value-producing
     run: CelExpression                 // over `inputs`, `steps`; value-producing
@@ -125,21 +128,45 @@ interface SignalTrigger {
 }
 ```
 
+A trigger's `on` has one of two shapes:
+
+```yaml
+# Accepts events
+on:
+  kind: github.issue.labeled
+  connectionId: any
+  filter: event.payload.label == "ready-for-agent"
+
+# Fires on a schedule
+on:
+  schedule: "0 9 * * 1-5"
+  timezone: Europe/Amsterdam   # optional; the user's timezone setting when absent
+```
+
 `EventSelector` is defined here because workflows own triggers; the matcher in [./08-events-and-connections.md](./08-events-and-connections.md) evaluates it (kind matches, Connection selection admits `event.connectionId`, filter true). The persisted kind catalogue that `kind` is validated against is registered by plugins and core emitters ([./08-events-and-connections.md](./08-events-and-connections.md)).
+
+*(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276).)* **`on` replaces `source`.** A trigger's matching fields used to sit under `source:`, and a cron trigger's `schedule` and `timezone` sat beside it at the trigger level, with `source.kind: cron.tick`. `source` was the wrong name: an Event Source is where an event comes from, and the field held a description of the events the trigger accepts. The split shape also let the event kind and the schedule disagree, so four save checks refused the bad combinations. Now:
+
+- `on:` is an `EventSelector` or a `Schedule`. A start trigger takes either; a signal trigger takes only an `EventSelector`. A `Schedule` has no `filter`.
+- The schema rules out a schedule beside an event kind, so the four checks are gone: a `schedule` or a `timezone` on a trigger that is not on `cron.tick`, a trigger on `cron.tick` with no `schedule`, and a signal trigger on `cron.tick`. The schedule's own checks stay (section 1).
+- `cron.tick` is no longer a kind a trigger can name. An `EventSelector` with `kind: cron.tick` is refused as an unknown kind, with a hint to write `on: schedule:` instead.
+- Nothing changes underneath. The Scheduler still appends a `cron.tick` event through the one pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)), a run keeps it as its triggering event, and an input mapping still reads `event.payload.scheduledFor` and `event.payload.previousFiredAt`. A tick still reaches only the trigger its payload names (section 2.1), and a cron trigger's row still stores the event kind `cron.tick`, but both are internal details an author never writes.
+- `trigger.query` follows the same split. Its items carry `on` in place of the flat `eventKind`, `connectionId`, `filter`, `schedule` and `timezone`. Its filter gains `on: "event" | "schedule"`, so `on: "schedule"` lists the cron triggers; `eventKind` matches only triggers that accept events ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2).
+- There is no compatibility path. A workflow written with `source:`, or with `schedule` or `timezone` at the trigger level, is refused with an error that says to write them under `on:`.
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* **A trigger is identified by `(workflowId, triggerId)`**, where `triggerId` is the `id` written in the source. No other id is minted, and a trigger id is unique only inside its workflow, as a job id is inside a GitHub Actions file. A later operation that names one trigger takes both. Each save reconciles the trigger rows in the transaction that stores the workflow:
 
-- a trigger whose id stays keeps its row, its `status` and its `createdAt`; its other fields (event kind, Connection selection, filter, schedule, timezone) are computed again from the source;
+- a trigger whose id stays keeps its row, its `status` and its `createdAt`; its other fields (its `on`: event kind, Connection selection and filter, or schedule and timezone) are computed again from the source;
 - a removed id loses its row;
 - a new id gets a row, `active` for a start trigger. A signal trigger's row has no status.
 
 A trigger whose id stays but whose `kind` changes, start to signal or back, is a new trigger: new `createdAt`, and `active` again if it is a start trigger. A start and a signal trigger are different things, and a signal trigger has no status to keep. A start trigger may leave out `inputs` (it maps nothing) and `spawnBound` (the default bound applies, section 2.5).
 
-*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* A save also clears the `health` of every start trigger whose definition it changes, because the error it recorded was about the definition being replaced (section 2.1). A trigger the save leaves as it was keeps its error, which is still true of it. A cron trigger whose schedule, timezone or event kind changes loses its next fire time, and the Scheduler computes it again (section 2.2). Its `status` stays, so a paused trigger stays paused.
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* A save also clears the `health` of every start trigger whose definition it changes, because the error it recorded was about the definition being replaced (section 2.1). A trigger the save leaves as it was keeps its error, which is still true of it. A cron trigger whose schedule or timezone changes, or that changes between a `Schedule` and an `EventSelector`, loses its next fire time, and the Scheduler computes it again (section 2.2). Its `status` stays, so a paused trigger stays paused.
 
 ### 2.1 Start triggers
 
-A start trigger has a static condition, its `EventSelector`: the event kind, the Connection selection and the optional CEL `filter`. When a persisted event matches an enabled workflow's active start trigger, the matcher inserts a pending-run effect row for it in the same transaction that advances its cursor ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); mechanics in [./08-events-and-connections.md](./08-events-and-connections.md)). One event may start any number of runs across workflows and signal any number of live subscriptions; delivery is non-exclusive.
+A start trigger fires on events or on a schedule (section 2.2). One that fires on events has a static condition, its `EventSelector`: the event kind, the Connection selection and the optional CEL `filter`. When a persisted event matches an enabled workflow's active start trigger, the matcher inserts a pending-run effect row for it in the same transaction that advances its cursor ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); mechanics in [./08-events-and-connections.md](./08-events-and-connections.md)). One event may start any number of runs across workflows and signal any number of live subscriptions; delivery is non-exclusive.
 
 Connection selection is explicit: a named Connection or a deliberate `"any"`. Silent all-connections matching does not exist. Triggers on core-emitted events (cron, manual, platform) have no Connection; `connectionId` is absent for them.
 
@@ -147,19 +174,19 @@ A filter or mapping expression that throws evaluates as no-match and records a v
 
 *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Start triggers as built.** The event router ([./08-events-and-connections.md](./08-events-and-connections.md) section 4) has a routing table for triggers, with one route per active start trigger of an enabled workflow.
 
-- **Admitting an event.** A route admits an event when its kind is the trigger's `source.kind` and its Connection is the one the trigger names. A trigger that names `"any"`, or no Connection, admits every Connection. A `cron.tick` is admitted only when the Scheduler emitted it (source `cron`), and only by the trigger its payload names. The `filter` then decides.
+- **Admitting an event.** A route admits an event when its kind is the trigger's event kind (`on.kind`, or `cron.tick` for a cron trigger) and its Connection is the one the trigger names. A trigger that names `"any"`, or no Connection, admits every Connection. A `cron.tick` is admitted only when the Scheduler emitted it (source `cron`), and only by the trigger its payload names. The `filter` then decides.
 - **The trigger effect.** On a match, the router evaluates the trigger's `inputs` over `event` and writes a **trigger effect**: a row `pending`, holding the mapped inputs, unique on `(workflowId, triggerId, eventId)`. A mapping that fails is a no-match, like a failing filter.
 - **Starting the run.** A separate delivery reads the `pending` effects in arrival order. For each one, in one transaction, it starts the run (section 7.1) and marks the effect `spawned` with the run's id. An effect whose event has been pruned from the log, or whose trigger was paused or its workflow disabled since the match, is marked `discarded`, and the reason is logged. A start that fails because the database was busy or could not be opened leaves its effect `pending`, and the next pass tries it again. Any other failure, such as a constraint the database refuses or a bug in the controller, would fail the same way on every try, so its effect is marked `discarded` too, and the failure is recorded on the trigger's `health`. A run that starts clears an error its trigger's last start recorded. One effect that fails to start holds up no other. The router only writes rows, so a run that is slow or fails to start never holds up the routing of the next event.
 - **Paused triggers and disabled workflows** have no route. An event that arrives while a trigger is paused, or while its workflow is disabled, is not evaluated against it and starts no run later.
 - **Health.** The warning is the trigger's `health`, `ok` or `error` with a message and a time. It records the last failure of a filter or mapping, of a cron schedule (section 2.2) or of a run's start, and which of the three failed, since only the same one clears it; [./08-events-and-connections.md](./08-events-and-connections.md) section 4 has the rules. Only start triggers have one.
 
-Event kinds a start trigger can name in v1: GitHub and Gmail events from their plugins, `cron.tick`, manual synthetic events, and the platform events `run.completed`, `run.failed`, `task.created`, `task.updated` ([./08-events-and-connections.md](./08-events-and-connections.md) owns the envelope and catalogue).
+Event kinds a start trigger can name in v1: GitHub and Gmail events from their plugins, ~~`cron.tick`~~ *(a schedule is written as a `Schedule` since 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276))*, manual synthetic events, and the platform events `run.completed`, `run.failed`, `task.created`, `task.updated` ([./08-events-and-connections.md](./08-events-and-connections.md) owns the envelope and catalogue).
 
-*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The kinds a trigger can listen for are one catalogue. `eventKind.query` returns it and validation reads it: the **core kinds** `cron.tick`, `run.completed`, `run.failed`, `run.cancelled`, `task.created` and `task.updated`, and the kinds of every plugin that is enabled and started. A manual synthetic event has no kind of its own; it carries whatever kind its caller gives it. A signal trigger cannot name `cron.tick`: the Scheduler starts runs with its ticks and never signals a live run with one, so such a trigger could never fire. The catalogue's rules are in [./08-events-and-connections.md](./08-events-and-connections.md) section 2.
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The kinds a trigger can listen for are one catalogue. `eventKind.query` returns it and validation reads it: the **core kinds** ~~`cron.tick`,~~ `run.completed`, `run.failed`, `run.cancelled`, `task.created` and `task.updated`, and the kinds of every plugin that is enabled and started. A manual synthetic event has no kind of its own; it carries whatever kind its caller gives it. ~~A signal trigger cannot name `cron.tick`: the Scheduler starts runs with its ticks and never signals a live run with one, so such a trigger could never fire.~~ *(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276): `cron.tick` is not in the catalogue, so no trigger can name it. A cron trigger writes `on: { schedule, timezone? }` instead. `cron.tick` stays a core kind in two senses: no plugin can declare a kind with its name, and its events appear in the event log.)* The catalogue's rules are in [./08-events-and-connections.md](./08-events-and-connections.md) section 2.
 
 ### 2.2 Cron
 
-Cron is a core emitter, not a plugin. The schedule is trigger configuration: a start trigger whose `source.kind` is `cron.tick` carries `schedule` and optional `timezone` (per trigger; when omitted, the **user's timezone setting**, the one spec-wide timezone source pinned in [./12-assistants.md](./12-assistants.md) section 5.2 - there is no separate controller timezone). The core **Scheduler** emits `cron.tick { workflowId, triggerId, scheduledFor, previousFiredAt }` (`previousFiredAt` = when this trigger last actually fired, `null` on the first tick; the shipped Triage workflow maps it to its `since` input) through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. The same Scheduler also fires assistant Scheduled Wakes (heartbeat, reminders), which never enter the pipeline ([./12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
+Cron is a core emitter, not a plugin. The schedule is trigger configuration: a **cron trigger** is a start trigger whose `on` is a `Schedule`, `{ schedule, timezone? }` (timezone per trigger; when omitted, the **user's timezone setting**, the one spec-wide timezone source pinned in [./12-assistants.md](./12-assistants.md) section 5.2 - there is no separate controller timezone). The core **Scheduler** emits `cron.tick { workflowId, triggerId, scheduledFor, previousFiredAt }` (`previousFiredAt` = when this trigger last actually fired, `null` on the first tick; the shipped Triage workflow maps it to its `since` input) through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. The same Scheduler also fires assistant Scheduled Wakes (heartbeat, reminders), which never enter the pipeline ([./12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
 
 *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Cron as built.** The Scheduler looks at the cron triggers every second. Each cron trigger row keeps its next fire time, the timezone that time was computed in, and when it last fired. The timezone is the trigger's `timezone`, else the user's timezone setting, else UTC while the user has set none. Each trigger is handled in its own transaction:
 

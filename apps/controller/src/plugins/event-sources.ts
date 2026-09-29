@@ -99,12 +99,13 @@ export const registerEventSourceContribution = (
           }),
         );
       }
-      // A trigger refers to a kind by its name only. A plugin kind with the
-      // name of a core kind would make that name ambiguous.
+      // An event kind is known by its name only. A plugin kind with the name
+      // of a core kind would make that name ambiguous, for the triggers that
+      // listen for it and for the Scheduler's cron.tick alike.
       if (isCoreEventKind(kind)) {
         return yield* Effect.fail(
           new PluginError({
-            message: `the event kind ${kind} is already declared by the core. A trigger refers to a kind by its name only, so it could not tell the two kinds apart. Give the kind another name.`,
+            message: `the event kind ${kind} is already declared by the core. An event kind is known by its name only, so the two kinds could not be told apart. Give the kind another name.`,
           }),
         );
       }

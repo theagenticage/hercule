@@ -1,6 +1,6 @@
 /**
  * Firing cron triggers: the rule the Scheduler applies to every start
- * trigger on `cron.tick` (spec 07 section 2, spec 08 section 3).
+ * trigger whose `on` is a schedule (spec 07 section 2, spec 08 section 3).
  *
  * Each cron trigger row holds the next time it is scheduled to fire, and the
  * timezone that time was computed in. The Scheduler lists the triggers it has
@@ -102,7 +102,7 @@ const describeUnreadableSchedule = (
   `The schedule "${trigger.schedule}" cannot be read in the timezone ${zone}: ${error.message}. ` +
   (trigger.timezone === undefined
     ? "Set a known timezone in Settings."
-    : "Set a known timezone on the trigger in the workflow.");
+    : "Set a known timezone under on in the trigger.");
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

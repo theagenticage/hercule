@@ -28,7 +28,11 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/** The longest event kind. Namespaced by source: `github.issue.opened`. */
+/**
+ * The longest event kind. The part of a kind before its first dot is a
+ * namespace, such as `github` in `github.issue.opened`. It is not always the
+ * Event Source: `task.created` comes from the core.
+ */
 export const MAX_EVENT_KIND_LENGTH = 128;
 
 export const EventKind = bounded(1, MAX_EVENT_KIND_LENGTH);

@@ -7,7 +7,7 @@
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Issue, Trigger, TriggerKey, Workflow } from "@hercule/contract";
+import type { Issue, Schedule, Trigger, TriggerKey, Workflow } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -290,26 +290,16 @@ export const declareStartTrigger = (
 ): DeclaredTrigger => ({
   triggerId,
   kind: "start",
-  eventKind: "task.created",
-  connectionId: undefined,
-  filter: undefined,
-  schedule: undefined,
-  timezone: undefined,
+  on: { kind: "task.created" },
   inputs: undefined,
   ...fields,
 });
 
-/** Returns a start trigger on `cron.tick` at 09:00 every day in Amsterdam, with `fields` replacing the defaults. */
+/** Returns a cron trigger with the schedule `on`, as a save declares it. By default it fires at 09:00 every day in Amsterdam. */
 export const declareCronTrigger = (
   triggerId: string,
-  fields: Partial<DeclaredTrigger> = {},
-): DeclaredTrigger =>
-  declareStartTrigger(triggerId, {
-    eventKind: "cron.tick",
-    schedule: "0 9 * * *",
-    timezone: "Europe/Amsterdam",
-    ...fields,
-  });
+  on: Schedule = { schedule: "0 9 * * *", timezone: "Europe/Amsterdam" },
+): DeclaredTrigger => declareStartTrigger(triggerId, { on });
 
 /** Asserts that no workflow and no trigger is stored, for example after a failed save. */
 export const expectNothingStored = async (base: string, token: string): Promise<void> => {

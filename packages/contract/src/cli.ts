@@ -1093,9 +1093,8 @@ export const CLI = {
           "triggers:",
           "  - id: weekday_morning",
           "    kind: start",
-          "    source:",
-          "      kind: cron.tick",
-          '    schedule: "0 9 * * 1-5"',
+          "    on:",
+          '      schedule: "0 9 * * 1-5"',
           "steps:",
           "  - id: file_task",
           "    kind: action",
@@ -1192,9 +1191,8 @@ export const CLI = {
           "triggers:",
           "  - id: weekday_morning",
           "    kind: start",
-          "    source:",
-          "      kind: cron.tick",
-          '    schedule: "0 9 * * 1-5"',
+          "    on:",
+          '      schedule: "0 9 * * 1-5"',
           "steps:",
           "  - id: file_task",
           "    kind: action",
@@ -1220,11 +1218,12 @@ export const CLI = {
 
   "trigger.query": {
     command: "trigger list",
-    help: "Lists the triggers of every workflow, newest first. Each row shows the event kind the trigger listens for, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
+    help: "Lists the triggers of every workflow, newest first. Each row shows what the trigger fires on, an event kind or a schedule, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
     examples: [
       { args: [] },
       { args: ["--workflow", "1f3a9c2e"] },
-      { args: ["--kind", "start", "--event-kind", "cron.tick"] },
+      { args: ["--on", "schedule"] },
+      { args: ["--event-kind", "github.pr.labeled"] },
       { args: ["--status", "paused"] },
     ],
     fields: {
@@ -1237,9 +1236,13 @@ export const CLI = {
         flag: "kind",
         help: "start for triggers that start runs, signal for triggers that resume a live run.",
       },
+      on: {
+        flag: "on",
+        help: "event for triggers that fire on events, schedule for cron triggers, which fire on a schedule.",
+      },
       eventKind: {
         flag: "event-kind",
-        help: "Only the triggers on this event kind, such as cron.tick or github.pr.labeled.",
+        help: "Only the triggers on this event kind, such as github.pr.labeled. A cron trigger is on no event kind: use --on schedule to list the cron triggers.",
       },
       status: {
         flag: "status",

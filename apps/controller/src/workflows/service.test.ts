@@ -139,7 +139,7 @@ const buildTriggeredSource = (name: string, triggerIds: ReadonlyArray<string>): 
     ...triggerIds.flatMap((id) => [
       `  - id: ${id}`,
       "    kind: start",
-      "    source:",
+      "    on:",
       "      kind: task.created",
     ]),
     "steps:",

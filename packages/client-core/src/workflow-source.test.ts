@@ -30,7 +30,7 @@ const SOURCE = [
   "triggers:",
   "  - id: labelled",
   "    kind: start",
-  "    source:",
+  "    on:",
   "      kind: github.pr.labeled",
   "      connectionId: any",
   "      filter: event.payload.number > 3",
@@ -154,7 +154,7 @@ describe("parseWorkflowSourceWithRanges", () => {
         "triggers:",
         "  - id: merged",
         "    kind: signal",
-        "    source:",
+        "    on:",
         "      kind: github.pr.merged",
         "      connectionId: any",
         "    correlation:",
@@ -253,7 +253,7 @@ describe("locateIssues", () => {
   });
 
   it("locates a nested key from the key through its value, with the given severity", () => {
-    const path = ["triggers", "0", "source", "filter"];
+    const path = ["triggers", "0", "on", "filter"];
     const from = findUniqueOffset(SOURCE, "filter: event.payload.number > 3");
 
     expect(
@@ -332,7 +332,7 @@ describe("locateIssues", () => {
 describe("decideIssueState", () => {
   const error: Issue = { path: ["steps", "1", "action"], message: "task.creat is not an action." };
   const warning: Issue = {
-    path: ["triggers", "0", "source", "filter"],
+    path: ["triggers", "0", "on", "filter"],
     message: "This filter admits every event.",
   };
 

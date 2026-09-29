@@ -55,7 +55,7 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
-export { describeTrigger, type TriggerReading } from "./trigger-display";
+export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
 export { buildIdOptions, type IdOption } from "./id-options";
 export { readJsonObject } from "./json-shape";

@@ -78,9 +78,12 @@ const BUILT_IN_ACTION_IDS = [
   "wait",
 ];
 
-/** The event kinds the core emits. A trigger on one of them takes no Connection. */
-const CORE_EVENT_KINDS = [
-  "cron.tick",
+/**
+ * The event kinds the controller emits, which a trigger can listen for. A
+ * trigger on one of them takes no Connection. The Scheduler's `cron.tick` is
+ * not one of them: a trigger fires on a schedule by writing it under `on`.
+ */
+const PLATFORM_EVENT_KINDS = [
   "run.cancelled",
   "run.completed",
   "run.failed",
@@ -257,7 +260,7 @@ const EDGE_INTO_SIGNAL: InvalidFixture = {
 triggers:
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -322,7 +325,7 @@ const EDGE_FROM_START_TRIGGER: InvalidFixture = {
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
 steps:
 ${buildTaskStep("plan")}
@@ -517,14 +520,14 @@ const buildReviewLoopSource = (agentId: string, implementEntryLine: string): str
 triggers:
   - id: checks_failed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
       run: steps.open_pr.output.id
   - id: pr_merged
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -569,7 +572,7 @@ const SIGNAL_ONLY_STEP_SOURCE = `name: Close out when the task changes
 triggers:
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -632,7 +635,7 @@ const EVERY_STEP_AFTER_A_SIGNAL: InvalidFixture = {
 triggers:
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -718,14 +721,14 @@ inputs:
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
       filter: 'event.payload.priority == "high"'
     inputs:
       pr_number: event.payload.number
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
       filter: has(event.payload.changes)
     correlation:
@@ -774,14 +777,14 @@ inputs:
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
       filter: 'steps.file_task.output.id == "x"'
     inputs:
       pr_number: inputs.pr_number
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
       filter: 'steps.file_task.output.id != ""'
     correlation:
@@ -811,9 +814,9 @@ edges:
     maxTraversals: 3
 `,
   paths: [
-    ["triggers", "0", "source", "filter"],
+    ["triggers", "0", "on", "filter"],
     ["triggers", "0", "inputs", "pr_number"],
-    ["triggers", "1", "source", "filter"],
+    ["triggers", "1", "on", "filter"],
     ["triggers", "1", "correlation", "event"],
     ["triggers", "1", "correlation", "run"],
     ["triggers", "1", "outputs", "status"],
@@ -830,7 +833,7 @@ const SYNTAX_ERRORS: InvalidFixture = {
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
       filter: 'event.payload.number >'
 steps:
@@ -840,7 +843,7 @@ steps:
     prompt: "Review {{ inputs.pr_number + }}."
 `,
   paths: [
-    ["triggers", "0", "source", "filter"],
+    ["triggers", "0", "on", "filter"],
     ["steps", "0", "prompt"],
   ],
 };
@@ -880,12 +883,12 @@ const CONDITIONS_THAT_ARE_NOT_BOOL: InvalidFixture = {
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
       filter: size(event.payload.labels)
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
       filter: "'changed'"
     correlation:
@@ -903,8 +906,8 @@ edges:
     maxTraversals: 3
 `,
   paths: [
-    ["triggers", "0", "source", "filter"],
-    ["triggers", "1", "source", "filter"],
+    ["triggers", "0", "on", "filter"],
+    ["triggers", "1", "on", "filter"],
     ["steps", "0", "condition"],
     ["edges", "0", "condition"],
   ],
@@ -1452,7 +1455,7 @@ ${buildTaskStep("file_task")}
 const GITHUB_LABEL_TRIGGER_SOURCE = buildOneTriggerSource(
   "Labels from any Connection",
   "kind: start",
-  "source:",
+  "on:",
   "  kind: github.pr.labeled",
   "  connectionId: any",
 );
@@ -1463,11 +1466,11 @@ const UNKNOWN_EVENT_KIND: InvalidFixture = {
     buildOneTriggerSource(
       "A kind nobody emits",
       "kind: start",
-      "source:",
+      "on:",
       "  kind: github.pr.labelled",
       "  connectionId: any",
     ),
-  paths: [["triggers", "0", "source", "kind"]],
+  paths: [["triggers", "0", "on", "kind"]],
 };
 
 const PLUGIN_KIND_WITHOUT_CONNECTION: InvalidFixture = {
@@ -1476,10 +1479,10 @@ const PLUGIN_KIND_WITHOUT_CONNECTION: InvalidFixture = {
     buildOneTriggerSource(
       "Labels from no Connection",
       "kind: start",
-      "source:",
+      "on:",
       "  kind: github.pr.labeled",
     ),
-  paths: [["triggers", "0", "source", "connectionId"]],
+  paths: [["triggers", "0", "on", "connectionId"]],
 };
 
 const CORE_KIND_WITH_CONNECTION: InvalidFixture = {
@@ -1488,11 +1491,11 @@ const CORE_KIND_WITH_CONNECTION: InvalidFixture = {
     buildOneTriggerSource(
       "Tasks from any Connection",
       "kind: start",
-      "source:",
+      "on:",
       "  kind: task.created",
       "  connectionId: any",
     ),
-  paths: [["triggers", "0", "source", "connectionId"]],
+  paths: [["triggers", "0", "on", "connectionId"]],
 };
 
 const ABSENT_CONNECTION: InvalidFixture = {
@@ -1501,11 +1504,11 @@ const ABSENT_CONNECTION: InvalidFixture = {
     buildOneTriggerSource(
       "Labels from a missing Connection",
       "kind: start",
-      "source:",
+      "on:",
       "  kind: github.pr.labeled",
       `  connectionId: ${ABSENT_ID}`,
     ),
-  paths: [["triggers", "0", "source", "connectionId"]],
+  paths: [["triggers", "0", "on", "connectionId"]],
 };
 
 const WRONG_TYPE_CONNECTION: InvalidFixture = {
@@ -1514,18 +1517,42 @@ const WRONG_TYPE_CONNECTION: InvalidFixture = {
     buildOneTriggerSource(
       "Labels from a mail Connection",
       "kind: start",
-      "source:",
+      "on:",
       "  kind: github.pr.labeled",
       `  connectionId: ${mailConnectionId}`,
     ),
-  paths: [["triggers", "0", "source", "connectionId"]],
+  paths: [["triggers", "0", "on", "connectionId"]],
 };
 
-const CRON_WITHOUT_SCHEDULE: InvalidFixture = {
-  description: "a cron trigger with no schedule",
+/**
+ * A trigger that listens for the event the Scheduler emits. No trigger can:
+ * a trigger fires on a schedule by writing the schedule under `on`.
+ */
+const LISTENS_FOR_CRON_TICK: InvalidFixture = {
+  description: "a trigger that listens for cron.tick",
   build: () =>
-    buildOneTriggerSource("Ticks with no schedule", "kind: start", "source:", "  kind: cron.tick"),
-  paths: [["triggers", "0", "schedule"]],
+    buildOneTriggerSource("Listens for ticks", "kind: start", "on:", "  kind: cron.tick"),
+  paths: [["triggers", "0", "on", "kind"]],
+};
+
+/**
+ * A signal trigger that listens for the event the Scheduler emits. A signal
+ * trigger cannot fire on a schedule either, so its error must not say to
+ * write one.
+ */
+const SIGNAL_LISTENS_FOR_CRON_TICK: InvalidFixture = {
+  description: "a signal trigger that listens for cron.tick",
+  build: () =>
+    buildOneTriggerSource(
+      "Waits for ticks",
+      "kind: signal",
+      "on:",
+      "  kind: cron.tick",
+      "correlation:",
+      "  event: event.payload.taskId",
+      "  run: steps.file_task.output.id",
+    ),
+  paths: [["triggers", "0", "on", "kind"]],
 };
 
 /** Two invalid cron schedules: plain words, and an hour past 23. */
@@ -1535,20 +1562,18 @@ const INVALID_SCHEDULES: InvalidFixture = {
 triggers:
   - id: in_words
     kind: start
-    source:
-      kind: cron.tick
-    schedule: every morning
+    on:
+      schedule: every morning
   - id: hour_out_of_range
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 25 * * *"
+    on:
+      schedule: "0 25 * * *"
 steps:
 ${buildTaskStep("file_task")}
 `,
   paths: [
-    ["triggers", "0", "schedule"],
-    ["triggers", "1", "schedule"],
+    ["triggers", "0", "on", "schedule"],
+    ["triggers", "1", "on", "schedule"],
   ],
 };
 
@@ -1559,14 +1584,8 @@ ${buildTaskStep("file_task")}
 const SCHEDULE_WITH_SECONDS: InvalidFixture = {
   description: "a cron schedule with a field for seconds",
   build: () =>
-    buildOneTriggerSource(
-      "Ticks each second",
-      "kind: start",
-      "source:",
-      "  kind: cron.tick",
-      'schedule: "0 0 9 * * 1-5"',
-    ),
-  paths: [["triggers", "0", "schedule"]],
+    buildOneTriggerSource("Ticks each second", "kind: start", "on:", '  schedule: "0 0 9 * * 1-5"'),
+  paths: [["triggers", "0", "on", "schedule"]],
 };
 
 /**
@@ -1579,11 +1598,10 @@ const SCHEDULE_THAT_NEVER_COMES_DUE: InvalidFixture = {
     buildOneTriggerSource(
       "Ticks on the 31st of February",
       "kind: start",
-      "source:",
-      "  kind: cron.tick",
-      'schedule: "0 0 31 2 *"',
+      "on:",
+      '  schedule: "0 0 31 2 *"',
     ),
-  paths: [["triggers", "0", "schedule"]],
+  paths: [["triggers", "0", "on", "schedule"]],
 };
 
 const INVALID_TIMEZONE: InvalidFixture = {
@@ -1592,25 +1610,11 @@ const INVALID_TIMEZONE: InvalidFixture = {
     buildOneTriggerSource(
       "Ticks in no timezone",
       "kind: start",
-      "source:",
-      "  kind: cron.tick",
-      'schedule: "0 9 * * 1-5"',
-      "timezone: Mars/Olympus_Mons",
+      "on:",
+      '  schedule: "0 9 * * 1-5"',
+      "  timezone: Mars/Olympus_Mons",
     ),
-  paths: [["triggers", "0", "timezone"]],
-};
-
-const SCHEDULE_ON_NON_CRON_KIND: InvalidFixture = {
-  description: "a schedule on a kind that is not cron.tick",
-  build: () =>
-    buildOneTriggerSource(
-      "A schedule on tasks",
-      "kind: start",
-      "source:",
-      "  kind: task.created",
-      'schedule: "0 9 * * *"',
-    ),
-  paths: [["triggers", "0", "schedule"]],
+  paths: [["triggers", "0", "on", "timezone"]],
 };
 
 const UNDECLARED_INPUT_MAPPING: InvalidFixture = {
@@ -1624,7 +1628,7 @@ inputs:
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
     inputs:
       ghost: event.payload.id
@@ -1650,18 +1654,18 @@ inputs:
 triggers:
   - id: on_label
     kind: start
-    source:
+    on:
       kind: github.pr.labeled
       connectionId: any
     inputs:
       pr_url: event.payload.subject.url
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -1672,37 +1676,16 @@ ${buildTaskStep("file_task", "terminal: true")}
   paths: [["triggers", "1", "inputs"]],
 };
 
-/**
- * A signal trigger on cron.tick. The Scheduler never sends cron.tick to a live
- * run, so the signal could never fire.
- */
-const SIGNAL_ON_CRON_TICK: InvalidFixture = {
-  description: "a signal trigger on cron.tick",
-  build: () => `name: Waits for a tick
-triggers:
-  - id: next_tick
-    kind: signal
-    source:
-      kind: cron.tick
-    correlation:
-      event: event.id
-      run: steps.file_task.output.id
-steps:
-${buildTaskStep("file_task", "terminal: true")}
-`,
-  paths: [["triggers", "0", "source", "kind"]],
-};
-
 const TRIGGER_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
   UNKNOWN_EVENT_KIND,
   PLUGIN_KIND_WITHOUT_CONNECTION,
   CORE_KIND_WITH_CONNECTION,
   ABSENT_CONNECTION,
   WRONG_TYPE_CONNECTION,
-  CRON_WITHOUT_SCHEDULE,
+  LISTENS_FOR_CRON_TICK,
+  SIGNAL_LISTENS_FOR_CRON_TICK,
   INVALID_SCHEDULES,
   INVALID_TIMEZONE,
-  SCHEDULE_ON_NON_CRON_KIND,
   UNDECLARED_INPUT_MAPPING,
   UNMAPPED_REQUIRED_INPUT,
 ];
@@ -1724,41 +1707,40 @@ inputs:
 triggers:
   - id: any_label
     kind: start
-    source:
+    on:
       kind: github.pr.labeled
       connectionId: any
   - id: work_label
     kind: start
-    source:
+    on:
       kind: github.pr.labeled
       connectionId: ${githubConnectionId}
     inputs:
       pr_url: event.payload.subject.url
   - id: weekday_morning
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 9 * * 1-5"
-    timezone: Europe/Amsterdam
+    on:
+      schedule: "0 9 * * 1-5"
+      timezone: Europe/Amsterdam
   - id: on_run_completed
     kind: start
-    source:
+    on:
       kind: run.completed
   - id: on_run_failed
     kind: start
-    source:
+    on:
       kind: run.failed
   - id: on_run_cancelled
     kind: start
-    source:
+    on:
       kind: run.cancelled
   - id: on_task_created
     kind: start
-    source:
+    on:
       kind: task.created
   - id: on_task_updated
     kind: start
-    source:
+    on:
       kind: task.updated
 steps:
 ${buildTaskStep("file_task")}
@@ -1806,7 +1788,7 @@ describe("the trigger rules", () => {
         ...Array.from({ length: 5 }, (_, index) => [
           `  - id: on_create_${String(index)}`,
           "    kind: start",
-          "    source:",
+          "    on:",
           "      kind: task.created",
         ]).flat(),
         "steps:",
@@ -1828,10 +1810,39 @@ describe("the trigger rules", () => {
     });
   });
 
-  it("rejects a signal trigger on cron.tick, with a message that explains why it could never fire", async () => {
+  it("rejects a trigger on cron.tick, with a message that says to write a schedule under on", async () => {
     await withArrangedController(async (controller) => {
-      const [issue] = await expectErrorsAt(controller, SIGNAL_ON_CRON_TICK);
-      expect(issue!.message).toContain("never to signal a running run");
+      const [issue] = await expectErrorsAt(controller, LISTENS_FOR_CRON_TICK);
+      expect(issue!.message).toContain("the Scheduler emits it only for cron triggers");
+      expect(issue!.message).toContain("write schedule under on in place of kind");
+      expect(issue!.message).not.toContain("The known event kinds are");
+    });
+  });
+
+  it("rejects a signal trigger on cron.tick, with a message that says to name the kind of an event the run waits for", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, SIGNAL_LISTENS_FOR_CRON_TICK);
+      expect(issue!.message).toContain("A signal trigger resumes a run when an event arrives");
+      expect(issue!.message).toContain("The known event kinds are");
+      expect(issue!.message).not.toContain("schedule");
+    });
+  });
+
+  it("rejects a trigger written with source, with a message that says to rename it to on", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, {
+        description: "a trigger written with source",
+        build: () =>
+          buildOneTriggerSource(
+            "Written before on",
+            "kind: start",
+            "source:",
+            "  kind: task.created",
+          ),
+        // The missing on is not reported separately: renaming source fixes both.
+        paths: [["triggers", "0", "source"]],
+      });
+      expect(issues[0]!.message).toContain("Rename source to on");
     });
   });
 
@@ -1983,11 +1994,11 @@ inputs:
 triggers:
   - id: on_create
     kind: start
-    source:
+    on:
       kind: task.created
   - id: pr_merged
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -2040,7 +2051,7 @@ const buildSignalWorkflowSource = (terminalLine: string): string =>
 triggers:
   - id: task_changed
     kind: signal
-    source:
+    on:
       kind: task.updated
     correlation:
       event: event.payload.taskId
@@ -2127,7 +2138,6 @@ const EVERY_INVALID_FIXTURE: ReadonlyArray<Pick<InvalidFixture, "description" | 
   EDGE_FROM_START_TRIGGER,
   UNCAPPED_SELF_LOOP,
   UNREACHED_LOOP,
-  SIGNAL_ON_CRON_TICK,
   UNKNOWN_CONNECTION_TYPE,
   EVERY_STEP_AFTER_A_SIGNAL,
   SCHEDULE_WITH_SECONDS,
@@ -2326,11 +2336,11 @@ describe("workflowAction.query", () => {
 });
 
 describe("eventKind.query", () => {
-  it("returns the core event kinds as needing no Connection, and each plugin event kind as needing one", async () => {
+  it("returns the platform event kinds as needing no Connection, and each plugin event kind as needing one", async () => {
     await withArrangedController(async ({ base, token }) => {
       const kinds = await listEventKinds(base, token);
       expect(kinds.map((item) => item.kind).sort()).toEqual(
-        [...CORE_EVENT_KINDS, "github.pr.labeled"].sort(),
+        [...PLATFORM_EVENT_KINDS, "github.pr.labeled"].sort(),
       );
       for (const item of kinds) {
         expect(Object.keys(item).sort(), item.kind).toEqual([
@@ -2357,11 +2367,11 @@ describe("eventKind.query", () => {
 
       await disablePlugin(base, token, "github");
       const kinds = await listEventKinds(base, token);
-      expect(kinds.map((item) => item.kind).sort()).toEqual(CORE_EVENT_KINDS);
+      expect(kinds.map((item) => item.kind).sort()).toEqual(PLATFORM_EVENT_KINDS);
       await expectErrorsAt(controller, {
         description: "the GitHub kind with its plugin disabled",
         build: () => GITHUB_LABEL_TRIGGER_SOURCE,
-        paths: [["triggers", "0", "source", "kind"]],
+        paths: [["triggers", "0", "on", "kind"]],
       });
     });
   });
