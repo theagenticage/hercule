@@ -15,11 +15,10 @@ import {
   PASSWORD,
   USERNAME,
   runCli,
-  parseJsonOutput,
   startController,
-  createTemporaryHome,
   type Controller,
-} from "./harness";
+} from "../scripts/controller-process";
+import { parseJsonOutput, createTemporaryHome } from "./harness";
 
 /** The home the controller and the CLI share; the CLI writes its credential here. */
 const state = createTemporaryHome();

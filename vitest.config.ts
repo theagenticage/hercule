@@ -31,8 +31,9 @@ import { defineConfig } from "vitest/config";
  * `e2e/harness.ts`).
  *
  * The `desktop` project is out of `pnpm test` too: `pnpm test:desktop` runs it,
- * after `pnpm build:desktop`. It drives the packaged app with Playwright, which
- * runs on Node.
+ * after `pnpm build:desktop` and `pnpm build:binary`. It drives the packaged
+ * app with Playwright, which runs on Node, against a controller started from
+ * the compiled binary.
  */
 
 /** The source folders whose tests run in the `react` project, on jsdom. */

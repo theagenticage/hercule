@@ -30,23 +30,25 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "../packages/protocol/src/output-schema.testing";
 import {
-  readApiKey,
   runCli,
   completeSetup,
+  PASSWORD,
+  ROOT,
+  startController,
+  USERNAME,
+  type Controller,
+  type Ran,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   parseJsonOutputOrFail,
   isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
   isLoginAvailable,
-  PASSWORD,
   prepareLoggedInInstance,
-  ROOT,
-  startController,
   createTemporaryHome,
   waitForTranscriptTag,
-  USERNAME,
-  type Controller,
   type Page,
-  type Ran,
   type Row,
   type Session,
 } from "./harness";

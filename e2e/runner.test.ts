@@ -13,14 +13,13 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  readApiKey,
   runCli,
   completeSetup,
   startController,
-  createTemporaryHome,
   type Controller,
   type Ran,
-} from "./harness";
+} from "../scripts/controller-process";
+import { readApiKey, createTemporaryHome } from "./harness";
 
 const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");

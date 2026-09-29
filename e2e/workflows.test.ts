@@ -19,13 +19,11 @@ import {
   USERNAME,
   runCli,
   completeSetup,
-  parseJsonOutputOrFail,
-  findReleaseBinary,
   startController,
-  createTemporaryHome,
   type Controller,
   type Ran,
-} from "./harness";
+} from "../scripts/controller-process";
+import { parseJsonOutputOrFail, findReleaseBinary, createTemporaryHome } from "./harness";
 
 const state = createTemporaryHome();
 const binary = findReleaseBinary();

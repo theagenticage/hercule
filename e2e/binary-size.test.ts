@@ -6,7 +6,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ROOT } from "./harness";
+import { ROOT } from "../scripts/controller-process";
 
 /**
  * One limit for every target, so it has to fit the biggest one. The same

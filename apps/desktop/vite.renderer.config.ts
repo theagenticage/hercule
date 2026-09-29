@@ -39,6 +39,13 @@ export default defineConfig(({ command }) => {
       // Chromium has supported `<link rel="modulepreload">` since version 66,
       // so Vite's polyfill for older browsers would never run.
       modulePreload: { polyfill: false },
+      // Vite warns about any chunk over 500 kB before gzip. The entry chunk is
+      // over that on purpose: it holds the launch screens, so the first screen
+      // needs no second file. The real limit is the first-paint budget of
+      // 250 kB gzipped, which scripts/check-bundle-budget.ts enforces. This
+      // limit sits just above the entry chunk's current size (520 kB), so the
+      // warning still fires if a chunk grows a lot.
+      chunkSizeWarningLimit: 600,
       outDir: fileURLToPath(new URL("./out/renderer", import.meta.url)),
       // The output folder is outside `root`, so Vite empties it only when asked.
       emptyOutDir: true,

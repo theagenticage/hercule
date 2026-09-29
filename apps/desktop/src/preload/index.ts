@@ -4,13 +4,16 @@
  *
  * The preload imports only types from the contract, so it loads no Effect and
  * stays one small file. It checks nothing itself: main checks the sender and
- * decodes the request of every message, because the renderer is untrusted.
+ * decodes the request of every message, because the renderer is untrusted,
+ * and main has encoded every payload it sends against the contract.
  */
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   Bridge,
+  EncodedIpcPayload,
   EncodedIpcRequest,
   EncodedIpcResponse,
+  MainToRendererIpcChannelName,
   RendererToMainIpcChannelName,
 } from "../ipc/bridge";
 import type { IpcReply } from "../ipc/contract";
@@ -30,9 +33,35 @@ const invokeChannel = async <Name extends RendererToMainIpcChannelName>(
   return reply.response;
 };
 
+/**
+ * Calls `listener` with the payload of each message main sends on `channel`,
+ * and returns a function that removes the listener. The listener never sees
+ * Electron's event object, whose `sender` would let the page send anything.
+ */
+const subscribeToChannel = <Name extends MainToRendererIpcChannelName>(
+  channel: Name,
+  listener: (payload: EncodedIpcPayload<Name>) => void,
+): (() => void) => {
+  const forwardPayload = (_event: IpcRendererEvent, payload: EncodedIpcPayload<Name>) => {
+    listener(payload);
+  };
+  ipcRenderer.on(channel, forwardPayload);
+  return () => {
+    ipcRenderer.removeListener(channel, forwardPayload);
+  };
+};
+
 const bridge: Bridge = {
   controllerUrl: {
     read: () => invokeChannel("controllerUrl.read"),
+    save: (url) => invokeChannel("controllerUrl.save", url),
+  },
+  token: {
+    read: () => invokeChannel("token.read"),
+    write: (token) => invokeChannel("token.write", token),
+  },
+  menu: {
+    onCommand: (listener) => subscribeToChannel("menu.command", listener),
   },
 };
 

@@ -7,7 +7,12 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
-import { AppSettings, makeAppSettingsLayer, type WindowState } from "./app-settings";
+import {
+  AppSettings,
+  makeAppSettingsLayer,
+  NoControllerSaved,
+  type WindowState,
+} from "./app-settings";
 
 let folder: string;
 let file: string;
@@ -179,5 +184,131 @@ describe("the app's settings", () => {
     );
     expect(outcome).toEqual({ failed: true, settings: { controllerUrl: null, window: null } });
     expect(existsSync(`${file}.tmp`)).toBe(false);
+  });
+});
+
+describe("the controller URL and the token", () => {
+  const encrypted = new Uint8Array([0, 1, 2, 254, 255]);
+  const encryptedInBase64 = "AAEC/v8=";
+
+  const readUrlAndToken = Effect.gen(function* () {
+    const settings = yield* AppSettings;
+    return {
+      controllerUrl: yield* settings.readControllerUrl,
+      token: yield* settings.readEncryptedToken,
+    };
+  });
+
+  const saveControllerUrl = (origin: string) =>
+    AppSettings.use((settings) => settings.saveControllerUrl(origin));
+
+  const saveEncryptedToken = (token: Uint8Array | null) =>
+    AppSettings.use((settings) => settings.saveEncryptedToken(token));
+
+  it("read the token from the file, in base64", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", token: encryptedInBase64 }),
+    );
+    expect(await runWithAppSettings(readUrlAndToken)).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      token: encrypted,
+    });
+  });
+
+  it("ignore a token that is not base64", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", token: "?!" }));
+    expect(await runWithAppSettings(readUrlAndToken)).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      token: null,
+    });
+  });
+
+  it("save the token beside the controller URL, in base64", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937" }));
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveEncryptedToken(encrypted), readUrlAndToken),
+    );
+    expect(afterSave).toEqual({ controllerUrl: "http://127.0.0.1:4937", token: encrypted });
+    expect(readFileObject()).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      token: encryptedInBase64,
+    });
+  });
+
+  it("remove the token", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", token: encryptedInBase64 }),
+    );
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveEncryptedToken(null), readUrlAndToken),
+    );
+    expect(afterSave).toEqual({ controllerUrl: "http://127.0.0.1:4937", token: null });
+    expect(readFileObject()).toEqual({ controllerUrl: "http://127.0.0.1:4937" });
+  });
+
+  it("refuse to save a token with no controller URL saved, and write nothing", async () => {
+    const exit = await runWithAppSettings(Effect.exit(saveEncryptedToken(encrypted)));
+    expect(exit).toEqual(Exit.fail(new NoControllerSaved()));
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("remove a token whose controller URL did not decode", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "file:///x", token: encryptedInBase64 }));
+    await runWithAppSettings(saveEncryptedToken(null));
+    expect(readFileObject()).toEqual({ controllerUrl: "file:///x" });
+  });
+
+  it("keep the token when the same controller is saved again", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", token: encryptedInBase64 }),
+    );
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("http://127.0.0.1:4937"), readUrlAndToken),
+    );
+    expect(afterSave).toEqual({ controllerUrl: "http://127.0.0.1:4937", token: encrypted });
+    expect(readFileObject()).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      token: encryptedInBase64,
+    });
+  });
+
+  it("drop the token in the same write when a different controller is saved", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", token: encryptedInBase64 }),
+    );
+    const calls: Array<string> = [];
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("https://hercule.example"), readUrlAndToken),
+      makeRecordingFileSystem(calls),
+    );
+    expect(afterSave).toEqual({ controllerUrl: "https://hercule.example", token: null });
+    expect(readFileObject()).toEqual({ controllerUrl: "https://hercule.example" });
+    expect(calls).toEqual(["sync settings.json.tmp", "rename settings.json.tmp settings.json"]);
+  });
+
+  it("keep the window state and unknown keys when the controller and the token change", async () => {
+    const newerKey = { theme: "orient-express" };
+    writeFileSync(
+      file,
+      JSON.stringify({
+        controllerUrl: "http://127.0.0.1:4937",
+        token: encryptedInBase64,
+        window: windowState,
+        newerKey,
+      }),
+    );
+    await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("https://hercule.example"), saveEncryptedToken(encrypted)),
+    );
+    expect(readFileObject()).toEqual({
+      controllerUrl: "https://hercule.example",
+      token: encryptedInBase64,
+      window: windowState,
+      newerKey,
+    });
   });
 });

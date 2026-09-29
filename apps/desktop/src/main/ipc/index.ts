@@ -3,10 +3,12 @@
  * registered with Electron once at boot.
  */
 import { ipcMain } from "electron";
-import type { Effect, ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import type { RendererToMainIpcChannelName } from "../../ipc/bridge";
 import { RENDERER_TO_MAIN_IPC_CHANNELS } from "../../ipc/contract";
-import { AppSettings } from "../app-settings";
+import { AppSettings, type NoControllerSaved } from "../app-settings";
+import { ControllerConnection } from "../controller-connection";
+import { StoredToken } from "../stored-token";
 import { answerIpcMessage } from "./message";
 
 type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
@@ -15,7 +17,14 @@ type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
  * The services the IPC handlers use. A handler that needs another service
  * adds it to this union, and main's runtime must then provide it.
  */
-export type IpcHandlerServices = AppSettings;
+export type IpcHandlerServices = AppSettings | ControllerConnection | StoredToken;
+
+/**
+ * The errors a handler fails with when the request makes no sense in main's
+ * current state. Main refuses the message, and the error's message is the
+ * reason. An outcome the user can cause is part of the response instead.
+ */
+type IpcHandlerError = NoControllerSaved;
 
 /**
  * What main does for each channel, given the decoded request. The table is
@@ -26,11 +35,14 @@ const IPC_HANDLERS: {
     request: RendererToMainIpcChannels[Name]["request"]["Type"],
   ) => Effect.Effect<
     RendererToMainIpcChannels[Name]["response"]["Type"],
-    never,
+    IpcHandlerError,
     IpcHandlerServices
   >;
 } = {
   "controllerUrl.read": () => AppSettings.use((settings) => settings.readControllerUrl),
+  "controllerUrl.save": (input) => ControllerConnection.use((connection) => connection.save(input)),
+  "token.read": () => StoredToken.use((storedToken) => storedToken.read),
+  "token.write": (token) => StoredToken.use((storedToken) => storedToken.write(token)),
 };
 
 /**

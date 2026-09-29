@@ -50,11 +50,11 @@ jobs:
   # macOS runner.
   desktop:
     runs-on: macos-latest
-    # On a developer's Mac, with Electron already downloaded, the build takes
-    # about 10 s and the suite about 5 s. A fresh runner adds the install and
-    # Electron's 100 MB download, a few minutes at most. The bound stops an
-    # app that hangs, such as on a macOS alert, from holding the runner for
-    # GitHub's default of six hours.
+    # On a developer's Mac, with Electron already downloaded, the two builds
+    # take about 10 s together and the suite about 11 s. A fresh runner adds
+    # the install and Electron's 100 MB download, a few minutes at most. The
+    # bound stops an app that hangs, such as on a macOS alert, from holding
+    # the runner for GitHub's default of six hours.
     timeout-minutes: 10
     env:
       # No signing identity exists in CI. Without this, electron-builder looks
@@ -90,4 +90,7 @@ jobs:
       # Builds the release package and the test package; the suite runs the
       # test package and reads the release package's fuses and app.asar.
       - run: pnpm build:desktop
+      # The suite connects the app to a real controller, started from the
+      # compiled binary in a scratch Hercule Home.
+      - run: pnpm build:binary
       - run: pnpm test:desktop

@@ -23,10 +23,13 @@ const bannedEverywhere = [
 /**
  * `fork()` is broken under `bun build --compile` (spec 15 section 11), and no
  * import form of it can be banned reliably: a default import reaches it as
- * `cp.fork`. So the module itself is banned, and one file is allowed to use it.
+ * `cp.fork`. So the module itself is banned. Role code starts another process
+ * only through `packages/hercule/src/spawn.ts`, the one role file allowed to
+ * import it. Tooling and test harnesses that never ship inside the binary are
+ * exempt; the exemption block below lists them.
  */
 const childProcessMessage =
-  "Use spawnHercule() from @hercule/hercule; fork() is broken under `bun build --compile` (spec 15 section 11).";
+  "Use spawnOwnBinary() from @hercule/hercule; fork() is broken under `bun build --compile` (spec 15 section 11).";
 
 const bannedChildProcess = ["child_process", "node:child_process"].map((name) => ({
   name,
@@ -280,7 +283,7 @@ export default tseslint.config(
     files: [
       "apps/web/src/routes/_shell.tsx",
       "apps/web/src/routes/_shell/settings.tsx",
-      "apps/desktop/src/renderer/routes/_shell.tsx",
+      "apps/desktop/src/renderer/routes/_connected/_shell.tsx",
     ],
     rules: {
       "no-restricted-imports": browserImports(),

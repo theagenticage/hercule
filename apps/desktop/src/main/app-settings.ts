@@ -1,7 +1,9 @@
 /**
  * The app's settings file: the one small file main keeps in the app's user
- * data folder, `settings.json`. It holds the saved controller URL and the
- * window's state.
+ * data folder, `settings.json`. It holds the saved controller URL, the login
+ * token as the Keychain encrypted it, and the window's state. The token sits
+ * beside the URL of the controller it belongs to, so that one write changes
+ * both.
  *
  * The file is read once, when main starts, and kept in memory; reads never
  * touch the disk. Every save writes the whole file again.
@@ -14,6 +16,7 @@
  * survive a run of an older one.
  */
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -53,6 +56,25 @@ export const WindowState = Schema.Struct({
   fullScreen: Schema.Boolean,
 });
 export type WindowState = typeof WindowState.Type;
+
+/**
+ * The login token as the Keychain encrypted it. The file holds it in base64,
+ * so it is the only key a person cannot read.
+ */
+const EncryptedToken = Schema.Uint8ArrayFromBase64;
+
+/**
+ * The error a save of the login token fails with when no controller URL is
+ * saved: a token belongs to one controller, so there is nothing to save it
+ * for. The message completes a sentence, such as a refused IPC message's.
+ */
+export class NoControllerSaved extends Data.TaggedError("NoControllerSaved")<{
+  readonly message: string;
+}> {
+  constructor() {
+    super({ message: "no controller URL is saved, and a login token belongs to one controller" });
+  }
+}
 
 /** The settings file's text: a JSON object, indented so that a person can read it. */
 const SettingsFileJson = Schema.fromJsonString(Schema.JsonObject, { space: 2 });
@@ -121,6 +143,10 @@ const writeFileAtomically = (
   );
 };
 
+/** Returns a copy of `settings` without `key`. */
+const removeSettingsKey = (settings: SettingsFileObject, key: string): SettingsFileObject =>
+  Object.fromEntries(Object.entries(settings).filter(([name]) => name !== key));
+
 /**
  * Builds the settings service on the file at `file`, reading the file once.
  * Saves run one at a time, and a save that has started finishes even when
@@ -130,13 +156,82 @@ const make = (file: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     let settings = yield* readSettingsFile(fs, file);
-    const controllerUrl = yield* decodeSettingsKey(ControllerUrl, settings, "controllerUrl", file);
+    let controllerUrl = yield* decodeSettingsKey(ControllerUrl, settings, "controllerUrl", file);
+    let encryptedToken = yield* decodeSettingsKey(EncryptedToken, settings, "token", file);
     let windowState = yield* decodeSettingsKey(WindowState, settings, "window", file);
     const fileWriteLock = yield* Semaphore.make(1);
+
+    /**
+     * Runs `save` on its own, after any save under way, and lets it finish
+     * once it has started. A save builds the new settings only once it runs,
+     * so it never writes over another save's change.
+     */
+    const runSave = <E>(save: Effect.Effect<void, E>): Effect.Effect<void, E> =>
+      save.pipe(Effect.uninterruptible, fileWriteLock.withPermits(1));
+
+    /**
+     * Writes `next` to the file, and then makes it the settings in memory.
+     * Fails when the file cannot be written, and then keeps the settings
+     * saved before.
+     */
+    const writeSettings = (next: SettingsFileObject): Effect.Effect<void, PlatformError> =>
+      Effect.gen(function* () {
+        // The schema encodes every JSON object.
+        const text = yield* Effect.orDie(Schema.encodeEffect(SettingsFileJson)(next));
+        yield* writeFileAtomically(fs, file, text);
+        settings = next;
+      });
 
     return {
       /** Returns the saved controller URL, or `null` before one has been saved. */
       readControllerUrl: Effect.sync(() => controllerUrl),
+
+      /**
+       * Saves `origin`, the origin of a controller, as the controller URL.
+       * When `origin` differs from the saved controller URL, the same write
+       * removes the stored token, which belongs to the controller saved
+       * before. Fails when the file cannot be written, and then keeps the
+       * settings saved before.
+       */
+      saveControllerUrl: (origin: string) =>
+        runSave(
+          Effect.gen(function* () {
+            // An origin is an http or https URL, so the schema encodes it.
+            const encoded = yield* Effect.orDie(Schema.encodeEffect(ControllerUrl)(origin));
+            const keepsToken = origin === controllerUrl;
+            const kept = keepsToken ? settings : removeSettingsKey(settings, "token");
+            yield* writeSettings({ ...kept, controllerUrl: encoded });
+            controllerUrl = origin;
+            if (!keepsToken) encryptedToken = null;
+          }),
+        ),
+
+      /** Returns the stored token, as the Keychain encrypted it, or `null` when none is stored. */
+      readEncryptedToken: Effect.sync(() => encryptedToken),
+
+      /**
+       * Saves `encrypted`, the login token as the Keychain encrypted it, or
+       * removes the stored token when `encrypted` is `null`.
+       *
+       * Fails with NoControllerSaved when a token is given and no controller
+       * URL is saved. Removing always works, even with no controller URL, so
+       * that a token whose URL was lost can still be removed. Fails when the
+       * file cannot be written, and then keeps the token saved before.
+       */
+      saveEncryptedToken: (encrypted: Uint8Array | null) =>
+        runSave(
+          Effect.gen(function* () {
+            if (encrypted === null) {
+              yield* writeSettings(removeSettingsKey(settings, "token"));
+            } else {
+              if (controllerUrl === null) return yield* new NoControllerSaved();
+              // The schema encodes every byte array.
+              const token = yield* Effect.orDie(Schema.encodeEffect(EncryptedToken)(encrypted));
+              yield* writeSettings({ ...settings, token });
+            }
+            encryptedToken = encrypted;
+          }),
+        ),
 
       /** Returns the saved window state, or `null` before the window was first saved. */
       readWindowState: Effect.sync(() => windowState),
@@ -146,17 +241,14 @@ const make = (file: string) =>
        * then keeps the state saved before.
        */
       saveWindowState: (state: WindowState) =>
-        // The new settings are built only once the save holds the lock, so a
-        // save never writes over another's change.
-        Effect.gen(function* () {
-          // Both schemas encode every value of their type.
-          const window = yield* Effect.orDie(Schema.encodeEffect(WindowState)(state));
-          const next = { ...settings, window };
-          const text = yield* Effect.orDie(Schema.encodeEffect(SettingsFileJson)(next));
-          yield* writeFileAtomically(fs, file, text);
-          settings = next;
-          windowState = state;
-        }).pipe(Effect.uninterruptible, fileWriteLock.withPermits(1)),
+        runSave(
+          Effect.gen(function* () {
+            // The schema encodes every value of its type.
+            const window = yield* Effect.orDie(Schema.encodeEffect(WindowState)(state));
+            yield* writeSettings({ ...settings, window });
+            windowState = state;
+          }),
+        ),
     };
   });
 

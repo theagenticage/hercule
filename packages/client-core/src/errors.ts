@@ -127,6 +127,24 @@ const asEnvelope = (u: unknown): ErrorEnvelope | undefined => {
 };
 
 /**
+ * Checks whether the error a response body was read with means the connection
+ * was lost while the body arrived, rather than that the body was malformed.
+ * Reading a body fails with:
+ *
+ * - an `AbortError` or a `TimeoutError` when the request's signal was
+ *   aborted, for example by a time limit that ran out after the headers;
+ * - a `TypeError` when the network failed partway through the body.
+ *
+ * The error is recognized by its name, not its class. A `DOMException` from
+ * another realm, such as the DOM of a test environment, is not an instance of
+ * this realm's `Error`.
+ */
+const isConnectionLoss = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("name" in error)) return false;
+  return error.name === "AbortError" || error.name === "TimeoutError" || error.name === "TypeError";
+};
+
+/**
  * Converts any failure of the derived client into a `RequestError`, an
  * `ApiError` or a `ConnectionError`.
  *
@@ -134,6 +152,9 @@ const asEnvelope = (u: unknown): ErrorEnvelope | undefined => {
  * before that point comes from the caller's input, not from the controller,
  * so it becomes a `RequestError` rather than an envelope the controller never
  * sent.
+ *
+ * A `ConnectionError` means no complete response arrived: the request could
+ * not be sent, or the connection was lost or aborted while the body arrived.
  *
  * A response that arrived but could not be decoded becomes an `internal`
  * `ApiError`, with the original failure kept as `cause`. That covers:
@@ -159,8 +180,12 @@ export const toClientError = (
   }
 
   if (HttpClientError.isHttpClientError(failure)) {
-    const reason = failure.reason._tag;
-    if (reason === "TransportError" || reason === "InvalidUrlError") {
+    const reason = failure.reason;
+    if (
+      reason._tag === "TransportError" ||
+      reason._tag === "InvalidUrlError" ||
+      (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
+    ) {
       return new ConnectionError(url, failure);
     }
   }

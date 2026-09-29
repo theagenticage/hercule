@@ -1,7 +1,9 @@
 /**
  * Tests the desktop app's security baseline from outside (spec 17, §Security
  * baseline and §Content-Security-Policy): the page's policy, the window's web
- * preferences, navigation, new windows, permissions and the IPC checks.
+ * preferences, navigation, new windows, permissions, the IPC checks, and the
+ * stored token's tie to its controller. The refused command-line arguments
+ * need the release package, so `refused-arguments.test.ts` tests them.
  *
  * Every test starts the packaged test package with a fresh user data directory.
  * Nothing here opens the developer's browser: a test that could reach
@@ -13,13 +15,14 @@ import { writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 import type { ElectronApplication, Page } from "playwright";
-import { describe, expect, it, onTestFinished } from "vitest";
-import { findPackagedApp } from "../../apps/desktop/scripts/packaged-app";
+import { describe, expect, it } from "vitest";
+import { findPackagedApp, readSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
-  createUserDataDirForTest,
+  answerWithEmptyPage,
   launchForTest,
-  startLoopbackServer,
-  type LoopbackServer,
+  launchWithSavedController,
+  recordExternalOpens,
+  startServerForTest,
   type PageGlobal,
 } from "./harness";
 
@@ -32,47 +35,6 @@ const APP_ORIGIN = "app://hercule";
  */
 const POLICY_WITHOUT_CONTROLLER =
   "default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
-
-/**
- * Starts the app with `url` already saved as its controller, the way main
- * saves one after a successful check: in `settings.json` in the user data
- * directory.
- */
-async function launchWithSavedController(url: string) {
-  const userDataDir = createUserDataDirForTest();
-  writeFileSync(join(userDataDir, "settings.json"), JSON.stringify({ controllerUrl: url }));
-  return launchForTest(userDataDir);
-}
-
-/** Starts a loopback server for one test, and stops it when the test finishes. */
-async function startServerForTest(
-  ...args: Parameters<typeof startLoopbackServer>
-): Promise<LoopbackServer> {
-  const server = await startLoopbackServer(...args);
-  onTestFinished(server.close);
-  return server;
-}
-
-/**
- * Replaces `shell.openExternal` in main with a function that only records the
- * URL, so a test can check what the app would open without opening the
- * developer's browser. Returns a function that reads the recorded URLs.
- *
- * The recorded URLs are kept on main's `globalThis`, because a function handed
- * to `app.evaluate` cannot close over anything in this file.
- */
-async function recordExternalOpens(app: ElectronApplication): Promise<() => Promise<string[]>> {
-  await app.evaluate(({ shell }) => {
-    const opened: string[] = [];
-    (globalThis as { openedExternally?: string[] }).openedExternally = opened;
-    shell.openExternal = (url: string) => {
-      opened.push(url);
-      return Promise.resolve();
-    };
-  });
-  return () =>
-    app.evaluate(() => (globalThis as { openedExternally?: string[] }).openedExternally ?? []);
-}
 
 /**
  * Makes the page break its own policy with a request `connect-src` refuses,
@@ -128,12 +90,6 @@ function runScriptInWindowAt(
     },
     { url, script },
   );
-}
-
-/** Answers with an empty HTML page, for a server that plays another origin. */
-function answerWithEmptyPage(_request: IncomingMessage, response: ServerResponse) {
-  response.setHeader("content-type", "text/html; charset=utf-8");
-  response.end("<!doctype html><title>another origin</title>");
 }
 
 describe("the page's policy", () => {
@@ -410,5 +366,58 @@ contextBridge.exposeInMainWorld("rawIpc", { invoke: (channel, ...args) => ipcRen
     expect(outcome).toEqual({
       refused: `Main refused a message on controllerUrl.read: it comes from ${stranger.url}, not app://hercule.`,
     });
+  });
+});
+
+describe("the stored token", () => {
+  /**
+   * Answers as a set-up controller that accepts the app, preflights
+   * included, so that nothing but the app itself keeps a request with the
+   * token from arriving.
+   */
+  const answerAsController = (request: IncomingMessage, response: ServerResponse) => {
+    response.setHeader("access-control-allow-origin", APP_ORIGIN);
+    if (request.method === "OPTIONS") {
+      // What the controller answers: every method in the operation table.
+      response.setHeader("access-control-allow-methods", "DELETE, GET, PATCH, POST, PUT");
+      response.setHeader("access-control-allow-headers", "authorization, content-type");
+      response.writeHead(204).end();
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ complete: true }));
+  };
+
+  it("is removed, and never sent, when another program saves another controller URL", async () => {
+    const first = await startServerForTest(answerAsController);
+    const authorizations: Array<string> = [];
+    const second = await startServerForTest((request, response) => {
+      if (request.headers.authorization !== undefined) {
+        authorizations.push(request.headers.authorization);
+      }
+      answerAsController(request, response);
+    });
+    const launched = await launchWithSavedController(first.url);
+    await launched.page.evaluate(() =>
+      (globalThis as PageGlobal).bridge.token.write("secret-token"),
+    );
+    await launched.close();
+
+    // What a program that can write the settings file could do: point the
+    // saved controller at its own server, and keep the encrypted token.
+    const settings = readSettings(launched.userDataDir);
+    expect(settings).toHaveProperty("token");
+    writeFileSync(
+      join(launched.userDataDir, "settings.json"),
+      JSON.stringify({ ...settings, controllerUrl: second.url }),
+    );
+    const { page } = await launchForTest(launched.userDataDir);
+
+    await page.getByRole("button", { name: "Sign in" }).waitFor();
+    expect(await page.evaluate(() => (globalThis as PageGlobal).bridge.token.read())).toBeNull();
+    const settingsAfter = readSettings(launched.userDataDir);
+    expect(settingsAfter["controllerUrl"]).toBe(second.url);
+    expect(settingsAfter).not.toHaveProperty("token");
+    expect(authorizations).toEqual([]);
   });
 });

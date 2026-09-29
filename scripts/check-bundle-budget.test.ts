@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
@@ -94,5 +94,59 @@ describe("check-bundle-budget", () => {
     const stderr = await readBudgetFailure(join(tmpdir(), "hercule-no-such-build"));
 
     expect(stderr).toContain("there is no build in");
+  });
+});
+
+/**
+ * Writes main's build the way Vite lays one out, and returns the path of its
+ * startup file: `index.js` of `startupBytes` bytes, beside a 400 kB chunk in
+ * `assets/` that main imports lazily.
+ */
+const createMainBuild = async (startupBytes: number): Promise<string> => {
+  const folder = await mkdtemp(join(tmpdir(), "hercule-main-budget-"));
+  folders.push(folder);
+  await mkdir(join(folder, "assets"));
+  await writeFile(join(folder, "index.js"), "x".repeat(startupBytes));
+  await writeFile(join(folder, "assets/controller-check.js"), "x".repeat(400 * 1024));
+  return join(folder, "index.js");
+};
+
+const checkMainStartup = (file: string) =>
+  run("bun", ["run", join(root, "scripts/check-bundle-budget.ts"), "--main-startup", file], {
+    cwd: root,
+  });
+
+/** Resolves to the error output the check of main's startup file failed with, or fails the test. */
+const readMainStartupFailure = async (file: string): Promise<string> => {
+  const refusal = await checkMainStartup(file).then(
+    () => undefined,
+    (thrown: { readonly stderr: string }) => thrown,
+  );
+  if (refusal === undefined) throw new Error("check-bundle-budget accepted main's startup file");
+  return refusal.stderr;
+};
+
+describe("check-bundle-budget --main-startup", () => {
+  it("passes a startup file within the budget, whatever the lazy chunks beside it weigh", async () => {
+    const { stdout } = await checkMainStartup(await createMainBuild(150 * 1024));
+
+    expect(stdout).toContain("is 150.0 kB minified; the budget is 160.0 kB.");
+  });
+
+  it("fails a startup file over the budget, and names the file, its size and the spec", async () => {
+    const file = await createMainBuild(170 * 1024);
+
+    const stderr = await readMainStartupFailure(file);
+
+    expect(stderr).toContain(
+      `${relative(root, file)} is 170.0 kB minified, over main's startup budget of 160.0 kB`,
+    );
+    expect(stderr).toContain(`Spec 17 §Performance owns the number, in the "Main's startup" row`);
+  });
+
+  it("fails when the startup file does not exist", async () => {
+    const stderr = await readMainStartupFailure(join(tmpdir(), "hercule-no-such-main/index.js"));
+
+    expect(stderr).toContain("there is no startup file at");
   });
 });

@@ -226,7 +226,7 @@ export {
   isSupportedTimezone,
   listSupportedTimezones,
 } from "./timezone";
-export { createTokenStore } from "./token-store";
+export { createTokenStore, type TokenStore } from "./token-store";
 export {
   listWorkflowCompletions,
   type CompletionList,

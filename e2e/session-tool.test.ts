@@ -38,24 +38,26 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  readApiKey,
   runCli,
   completeSetup,
+  PASSWORD,
+  ROOT,
+  startController,
+  USERNAME,
+  type Controller,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   listInstances,
   parseJsonOutputOrFail,
   lendCredential,
   LENT_CREDENTIALS,
   isLiveSessionTestEnabled,
   isLoginAvailable,
-  PASSWORD,
-  ROOT,
   collectAssistantText,
   readSession,
-  startController,
   createTemporaryHome,
   waitForTranscriptTag,
-  USERNAME,
-  type Controller,
   type Instance,
   type Session,
   type Snapshot,

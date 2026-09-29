@@ -20,7 +20,7 @@ const mainFrame: WebFrame = { origin: "app://hercule" };
 const readRefusal = <A>(effect: Effect.Effect<A, IpcMessageRefused>): string => {
   const exit = Effect.runSyncExit(Effect.flip(effect));
   if (Exit.isFailure(exit)) throw new Error("the effect was not refused");
-  return exit.value.reason;
+  return exit.value.message;
 };
 
 describe("checkIpcSender", () => {
@@ -74,6 +74,28 @@ describe("decodeIpcRequest", () => {
   });
 });
 
+describe("the requests of the renderer-to-main channels", () => {
+  const cases: ReadonlyArray<{
+    readonly name: keyof typeof RENDERER_TO_MAIN_IPC_CHANNELS;
+    readonly valid: ReadonlyArray<unknown>;
+    readonly invalid: ReadonlyArray<unknown>;
+  }> = [
+    { name: "controllerUrl.read", valid: [], invalid: [42] },
+    { name: "controllerUrl.save", valid: ["http://127.0.0.1:4937"], invalid: [42] },
+    { name: "token.read", valid: [], invalid: ["a token"] },
+    { name: "token.write", valid: ["a token"], invalid: [42] },
+    { name: "token.write", valid: [null], invalid: [""] },
+  ];
+
+  it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {
+    const schema = RENDERER_TO_MAIN_IPC_CHANNELS[name].request;
+    expect(Effect.runSync(decodeIpcRequest(schema, valid))).toEqual(valid[0]);
+    expect(readRefusal(decodeIpcRequest(schema, invalid))).toMatch(
+      /^its request does not match the contract: .+/,
+    );
+  });
+});
+
 describe("answerIpcMessage", () => {
   const channel = RENDERER_TO_MAIN_IPC_CHANNELS["controllerUrl.read"];
   const readUrl = () => Effect.succeed("http://127.0.0.1:4937");
@@ -108,6 +130,32 @@ describe("answerIpcMessage", () => {
       refusal:
         "Main refused a message on controllerUrl.read: its request does not match the contract: Expected undefined.",
     });
+  });
+
+  it("replies with the refusal, the error's message as the reason, when the handler fails", () => {
+    const reply = Effect.runSync(
+      answerIpcMessage(
+        "token.write",
+        RENDERER_TO_MAIN_IPC_CHANNELS["token.write"],
+        () => Effect.fail(new Error("no controller URL is saved")),
+        { senderFrame: mainFrame, mainFrame, args: ["a token"] },
+      ),
+    );
+    expect(reply).toEqual({
+      refusal: "Main refused a message on token.write: no controller URL is saved.",
+    });
+  });
+
+  it("replies with an outcome the user caused as the response", () => {
+    const reply = Effect.runSync(
+      answerIpcMessage(
+        "controllerUrl.save",
+        RENDERER_TO_MAIN_IPC_CHANNELS["controllerUrl.save"],
+        () => Effect.succeed({ _tag: "Unreachable", origin: "http://127.0.0.1:1" } as const),
+        { senderFrame: mainFrame, mainFrame, args: ["http://127.0.0.1:1"] },
+      ),
+    );
+    expect(reply).toEqual({ response: { _tag: "Unreachable", origin: "http://127.0.0.1:1" } });
   });
 
   it("logs each refusal once, as a warning", () => {

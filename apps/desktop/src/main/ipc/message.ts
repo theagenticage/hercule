@@ -1,14 +1,14 @@
 /**
  * How main answers one IPC message on a renderer-to-main channel: it checks
  * who sent the message, decodes the request, runs the channel's handler and
- * encodes the response. A message that fails a check is refused: main logs it
- * once and replies with the reason.
+ * encodes the response. A message that fails a check, or whose handler
+ * fails, is refused: main logs it once and replies with the reason.
  *
  * Nothing here imports Electron, so the checks run in unit tests.
  */
+import { DESKTOP_APP_ORIGIN } from "@hercule/contract";
 import { Data, Effect, Schema } from "effect";
 import type { IpcReply, RendererToMainIpcChannel } from "../../ipc/contract";
-import { RENDERER_ORIGIN } from "../renderer-origin";
 
 /** The part of Electron's `WebFrameMain` that the sender check reads. */
 export interface WebFrame {
@@ -16,17 +16,17 @@ export interface WebFrame {
 }
 
 /**
- * The error main fails with when it refuses an IPC message. `reason` says
- * why; it goes back to the renderer and into main's log.
+ * The error a check of an IPC message fails with. `message` says why main
+ * refuses the message; it goes back to the renderer and into main's log.
  */
 export class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
-  readonly reason: string;
+  readonly message: string;
 }> {}
 
 /**
  * Checks that an IPC message comes from the window's page: `senderFrame` must
  * be the main frame of the web contents that sent the message, not a frame
- * inside the page, and its origin must be `app://hercule`. Fails with
+ * inside the page, and its origin must be `DESKTOP_APP_ORIGIN`. Fails with
  * IpcMessageRefused otherwise. `senderFrame` is null when the frame navigated
  * away or closed before main read the message.
  *
@@ -38,15 +38,15 @@ export const checkIpcSender = (
   mainFrame: WebFrame,
 ): Effect.Effect<void, IpcMessageRefused> => {
   if (senderFrame === null) {
-    return Effect.fail(new IpcMessageRefused({ reason: "the frame that sent it is gone" }));
+    return Effect.fail(new IpcMessageRefused({ message: "the frame that sent it is gone" }));
   }
   if (senderFrame !== mainFrame) {
-    return Effect.fail(new IpcMessageRefused({ reason: "it comes from a frame inside the page" }));
+    return Effect.fail(new IpcMessageRefused({ message: "it comes from a frame inside the page" }));
   }
-  if (senderFrame.origin !== RENDERER_ORIGIN) {
+  if (senderFrame.origin !== DESKTOP_APP_ORIGIN) {
     return Effect.fail(
       new IpcMessageRefused({
-        reason: `it comes from ${senderFrame.origin}, not ${RENDERER_ORIGIN}`,
+        message: `it comes from ${senderFrame.origin}, not ${DESKTOP_APP_ORIGIN}`,
       }),
     );
   }
@@ -73,7 +73,7 @@ export const decodeIpcRequest = <IpcRequestSchema extends Schema.Top>(
   if (args.length > 1) {
     return Effect.fail(
       new IpcMessageRefused({
-        reason: `it carries ${args.length} arguments, and a message carries at most one, the request`,
+        message: `it carries ${args.length} arguments, and a message carries at most one, the request`,
       }),
     );
   }
@@ -81,7 +81,7 @@ export const decodeIpcRequest = <IpcRequestSchema extends Schema.Top>(
     Effect.mapError(
       (error) =>
         new IpcMessageRefused({
-          reason: `its request does not match the contract: ${error.message}`,
+          message: `its request does not match the contract: ${error.message}`,
         }),
     ),
   );
@@ -103,15 +103,22 @@ export interface IpcMessage {
  * the renderer, which holds the encoded response, or the reason main refused
  * the message; a refusal is also logged, once, as a warning.
  *
- * A response that does not encode is a bug in main, not the renderer's
- * fault, so it is a defect rather than a refusal.
+ * `handler` fails only when the request makes no sense in main's current
+ * state, and main then refuses the message, with the error's message as the
+ * reason, as it refuses one that does not decode. A response that does not
+ * encode is a bug in main, not the renderer's fault, so it is a defect rather
+ * than a refusal.
  */
-export const answerIpcMessage = <IpcChannel extends RendererToMainIpcChannel, Services>(
+export const answerIpcMessage = <
+  IpcChannel extends RendererToMainIpcChannel,
+  HandlerError extends Error,
+  Services,
+>(
   name: string,
   channel: IpcChannel,
   handler: (
     request: IpcChannel["request"]["Type"],
-  ) => Effect.Effect<IpcChannel["response"]["Type"], never, Services>,
+  ) => Effect.Effect<IpcChannel["response"]["Type"], HandlerError, Services>,
   message: IpcMessage,
 ): Effect.Effect<
   IpcReply<IpcChannel["response"]["Encoded"]>,
@@ -124,8 +131,8 @@ export const answerIpcMessage = <IpcChannel extends RendererToMainIpcChannel, Se
     const response = yield* handler(request);
     return { response: yield* Effect.orDie(Schema.encodeEffect(channel.response)(response)) };
   }).pipe(
-    Effect.catchTag("IpcMessageRefused", ({ reason }) => {
-      const refusal = `Main refused a message on ${name}: ${reason}.`;
+    Effect.catch((error) => {
+      const refusal = `Main refused a message on ${name}: ${error.message}.`;
       return Effect.as(Effect.logWarning(refusal), { refusal });
     }),
   );

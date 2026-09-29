@@ -9,73 +9,142 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ShellRouteImport } from './routes/_shell'
-import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ConnectedRouteImport } from './routes/_connected'
+import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
+import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
+import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
 
-const ShellRoute = ShellRouteImport.update({
-  id: '/_shell',
+const ConnectedRoute = ConnectedRouteImport.update({
+  id: '/_connected',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ShellIndexRoute = ShellIndexRouteImport.update({
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectedShellRoute = ConnectedShellRouteImport.update({
+  id: '/_shell',
+  getParentRoute: () => ConnectedRoute,
+} as any)
+const ConnectedLoginRoute = ConnectedLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => ConnectedRoute,
+} as any)
+const ConnectedShellIndexRoute = ConnectedShellIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => ShellRoute,
+  getParentRoute: () => ConnectedShellRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof ShellIndexRoute
+  '/': typeof ConnectedShellIndexRoute
+  '/connect': typeof ConnectRoute
+  '/login': typeof ConnectedLoginRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof ShellIndexRoute
+  '/': typeof ConnectedShellIndexRoute
+  '/connect': typeof ConnectRoute
+  '/login': typeof ConnectedLoginRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/_shell': typeof ShellRouteWithChildren
-  '/_shell/': typeof ShellIndexRoute
+  '/_connected': typeof ConnectedRouteWithChildren
+  '/connect': typeof ConnectRoute
+  '/_connected/_shell': typeof ConnectedShellRouteWithChildren
+  '/_connected/login': typeof ConnectedLoginRoute
+  '/_connected/_shell/': typeof ConnectedShellIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/connect' | '/login'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/_shell' | '/_shell/'
+  to: '/' | '/connect' | '/login'
+  id:
+    | '__root__'
+    | '/_connected'
+    | '/connect'
+    | '/_connected/_shell'
+    | '/_connected/login'
+    | '/_connected/_shell/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  ShellRoute: typeof ShellRouteWithChildren
+  ConnectedRoute: typeof ConnectedRouteWithChildren
+  ConnectRoute: typeof ConnectRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_shell': {
-      id: '/_shell'
+    '/_connected': {
+      id: '/_connected'
       path: ''
       fullPath: '/'
-      preLoaderRoute: typeof ShellRouteImport
+      preLoaderRoute: typeof ConnectedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_shell/': {
-      id: '/_shell/'
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_connected/_shell': {
+      id: '/_connected/_shell'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof ConnectedShellRouteImport
+      parentRoute: typeof ConnectedRoute
+    }
+    '/_connected/login': {
+      id: '/_connected/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof ConnectedLoginRouteImport
+      parentRoute: typeof ConnectedRoute
+    }
+    '/_connected/_shell/': {
+      id: '/_connected/_shell/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof ShellIndexRouteImport
-      parentRoute: typeof ShellRoute
+      preLoaderRoute: typeof ConnectedShellIndexRouteImport
+      parentRoute: typeof ConnectedShellRoute
     }
   }
 }
 
-interface ShellRouteChildren {
-  ShellIndexRoute: typeof ShellIndexRoute
+interface ConnectedShellRouteChildren {
+  ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
 }
 
-const ShellRouteChildren: ShellRouteChildren = {
-  ShellIndexRoute: ShellIndexRoute,
+const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
+  ConnectedShellIndexRoute: ConnectedShellIndexRoute,
 }
 
-const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
+const ConnectedShellRouteWithChildren = ConnectedShellRoute._addFileChildren(
+  ConnectedShellRouteChildren,
+)
+
+interface ConnectedRouteChildren {
+  ConnectedShellRoute: typeof ConnectedShellRouteWithChildren
+  ConnectedLoginRoute: typeof ConnectedLoginRoute
+}
+
+const ConnectedRouteChildren: ConnectedRouteChildren = {
+  ConnectedShellRoute: ConnectedShellRouteWithChildren,
+  ConnectedLoginRoute: ConnectedLoginRoute,
+}
+
+const ConnectedRouteWithChildren = ConnectedRoute._addFileChildren(
+  ConnectedRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
-  ShellRoute: ShellRouteWithChildren,
+  ConnectedRoute: ConnectedRouteWithChildren,
+  ConnectRoute: ConnectRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

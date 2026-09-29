@@ -21,17 +21,19 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  readApiKey,
   runCli,
   completeSetup,
+  startController,
+  type Controller,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   listInstances,
   parseJsonOutputOrFail,
   isLiveSessionTestEnabled,
   readSession,
-  startController,
   createTemporaryHome,
   waitForTranscriptTag,
-  type Controller,
   type Instance,
   type Session,
 } from "./harness";

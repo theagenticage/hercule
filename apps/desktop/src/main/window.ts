@@ -1,5 +1,6 @@
 /**
- * The app's one window: how it opens, shows, hides and remembers where it was.
+ * The app's one window, the MainWindow service (see `./main-window.ts`), built
+ * with Electron: how it opens, shows, hides and remembers where it was.
  *
  * - It opens hidden, painted with the theme's background, and shows once the
  *   page has drawn, so it never flashes a blank frame.
@@ -11,12 +12,13 @@
  *   while it moves or resizes.
  */
 import path from "node:path";
-import { app, BrowserWindow, nativeTheme, screen, type Event } from "electron";
-import * as Context from "effect/Context";
+import { app, BrowserWindow, dialog, nativeTheme, screen, type Event } from "electron";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import { AppSettings, type Bounds, type WindowState } from "./app-settings";
+import { encodeIpcPayload } from "./ipc/payload";
+import { MainWindow } from "./main-window";
 import { RENDERER_URL } from "./renderer-origin";
 import { chooseWindowBackground } from "./window-background";
 import {
@@ -127,6 +129,15 @@ const make = Effect.gen(function* () {
 
   window.once("ready-to-show", () => visibility.showWindowFirstTime(saved?.fullScreen ?? false));
   window.on("close", hideInsteadOfClosing);
+  // After the window has closed, macOS can still report a change to it, such
+  // as the window being hidden, and Electron still emits the event on the
+  // destroyed window. A listener that reads the window then throws "Object
+  // has been destroyed". Electron's own listener for `show` and `hide` does
+  // that, and the error dialog that follows keeps the app from quitting
+  // until the user dismisses it. The window is gone, so no listener on it
+  // has anything left to do. The other listeners for `closed` still run:
+  // Node calls every listener an event had when it was emitted.
+  window.once("closed", () => window.removeAllListeners());
   yield* Effect.acquireRelease(
     Effect.sync(() => nativeTheme.on("updated", paintBackground)),
     () => Effect.sync(() => nativeTheme.off("updated", paintBackground)),
@@ -136,37 +147,25 @@ const make = Effect.gen(function* () {
     () => Effect.sync(() => app.off("before-quit", prepareToQuit)),
   );
 
-  return {
-    /**
-     * Loads the renderer's page into the window. Call it once, after the
-     * `app` scheme is served. A page that does not load is logged.
-     */
+  return MainWindow.of({
     load: Effect.tryPromise(() => window.loadURL(RENDERER_URL)).pipe(
       Effect.catch((error) =>
         Effect.logError(`The window could not load ${RENDERER_URL}: ${error.message}`),
       ),
     ),
-
-    /** Shows the window and focuses it; see `showWindow`. */
+    reload: Effect.sync(() => window.webContents.reload()),
     show: Effect.sync(visibility.showWindow),
-  };
+    send: (name, payload) =>
+      Effect.map(encodeIpcPayload(name, payload), (encoded) =>
+        window.webContents.send(name, encoded),
+      ),
+    showWarning: (message) =>
+      Effect.sync(() => {
+        void dialog.showMessageBox(window, { type: "warning", message, buttons: ["OK"] });
+      }),
+  });
 });
-
-/** The app's one window. */
-export class MainWindow extends Context.Service<MainWindow, Effect.Success<typeof make>>()(
-  "hercule/desktop/MainWindow",
-) {}
 
 /** Builds the window service; see `make`. */
 export const MainWindowLayer: Layer.Layer<MainWindow, never, AppSettings> =
   Layer.effect(MainWindow)(make);
-
-/** Loads the renderer's page into the window; see `MainWindow.load`. */
-export const loadMainWindow: Effect.Effect<void, never, MainWindow> = MainWindow.use(
-  (window) => window.load,
-);
-
-/** Shows and focuses the window; see `MainWindow.show`. */
-export const showMainWindow: Effect.Effect<void, never, MainWindow> = MainWindow.use(
-  (window) => window.show,
-);

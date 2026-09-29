@@ -31,14 +31,16 @@ import {
   USERNAME,
   runCli,
   completeSetup,
+  startController,
+  type Controller,
+  type Ran,
+} from "../scripts/controller-process";
+import {
   buildGitEnv,
   parseJsonOutputOrFail,
   findReleaseBinary,
-  startController,
   createTemporaryHome,
   waitForEnrolledRunner,
-  type Controller,
-  type Ran,
 } from "./harness";
 
 const state = createTemporaryHome();

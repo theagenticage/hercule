@@ -1,0 +1,135 @@
+/* The controls every screen shares: the text field and the buttons. The rules
+   and class names are the Bureau book's, as its system.css spells them. Each
+   departure from the book says why. */
+
+/* ---------- Buttons ---------- */
+/* One doctrine for every button:
+   - .btn          a neutral tablet. The default for an answer that does something.
+   - .btn--accent  the one suggested answer of a group. The only filled button anywhere.
+   - .btn--quiet   declines and dismissals: text until hovered. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-btn);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--btn-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.btn:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--btn-fill));
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn--accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: var(--w-bold);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 80%, black),
+    inset 0 1px 0 color-mix(in oklab, white calc(30% * var(--glass-level)), transparent);
+}
+.btn--accent:hover {
+  background: color-mix(in oklab, var(--accent) 90%, var(--accent-fg));
+}
+.btn--quiet {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.btn--quiet:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* A suggested answer that cannot act yet, such as Sign in before both fields
+   hold text. The book draws no disabled control, so this follows macOS: a
+   default button that cannot act loses its accent and becomes a plain
+   button, with its label in faint ink. The fill, the rim and the shadow are
+   the neutral tablet's, as .btn draws them. The label stays bold, so it keeps
+   its width when the button turns on. Without pointer events, the hover and
+   press rules above cannot fire, so the button neither brightens nor sinks. */
+.btn--accent:disabled {
+  background: var(--btn-fill);
+  color: var(--faint);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
+  pointer-events: none;
+}
+/* A button whose action is already running. It keeps its full colour and its
+   focus, and its label says what is happening. It neither brightens nor
+   sinks, because pressing it again does nothing. */
+.btn[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+/* ---------- Inputs ---------- */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+}
+/* The book draws a field as a box around text. Here it is also a real text
+   input, which comes with the browser's own border; .field draws the edge
+   instead. */
+input.field {
+  border: 0;
+}
+/* The book's placeholder colour, from its composer. */
+.field::placeholder {
+  color: var(--faint);
+}
+
+/* Chromium draws each character of a password as a bullet (U+2022) in the
+   field's font. Bricolage's bullet is 2.5px across at 13px, less than half
+   the bullet of a macOS secure text field. Enlarging it with size-adjust does
+   not help: a glyph grows away from the baseline, so at the right size the
+   bullet floats above the x-height.
+
+   So this face takes only that one character from Geneva, which macOS
+   installs in /System/Library/Fonts. Measured at 13px against an
+   NSSecureTextField in the 13pt system font:
+   - Geneva's bullet is 5.5px across, as the native bullet is.
+   - Its centre is 5.1px above the baseline; the native one is 5px.
+   The app runs only on macOS. Another platform would need its own local()
+   source. Without Geneva, the bullet falls back to Bricolage's small one.
+
+   Bricolage stays the field's first font, so the line height, the placeholder
+   and the caret follow it. The ascent and descent below are Bricolage's.
+   With Geneva's own, a line of bullets sits 0.5px lower than an empty line,
+   and the caret jumps down at the first character. */
+@font-face {
+  font-family: "Password bullet";
+  src: local("Geneva");
+  unicode-range: U+2022;
+  ascent-override: 93%;
+  descent-override: 27%;
+}
+input.field[type="password"] {
+  font-family: "Password bullet", var(--font-ui);
+}
+/* Geneva's bullet advances 0.667em; the native one advances 0.622em (8.1px at
+   13px). The placeholder, shown only while the field is empty, keeps its
+   normal spacing. */
+input.field[type="password"]:not(:placeholder-shown) {
+  letter-spacing: -0.045em;
+}

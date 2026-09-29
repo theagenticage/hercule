@@ -11,9 +11,13 @@
  * fuse: `EnableNodeCliInspectArguments` is on, because Playwright connects to
  * main through `--inspect`. The app is found, started and quit by
  * `apps/desktop/scripts/packaged-app.ts`, which the perf script uses too.
+ *
+ * A test that connects or signs in reaches a real controller: the compiled
+ * binary, `./hercule`, started in a scratch Hercule Home by
+ * `scripts/controller-process.ts`. Run `pnpm build:binary` first as well.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -29,8 +33,19 @@ import {
   isWindowVisible,
   launchTestPackage,
   quitApp,
+  signIn,
+  writeControllerUrl,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
+import {
+  completeSetup,
+  PASSWORD,
+  ROOT,
+  startController,
+  USERNAME,
+  type Controller,
+} from "../../scripts/controller-process";
+import { createTemporaryHome } from "../harness";
 
 /**
  * The page's global object, with the bridge the preload exposes on it as
@@ -95,6 +110,106 @@ export async function launchForTest(
   await expect.poll(() => isWindowVisible(app), { message: "the window did not show" }).toBe(true);
   await sleep(200);
   return { app, page, userDataDir, close };
+}
+
+/**
+ * Starts the app for the current test with `url` already saved as its
+ * controller (see `writeControllerUrl`), on a fresh user data directory.
+ */
+export async function launchWithSavedController(url: string): Promise<LaunchedApp> {
+  const userDataDir = createUserDataDirForTest();
+  writeControllerUrl(userDataDir, url);
+  return launchForTest(userDataDir);
+}
+
+/**
+ * Types `url` into the connect screen's address field and presses Connect.
+ * Returns once the button is pressed; the caller waits for the outcome it
+ * expects. On success main saves the URL and reloads the window.
+ */
+export async function connectTo(page: Page, url: string): Promise<void> {
+  await page.getByRole("textbox", { name: "Controller address" }).fill(url);
+  await page.getByRole("button", { name: "Connect" }).click();
+}
+
+/**
+ * Waits for the line the connect or sign-in screen shows under its form, and
+ * returns its text. Fails when no line shows within Playwright's timeout.
+ */
+export async function readAlertText(page: Page): Promise<string | null> {
+  const alert = page.getByRole("alert");
+  await alert.waitFor();
+  return alert.textContent();
+}
+
+/**
+ * Signs in on the sign-in screen as `USERNAME`, and returns the token the
+ * controller at `controllerUrl` issued, read from the `auth.login` response
+ * the page received. Returns once the response has arrived; the caller waits
+ * for the screen it expects next.
+ */
+export async function signInAndReadToken(page: Page, controllerUrl: string): Promise<string> {
+  const response = page.waitForResponse(
+    (candidate) =>
+      candidate.url() === `${controllerUrl}/api/v1/auth/login` &&
+      candidate.request().method() === "POST",
+  );
+  await signIn(page, { username: USERNAME, password: PASSWORD });
+  const { token } = (await (await response).json()) as { token: string };
+  return token;
+}
+
+/**
+ * Starts a controller for the current test from the compiled binary,
+ * `./hercule`, in a scratch Hercule Home, never the user's own. With
+ * `setUp: true`, it also completes first-run setup as `USERNAME`, so the app
+ * can sign in; otherwise setup is still pending.
+ *
+ * The controller is stopped, and its home deleted, when the test finishes.
+ * Fails when the binary has not been built, or setup fails.
+ */
+export async function startControllerForTest(options: {
+  readonly setUp: boolean;
+}): Promise<Controller> {
+  const binary = join(ROOT, "hercule");
+  if (!existsSync(binary)) {
+    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
+  }
+  const { home, remove } = createTemporaryHome();
+  onTestFinished(remove);
+  const controller = await startController({ home, binary });
+  onTestFinished(async () => {
+    await controller.stop();
+  });
+  if (options.setUp) {
+    const ran = await completeSetup({ home, url: controller.url, binary });
+    if (ran.code !== 0)
+      throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
+  }
+  return controller;
+}
+
+/**
+ * Replaces `shell.openExternal` in main with a function that only records the
+ * URL, so a test can check what the app would open without opening the
+ * developer's browser. Returns a function that reads the recorded URLs.
+ *
+ * The recorded URLs are kept on main's `globalThis`, because a function handed
+ * to `app.evaluate` cannot close over anything in this file.
+ */
+export async function recordExternalOpens(
+  app: ElectronApplication,
+): Promise<() => Promise<string[]>> {
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = [];
+    (globalThis as { openedExternally?: string[] }).openedExternally = opened;
+    shell.openExternal = (url: string) => {
+      opened.push(url);
+      return Promise.resolve();
+    };
+  });
+  return () =>
+    app.evaluate(() => (globalThis as { openedExternally?: string[] }).openedExternally ?? []);
 }
 
 /**
@@ -172,4 +287,23 @@ export async function startLoopbackServer(
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       }),
   };
+}
+
+/** Starts a loopback server for the current test, and stops it when the test finishes. */
+export async function startServerForTest(
+  ...args: Parameters<typeof startLoopbackServer>
+): Promise<LoopbackServer> {
+  const server = await startLoopbackServer(...args);
+  onTestFinished(server.close);
+  return server;
+}
+
+/**
+ * Answers every request with an empty HTML page. A server that does this
+ * stands for a page from another origin, or for a server that is not a
+ * controller.
+ */
+export function answerWithEmptyPage(_request: IncomingMessage, response: ServerResponse): void {
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.end("<!doctype html><title>another origin</title>");
 }

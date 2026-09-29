@@ -6,7 +6,7 @@
  * Every test starts the packaged test package with a fresh user data directory,
  * so no test sees another's settings. Run `pnpm build:desktop` first.
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ElectronApplication } from "playwright";
 import { describe, expect, it } from "vitest";
@@ -119,6 +119,33 @@ describe("the window", () => {
       app.emit("activate", {}, false);
     });
     await expect.poll(() => isWindowVisible(app)).toBe(true);
+  });
+
+  it("ignores a hide reported after the window has closed, so quitting shows no error", async () => {
+    const { app, userDataDir, close } = await launchForTest();
+    const errorFile = join(userDataDir, "late-hide-error.txt");
+
+    // As the app quits, Electron destroys the window. macOS can still report
+    // afterwards that the window was hidden, up to about 100 ms later on a
+    // busy machine, and Electron then emits `hide` on the destroyed window.
+    // The test emits `hide` right after `closed` instead, and writes down
+    // any error the emit throws. It writes to a file because the app has
+    // exited by the time the test can read anything from it.
+    await app.evaluate(({ BrowserWindow }, file) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.once("closed", () => {
+        process.nextTick(() => {
+          try {
+            window.emit("hide");
+          } catch (error) {
+            process.getBuiltinModule("node:fs").writeFileSync(file, String(error));
+          }
+        });
+      });
+    }, errorFile);
+
+    await close();
+    expect(existsSync(errorFile) ? readFileSync(errorFile, "utf8") : null).toBeNull();
   });
 
   it("hands a second launch over to the running window, which shows and takes focus, and the second launch exits", async () => {

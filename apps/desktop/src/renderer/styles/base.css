@@ -17,6 +17,25 @@ body {
      the colour main gives the window. */
   background: var(--bg);
   color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  line-height: 1.45;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Controls take the page's type and ink, not the browser's own. */
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
 }
 
 html {

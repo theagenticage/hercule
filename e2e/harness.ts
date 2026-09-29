@@ -4,10 +4,10 @@
  * Nothing here imports Hercule code. These tests check that what an operator
  * runs actually works, so the controller is started the way `hercule serve`
  * starts it, and every command goes through `argv`, stdin, stdout and the exit
- * code - the same interface a shell sees.
- *
- * The processes are started with `Bun.spawn` rather than `spawnOwnBinary`, which
- * inherits stdio: a test has to read what the command printed.
+ * code - the same interface a shell sees. Starting the controller and running
+ * the CLI live in `scripts/controller-process.ts`, which the desktop suite and
+ * the desktop perf script use too; this file holds what only the binary suite
+ * needs on top.
  */
 import {
   chmodSync,
@@ -20,13 +20,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-
-/** The repository root, so the tests run from any working directory. */
-export const ROOT = dirname(import.meta.dirname);
-
-/** The dispatcher's source entrypoint: the same `main.ts` the binary compiles. */
-const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { ROOT, runCli, type Ran } from "../scripts/controller-process";
 
 /**
  * Returns the path of the release binary if one has been built, or `undefined`
@@ -42,28 +38,6 @@ const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
 export function findReleaseBinary(): string | undefined {
   const built = join(ROOT, "hercule");
   return existsSync(built) ? built : undefined;
-}
-
-/**
- * The Bun executable running this test. Under `pnpm test` that is `bun`, but a
- * vitest started by node would give a node path, which cannot run the
- * dispatcher.
- */
-const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
-
-/**
- * Builds the environment a spawned Hercule sees: this process's environment,
- * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or
- * `HERCULE_TOKEN` set in their shell must not change what these tests
- * exercise.
- */
-function buildCleanEnv(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] =>
-        entry[1] !== undefined && !entry[0].startsWith("HERCULE_"),
-    ),
-  );
 }
 
 /**
@@ -125,23 +99,6 @@ export function lendCredential(home: string, instanceId: string): void {
   chmodSync(path, 0o600);
 }
 
-/** The result of a finished command. */
-export interface Ran {
-  readonly code: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/**
- * Picks a port to try. Nothing reserves it: `bind.port` rejects 0, so the
- * kernel cannot give the controller an ephemeral port, and probing one by
- * binding and closing it would only move the race. `startController` treats a
- * bind failure as an ordinary outcome and picks another number instead.
- */
-function pickCandidatePort(): number {
-  return 20_000 + Math.floor(Math.random() * 40_000);
-}
-
 /**
  * Creates a temporary Hercule Home, and returns it with a function that
  * removes it.
@@ -191,161 +148,6 @@ export function buildGitEnv(home: string): Record<string, string> {
   };
 }
 
-/** A controller process that is running and responding. */
-export interface Controller {
-  readonly url: string;
-  /** The port it bound, so a restart can ask for the same one. */
-  readonly port: number;
-  /** Everything the process has printed on stdout and stderr, in order. */
-  output: () => string;
-  /** Sends SIGTERM, then returns the exit code. */
-  stop: () => Promise<number>;
-}
-
-/**
- * Starts `hercule serve` against a home, and resolves once it responds.
- *
- * Readiness is checked with the unauthenticated `setup.read`, not a line of
- * output: the tests need the listener, and the log line is printed just
- * before the listener is reachable anyway.
- *
- * With no `port`, a number is picked, and the start is retried on another
- * port if something else on the machine took it in the meantime. With a
- * `port` - a restart on the port the first run bound - a bind failure is the
- * result the test gets, so it is reported rather than retried.
- */
-export async function startController(options: {
-  readonly home: string;
-  readonly port?: number | undefined;
-  readonly timeoutMs?: number | undefined;
-  /** The compiled binary to run instead of the dispatcher's source. */
-  readonly binary?: string | undefined;
-  /**
-   * Extra environment for the controller - and the runner it starts for
-   * itself - on top of the clean environment. A suite that has to set `HOME`,
-   * because git must find none of the developer's own configuration, sets it
-   * here.
-   */
-  readonly env?: Readonly<Record<string, string>> | undefined;
-}): Promise<Controller> {
-  const attempts = options.port === undefined ? 20 : 1;
-  const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
-  let last: Error | undefined;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const port = options.port ?? pickCandidatePort();
-    try {
-      return await startControllerOnPort(
-        command,
-        options.home,
-        port,
-        options.timeoutMs,
-        options.env,
-      );
-    } catch (error) {
-      last = error as Error;
-      if (!/in use/.test(last.message)) throw last;
-    }
-  }
-  throw last ?? new Error("hercule serve did not start");
-}
-
-/** How long `stop` waits, at most, for the output of a process that has exited. */
-const OUTPUT_DRAIN_BOUND_MS = 5_000;
-
-/** Makes one attempt: spawns on this port and waits for it to respond. */
-async function startControllerOnPort(
-  command: ReadonlyArray<string>,
-  home: string,
-  port: number,
-  timeoutMs: number | undefined,
-  env?: Readonly<Record<string, string>>,
-): Promise<Controller> {
-  const url = `http://127.0.0.1:${String(port)}`;
-  const chunks: Array<string> = [];
-
-  const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
-    cwd: ROOT,
-    env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const drain = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
-    const decoder = new TextDecoder();
-    for await (const chunk of stream) chunks.push(decoder.decode(chunk));
-  };
-  const drained = Promise.all([drain(child.stdout), drain(child.stderr)]);
-
-  const readOutput = (): string => chunks.join("");
-  const deadline = Date.now() + (timeoutMs ?? 20_000);
-  for (;;) {
-    if (child.exitCode !== null) {
-      throw new Error(`hercule serve exited with ${String(child.exitCode)}:\n${readOutput()}`);
-    }
-    try {
-      const response = await fetch(`${url}/api/v1/setup`);
-      if (response.ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) throw new Error(`hercule serve did not respond:\n${readOutput()}`);
-    await Bun.sleep(50);
-  }
-
-  return {
-    url,
-    port,
-    output: readOutput,
-    stop: async () => {
-      child.kill("SIGTERM");
-      await child.exited;
-      // The process can exit before all of its output has been read from the
-      // pipes, and tests check the last lines it printed while stopping. The
-      // pipes close only when every process holding them has exited. The local
-      // runner shares the controller's stderr and is killed when the
-      // controller exits, so the wait is normally short. The wait is capped
-      // anyway, so a child that outlives the controller cannot block `stop`.
-      await Promise.race([drained, Bun.sleep(OUTPUT_DRAIN_BOUND_MS)]);
-      return child.exitCode ?? -1;
-    },
-  };
-}
-
-/**
- * Runs the CLI once, the way a shell would: arguments in `argv`, content on
- * stdin, and nothing shared with the caller except the environment it is
- * given.
- */
-export async function runCli(
-  args: ReadonlyArray<string>,
-  options: {
-    readonly home: string;
-    readonly env?: Readonly<Record<string, string>> | undefined;
-    readonly stdin?: string | undefined;
-    /** The compiled binary to run instead of the dispatcher's source. */
-    readonly binary?: string | undefined;
-  },
-): Promise<Ran> {
-  const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
-  const child = Bun.spawn([...command, ...args], {
-    cwd: ROOT,
-    env: { ...buildCleanEnv(), HERCULE_HOME: options.home, ...options.env },
-    stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { code, stdout, stderr };
-}
-
-/** The user every suite sets up as, and the password it logs in with. */
-export const USERNAME = "rogier";
-export const PASSWORD = "correct horse battery staple";
-
 /**
  * Returns the API key `hercule login` wrote into a home, for the requests no
  * command covers. Reading the file is the only way to get it: by design, the
@@ -356,41 +158,6 @@ export function readApiKey(home: string): string {
     readonly apiKey: string;
   };
   return credentials.apiKey;
-}
-
-/**
- * Takes a fresh controller through first run, the way an operator does: reads
- * the setup URL it wrote into its home, and passes that token to the CLI. The
- * caller checks the exit code, because some suites expect this to fail.
- */
-export async function completeSetup(options: {
-  readonly home: string;
-  readonly url: string;
-  readonly binary?: string | undefined;
-}): Promise<Ran> {
-  const setupUrl = readFileSync(join(options.home, "setup-url"), "utf8").trim();
-  const token = new URL(setupUrl).searchParams.get("token");
-  if (token === null) throw new Error(`no setup token in ${setupUrl}`);
-  return runCli(
-    [
-      "setup",
-      "complete",
-      "--setup-token",
-      token,
-      "--username",
-      USERNAME,
-      "--password-stdin",
-      "--timezone",
-      "Europe/Amsterdam",
-      "--json",
-    ],
-    {
-      home: options.home,
-      binary: options.binary,
-      env: { HERCULE_API_URL: options.url },
-      stdin: PASSWORD,
-    },
-  );
 }
 
 /** Parses the CLI's `--json` output. Throws with the command's own output when it is not JSON. */
@@ -472,7 +239,7 @@ export async function waitForEnrolledRunner(options: {
     if (id !== undefined && existsSync(join(options.home, "runner", "runner.json"))) return id;
     if (Date.now() > deadline)
       throw new Error(`no runner connected to the controller:\n${ran.stdout}`);
-    await Bun.sleep(500);
+    await sleep(500);
   }
 }
 
@@ -517,7 +284,7 @@ export async function probeUntilLoggedIn(options: {
         `the instance never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
       );
     }
-    await Bun.sleep(2_000);
+    await sleep(2_000);
   }
 }
 
@@ -612,7 +379,7 @@ export async function waitForTranscriptTag(options: {
           `${rows.map((row) => row.event._tag).join(", ") || "nothing"}`,
       );
     }
-    await Bun.sleep(500);
+    await sleep(500);
   }
 }
 

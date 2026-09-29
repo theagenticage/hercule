@@ -1,7 +1,12 @@
 /**
  * Starts the desktop app's main process.
  *
- * Before Electron is ready, and synchronously, it:
+ * First, it refuses to start, printing why and exiting with code 1, when the
+ * packaged app is given a command-line argument it does not allow, because
+ * some would let another program read the signed-in session; see
+ * `findRefusedArgument`.
+ *
+ * Then, before Electron is ready, and synchronously, it:
  *
  * - registers the `app` scheme's privileges, which Electron takes only then;
  * - takes the single-instance lock, and quits when another instance of the
@@ -16,18 +21,26 @@
  * The top level stays synchronous and does little: Electron waits for this
  * module to finish before it emits `ready`.
  */
+import { writeSync } from "node:fs";
+import inspector from "node:inspector";
 import path from "node:path";
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
-import { app, Menu, protocol } from "electron";
+import { app, Menu, protocol, safeStorage } from "electron";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { answerAppRequest, makeAppSchemeLayer } from "./app-scheme";
 import { makeAppSettingsLayer } from "./app-settings";
+import { makeControllerConnectionLayer } from "./controller-connection";
+import { fetchWithoutRedirects } from "./fetch-without-redirects";
 import { registerIpcHandlers } from "./ipc";
-import { buildMenuTemplate } from "./menu";
+import { loadMainWindow, showMainWindow } from "./main-window";
+import { makeMainMenuLayer } from "./menu";
+import { findRefusedArgument } from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
-import { secureSession, secureWebContents } from "./security";
-import { loadMainWindow, MainWindowLayer, showMainWindow } from "./window";
+import { makeSafeStorageLayer } from "./safe-storage";
+import { openInBrowser, secureSession, secureWebContents } from "./security";
+import { StoredTokenLayer } from "./stored-token";
+import { MainWindowLayer } from "./window";
 
 /**
  * The address of the renderer's dev server, set by `scripts/dev.ts`. A
@@ -38,8 +51,16 @@ const devServerUrl = app.isPackaged ? null : (process.env.HERCULE_DESKTOP_DEV_SE
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
+  const windowAndMenu = makeMainMenuLayer(Menu, !app.isPackaged).pipe(
+    Layer.provideMerge(MainWindowLayer),
+  );
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(MainWindowLayer, makeAppSchemeLayer(devServerUrl)).pipe(
+    Layer.mergeAll(
+      StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage))),
+      makeControllerConnectionLayer(openInBrowser, fetchWithoutRedirects),
+      makeAppSchemeLayer(devServerUrl),
+    ).pipe(
+      Layer.provideMerge(windowAndMenu),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
       Layer.provide(NodeFileSystem.layer),
     ),
@@ -62,29 +83,45 @@ const startApp = (): void => {
   });
 
   void app.whenReady().then(() => {
-    Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(!app.isPackaged)));
     protocol.handle(APP_SCHEME, (request) => runtime.runPromise(answerAppRequest(request)));
     runtime.runFork(loadMainWindow);
   });
 };
 
-// Spec 17 (§Reaching the controller) says why the renderer needs each of
-// these privileges.
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: APP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      codeCache: true,
-    },
-  },
-]);
-
-if (app.requestSingleInstanceLock()) {
-  startApp();
+// The first argument is the executable's path.
+const refusedArgument = findRefusedArgument(
+  process.argv.slice(1),
+  app.isPackaged,
+  inspector.url() !== undefined,
+);
+if (refusedArgument !== undefined) {
+  // Written synchronously: on macOS a write to a pipe is asynchronous, and
+  // the app exits right after. The argument is quoted as a JSON string, so a
+  // space, tab or newline in it shows.
+  writeSync(
+    process.stderr.fd,
+    `Hercule does not start with the argument ${JSON.stringify(refusedArgument)}: it refuses every command-line argument but a few, because some would let another program read your signed-in session. Start it without that argument.\n`,
+  );
+  app.exit(1);
 } else {
-  app.quit();
+  // Spec 17 (§Reaching the controller) says why the renderer needs each of
+  // these privileges.
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: APP_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        codeCache: true,
+      },
+    },
+  ]);
+
+  if (app.requestSingleInstanceLock()) {
+    startApp();
+  } else {
+    app.quit();
+  }
 }

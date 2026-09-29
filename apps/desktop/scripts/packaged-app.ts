@@ -1,16 +1,16 @@
 /**
- * Finds, starts and quits the packaged desktop app that `pnpm build:desktop`
- * builds. The perf script (`./perf.ts`) and the end-to-end suite
- * (`e2e/desktop/`) both start the app through this module, so they run it the
- * same way.
+ * Finds, starts, signs in and quits the packaged desktop app that
+ * `pnpm build:desktop` builds. The perf script (`./perf.ts`) and the
+ * end-to-end suite (`e2e/desktop/`) both run the app through this module, so
+ * they run it the same way.
  *
  * The perf script runs on plain Node and imports this module by its `.ts`
  * path, so the module uses only TypeScript that Node can strip, and imports
  * no other file of the repository.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { _electron, type ElectronApplication } from "playwright";
+import { _electron, type ElectronApplication, type Page } from "playwright";
 
 /**
  * The folder electron-builder writes the `.app` into for this machine:
@@ -85,8 +85,56 @@ export function buildAppArgs(userDataDir: string): string[] {
 }
 
 /**
+ * Writes `url` into the settings file in `userDataDir` as the saved
+ * controller, the way main saves one after a successful check, so the app
+ * starts connected to it. Replaces any settings already there. Call it before
+ * the app starts: main reads the settings file only once, at start.
+ */
+export function writeControllerUrl(userDataDir: string, url: string): void {
+  writeFileSync(join(userDataDir, "settings.json"), JSON.stringify({ controllerUrl: url }));
+}
+
+/**
+ * Reads the settings file in `userDataDir` and returns the JSON object it
+ * holds, or an empty object when main has not written the file yet.
+ */
+export function readSettings(userDataDir: string): Record<string, unknown> {
+  const file = join(userDataDir, "settings.json");
+  if (!existsSync(file)) return {};
+  return JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+}
+
+/**
+ * Signs in on the app's sign-in screen the way a user does: types the
+ * username and the password, and presses "Sign in". Returns once the button
+ * is pressed; the caller waits for whatever screen it expects next.
+ */
+export async function signIn(
+  page: Page,
+  credentials: { readonly username: string; readonly password: string },
+): Promise<void> {
+  await page.getByRole("textbox", { name: "Username" }).fill(credentials.username);
+  await page.getByLabel("Password").fill(credentials.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+/**
+ * The switch that makes the app encrypt its sign-in with a fixed key instead
+ * of one kept in the macOS Keychain, so no test and no perf run reads or
+ * writes the real Keychain, and none can meet its access prompt.
+ *
+ * While its Node inspector is closed, a packaged app refuses every argument
+ * except those `buildAppArgs` passes, this one included: anyone could read a
+ * token saved under the fixed key. Playwright always opens the inspector. A
+ * launch that spawns the app itself, and passes any other argument, passes
+ * `--inspect=0` as well; the test package's fuses allow it.
+ */
+export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
+
+/**
  * Starts the test package with Playwright's Electron driver, on the given
- * user data directory, and returns Playwright's handle on it.
+ * user data directory, and returns Playwright's handle on it. The app runs on
+ * the mock keychain (see `MOCK_KEYCHAIN_SWITCH`).
  *
  * Given an `executablePath`, Playwright passes only `--inspect=0` and
  * `--remote-debugging-port=0` before the app's own arguments. It does not
@@ -96,7 +144,7 @@ export function buildAppArgs(userDataDir: string): string[] {
 export function launchTestPackage(userDataDir: string): Promise<ElectronApplication> {
   return _electron.launch({
     executablePath: findExecutable("test"),
-    args: buildAppArgs(userDataDir),
+    args: [...buildAppArgs(userDataDir), MOCK_KEYCHAIN_SWITCH],
     env: buildAppEnv(),
     // Playwright otherwise makes every page match `prefers-color-scheme:
     // light`, whatever the macOS appearance, and the page's theme follows

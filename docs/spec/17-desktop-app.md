@@ -108,10 +108,23 @@ Measured 2026-09-29 against Electron 44.4.5:
 - **One controller.** The first milestone connects to one controller at a time.
 - **Where the URL is kept.** Main keeps the URL in the app's settings file in its user data directory.
 - **The connect screen.** It asks for the URL, prefilled with `http://127.0.0.1:4937` (the default `bind.port`, [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
-- **Main checks the URL.** Main calls `setup.read` on it through the contract's client. This is main's one call to the controller: the renderer cannot make it, because its CSP (below) names only the controller it is connected to.
-  - The URL is not a Hercule controller: the connect screen says so, and nothing is saved.
-  - The controller's setup is not complete: the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.
-  - The check passes: main saves the URL and reloads the window, so the new CSP names the new controller.
+- **The URL is an origin.** Main accepts an `http:` or `https:` URL with no user name, no password, no path other than `/`, no query and no fragment, and saves its origin. Anything else is refused with a message, never trimmed.
+- **Main checks the URL.** Main sends `setup.read` to it. This is main's one call to the controller: the renderer cannot make it, because its CSP (below) names only the controller it is connected to.
+  - **The request goes through Chromium's network stack, the one the page uses,** not through Node's `fetch` and not through the contract's client. That way the check sees the macOS proxy settings and the certificates the Keychain trusts, as the page does. Main uses Electron's `net.request`, because `net.fetch` cannot return a redirect or send the preflight with the page's origin. The request sends no cookies or stored credentials. Main must read the response's `access-control-allow-origin` header, and the derived client does not expose response headers. Main still takes the operation's path from the contract's operation table, and decodes the body with the contract's `SetupState` schema. The check is its own module, imported the first time the user connects, so it is not on the launch path.
+  - **The check gives up after 5 seconds,** and reads at most 64 kB of the answer. A larger answer is not a `SetupState`.
+  - **The check sends the preflights too.** After the `GET`, main sends the `OPTIONS` requests the renderer's own calls will need, one for each method in the contract's operation table, all at once. Each asks with its method and `access-control-request-headers: authorization, content-type`. A reverse proxy can pass the `GET` with its CORS header and still reject a preflight, and sign-in or every edit would then fail with a misleading line. Main asks once per method, rather than asking once and reading the answer for every method, because a server may answer a preflight for the asked method only, and Chromium asks the same way. The check asks at one path, so a proxy whose CORS answer differs from path to path is not detected.
+  - **The outcomes,** checked in this order. The connect screen shows each as one line, with the origin that was checked rather than the text as typed, and nothing is saved unless the check passes:
+    - The request fails, or times out: the controller is unreachable.
+    - The answer redirects to the same path on another origin, such as `https:` for `http:`: the app names that origin and asks the user to connect to it instead. It does not follow the redirect, because the saved URL must be the one the renderer calls. Any other redirect counts as the next outcome.
+    - The status is not 200, or the body is not a `SetupState`: the URL is not a Hercule controller. So does a status outside 200 to 599, such as `999`. Response headers that the page's network stack cannot represent, such as a header with a character above U+00FF, are ignored: the check reads only `location` and the CORS headers, and those are plain ASCII whenever they are valid.
+    - The response's `access-control-allow-origin` does not allow the origin (by name or `*`): the controller is older than the desktop app and must be updated.
+    - A preflight's answer is not 2xx, does not allow the origin (by name or `*`), does not name `authorization`, does not allow `content-type` (by name or `*`), or does not allow its method (by exact name or `*`): the app names every refused method, and asks the user to update the controller or check any proxy in front of it. A proxy is the likelier cause here, because the controller's own answer passed the step above. These are Chromium's rules for the page's calls. A preflight's answer need not list `GET`, `HEAD` or `POST`, which CORS always allows. `*` counts because the page's calls send no credentials; it never covers `authorization`.
+    - The controller's setup is not complete: the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.
+    - Otherwise the check passes: main saves the URL and reloads the window, so the new CSP names the new controller.
+- **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again.
+- **A controller that does not answer at launch** is treated as down after 5 seconds. A connection can be accepted and never answered, and neither Chromium nor the client gives up on its own. While the app waits, and only once the wait is noticeable, it shows the lockup, "Connecting to `<url>`…", and a Change button that leads to the connect screen.
+- **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. Slice 6, which adds the composer, gives those two a limit above that wait. A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
+- **Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.
 - **Changing controllers.** Changing the controller deletes the stored token (see [Auth and the token](#auth-and-the-token)).
 
 ### Content-Security-Policy
@@ -159,9 +172,13 @@ The flow is the web app's ([./14-web-app.md](./14-web-app.md) §Auth in the clie
 Only the storage differs:
 
 - **At rest,** main encrypts the token with Electron's `safeStorage` and writes it into the app's user data directory. On macOS, `safeStorage` keeps its key in the Keychain. The token is never in `localStorage` and never on disk in plain text.
-- **It is stored together with the controller URL it belongs to,** so one controller's token is never sent to another. Connecting to a different controller deletes it.
+- **It is stored together with the controller URL it belongs to,** so one controller's token is never sent to another. Both sit in the app's settings file and change in one write. Connecting to a different controller deletes the token; connecting to the same one again keeps it. The URL is encrypted together with the token, and main deletes a token whose URL does not match the saved one, or that has no saved URL beside it, or whose encrypted value names no URL. Otherwise another program could edit the settings file and have the token sent to a server of its own.
+- **When the Keychain fails:**
+  - If the saved token cannot be decrypted, for example because the Keychain key changed or access was denied, main deletes it, and the user signs in again.
+  - If a new token cannot be encrypted, main saves nothing and tells the user they will have to sign in again next time. The user stays signed in for this run. There is no plain-text fallback.
 - **At boot,** the renderer reads the token once through the bridge, before it creates the client. Its `TokenStore` then reads from memory, and each write is sent to main.
 - **Logout and the first 401 remove it,** as on the web.
+- **Sign Out never waits on the controller.** The app forgets the token, empties its caches and shows the sign-in screen at once. It then asks the controller to revoke the token it just forgot, and ignores the answer. A controller that hangs must not keep a user signed in who asked to be signed out, and a quit in that moment must not leave the token on disk.
 - **While the app runs, the token is in the renderer's memory,** as it is in a browser tab. The CSP above is what protects it.
 
 **Verify at build time:** whether an unsigned development build prompts for Keychain access when `safeStorage` is first used. A signed build must not prompt.
@@ -187,6 +204,16 @@ Only the storage differs:
   - `OnlyLoadAppFromAsar` on
   - `GrantFileProtocolExtraPrivileges` off: the app loads nothing over `file://`
 - **The test package differs from the release package in one fuse.** Playwright's Electron driver attaches through `--inspect`, which `EnableNodeCliInspectArguments` turns off. The end-to-end tests and the perf script therefore run a second package with only that fuse on. A packaging test reads every fuse off the release `.app` and checks it.
+- **The packaged app refuses every command-line argument but three, matched as whole arguments.** Started with any other argument, it prints why and exits before it reads the token. Many of Chromium's switches would let another program on the machine read the signed-in session, and nobody can list them all, so the rule is an allow-list. For example:
+  - `--remote-debugging-port` and `--remote-debugging-pipe` let another program drive the page, which holds the token. No fuse turns them off.
+  - `--log-net-log` writes every request to a file, the `authorization` header included.
+  - `--proxy-server`, `--host-resolver-rules` and `--ignore-certificate-errors` send the app's requests, and the token with them, to another server.
+  - `--use-mock-keychain` replaces the Keychain key with a fixed one, so any program could decrypt a token saved under it.
+- **Arguments that are not switches are refused too.** Chromium trims spaces, tabs and newlines from each argument before it looks for a switch, and reads `-x` as it reads `--x`. So ` --remote-debugging-port=0`, with a leading space, is that switch.
+- **The three allowed arguments are the ones the end-to-end tests pass.** macOS passes the app no argument when it opens it.
+  - `--user-data-dir=<folder>` gives each test its own folder. It exposes nothing: a program that can write a folder it names can write the app's own.
+  - `-ApplePersistenceIgnoreState` followed by `YES` keeps macOS from offering to reopen windows after a test stops the app. The app does not use window restoration.
+- **The refusal applies only while the Node inspector is closed.** An open inspector already gives full control of main, so refusing arguments would add nothing. The release package's fuse keeps the inspector closed, so there the refusal always applies. The test package runs with the inspector open, which lets Playwright pass `--remote-debugging-port` and the tests pass `--use-mock-keychain`.
 
 ## The IPC contract
 
@@ -195,8 +222,14 @@ Only the storage differs:
 - Main decodes each request against it.
 - The preload exposes one typed function per channel, on one object in the renderer's world: `window.bridge`.
   - A renderer → main channel `a.b` is called as `window.bridge.a.b(request)` and returns a promise of the response.
-  - A main → renderer channel is declared in a second table. The bridge exposes it as a subscription: `thread.open` becomes `window.bridge.thread.onOpen(listener)`, which returns a function that unsubscribes. The preload passes the listener only the decoded payload, never Electron's IPC event object.
+  - A main → renderer channel is declared in a second table. The bridge exposes it as a subscription: `thread.open` becomes `window.bridge.thread.onOpen(listener)`, which returns a function that unsubscribes. Main encodes each payload against the table before it sends it. The preload passes the listener only that payload, never Electron's IPC event object. The preload does not decode it, because the preload links nothing but Electron.
 - Nothing else crosses between the layers.
+
+**Errors across the bridge:**
+
+- **An outcome the user can cause is part of the response,** as a tagged union. `controllerUrl.save`, for example, answers with one of its outcomes, and the connect screen shows each one. Errors cannot carry a type across the bridge: Electron copies only an error's message to the page.
+- **A refused message is a bug.** Main refuses a message that does not decode, a sender other than the app's main frame, and a request that makes no sense in main's current state. It logs the refusal, and the promise in the renderer rejects with its message. The renderer never shows a refusal to the user as if the user had caused it.
+- **A defect,** an error nobody expected, rejects the promise too, and Electron logs it.
 
 The first milestone's channels:
 
@@ -343,7 +376,7 @@ These are starting budgets. Slice 5 measures the real thread screen, and each bu
 | Idle, window hidden or minimized | Renderer: no wakeups from the app |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The tail paints at most once per frame |
 | Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts` |
-| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used |
+| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI |
 
 ### Rules
 
@@ -381,7 +414,14 @@ These rules keep the budgets:
 
 ### Measuring
 
-- **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table. Memory, CPU and wakeups come from `app.getAppMetrics()`. Long tasks come from a `PerformanceObserver` in the renderer.
+- **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table.
+  - **No tool is attached while it reads memory, CPU and wakeups.** It reads them from a plain launch of the app. An attached Playwright makes the renderer read 7 to 14 MB higher.
+  - **The plain launch passes three switches:** `--inspect=0` and `--remote-debugging-port=0` open main's Node inspector and a DevTools port, which the script connects to only while it reads, and `--use-mock-keychain` lets the app read the token saved at sign-in without the real Keychain.
+  - **The measured launch is the app's third.** On the second, Chromium writes its code cache, and the renderer reads about 7 MB higher.
+  - **Memory is read 13 seconds after the page opens,** from outside the app. The working set is the resident size `ps` reports, the same number `app.getAppMetrics()` gives on macOS. The physical footprint, which Activity Monitor shows, is recorded beside it without a budget.
+  - **CPU and wakeups** come from `app.getAppMetrics()`, which the script calls in main through its Node inspector, connecting only for each call. A wakeup is the kernel's count of a process's interrupt wakeups. The visible sample starts 30 seconds after the page opens, so it measures the app at rest, not the one-off timers that fire after a page loads.
+  - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
+  - **Long tasks** come from a `PerformanceObserver` in the renderer.
 - **CI gates what does not depend on the machine:**
   - the renderer bundle budget
   - the process count
@@ -405,7 +445,33 @@ These rules keep the budgets:
 | The preload, minified | - | 243 bytes |
 
 - **Launch is measured without Playwright.** Playwright holds each new renderer paused until it attaches, which adds its own time to a launch. The perf script spawns the app as a plain process, and reads the page's `first-paint` entry over the Chrome DevTools Protocol once the window is on screen.
-- **The wakeups are an upper bound.** The perf script samples them through Playwright, which keeps a connection to main open. Sampled with `top` on the release package started without Playwright, all four processes showed 0 wakeups a second.
+- **Slice 1's memory and wakeups were read the old way,** with Playwright attached, so they read higher than slice 2's method would give. Read from a plain launch, slice 1's renderer is about 81 MB.
+
+**Slice 2,** measured 2026-09-29 on the reference machine with the perf script, over five runs. The window shows the signed-in shell against a controller on loopback. The load average was 5 to 13 while measuring. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to first paint, warm | 500 ms | 224 to 258 ms |
+| Launch: spawn to the first screen, the signed-in shell | - | 246 to 256 ms |
+| Processes | 4 | 4 |
+| Memory, summed working set | 420 MB | 343 MB |
+| Memory, renderer | 180 MB | 96 MB |
+| Physical footprint | - | 149 to 150 MB summed; renderer 28 MB |
+| Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 0; GPU 0 |
+| Wakeups while hidden | renderer none | renderer 0 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB | 162.6 kB |
+| Main's startup file, minified | 160 kB | 136.6 kB, 45.9 kB gzipped |
+| Main's controller check, loaded on first connect | - | 25.8 kB, 7.1 kB gzipped |
+| The preload, minified | - | 478 bytes |
+
+- **The renderer's JavaScript** is mostly react-dom (54 kB gzipped), Effect (49 kB), TanStack Router (17.6 kB), the contract (13.2 kB) and TanStack Query (7.4 kB). The contract brings about 3.8 kB of the runner protocol and the plugin host with it.
+- **About 16 kB of main's growth is Effect Schema code that only the controller check uses.** The bundler puts each module in one chunk, and startup imports `effect/Schema` too, so that code cannot move into the check's chunk.
+- **The renderer is about 15 MB above slice 1,** read the same way. Most of it is building the contract: importing it creates 2,656 Effect Schema objects, and the short-lived copies they make grow V8's young generation from 0.5 to 8 MB. V8 shrinks it again 30 to 60 seconds after load.
+  - **The client builds each operation on its first call,** not all 126 when it is created. That saved about 6.5 MB and 10 ms on the first screen.
+  - **Loading only the contract groups a screen calls** was prototyped and not taken. Loading only setup and auth saved about 8 MB more, but it needs one entry point per group and a client that takes groups, and the saving shrinks with each slice, because by slice 8 the app calls most groups. It is the first cut to revisit if the renderer nears its budget.
+  - **A smaller young generation** (`--js-flags=--max-semi-space-size=1`) saved about 6 MB only in the first minute, and made allocation-heavy work 34 to 49% slower. Not taken.
+  - **Escaping the bundle's few non-ASCII characters** saved about 1 MB. V8 stores a script with any non-ASCII character at two bytes per character. Not taken for now: it needs a build plugin, for little gain.
+  - **Cheaper schema construction** is the lever left, not yet prototyped. Effect Schema's construction dominates the startup profile.
 
 ## Slices
 
@@ -425,7 +491,8 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
    - CORS on the controller
    - the connect screen
    - the stored token
-   - sign in and sign out
+   - sign in and sign out. Sign Out lives in the app menu, so this slice brings forward the Sign Out item and the `menu.command` channel. The rest of the menu stays in slice 8.
+   - the refused arguments
 3. **Design foundation.**
    - font preloading
    - faces, poses, icons and marks as typed modules
@@ -433,7 +500,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
    - the screenshot comparison against the Bureau pages
 4. **Sidebar.** Waiting on you, New thread, and threads grouped by project and workspace, kept live.
 5. **Thread view.**
-   - the transcript and streaming
+   - the transcript and streaming. `transcript.read` returns the whole transcript, with no paging, so the slice's plan measures a long thread first.
    - turn dividers and markdown
    - the Requests dock
    - queued inputs
@@ -455,6 +522,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
 - **Renderer component tests** work as they do in `apps/web`.
 - **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the test package (see [Security baseline](#security-baseline)) against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. CI runs them on macOS, the target platform.
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
+  - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.

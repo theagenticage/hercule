@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isOnRendererOrigin } from "./renderer-origin";
+import { APP_SCHEME, isOnRendererOrigin, RENDERER_URL } from "./renderer-origin";
+
+describe("APP_SCHEME and RENDERER_URL", () => {
+  it("serve the renderer at app://hercule/", () => {
+    expect(APP_SCHEME).toBe("app");
+    expect(RENDERER_URL).toBe("app://hercule/");
+  });
+});
 
 describe("isOnRendererOrigin", () => {
   it.each(["app://hercule", "app://hercule/", "app://hercule/assets/index.js?x=1#y"])(

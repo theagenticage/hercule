@@ -25,6 +25,8 @@ export {
 
 export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily } from "./grants";
 
+export { DESKTOP_APP_ORIGIN } from "./desktop-app";
+
 export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
 export {

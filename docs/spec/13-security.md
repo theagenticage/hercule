@@ -10,6 +10,9 @@ Hercule v1 is a single-user system whose supported perimeter is a home LAN or a 
   - **A request from that origin** gets `access-control-allow-origin: app://hercule`.
   - **A preflight from that origin** gets the methods the API uses, the request headers `authorization` and `content-type`, and `access-control-max-age: 7200`. Every request that carries the bearer token is preflighted, and Chromium caches a preflight for each URL for at most two hours, so the maximum saves a round trip on each repeat request.
   - **Any other origin** gets no CORS header, so a page on that origin cannot read a response.
+  - **Every response other than a preflight's carries `vary: origin`,** because the answer now depends on the request's origin, and a cache must not hand one origin's answer to another. A preflight's answer needs no `vary`: HTTP caches do not store answers to `OPTIONS`, and the browser keeps its preflight answers per origin.
+  - **The preflight is answered before authentication,** and it runs no operation.
+  - **The desktop app's requests carry only the headers the preflight allows.** `client-core` turns off Effect's trace headers (`b3`, `traceparent`), which it would otherwise add to every request. The controller does not read them.
   - **CORS is not authentication.** It decides only whether a page may read a response. Every operation except `setup.read` and `auth.login` still requires the bearer token.
   - **Why allowing the origin is safe:** no web page can take the origin `app://hercule`. Only an app that registers the scheme itself can use it.
   - **The WebSocket is not affected.** CORS does not apply to the upgrade, and the socket authenticates with its ticket (§4).

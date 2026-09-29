@@ -13,7 +13,7 @@
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
     "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --outfile hercule",
-    "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer && pnpm --filter @hercule/desktop package",
+    "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer && bun run scripts/check-bundle-budget.ts --main-startup apps/desktop/out/main/index.js && pnpm --filter @hercule/desktop package",
     "test:desktop": "vitest run --project desktop"
   },
   "devDependencies": {

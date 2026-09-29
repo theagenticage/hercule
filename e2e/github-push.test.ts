@@ -33,17 +33,19 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PASSWORD,
   USERNAME,
-  readApiKey,
   runCli,
   completeSetup,
+  startController,
+  type Controller,
+  type Ran,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   buildGitEnv,
   parseJsonOutput,
   isLiveSessionTestEnabled,
   findReleaseBinary,
-  startController,
   createTemporaryHome,
-  type Controller,
-  type Ran,
 } from "./harness";
 
 const token = process.env["HERCULE_E2E_GITHUB_TOKEN"];
