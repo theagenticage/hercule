@@ -10,9 +10,8 @@
 }
 
 /* The strip along the top of the sidebar, where macOS draws the traffic
-   lights. The window is dragged by it. */
+   lights. The shell's drag strip, over it, drags the window. */
 .side-top {
   flex: none;
   height: 48px;
-  -webkit-app-region: drag;
 }

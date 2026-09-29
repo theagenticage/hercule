@@ -119,6 +119,17 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     request: Schema.NullOr(Schema.NonEmptyString),
     response: Schema.Void,
   },
+  /**
+   * Reports that the frame that draws the page's first screen, fonts
+   * included, has reached the window. Main
+   * shows the window if it has not shown yet, and otherwise does nothing: the
+   * page reports again after each reload, and more than one screen can report
+   * at launch, so a second report is normal and never refused.
+   */
+  "firstScreen.report": {
+    request: Schema.Undefined,
+    response: Schema.Void,
+  },
 } as const satisfies Record<`${string}.${string}`, RendererToMainIpcChannel>;
 
 /**

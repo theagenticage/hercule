@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en" data-theme="studio">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Hercule</title>
+    <style>
+      .bar .who-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .who-head .title {
+        color: var(--ink);
+      }
+      .who-head small {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .chan {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: var(--r-pill);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .chan.is-on {
+        background: var(--selected);
+        color: var(--ink);
+      }
+      .split {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 316px;
+      }
+      .convo {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .convo .column {
+        width: min(660px, 100% - 48px);
+      }
+      .tx {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 24px 0 172px;
+      }
+      .quiet {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .quiet::before,
+      .quiet::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--line-soft);
+      }
+      .quiet span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      /* A Notice is the system speaking about Ada, never in her voice. */
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        align-self: center;
+        max-width: 560px;
+        padding: 8px 14px 8px 8px;
+        border-radius: var(--r-lg);
+        background: var(--fail-tint);
+        color: var(--ink);
+        font-size: var(--t-12);
+        line-height: 1.4;
+      }
+      .notice b {
+        color: var(--fail-ink);
+      }
+      .notice .time {
+        margin-left: 6px;
+      }
+      .refs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .ref {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 11px 0 5px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .ref .you-ink {
+        font-weight: var(--w-bold);
+      }
+      .reminder {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 10px 14px 10px 12px;
+        border-radius: var(--r-lg);
+        background: var(--who-tint);
+      }
+      .reminder .ic {
+        color: var(--who-ink);
+      }
+      .reminder b {
+        display: block;
+        font-size: var(--t-13);
+      }
+      .reminder span {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .mention {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--who-ink);
+        font-weight: var(--w-bold);
+        vertical-align: -3px;
+      }
+      .caret {
+        display: inline-block;
+        width: 8px;
+        height: 16px;
+        margin-left: 3px;
+        border-radius: 2px;
+        background: var(--who-ink);
+        vertical-align: -3px;
+        animation: caret 1s steps(2) infinite;
+      }
+      @keyframes caret {
+        50% {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .caret {
+          animation: none;
+        }
+      }
+
+      /* The rail: what Ada keeps between turns. */
+      .rail {
+        min-height: 0;
+        overflow: auto;
+        padding: 18px 20px 24px;
+        border-left: 1px solid var(--line-soft);
+        background: var(--bg);
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        scrollbar-width: thin;
+      }
+      .rail .section-h {
+        margin-bottom: 10px;
+      }
+      .rail .section-h a {
+        margin-left: auto;
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+      .beat {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(17, 1fr);
+        align-items: end;
+        height: 34px;
+        gap: 3px;
+      }
+      .beat i {
+        height: 8px;
+        border-radius: 3px;
+        background: var(--line);
+      }
+      .beat i.q {
+        background: color-mix(in oklab, var(--who) 38%, transparent);
+      }
+      .beat i.s {
+        height: 22px;
+        background: var(--who);
+      }
+      .beat-axis {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 5px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-variant-numeric: tabular-nums;
+      }
+      .beat-line {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .beat-line b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .rem {
+        display: grid;
+        grid-template-columns: 62px 1fr;
+        gap: 10px;
+        padding: 7px 0;
+        font-size: var(--t-12);
+        border-top: 1px solid var(--line-soft);
+      }
+      .rem:first-of-type {
+        border-top: 0;
+      }
+      .rem time {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .rem b {
+        font-weight: var(--w-medium);
+      }
+      .core {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .core-top {
+        display: flex;
+        justify-content: space-between;
+        font-size: var(--t-12);
+      }
+      .core-top span:last-child {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .core p {
+        margin: 0;
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .topic {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0 8px;
+        padding: 6px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: var(--t-12);
+      }
+      .topic b {
+        font-weight: var(--w-medium);
+      }
+      .topic small {
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-variant-numeric: tabular-nums;
+      }
+      .topic span {
+        grid-column: 1 / 3;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="assistants"></aside>
+      <main class="main">
+        <header class="bar">
+          <div class="who-head">
+            <i data-face="Ada" data-pose="working" data-size="30"></i>
+            <h1 class="title">Ada</h1>
+            <small>personal assistant</small>
+          </div>
+          <span class="chan is-on"><i data-i="chat" data-size="13"></i>Web chat</span>
+          <span class="chan"><i data-brand="slack" data-size="12"></i>Slack DM</span>
+          <span class="spacer"></span>
+          <span class="time">Claude Code · Sonnet 5</span>
+          <a class="btn btn--sm" href="settings-assistants.html"><i data-i="settings" data-size="14"></i>Ada's record</a>
+        </header>
+
+        <div class="split">
+          <div class="convo">
+            <div class="transcript" data-transcript>
+              <div class="column tx">
+                <div class="stamp">Yesterday</div>
+                <div class="notice">
+                  <i data-face="Ada" data-pose="failed" data-size="28"></i>
+                  <span><b>Ada was interrupted:</b> her turn failed: provider timeout after 120s. Your last message was kept.<span class="time">22:14</span></span>
+                </div>
+
+                <div class="stamp">Today</div>
+                <div class="quiet"><span><i data-i="heart" data-size="13"></i>2 quiet check-ins · 07:00 · 08:00</span></div>
+
+                <div class="msg">
+                  <i data-face="Ada" data-pose="idle" data-size="34"></i>
+                  <div class="msg-body">
+                    <div class="msg-name">Ada <small>heartbeat · 09:00</small></div>
+                    <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3&#8209;D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p>
+                    <div class="refs">
+                      <a class="ref" href="session-active.html"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="22"></i>Fix 3&#8209;D Secure checkout<span class="you-ink">· waiting on you</span></a>
+                      <button class="btn btn--who btn--sm" style="--hue: var(--hue-iris)"><i data-face="Ada" data-pose="idle" data-size="20"></i>Draft it for Marta</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="msg--me">
+                  <div>
+                    <div class="bubble">Remind me Friday to renew the SSL cert for ops.</div>
+                    <div class="bubble-meta">09:20</div>
+                  </div>
+                </div>
+
+                <div class="msg">
+                  <i data-face="Ada" data-pose="idle" data-size="34"></i>
+                  <div class="msg-body">
+                    <div class="msg-name">Ada <small>09:20</small></div>
+                    <p>Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.</p>
+                    <div class="reminder" style="--hue: var(--hue-iris)">
+                      <i data-i="alarm" data-size="18"></i>
+                      <div><b>Renew the SSL cert for ops</b><span>Fri 2 Oct · 09:00 · to Web chat</span></div>
+                      <button class="btn btn--ghost btn--sm">Edit</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="msg--me">
+                  <div>
+                    <div class="bubble">What's the status of the backup job?</div>
+                    <div class="bubble-meta">09:38</div>
+                  </div>
+                </div>
+
+                <div class="msg">
+                  <i data-face="Ada" data-pose="working" data-size="34"></i>
+                  <div class="msg-body">
+                    <div class="msg-name">Ada <small>answering…</small></div>
+                    <p><span class="mention" style="--hue: var(--hue-teal)"><i data-face="Milo" data-pose="working" data-size="18"></i>Milo</span> started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret" style="--hue: var(--hue-iris)"></span></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="composer" data-composer>
+                <div class="composer-card">
+                  <textarea class="composer-input" rows="1" placeholder="Message Ada…"></textarea>
+                  <div class="fold fold--hide">
+                    <div>
+                      <div class="composer-row">
+                        <button class="icon-btn" title="Attach"><i data-i="plus"></i></button>
+                        <button class="pick"><i data-i="chat" data-size="14"></i>Web chat</button>
+                        <span class="spacer"></span>
+                        <button class="pick pick--pill"><i data-brand="claude" data-size="13"></i>Claude Code · Sonnet 5</button>
+                        <button class="icon-btn" title="Dictate"><i data-i="mic"></i></button>
+                        <button class="stop" title="Stop Ada's turn"><i data-i="stop" data-size="14"></i></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="fold fold--hide">
+                  <div>
+                    <div class="lip">
+                      <span><i data-i="memory" data-size="13"></i>Remembers 7 topics</span>
+                      <span><i data-i="heart" data-size="13"></i>Next heartbeat 10:00</span>
+                      <span class="spacer"></span>
+                      <span>Replies when her turn ends</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rail">
+            <section>
+              <h2 class="section-h"><i data-i="heart" data-size="14"></i>Heartbeat<a href="settings-assistants.html">Every hour</a></h2>
+              <div class="beat" style="--hue: var(--hue-iris)" aria-label="Heartbeats from 07:00 to 23:00">
+                <i class="q"></i><i class="q"></i><i class="s"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+              <div class="beat-axis"><span>07</span><span>11</span><span>15</span><span>19</span><span>23</span></div>
+              <div class="beat-line"><b>09:00</b> spoke · 07:00 and 08:00 quiet · next <b>10:00</b></div>
+            </section>
+
+            <section>
+              <h2 class="section-h"><i data-i="alarm" data-size="14"></i>Reminders <b class="count">3</b></h2>
+              <div class="rem"><time>Thu 16:00</time><b>Call the accountant</b></div>
+              <div class="rem"><time>Fri 09:00</time><b>Renew the SSL cert for ops</b></div>
+              <div class="rem"><time>Mon 08:30</time><b>Weekly revenue summary <span class="faint">· every week</span></b></div>
+            </section>
+
+            <section>
+              <h2 class="section-h"><i data-i="memory" data-size="14"></i>Memory<a href="settings-assistants.html">Edit</a></h2>
+              <div class="core">
+                <div class="core-top"><b>Core note</b><span>1,284 of 4,000</span></div>
+                <div class="meter" style="--hue: var(--hue-iris)"><i style="width: 32%"></i></div>
+                <p>Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays…</p>
+              </div>
+              <div class="topic"><b>work-style</b><small>1.2k</small><span>Prefers short answers; decides fast; hates long preambles</span></div>
+              <div class="topic"><b>webshop</b><small>3.4k</small><span>Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span></div>
+              <div class="topic"><b>payments-api</b><small>2.1k</small><span>Owns webhooks + payouts; v2.x; publish via npm</span></div>
+              <div class="topic"><b>ops</b><small>1.8k</small><span>Backups nightly 04:00 to B2; certs on status.acme.dev</span></div>
+              <div class="topic"><b>customers</b><small>2.7k</small><span>Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span></div>
+              <div class="topic faint" style="grid-template-columns: 1fr"><span>+2 topics · family, reading · 7 of 24</span></div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

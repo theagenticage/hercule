@@ -12,6 +12,10 @@
     "src/preload/**/*.ts",
     "src/ipc/**/*.ts",
     "scripts/**/*.ts",
-    "vite.*.config.ts"
+    "vite.*.config.ts",
+    // The motion test reads every stylesheet of the renderer with `node:fs`,
+    // so it belongs to the Node program, although it sits beside the styles
+    // it checks. tsconfig.renderer.json leaves it out.
+    "src/renderer/styles/motion.test.ts"
   ]
 }

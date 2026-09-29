@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bureau reference sheet</title>
+    <!-- The Bureau book's own files. scripts/compare-bureau.ts serves them
+         under /bureau/, from docs/design/crew-bureau. -->
+    <link rel="stylesheet" href="/bureau/tokens.css" />
+    <link rel="stylesheet" href="/bureau/system.css" />
+    <!-- The book animates the faces' blink, wave, z's and paws, and the
+         working mark's dots. The app draws each piece at the frame the book
+         shows with every animation off, so this sheet stops them all. -->
+    <style>
+      * {
+        animation: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sheet"></div>
+    <script src="/bureau/crew.js"></script>
+    <script type="module" src="./reference.ts"></script>
+  </body>
+</html>

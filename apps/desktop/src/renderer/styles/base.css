@@ -64,3 +64,33 @@ html {
   outline-offset: 2px;
   border-radius: var(--r-xs);
 }
+
+/* A theme change snaps, as the native window around the page does. The theme
+   script (public/theme-init.js) sets the attribute only while it switches the
+   theme. */
+html[data-theme-changing] *,
+html[data-theme-changing] *::before,
+html[data-theme-changing] *::after {
+  transition: none !important;
+}
+
+/* With Reduce motion on, no transition runs: a hovered button, for one, takes
+   its new colours at once.
+   - Every transition lasts one of the three duration tokens;
+     styles/motion.test.ts refuses any other duration.
+   - Setting the tokens to 0s therefore stops every transition, and Chromium
+     starts none, so no transition event fires. No renderer code waits for
+     `transitionend`.
+   - This file loads after tokens.css, so these values replace the tokens'.
+   A rule that set a duration on every element would be wrong: an element
+   transitions every property by default, layout included, so each change
+   would start a transition of its own.
+   The one animation, the working pose's paws, is declared only for
+   no-preference, so it stops without a rule here. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+  }
+}

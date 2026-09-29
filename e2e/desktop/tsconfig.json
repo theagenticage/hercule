@@ -7,7 +7,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node"],
+    // The desktop scripts this suite imports run on plain Node too, which
+    // resolves an import only by its full file name, so they import each
+    // other as `./processes.ts`. TypeScript refuses that extension unless
+    // this is on.
+    "allowImportingTsExtensions": true
   },
   "include": ["**/*.ts"]
 }

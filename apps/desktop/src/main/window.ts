@@ -2,8 +2,9 @@
  * The app's one window, the MainWindow service (see `./main-window.ts`), built
  * with Electron: how it opens, shows, hides and remembers where it was.
  *
- * - It opens hidden, painted with the theme's background, and shows once the
- *   page has drawn, so it never flashes a blank frame.
+ * - It opens hidden, painted with the theme's background, and shows once its
+ *   first screen has reached it, so it never shows an empty page (see
+ *   `./window-visibility.ts`).
  * - It opens where it was when the app last hid it or quit, moved onto a
  *   display when that position is on none. The first time, it opens at
  *   1440 by 900, centred.
@@ -46,7 +47,7 @@ const chooseWindowBounds = (saved: WindowState | null): Bounds =>
 
 /**
  * Creates the window, hidden, and wires its events. The window shows itself
- * once the page has drawn.
+ * once its first screen has reached it.
  *
  * The window and the listeners on the app are released when main's runtime
  * shuts down: the listeners are removed, and the window is destroyed if it
@@ -59,16 +60,16 @@ const make = Effect.gen(function* () {
   const settings = yield* AppSettings;
   const saved = yield* settings.readWindowState;
 
-  // Saves run in the background, started by Electron's events. When main
-  // shuts down, it waits for the saves under way instead of interrupting
-  // them, so the save the app starts as it quits reaches the disk. The
-  // finalizer added last runs first, so the wait comes before the set of
-  // saves is closed.
-  const saves = yield* FiberSet.make();
-  yield* Effect.addFinalizer(() => FiberSet.awaitEmpty(saves));
-  const runSave = yield* FiberSet.runtime(saves)();
+  // Electron's events start effects that run in the background: saves and
+  // logs. When main shuts down, it waits for those under way instead of
+  // interrupting them, so the save the app starts as it quits reaches the
+  // disk. The finalizer added last runs first, so the wait comes before the
+  // set of fibers is closed.
+  const background = yield* FiberSet.make();
+  yield* Effect.addFinalizer(() => FiberSet.awaitEmpty(background));
+  const runInBackground = yield* FiberSet.runtime(background)();
   const startSavingWindowState = (state: WindowState): void => {
-    runSave(
+    runInBackground(
       settings
         .saveWindowState(state)
         .pipe(
@@ -104,7 +105,22 @@ const make = Effect.gen(function* () {
     (window) => Effect.sync(() => (window.isDestroyed() ? undefined : window.destroy())),
   );
 
-  const visibility = makeWindowVisibility(window, startSavingWindowState);
+  // A hidden window is not the key window, so Chromium gives its page no
+  // focus, and the input a first screen focuses would draw its focus ring and
+  // caret only once the window shows, a frame after the rest of the screen.
+  // Focusing the page while the window is still hidden draws them with the
+  // rest. Focus given before the page's navigation commits is lost with the
+  // window's first, empty document, so it is given then, still before the
+  // first paint.
+  window.webContents.once("did-navigate", () => window.webContents.focus());
+
+  const visibility = makeWindowVisibility(window, {
+    restoreFullScreen: saved?.fullScreen ?? false,
+    saveWindowState: startSavingWindowState,
+    logError: (message) => {
+      runInBackground(Effect.logError(message));
+    },
+  });
   let quitting = false;
 
   /** Hides the window instead of closing it, unless the app is quitting. */
@@ -127,7 +143,6 @@ const make = Effect.gen(function* () {
   const paintBackground = () =>
     window.setBackgroundColor(chooseWindowBackground(nativeTheme.shouldUseDarkColors));
 
-  window.once("ready-to-show", () => visibility.showWindowFirstTime(saved?.fullScreen ?? false));
   window.on("close", hideInsteadOfClosing);
   // After the window has closed, macOS can still report a change to it, such
   // as the window being hidden, and Electron still emits the event on the
@@ -155,6 +170,7 @@ const make = Effect.gen(function* () {
     ),
     reload: Effect.sync(() => window.webContents.reload()),
     show: Effect.sync(visibility.showWindow),
+    showFirstTime: Effect.sync(visibility.showWindowFirstTime),
     send: (name, payload) =>
       Effect.map(encodeIpcPayload(name, payload), (encoded) =>
         window.webContents.send(name, encoded),

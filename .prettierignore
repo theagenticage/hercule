@@ -11,5 +11,10 @@ apps/runner/src/providers/codex/generated/
 # Copied unchanged from the design system, which is its source (spec 17).
 apps/desktop/src/renderer/styles/tokens.css
 
+# The Crew Bureau design book and the two folders its pages link to, shared/
+# and c0-crew/, copied byte for byte from the design prototype (spec 17).
+# Reformatting them would make them differ from the book they copy.
+docs/design/
+
 # Markdown is authored by hand; reformatting the spec would bury real diffs.
 **/*.md

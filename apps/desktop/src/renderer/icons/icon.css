@@ -1,0 +1,7 @@
+/* An icon sits on the text line like a character, and never shrinks in a flex
+   row. As the Bureau book's .ic. */
+.ic {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}

@@ -116,6 +116,7 @@ describe("ControllerConnection.save", () => {
         reloads++;
       }),
       show: Effect.void,
+      showFirstTime: Effect.void,
       send: () => Effect.void,
       showWarning: () => Effect.void,
     });

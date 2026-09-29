@@ -29,23 +29,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
-import { createServer as createTcpServer, type AddressInfo } from "node:net";
-import { constants } from "node:os";
 import { fileURLToPath } from "node:url";
 import { build, createServer, type Rolldown } from "vite";
+import { buildAppEnv, exitCodeForSignal, findFreePort } from "./processes.ts";
 
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
-
-/** Returns a loopback port that nothing is listening on right now. */
-const findFreePort = (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const probe = createTcpServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as AddressInfo;
-      probe.close(() => resolve(port));
-    });
-  });
 
 const port = await findFreePort();
 const renderer = await createServer({
@@ -57,23 +45,12 @@ await renderer.listen();
 // The `electron` package's main module is the path to the Electron binary.
 const electronPath = createRequire(import.meta.url)("electron") as string;
 
-// Electron gets this script's environment without two kinds of variable.
-// ELECTRON_RUN_AS_NODE makes Electron run as plain Node, so no window opens.
-// A HERCULE_* variable from the shell, such as HERCULE_HOME, belongs to
-// whatever Hercule the developer runs, not to this app.
-const env: NodeJS.ProcessEnv = Object.fromEntries(
-  Object.entries(process.env).filter(
-    ([name]) => name !== "ELECTRON_RUN_AS_NODE" && !name.startsWith("HERCULE_"),
-  ),
-);
+const env = buildAppEnv();
 env.HERCULE_DESKTOP_DEV_SERVER_URL = `http://127.0.0.1:${String(port)}/`;
 env.NODE_OPTIONS = [env.NODE_OPTIONS, "--enable-source-maps"].filter(Boolean).join(" ");
 
 let electron: ChildProcess | undefined;
 const watchers: Rolldown.RolldownWatcher[] = [];
-
-/** Returns the exit code a shell reports for a process killed by `signal`. */
-const exitCodeForSignal = (signal: NodeJS.Signals) => 128 + constants.signals[signal];
 
 /**
  * Sends `signal` to Electron if it is running and waits for it to exit, then

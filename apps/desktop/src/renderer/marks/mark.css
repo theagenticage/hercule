@@ -1,0 +1,31 @@
+/* The six state marks, as the Bureau book draws them. The glyph is drawn in
+   currentColor, so each state's colour is set here, on the mark. Colour helps
+   but is never the only cue: each state also has its own glyph.
+
+   Nothing animates: the book fades the working mark's dots in turn, and the
+   app draws them still, so a list full of working rows draws no frames
+   (spec 17 §Performance, rule 2). */
+.mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  line-height: 0;
+}
+.mark--working {
+  color: var(--muted);
+}
+.mark--waiting {
+  color: var(--you);
+}
+.mark--done {
+  color: var(--ok);
+}
+.mark--failed {
+  color: var(--fail-ink);
+}
+.mark--paused {
+  color: var(--muted);
+}
+.mark--idle {
+  color: var(--faint);
+}

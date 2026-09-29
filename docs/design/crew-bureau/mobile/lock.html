@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Lock screen · Hercule</title>
+    <style>
+      .lock {
+        color: #fff;
+        background: none;
+      }
+      /* The wallpaper: a plain warm dusk, darker at the top so the clock stays white. It carries no
+         colour blobs, so what shows through the glass cards is the crew on the hill and nothing else. */
+      .wall {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, light-dark(oklch(0.44 0.035 60), oklch(0.2 0.02 60)), light-dark(oklch(0.66 0.045 70), oklch(0.31 0.03 60)));
+      }
+      /* The crew sits on a hill at the bottom of the wallpaper, between the flashlight and the camera. */
+      .hill {
+        position: absolute;
+        left: -40px;
+        right: -40px;
+        bottom: -150px;
+        height: 250px;
+        border-radius: 50%;
+        background: light-dark(oklch(0.62 0.09 45 / 0.55), oklch(0.2 0.04 45 / 0.6));
+      }
+      .hill-crew {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 56px;
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+        gap: 4px;
+      }
+      .hill-crew > * {
+        filter: drop-shadow(0 4px 3px oklch(0.2 0.05 40 / 0.35));
+      }
+      .lock .status,
+      .clock,
+      .notes {
+        position: relative;
+      }
+      /* The lock screen shows the big clock instead of the time in the status bar. */
+      .lock .status-time {
+        visibility: hidden;
+      }
+      .clock {
+        display: grid;
+        justify-items: center;
+        padding: 0 0 12px;
+        flex: none;
+        text-shadow: 0 1px 12px oklch(0.2 0.05 290 / 0.25);
+      }
+      .clock .ic {
+        opacity: 0.9;
+      }
+      .clock-date {
+        margin-top: 2px;
+        font-size: 17px;
+        font-weight: var(--w-bold);
+        letter-spacing: 0.005em;
+        opacity: 0.92;
+      }
+      .clock-time {
+        margin-top: -4px;
+        font-size: 78px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.035em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .notes {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 0 10px 40px;
+        overflow: auto;
+        scrollbar-width: none;
+      }
+      /* One material for every card: the theme's glass over the wallpaper. */
+      .la,
+      .nt {
+        position: relative;
+        border-radius: 24px;
+        background: var(--glass-fill-raised);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 1px 0 var(--glass-edge), 0 8px 24px -12px oklch(0.2 0.05 290 / 0.35);
+        color: var(--ink);
+        flex: none;
+      }
+
+      /* Live Activity: the session itself, live, with its one question answerable here. */
+      .la {
+        padding: 12px 12px 12px;
+      }
+      .la-top {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        gap: 0 10px;
+        align-items: center;
+      }
+      .la-top > .cr {
+        grid-row: span 2;
+      }
+      .la-top b {
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .la-sub {
+        grid-column: 2;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .la-sub .you-ink {
+        font-weight: var(--w-bold);
+      }
+      .la-diff {
+        grid-row: 1 / 3;
+        grid-column: 3;
+        display: grid;
+        justify-items: end;
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+      .la-diff .add {
+        color: var(--ok);
+      }
+      .la-diff .del {
+        color: var(--fail-ink);
+      }
+      .la-diff small {
+        color: var(--muted);
+        font-family: var(--font-ui);
+        font-size: var(--t-11);
+      }
+      /* The session's path so far: three steps done in its own color, the fourth waiting on you. */
+      .la-track {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+        margin: 10px 2px 0;
+      }
+      .la-track span {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 10.5px;
+        font-weight: var(--w-medium);
+      }
+      .la-track span::before {
+        content: "";
+        height: 4px;
+        border-radius: 2px;
+        background: var(--who);
+      }
+      .la-track span.is-you {
+        color: var(--you-ink);
+        font-weight: var(--w-bold);
+      }
+      .la-track span.is-you::before {
+        background: repeating-linear-gradient(90deg, var(--you) 0 6px, transparent 6px 9px);
+      }
+      .la-q {
+        margin: 8px 2px 10px;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+      .la-q code {
+        font-size: 12px;
+      }
+      .go {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .go button {
+        height: 40px;
+        border-radius: 14px;
+        background: color-mix(in oklab, var(--ink) 8%, transparent);
+        font-size: 14px;
+        font-weight: var(--w-bold);
+      }
+      /* The same doctrine as every other button: the suggested answer is the one accent fill,
+         a decline is quiet, and only a destructive answer is red. */
+      .go .is-accent {
+        background: var(--accent);
+        color: var(--accent-fg);
+      }
+      .go .is-quiet {
+        background: transparent;
+        color: var(--muted);
+      }
+      .go .is-danger {
+        color: var(--fail-ink);
+      }
+
+      /* Notifications arrive like messages from colleagues: the sender's face, the app as a badge. */
+      .nt {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 0 10px;
+        padding: 11px 12px 12px;
+      }
+      .nt-av {
+        position: relative;
+        align-self: start;
+        margin-top: 1px;
+      }
+      .nt-av .app-icon {
+        position: absolute;
+        right: -4px;
+        bottom: -3px;
+        --size: 17px;
+        box-shadow: 0 0 0 1.5px var(--raised);
+      }
+      .nt-h {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
+      }
+      .nt-h b {
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nt-h small {
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+      }
+      .nt-h time {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+      }
+      .nt p {
+        margin: 1px 0 0;
+        font-size: 14.5px;
+        line-height: 1.35;
+      }
+      .nt .go {
+        grid-column: 1 / -1;
+        margin-top: 9px;
+      }
+      .nt .go button {
+        height: 36px;
+        border-radius: 12px;
+      }
+      .nt--quiet p {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Two older notifications from the same colleague, stacked behind. */
+      .nt--stacked {
+        margin-bottom: 14px;
+      }
+      .nt--stacked::before,
+      .nt--stacked::after {
+        content: "";
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: -7px;
+        height: 20px;
+        border-radius: 0 0 20px 20px;
+        /* Only the part below the card shows, so the glass card never shows the sliver through it. */
+        clip-path: inset(13px 0 0 0);
+        background: var(--glass-fill-thin);
+        backdrop-filter: var(--glass-filter);
+        -webkit-backdrop-filter: var(--glass-filter);
+        z-index: -1;
+      }
+      .nt--stacked::after {
+        left: 24px;
+        right: 24px;
+        bottom: -13px;
+        clip-path: inset(7px 0 0 0);
+        z-index: -2;
+        opacity: 0.7;
+      }
+      .reply {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        justify-self: start;
+        grid-column: 2;
+        height: 30px;
+        margin-top: 8px;
+        padding: 0 12px 0 9px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--ink) 8%, transparent);
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+      }
+      .hap {
+        display: flex;
+        justify-content: center;
+        margin: 8px 0 -2px;
+      }
+
+      .lock-foot {
+        position: absolute;
+        left: 46px;
+        right: 46px;
+        bottom: 34px;
+        display: flex;
+        justify-content: space-between;
+        pointer-events: none;
+      }
+      .lock-foot span {
+        display: grid;
+        place-items: center;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: light-dark(oklch(0.2 0.03 290 / 0.28), oklch(1 0 0 / 0.14));
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+      .lock .home-ind {
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone lock">
+      <div class="wall" aria-hidden="true">
+        <div class="hill"></div>
+        <div class="hill-crew">
+          <i data-face="Milo" data-pose="asleep" data-size="30"></i>
+          <i data-face="Ada" data-pose="working" data-size="38"></i>
+          <i data-face="Refactor cart totals" data-pose="working" data-size="32"></i>
+          <i data-face="Juno" data-pose="asleep" data-size="28"></i>
+        </div>
+      </div>
+      <div data-status="light"></div>
+
+      <div class="clock">
+        <i data-i="lock" data-size="16"></i>
+        <div class="clock-date">Tuesday 29 September</div>
+        <div class="clock-time">9:41</div>
+      </div>
+
+      <div class="notes">
+        <section class="la" style="--hue: var(--hue-peach)" aria-label="Live Activity">
+          <div class="la-top">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="44"></i>
+            <b>Fix 3&#8209;D Secure checkout</b>
+            <span class="la-diff"><span><span class="add">+48</span> <span class="del">-12</span></span><small>3 files</small></span>
+            <span class="la-sub"><span class="you-ink">waiting on you</span> · webshop · 7m</span>
+          </div>
+          <div class="la-track"><span>Read</span><span>Edited 3</span><span>24 passed</span><span class="is-you">Push?</span></div>
+          <div class="la-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+          <div class="go"><button class="is-accent">Allow once</button><button class="is-quiet">Deny</button></div>
+          <div class="hap"><span class="haptic"><i data-i="wave" data-size="11"></i>success on Allow · warning on Deny</span></div>
+        </section>
+
+        <article class="nt" style="--hue: var(--hue-orchid)">
+          <span class="nt-av"><i data-face="Ship release" data-pose="waiting" data-size="38"></i><span class="app-icon" data-theme="whitehaven"><i data-logo="12"></i></span></span>
+          <div>
+            <div class="nt-h"><b>Ship release v2.15</b><small>Request</small><time>4m ago</time></div>
+            <p>Publish payments-api 2.15.0 to npm?</p>
+          </div>
+          <div class="go"><button class="is-accent">Allow once</button><button class="is-quiet">Deny</button></div>
+        </article>
+
+        <article class="nt" style="--hue: var(--hue-mint)">
+          <span class="nt-av"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="38"></i><span class="app-icon" data-theme="whitehaven"><i data-logo="12"></i></span></span>
+          <div>
+            <div class="nt-h"><b>Migrate ops dashboards</b><small>Question</small><time>12m ago</time></div>
+            <p>Keep the old Grafana folder?</p>
+          </div>
+          <div class="go"><button class="is-accent">Keep</button><button class="is-danger">Delete</button></div>
+        </article>
+
+        <article class="nt nt--quiet nt--stacked" style="--hue: var(--hue-iris)">
+          <span class="nt-av"><i data-face="Ada" data-pose="idle" data-size="38"></i><span class="app-icon" data-theme="whitehaven"><i data-logo="12"></i></span></span>
+          <div>
+            <div class="nt-h"><b>Ada</b><small>2 more</small><time>09:00</time></div>
+            <p>Morning Rogier. One urgent thing: EU card payments that need 3&#8209;D Secure have failed since yesterday's deploy.</p>
+          </div>
+          <button class="reply"><i data-i="mic" data-size="14"></i>Reply</button>
+        </article>
+      </div>
+
+      <div class="lock-foot" aria-hidden="true">
+        <span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8h8v4.4l-2 3.2v10.8h-4V10.4L8 7.2z" /><path d="M8 7.2h8" /><path d="M12 13.4v2" /></svg></span>
+        <span><svg width="24" height="22" viewBox="0 0 24 22" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7.2c0-1.1.9-2 2-2h2.6l1.6-2.4h5.6l1.6 2.4H19c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2z" /><circle cx="12" cy="12" r="3.6" /></svg></span>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

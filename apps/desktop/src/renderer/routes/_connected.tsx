@@ -1,6 +1,7 @@
-import type { JSX } from "react";
+import { useEffect, type JSX } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { buildEntryDeps, CONNECT_PATH, resolveEntry } from "../app/entry-guard";
+import { reportFirstScreen } from "../app/presented-frame";
 import { CenteredFooter, CenteredScreen } from "../screens/centered-screen";
 
 /**
@@ -29,9 +30,12 @@ export const Route = createFileRoute("/_connected")({
     return { controller };
   },
   // The router shows this while the guard waits, but only once the wait
-  // passes its default of one second. A controller that answers at once never
-  // flashes it.
+  // passes one second, so a controller that answers at once never flashes
+  // it. Main's time limit for the first screen (`FIRST_SCREEN_TIMEOUT_MS` in
+  // src/main/window-visibility.ts) leaves room for this second: raising it
+  // means raising that limit too.
   pendingComponent: Connecting,
+  pendingMs: 1000,
   // The app starts on this route, so it is not split into a chunk of its own:
   // a split route costs two more requests (its script and its stylesheet)
   // before the first render.
@@ -44,13 +48,20 @@ export const Route = createFileRoute("/_connected")({
  * to the connect screen. A controller that is slow to answer never leaves the
  * user without a way out, even during the 5 seconds before the app gives up
  * on it.
+ *
+ * Once it has reached the window, the screen reports itself to main as the
+ * first screen, so a slow controller does not keep the window hidden at
+ * launch. After launch, main ignores the report.
  */
 function Connecting(): JSX.Element {
   // While the guard waits, this route's context is the router's, where the
   // controller is saved: with none saved, the guard redirects at once and
   // this screen never shows.
-  const { controller } = Route.useRouteContext();
+  const { bridge, controller } = Route.useRouteContext();
   const navigate = useNavigate();
+  useEffect(() => {
+    void reportFirstScreen(bridge);
+  }, [bridge]);
   return (
     <CenteredScreen>
       <CenteredFooter

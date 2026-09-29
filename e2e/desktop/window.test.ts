@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ElectronApplication } from "playwright";
+import type { ElectronApplication, Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
 import {
@@ -25,6 +25,38 @@ import {
  * another colour.
  */
 const BACKGROUND = { light: "#f4f3f0", dark: "#1a1310" } as const;
+
+/**
+ * The appearances a test flips the app through, with the theme each one
+ * gives. Light, dark, light: whichever appearance the machine starts in, the
+ * window changes at least once in each direction.
+ */
+const APPEARANCE_FLIPS = [
+  { source: "light", background: BACKGROUND.light, theme: "whitehaven" },
+  { source: "dark", background: BACKGROUND.dark, theme: "orient-express" },
+  { source: "light", background: BACKGROUND.light, theme: "whitehaven" },
+] as const;
+
+/**
+ * Sets the app's own appearance, as macOS does when the user switches between
+ * light and dark. It changes `nativeTheme.themeSource` rather than the
+ * machine's appearance, so nothing outside the app changes.
+ */
+function setAppearance(app: ElectronApplication, source: "light" | "dark"): Promise<void> {
+  return app.evaluate(({ nativeTheme }, themeSource) => {
+    nativeTheme.themeSource = themeSource;
+  }, source);
+}
+
+/** Reads the theme the page is on. */
+function readTheme(page: Page): Promise<string | undefined> {
+  return page.evaluate(() => document.documentElement.dataset["theme"]);
+}
+
+/** The page's record of each theme change; see the test that installs it. */
+type ThemeChangeLog = typeof globalThis & {
+  themeChanges?: Array<{ theme: string | undefined; running: string[] }>;
+};
 
 /** Counts the app's windows, hidden ones included. */
 function countWindows(app: ElectronApplication): Promise<number> {
@@ -58,25 +90,65 @@ describe("the window", () => {
       app.evaluate(({ BrowserWindow }) =>
         BrowserWindow.getAllWindows()[0]!.getBackgroundColor().toLowerCase(),
       );
-    const readTheme = () => page.evaluate(() => document.documentElement.dataset["theme"]);
 
     const darkAtLaunch = await app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors);
     expect(await readBackground()).toBe(darkAtLaunch ? BACKGROUND.dark : BACKGROUND.light);
 
-    // Light, dark, light: whichever appearance the machine starts in, the
-    // window changes at least once in each direction.
-    const appearances = [
-      { source: "light", background: BACKGROUND.light, theme: "whitehaven" },
-      { source: "dark", background: BACKGROUND.dark, theme: "orient-express" },
-      { source: "light", background: BACKGROUND.light, theme: "whitehaven" },
-    ] as const;
-    for (const { source, background, theme } of appearances) {
-      await app.evaluate(({ nativeTheme }, themeSource) => {
-        nativeTheme.themeSource = themeSource;
-      }, source);
+    for (const { source, background, theme } of APPEARANCE_FLIPS) {
+      await setAppearance(app, source);
       await expect.poll(readBackground).toBe(background);
-      await expect.poll(readTheme).toBe(theme);
+      await expect.poll(() => readTheme(page)).toBe(theme);
     }
+  });
+
+  it("snaps to the new theme when the appearance changes, with no control fading to its new colours", async () => {
+    const { app, page } = await launchForTest();
+
+    // The check means something only if a control on screen has a transition
+    // that a theme change would start. The Connect button fades its
+    // background, which differs between the two themes.
+    expect(
+      await page
+        .getByRole("button", { name: "Connect" })
+        .evaluate((button) => getComputedStyle(button).transitionProperty),
+    ).toContain("background");
+
+    // Records, right after each theme change, the transitions and animations
+    // that are running. `getAnimations` recalculates the page's style first,
+    // so a transition that the change starts is in the list. The observer's
+    // callback runs in the same task as the change, before the next frame.
+    await page.evaluate(() => {
+      const changes: NonNullable<ThemeChangeLog["themeChanges"]> = [];
+      (globalThis as ThemeChangeLog).themeChanges = changes;
+      new MutationObserver(() => {
+        changes.push({
+          theme: document.documentElement.dataset["theme"],
+          running: document
+            .getAnimations()
+            .map((animation) =>
+              animation instanceof CSSTransition
+                ? animation.transitionProperty
+                : animation instanceof CSSAnimation
+                  ? animation.animationName
+                  : animation.constructor.name,
+            ),
+        });
+      }).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+    });
+
+    for (const { source, theme } of APPEARANCE_FLIPS) {
+      await setAppearance(app, source);
+      await expect.poll(() => readTheme(page)).toBe(theme);
+    }
+
+    const changes = await page.evaluate(() => (globalThis as ThemeChangeLog).themeChanges);
+    // The first flip changes nothing when the machine is already light, so
+    // only the last two changes are certain to happen.
+    expect(changes?.slice(-2)).toEqual([
+      { theme: "orient-express", running: [] },
+      { theme: "whitehaven", running: [] },
+    ]);
+    expect(changes?.flatMap(({ running }) => running)).toEqual([]);
   });
 
   it("can be made full screen by the user", async () => {

@@ -28,15 +28,15 @@ import { expect, onTestFinished } from "vitest";
 import type { Bridge } from "../../apps/desktop/src/ipc/bridge";
 import {
   buildAppArgs,
-  buildAppEnv,
   findExecutable,
   isWindowVisible,
   launchTestPackage,
   quitApp,
   signIn,
-  writeControllerUrl,
+  writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
+import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   completeSetup,
   PASSWORD,
@@ -73,6 +73,11 @@ export interface LaunchedApp {
   /** The user data directory the app was started with. */
   readonly userDataDir: string;
   /**
+   * Returns everything main has written to its standard output and standard
+   * error since the app started, where main's log goes.
+   */
+  readonly readMainOutput: () => string;
+  /**
    * Quits the app; see `quitApp`. Calling it again returns the first call's
    * promise, so a test can quit the app early and still have it quit when
    * the test finishes.
@@ -86,12 +91,21 @@ export interface LaunchedApp {
  * finishes. Without a `userDataDir`, the app gets a fresh one. Fails if the
  * window is not on screen within the poll timeout.
  *
- * The 200 ms keep the tests clear of a crash in Electron 44.4.5 on macOS 15
- * with Stage Manager on: the app crashes with SIGSEGV when a window is
- * destroyed within about 100 ms of first appearing, while Stage Manager is
- * still placing it. A test that quits right after the page loads hits that
- * window of time; no user can quit that fast, so the wait keeps the tests on
- * the path users take. The crash is not yet reported upstream.
+ * The page loads while the window is still hidden: main shows the window once
+ * the page reports that its first screen has reached the window, or 3 seconds
+ * after the page first painted if no report comes. So a test cannot check the
+ * window right after the page loads; it waits here until main has shown it.
+ *
+ * `prepareFirstWindow`, when given, runs as soon as the first window exists,
+ * before the wait for its page to load. A test that must act before the
+ * window shows does it there; the window can still show while it runs.
+ *
+ * The 200 ms keep the tests on the path users take: no user quits within
+ * 200 ms of the window appearing, while macOS may still be placing it. A quit
+ * that early is also one of the two things that must happen together for
+ * Electron 44.4.5 to crash with SIGSEGV while quitting, on macOS 15 with
+ * Stage Manager on. `quitApp` describes the crash and avoids the other one.
+ * The crash is not yet reported upstream.
  *
  * The test fails if the app does not quit cleanly: vitest runs a test's
  * finishing callbacks last registered first, so the app has quit before its
@@ -99,26 +113,35 @@ export interface LaunchedApp {
  */
 export async function launchForTest(
   userDataDir = createUserDataDirForTest(),
+  prepareFirstWindow?: (app: ElectronApplication, page: Page) => Promise<void>,
 ): Promise<LaunchedApp> {
   const app = await launchTestPackage(userDataDir);
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= quitApp(app));
   onTestFinished(close);
 
+  // Playwright reads main's output from the start and passes on only what
+  // arrives after a listener is added, so the listeners go on before any wait.
+  let mainOutput = "";
+  const appendMainOutput = (chunk: Buffer) => (mainOutput += chunk.toString());
+  app.process().stdout?.on("data", appendMainOutput);
+  app.process().stderr?.on("data", appendMainOutput);
+
   const page = await app.firstWindow();
+  await prepareFirstWindow?.(app, page);
   await page.waitForLoadState("load");
   await expect.poll(() => isWindowVisible(app), { message: "the window did not show" }).toBe(true);
   await sleep(200);
-  return { app, page, userDataDir, close };
+  return { app, page, userDataDir, readMainOutput: () => mainOutput, close };
 }
 
 /**
  * Starts the app for the current test with `url` already saved as its
- * controller (see `writeControllerUrl`), on a fresh user data directory.
+ * controller (see `writeSettings`), on a fresh user data directory.
  */
 export async function launchWithSavedController(url: string): Promise<LaunchedApp> {
   const userDataDir = createUserDataDirForTest();
-  writeControllerUrl(userDataDir, url);
+  writeSettings(userDataDir, { controllerUrl: url });
   return launchForTest(userDataDir);
 }
 

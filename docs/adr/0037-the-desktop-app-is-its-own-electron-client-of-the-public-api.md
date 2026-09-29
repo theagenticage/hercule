@@ -12,7 +12,7 @@ ADR 0017 planned the desktop app as a second consumer of two packages: `client-c
 
 Two things have changed since then:
 
-- The desktop app now has a design language of its own: **Crew Bureau**, from the design-systems prototype (`prototype/design-systems-2/c1-bureau/` on `prototype/design-systems`, a130074e). Bureau is not the web's Midnight language with other colours. It has different type, radii and colour roles, and faces that show state through poses. It limits glass to a fixed set of surfaces and has its own button rules.
+- The desktop app now has a design language of its own: **Crew Bureau**, from the design-systems prototype (`prototype/design-systems-2/c1-bureau/` on `prototype/design-systems`, a130074e), copied byte for byte into [`docs/design/crew-bureau/`](../design/crew-bureau/). Bureau is not the web's Midnight language with other colours. It has different type, radii and colour roles, and faces that show state through poses. It limits glass to a fixed set of surfaces and has its own button rules.
 - The goal is an app that feels native on macOS, not a web page in a frame. Most of that feel lives in the components. A native control shows the arrow cursor, and nothing in its chrome can be selected. It shows a focus ring only for the keyboard, and it gets a native context menu. `@hercule/ui` is built to feel right in a browser tab.
 
 Reusing `ui` would mean bending each of its components to two design languages and two sets of platform habits. Everything that interprets domain data already lives in `client-core` (spec 14 §Packages). What the two apps can share without cost is therefore the contract and `client-core`, not the components.

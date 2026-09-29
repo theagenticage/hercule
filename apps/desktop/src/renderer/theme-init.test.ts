@@ -51,6 +51,47 @@ const runThemeScript = (appearance: FakeAppearance): void => {
   eval(script);
 };
 
+/** The theme attributes of <html> at one moment. */
+interface ThemeAttributes {
+  readonly theme: string | undefined;
+  readonly changing: string | undefined;
+}
+
+/**
+ * Wraps the page's `getComputedStyle` so that each call records the theme
+ * attributes of <html> at that moment, then reads the style as before.
+ * Returns the list the calls are recorded in, oldest first.
+ */
+const recordStyleReads = (): ThemeAttributes[] => {
+  const reads: ThemeAttributes[] = [];
+  const readStyle = window.getComputedStyle.bind(window);
+  vi.stubGlobal("getComputedStyle", (element: Element) => {
+    const { theme, themeChanging } = document.documentElement.dataset;
+    reads.push({ theme, changing: themeChanging });
+    return readStyle(element);
+  });
+  return reads;
+};
+
+/**
+ * Starts recording every change to the theme attributes of <html>. Returns a
+ * function that stops the recording and returns each change as the attribute's
+ * name and its value before the change, oldest first; a value of `null` means
+ * the attribute was added.
+ */
+const recordThemeAttributeChanges = (): (() => Array<[string | null, string | null]>) => {
+  const observer = new MutationObserver(() => {});
+  observer.observe(document.documentElement, {
+    attributeFilter: ["data-theme", "data-theme-changing"],
+    attributeOldValue: true,
+  });
+  return () => {
+    const records = observer.takeRecords();
+    observer.disconnect();
+    return records.map((record) => [record.attributeName, record.oldValue]);
+  };
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -75,6 +116,41 @@ describe("the theme script", () => {
 
     appearance.change(false);
     expect(document.documentElement.dataset.theme).toBe("whitehaven");
+  });
+
+  it("switches transitions off while it changes the theme later, so the change snaps", () => {
+    const appearance = new FakeAppearance(false);
+    runThemeScript(appearance);
+    const styleReads = recordStyleReads();
+    const stopRecording = recordThemeAttributeChanges();
+
+    appearance.change(true);
+
+    // base.css switches every transition off while `data-theme-changing` is
+    // set, so it is added before the theme changes and removed after.
+    expect(stopRecording()).toEqual([
+      ["data-theme-changing", null],
+      ["data-theme", "whitehaven"],
+      ["data-theme-changing", ""],
+    ]);
+    // The page's style is recalculated once, with the new theme already in
+    // place and transitions still off. Without that read, Chromium would
+    // recalculate style only after the attribute is gone, and every control
+    // would fade to its new colours.
+    expect(styleReads).toEqual([{ theme: "orient-express", changing: "" }]);
+  });
+
+  it("sets the first theme without switching transitions off", () => {
+    // Nothing has painted before the script runs, so nothing can fade, and a
+    // style read then would cost a style pass for nothing.
+    delete document.documentElement.dataset.theme;
+    const styleReads = recordStyleReads();
+    const stopRecording = recordThemeAttributeChanges();
+
+    runThemeScript(new FakeAppearance(true));
+
+    expect(stopRecording()).toEqual([["data-theme", null]]);
+    expect(styleReads).toEqual([]);
   });
 
   it("uses theme names the design tokens define", () => {

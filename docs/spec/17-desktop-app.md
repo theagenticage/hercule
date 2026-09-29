@@ -43,7 +43,7 @@ The desktop app has three layers. Each has one job.
 | renderer | a sandboxed Chromium renderer | every screen and component, and every call to the controller | React 19 with the React Compiler, TanStack Router, Query and Virtual; `client-core` for all data; no Effect code ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)) |
 
 - **One window.** The first milestone has exactly one window.
-- **One instance.** A second launch focuses the running window and exits (`app.requestSingleInstanceLock`).
+- **One instance.** A second launch shows and focuses the running window and exits (`app.requestSingleInstanceLock`). The app takes focus from whichever app is in front, often the terminal the launch came from (`app.focus({ steal: true })`).
 - **The renderer follows the web app's layering rules** (AGENTS.md §Web app layout):
   - one screen is one route file, and its loader prefetches what the screen reads;
   - components are presentational or orchestrating;
@@ -241,6 +241,7 @@ The first milestone's channels:
 | `badge.set` | renderer → main | the dock badge count |
 | `notification.show` / `notification.close` | renderer → main | a thread's notification, keyed by session id |
 | `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser |
+| `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
 | `thread.open` | main → renderer | a notification click or a menu shortcut asks for a thread |
 | `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread or Send |
 
@@ -253,10 +254,12 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 - **Title bar:**
   - `titleBarStyle: "hiddenInset"`, with the traffic lights sitting in the sidebar's top strip.
   - `trafficLightPosition: { x: 19, y: 16 }` puts the native lights where the Bureau pages draw them: centres at 26, 46 and 66 pt from the left, 24 pt from the top. The renderer draws no lights of its own.
-  - The sidebar's top strip and the thread's chrome row are drag regions. The controls inside them are not.
+  - The top 52 pt of the window drags it, across its full width. The shell draws this as one strip over the top of the window that paints nothing and is not a compositing layer; the sidebar's top strip and the thread's chrome row both sit inside it. Each control placed in the band is marked `no-drag`, so it takes clicks.
 - **No flash:**
   - The window is created hidden, with `backgroundColor` set to `--bg` of the current appearance: `#f4f3f0` for Whitehaven and `#1a1310` for Orient Express. These are the sRGB values Chromium draws for the `oklch` tokens, and a unit test derives them from `tokens.css`.
-  - It is shown on `ready-to-show`.
+  - It is shown when the frame that draws its first screen, fonts included, has reached the window, or 3 seconds after its page first painted, whichever is first. It is also shown at once when its page fails to load or its renderer exits. Showing on `ready-to-show` would show an empty page for a few frames: `ready-to-show` fires when the bare HTML first paints, 50 to 80 ms before the first screen has painted.
+  - The 3-second limit means a renderer that fails before it reports still gets its window. It sits well above the "connecting" screen's 1-second delay, because that delay starts only once the renderer's code has loaded and its router has started, and fonts and a few frames follow it. So a healthy renderer shows its window by reporting, even on a slow Mac's cold launch. A crash or a failed load does not wait for the limit.
+  - The renderer reports its first screen through the IPC contract once the frame that draws it has been presented: it times a sentinel element that draws nothing with Element Timing, whose entry arrives only once its frame has been presented, or has failed to present. A frame that fails to present is rare; the window then shows a frame early, and the screen appears with the next frame. Two animation frames are not enough, because the second can run before the first frame has reached the window. The "connecting" screen reports too, so a slow controller does not keep the window hidden.
   - When the appearance changes, main updates the background colour.
 - **Theme follows the system, live:** Whitehaven when macOS is light, Orient Express when it is dark, through `prefers-color-scheme`. Bureau's other three themes, and a glass setting, arrive with Settings.
 - **Accessibility settings:**
@@ -295,7 +298,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 
 ## Design system
 
-**The pixel reference.** The pixel reference is the Crew Bureau book and its desktop pages: `prototype/design-systems-2/c1-bureau/` on `prototype/design-systems`, at a130074e.
+**The pixel reference.** The pixel reference is the Crew Bureau book and its desktop pages, in [`docs/design/crew-bureau/`](../design/crew-bureau/). The folder is a copy of `prototype/design-systems-2/c1-bureau/` at commit a130074e on the `prototype/design-systems` branch, kept byte for byte and never edited. Its pages link to two sibling folders, copied the same way beside it: `docs/design/shared/` (the book's frame scripts and the brief) and `docs/design/c0-crew/` (the original Crew, for the book's before-and-after frames). Open `docs/design/crew-bureau/index.html` in a browser to read the book.
 
 - Where this text and the pages disagree, the pages decide a measurement and this text decides a behaviour. This is spec 14's rule for its prototypes.
 - Behaviour comes from [./14-web-app.md](./14-web-app.md): §App shell (the Threads face), §The thread surface, and §The composer is the thread's configuration.
@@ -307,6 +310,21 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 3. **Six marks.** Queued, cancelled and skipped lose their marks and become words.
 
 **A thread's face is seeded by its session id,** not by its title. The book derives a face from a name. A thread's title is written by the agent after the first message and can change, and a face must not change when its title does. The book's stored look (its Spec change 3) is for workflows and assistants, and arrives with them.
+
+**A face shows its colleague's state as a pose.** The eight poses, as the book draws them. Every pose is still, except that the working pose's paws type while its turn runs ([Rules](#rules), rule 2). Slice 4 maps a session's state to a pose in `@hercule/client-core`.
+
+| Pose | Read to assistive technology as | Drawn | Mark |
+|---|---|---|---|
+| working | working | lowered eyes with a glint, brows, a flat mouth, paws on a typewriter | yes |
+| waiting | waiting on you | wide eyes, brows, an "o" mouth, a raised arm with a `--you` palm | yes |
+| idle | idle | eyes, a smile | yes |
+| asleep | asleep | closed eyes, a small mouth, two z's, desaturated | no |
+| failed | failed | eyes, brows, a wavy mouth, a plaster, a red badge with an X | yes |
+| paused | paused | line eyes, a flat mouth, an outlined badge | yes |
+| done | done | smiling eyes, a smile, a green badge with a check | yes |
+| away | can't be reached | offset dots, a dotted mouth, an outlined badge, faded and desaturated | no |
+
+A face's accessible name is its label and its pose's words: "Fix 3-D Secure checkout for EU cards, waiting on you".
 
 **How the system is carried over:**
 
@@ -351,6 +369,8 @@ Animation and glass were measured on a visible window on the same machine, count
 | Text streaming at 30 updates a second, composer glass at level 0.4 | 261 | 59 |
 | The same, with glass at 0 | 258 | 56 |
 
+The physical footprint of an empty app, measured later with a visible 1440 by 900 window on the same machine's built-in display, is 119 MB summed: browser 40, GPU 54, network utility 7, renderer 18. That is the least any window of this app can cost. The same app with one focused text field read 124 and 139 MB: the extra is in the GPU process, up to 20 MB, about one window-sized frame buffer (2880 by 1800 pixels at 4 bytes each). The field's blinking caret keeps frames coming, and Chromium holds a third frame buffer while frames come.
+
 What the numbers show:
 
 - **Idle faces are not free.** Bureau starts each face's blink at a different time, so with 40 faces on screen one of them is almost always blinking. That keeps the GPU process awake about 16 times as often as a still page, and wakes the renderer about 30 times a second while nothing happens.
@@ -371,7 +391,7 @@ These are starting budgets. Slice 5 measures the real thread screen, and each bu
 |---|---|
 | Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
 | Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one |
-| Memory | Summed working set at most 420 MB, and the renderer at most 180 MB |
+| Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB |
 | Idle, window visible, no thread working | Renderer: no wakeups from the app except the live connection's 30-second keepalive. GPU: at most 12 wakeups a second, the still-page level |
 | Idle, window hidden or minimized | Renderer: no wakeups from the app |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The tail paints at most once per frame |
@@ -392,7 +412,9 @@ These rules keep the budgets:
 2. **Nothing animates unless something is happening:**
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
    - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. The sidebar and every other list show still poses and still marks.
-   - Animations change only `transform` and `opacity`.
+   - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
+   - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
+   - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
    - Reduce motion turns every animation off.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
    - The renderer drops the open thread's `session:<id>:tap` subscription. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
@@ -412,13 +434,15 @@ These rules keep the budgets:
 
 **Verify at build time:** the cost of glass on the slowest Mac the app supports, before the first release. The M4 Max measurement cannot show that cost.
 
+**Verify at build time, in slice 5:** whether Chromium's `--double-buffer-compositing` switch is worth it. The switch keeps two window-sized frame buffers instead of three, which saves about 20 MB in the GPU process while frames come, as they do whenever a caret blinks ([Baseline](#baseline)). It can also drop frames. The app takes the switch only if a turn streaming at full speed while the transcript scrolls drops no more frames with it than without it.
+
 ### Measuring
 
 - **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table.
   - **No tool is attached while it reads memory, CPU and wakeups.** It reads them from a plain launch of the app. An attached Playwright makes the renderer read 7 to 14 MB higher.
   - **The plain launch passes three switches:** `--inspect=0` and `--remote-debugging-port=0` open main's Node inspector and a DevTools port, which the script connects to only while it reads, and `--use-mock-keychain` lets the app read the token saved at sign-in without the real Keychain.
   - **The measured launch is the app's third.** On the second, Chromium writes its code cache, and the renderer reads about 7 MB higher.
-  - **Memory is read 13 seconds after the page opens,** from outside the app. The working set is the resident size `ps` reports, the same number `app.getAppMetrics()` gives on macOS. The physical footprint, which Activity Monitor shows, is recorded beside it without a budget.
+  - **Memory is read 13 seconds after the page opens,** from outside the app. The budget limits the physical footprint, which `footprint` reports and Activity Monitor shows. The working set, the resident size `ps` reports and the number `app.getAppMetrics()` gives on macOS, is recorded beside it without a budget. It counts the Electron framework's pages, which all four processes share, once in each process, so it reads about 200 MB above the footprint however little the app holds. Slices 1 and 2 were budgeted on the working set, 420 MB summed and 180 MB for the renderer; slice 3 moved the budget to the footprint.
   - **CPU and wakeups** come from `app.getAppMetrics()`, which the script calls in main through its Node inspector, connecting only for each call. A wakeup is the kernel's count of a process's interrupt wakeups. The visible sample starts 30 seconds after the page opens, so it measures the app at rest, not the one-off timers that fire after a page loads.
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
   - **Long tasks** come from a `PerformanceObserver` in the renderer.
@@ -459,7 +483,7 @@ These rules keep the budgets:
 | Physical footprint | - | 149 to 150 MB summed; renderer 28 MB |
 | Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 0; GPU 0 |
 | Wakeups while hidden | renderer none | renderer 0 |
-| Renderer JavaScript for the first screen, gzipped | 250 kB | 162.6 kB |
+| Renderer JavaScript for the first screen, gzipped | 250 kB | 163.1 kB |
 | Main's startup file, minified | 160 kB | 136.6 kB, 45.9 kB gzipped |
 | Main's controller check, loaded on first connect | - | 25.8 kB, 7.1 kB gzipped |
 | The preload, minified | - | 478 bytes |
@@ -472,6 +496,30 @@ These rules keep the budgets:
   - **A smaller young generation** (`--js-flags=--max-semi-space-size=1`) saved about 6 MB only in the first minute, and made allocation-heavy work 34 to 49% slower. Not taken.
   - **Escaping the bundle's few non-ASCII characters** saved about 1 MB. V8 stores a script with any non-ASCII character at two bytes per character. Not taken for now: it needs a build plugin, for little gain.
   - **Cheaper schema construction** is the lever left, not yet prototyped. Effect Schema's construction dominates the startup profile.
+
+**Slice 3,** measured 2026-09-29 on the reference machine with the perf script, in one run. The window shows the signed-in shell against a controller on loopback, as in slice 2. The load average was 10.7 while measuring. From this slice on, memory is budgeted on the physical footprint ([Measuring](#measuring)).
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to window shown, warm | 500 ms | 304 ms |
+| Launch: spawn to first paint | - | 236 ms |
+| Launch: spawn to the first screen, the signed-in shell | - | 292 ms |
+| Processes | 4 | 4 |
+| Memory, summed physical footprint | 220 MB | 155 MB: browser 48, GPU 72, network utility 7, renderer 29 |
+| Memory, renderer's physical footprint | 100 MB | 29 MB |
+| Working set | - | 356 MB summed; renderer 101 MB |
+| Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 0; GPU 0 |
+| Wakeups while hidden | renderer none | renderer 0 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB | 163.8 kB |
+| Main's startup file, minified | 160 kB | 137.4 kB |
+| The faces, on their own, gzipped | - | 3.9 kB of JavaScript, 0.3 kB of CSS |
+| The icons, on their own, gzipped | - | 1.3 kB of JavaScript, 0.1 kB of CSS |
+| The marks, on their own, gzipped | - | 0.7 kB of JavaScript, 0.4 kB of CSS |
+| Elements in one face, root included | - | 12 to 26, by look and pose |
+| Specimen window's renderer, 91 faces and the other pieces | - | 165 MB working set, indicative |
+
+- **No release screen draws a face, an icon or a mark yet,** so the three folders are not in the release bundle. Each size above is a library build of the folder's `index.ts` with React left out. The sidebar brings them into the first screen in slice 4.
+- **A face draws one or two elements fewer than the book's,** because the port leaves out the two groups that exist only to animate: the eyes' blink group, and the waving arm's group in the waiting pose.
 
 ## Slices
 
@@ -497,7 +545,7 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
    - font preloading
    - faces, poses, icons and marks as typed modules
    - the live theme
-   - the screenshot comparison against the Bureau pages
+   - the screenshot comparison tool, run on the pieces: slice 3 draws no screen that a Bureau page shows
 4. **Sidebar.** Waiting on you, New thread, and threads grouped by project and workspace, kept live.
 5. **Thread view.**
    - the transcript and streaming. `transcript.read` returns the whole transcript, with no paging, so the slice's plan measures a long thread first.
@@ -525,6 +573,16 @@ Each slice is a reviewable change. Its plan states its performance cost first ([
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
+- **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
+  - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from `docs/design/crew-bureau/`, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
+  - Both sheets render in one Electron, hidden, at DPR 2, in sRGB, with GPU rasterization off. With GPU rasterization, a change in one cell also moved pixels in its neighbours, and the result could vary with the machine's GPU.
+  - It fails first if the book's `tokens.css` or font files differ from the app's, or if any cell sits in a different place, so each pixel it reports is a drawing difference.
+  - The comparison is exact: no tolerance, on every channel of every device pixel. It writes the reference, the app's capture and a diff image to `apps/desktop/out/bureau-compare/`.
+  - The specimen sheet is served only by the dev server. The release build never bundles it, and an eslint rule forbids importing it.
+- **The first-frame check.** `apps/desktop/scripts/first-frame.ts` records the window with ScreenCaptureKit as macOS first puts it on screen, and checks that it already holds the whole first screen, focus ring included, for the sign-in screen and the shell in both themes. Re-run it after every Electron upgrade. It rests on Chromium behaviour no other test covers, and an upgrade can change any of it:
+  - a hidden window still draws and presents its page's frames;
+  - an Element Timing entry's `renderTime` is when its frame was presented, or failed to present;
+  - `show()` shows the frame the window holds, not an empty one.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
@@ -558,4 +616,4 @@ ADRs:
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 
-Prototype: the Crew Bureau book, `prototype/design-systems-2/c1-bureau/index.html` on `prototype/design-systems` at a130074e.
+Prototype: the Crew Bureau book, [`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html).

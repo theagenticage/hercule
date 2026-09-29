@@ -16,7 +16,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { describe, expect, it } from "vitest";
-import { buildAppArgs, buildAppEnv, findExecutable } from "../../apps/desktop/scripts/packaged-app";
+import { buildAppArgs, findExecutable } from "../../apps/desktop/scripts/packaged-app";
+import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import { createUserDataDirForTest, waitForExit } from "./harness";
 
 describe("the release package", () => {

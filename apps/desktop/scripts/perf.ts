@@ -20,8 +20,8 @@
  *    - each process's CPU and wakeups over 10 s with the window visible,
  *      from 30 s after the page opens;
  *    - the same over 10 s with the window hidden, from 3 s after hiding it;
- *    - the launch times: how long from spawn until the window was ready to
- *      show, and until the first screen was on it.
+ *    - the launch times: how long from spawn until the window was shown,
+ *      and until the page's paints that lead up to it.
  *
  * Nothing stays attached to the app while memory, CPU and wakeups are read,
  * because an attached tool changes what it measures: with Playwright
@@ -32,11 +32,14 @@
  * Memory is read from outside the app, by process ID. Two numbers are read
  * for each process:
  *
- * - The working set, which the budget limits: the resident size `ps`
- *   reports. It is the same number `app.getAppMetrics()` reports as the
- *   working set on macOS, so the budget's unit is unchanged.
- * - The physical footprint, which `footprint` reports and Activity Monitor
- *   shows as a process's memory. It is printed for information only.
+ * - The physical footprint, which the budget limits: the memory `footprint`
+ *   reports and Activity Monitor shows for a process.
+ * - The working set, the resident size `ps` reports, which is the number
+ *   `app.getAppMetrics()` reports on macOS. It is printed for information
+ *   only. It counts the Electron framework's pages, which all four processes
+ *   share, once in each process. The sum then reads about 200 MB above the
+ *   summed footprint, however little the app itself holds: 315 MB against
+ *   119 MB for an empty Electron app.
  *
  * CPU and wakeups come from `app.getAppMetrics()`, which the script calls in
  * main through the Node inspector the launch opens (see below). It connects
@@ -52,19 +55,24 @@
  * Launch is measured without Playwright, because Playwright slows the launch
  * down: it holds each new renderer paused until it has attached to it, and it
  * connects to main through the inspector. The script notes the time, spawns
- * the app with `--remote-debugging-port=0`, and connects to the page over the
- * Chrome DevTools Protocol only after the idle samples. From the page it
- * reads two performance entries, in milliseconds since the epoch like the
- * time noted at spawn:
+ * the app with `--remote-debugging-port=0`, and reads the launch times only
+ * after the idle samples, each in milliseconds since the epoch like the time
+ * noted at spawn:
  *
- * - `first-paint`, for the window showing. Main keeps no record of when
- *   `ready-to-show` fired. Electron emits `ready-to-show` when the page first
- *   paints: on a copy of main that logged the event, the `first-paint` entry
- *   came 4 to 18 ms after it, so the time printed here is high by about that
- *   much.
- * - `first-screen`, the mark the page sets in the animation frame after its
- *   first screen is on the page. The script checks that the screen is the
- *   shell, so the time is a signed-in launch's and not the connect screen's.
+ * - `window-shown`, the budgeted one: the mark main sets in its own
+ *   performance timeline when it shows the window, read through the
+ *   inspector. Main shows the window once the page reports that its first
+ *   screen, fonts included, has reached the window. The run fails when main
+ *   logs that it showed the window without that report, on its time limit
+ *   or after a failure, because the time is then not the first screen's.
+ * - From the page, over the Chrome DevTools Protocol, two entries that say
+ *   where the time before the show went:
+ *   - `first-paint`, when the page first painted, which is when Electron
+ *     emits `ready-to-show`;
+ *   - `first-screen`, the mark the page sets at the moment the frame that
+ *     drew its first screen was presented; the page reports to main after
+ *     that. The script checks that the screen is the shell, so the time is a
+ *     signed-in launch's and not the connect screen's.
  *
  * The plain launch also passes `--inspect=0` and `--use-mock-keychain`. The
  * mock keychain lets the app read the token saved in step 1. While its Node
@@ -81,7 +89,7 @@
  * load average with the results.
  */
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -91,30 +99,27 @@ import { chromium } from "playwright";
 // The extensions are spelled out because Node runs this script as it is, and
 // Node resolves no import without one.
 import {
-  completeSetup,
-  PASSWORD,
-  ROOT,
-  startController,
-  USERNAME,
-} from "../../../scripts/controller-process.ts";
-import {
   buildAppArgs,
-  buildAppEnv,
+  evaluateInMain,
   findExecutable,
+  formatTable,
   launchTestPackage,
   MOCK_KEYCHAIN_SWITCH,
   quitApp,
-  readSettings,
-  signIn,
-  writeControllerUrl,
+  runWithScratchController,
+  signInOnce,
+  stopApp,
+  writeSettings,
 } from "./packaged-app.ts";
+import { buildAppEnv } from "./processes.ts";
+import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
 /** The limits of spec 17's budget table that one launch of the app can check. */
 const BUDGET = {
   launchMs: 500,
   processes: 4,
-  summedWorkingSetMb: 420,
-  rendererWorkingSetMb: 180,
+  summedFootprintMb: 220,
+  rendererFootprintMb: 100,
   gpuWakeupsVisible: 12,
   // The budget is "no wakeups from the app". Chromium wakes an idle renderer
   // on its own, 0 to 2 times a second in the baseline, so that is the most a
@@ -160,58 +165,6 @@ interface ProcessUse {
   /** The average CPU use over the sample, where 100 is one core. */
   readonly cpuPercent: number;
   readonly wakeupsPerSecond: number;
-}
-
-/** The inspector's reply to a `Runtime.evaluate` request, as far as the script reads it. */
-interface EvaluateReply {
-  readonly id: number;
-  readonly result: {
-    readonly result: { readonly value?: unknown };
-    readonly exceptionDetails?: { readonly text: string };
-  };
-}
-
-/**
- * Evaluates `expression` in the app's main process, through the Node
- * inspector at `inspectorUrl`, and returns the value it evaluates to. Fails
- * when the expression throws.
- *
- * The connection lasts only for the call, so nothing stays attached to the
- * app in between. `require` is not a global in main; the inspector's command
- * line API supplies it to the expression.
- */
-async function evaluateInMain(inspectorUrl: string, expression: string): Promise<unknown> {
-  const socket = new WebSocket(inspectorUrl);
-  try {
-    await new Promise((resolve, reject) => {
-      socket.addEventListener("open", resolve, { once: true });
-      socket.addEventListener(
-        "error",
-        () => reject(new Error(`could not connect to main's inspector at ${inspectorUrl}`)),
-        { once: true },
-      );
-    });
-    const reply = new Promise<EvaluateReply>((resolve) => {
-      socket.addEventListener("message", (event) => {
-        const message = JSON.parse(String(event.data)) as EvaluateReply;
-        if (message.id === 1) resolve(message);
-      });
-    });
-    socket.send(
-      JSON.stringify({
-        id: 1,
-        method: "Runtime.evaluate",
-        params: { expression, includeCommandLineAPI: true, returnByValue: true },
-      }),
-    );
-    const { result } = await reply;
-    if (result.exceptionDetails !== undefined) {
-      throw new Error(`main could not evaluate ${expression}: ${result.exceptionDetails.text}`);
-    }
-    return result.result.value;
-  } finally {
-    socket.close();
-  }
 }
 
 /**
@@ -340,65 +293,6 @@ async function runInScratchUserDataDir<T>(use: (userDataDir: string) => Promise<
 }
 
 /**
- * Starts a controller from the compiled binary in a scratch Hercule Home,
- * never the user's own, and completes its setup. Runs `use` with the
- * controller's URL, then stops the controller and deletes the home. Fails
- * when the binary has not been built, or setup fails.
- */
-async function runWithScratchController<T>(use: (url: string) => Promise<T>): Promise<T> {
-  const binary = join(ROOT, "hercule");
-  if (!existsSync(binary)) {
-    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
-  }
-  const home = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-home-"));
-  try {
-    const controller = await startController({ home, binary });
-    try {
-      const ran = await completeSetup({ home, url: controller.url, binary });
-      if (ran.code !== 0) {
-        throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
-      }
-      return await use(controller.url);
-    } finally {
-      await controller.stop();
-    }
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-}
-
-/**
- * Waits until main has saved a token in the settings file in `userDataDir`.
- * The page saves the token without waiting for main, so it can land just
- * after the shell shows. Fails after 5 s.
- */
-async function waitForSavedToken(userDataDir: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (typeof readSettings(userDataDir)["token"] === "string") return;
-    await sleep(50);
-  }
-  throw new Error("main did not save the token within 5 s of signing in");
-}
-
-/**
- * Starts the app on `userDataDir`, which already holds a saved controller,
- * signs in on the sign-in screen, waits for the shell and the saved token,
- * and quits.
- */
-async function signInOnce(userDataDir: string): Promise<void> {
-  const app = await launchTestPackage(userDataDir);
-  try {
-    const page = await app.firstWindow();
-    await signIn(page, { username: USERNAME, password: PASSWORD });
-    await page.getByRole("main").waitFor();
-    await waitForSavedToken(userDataDir);
-  } finally {
-    await quitApp(app);
-  }
-}
-
-/**
  * Starts the signed-in app on `userDataDir`, waits for the shell, and quits.
  *
  * The measured launch must not be the app's second. On the second launch
@@ -418,9 +312,11 @@ async function warmUpApp(userDataDir: string): Promise<void> {
 
 /** How long a launch took, in milliseconds from spawn. */
 interface LaunchTimes {
-  /** Until the page first painted: the window is ready to show. */
-  readonly windowShowsMs: number;
-  /** Until the page's first screen was on it. */
+  /** Until main showed the window. */
+  readonly windowShownMs: number;
+  /** Until the page first painted. */
+  readonly firstPaintMs: number;
+  /** Until the frame that drew the page's first screen, fonts included, was presented. */
   readonly firstScreenMs: number;
 }
 
@@ -441,12 +337,13 @@ interface PlainLaunch {
  * - the memory of each of its processes (see `readProcessMemory`);
  * - each process's CPU and wakeups with the window visible, then hidden
  *   (see `sampleIdleUse`);
- * - last, how long it took to show its window and its first screen, which
- *   is the one measure that needs a connection to the page.
+ * - last, how long it took to show its window and to paint its first
+ *   screen, the measures that need a connection to main and to the page.
  *
  * Fails when the app does not open its page within 10 s, when the window is
- * not visible while it is sampled, when the first screen is not the shell,
- * or when the app does not quit cleanly afterwards.
+ * not visible while it is sampled, when main showed the window without its
+ * first screen, when the first screen is not the shell, or when the app does
+ * not quit cleanly afterwards.
  */
 async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
@@ -458,8 +355,18 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
       "--inspect=0",
       "--remote-debugging-port=0",
     ],
-    { env: buildAppEnv(), stdio: ["ignore", "ignore", "pipe"] },
+    { env: buildAppEnv(), stdio: ["ignore", "pipe", "pipe"] },
   );
+  // Main logs to both streams. Both are kept whole, to be checked for the
+  // error main logs when it shows the window without its first screen, and
+  // reading them to the end keeps a full pipe from blocking the app.
+  let mainOutput = "";
+  const appendMainOutput = (chunk: string) => (mainOutput += chunk);
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", appendMainOutput);
+  child.stderr.on("data", appendMainOutput);
+  let measured: PlainLaunch;
   try {
     // The app prints both addresses on stderr: main's Node inspector as
     // `Debugger listening on ws://127.0.0.1:<port>/<id>`, and Chromium's
@@ -470,10 +377,7 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
       endpoint: string;
     }>((resolve, reject) => {
       let output: string | null = "";
-      child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => {
-        // The stream is read to its end all the same, so that a full pipe
-        // never blocks the app.
         if (output === null) return;
         output += chunk;
         const inspector = /Debugger listening on (ws:\/\/\S+)/.exec(output);
@@ -507,6 +411,19 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
     await sleep(HIDDEN_SETTLE_MS);
     const hidden = await sampleIdleUse(inspectorUrl);
 
+    const windowShownAt = await evaluateInMain(
+      inspectorUrl,
+      `performance.timeOrigin + performance.getEntriesByName("window-shown")[0]?.startTime`,
+    );
+    if (typeof windowShownAt !== "number" || Number.isNaN(windowShownAt)) {
+      throw new Error("main has no window-shown mark, so it never showed the window");
+    }
+    if (mainOutput.includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
+      throw new Error(
+        `main showed the window without its first screen, so the launch time is not the first screen's. Main's output:\n${mainOutput}`,
+      );
+    }
+
     const browser = await chromium.connectOverCDP(endpoint);
     try {
       const page = browser.contexts()[0]?.pages()[0];
@@ -520,20 +437,20 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
         // window that is not shown draws no animation frames.
         { polling: 100, timeout: 10_000 },
       );
-      const measured = await page.evaluate(() => ({
-        firstPaint:
-          performance.timeOrigin + performance.getEntriesByName("first-paint")[0]!.startTime,
-        firstScreen:
-          performance.timeOrigin + performance.getEntriesByName("first-screen")[0]!.startTime,
-      }));
+      const painted = await page.evaluate(() => {
+        const readEntry = (name: string): number =>
+          performance.timeOrigin + performance.getEntriesByName(name)[0]!.startTime;
+        return { firstPaint: readEntry("first-paint"), firstScreen: readEntry("first-screen") };
+      });
       // Only the shell has a <main>; the connect and sign-in screens do not.
       if ((await page.getByRole("main").count()) === 0) {
         throw new Error("the app did not open on the shell, so it was not signed in");
       }
-      return {
+      measured = {
         launch: {
-          windowShowsMs: measured.firstPaint - spawnedAt,
-          firstScreenMs: measured.firstScreen - spawnedAt,
+          windowShownMs: windowShownAt - spawnedAt,
+          firstPaintMs: painted.firstPaint - spawnedAt,
+          firstScreenMs: painted.firstScreen - spawnedAt,
         },
         memory,
         visible,
@@ -543,8 +460,15 @@ async function measurePlainLaunch(userDataDir: string): Promise<PlainLaunch> {
       await browser.close();
     }
   } finally {
-    await stopApp(child);
+    await stopApp(child.pid!);
   }
+  // The process has ended, so its exit code is known. Anything but 0, such as
+  // a crash while quitting, fails the run: nothing else would notice it.
+  if (child.exitCode !== 0) {
+    const ending = child.signalCode ?? `code ${String(child.exitCode)}`;
+    throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
+  }
+  return measured;
 }
 
 /**
@@ -563,32 +487,6 @@ async function waitForPageTarget(port: string): Promise<void> {
   throw new Error("the app did not open app://hercule/ within 10 s");
 }
 
-/**
- * Stops an app started as a plain process: sends it SIGTERM, which quits it
- * as `app.quit()` does, and waits for it to exit. Kills it after 10 s. Fails
- * unless it exits with code 0.
- */
-async function stopApp(child: ReturnType<typeof spawn>): Promise<void> {
-  if (child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise((resolve) => child.once("exit", resolve));
-    child.kill("SIGTERM");
-    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
-    await exited;
-    clearTimeout(timer);
-  }
-  if (child.exitCode !== 0) {
-    const ending = child.signalCode ?? `code ${String(child.exitCode)}`;
-    throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
-  }
-}
-
-/** Formats a Markdown table. */
-function formatTable(header: readonly string[], rows: readonly (readonly string[])[]): string {
-  return [header, header.map(() => "---"), ...rows]
-    .map((cells) => `| ${cells.join(" | ")} |`)
-    .join("\n");
-}
-
 /** Formats a process's CPU and wakeups as table cells, or dashes when it was not running. */
 function formatUse(sample: ProcessUse | undefined): string[] {
   if (sample === undefined) return ["-", "-"];
@@ -597,7 +495,7 @@ function formatUse(sample: ProcessUse | undefined): string[] {
 
 const { launch, memory, visible, hidden } = await runWithScratchController((controllerUrl) =>
   runInScratchUserDataDir(async (userDataDir) => {
-    writeControllerUrl(userDataDir, controllerUrl);
+    writeSettings(userDataDir, { controllerUrl });
     await signInOnce(userDataDir);
     await warmUpApp(userDataDir);
     return measurePlainLaunch(userDataDir);
@@ -639,11 +537,12 @@ const rendererLimit = `no wakeups from the app (at most ${BUDGET.rendererWakeups
 // or null for a measure that is recorded but has no budget.
 const budgets: [string, string, string, boolean | null][] = [
   [
-    "Launch, window shows",
-    `ready to show within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
-    `${launch.windowShowsMs.toFixed(0)} ms`,
-    launch.windowShowsMs <= BUDGET.launchMs,
+    "Launch, spawn to window shown",
+    `shown within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
+    `${launch.windowShownMs.toFixed(0)} ms`,
+    launch.windowShownMs <= BUDGET.launchMs,
   ],
+  ["Launch, first paint", "recorded; not budgeted", `${launch.firstPaintMs.toFixed(0)} ms`, null],
   [
     "Launch, first screen",
     "recorded; no budget until slice 5",
@@ -657,19 +556,19 @@ const budgets: [string, string, string, boolean | null][] = [
     memory.length <= BUDGET.processes,
   ],
   [
-    "Memory, summed",
-    `at most ${BUDGET.summedWorkingSetMb} MB`,
-    `${summedMb.toFixed(0)} MB`,
-    summedMb <= BUDGET.summedWorkingSetMb,
+    "Footprint, summed",
+    `at most ${BUDGET.summedFootprintMb} MB`,
+    `${summedFootprintMb.toFixed(0)} MB`,
+    summedFootprintMb <= BUDGET.summedFootprintMb,
   ],
   [
-    "Memory, renderer",
-    `at most ${BUDGET.rendererWorkingSetMb} MB`,
-    `${rendererMb.toFixed(0)} MB`,
-    rendererMb <= BUDGET.rendererWorkingSetMb,
+    "Footprint, renderer",
+    `at most ${BUDGET.rendererFootprintMb} MB`,
+    `${rendererFootprintMb.toFixed(0)} MB`,
+    rendererFootprintMb <= BUDGET.rendererFootprintMb,
   ],
-  ["Footprint, summed", "recorded; not budgeted", `${summedFootprintMb.toFixed(0)} MB`, null],
-  ["Footprint, renderer", "recorded; not budgeted", `${rendererFootprintMb.toFixed(0)} MB`, null],
+  ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
+  ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
   [
     "Idle visible, GPU",
     `at most ${BUDGET.gpuWakeupsVisible} wakeups/s`,

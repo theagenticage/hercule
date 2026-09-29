@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <title>Hercule</title>
+    <!-- Requests the UI font while the HTML parses, rather than once React has
+         rendered the first text. Every face is declared with
+         font-display: block, so text stays invisible until its font arrives;
+         starting the request early shows text sooner. Only the Latin subset of
+         Bricolage Grotesque is preloaded. Limelight and Recursive load the
+         first time text uses them (spec 17, §Performance, rule 6).
+         `crossorigin` is required: Chromium always fetches fonts in CORS mode,
+         so a preload without it would not match the font's request, and the
+         file would be read twice. -->
+    <link
+      rel="preload"
+      href="./styles/fonts/bricolage-grotesque-latin-standard-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <!-- Blocks the parser on purpose: the theme that matches the macOS
          appearance is set before the first paint, so a dark Mac never sees a
          light window first. -->

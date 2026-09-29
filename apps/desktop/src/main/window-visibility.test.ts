@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bounds, WindowState } from "./app-settings";
-import { makeWindowVisibility, type ShowableWindow } from "./window-visibility";
+import {
+  FIRST_SCREEN_TIMEOUT_MS,
+  makeWindowVisibility,
+  SHOWN_WITHOUT_FIRST_SCREEN_ERROR,
+  type ShowableWindow,
+} from "./window-visibility";
 
 /** Where the stand-in window is created. */
 const CREATED_AT: Bounds = { x: 40, y: 60, width: 1440, height: 900 };
@@ -8,8 +13,16 @@ const CREATED_AT: Bounds = { x: 40, y: 60, width: 1440, height: 900 };
 const MOVED_TO: Bounds = { x: 200, y: 100, width: 1200, height: 800 };
 
 /**
+ * The arguments after the event of a `did-fail-load` for the page itself:
+ * the error code, its description, the URL, and whether the main frame
+ * failed.
+ */
+const PAGE_FAILED_TO_LOAD = [-6, "ERR_FILE_NOT_FOUND", "app://hercule/", true] as const;
+
+/**
  * A stand-in for the window. It records each call that shows, hides or
- * focuses the window, or changes its full screen, and each save, in `calls`.
+ * focuses the window, or changes its full screen, each save and each error,
+ * in `calls`.
  *
  * Like Electron's, its normal bounds are stale in full screen: they are the
  * bounds it was created at, whatever the user did since. Entering and leaving
@@ -19,13 +32,21 @@ const MOVED_TO: Bounds = { x: 200, y: 100, width: 1200, height: 800 };
 const makeWindow = () => {
   const calls: Array<string> = [];
   const saved: Array<WindowState> = [];
-  const listeners: Array<{ event: string; listener: () => void; once: boolean }> = [];
-  const emit = (event: string) => {
+  const errors: Array<string> = [];
+  // The listeners take the arguments Electron passes after the event, each
+  // typed by the interface the stand-in fills.
+  type Listener = (event: unknown, ...args: Array<never>) => void;
+  const listeners: Array<{ event: string; listener: Listener; once: boolean }> = [];
+  const emit = (event: string, ...args: ReadonlyArray<unknown>) => {
     for (const entry of listeners.filter((entry) => entry.event === event)) {
       if (entry.once) listeners.splice(listeners.indexOf(entry), 1);
-      entry.listener();
+      entry.listener({}, ...(args as Array<never>));
     }
   };
+  const on = (event: string, listener: Listener) =>
+    listeners.push({ event, listener, once: false });
+  const once = (event: string, listener: Listener) =>
+    listeners.push({ event, listener, once: true });
   let fullScreen = false;
   let bounds = CREATED_AT;
 
@@ -36,25 +57,34 @@ const makeWindow = () => {
     isFullScreen: () => fullScreen,
     setFullScreen: (flag) => calls.push(`setFullScreen(${String(flag)})`),
     getNormalBounds: () => (fullScreen ? CREATED_AT : bounds),
-    on: (event, listener) => listeners.push({ event, listener, once: false }),
-    once: (event, listener) => listeners.push({ event, listener, once: true }),
+    on,
+    once,
     off: (event, listener) => {
       const index = listeners.findIndex(
         (entry) => entry.event === event && entry.listener === listener,
       );
       if (index !== -1) listeners.splice(index, 1);
     },
+    webContents: { on, once },
   };
   const saveWindowState = (state: WindowState) => {
     calls.push("save");
     saved.push(state);
   };
+  const logError = (message: string) => {
+    calls.push("error");
+    errors.push(message);
+  };
 
   return {
-    window,
     calls,
     saved,
-    saveWindowState,
+    errors,
+    /** Takes over showing and hiding the stand-in, for a window saved in full screen or not. */
+    makeVisibility: ({ restoreFullScreen = false } = {}) =>
+      makeWindowVisibility(window, { restoreFullScreen, saveWindowState, logError }),
+    /** Emits `event`, as Electron does on the window or its web contents. */
+    emit,
     /** Moves the window, as the user does by dragging it. */
     moveTo: (next: Bounds) => {
       bounds = next;
@@ -77,30 +107,133 @@ const makeWindow = () => {
 /** Makes a stand-in window, and a visibility for it that has shown the window. */
 const makeShownWindow = () => {
   const stand = makeWindow();
-  const visibility = makeWindowVisibility(stand.window, stand.saveWindowState);
-  visibility.showWindowFirstTime(false);
+  const visibility = stand.makeVisibility();
+  visibility.showWindowFirstTime();
   stand.calls.length = 0;
   return { ...stand, visibility };
 };
 
-describe("showWindowFirstTime", () => {
-  it("shows the window", () => {
-    const { window, calls, saveWindowState } = makeWindow();
-    makeWindowVisibility(window, saveWindowState).showWindowFirstTime(false);
+beforeEach(() => {
+  // Only the timers are faked: a fake `performance` would drop the marks.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  performance.clearMarks("window-shown");
+});
+
+describe("the first show", () => {
+  it("shows the window when the page reports its first screen, and not before", () => {
+    const { calls, makeVisibility, emit } = makeWindow();
+    const visibility = makeVisibility();
+    emit("ready-to-show");
+    expect(calls).toEqual([]);
+
+    visibility.showWindowFirstTime();
     expect(calls).toEqual(["show"]);
   });
 
+  it("marks the moment the window shows, for the launch measurement", () => {
+    const { makeVisibility } = makeWindow();
+    makeVisibility().showWindowFirstTime();
+    expect(performance.getEntriesByName("window-shown")).toHaveLength(1);
+  });
+
+  it("shows the window only once, however many times the page reports", () => {
+    const { calls, makeVisibility, emit } = makeWindow();
+    const visibility = makeVisibility();
+    emit("ready-to-show");
+    visibility.showWindowFirstTime();
+    visibility.showWindowFirstTime();
+    vi.advanceTimersByTime(FIRST_SCREEN_TIMEOUT_MS);
+    emit("did-fail-load", ...PAGE_FAILED_TO_LOAD);
+    emit("render-process-gone", { reason: "crashed" });
+
+    expect(calls).toEqual(["show"]);
+    expect(performance.getEntriesByName("window-shown")).toHaveLength(1);
+  });
+
+  it("shows the window 3 seconds after the page first painted, when the page never reports, and logs why", () => {
+    const { calls, errors, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("ready-to-show");
+    vi.advanceTimersByTime(FIRST_SCREEN_TIMEOUT_MS - 1);
+    expect(calls).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(calls).toEqual(["error", "show"]);
+    expect(errors).toEqual([
+      "The window is shown without waiting for its first screen, because the page did not report its first screen within 3000 ms of its first paint.",
+    ]);
+    expect(errors[0]!.startsWith(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)).toBe(true);
+  });
+
+  it("waits for the page to first paint before it starts the 3 seconds", () => {
+    const { calls, makeVisibility } = makeWindow();
+    makeVisibility();
+    vi.advanceTimersByTime(10 * FIRST_SCREEN_TIMEOUT_MS);
+    expect(calls).toEqual([]);
+  });
+
+  it("shows the window at once when its page fails to load, and logs why", () => {
+    const { calls, errors, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("did-fail-load", ...PAGE_FAILED_TO_LOAD);
+    expect(calls).toEqual(["error", "show"]);
+    expect(errors).toEqual([
+      "The window is shown without waiting for its first screen, because its page failed to load.",
+    ]);
+  });
+
+  it("keeps the window hidden when a frame inside the page fails to load, and still shows it when the page fails later", () => {
+    const { calls, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("did-fail-load", -105, "ERR_NAME_NOT_RESOLVED", "https://example.invalid/", false);
+    expect(calls).toEqual([]);
+
+    emit("did-fail-load", ...PAGE_FAILED_TO_LOAD);
+    expect(calls).toEqual(["error", "show"]);
+  });
+
+  it("keeps the window hidden when the page's load is stopped after the page committed", () => {
+    const { calls, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("did-fail-load", -3, "ERR_ABORTED", "app://hercule/", true);
+    expect(calls).toEqual([]);
+  });
+
+  it("shows the window at once when its renderer process exits, and logs why", () => {
+    const { calls, errors, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("ready-to-show");
+    emit("render-process-gone", { reason: "crashed" });
+    expect(calls).toEqual(["error", "show"]);
+    expect(errors).toEqual([
+      "The window is shown without waiting for its first screen, because its renderer process exited (crashed).",
+    ]);
+  });
+
+  it("never shows a window that closed before the 3 seconds passed", () => {
+    const { calls, makeVisibility, emit } = makeWindow();
+    makeVisibility();
+    emit("ready-to-show");
+    emit("closed");
+    vi.advanceTimersByTime(FIRST_SCREEN_TIMEOUT_MS);
+    expect(calls).toEqual([]);
+  });
+
   it("puts a window saved in full screen back in full screen, once it is on screen", () => {
-    const { window, calls, saveWindowState } = makeWindow();
-    makeWindowVisibility(window, saveWindowState).showWindowFirstTime(true);
+    const { calls, makeVisibility } = makeWindow();
+    makeVisibility({ restoreFullScreen: true }).showWindowFirstTime();
     expect(calls).toEqual(["show", "setFullScreen(true)"]);
   });
 });
 
 describe("showWindow", () => {
   it("does nothing before the window has shown the first time", () => {
-    const { window, calls, saveWindowState } = makeWindow();
-    makeWindowVisibility(window, saveWindowState).showWindow();
+    const { calls, makeVisibility } = makeWindow();
+    makeVisibility().showWindow();
     expect(calls).toEqual([]);
   });
 
@@ -169,8 +302,8 @@ describe("saveWindowStateOnQuit", () => {
   });
 
   it("saves nothing before the window has shown the first time", () => {
-    const { window, saved, saveWindowState } = makeWindow();
-    makeWindowVisibility(window, saveWindowState).saveWindowStateOnQuit();
+    const { saved, makeVisibility } = makeWindow();
+    makeVisibility().saveWindowStateOnQuit();
     expect(saved).toEqual([]);
   });
 

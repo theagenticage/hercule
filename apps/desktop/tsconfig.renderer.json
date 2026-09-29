@@ -5,5 +5,7 @@
     "types": ["vite/client"],
     "jsx": "react-jsx"
   },
-  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"],
+  // Checked by tsconfig.node.json instead; the comment there says why.
+  "exclude": ["src/renderer/styles/motion.test.ts"]
 }

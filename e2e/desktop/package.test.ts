@@ -16,11 +16,11 @@ import { promisify } from "node:util";
 import { describe, expect, it, onTestFinished } from "vitest";
 import {
   buildAppArgs,
-  buildAppEnv,
   findExecutable,
   findPackagedApp,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
+import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import { createUserDataDirForTest, runSecondInstance, waitForExit } from "./harness";
 
 /**

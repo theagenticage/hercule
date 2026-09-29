@@ -193,6 +193,40 @@ const viteAssetUrlSyntax = {
     "Vite turns `new URL(path, import.meta.url)` into an import of that file, which neither eslint nor dep-lint can see, so the desktop renderer does not use it. Import the file with a `?url` suffix instead.",
 };
 
+/**
+ * The desktop renderer's specimen sheets are a development tool for
+ * `pnpm compare:bureau`, served by the dev server alone. A renderer file
+ * outside them that imported them would put them in the release app.
+ */
+const specimensMessage =
+  "The specimen sheets are a development tool that never ships, so no renderer file outside specimens/ imports them. Import the component the sheet draws instead.";
+const specimensPattern = { group: ["**/specimens", "**/specimens/*"], message: specimensMessage };
+const specimensCalls = buildImportCalls("/(^|\\x2F)specimens(\\x2F|$)/", specimensMessage);
+
+/**
+ * The desktop renderer draws with React elements only, never with a string
+ * of markup, so no text can reach the page as HTML. The selectors refuse
+ * every way the DOM offers to parse a string as HTML into the page:
+ * - React's `dangerouslySetInnerHTML`;
+ * - assigning `innerHTML` or `outerHTML`, by name or as `["innerHTML"]`;
+ * - calling `insertAdjacentHTML`, `setHTMLUnsafe` or
+ *   `createContextualFragment`, by name or as `["insertAdjacentHTML"]`;
+ * - `document.write` and `document.writeln`.
+ */
+const markupMessage =
+  "The desktop renderer never sets markup from a string, so no text can reach the page as HTML. Build the element with JSX.";
+const markupProperties = "/^(innerHTML|outerHTML)$/";
+const markupMethods = "/^(insertAdjacentHTML|setHTMLUnsafe|createContextualFragment)$/";
+const markupSyntax = [
+  "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+  `AssignmentExpression[left.computed=false][left.property.name=${markupProperties}]`,
+  `AssignmentExpression[left.computed=true][left.property.value=${markupProperties}]`,
+  `CallExpression[callee.computed=false][callee.property.name=${markupMethods}]`,
+  `CallExpression[callee.computed=true][callee.property.value=${markupMethods}]`,
+  "CallExpression[callee.object.name='document'][callee.property.name=/^(write|writeln)$/]",
+].map((selector) => ({ selector, message: markupMessage }));
+const desktopRendererSyntax = [viteGlobSyntax, viteAssetUrlSyntax, ...specimensCalls];
+
 export default tseslint.config(
   {
     // The generated files are build output that happens to be TypeScript.
@@ -203,6 +237,10 @@ export default tseslint.config(
       ".claude/**",
       // A plan folder is one ticket's local working state, never part of the tree.
       "docs/plans/**",
+      // The Crew Bureau design book and the two folders its pages link to,
+      // copied byte for byte from the design prototype (spec 17). Their
+      // scripts are the book's and are never edited here.
+      "docs/design/**",
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
@@ -268,25 +306,46 @@ export default tseslint.config(
   {
     files: ["apps/desktop/src/renderer/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": browserSyntax({ more: [viteGlobSyntax, viteAssetUrlSyntax] }),
+      "no-restricted-imports": browserImports({ more: [specimensPattern] }),
+      "no-restricted-syntax": browserSyntax({ more: [...desktopRendererSyntax, ...markupSyntax] }),
+    },
+  },
+  {
+    // The reference sheet draws the Bureau book's pieces, which the book's
+    // crew.js returns as strings of markup.
+    files: ["apps/desktop/src/renderer/specimens/reference.ts"],
+    rules: {
+      "no-restricted-syntax": browserSyntax({ more: desktopRendererSyntax }),
     },
   },
   {
     // A screen composes presentation; it does not reach into the frame around
     // it. Only the layout routes below mount the shell.
-    files: ["apps/web/src/routes/**/*.tsx", "apps/desktop/src/renderer/routes/**/*.tsx"],
+    files: ["apps/web/src/routes/**/*.tsx"],
     rules: {
       "no-restricted-imports": browserImports({ more: [shellPattern] }),
     },
   },
   {
-    files: [
-      "apps/web/src/routes/_shell.tsx",
-      "apps/web/src/routes/_shell/settings.tsx",
-      "apps/desktop/src/renderer/routes/_connected/_shell.tsx",
-    ],
+    // The desktop app's screens keep the specimen ban beside the shell's,
+    // because a rule's options here replace the ones above.
+    files: ["apps/desktop/src/renderer/routes/**/*.tsx"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [shellPattern, specimensPattern] }),
+    },
+  },
+  {
+    files: ["apps/web/src/routes/_shell.tsx", "apps/web/src/routes/_shell/settings.tsx"],
     rules: {
       "no-restricted-imports": browserImports(),
+    },
+  },
+  {
+    // The desktop app's layout route mounts the shell, so it may import it,
+    // but it keeps the specimen ban.
+    files: ["apps/desktop/src/renderer/routes/_connected/_shell.tsx"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [specimensPattern] }),
     },
   },
   {

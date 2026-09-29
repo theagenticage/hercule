@@ -64,6 +64,7 @@ const makeFakeMenuAndWindow = (seen: Seen): Layer.Layer<MainMenu | MainWindow> =
       load: Effect.void,
       reload: Effect.void,
       show: Effect.void,
+      showFirstTime: Effect.void,
       send: () => Effect.void,
       showWarning: (message) =>
         Effect.sync(() => {

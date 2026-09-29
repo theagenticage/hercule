@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Ada · Hercule</title>
+    <style>
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+      }
+      .tx {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 14px 16px 150px;
+      }
+      .quiet {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .quiet::before,
+      .quiet::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--line-soft);
+      }
+      .quiet span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px 8px 8px;
+        border-radius: var(--r-lg);
+        background: var(--fail-tint);
+        font-size: var(--t-12);
+        line-height: 1.4;
+      }
+      .notice b {
+        color: var(--fail-ink);
+      }
+      .refs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .ref {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 36px;
+        padding: 0 12px 0 6px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .ref .you-ink {
+        font-weight: var(--w-bold);
+      }
+      .refs .btn {
+        height: 36px;
+        border-radius: var(--r-pill);
+        font-size: var(--t-13);
+      }
+      .reminder {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: var(--r-lg);
+        background: var(--who-tint);
+      }
+      .reminder .ic {
+        color: var(--who-ink);
+      }
+      .reminder div {
+        flex: 1;
+      }
+      .reminder b {
+        display: block;
+        font-size: 14px;
+      }
+      .reminder span {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .mention {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--who-ink);
+        font-weight: var(--w-bold);
+        vertical-align: -3px;
+      }
+      .caret {
+        display: inline-block;
+        width: 8px;
+        height: 16px;
+        margin-left: 3px;
+        border-radius: 2px;
+        background: var(--who-ink);
+        vertical-align: -3px;
+        animation: caret 1s steps(2) infinite;
+      }
+      @keyframes caret {
+        50% {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .caret {
+          animation: none;
+        }
+      }
+      .lipline {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        padding: 7px 0 0;
+        color: var(--faint);
+        font-size: var(--t-11);
+      }
+      .lipline span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .composer.is-scrolled .lipline {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <header class="m-nav">
+        <a class="m-back" href="#"><i data-i="chev-l" data-size="22"></i>Crew</a>
+        <div class="m-head" style="--hue: var(--hue-iris)">
+          <i data-face="Ada" data-pose="working" data-size="30"></i>
+          <span class="m-head-text"><b>Ada</b><small style="color: var(--who-ink)">answering…</small></span>
+        </div>
+        <button class="icon-btn" title="Ada's Memory"><i data-i="memory" data-size="20"></i></button>
+      </header>
+
+      <div class="stage">
+        <div class="transcript" data-transcript>
+          <div class="tx">
+            <div class="stamp">Yesterday</div>
+            <div class="notice">
+              <i data-face="Ada" data-pose="failed" data-size="28"></i>
+              <span><b>Ada was interrupted:</b> provider timeout after 120s. Your last message was kept. <span class="faint">22:14</span></span>
+            </div>
+
+            <div class="stamp">Today</div>
+            <div class="quiet"><span><i data-i="heart" data-size="13"></i>2 quiet check-ins · 07:00 · 08:00</span></div>
+
+            <div class="m-msg" style="--hue: var(--hue-iris)">
+              <div class="m-by"><i data-face="Ada" data-pose="idle" data-size="22"></i><b>Ada</b><span>heartbeat · 09:00</span></div>
+              <div class="msg-body">
+                <p>Morning Rogier. Triage found one urgent thing: EU card payments that need 3&#8209;D Secure have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. Also: Marta at Brightline wants her invoice in the company name - I can draft that.</p>
+                <div class="refs">
+                  <a class="ref" href="session-active.html"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="26"></i>Fix 3&#8209;D Secure<span class="you-ink">· waiting on you</span></a>
+                  <button class="btn btn--accent">Draft it for Marta</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg--me">
+              <div>
+                <div class="bubble">Remind me Friday to renew the SSL cert for ops.</div>
+                <div class="bubble-meta">09:20 · said out loud</div>
+              </div>
+            </div>
+
+            <div class="m-msg" style="--hue: var(--hue-iris)">
+              <div class="m-by"><i data-face="Ada" data-pose="idle" data-size="22"></i><b>Ada</b><span>09:20</span></div>
+              <div class="msg-body">
+                <p>Done. I'll remind you Friday 2 October at 09:00.</p>
+                <div class="reminder">
+                  <i data-i="alarm" data-size="20"></i>
+                  <div><b>Renew the SSL cert for ops</b><span>Fri 2 Oct · 09:00 · to Web chat</span></div>
+                  <button class="btn btn--quiet btn--sm">Edit</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg--me">
+              <div>
+                <div class="bubble">What's the status of the backup job?</div>
+                <div class="bubble-meta">09:38</div>
+              </div>
+            </div>
+
+            <div class="m-msg" style="--hue: var(--hue-iris)">
+              <div class="m-by"><i data-face="Ada" data-pose="working" data-size="22"></i><b>Ada</b><span>answering…</span></div>
+              <div class="msg-body">
+                <p><span class="mention" style="--hue: var(--hue-teal)"><i data-face="Milo" data-pose="working" data-size="18"></i>Milo</span> started an investigation at 09:35 on build-box-1. So far: the backup job's <code>pg_dump</code> has been slower each night since the table <code>events</code> passed 40 GB<span class="caret" style="--hue: var(--hue-iris)"></span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer" data-composer>
+            <div class="composer-card">
+              <div class="m-comp">
+                <button class="icon-btn" title="Attach"><i data-i="plus" data-size="20"></i></button>
+                <textarea class="composer-input" rows="1" placeholder="Message Ada…"></textarea>
+                <button class="m-mic" title="Hold to talk to Ada"><i data-i="mic" data-size="20"></i></button>
+              </div>
+            </div>
+            <div class="lipline"><span><i data-i="memory" data-size="12"></i>Remembers 7 topics</span><span><i data-i="heart" data-size="12"></i>Next heartbeat 10:00</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

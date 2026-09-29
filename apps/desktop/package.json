@@ -3,6 +3,7 @@
   "productName": "Hercule",
   "version": "0.1.0",
   "description": "The Hercule desktop app for macOS.",
+  "author": "Rogier Pennink",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
@@ -10,7 +11,9 @@
     "dev": "node scripts/dev.ts",
     "build": "vite build --config vite.renderer.config.ts && vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
     "package": "electron-builder --mac && electron-builder --mac --config.directories.output=dist/test --config.electronFuses.enableNodeCliInspectArguments=true",
-    "perf": "node scripts/perf.ts"
+    "perf": "node scripts/perf.ts",
+    "first-frame": "node scripts/first-frame.ts",
+    "compare:bureau": "node scripts/compare-bureau.ts"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",

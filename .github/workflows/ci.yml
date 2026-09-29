@@ -90,6 +90,9 @@ jobs:
       # Builds the release package and the test package; the suite runs the
       # test package and reads the release package's fuses and app.asar.
       - run: pnpm build:desktop
+      # Compares the app's faces, icons and marks with the Crew Bureau book in
+      # docs/design/crew-bureau, pixel for pixel.
+      - run: pnpm compare:bureau
       # The suite connects the app to a real controller, started from the
       # compiled binary in a scratch Hercule Home.
       - run: pnpm build:binary

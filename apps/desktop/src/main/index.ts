@@ -73,7 +73,13 @@ const startApp = (): void => {
   registerIpcHandlers(runtime);
 
   app.on("activate", () => runtime.runFork(showMainWindow));
-  app.on("second-instance", () => runtime.runFork(showMainWindow));
+  // A second launch comes from another app, often a terminal, and macOS
+  // leaves that app in front. The user launched Hercule to use it, so the
+  // app takes focus from whichever app has it.
+  app.on("second-instance", () => {
+    app.focus({ steal: true });
+    runtime.runFork(showMainWindow);
+  });
   // The app exits only once the runtime has shut down, so that a save of the
   // window's state that is under way finishes first. It exits even when the
   // shutdown fails, so that quitting never hangs.

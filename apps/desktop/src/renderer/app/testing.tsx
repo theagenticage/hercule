@@ -62,6 +62,9 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
+      firstScreen: {
+        report: () => Promise.resolve(undefined),
+      },
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);

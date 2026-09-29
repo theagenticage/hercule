@@ -12,7 +12,7 @@
 #   package.
 
 # The macOS bundle identifier. It cannot change once the app is released.
-appId: dev.hercule.desktop
+appId: sh.hercule.desktop
 
 directories:
   output: dist/release

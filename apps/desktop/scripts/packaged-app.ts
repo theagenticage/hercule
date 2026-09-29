@@ -1,16 +1,32 @@
 /**
  * Finds, starts, signs in and quits the packaged desktop app that
- * `pnpm build:desktop` builds. The perf script (`./perf.ts`) and the
- * end-to-end suite (`e2e/desktop/`) both run the app through this module, so
- * they run it the same way.
+ * `pnpm build:desktop` builds, and starts the scratch controller it signs in
+ * to. The perf script (`./perf.ts`), the first-frame check
+ * (`./first-frame.ts`) and the end-to-end suite (`e2e/desktop/`) all run the
+ * app through this module, so they run it the same way.
  *
- * The perf script runs on plain Node and imports this module by its `.ts`
- * path, so the module uses only TypeScript that Node can strip, and imports
- * no other file of the repository.
+ * It also holds what the perf script and the first-frame check share beyond
+ * that: the connection to main's Node inspector, stopping the app by its
+ * process ID, and the Markdown table each prints.
+ *
+ * The scripts run on plain Node and import this module by its `.ts` path, so
+ * the module uses only TypeScript that Node can strip, and imports its
+ * neighbours by their full file names too.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { _electron, type ElectronApplication, type Page } from "playwright";
+import {
+  completeSetup,
+  PASSWORD,
+  ROOT,
+  startController,
+  USERNAME,
+} from "../../../scripts/controller-process.ts";
+import { buildAppEnv } from "./processes.ts";
+import type { WindowState } from "../src/main/app-settings.ts";
 
 /**
  * The folder electron-builder writes the `.app` into for this machine:
@@ -45,27 +61,6 @@ export function findExecutable(kind: PackageKind): string {
 }
 
 /**
- * Builds the environment the app is started with: this process's environment
- * without `ELECTRON_RUN_AS_NODE` and without any `HERCULE_` variable.
- *
- * - `ELECTRON_RUN_AS_NODE` would make an Electron binary run as plain Node.
- *   The packaged app ignores it (its `RunAsNode` fuse is off), but a shell
- *   that exports it must not decide how the app runs.
- * - A `HERCULE_` variable in the developer's shell must not change the app's
- *   behaviour either.
- */
-export function buildAppEnv(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] =>
-        entry[1] !== undefined &&
-        entry[0] !== "ELECTRON_RUN_AS_NODE" &&
-        !entry[0].startsWith("HERCULE_"),
-    ),
-  );
-}
-
-/**
  * Builds the arguments every launch of a packaged app gets.
  *
  * - `--user-data-dir` keeps the app's settings file and its single-instance
@@ -85,13 +80,20 @@ export function buildAppArgs(userDataDir: string): string[] {
 }
 
 /**
- * Writes `url` into the settings file in `userDataDir` as the saved
- * controller, the way main saves one after a successful check, so the app
- * starts connected to it. Replaces any settings already there. Call it before
- * the app starts: main reads the settings file only once, at start.
+ * Writes the settings file in `userDataDir`, replacing any settings already
+ * there. Call it before the app starts: main reads the settings file only
+ * once, at start.
+ *
+ * - `controllerUrl` is the saved controller, as main saves one after a
+ *   successful check, so the app starts connected to it.
+ * - `window`, when given, is the window's saved state, so the window opens
+ *   where it says.
  */
-export function writeControllerUrl(userDataDir: string, url: string): void {
-  writeFileSync(join(userDataDir, "settings.json"), JSON.stringify({ controllerUrl: url }));
+export function writeSettings(
+  userDataDir: string,
+  settings: { readonly controllerUrl: string; readonly window?: WindowState },
+): void {
+  writeFileSync(join(userDataDir, "settings.json"), JSON.stringify(settings));
 }
 
 /**
@@ -108,13 +110,36 @@ export function readSettings(userDataDir: string): Record<string, unknown> {
  * Signs in on the app's sign-in screen the way a user does: types the
  * username and the password, and presses "Sign in". Returns once the button
  * is pressed; the caller waits for whatever screen it expects next.
+ *
+ * Fails, before pressing the button, when a field does not hold exactly what
+ * was typed. The window takes the keyboard focus when it shows, so a key the
+ * person at the machine presses then lands in a field, and the controller
+ * would refuse the sign-in with no hint why. Both fields are read after both
+ * are filled, because a stray key can land in either while the other fills.
  */
 export async function signIn(
   page: Page,
   credentials: { readonly username: string; readonly password: string },
 ): Promise<void> {
-  await page.getByRole("textbox", { name: "Username" }).fill(credentials.username);
-  await page.getByLabel("Password").fill(credentials.password);
+  const fields = [
+    {
+      name: "Username",
+      field: page.getByRole("textbox", { name: "Username" }),
+      typed: credentials.username,
+    },
+    { name: "Password", field: page.getByLabel("Password"), typed: credentials.password },
+  ];
+  for (const { field, typed } of fields) await field.fill(typed);
+  for (const { name, field, typed } of fields) {
+    const held = await field.inputValue();
+    // The message gives lengths, not the text: a stray key can be part of
+    // something private the person was typing in another app.
+    if (held !== typed) {
+      throw new Error(
+        `The ${name} field holds other text than was typed (${String(held.length)} characters, where ${String(typed.length)} were typed), so the sign-in would fail. A key pressed while the app started probably reached its window. Run again without typing while the app starts.`,
+      );
+    }
+  }
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
@@ -158,6 +183,17 @@ export function launchTestPackage(userDataDir: string): Promise<ElectronApplicat
  * waits for its process to exit. Fails if the process exits other than with
  * code 0, such as on a crash.
  *
+ * `app.quit()` runs from a timer in main, as an ordinary task on main's event
+ * loop, which is also how it runs when the user picks Quit. It does not run
+ * inside the call that reaches main through its Node inspector, which is how
+ * Playwright's own `close()` quits the app. Quitting from inside that call
+ * sometimes makes Electron 44.4.5 crash with SIGSEGV on macOS 15 with Stage
+ * Manager on. The crash happens when macOS is still moving the window, as it
+ * does right after the window shows or moves: macOS sends the window a
+ * notification after Electron has already freed it. The same quit from a
+ * timer did not crash in about 400 runs of a standalone repro
+ * (`docs/plans/electron-upstream-bugs.md` §1).
+ *
  * Closing the window only hides it, so a mistake in that handler can keep
  * `app.quit()` from finishing. After 10 seconds the process is killed, by the
  * PID Playwright started, and this fails saying so: nothing is left running.
@@ -169,16 +205,21 @@ export function launchTestPackage(userDataDir: string): Promise<ElectronApplicat
 export async function quitApp(app: ElectronApplication): Promise<void> {
   // Playwright's handle on the process is gone once the app has closed.
   const child = app.process();
-  const quit = app.close();
+  // Playwright emits `close` once the process has exited and Playwright has
+  // finished with it.
+  const closed = new Promise<void>((resolve) => app.once("close", () => resolve()));
+  await app.evaluate(({ app }) => {
+    setTimeout(() => app.quit(), 0);
+  });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<true>((resolve) => {
     timer = setTimeout(() => resolve(true), 10_000);
   });
-  const outcome = await Promise.race([quit.then(() => false as const), timedOut]);
+  const outcome = await Promise.race([closed.then(() => false as const), timedOut]);
   clearTimeout(timer);
   if (outcome) {
     child.kill("SIGKILL");
-    await quit.catch(() => undefined);
+    await closed;
     throw new Error("the app was still running 10 s after app.quit(), so it was killed");
   }
   if (child.exitCode !== 0) {
@@ -190,4 +231,221 @@ export async function quitApp(app: ElectronApplication): Promise<void> {
 /** Checks whether the app's one window is on screen. */
 export function isWindowVisible(app: ElectronApplication): Promise<boolean> {
   return app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible());
+}
+
+/**
+ * Starts a controller from the compiled binary in a scratch Hercule Home,
+ * never the user's own, and completes its setup. Runs `use` with the
+ * controller's URL, then stops the controller and deletes the home. Fails
+ * when the binary has not been built, or setup fails.
+ */
+export async function runWithScratchController<T>(use: (url: string) => Promise<T>): Promise<T> {
+  const binary = join(ROOT, "hercule");
+  if (!existsSync(binary)) {
+    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
+  }
+  const home = mkdtempSync(join(tmpdir(), "hercule-desktop-home-"));
+  try {
+    const controller = await startController({ home, binary });
+    try {
+      const ran = await completeSetup({ home, url: controller.url, binary });
+      if (ran.code !== 0) {
+        throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
+      }
+      return await use(controller.url);
+    } finally {
+      await controller.stop();
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Waits until main has saved a token in the settings file in `userDataDir`.
+ * The page saves the token without waiting for main, so it can land just
+ * after the shell shows. Fails after 5 s.
+ */
+async function waitForSavedToken(userDataDir: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (typeof readSettings(userDataDir)["token"] === "string") return;
+    await sleep(50);
+  }
+  throw new Error("main did not save the token within 5 s of signing in");
+}
+
+/**
+ * Starts the app on `userDataDir`, which already holds a saved controller,
+ * signs in on the sign-in screen, waits for the shell and the saved token,
+ * and quits.
+ */
+export async function signInOnce(userDataDir: string): Promise<void> {
+  const app = await launchTestPackage(userDataDir);
+  try {
+    const page = await app.firstWindow();
+    await signIn(page, { username: USERNAME, password: PASSWORD });
+    await page.getByRole("main").waitFor();
+    await waitForSavedToken(userDataDir);
+  } finally {
+    await quitApp(app);
+  }
+}
+
+/** A connection to the Node inspector of the app's main process. */
+export interface Inspector {
+  /** Sends a request and returns its result. Fails when the inspector refuses the request. */
+  readonly send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Sends a request that evaluates code, such as `Runtime.evaluate`, and
+   * returns the value the code evaluates to. Fails when the inspector refuses
+   * the request, or when the code throws.
+   */
+  readonly evaluate: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Returns the parameters of the oldest event called `method` that no
+   * earlier call returned, waiting for one when there is none yet.
+   */
+  readonly waitForEvent: (method: string) => Promise<unknown>;
+  readonly close: () => void;
+}
+
+/** A message from the inspector: a reply to a request when it has an `id`, an event otherwise. */
+interface InspectorMessage {
+  readonly id?: number;
+  readonly method?: string;
+  readonly params?: unknown;
+  readonly result?: {
+    readonly result?: { readonly value?: unknown };
+    readonly exceptionDetails?: {
+      readonly text: string;
+      readonly exception?: { readonly description?: string };
+    };
+  };
+  readonly error?: { readonly message: string };
+}
+
+/** Connects to main's Node inspector at `url`. Fails when the inspector refuses the connection. */
+export async function connectInspector(url: string): Promise<Inspector> {
+  const socket = new WebSocket(url);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve, { once: true });
+    socket.addEventListener(
+      "error",
+      () => reject(new Error(`could not connect to main's inspector at ${url}`)),
+      { once: true },
+    );
+  });
+  let lastId = 0;
+  const replies = new Map<number, (message: InspectorMessage) => void>();
+  const events: InspectorMessage[] = [];
+  const eventWaiters: Array<() => void> = [];
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(String(event.data)) as InspectorMessage;
+    if (message.id === undefined) {
+      events.push(message);
+      for (const wake of eventWaiters.splice(0)) wake();
+      return;
+    }
+    replies.get(message.id)?.(message);
+  });
+
+  const request = (method: string, params: Record<string, unknown> = {}) =>
+    new Promise<InspectorMessage>((resolve, reject) => {
+      const id = ++lastId;
+      replies.set(id, (message) => {
+        replies.delete(id);
+        if (message.error === undefined) resolve(message);
+        else reject(new Error(`main's inspector refused ${method}: ${message.error.message}`));
+      });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+
+  return {
+    send: async (method, params) => (await request(method, params)).result,
+    evaluate: async (method, params) => {
+      const { result } = await request(method, params);
+      const thrown = result?.exceptionDetails;
+      if (thrown !== undefined) {
+        throw new Error(`main threw: ${thrown.exception?.description ?? thrown.text}`);
+      }
+      return result?.result?.value;
+    },
+    waitForEvent: async (method) => {
+      for (;;) {
+        const index = events.findIndex((event) => event.method === method);
+        if (index !== -1) return events.splice(index, 1)[0]!.params;
+        await new Promise<void>((wake) => eventWaiters.push(wake));
+      }
+    },
+    close: () => socket.close(),
+  };
+}
+
+/**
+ * Evaluates `expression` in the app's main process, through the Node
+ * inspector at `inspectorUrl`, and returns the value it evaluates to, awaited
+ * when it is a promise. Fails when the expression throws.
+ *
+ * The connection lasts only for the call, so nothing stays attached to the
+ * app in between. `require` is not a global in main; the inspector's command
+ * line API supplies it to the expression.
+ */
+export async function evaluateInMain(inspectorUrl: string, expression: string): Promise<unknown> {
+  const inspector = await connectInspector(inspectorUrl);
+  try {
+    return await inspector.evaluate("Runtime.evaluate", {
+      expression,
+      includeCommandLineAPI: true,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+  } finally {
+    inspector.close();
+  }
+}
+
+/** Checks whether the process `pid` is still running. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stops the app's process `pid`: sends it SIGTERM, which quits the app as
+ * `app.quit()` does, and waits until the process has ended. Kills it when it
+ * is still running 10 s later, and then fails saying so.
+ *
+ * It needs only the process ID, so it also stops an app started through
+ * LaunchServices, which is not a child of the script. A caller that spawned
+ * the app itself can read the app's exit code from its child process
+ * afterwards.
+ */
+export async function stopApp(pid: number): Promise<void> {
+  if (!isRunning(pid)) return;
+  process.kill(pid, "SIGTERM");
+  const deadline = Date.now() + 10_000;
+  while (isRunning(pid)) {
+    if (Date.now() > deadline) {
+      process.kill(pid, "SIGKILL");
+      throw new Error(
+        `the app (process ${String(pid)}) was still running 10 s after SIGTERM, so it was killed`,
+      );
+    }
+    await sleep(100);
+  }
+}
+
+/** Formats a Markdown table. */
+export function formatTable(
+  header: ReadonlyArray<string>,
+  rows: ReadonlyArray<ReadonlyArray<string>>,
+): string {
+  return [header, header.map(() => "---"), ...rows]
+    .map((cells) => `| ${cells.join(" | ")} |`)
+    .join("\n");
 }

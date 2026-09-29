@@ -38,6 +38,14 @@ export class MainWindow extends Context.Service<
     readonly show: Effect.Effect<void>;
 
     /**
+     * Shows the window for the first time, when the page reports that its
+     * first screen has reached the window. Does nothing once the window has
+     * shown: the page reports again after each reload, and more than one
+     * screen can report at launch.
+     */
+    readonly showFirstTime: Effect.Effect<void>;
+
+    /**
      * Sends `payload` to the page on the main-to-renderer channel `name`,
      * encoded against the IPC contract.
      */

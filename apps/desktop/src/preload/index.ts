@@ -60,6 +60,9 @@ const bridge: Bridge = {
     read: () => invokeChannel("token.read"),
     write: (token) => invokeChannel("token.write", token),
   },
+  firstScreen: {
+    report: () => invokeChannel("firstScreen.report"),
+  },
   menu: {
     onCommand: (listener) => subscribeToChannel("menu.command", listener),
   },
