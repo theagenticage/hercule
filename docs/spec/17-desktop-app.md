@@ -413,7 +413,12 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - its priority as bars at the right: 4 for urgent, drawn in `--fail` as the book does, 3 for high, 2 for normal, 1 for low;
   - its title.
 
-  A click adds the Task's title and description to the Message Draft, after a blank line when the field already holds text, and focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
+  ~~A click adds the Task's title and description to the Message Draft,~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* A click adds one line that points the agent at the Task, rather than the Task's text:
+  - "Pick up ticket https://github.com/owner/repo/issues/42" when the Task's first External Ref is a GitHub issue;
+  - "Pick up pull request https://github.com/owner/repo/pull/87" when it is a GitHub pull request;
+  - "Start working on task <id>: <title>" otherwise.
+
+  The thread's agent reads the rest itself, with `gh` or `hercule task read`. The message stays short, and text written outside Hercule, such as an issue's body, is never sent as the user's own words. The line goes after a blank line when the field already holds text, and the click focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
 - **The open draft is a row in the sidebar,** as the book draws it: "New thread", with its workspace and machine on the second line, and "draft" at its end. It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".
 - **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 

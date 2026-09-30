@@ -59,13 +59,28 @@ describe("buildStartCards", () => {
     expect(bare?.source).toBeNull();
   });
 
-  it("puts the description after the title and a blank line, or the title alone when there is none", () => {
-    const [described, bare] = buildStartCards([
-      buildTask({ id: "a", title: "Fix checkout", description: "  EU cards fail.\n" }),
-      buildTask({ id: "b", title: "Fix checkout", description: "   " }),
+  it("points the message at the GitHub issue or pull request the task came from", () => {
+    const entry = { at: AT, actor: "user" } as const;
+    const [issue, pull] = buildStartCards([
+      buildTask({ id: "a", provenance: [{ ...entry, ref: "github:issue:acme/webshop#12" }] }),
+      buildTask({ id: "b", provenance: [{ ...entry, ref: "github:pr:acme/webshop#87" }] }),
     ]);
-    expect(described?.message).toBe("Fix checkout\n\nEU cards fail.");
-    expect(bare?.message).toBe("Fix checkout");
+    expect(issue?.message).toBe("Pick up ticket https://github.com/acme/webshop/issues/12");
+    expect(pull?.message).toBe("Pick up pull request https://github.com/acme/webshop/pull/87");
+  });
+
+  it("points the message at the task itself when it came from no GitHub issue or pull request", () => {
+    const entry = { at: AT, actor: "user" } as const;
+    const cards = buildStartCards([
+      buildTask({ id: "a", description: "EU cards fail." }),
+      buildTask({ id: "b", provenance: [{ ...entry, ref: "github:repo:acme/webshop" }] }),
+      buildTask({ id: "c", provenance: [{ ...entry, ref: "sentry:issue:4411" }] }),
+    ]);
+    expect(cards.map((card) => card.message)).toEqual([
+      "Start working on task a: Cart total rounding on discounts",
+      "Start working on task b: Cart total rounding on discounts",
+      "Start working on task c: Cart total rounding on discounts",
+    ]);
   });
 });
 

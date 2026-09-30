@@ -382,7 +382,7 @@ describe("the new-thread screen", () => {
     await userEvent.click(card);
 
     expect(field.value).toBe(
-      "Look at checkout\n\nCart total rounding on discounts\n\nTotals are off by a cent.",
+      `Look at checkout\n\nStart working on task ${CART_TASK.id}: Cart total rounding on discounts`,
     );
     expect(document.activeElement).toBe(field);
     // The cards ask for the project's most urgent open tasks.
