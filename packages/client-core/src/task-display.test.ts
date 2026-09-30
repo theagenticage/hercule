@@ -35,9 +35,9 @@ describe("describeProvenanceTarget", () => {
   const stamp = { at: "2026-09-04T15:21:31.646Z", actor: "user" } as const;
 
   it("shows the external ref, the event and the run", () => {
-    expect(describeProvenanceTarget({ ...stamp, ref: "github:issue:theagenticage/hercule#61" })).toBe(
-      "github:issue:theagenticage/hercule#61",
-    );
+    expect(
+      describeProvenanceTarget({ ...stamp, ref: "github:issue:theagenticage/hercule#61" }),
+    ).toBe("github:issue:theagenticage/hercule#61");
     expect(describeProvenanceTarget({ ...stamp, eventId: 4242 })).toBe("event 4242");
     expect(
       describeProvenanceTarget({ ...stamp, runId: "01a06d02-beca-760b-a6b2-83af536c3c20" }),
