@@ -1,7 +1,12 @@
 import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { buildApprovalCard, formatRequestQuestion, readErrorMessage } from "@hercule/client-core";
+import {
+  buildApprovalCard,
+  formatDescribeLine,
+  formatRequestQuestion,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import "./dock.css";
@@ -163,11 +168,11 @@ export function RequestDock({
         {card.note === null ? null : <p className="dock-note">{card.note}</p>}
         <div className="ledger">
           {card.rows.map((row) => {
-            const key = DECISION_KEYS[row.decision];
-            const describeId = `${titleId}-${row.decision}`;
+            const key = DECISION_KEYS[row.id];
+            const describeId = `${titleId}-${row.id}`;
             return (
               <button
-                key={row.decision}
+                key={row.id}
                 type="button"
                 className="ans"
                 aria-label={row.label}
@@ -175,12 +180,12 @@ export function RequestDock({
                 aria-keyshortcuts={key?.shortcut}
                 aria-disabled={answered || undefined}
                 onClick={() => {
-                  if (!answered) respond.mutate(row.decision);
+                  if (!answered) respond.mutate(row.id);
                 }}
               >
-                <span className={DECISION_BUTTON_CLASSES[row.decision]}>{row.label}</span>
+                <span className={DECISION_BUTTON_CLASSES[row.id]}>{row.label}</span>
                 <span className="ans-desc" id={describeId}>
-                  {row.describe}
+                  {formatDescribeLine(row.describeLine)}
                 </span>
                 {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
               </button>
@@ -198,15 +203,15 @@ export function RequestDock({
         <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
         <span className="spacer" />
         {card.rows
-          .filter((row) => row.decision === "allow" || row.decision === "deny")
+          .filter((row) => row.id === "allow" || row.id === "deny")
           .map((row) => (
             <button
-              key={row.decision}
+              key={row.id}
               type="button"
-              className={DECISION_BUTTON_CLASSES[row.decision]}
+              className={DECISION_BUTTON_CLASSES[row.id]}
               aria-disabled={answered || undefined}
               onClick={() => {
-                if (!answered) respond.mutate(row.decision);
+                if (!answered) respond.mutate(row.id);
               }}
             >
               {row.label}

@@ -69,7 +69,7 @@ One **warning**, not an error: a graph with signal nodes and no `terminal` step 
 - Expressions: a filter, a step condition and an edge condition must give a bool. One whose type is known and is not `bool` is refused; one whose type is known only at run time is accepted.
 - Templates: the `prompt` and every string inside `params` that holds `{{`, at any depth, are templates (section 5). Each of their expressions is checked in the scope of a run, and an unclosed `{{` is refused.
 - Actions: an action step names a built-in action, or an action of a plugin that is enabled and started; the refusal lists the actions that can be named. The params rule: every param the action requires is present, and a key its input does not declare is refused, at any depth. A literal value is decoded against its field's schema, together with any rule the input carries as a whole (a `task.update` names a field to change). A template is accepted for a field of any type, because its value is known only when the run renders it, except where the field takes no value at all.
-- Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `cron.tick` start trigger has a five-field `schedule`, with no field for seconds; `timezone` is an IANA zone; neither is allowed on another kind. A signal trigger cannot listen for `cron.tick`.
+- Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `Schedule` has a five-field `schedule`, with no field for seconds, that parses and comes due at least once; its `timezone` is a known IANA zone. *(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276): the rules that kept `schedule` and `timezone` off other kinds, and a signal trigger off `cron.tick`, are gone, because the shape of `on` rules those out.)*
 - Inputs: a Connection input's `connection.type` is a Connection type of a plugin that is enabled and started.
 - Graph: an edge from or into a start trigger is refused, because a start trigger starts runs and does not continue one. The entry-step rules of section 4.3 apply.
 
@@ -87,6 +87,8 @@ These are decided by the definition alone, because a policy's checkouts are writ
 
 A stored workflow can stop validating without being edited: its plugin is disabled, its agent or a Connection named in a default is deleted. The controller re-validates every workflow that references the mutated thing at the moment of the mutation. A workflow that fails is marked **invalid**: a health warning on the workflow, one Notification, and its start triggers no longer match while it is invalid (matched events show as ignored in the events view, [./08-events-and-connections.md](./08-events-and-connections.md)). A manual run of an invalid workflow is rejected with the validation error. The mark clears on the next successful validation (the plugin is re-enabled, or the workflow is saved with a fix). Runs are never spawned only to fail at stamp: one notification, not a failed-run flood.
 
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* The invalid mark is not built yet, and neither is the events view that shows matched events as ignored. Until they are, a start trigger of a workflow that no longer validates still matches, and each match writes a run that fails at once with `validation-error` (section 7.1).
+
 ## 2. Triggers
 
 A workflow owns its triggers; there is no standalone routing entity. Triggers are rows in their own table, queryable independently of the workflow (a scheduled-tasks view is a query over cron triggers). A workflow may carry several start triggers and several signal triggers.
@@ -94,27 +96,30 @@ A workflow owns its triggers; there is no standalone routing entity. Triggers ar
 ```ts
 type Trigger = StartTrigger | SignalTrigger
 
-interface EventSelector {               // the static condition of a trigger
-  kind: string                         // event kind, namespaced by source: "github.issue.opened", "task.updated", "cron.tick"
+interface EventSelector {               // the events a trigger accepts
+  kind: string                         // event kind: "github.issue.opened", "task.updated"; the part before the first dot is a namespace, not always the Event Source
   connectionId?: string | "any"        // required for plugin-emitted kinds: a Connection id or a deliberate "any"; absent for core-emitted kinds
   filter?: CelExpression               // over `event`; bool
+}
+
+interface Schedule {                    // when a cron trigger fires; no filter, the cron expression already sets when
+  schedule: string                     // five-field cron expression
+  timezone?: string                    // IANA zone; the user's timezone setting when omitted
 }
 
 interface StartTrigger {
   id: string                           // unique inside its workflow; section 1 for the form
   kind: "start"
-  source: EventSelector
+  on: EventSelector | Schedule         // a Schedule makes it a cron trigger
   inputs?: Record<string, CelExpression> // input name -> expression over `event`
   spawnBound?: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
   status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
-  schedule?: string                    // cron triggers only (source.kind == "cron.tick"): cron expression
-  timezone?: string                    // cron triggers only; the user's timezone setting when omitted
 }
 
 interface SignalTrigger {
   id: string                           // referenced as steps.<id> once it has fired (section 2.4)
   kind: "signal"
-  source: EventSelector                // the condition shape
+  on: EventSelector                    // events only: a signal trigger never fires on a schedule
   correlation: {
     event: CelExpression               // over `event`; value-producing
     run: CelExpression                 // over `inputs`, `steps`; value-producing
@@ -123,31 +128,78 @@ interface SignalTrigger {
 }
 ```
 
+A trigger's `on` has one of two shapes:
+
+```yaml
+# Accepts events
+on:
+  kind: github.issue.labeled
+  connectionId: any
+  filter: event.payload.label == "ready-for-agent"
+
+# Fires on a schedule
+on:
+  schedule: "0 9 * * 1-5"
+  timezone: Europe/Amsterdam   # optional; the user's timezone setting when absent
+```
+
 `EventSelector` is defined here because workflows own triggers; the matcher in [./08-events-and-connections.md](./08-events-and-connections.md) evaluates it (kind matches, Connection selection admits `event.connectionId`, filter true). The persisted kind catalogue that `kind` is validated against is registered by plugins and core emitters ([./08-events-and-connections.md](./08-events-and-connections.md)).
+
+*(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276).)* **`on` replaces `source`.** A trigger's matching fields used to sit under `source:`, and a cron trigger's `schedule` and `timezone` sat beside it at the trigger level, with `source.kind: cron.tick`. `source` was the wrong name: an Event Source is where an event comes from, and the field held a description of the events the trigger accepts. The split shape also let the event kind and the schedule disagree, so four save checks refused the bad combinations. Now:
+
+- `on:` is an `EventSelector` or a `Schedule`. A start trigger takes either; a signal trigger takes only an `EventSelector`. A `Schedule` has no `filter`.
+- The schema rules out a schedule beside an event kind, so the four checks are gone: a `schedule` or a `timezone` on a trigger that is not on `cron.tick`, a trigger on `cron.tick` with no `schedule`, and a signal trigger on `cron.tick`. The schedule's own checks stay (section 1).
+- `cron.tick` is no longer a kind a trigger can name. An `EventSelector` with `kind: cron.tick` is refused as an unknown kind, with a hint to write `on: schedule:` instead.
+- Nothing changes underneath. The Scheduler still appends a `cron.tick` event through the one pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)), a run keeps it as its triggering event, and an input mapping still reads `event.payload.scheduledFor` and `event.payload.previousFiredAt`. A tick still reaches only the trigger its payload names (section 2.1), and a cron trigger's row still stores the event kind `cron.tick`, but both are internal details an author never writes.
+- `trigger.query` follows the same split. Its items carry `on` in place of the flat `eventKind`, `connectionId`, `filter`, `schedule` and `timezone`. Its filter gains `on: "event" | "schedule"`, so `on: "schedule"` lists the cron triggers; `eventKind` matches only triggers that accept events ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2).
+- There is no compatibility path. A workflow written with `source:`, or with `schedule` or `timezone` at the trigger level, is refused with an error that says to write them under `on:`.
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* **A trigger is identified by `(workflowId, triggerId)`**, where `triggerId` is the `id` written in the source. No other id is minted, and a trigger id is unique only inside its workflow, as a job id is inside a GitHub Actions file. A later operation that names one trigger takes both. Each save reconciles the trigger rows in the transaction that stores the workflow:
 
-- a trigger whose id stays keeps its row, its `status` and its `createdAt`; its other fields (event kind, Connection selection, filter, schedule, timezone) are computed again from the source;
+- a trigger whose id stays keeps its row, its `status` and its `createdAt`; its other fields (its `on`: event kind, Connection selection and filter, or schedule and timezone) are computed again from the source;
 - a removed id loses its row;
 - a new id gets a row, `active` for a start trigger. A signal trigger's row has no status.
 
 A trigger whose id stays but whose `kind` changes, start to signal or back, is a new trigger: new `createdAt`, and `active` again if it is a start trigger. A start and a signal trigger are different things, and a signal trigger has no status to keep. A start trigger may leave out `inputs` (it maps nothing) and `spawnBound` (the default bound applies, section 2.5).
 
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* A save also clears the `health` of every start trigger whose definition it changes, because the error it recorded was about the definition being replaced (section 2.1). A trigger the save leaves as it was keeps its error, which is still true of it. A cron trigger whose schedule or timezone changes, or that changes between a `Schedule` and an `EventSelector`, loses its next fire time, and the Scheduler computes it again (section 2.2). Its `status` stays, so a paused trigger stays paused.
+
 ### 2.1 Start triggers
 
-A start trigger has a static condition, its `EventSelector`: the event kind, the Connection selection and the optional CEL `filter`. When a persisted event matches an enabled workflow's active start trigger, the matcher inserts a pending-run effect row for it in the same transaction that advances its cursor ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); mechanics in [./08-events-and-connections.md](./08-events-and-connections.md)). One event may start any number of runs across workflows and signal any number of live subscriptions; delivery is non-exclusive.
+A start trigger fires on events or on a schedule (section 2.2). One that fires on events has a static condition, its `EventSelector`: the event kind, the Connection selection and the optional CEL `filter`. When a persisted event matches an enabled workflow's active start trigger, the matcher inserts a pending-run effect row for it in the same transaction that advances its cursor ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); mechanics in [./08-events-and-connections.md](./08-events-and-connections.md)). One event may start any number of runs across workflows and signal any number of live subscriptions; delivery is non-exclusive.
 
 Connection selection is explicit: a named Connection or a deliberate `"any"`. Silent all-connections matching does not exist. Triggers on core-emitted events (cron, manual, platform) have no Connection; `connectionId` is absent for them.
 
 A filter or mapping expression that throws evaluates as no-match and records a visible health warning on the trigger; it never stops the pipeline.
 
-Event kinds a start trigger can name in v1: GitHub and Gmail events from their plugins, `cron.tick`, manual synthetic events, and the platform events `run.completed`, `run.failed`, `task.created`, `task.updated` ([./08-events-and-connections.md](./08-events-and-connections.md) owns the envelope and catalogue).
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Start triggers as built.** The event router ([./08-events-and-connections.md](./08-events-and-connections.md) section 4) has a routing table for triggers, with one route per active start trigger of an enabled workflow.
 
-*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The kinds a trigger can listen for are one catalogue. `eventKind.query` returns it and validation reads it: the **core kinds** `cron.tick`, `run.completed`, `run.failed`, `run.cancelled`, `task.created` and `task.updated`, and the kinds of every plugin that is enabled and started. A manual synthetic event has no kind of its own; it carries whatever kind its caller gives it. A signal trigger cannot name `cron.tick`: the Scheduler starts runs with its ticks and never signals a live run with one, so such a trigger could never fire. The catalogue's rules are in [./08-events-and-connections.md](./08-events-and-connections.md) section 2.
+- **Admitting an event.** A route admits an event when its kind is the trigger's event kind (`on.kind`, or `cron.tick` for a cron trigger) and its Connection is the one the trigger names. A trigger that names `"any"`, or no Connection, admits every Connection. A `cron.tick` is admitted only when the Scheduler emitted it (source `cron`), and only by the trigger its payload names. The `filter` then decides.
+- **The trigger effect.** On a match, the router evaluates the trigger's `inputs` over `event` and writes a **trigger effect**: a row `pending`, holding the mapped inputs, unique on `(workflowId, triggerId, eventId)`. A mapping that fails is a no-match, like a failing filter.
+- **Starting the run.** A separate delivery reads the `pending` effects in arrival order. For each one, in one transaction, it starts the run (section 7.1) and marks the effect `spawned` with the run's id. An effect whose event has been pruned from the log, or whose trigger was paused or its workflow disabled since the match, is marked `discarded`, and the reason is logged. A start that fails because the database was busy or could not be opened leaves its effect `pending`, and the next pass tries it again. Any other failure, such as a constraint the database refuses or a bug in the controller, would fail the same way on every try, so its effect is marked `discarded` too, and the failure is recorded on the trigger's `health`. A run that starts clears an error its trigger's last start recorded. One effect that fails to start holds up no other. The router only writes rows, so a run that is slow or fails to start never holds up the routing of the next event.
+- **Paused triggers and disabled workflows** have no route. An event that arrives while a trigger is paused, or while its workflow is disabled, is not evaluated against it and starts no run later.
+- **Health.** The warning is the trigger's `health`, `ok` or `error` with a message and a time. It records the last failure of a filter or mapping, of a cron schedule (section 2.2) or of a run's start, and which of the three failed, since only the same one clears it; [./08-events-and-connections.md](./08-events-and-connections.md) section 4 has the rules. Only start triggers have one.
+
+Event kinds a start trigger can name in v1: GitHub and Gmail events from their plugins, ~~`cron.tick`~~ *(a schedule is written as a `Schedule` since 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276))*, manual synthetic events, and the platform events `run.completed`, `run.failed`, `task.created`, `task.updated` ([./08-events-and-connections.md](./08-events-and-connections.md) owns the envelope and catalogue).
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The kinds a trigger can listen for are one catalogue. `eventKind.query` returns it and validation reads it: the **core kinds** ~~`cron.tick`,~~ `run.completed`, `run.failed`, `run.cancelled`, `task.created` and `task.updated`, and the kinds of every plugin that is enabled and started. A manual synthetic event has no kind of its own; it carries whatever kind its caller gives it. ~~A signal trigger cannot name `cron.tick`: the Scheduler starts runs with its ticks and never signals a live run with one, so such a trigger could never fire.~~ *(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276): `cron.tick` is not in the catalogue, so no trigger can name it. A cron trigger writes `on: { schedule, timezone? }` instead. `cron.tick` stays a core kind in two senses: no plugin can declare a kind with its name, and its events appear in the event log.)* The catalogue's rules are in [./08-events-and-connections.md](./08-events-and-connections.md) section 2.
 
 ### 2.2 Cron
 
-Cron is a core emitter, not a plugin. The schedule is trigger configuration: a start trigger whose `source.kind` is `cron.tick` carries `schedule` and optional `timezone` (per trigger; when omitted, the **user's timezone setting**, the one spec-wide timezone source pinned in [./12-assistants.md](./12-assistants.md) section 5.2 - there is no separate controller timezone). The core **Scheduler** emits `cron.tick { workflowId, triggerId, scheduledFor, previousFiredAt }` (`previousFiredAt` = when this trigger last actually fired, `null` on the first tick; the shipped Triage workflow maps it to its `since` input) through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. The same Scheduler also fires assistant Scheduled Wakes (heartbeat, reminders), which never enter the pipeline ([./12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
+Cron is a core emitter, not a plugin. The schedule is trigger configuration: a **cron trigger** is a start trigger whose `on` is a `Schedule`, `{ schedule, timezone? }` (timezone per trigger; when omitted, the **user's timezone setting**, the one spec-wide timezone source pinned in [./12-assistants.md](./12-assistants.md) section 5.2 - there is no separate controller timezone). The core **Scheduler** emits `cron.tick { workflowId, triggerId, scheduledFor, previousFiredAt }` (`previousFiredAt` = when this trigger last actually fired, `null` on the first tick; the shipped Triage workflow maps it to its `since` input) through the pipeline and the matcher routes it by trigger id, so no filter is needed. Ticks missed while the controller was down are skipped with a visible note. The same Scheduler also fires assistant Scheduled Wakes (heartbeat, reminders), which never enter the pipeline ([./12-assistants.md](./12-assistants.md) section 8, [ADR 0024](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)). A "scheduled task" form in the UI is sugar over creating a workflow with one cron trigger and one step, or adding a cron trigger to an existing workflow.
+
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Cron as built.** The Scheduler looks at the cron triggers every second. Each cron trigger row keeps its next fire time, the timezone that time was computed in, and when it last fired. The timezone is the trigger's `timezone`, else the user's timezone setting, else UTC while the user has set none. Each trigger is handled in its own transaction:
+
+- A trigger with no next fire time yet, or whose timezone changed since it was computed (for example because the user changed the timezone setting), gets its next fire time computed, and does not fire.
+- A trigger that is paused, or whose workflow is disabled, does not fire. Its next fire time moves on without a note, because nothing was missed.
+- A trigger whose next fire time has come fires for the **latest** scheduled time that has come, if that time came due at most 60 seconds ago: one `cron.tick` is appended to the event log, with `occurredAt` equal to `scheduledFor` and the dedup key `<workflowId>/<triggerId>/<scheduledFor>`. The trigger's last fire time becomes `scheduledFor`. Scheduled times before the latest one, if any, were missed.
+- When even the latest scheduled time is more than 60 seconds late, nothing fires, because the controller was not running at that time.
+- The trigger records the stretch of scheduled times it missed, `{ from, until }`, as its visible note. Only the latest stretch is kept. There are no catch-up runs. For example, a trigger due at 09:00 every day on a controller that was down from Monday 08:00 to Wednesday 09:00:30 fires once, for Wednesday 09:00, and notes Monday to Tuesday as missed.
+- A trigger whose timezone is not a known one gets no next fire time and never fires. Saving a workflow and writing the timezone setting both refuse an unknown timezone, so this happens only when a newer timezone database drops a known one. The error is recorded on the trigger's `health`, once, and cleared when a later pass computes the next fire time in a known timezone.
+- The trigger is read again in the transaction that fires it, so a save, pause or delete between the Scheduler's listing and the firing is never overridden.
+- Daylight saving time moves the local clock, and the Scheduler follows it. When the clocks go back, a local time that occurs twice fires once, at its first occurrence, and the repeated hour's second pass fires nothing: a schedule every 30 minutes in Europe/Amsterdam fires at 02:30 summer time and next at 03:00 winter time. When the clocks go forward, a local time that does not exist fires at the same minute an hour later: a schedule for 02:30 fires at 03:30 that day.
+
+`trigger.query` returns the next fire time, the last fire time and the missed stretch, and every change is announced on the live topic `workflow`.
 
 ### 2.3 Manual
 
@@ -176,6 +228,8 @@ implement (entry: true) -> open_pr
 ### 2.5 Spawn bounds
 
 Every start trigger carries a spawn bound: the number of runs it may spawn per window, default about 30 per hour, configurable per trigger. Signal triggers do not spawn runs and carry none. Exceeding the bound trips a breaker: the trigger's `status` becomes `paused`, events that matched but did not spawn are held visibly against the trigger, a Notification is raised, and the user resumes with one click, optionally discarding the backlog. Nothing is dropped silently, and a tripped breaker is the intended review moment. Breaker semantics, the held-event view and the Notification are specified in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)). Spawn bounds are the only core-enforced bound in v1: there are no run caps, spend gates or quiet hours (pausing a workflow or trigger covers quiet hours).
+
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* Spawn bounds are not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)). A start trigger starts a run for every event it matches, and a `spawnBound` in the source is accepted and not enforced. Only the user pauses a trigger, with `trigger.pause`, and `trigger.resume` takes no `discardHeld` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Nothing is held: the events a paused trigger would have matched start no run, before or after it is resumed.
 
 ## 3. Inputs
 
@@ -450,7 +504,7 @@ Concurrent runs of one workflow are unlimited in v1; the per-runner session cap 
 - the definition has an element that runs cannot execute yet (the list below);
 - the inputs are not valid (section 3).
 
-A run that failed at start would be one more failed run to read, for a problem the caller can be told about at once. `validation-error` as a run's failure reason stays for starts that nobody waits on: a trigger effect ([#82](https://github.com/theagenticage/hercule/issues/82)).
+A run that failed at start would be one more failed run to read, for a problem the caller can be told about at once. `validation-error` as a run's failure reason stays for starts that nobody waits on: a trigger effect ([#82](https://github.com/theagenticage/hercule/issues/82)) *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): built, below)*.
 
 Runs execute part of this document so far. Each element they cannot execute yet is one issue, at its place, in plain words ("Runs cannot evaluate edge conditions yet."):
 
@@ -468,9 +522,20 @@ How the numbered steps above apply to a start by request:
 
 - The frozen plan is the parsed definition, including `name` and `description`, so a run can still be named and drawn after its workflow is renamed, edited or deleted. It is the contract's `WorkflowDefinition`; no separate execution-plan type exists (section 9).
 - Step 3 applies defaults: a required input with a default takes it.
-- Steps 4 and 5 do nothing yet: no run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82), and a plan with a signal trigger is refused.
+- ~~Steps 4 and 5 do nothing yet: no run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82), and a plan with a signal trigger is refused.~~ Step 4 does nothing, because a start by request has no triggering event, and step 5 does nothing yet, because a plan with a signal trigger is refused *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82))*.
 - A disabled workflow can still be run by hand (section 1).
 - The request writes the run and a `pending` step record for each entry step, in one transaction, and answers `{ runId }` at once. It never waits for a step. The run engine then executes the run apart from the request. ~~It executes ready steps one at a time, in the order their step records were created (section 4.3).~~ It executes every ready step at once, and at most one record of each step at a time (section 4.3) *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*.
+
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Starting a run from a trigger effect, as built.** The delivery of a trigger effect (section 2.1) starts the run with the same checks as `run.start`, with the inputs the trigger mapped from the event, except two. No grant is checked.
+
+- The nesting limit is not checked, because the run is 1 deep.
+- Whether a runner can run the plan is not checked. A run that no runner can run starts, and its first workspace step fails with `workspace-failed`, as for a run whose runner was retired after it started. Which runners are connected says nothing about the workflow, so this is not a validation failure, and its notification is not held back.
+
+
+- The delivery first checks that the trigger is still active and its workflow still enabled. A trigger paused, or a workflow disabled, after the match and before the delivery starts no run: the effect is marked `discarded`, and the delivery logs why. This keeps the promise that a paused trigger starts no run.
+- Nobody waits on this start to refuse it. So when a check fails, the run is still written, and it ends at once `failed` with the reason `validation-error` and a `failureMessage` that says what did not validate. It has no `startedAt` and no step records. It raises the usual `core.run-failed` notification, with the trigger among its subjects, so the user learns that the trigger's runs are failing. A trigger whose runs fail validation fails the same way on every event it matches, so this notification is not raised when one about a run of the same trigger was raised in the hour before. Each such run is still listed as failed.
+- Otherwise the numbered steps apply as for a start by request. Step 3 applies defaults to the mapped inputs. Step 4 copies the event onto the run as `triggerEvent`, without `raw` (section 7.2).
+- The run's `origin` is `{ kind: "trigger", triggerId, eventId }`, and the actor of its writes is `system`.
 
 ### 7.2 The run record
 
@@ -564,7 +629,7 @@ interface StepRecord {
 }
 ```
 
-- **Fields that join later**, each with the ticket that sets it: ~~`workspaceId`, `runnerId` and~~ a step record's `sessionId` with agent steps *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257): `workspaceId` and `runnerId` joined with workspace steps, below)* ([#83](https://github.com/theagenticage/hercule/issues/83)); `triggerEvent` and the `trigger` origin with trigger effects ([#82](https://github.com/theagenticage/hercule/issues/82)); ~~`rerunOf` with re-run ([#81](https://github.com/theagenticage/hercule/issues/81));~~ *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81): the field joined with re-run as `originalRunId`, section 7.4)* ~~the run's final output, which is its terminal step's output, with terminal steps ([#80](https://github.com/theagenticage/hercule/issues/80));~~ `taskId` ([./02-domain-model.md](./02-domain-model.md)) with the ticket that links a run to a Task.
+- **Fields that join later**, each with the ticket that sets it: ~~`workspaceId`, `runnerId` and~~ a step record's `sessionId` with agent steps *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257): `workspaceId` and `runnerId` joined with workspace steps, below)* ([#83](https://github.com/theagenticage/hercule/issues/83)); ~~`triggerEvent` and the `trigger` origin with trigger effects ([#82](https://github.com/theagenticage/hercule/issues/82));~~ *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): both joined with trigger effects, below)*; ~~`rerunOf` with re-run ([#81](https://github.com/theagenticage/hercule/issues/81));~~ *(amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81): the field joined with re-run as `originalRunId`, section 7.4)* ~~the run's final output, which is its terminal step's output, with terminal steps ([#80](https://github.com/theagenticage/hercule/issues/80));~~ `taskId` ([./02-domain-model.md](./02-domain-model.md)) with the ticket that links a run to a Task.
 - **`origin`.** `manual` when the user starts a run by hand, from the web app or the CLI; `api` when a session calls ~~`workflow.run`; always `api` for `workflow.submit`, whoever calls it (section 9)~~ `run.start`, for a stored workflow or a sent one alike *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; `action` for a run that a ~~`workflow.run`~~ `run.start` step started (section 8). `actor` is the starter's actor stamp. The user who sends a workflow with `run.start` starts it by hand as much as one who names a stored workflow, so the origin follows who started the run, not which kind of workflow it runs.
 - **A step record's `error` is `{ code, message }`**, not a string, so a client can tell the kinds of failure apart. `code` is one of:
   - an error code of the API, when the action's operation failed with one, such as `not_found` or `validation`. `validation` is also the code when the rendered params do not match the action's input (section 5);
@@ -572,8 +637,8 @@ interface StepRecord {
   - `unexpected`, for a failure that is not one of the API's errors, such as a database error or a bug in the controller;
   - `interrupted`, for a plugin action cut off by a restart (below);
   - the `code` of a plugin's `ActionError` ([./05-plugins.md](./05-plugins.md) section 4.4).
-- **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. ~~The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).~~ `iteration-limit` and the step status `skipped` are built *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, and so is `workspace-failed` *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257))*.
-- **`pending`** means created and not started yet, for a run and for a step record alike. A run is `pending` from the request that creates it until the run engine takes it up; it is never held back by validation, which happens before it exists, and nothing places it yet. A step record is `pending` from when the step before it completes until the engine calls its action, not only as a queued iteration behind a busy step.
+- **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. ~~The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).~~ `iteration-limit` and the step status `skipped` are built *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, and so is `workspace-failed` *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257))*, and so is `validation-error`, for a run a trigger starts *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82), below)*.
+- **`pending`** means created and not started yet, for a run and for a step record alike. A run is `pending` from the request that creates it until the run engine takes it up; it is never held back by validation, which happens before it exists, and nothing places it yet. *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* A run a trigger starts whose checks fail (section 7.1) moves from `pending` straight to `failed` with `validation-error`, in the transaction that writes it, so no reader ever sees it `pending` and it is never `running`. A step record is `pending` from when the step before it completes until the engine calls its action, not only as a queued iteration behind a busy step.
 - **A step record moves to `running` in a transaction of its own, before its action is called.** What happens next depends on the action:
   - A built-in action's effect, the end of its step record, and ~~a `pending` record for each step an edge leads to~~ what routing decides after it (below) *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* commit in one transaction. A crash therefore never leaves the effect committed with the record unfinished. A built-in step record found `running` when the controller starts means that transaction never committed and the action took no effect, so the engine executes it again.
   - A plugin action is called after its `running` record has committed, outside any transaction, because it reaches outside the database. Its step record found `running` when the controller starts may or may not have taken effect. Runs never retry an action (section 7.5), so the step fails with the code `interrupted` and the run fails with `step-failed`.
@@ -604,6 +669,10 @@ interface StepRecord {
   - **Cancel.** The cancel transaction ends the records as before. After it commits, the controller settles every workspace step it cancelled with the runner, which stops the step. A settle that cannot be delivered is caught by the runner's report when it returns.
   - **`workspace-failed`.** The run fails with `workspace-failed` when its workspace cannot be set up (a failed setup command), or when the user retires the runner it is pinned to (the message is "runner X was retired"). `failedStepId` is set when a workspace step was running, and that step's record is `failed`. A failed setup always has one: the first workspace step, whose start began the provisioning. A runner retired between two workspace steps has none, and `failedStepId` is absent.
   - **Error codes of a workspace step.** Beside the codes above, a runner reports `action_failed` (the action ran and failed; for a git action, the message holds the tail of git's error output), `timeout` (the action ran past its 10-minute deadline and was stopped), `unsupported_action` (the runner's build does not implement the action) and `interrupted` (the step was stopped before it finished). `validation` is the code for a step whose `resourceId` is not a checkout of the run's workspace. A workspace step that fails with one of these codes fails the run with `step-failed`, as any action does.
+- *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Runs started by a trigger, as built.**
+  - **`origin`** has a fourth kind, `{ kind: "trigger"; triggerId: string; eventId: number }`: the trigger's id in the workflow's source, and the event's position in the event log.
+  - **`triggerEvent`** is the copy of the event that started the run, taken when the run was written: the event as the log held it then, without `raw`. Only a run a trigger started has one.
+  - **`failureReason`** can be `validation-error`, with **`failureMessage`**, a sentence that says what did not validate (section 7.1). Only such a run has a `failureMessage`.
 - Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
 
 ### 7.3 Platform events
@@ -615,7 +684,7 @@ At a terminal state the controller emits `run.completed`, `run.failed` or `run.c
 *(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81).)* **Emitted as built.** Every run that ends emits exactly one of the three events.
 
 - The event is written in the transaction that ends the run, by the one function every way a run ends goes through (section 7.2). So the run's status and its event commit together or not at all. A run ends only once, so it emits only once.
-- A session's subscription to the run receives the event now ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Triggers receive it when triggers start runs ([#82](https://github.com/theagenticage/hercule/issues/82)).
+- A session's subscription to the run receives the event now ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). ~~Triggers receive it when triggers start runs ([#82](https://github.com/theagenticage/hercule/issues/82)).~~ Start triggers receive it too, like any event *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82))*.
 - The payloads, and what they leave out for now, are in [./08-events-and-connections.md](./08-events-and-connections.md) section 5.5.
 
 ### 7.4 Re-run
@@ -635,7 +704,7 @@ Both create a new Run that references the original. Re-runs provision fresh ephe
 - **Checked like any start by request** (section 7.1). When the new run cannot start, the request is refused with `validation`, and no run is created. For example, a re-stamp whose stored workflow no longer accepts the old inputs, because an input was removed, is refused this way, and the message points to replay.
 - **No stored workflow, no re-stamp.** A run of a workflow sent with `run.start`, or of a workflow deleted since, has no stored workflow to re-stamp from. A re-stamp of it is refused with `invalid_state`, and the message tells the caller to replay. This holds when `mode` is left out, too. The controller never falls back to replay by itself, because the caller would get the old plan without knowing it.
 - **The new run** names the original in `originalRunId` (section 7.2). The mode is not stored. The new run's `origin` follows who called `run.rerun`, exactly as for `run.start` (section 7.2), and the nesting limit of `run.start` applies to it (section 8). It gets a fresh workspace, like any run.
-- **No triggering event.** A re-run is started by its caller, not by an event, so it has no triggering event (section 7.1 step 4) and does not copy the original's. The original keeps its own copy, and `originalRunId` leads to it. No run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82).
+- **No triggering event.** A re-run is started by its caller, not by an event, so it has no triggering event (section 7.1 step 4) and does not copy the original's. The original keeps its own copy, and `originalRunId` leads to it. ~~No run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82).~~ *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): a run a trigger starts has one, section 7.2)*
 - **Lineage.** `run.query` with `originalRunId` lists the re-runs of a run.
 
 ### 7.5 Cleanup and supervision

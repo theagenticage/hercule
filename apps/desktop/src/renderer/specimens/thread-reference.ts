@@ -63,6 +63,7 @@ import {
   buildApprovalCard,
   buildThreadBlocks,
   describeAgent,
+  formatDescribeLine,
   formatMessageTime,
   formatRequestQuestion,
   resolveBrowserTimezone,
@@ -138,7 +139,7 @@ const answers = findElements(composer, ".dock .ledger > .ans", card.rows.length)
 answers.forEach((answer, index) => {
   const row = card.rows[index]!;
   findElement(answer, ".btn").textContent = row.label;
-  findElement(answer, ".ans-desc").textContent = row.describe;
+  findElement(answer, ".ans-desc").textContent = formatDescribeLine(row.describeLine);
 });
 
 // 5. The Changes and Commit pill.
@@ -185,7 +186,7 @@ readCrew().drawPlaceholders(stop);
 // 13. dock-mini's question and answers.
 const mini = findElement(composer, ".dock-mini");
 findElement(mini, ".dock-mini-q").textContent = formatRequestQuestion(PUSH_REQUEST);
-const miniRows = card.rows.filter((row) => row.decision === "allow" || row.decision === "deny");
+const miniRows = card.rows.filter((row) => row.id === "allow" || row.id === "deny");
 findElements(mini, ".btn", miniRows.length).forEach((button, index) => {
   button.textContent = miniRows[index]!.label;
 });

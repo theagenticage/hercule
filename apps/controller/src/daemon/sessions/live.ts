@@ -21,7 +21,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hercule/protocol";
+import {
+  SessionSpec,
+  type ControllerToRunner,
+  type ModelSelection,
+  type SessionInputResult,
+} from "@hercule/protocol";
 import {
   createDecodeValidationError,
   createInvalidStateError,
@@ -60,6 +65,7 @@ import {
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import type { WorkspaceService } from "../../workspaces";
+import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
@@ -154,6 +160,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const { dispatch } = yield* Dispatch;
   const agents = yield* agentRepository;
+  const forkAfterCommit = yield* makeForkAfterCommit;
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -429,26 +436,132 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Checks the `session.input` grant, decodes the input, and stores it as the
+   * next input of its session, in the caller's transaction or in one of its
+   * own. Returns the session as it was read and the stored row. Sends
+   * nothing: the caller delivers the row once the write has committed.
+   *
+   * - An idle session will not change to idle again, so no flush would send
+   *   its input. The row is stored already claimed, so a cancel or a flush
+   *   never sees it as waiting, and the caller sends it.
+   * - A session with any other status gets the input queued.
+   * - An exited session whose transcript can be resumed goes back on the
+   *   queue, with a spec that holds its provider-native session id, and the
+   *   row is stored as waiting. The caller dispatches the session.
+   *
+   * Reading the session, validating the options and both writes share one
+   * transaction. So two inputs sent at the same time run one after the other
+   * instead of merging their options over the same stale row, and an option
+   * the model does not offer rolls everything back, leaving neither a changed
+   * selection nor an input row.
+   */
+  const storeInput = (
+    input: InputInput,
+  ): Effect.Effect<{ readonly session: StoredSession; readonly row: StoredInput }, InputError> =>
+    Effect.gen(function* () {
+      yield* requireGrant("session.input");
+      const { id, text, ...picks } = yield* Effect.mapError(
+        decodeInput(input),
+        createDecodeValidationError,
+      );
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const session = yield* readSession(id);
+          if (session.conversationDeleted) {
+            return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
+          }
+          if (session.conversationId !== null) {
+            return yield* Effect.fail(createInvalidStateError(USE_CONVERSATION_SEND));
+          }
+          const nativeSessionId =
+            session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
+          const modelSelection = yield* resolveModelSelection(session, picks);
+          const at = yield* nowIso;
+          const row = yield* sessions.takeInput({
+            sessionId: id,
+            modelSelection,
+            buildResumeSpec:
+              nativeSessionId === undefined
+                ? undefined
+                : (now: StoredSession) => buildResumeSpec(now, modelSelection, nativeSessionId),
+            text,
+            at,
+            claimed: session.status === "idle",
+          });
+          return { session, row };
+        }),
+      );
+    });
+
+  /**
+   * Runs `writes` in a transaction, and sends `frame` to a runner once that
+   * transaction commits. Fails with `InvalidState`, and writes nothing, when
+   * the runner is not connected.
+   *
+   * The transaction may be the caller's: `notification.act` runs an answer
+   * and resolves its decision in one transaction. The frame then waits for
+   * the caller's commit, and is never sent if the caller rolls back. So the
+   * runner is never told about a change the database does not hold.
+   *
+   * The runner can still drop off between the check and the send. The frame
+   * is then lost, as it would be if the socket closed just after the send;
+   * the failure is logged. Nothing sends the frame again:
+   *
+   * - a lost interrupt or stop can simply be asked for again;
+   * - a lost answer leaves the harness waiting on its request, and a second
+   *   answer is refused because the approval notification is already
+   *   decided. The user interrupts or stops the session to end the wait.
+   *
+   * The runner's report of what the frame did is applied in a later
+   * transaction, after this one commits, so that report always finds these
+   * writes. For example, the `request.resolved` that follows an answer finds
+   * the approval notification already resolved, and does not withdraw it.
+   */
+  const writeThenTellRunner = <E>(
+    runnerId: string,
+    frame: ControllerToRunner,
+    writes: Effect.Effect<void, E>,
+  ): Effect.Effect<void, E | InvalidState | SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        if (!(yield* connections.holdsConnection(runnerId))) {
+          return yield* Effect.fail(createInvalidStateError(GONE));
+        }
+        yield* writes;
+        yield* forkAfterCommit(
+          "Could not send a frame to a session's runner",
+          Effect.flatMap(connections.tell(runnerId, frame), (told) =>
+            told ? Effect.void : Effect.logWarning(`${GONE}; the frame was not sent`),
+          ),
+        );
+      }),
+    );
+
+  /**
    * Tells the session's runner to end the running turn, as the actor behind
-   * the current request, and writes the `session.interrupted` audit entry.
+   * the current request. Writes the `session.interrupted` audit entry and
+   * withdraws the approval notification about the request the turn waits on,
+   * if any, because the interrupt ends that wait. The runner is told once
+   * those writes commit.
    * Fails with `InvalidState` when the runner is not connected.
    */
   const interruptTurn = (session: StoredSession): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      if (!(yield* connections.tell(session.runnerId, sessions.interrupting(session.id)))) {
-        return yield* Effect.fail(createInvalidStateError(GONE));
-      }
       const actor = yield* currentStamp;
-      yield* withTransaction(
-        sql,
-        Effect.flatMap(nowIso, (at) =>
-          audit.append({
+      yield* writeThenTellRunner(
+        session.runnerId,
+        sessions.interrupting(session.id),
+        Effect.gen(function* () {
+          yield* audit.append({
             kind: "session.interrupted",
             actor,
             payload: { sessionId: session.id, runnerId: session.runnerId },
-            at,
-          }),
-        ),
+            at: yield* nowIso,
+          });
+          yield* sessions.withdrawApprovalNotification(session.id, "interrupted");
+        }),
       );
     });
 
@@ -538,13 +651,14 @@ const make = Effect.gen(function* () {
 
   /**
    * Stops a session that has not exited, as the actor behind the current
-   * request, and writes the `session.stopped` audit entry. Returns what
-   * happened:
+   * request, and writes the `session.stopped` audit entry. Also withdraws the
+   * approval notification about the request the session waits on, if any.
+   * Returns what happened:
    *
    * - `ended`: the session was queued, so no runner held it, and it has
    *   exited now;
-   * - `told`: the runner was told to stop the session, and the session exits
-   *   when the runner reports the exit;
+   * - `told`: the stop is written, the runner is told once the transaction
+   *   commits, and the session exits when the runner reports the exit;
    * - `exited`: the session was read as queued, but something else ended it
    *   before this stop could, so nothing was sent and nothing was written;
    * - `unreachable`: the runner is not connected, so nothing was sent and
@@ -579,16 +693,20 @@ const make = Effect.gen(function* () {
         );
         if (ended !== undefined) return ended;
       }
-      if (!(yield* connections.tell(session.runnerId, sessions.stopping(session.id)))) {
-        return "unreachable";
-      }
-      yield* withTransaction(
-        sql,
-        Effect.flatMap(nowIso, (at) =>
-          audit.append({ kind: "session.stopped", actor, payload, at }),
+      return yield* writeThenTellRunner(
+        session.runnerId,
+        sessions.stopping(session.id),
+        Effect.gen(function* () {
+          yield* audit.append({ kind: "session.stopped", actor, payload, at: yield* nowIso });
+          yield* sessions.withdrawApprovalNotification(session.id, "stopped");
+        }),
+      ).pipe(
+        Effect.as("told" as const),
+        Effect.catchIf(
+          (error): error is InvalidState => error instanceof InvalidState,
+          () => Effect.succeed("unreachable" as const),
         ),
       );
-      return "told";
     });
 
   return {
@@ -682,19 +800,16 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Sends one turn's input to a session. The input is stored first, so the
-     * result holds an input id the caller can edit or cancel.
+     * Sends one turn's input to a session. The input is stored first
+     * (`storeInput`), so the result holds an input id the caller can edit or
+     * cancel. Then, after the commit:
      *
-     * - An idle session will not change to idle again, so no flush would send
-     *   its input. The row is inserted already claimed, so a cancel or a flush
-     *   never sees it as waiting, and it is delivered here.
-     * - A session with any other status gets the input queued. Steering it
-     *   into a running turn is what `input.steer` does.
-     * - An exited session whose transcript can be resumed is resumed by this
-     *   call. The row is stored as waiting, the session goes back on the queue
-     *   with a spec that holds its provider-native session id, and dispatch
-     *   places it like a spawn. The input is sent when the runner's
-     *   `session.started` makes the session idle, like a spawn's prompt.
+     * - an idle session is sent the input here;
+     * - a session with any other status keeps the input queued. Steering it
+     *   into a running turn is what `input.steer` does;
+     * - an exited session that this input resumed is dispatched, which places
+     *   it like a spawn. The input is sent when the runner's `session.started`
+     *   makes the session idle, like a spawn's prompt.
      *
      * The result always comes from the runner, never from the status the
      * controller read: only the adapter knows whether the input started a turn
@@ -702,50 +817,49 @@ const make = Effect.gen(function* () {
      */
     input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
-        yield* requireGrant("session.input");
-        const { id, text, ...picks } = yield* Effect.mapError(
-          decodeInput(input),
-          createDecodeValidationError,
-        );
-        // Reading the session, validating the options and both writes happen
-        // in one transaction. So two inputs sent at the same time run one after
-        // the other instead of merging their options over the same stale row,
-        // and an option the model does not offer rolls everything back,
-        // leaving neither a changed selection nor an input row.
-        const { session, row } = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const session = yield* readSession(id);
-            if (session.conversationDeleted) {
-              return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
-            }
-            if (session.conversationId !== null) {
-              return yield* Effect.fail(createInvalidStateError(USE_CONVERSATION_SEND));
-            }
-            const nativeSessionId =
-              session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
-            const modelSelection = yield* resolveModelSelection(session, picks);
-            const at = yield* nowIso;
-            const created = yield* sessions.takeInput({
-              sessionId: id,
-              modelSelection,
-              buildResumeSpec:
-                nativeSessionId === undefined
-                  ? undefined
-                  : (now: StoredSession) => buildResumeSpec(now, modelSelection, nativeSessionId),
-              text,
-              at,
-              claimed: session.status === "idle",
-            });
-            return { session, row: created };
-          }),
-        );
+        const { session, row } = yield* storeInput(input);
         // Outside the transaction: dispatch may send a frame to the runner,
         // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
         if (session.status !== "idle") return { inputId: row.id, result: "queued" };
         return yield* deliverClaimed(row);
       }),
+
+    /**
+     * Stores one turn's input to a session, like `input`, and returns the
+     * stored input without waiting for the runner. Checks the `session.input`
+     * grant, like `input`. Runs in the caller's transaction, or in its own
+     * when there is none, and sends nothing to the runner unless that
+     * transaction commits.
+     *
+     * After the commit, a fiber of its own delivers the input as `input`
+     * would:
+     *
+     * - an idle session is sent the input, which was stored already claimed;
+     * - an exited session that this input resumed is dispatched, and the
+     *   input is sent when the session becomes idle;
+     * - a session with any other status keeps the input queued until it is
+     *   next idle.
+     *
+     * A failed delivery is logged, not returned, because the caller has
+     * already returned. The input stays queued for the next flush.
+     */
+    queueInput: (input: InputInput): Effect.Effect<StoredInput, InputError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const { session, row } = yield* storeInput(input);
+          if (session.status === "exited") {
+            yield* forkAfterCommit(
+              "Could not dispatch a session resumed for its input",
+              dispatch(session.runnerId),
+            );
+          } else if (session.status === "idle") {
+            yield* forkAfterCommit("Could not deliver a session's input", sendClaimed(row));
+          }
+          return row;
+        }),
+      ),
 
     /**
      * Gets a queued input into the turn a busy session is running
@@ -793,9 +907,20 @@ const make = Effect.gen(function* () {
      *
      * Every check runs before anything is sent to the runner, because an
      * answer applied to the wrong request is the one mistake this operation
-     * must never make. It fails when the session has exited, has no open
-     * request, is waiting on a different request, or the decision is not one
-     * the request accepts.
+     * must never make. It fails when:
+     *
+     * - the session has exited;
+     * - the session has no open request, or waits on a different request;
+     * - the decision is not one the request accepts;
+     * - the request was already answered, or its wait already ended.
+     *
+     * The answer also resolves the approval notification about the request
+     * as `decided`, in the same transaction, stamped with the caller. So the
+     * notification shows the request as answered, whether the user answered
+     * it here or from the notification.
+     *
+     * The runner is told the answer once the transaction commits, so an
+     * answer the database does not hold never reaches the harness.
      */
     respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -821,22 +946,22 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
-        if (
-          !(yield* connections.tell(session.runnerId, sessions.responding(id, requestId, decision)))
-        ) {
-          return yield* Effect.fail(createInvalidStateError(GONE));
-        }
         const actor = yield* currentStamp;
-        yield* withTransaction(
-          sql,
-          Effect.flatMap(nowIso, (at) =>
-            audit.append({
+        yield* writeThenTellRunner(
+          session.runnerId,
+          sessions.responding(id, requestId, decision),
+          Effect.gen(function* () {
+            yield* audit.append({
               kind: "session.responded",
               actor,
               payload: { sessionId: id, runnerId: session.runnerId, requestId, decision },
-              at,
-            }),
-          ),
+              at: yield* nowIso,
+            });
+            // Resolving the notification in this transaction also refuses a
+            // second answer to the same request, wherever the first one came
+            // from.
+            yield* sessions.resolveApprovalNotification(id, requestId, decision);
+          }),
         );
         return (yield* recordComposer)(session);
       }),
@@ -872,7 +997,9 @@ const make = Effect.gen(function* () {
  *
  * - `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are
  *   operations. Each checks its own grant and decodes its own input, and a
- *   route handler calls it directly.
+ *   route handler calls it directly. `queueInput` checks its grant and
+ *   decodes its input too, but it stores the input in the caller's
+ *   transaction, so it is for a caller inside the controller, not a route.
  * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput` and
  *   `stopSession` check no grant. The first two send a row that is already
  *   stored: `sendClaimed` the row claimed when a session goes idle,

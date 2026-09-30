@@ -25,18 +25,43 @@ const NOW = Date.parse(START) + 4_300;
 
 describe("describeRunOrigin", () => {
   it("names who started the run, and how when not by hand", () => {
-    const manual = describeRunOrigin({ kind: "manual", actor: "user" });
-    assert.strictEqual(manual.starter.label, "you");
-    assert.strictEqual(manual.howStarted, undefined);
+    assert.deepStrictEqual(describeRunOrigin({ origin: { kind: "manual", actor: "user" } }), {
+      kind: "actor",
+      label: "you",
+      link: { kind: "none" },
+      howStarted: undefined,
+    });
 
-    const api = describeRunOrigin({ kind: "api", actor: `session:${PARENT}` });
-    assert.strictEqual(api.starter.label, "session 1f3a9c2e");
+    const api = describeRunOrigin({ origin: { kind: "api", actor: `session:${PARENT}` } });
+    assert.strictEqual(api.label, "session 1f3a9c2e");
     assert.strictEqual(api.howStarted, "through the API");
 
-    const child = describeRunOrigin({ kind: "action", parentRunId: PARENT, stepId: "spawn" });
-    assert.strictEqual(child.starter.label, "run 1f3a9c2e");
-    assert.deepStrictEqual(child.starter.link, { kind: "run", runId: PARENT });
-    assert.strictEqual(child.howStarted, "at step spawn");
+    const child = describeRunOrigin({
+      origin: { kind: "action", parentRunId: PARENT, stepId: "spawn" },
+    });
+    assert.deepStrictEqual(child, {
+      kind: "actor",
+      label: "run 1f3a9c2e",
+      link: { kind: "run", runId: PARENT },
+      howStarted: "at step spawn",
+    });
+  });
+
+  it("names the trigger that started a run, and the kind of event it matched", () => {
+    const origin = { kind: "trigger", triggerId: "on_issue", eventId: 42 } as const;
+    assert.deepStrictEqual(
+      describeRunOrigin({ origin, triggerEvent: { kind: "github.issue.opened" } }),
+      {
+        kind: "trigger",
+        label: "trigger on_issue",
+        triggerId: "on_issue",
+        howStarted: "on github.issue.opened",
+      },
+    );
+    // A run summary holds no copy of the event.
+    const summary = describeRunOrigin({ origin });
+    assert.strictEqual(summary.label, "trigger on_issue");
+    assert.strictEqual(summary.howStarted, undefined);
   });
 });
 
@@ -200,6 +225,7 @@ describe("describeRunStatus", () => {
 describe("describeFailureReason", () => {
   it("describes each reason in plain words", () => {
     assert.strictEqual(describeFailureReason("step-failed"), "step failed");
+    assert.strictEqual(describeFailureReason("validation-error"), "validation error");
     assert.strictEqual(describeFailureReason("expression-error"), "expression error");
     assert.strictEqual(describeFailureReason("controller-error"), "controller error");
     assert.strictEqual(describeFailureReason("iteration-limit"), "iteration limit");

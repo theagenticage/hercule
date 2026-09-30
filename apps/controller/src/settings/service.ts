@@ -29,6 +29,7 @@ import { connectionRepository, isGithubConnection } from "../connections";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
+import { validateTimezone } from "./timezone";
 
 /** One key a patch writes, with its scope. The audit entry records a list of these. */
 interface WrittenKey {
@@ -122,7 +123,8 @@ const make = Effect.gen(function* () {
      *
      * A patch with no key fails with a validation error. Otherwise it would
      * succeed and write an audit entry for a change that did not happen. To
-     * read the settings without writing, use `settings.read`.
+     * read the settings without writing, use `settings.read`. A timezone that
+     * is not an IANA zone name fails with a validation error too.
      */
     update: (
       patch: SettingsPatch,
@@ -139,6 +141,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(
             createValidationError([{ path: [], message: "name at least one setting to write" }]),
           );
+        }
+        if (patch.user?.timezone !== undefined) {
+          yield* validateTimezone(patch.user.timezone, ["user", "timezone"]);
         }
         return yield* withTransaction(
           sql,

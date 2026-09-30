@@ -352,7 +352,7 @@ describe("a condition that cannot be decided", () => {
 
         const failed = expectStatus(run, "failed");
         expect(failed.failureReason).toBe("expression-error");
-        expect(failed.failedStepId).toBe("guarded");
+        expect(failed).toMatchObject({ failedStepId: "guarded" });
         expect("failedEdge" in failed, JSON.stringify(run)).toBe(false);
         const [guarded] = findStepRecords(run, "guarded");
         expect(expectStatus(guarded, "failed").error.code).toBe("expression_error");

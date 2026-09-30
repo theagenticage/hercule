@@ -1,11 +1,12 @@
 /**
  * Tests the output that is not the generic table: the hint after a spawn, the
  * transcript, the output of workflow read, create, update and validate, and
- * the two catalogs used to write a workflow. Also tests one rule of the
- * table: each row stays on one line.
+ * the two catalogs used to write a workflow, and a notification's answers.
+ * Also tests two rules of all output: each table row stays on one line, and
+ * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
-import { renderHuman } from "./render";
+import { removeTerminalControls, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
 const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
@@ -156,11 +157,45 @@ describe("hercule workflow", () => {
     const triggers = renderHuman(
       {
         kind: "value",
-        value: { items: [{ triggerId: "on_label", filter: "event.a == 1 &&\r\n  event.b == 2" }] },
+        value: {
+          items: [
+            {
+              triggerId: "on_label",
+              on: { kind: "task.created", filter: "event.a == 1 &&\r\n  event.b == 2" },
+            },
+          ],
+        },
       },
       lookUpCommand("trigger", "list"),
     );
-    expect(triggers).toEqual(["triggerId  filter", "on_label   event.a == 1 && ..."]);
+    expect(triggers).toEqual([
+      "triggerId  on            filter",
+      "on_label   task.created  event.a == 1 && ...",
+    ]);
+  });
+
+  it("prints a trigger's filter in the last column, even when an earlier row has it", () => {
+    const listed = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            { triggerId: "labeled", on: { kind: "task.created", filter: "event.a == 1" } },
+            {
+              triggerId: "nightly",
+              on: { schedule: "0 2 * * *" },
+              nextFireAt: "2026-09-30T02:00:00.000Z",
+            },
+          ],
+        },
+      },
+      lookUpCommand("trigger", "list"),
+    );
+    expect(listed).toEqual([
+      "triggerId  on            nextFireAt                filter",
+      "labeled    task.created                            event.a == 1",
+      "nightly    0 2 * * *     2026-09-30T02:00:00.000Z",
+    ]);
   });
 
   it("prints one line per error and per warning after validate, or one line when there are none", () => {
@@ -213,16 +248,16 @@ describe("a catalog query that returns a plain array", () => {
         {
           kind: "value",
           value: [
-            { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
+            { kind: "task.created", description: "A task was created.", connectionRequired: false },
             { kind: "github.pr.labeled", description: "Labels changed.", connectionRequired: true },
           ],
         },
         lookUpCommand("event-kind", "list"),
       ),
     ).toEqual([
-      "kind               description           connectionRequired",
-      "cron.tick          A schedule came due.  false",
-      "github.pr.labeled  Labels changed.       true",
+      "kind               description          connectionRequired",
+      "task.created       A task was created.  false",
+      "github.pr.labeled  Labels changed.      true",
     ]);
   });
 
@@ -656,7 +691,10 @@ describe("hercule run", () => {
   });
 
   it("describes who started a run in the words the web app uses", () => {
-    const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
+    const readStartedBy = (
+      origin: Record<string, unknown>,
+      triggerEvent?: Record<string, unknown>,
+    ): string | undefined =>
       renderHuman(
         {
           kind: "value",
@@ -666,6 +704,7 @@ describe("hercule run", () => {
             plan: { name: "Nothing", steps: [] },
             inputs: {},
             origin,
+            ...(triggerEvent === undefined ? {} : { triggerEvent }),
             status: "pending",
             steps: [],
             createdAt: "2026-09-24T10:00:00.000Z",
@@ -679,5 +718,298 @@ describe("hercule run", () => {
     expect(readStartedBy({ kind: "action", parentRunId: RUN, stepId: "spawn" })).toBe(
       "startedBy  run 000000bb at step spawn",
     );
+    expect(
+      readStartedBy(
+        { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+        { kind: "github.issue.opened" },
+      ),
+    ).toBe("startedBy  trigger on_issue on github.issue.opened");
+  });
+
+  it("prints what did not validate for a run a trigger could not start, which has no start time", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "File a task", steps: [] },
+          inputs: {},
+          origin: { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+          status: "failed",
+          failureReason: "validation-error",
+          failureMessage: "The input title is required.",
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.000Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(0, 8)).toEqual([
+      `id              ${RUN}`,
+      "workflow        File a task",
+      "status          failed",
+      "failureReason   validation-error",
+      "failureMessage  The input title is required.",
+      "startedBy       trigger on_issue",
+      "createdAt       2026-09-24T10:00:00.000Z",
+      "finishedAt      2026-09-24T10:00:00.000Z",
+    ]);
+  });
+
+  it("prints what a trigger fires on, its health and its missed scheduled times on one short line each", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            {
+              triggerId: "weekday_morning",
+              kind: "start",
+              on: { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" },
+              status: "active",
+              health: { state: "ok" },
+              nextFireAt: "2026-09-29T07:00:00.000Z",
+              skippedTicks: {
+                from: "2026-09-26T07:00:00.000Z",
+                until: "2026-09-27T07:00:00.000Z",
+              },
+            },
+            {
+              triggerId: "on_issue",
+              kind: "start",
+              on: { kind: "github.issue.opened", connectionId: "any" },
+              status: "paused",
+              health: {
+                state: "error",
+                message: "no such key: labels",
+                at: "2026-09-28T09:00:00.000Z",
+              },
+            },
+          ],
+        },
+      },
+      lookUpCommand("trigger", "list"),
+    );
+    expect(lines).toEqual([
+      "triggerId        kind   on                                    status  health                      nextFireAt                skippedTicks",
+      "weekday_morning  start  0 9 * * 1-5 in Europe/Amsterdam       active  ok                          2026-09-29T07:00:00.000Z  2026-09-26T07:00:00.000Z to 2026-09-27T07:00:00.000Z",
+      "on_issue         start  github.issue.opened · any connection  paused  error: no such key: labels",
+    ]);
+  });
+});
+
+describe("hercule notification", () => {
+  const NOTIFICATION = "0199e0e7-1111-7000-8000-00000000abcd";
+  /**
+   * The answers as the controller stores them. The controller adds describe
+   * lines only when it returns an open decision.
+   */
+  const stored = [
+    {
+      id: "event-sourced",
+      label: "Event-sourced",
+      description: "Replays the ledger.",
+      operation: { op: "session.input", input: { sessionId: SESSION, text: "Event-sourced" } },
+      primary: true,
+    },
+    { id: "neither", label: "Neither", operation: null },
+  ];
+  const decision = {
+    id: NOTIFICATION,
+    kind: "triage.unsure",
+    title: "Which architecture?",
+    body: "Two options.\nBoth work.",
+    producer: { type: "session", sessionId: SESSION },
+    subject: [],
+    actions: [
+      {
+        ...stored[0],
+        describeLine: [
+          { kind: "text", text: "Reply to session " },
+          { kind: "marked", text: "Design ordering" },
+        ],
+      },
+      { ...stored[1], describeLine: [{ kind: "text", text: "Does nothing" }] },
+    ],
+    status: "open",
+    createdAt: "2026-09-28T10:00:00.000Z",
+  };
+
+  it("prints an open decision's fields, its body, and a table of its answers with what each does", () => {
+    const lines = renderHuman(
+      { kind: "value", value: decision },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^title +Which architecture\?$/));
+    expect(lines.slice(lines.indexOf("body"))).toEqual([
+      "body",
+      "Two options.",
+      "Both work.",
+      "",
+      "answers",
+      "id             label          does                                description",
+      "event-sourced  Event-sourced  Reply to session «Design ordering»  Replays the ledger.",
+      "neither        Neither        Does nothing",
+    ]);
+    expect(lines.join("\n")).not.toContain("operation");
+  });
+
+  it("prints a resolved decision's answers without what each does, and its resolution", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          body: undefined,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "decided",
+            actionId: "neither",
+            actor: "user",
+            origin: "api",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^resolution\.origin +api$/));
+    expect(lines).not.toContain("body");
+    expect(lines.slice(lines.indexOf("answers"))).toEqual([
+      "answers",
+      "id             label          description",
+      "event-sourced  Event-sourced  Replays the ledger.",
+      "neither        Neither",
+    ]);
+  });
+
+  it("lists each notification on one line, with its answers by label and without their operations", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { items: [decision] } },
+      lookUpCommand("notification", "list"),
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^id +kind +title +status +answers +age$/);
+    expect(lines[1]).toMatch(
+      new RegExp(
+        `^${NOTIFICATION.slice(-8)} +triage\\.unsure +Which architecture\\? +open +Event-sourced / Neither +\\S+$`,
+      ),
+    );
+  });
+
+  it("prints an informational notification without an answers heading", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { ...decision, body: undefined, actions: [], status: "resolved" } },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).not.toContain("answers");
+  });
+
+  it("prints the answer a decision was resolved with after act", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "decided",
+            actionId: "event-sourced",
+            actor: "user",
+            origin: "api",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "act"),
+    );
+
+    expect(lines).toEqual([`notification ${NOTIFICATION.slice(-8)} decided: Event-sourced`]);
+  });
+
+  it("says how the decision was resolved after act when it was not with the answer, such as withdrawn first", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          actions: stored,
+          status: "resolved",
+          resolution: {
+            kind: "withdrawn",
+            reason: "The session ended before the request was answered.",
+            actor: "user",
+            origin: "core",
+            at: "2026-09-28T10:05:00.000Z",
+          },
+        },
+      },
+      lookUpCommand("notification", "act"),
+    );
+
+    expect(lines).toEqual([
+      `notification ${NOTIFICATION.slice(-8)} withdrawn: The session ended before the request was answered.`,
+    ]);
+  });
+
+  it("removes escape sequences and bidirectional controls from what an agent wrote", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          ...decision,
+          title: "Which\u001b[8m architecture?",
+          body: "Two options.\u001b[2K\rBoth\tfine.",
+          actions: [
+            {
+              ...stored[0],
+              label: "Event\u202E-sourced",
+              describeLine: [
+                { kind: "text", text: "Reply to session " },
+                { kind: "marked", text: "Design\u001b[2K\r ordering" },
+              ],
+            },
+          ],
+        },
+      },
+      lookUpCommand("notification", "read"),
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^title +Which\[8m architecture\?$/));
+    expect(lines.slice(lines.indexOf("body"))).toEqual([
+      "body",
+      "Two options.[2KBoth\tfine.",
+      "",
+      "answers",
+      "id             label          does                                   description",
+      "event-sourced  Event-sourced  Reply to session «Design[2K ordering»  Replays the ledger.",
+    ]);
+  });
+});
+
+describe("removeTerminalControls", () => {
+  it("removes the C0 and C1 control characters but keeps tabs and line breaks", () => {
+    expect(removeTerminalControls("a\u0000b\u0007c\u001bd\re\u007ff\u009bg\th\ni")).toBe(
+      "abcdefg\th\ni",
+    );
+  });
+
+  it("removes every bidirectional control", () => {
+    const controls = "\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u200E\u200F\u061C";
+    expect(removeTerminalControls(`left${controls}right`)).toBe("leftright");
+  });
+
+  it("leaves ordinary text, including non-Latin scripts and emoji, alone", () => {
+    const text = "Déploiement «prod» · שלום · 🚀";
+    expect(removeTerminalControls(text)).toBe(text);
   });
 });

@@ -8,7 +8,7 @@ const at = (ms: number): string => new Date(Date.parse(START) + ms).toISOString(
 /** A fan-out: `create` leads to `label` and `query`, and `query` leads to `update`. */
 const PLAN: Run["plan"] = {
   name: "Triage a new issue",
-  triggers: [{ id: "weekdays", kind: "start", source: { kind: "cron.tick" } }],
+  triggers: [{ id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } }],
   steps: [
     { id: "create", kind: "action", action: "task.create" },
     { id: "label", kind: "action", action: "task.update" },
@@ -247,6 +247,52 @@ describe("buildRunGraph", () => {
       "create>query fired",
       // `query` has not finished, so its edge has not been decided.
       "query>update notYet",
+    ]);
+  });
+
+  it("marks the edge from the start trigger that started the run as travelled, and no other trigger's", () => {
+    const plan: Run["plan"] = {
+      ...PLAN,
+      triggers: [
+        { id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } },
+        { id: "on_issue", kind: "start", on: { kind: "github.issue.opened" } },
+      ],
+    };
+    const origin = { kind: "trigger", triggerId: "on_issue", eventId: 42 } as const;
+    const creating: Run = {
+      ...RUNNING,
+      plan,
+      origin,
+      steps: [{ stepId: "create", iteration: 1, status: "running", startedAt: at(0) }],
+      edgeTraversals: [0, 0, 0],
+    };
+    assert.deepStrictEqual(listEdgeTravel(creating).slice(0, 2), [
+      "weekdays>create notYet",
+      // The entry step the trigger led to is running, so the edge into it flows.
+      "on_issue>create active",
+    ]);
+    const completed: Run = {
+      ...RUN_FIELDS,
+      plan,
+      origin,
+      status: "completed",
+      startedAt: START,
+      finishedAt: at(40),
+      steps: [
+        {
+          stepId: "create",
+          iteration: 1,
+          status: "completed",
+          startedAt: at(0),
+          finishedAt: at(10),
+          output: null,
+        },
+      ],
+      edgeTraversals: [0, 0, 0],
+    };
+    assert.deepStrictEqual(listEdgeTravel(completed).slice(0, 2), [
+      "weekdays>create notTaken",
+      "on_issue>create fired",
     ]);
   });
 

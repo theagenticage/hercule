@@ -1078,6 +1078,114 @@ describe("A run's page > what happens to its workspace", () => {
   });
 });
 
+describe("A run's page > a run a trigger started", () => {
+  const ISSUE_URL = "https://github.com/acme/api/issues/7";
+
+  const BY_TRIGGER: Run = {
+    ...COMPLETED_RUN,
+    origin: { kind: "trigger", triggerId: "on_issue", eventId: 42 },
+    triggerEvent: {
+      id: 42,
+      source: "github",
+      connectionId: "0199c0ff-3333-7000-8000-000000000001",
+      system: "github",
+      kind: "github.issue.opened",
+      occurredAt: "2026-09-27T15:21:08.000Z",
+      receivedAt: "2026-09-27T15:21:09.000Z",
+      dedupKey: "delivery-1",
+      refs: [],
+      url: ISSUE_URL,
+      payload: { issue: { number: 7, title: "Login fails" } },
+      actor: null,
+    },
+  };
+
+  /**
+   * A run whose trigger matched an event, but whose inputs did not validate.
+   * The run never started, so it has no start time and no step records.
+   */
+  const INVALID_RUN: Run = {
+    id: "0199c0ff-2222-7000-8000-000000000009",
+    workflowId: WORKFLOW_ID,
+    plan: PLAN,
+    inputs: {},
+    origin: { kind: "trigger", triggerId: "on_issue", eventId: 43 },
+    status: "failed",
+    failureReason: "validation-error",
+    failureMessage: "The input title is required, and the trigger's mapping gave it no value.",
+    steps: [],
+    edgeTraversals: [],
+    createdAt: T0,
+    finishedAt: addSeconds(T0, 1),
+  };
+
+  it("names the trigger and the kind of event that started the run in the header", async () => {
+    await openRunPage(BY_TRIGGER);
+
+    const header = await findPageHeader();
+    expect(readPageText(header)).toContain("started by trigger on_issue on github.issue.opened");
+  });
+
+  it("shows the triggering event above the inputs: its kind, source, time, id, link and payload", async () => {
+    await openRunPage(BY_TRIGGER);
+    await findPageHeader();
+
+    const block = screen.getByRole("region", { name: "Triggering event" });
+    // Each fact is a term and its description, read here as pairs.
+    const facts = Object.fromEntries(
+      [...block.querySelectorAll("dt")].map((term) => [
+        readPageText(term),
+        readPageText(term.nextElementSibling as HTMLElement),
+      ]),
+    );
+    expect(facts).toEqual({
+      kind: "github.issue.opened",
+      source: "github",
+      occurred: "27 Sep 17:21:08",
+      event: "42 Open",
+    });
+    expect(block.querySelector("time")?.dateTime).toBe(BY_TRIGGER.triggerEvent?.occurredAt);
+    expect(within(block).getByRole("link", { name: "Open" }).getAttribute("href")).toBe(ISSUE_URL);
+    // The payload shows as JSON, keys and strings quoted.
+    expect(readPageText(block)).toContain('"title": "Login fails"');
+    const inputs = screen.getByRole("region", { name: "Inputs" });
+    expect(block.compareDocumentPosition(inputs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("links the triggering event only when its address is http or https", async () => {
+    const triggerEvent = BY_TRIGGER.triggerEvent;
+    if (triggerEvent === undefined) throw new Error("BY_TRIGGER has no triggering event");
+    await openRunPage({
+      ...BY_TRIGGER,
+      triggerEvent: { ...triggerEvent, url: "data:text/html,<h1>Sign in</h1>" },
+    });
+    await findPageHeader();
+
+    const block = screen.getByRole("region", { name: "Triggering event" });
+    expect(within(block).queryByRole("link")).toBeNull();
+    expect(readPageText(block)).not.toContain("Open");
+  });
+
+  it("shows no triggering event for a run the user started", async () => {
+    await openRunPage(COMPLETED_RUN);
+    await findPageHeader();
+
+    expect(screen.queryByRole("region", { name: "Triggering event" })).toBeNull();
+  });
+
+  it("shows why a run whose inputs did not validate failed, from when it was created", async () => {
+    await openRunPage(INVALID_RUN);
+
+    const header = await findPageHeader();
+    const text = readPageText(header);
+    expect(text).toMatch(/validation error/i);
+    expect(text).toContain(INVALID_RUN.failureMessage);
+    expect(text).toContain("started by trigger on_issue");
+    const times = [...header.querySelectorAll("time")].map((time) => time.dateTime);
+    expect(times).toEqual([INVALID_RUN.createdAt, INVALID_RUN.finishedAt]);
+  });
+});
+
 describe("A run's page > the output", () => {
   it("shows the run's output in an Output card under the inputs", async () => {
     await openRunPage(ROUTING_COMPLETED_RUN);

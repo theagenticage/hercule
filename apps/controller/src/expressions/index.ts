@@ -99,8 +99,7 @@ const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: numb
  * Standard CEL keeps whole numbers (int) and decimals (double) apart, and a
  * number read from the context is always a decimal, because the context is
  * plain JSON. So `inputs.count + 1` fails in standard CEL. An author should
- * never have to think about that, so the operators below extend CEL (spec 07,
- * section 5):
+ * never have to think about that, so the operators below extend CEL:
  *
  * - `+ - * / %` between a whole number and a decimal, in either order, give a
  *   decimal. `%` also works between two decimals. Two whole numbers stay whole,
@@ -110,6 +109,8 @@ const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: numb
  * - `+` between a string and a number, in either order, joins them as text. A
  *   whole decimal is written without `.0`, as JavaScript writes it.
  * - A list or map literal may mix value types, such as `[1, inputs.price]`.
+ *
+ * Spec 07 section 5 owns these extensions.
  *
  * Every handler is pure and synchronous. A registered handler is the only way
  * custom code enters the evaluator, and an asynchronous one is the only thing
@@ -165,6 +166,12 @@ const environment = buildEnvironment(true);
  *   expression in a prompt, reads the run's `inputs` and `steps`.
  */
 export type ExpressionScope = "event" | "run";
+
+/**
+ * The variables one evaluation reads, by name: `event` for an expression over
+ * one event, or `inputs` and `steps` for one inside a run.
+ */
+export type EvaluationContext = Readonly<Record<string, unknown>>;
 
 /** The variables each scope declares. All are `dyn`, as in the evaluation environment. */
 const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
@@ -256,7 +263,7 @@ const describeCheckFailure = (failure: CheckFailure, scope: ExpressionScope): st
 
 /** A source compiled once, called with one context per event. */
 export interface CompiledExpression {
-  (context: Record<string, unknown>): unknown;
+  (context: EvaluationContext): unknown;
 }
 
 /**
@@ -434,7 +441,7 @@ export const validateTemplate = (template: string): Effect.Effect<void, Expressi
  */
 export const evaluateExpression = (
   expression: string | CompiledExpression,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<unknown, ExpressionError> =>
   Effect.gen(function* () {
     const budget = Duration.toMillis(yield* ExpressionBudget);
@@ -472,7 +479,7 @@ export const evaluateExpression = (
  */
 export const evaluateCondition = (
   source: string,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<boolean, ExpressionError> =>
   Effect.flatMap(evaluateExpression(source, context), (value) =>
     typeof value === "boolean"
@@ -539,6 +546,13 @@ const convertToJson = (value: unknown): unknown => {
 };
 
 /**
+ * The end of the message for an expression whose value has no JSON form. It
+ * follows a phrase that names the expression.
+ */
+const NOT_JSON_REFUSAL =
+  "returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.";
+
+/**
  * Renders a template against a run's context (`inputs` and `steps`). Fails
  * with `ExpressionError` if an expression cannot be evaluated, or returns a
  * value with no JSON form.
@@ -551,7 +565,7 @@ const convertToJson = (value: unknown): unknown => {
  */
 export const renderTemplate = (
   template: string,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
 ): Effect.Effect<unknown, ExpressionError> =>
   Effect.gen(function* () {
     const parsed = parseTemplateExpressions(template);
@@ -574,7 +588,7 @@ export const renderTemplate = (
       if (json === undefined) {
         return yield* Effect.fail(
           new ExpressionError({
-            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.`,
+            message: `${describeSite()} ${NOT_JSON_REFUSAL}`,
           }),
         );
       }
@@ -608,7 +622,7 @@ export const renderTemplate = (
  */
 export const renderTemplates = (
   value: unknown,
-  context: Record<string, unknown>,
+  context: EvaluationContext,
   path: ReadonlyArray<string> = [],
 ): Effect.Effect<unknown, ExpressionError> => {
   if (typeof value === "string") {
@@ -637,3 +651,34 @@ export const renderTemplates = (
   }
   return Effect.succeed(value);
 };
+
+/**
+ * Evaluates a start trigger's input mapping against an event's context
+ * (`event`), and returns each input name with the JSON value of its
+ * expression. Fails with `ExpressionError` for the first expression that
+ * cannot be evaluated or returns a value with no JSON form; the message names
+ * the input.
+ */
+export const evaluateMapping = (
+  mapping: Readonly<Record<string, string>>,
+  context: EvaluationContext,
+): Effect.Effect<Record<string, unknown>, ExpressionError> =>
+  Effect.map(
+    Effect.forEach(Object.entries(mapping), ([name, source]) =>
+      Effect.gen(function* () {
+        const describeSite = (): string => `The expression for the input ${name}`;
+        const value = yield* Effect.mapError(
+          evaluateExpression(source, context),
+          (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),
+        );
+        const json = convertToJson(value);
+        if (json === undefined) {
+          return yield* Effect.fail(
+            new ExpressionError({ message: `${describeSite()} ${NOT_JSON_REFUSAL}` }),
+          );
+        }
+        return [name, json] as const;
+      }),
+    ),
+    (entries) => Object.fromEntries(entries),
+  );

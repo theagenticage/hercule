@@ -5,13 +5,12 @@
  * current session for the row under the last message, and sends
  * what the user types with `conversation.send`.
  *
- * The spec gives the screen's text but not how its layout is marked up. These
- * tests assume:
+ * The spec defines the screen's text but not how its layout is marked up.
+ * These tests assume:
  * - Each message's row carries `data-sender` with the sender's role
  *   (`owner`, `assistant` or `notice`). The tests read who sent a message
- *   from that attribute, not from class names, so restyling a bubble does not
- *   break them (D-76, #92 slice 3 review round 1; they used to match
- *   alignment classes such as `justify-end`).
+ *   from that attribute, not from class names such as `justify-end`, so
+ *   restyling a bubble does not break them.
  * - The screen's header row is the parent element of its `Assistants` crumb,
  *   as on the thread screen.
  * - The send control's accessible name contains "send", as in the thread's
@@ -344,8 +343,8 @@ describe("Assistant conversation: sending", () => {
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
   });
 
-  // Added in review round 1 of #92 slice 3 (F-73). `isPending` reaches the
-  // component a tick after `mutate`, so two Enters in one tick both sent.
+  // `isPending` reaches the component a tick after `mutate`, so two Enters in
+  // one tick could both send.
   it("sends once when Enter is pressed twice before the first send is answered", async () => {
     const user = userEvent.setup();
     const hold = holdFirstCall((call) => ({
@@ -652,7 +651,6 @@ describe("Assistant conversation: earlier messages", () => {
     hold.release();
   });
 
-  // Added in review round 2 of #92 slice 3 (D-88).
   it("shows why the earlier messages failed to load beside the button, and does not ask again on its own", async () => {
     const user = userEvent.setup();
     const messages = buildMessages(60);
@@ -716,8 +714,8 @@ describe("Assistant conversation: the row under the last bubble", () => {
     });
   });
 
-  // The ellipsis became the one character "…" in review round 1 of #92
-  // slice 3 (D-77), matching the WorkingMark row the thread screen shows.
+  // The ellipsis is the one character "…", matching the WorkingMark row the
+  // thread screen shows.
   it("shows that the assistant is working below the last bubble, and removes it without a reload once the session is idle", async () => {
     const { live, world } = await openConversation({
       messages: [LAST],
@@ -774,9 +772,10 @@ describe("Assistant conversation: the row under the last bubble", () => {
     expect(screen.getByText("Ada needs your approval").className).toMatch(/\bunderline\b/);
     expect(screen.queryByText("Ada is working…")).toBeNull();
     for (const each of buildApprovalCard(REQUEST).rows) {
+      const describeLine = each.describeLine.map((part) => part.text).join("");
       expect(
         screen.queryByRole("button", {
-          name: (name) => name.includes(each.label) && name.includes(each.describe),
+          name: (name) => name.includes(each.label) && name.includes(describeLine),
         }),
       ).toBeNull();
     }
@@ -800,8 +799,8 @@ describe("Assistant conversation: scrolling", () => {
     vi.restoreAllMocks();
   });
 
-  // Added in review round 1 of #92 slice 3 (F-72): the screen opened at the
-  // top of the conversation, on its oldest message.
+  // Guards against the screen opening at the top of the conversation, on its
+  // oldest message.
   it("opens on the newest message", async () => {
     geometry.set({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
 
@@ -813,9 +812,9 @@ describe("Assistant conversation: scrolling", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3. The first page holds the newest
-  // 50 messages, so a new message keeps the count at 50; the screen must
-  // follow the newest message's id, not the count.
+  // The first page holds the newest 50 messages, so a new message keeps the
+  // count at 50; the screen must follow the newest message's id, not the
+  // count.
   it("follows a new message at the bottom even when the page stays 50 messages long", async () => {
     const { live, world } = await openConversation({ messages: buildMessages(50) });
     await findOnScreen("message 50");
@@ -839,9 +838,8 @@ describe("Assistant conversation: scrolling", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3 (D-86). jsdom has no layout, so
-  // each message row is given a top of 100px per row above it, less the
-  // scroll offset, which is how a real page would place it.
+  // jsdom has no layout, so each message row is given a top of 100px per row
+  // above it, less the scroll offset, which is how a real page would place it.
   it("keeps the reader on the same message when earlier messages load above it", async () => {
     const user = userEvent.setup();
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
@@ -868,8 +866,8 @@ describe("Assistant conversation: scrolling", () => {
     });
   });
 
-  // Added in review round 2 of #92 slice 3 (D-90): the correction moved a
-  // reader who had scrolled on while the earlier messages loaded.
+  // Guards against the scroll correction moving a reader who scrolled on
+  // while the earlier messages loaded.
   it("leaves the page where the reader scrolled it while the earlier messages loaded", async () => {
     const user = userEvent.setup();
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (

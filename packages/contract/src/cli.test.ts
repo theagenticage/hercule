@@ -92,6 +92,7 @@ const COMMANDS: Record<string, string> = {
   "notification.read": "notification read",
   "notification.create": "notification create",
   "notification.withdraw": "notification withdraw",
+  "notification.act": "notification act",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -126,7 +127,9 @@ const COMMANDS: Record<string, string> = {
   "workflow.delete": "workflow delete",
   "workflow.validate": "workflow validate",
 
+  "trigger.pause": "trigger pause",
   "trigger.query": "trigger list",
+  "trigger.resume": "trigger resume",
 
   "workflowAction.query": "workflow-action list",
 
@@ -259,6 +262,7 @@ const RESOLVES: Record<string, string> = {
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
+  "notification.act id": "notification.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
@@ -275,7 +279,9 @@ const RESOLVES: Record<string, string> = {
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 
+  "trigger.pause workflowId": "workflow.query",
   "trigger.query workflowId": "workflow.query",
+  "trigger.resume workflowId": "workflow.query",
 
   "run.start workflowId": "workflow.query",
   "run.query workflowId": "workflow.query",

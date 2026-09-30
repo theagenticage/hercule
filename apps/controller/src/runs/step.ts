@@ -22,19 +22,20 @@ import {
   formatIssue,
   isApiError,
   listDecodeIssues,
-  type FailureReason,
   type Run,
   type RunStarted,
   type WorkflowDefinition,
+  type RunStartCall,
   type RunStartInput,
   type StepError,
   type TaskCreateInput,
   type NotificationCreateInput,
   type TaskFilter,
+  type TaskUpdateCall,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { renderTemplates } from "../expressions";
 import {
   isBuiltInControllerActionId,
@@ -42,12 +43,11 @@ import {
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
 } from "../plugins";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { TaskService } from "../tasks";
-import { runRepository, StepRecordEnded } from "./repository";
+import { runRepository, StepRecordEnded, type ExecutionFailureReason } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
-import { commitUninterruptibly } from "./transaction";
 
 /**
  * The codes of the step errors the engine writes itself. A step whose action
@@ -103,7 +103,7 @@ export const buildActionUnavailableError = (action: string): EngineStepError => 
 /** Why a step's input could not be prepared: the step error, and the reason the run fails. */
 export interface InputFailure {
   readonly error: EngineStepError;
-  readonly failureReason: FailureReason;
+  readonly failureReason: ExecutionFailureReason;
 }
 
 /**
@@ -235,7 +235,7 @@ interface StepExecutionNeeds {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
   ) => Effect.Effect<void, SqlError>;
   /** Routes the run after a step's record ended, inside the caller's transaction. */
   readonly routeAfterStep: (
@@ -254,7 +254,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const tasks = yield* TaskService;
-    const notifications = yield* NotificationService;
+    const notifier = yield* Notifier;
     const host = yield* PluginHost;
 
     /**
@@ -278,7 +278,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
         execute: (input) => {
           // A request sends the task id in the path; a step has no path, so it
           // sends the id as taskId.
-          const { taskId, ...fields } = input as { readonly taskId: string };
+          const { taskId, ...fields } = input as TaskUpdateCall;
           return tasks.update({ id: taskId, ...fields });
         },
       },
@@ -287,9 +287,9 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
       "task.query": { inTransaction: true, execute: (input) => tasks.query(input as TaskFilter) },
       "notification.create": {
         inTransaction: true,
-        execute: (input) => notifications.create(input as NotificationCreateInput),
+        execute: (input) => notifier.create(input as NotificationCreateInput),
       },
-      "run.start": { inTransaction: true, execute: (input) => start(input as RunStartInput) },
+      "run.start": { inTransaction: true, execute: (input) => start(input as RunStartCall) },
       wait: {
         inTransaction: false,
         execute: (input, step) =>
@@ -444,17 +444,15 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             actor,
           );
           execute = builtIn.inTransaction
-            ? commitUninterruptibly(sql, Effect.flatMap(called, writeCompletion))
-            : Effect.flatMap(called, (output) =>
-                commitUninterruptibly(sql, writeCompletion(output)),
-              );
+            ? withTransaction(sql, Effect.flatMap(called, writeCompletion))
+            : Effect.flatMap(called, (output) => withTransaction(sql, writeCompletion(output)));
         } else if (pluginExecute !== undefined) {
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {
               runId: run.id,
               stepId: attempt.stepId,
             }),
-            (output) => commitUninterruptibly(sql, writeCompletion(output)),
+            (output) => withTransaction(sql, writeCompletion(output)),
           );
         } else {
           return yield* failRun(

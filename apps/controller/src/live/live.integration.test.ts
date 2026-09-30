@@ -61,6 +61,7 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
+import { readEvent } from "../events/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   collectMessages,
@@ -183,13 +184,6 @@ const listLogEvents = async (base: string, token: string): Promise<ReadonlyArray
   const response = await get(base, "/api/v1/events?sort=id:asc&limit=500", token);
   expect(response.status).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<Event> }).items;
-};
-
-/** Reads one log entry through the API, as any other client does. */
-const readEvent = async (base: string, token: string, id: number): Promise<Event> => {
-  const response = await get(base, `/api/v1/events/${String(id)}`, token);
-  expect(response.status).toBe(200);
-  return (await response.json()) as Event;
 };
 
 describe("opening a live connection", () => {

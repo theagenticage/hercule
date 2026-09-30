@@ -229,7 +229,10 @@ const readThreadId = (params: unknown): string | undefined => {
 const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
   [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
 
-/** Builds a text-only turn input. Attachments are still an open item (spec 16 section B). */
+/**
+ * Builds a text-only turn input. Turn input is text only for now; attachments
+ * can be added later (spec 16 section B).
+ */
 const buildTextInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
 
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */

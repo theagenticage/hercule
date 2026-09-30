@@ -1,8 +1,8 @@
 /**
- * Converts pi's event lines into normalized provider events (spec 06 section
- * 6). The input is one raw line from pi's stdout and a small mutable state per
- * session; the output is a list of events. Nothing here touches a process or a
- * socket, and the only clock read is the wall clock.
+ * Converts pi's event lines into normalized provider events. The input is one
+ * raw line from pi's stdout and a small mutable state per session; the output
+ * is a list of events. Nothing here touches a process or a socket, and the
+ * only clock read is the wall clock. Spec 06 section 6 owns the event taxonomy.
  *
  * The line arrives raw, not parsed, because a line that is not JSON must be
  * reported too: pi writes its own error output to the same pipe as its events,

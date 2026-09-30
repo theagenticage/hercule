@@ -1,7 +1,7 @@
 /**
- * The divider under a thread turn (spec 14 §The thread surface): whether a
- * turn shows one, the words on it, and the line it lists for each tool item
- * when it is opened.
+ * The divider under a thread turn: whether a turn shows one, the words on
+ * it, and the line it lists for each tool item when it is opened. Spec 14
+ * §The thread surface owns the divider.
  */
 import { formatDuration } from "./duration";
 import type { ThreadItem, ThreadTurn } from "./turns";

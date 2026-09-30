@@ -599,11 +599,13 @@ if (domains.length > 0) {
  * every folder imports `absorbing.ts`: one node for both would be a cycle by
  * construction.
  *
- * Two rules hold (ADR 0033, amendment of 2026-09-24):
+ * Two rules hold:
  *
  * - the nodes form a DAG, for the same reason the domains do;
  * - a file reaches another folder only through that folder's `index.ts`,
  *   which is the folder's boundary.
+ *
+ * ADR 0033 records both rules.
  *
  * Like the domain graph, this one reads runtime imports only: `scanImports`
  * drops `import type`.

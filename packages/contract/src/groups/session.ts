@@ -247,6 +247,15 @@ export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
 /**
+ * One call of `session.input` as a single object: the session's id, which an
+ * HTTP request sends in its path, and the text. A bound answer sends this
+ * shape, so taking the answer queues the text as the session's next input.
+ */
+export const SessionInputCall = closedStruct({ sessionId: Id, ...SESSION_INPUT_FIELDS });
+
+export type SessionInputCall = Schema.Schema.Type<typeof SessionInputCall>;
+
+/**
  * What happened to one input. `inputId` is the id of the row it was stored as,
  * which a caller can edit or cancel while it is still `queued`.
  *
@@ -277,6 +286,15 @@ export const SESSION_RESPOND_FIELDS = {
 export const SessionRespondInput = closedStruct(SESSION_RESPOND_FIELDS);
 
 export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>;
+
+/**
+ * One call of `session.respond` as a single object: the session's id, which
+ * an HTTP request sends in its path, and the answer. The core binds it to the
+ * answers of the `core.approval` decision it raises for each approval.
+ */
+export const SessionRespondCall = closedStruct({ sessionId: Id, ...SESSION_RESPOND_FIELDS });
+
+export type SessionRespondCall = Schema.Schema.Type<typeof SessionRespondCall>;
 
 /**
  * Branching a session: `fork` opens a second provider-native session from the

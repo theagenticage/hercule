@@ -4,16 +4,18 @@
  * is pure. The service does the rest: it writes the rows, and it decides
  * whether to trust the event.
  *
- * Deltas are never stored per token (spec 04, Streaming). They are held per
- * (item, stream kind) and flushed as one row when:
+ * Deltas are never stored per token, so a streaming reply writes a handful of
+ * rows instead of one per token. They are held per (item, stream kind) and
+ * flushed as one row when:
  *
  * - the item completes,
  * - the turn completes,
  * - the session exits,
- * - the held text reaches `DELTA_FLUSH_BYTES`. Spec 04 left the flush rule
- *   inside an item open; this is the rule chosen here.
+ * - the held text reaches `DELTA_FLUSH_BYTES`, so a long item is stored in
+ *   pieces and a crash loses only its tail.
  *
- * Every other event becomes its own row.
+ * Every other event becomes its own row. Spec 04 (Streaming) owns the rule
+ * that deltas are not stored per token.
  */
 import type { OpenRequest, ProviderEvent, StreamKind } from "@hercule/protocol";
 import type { SessionStatus } from "@hercule/contract";
@@ -98,6 +100,19 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
   }
 };
 
+/** An event that can open or close the request a session waits on. */
+export type RequestEvent = Extract<
+  ProviderEvent,
+  { readonly _tag: "request.opened" | "request.resolved" | "turn.completed" | "session.exited" }
+>;
+
+/** Checks whether an event can open or close the request a session waits on. */
+export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
+  event._tag === "request.opened" ||
+  event._tag === "request.resolved" ||
+  event._tag === "turn.completed" ||
+  event._tag === "session.exited";
+
 /**
  * Returns the session's open request after this event, given the request open
  * now. Returns:
@@ -114,7 +129,7 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
  * alone.
  */
 export const computeOpenRequestAfter = (
-  event: ProviderEvent,
+  event: RequestEvent,
   open: OpenRequest | null,
 ): OpenRequest | null | undefined => {
   switch (event._tag) {
@@ -125,8 +140,6 @@ export const computeOpenRequestAfter = (
     case "turn.completed":
     case "session.exited":
       return open === null ? undefined : null;
-    default:
-      return undefined;
   }
 };
 

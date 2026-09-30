@@ -11,17 +11,23 @@ import {
   describeStepDuration,
   findFailedEdge,
   formatAge,
+  describeResolution,
+  describeTriggerOn,
+  formatDescribeLine,
   readJsonObject,
   readTimestamps,
 } from "@hercule/client-core";
 import {
   truncateText,
   formatIssue,
+  isSchedule,
+  type Notification,
+  type Resolution,
   type Run,
-  type RunOrigin,
   type RunStarted,
   type RunSummary,
   type StructuredResult,
+  type Trigger,
   type Workflow,
   type WorkflowAction,
   type WorkflowIssues,
@@ -39,13 +45,48 @@ const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  */
 const TAIL = 8;
 
+/**
+ * The characters a terminal acts on rather than prints:
+ *
+ * - the C0 control characters and DEL, except tab and line feed, which
+ *   multi-line text such as a notification's body needs. ESC starts the
+ *   sequences that move the cursor, erase a line or hide text, and a carriage
+ *   return lets later text overwrite the start of a line;
+ * - the C1 control characters, U+0080 to U+009F. Some terminals read U+009B as
+ *   ESC followed by `[`;
+ * - the Unicode bidirectional controls, which can reorder the text that
+ *   follows them on screen: the embeddings and overrides U+202A to U+202E, the
+ *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C.
+ */
+const TERMINAL_CONTROLS =
+  // Matching control characters is the point of this pattern.
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
+/**
+ * Removes the characters a terminal would act on rather than print, keeping
+ * tabs and line breaks. Much of what the CLI prints was written by someone
+ * other than the user, such as an agent's notification or an answer's label.
+ * Printed as it is, an escape sequence in that text could erase or hide a
+ * line, such as the line describing what an answer does.
+ */
+export const removeTerminalControls = (text: string): string => text.replace(TERMINAL_CONTROLS, "");
+
+/**
+ * Formats a value as the text of a table cell or of a `key  value` line. An
+ * id is shortened to its tail, and characters a terminal would act on are
+ * removed before the text is measured, so the columns stay aligned.
+ */
 const formatCell = (value: unknown): string => {
   if (value === undefined || value === null) return "";
-  if (typeof value === "string") return CANONICAL_ID.test(value) ? value.slice(-TAIL) : value;
+  if (typeof value === "string") {
+    return CANONICAL_ID.test(value) ? value.slice(-TAIL) : removeTerminalControls(value);
+  }
   if (Array.isArray(value)) return value.map(formatCell).join(",");
-  if (typeof value === "object") return JSON.stringify(value);
+  // JSON escapes the C0 control characters but not the C1 or bidirectional ones.
+  if (typeof value === "object") return removeTerminalControls(JSON.stringify(value));
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value) ?? "";
+  return removeTerminalControls(JSON.stringify(value) ?? "");
 };
 
 /** Returns every key of any row, in order of first appearance. */
@@ -59,18 +100,26 @@ const listColumns = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArra
 
 /**
  * Returns the first line of a multi-line table cell, followed by " ..." to
- * show that more lines follow. A cell with a line break would break the table
- * row. The space before the dots keeps them apart from a full stop that ends
- * the first line.
+ * show that more lines follow, with each tab turned into a space. A cell with
+ * a line break would break the table row, and a tab would move the columns
+ * after it. The space before the dots keeps them apart from a full stop that
+ * ends the first line.
  */
 const keepOnOneLine = (text: string): string => {
   const lineBreak = text.search(/[\r\n]/);
-  return lineBreak === -1 ? text : `${text.slice(0, lineBreak).trimEnd()} ...`;
+  const firstLine = lineBreak === -1 ? text : `${text.slice(0, lineBreak).trimEnd()} ...`;
+  return firstLine.replaceAll("\t", " ");
 };
 
-const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
+  renderTableColumns(rows, listColumns(rows));
+
+/** Same as `renderTable`, but prints only `columns`, in their order. */
+const renderTableColumns = (
+  rows: ReadonlyArray<Record<string, unknown>>,
+  columns: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
-  const columns = listColumns(rows);
   const body = rows.map((row) => columns.map((column) => keepOnOneLine(formatCell(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
@@ -268,6 +317,50 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 };
 
 /**
+ * Returns a trigger as a row of `trigger list`: every field, in the order the
+ * contract gives them, with the nested ones on one short line each:
+ *
+ * - `on`: what the trigger fires on, as the web app shows it, such as
+ *   "github.pr.labeled · any connection" or "0 9 * * 1-5 in Europe/Amsterdam".
+ * - `filter`: an event trigger's filter. `renderTriggerList` prints it in
+ *   the last column, because a filter is often long.
+ * - `health`: `ok`, or `error: ` and the evaluation error.
+ * - `skippedTicks`: the first and the last scheduled time a cron trigger
+ *   missed.
+ *
+ * `--json` prints every field as the controller sent it, such as when the
+ * error happened.
+ */
+const summarizeTrigger = (trigger: Trigger): Record<string, unknown> => ({
+  ...trigger,
+  on: describeTriggerOn(trigger.on),
+  ...(trigger.health === undefined
+    ? {}
+    : { health: trigger.health.state === "ok" ? "ok" : `error: ${trigger.health.message}` }),
+  ...(trigger.skippedTicks === undefined
+    ? {}
+    : { skippedTicks: `${trigger.skippedTicks.from} to ${trigger.skippedTicks.until}` }),
+  ...(isSchedule(trigger.on) || trigger.on.filter === undefined
+    ? {}
+    : { filter: trigger.on.filter }),
+});
+
+/**
+ * Returns the lines of `trigger list`: a table with a row per trigger, as
+ * `summarizeTrigger` builds it. The filter column comes last, whichever row
+ * first has a filter, so a long filter never pushes other columns to the
+ * right.
+ */
+const renderTriggerList = (triggers: ReadonlyArray<Trigger>): ReadonlyArray<string> => {
+  const rows = triggers.map(summarizeTrigger);
+  const columns = listColumns(rows);
+  return renderTableColumns(rows, [
+    ...columns.filter((column) => column !== "filter"),
+    ...columns.filter((column) => column === "filter"),
+  ]);
+};
+
+/**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
  * full id, and the command that subscribes to it. A caller who started a run
  * usually wants to know when it ends, and the subscription wakes it when the
@@ -280,13 +373,15 @@ const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
 ];
 
 /**
- * Describes who started a run, and how when not by hand, in the words the
- * web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e at
- * step spawn".
+ * Describes who or what started a run, and how when not by hand, in the words
+ * the web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e
+ * at step spawn", "trigger on_issue on github.issue.opened". A run summary
+ * holds no copy of the event, so a trigger run's row in `run list` reads
+ * "trigger on_issue".
  */
-const describeOrigin = (origin: RunOrigin): string => {
-  const { starter, howStarted } = describeRunOrigin(origin);
-  return howStarted === undefined ? starter.label : `${starter.label} ${howStarted}`;
+const describeOrigin = (run: Run | RunSummary): string => {
+  const { label, howStarted } = describeRunOrigin(run);
+  return howStarted === undefined ? label : `${label} ${howStarted}`;
 };
 
 /**
@@ -298,7 +393,7 @@ const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
   id: run.id,
   status: run.status === "failed" ? `${run.status} (${run.failureReason})` : run.status,
   workflow: run.workflowName,
-  startedBy: describeOrigin(run.origin),
+  startedBy: describeOrigin(run),
   age: formatAge(run.createdAt, now),
 });
 
@@ -324,10 +419,15 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
  * at as `count -> file`, and what went wrong at that edge, as the fields of
  * `run read`, or no fields for a run that did not fail. A run the controller
  * could not carry out may have failed before it reached any step, and only a
- * run that failed at an edge has a failed edge and its message.
+ * run that failed at an edge has a failed edge and its message. A run a
+ * trigger could not start has no step, only the message saying what did not
+ * validate.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
+  if (run.failureReason === "validation-error") {
+    return { failureReason: run.failureReason, failureMessage: run.failureMessage };
+  }
   const planEdge = findFailedEdge(run);
   return {
     failureReason: run.failureReason,
@@ -390,7 +490,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
       workflow: run.plan.name,
       status: run.status,
       ...describeFailure(run),
-      startedBy: describeOrigin(run.origin),
+      startedBy: describeOrigin(run),
       createdAt: run.createdAt,
       ...readTimestamps(run),
     },
@@ -407,17 +507,103 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
 ];
 
-/** Returns the lines the CLI prints for a successful command without `--json`. */
-export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
+/**
+ * Returns the answers of a decision as a table: each answer's id, which
+ * `notification act --action` takes, its label, what taking it does, and the
+ * producer's description. The "does" column shows only for an open decision,
+ * because the controller describes only answers that can still be taken.
+ */
+const renderAnswerTable = (actions: Notification["actions"]): ReadonlyArray<string> =>
+  renderTable(
+    actions.map((action) => ({
+      id: action.id,
+      label: action.label,
+      ...(action.describeLine === undefined
+        ? {}
+        : { does: formatDescribeLine(action.describeLine) }),
+      ...(action.description === undefined ? {} : { description: action.description }),
+    })),
+  );
+
+/**
+ * Returns a notification as a row of `notification list`: its id, kind,
+ * title, status, the labels of its answers, and its age. The body, the
+ * producer and what each answer does are left to `notification read`,
+ * because they do not fit on one line.
+ */
+const summarizeNotification = (notification: Notification, now: Date): Record<string, unknown> => ({
+  id: notification.id,
+  kind: notification.kind,
+  title: notification.title,
+  status: notification.status,
+  answers: notification.actions.map((action) => action.label).join(" / "),
+  age: formatAge(notification.createdAt, now),
+});
+
+/** Returns the rows of `notification list` as a table. */
+const renderNotificationList = (
+  notifications: ReadonlyArray<Notification>,
+): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(notifications.map((notification) => summarizeNotification(notification, now)));
+};
+
+/**
+ * Returns the lines printed for `notification read`: the notification's fields
+ * as key-value lines, then its markdown body and its answers under their own
+ * headings. The body and the answers are left out when there are none.
+ */
+const renderNotification = (notification: Notification): ReadonlyArray<string> => {
+  const { body, actions, ...fields } = notification;
+  return [
+    ...renderKeyValues(fields),
+    ...(body === undefined ? [] : ["", "body", ...body.split("\n")]),
+    ...(actions.length === 0 ? [] : ["", "answers", ...renderAnswerTable(actions)]),
+  ];
+};
+
+/**
+ * Returns the line printed after `notification act`: how the decision was
+ * resolved. `notification.act` returns only a resolved decision, because a
+ * failed operation fails the call instead. When an answer resolved the
+ * decision, the line names that answer by its label. When the decision was
+ * resolved another way first, such as withdrawn because its question stopped
+ * existing, the line describes that resolution, so it never names an answer
+ * that did not run.
+ */
+const renderNotificationDecided = (
+  notification: Notification & { readonly resolution: Resolution },
+): ReadonlyArray<string> => {
+  const { resolution } = notification;
+  const taken =
+    resolution.kind === "decided"
+      ? notification.actions.find((action) => action.id === resolution.actionId)
+      : undefined;
+  const outcome = taken === undefined ? describeResolution(resolution) : `decided: ${taken.label}`;
+  return [`notification ${formatCell(notification.id)} ${outcome}`];
+};
+
+/**
+ * Returns the lines for a successful command without `--json`, before
+ * `renderHuman` removes the characters a terminal would act on.
+ */
+const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
-  // items of `run.query` are run summaries.
+  // items of `run.query` are run summaries, those of `trigger.query` are
+  // triggers, and those of `notification.query` are notifications.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
       : command.id === "run.query"
         ? (items: ReadonlyArray<Record<string, unknown>>) =>
             renderRunList(items as ReadonlyArray<RunSummary>)
-        : renderTable;
+        : command.id === "trigger.query"
+          ? (items: ReadonlyArray<Record<string, unknown>>) =>
+              renderTriggerList(items as ReadonlyArray<Trigger>)
+          : command.id === "notification.query"
+            ? (items: ReadonlyArray<Record<string, unknown>>) =>
+                renderNotificationList(items as unknown as ReadonlyArray<Notification>)
+            : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 
@@ -458,6 +644,10 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     }
     if (command.id === "run.read") return renderRun(value as Run, Date.now());
     if (command.id === "run.cancel") return renderRunCancelled(value as Run);
+    if (command.id === "notification.read") return renderNotification(value as Notification);
+    if (command.id === "notification.act") {
+      return renderNotificationDecided(value as Notification & { readonly resolution: Resolution });
+    }
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just
     // spawned a session wants to watch it. The hint does not suggest a
@@ -475,4 +665,18 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     return lines;
   }
   return [formatCell(value)];
+};
+
+/**
+ * Returns the lines the CLI prints for a successful command without `--json`.
+ *
+ * Every line has the characters a terminal would act on removed, except the
+ * source that `workflow read` prints, which must come back byte for byte.
+ * `formatCell` has already removed them from table cells, so the columns
+ * line up; this pass covers the text printed any other way, such as a
+ * notification's body.
+ */
+export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
+  const lines = renderLines(outcome, command);
+  return command.id === "workflow.read" ? lines : lines.map(removeTerminalControls);
 };

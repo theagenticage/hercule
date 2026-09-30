@@ -2,21 +2,21 @@ import { Fragment, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { buildApprovalCard, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
-import { cn, DecisionMark } from "@hercule/ui";
+import { AnswerLedger, cn, DecisionMark } from "@hercule/ui";
 
 /**
- * The permission card: the request the session is parked on, docked onto the
- * composer. It always appears in the same place and is never repeated in the
- * transcript (spec 14 §The thread surface). The answers form a ledger: one
- * full-width button per answer, with the label in the left column and its
- * description beside it (spec 14 §Answers as a ledger).
+ * Renders the permission card: the request the session is parked on, docked
+ * onto the composer. The card always appears in the same place and is never
+ * repeated in the transcript. Its answers form the same ledger as a
+ * decision's answers in the notification center.
  *
  * The dock mirrors the composer's bottom lip above the card: the same 14px
  * inset, the same `--surface` on a `--line-soft` border, a 10px radius on the
  * two corners away from the card, and 8px hidden under the card. The card
- * keeps its own radius, border and shadow (spec 14 §Measurements, amended
- * 2026-09-14). A second raised card would look like a separate surface; a lip
- * looks like part of the composer, which is what the dock is.
+ * keeps its own radius, border and shadow. A second raised card would look
+ * like a separate surface; a lip looks like part of the composer, which is
+ * what the dock is. Spec 14 §The thread surface and §Measurements own the
+ * layout.
  *
  * A `question` request is not a permission request. It shows one block per
  * question (its chip, its prose, and its options, read-only) where a command
@@ -50,7 +50,7 @@ export function PermissionCard({
   // One answer per request. The card stays until the runner reports the
   // request resolved, and a second click in that time could send a decision
   // that contradicts the one already recorded.
-  const answered = respond.isPending || respond.isSuccess;
+  const rowsLocked = respond.isPending || respond.isSuccess;
 
   return (
     // The dock sits behind the card: the card is `z-[1]`, so the 8px of the
@@ -115,26 +115,16 @@ export function PermissionCard({
         )}
         {/* An instruction, not an option: 12px `--muted` with space above it. */}
         {card.note === null ? null : <p className="mt-2">{card.note}</p>}
-        {/* Each row extends 8px past this column on both sides, so its hover
-            background has room around the label while the label stays on the
-            same left edge as the title. The dock's 13px bottom padding keeps
-            the last row clear of the card, which covers the dock's bottom 8px. */}
-        <div className="mt-1 flex flex-col">
-          {card.rows.map((row) => (
-            <button
-              key={row.decision}
-              type="button"
-              disabled={answered}
-              onClick={() => respond.mutate(row.decision)}
-              className="-mx-2 grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[5px] text-left enabled:cursor-pointer enabled:hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
-            >
-              <span className="text-meta font-emph text-ink">{row.label}</span>
-              {/* `--muted`, not `--faint`: 12px `--faint` on `--surface` has
-                  a contrast of about 2.9:1 in dark mode and 2.4:1 in light
-                  mode, too low for readable text. */}
-              <span className="text-fine text-muted">{row.describe}</span>
-            </button>
-          ))}
+        {/* The ledger's rows extend 8px past this column on both sides, so
+            the labels stay on the same left edge as the title. The dock's
+            13px bottom padding keeps the last row clear of the card, which
+            covers the dock's bottom 8px. */}
+        <div className="mt-1">
+          <AnswerLedger
+            rows={card.rows}
+            disabled={rowsLocked}
+            onSelect={(decision) => respond.mutate(decision)}
+          />
         </div>
         {respond.error === null ? null : (
           <p className="mt-1 text-fail" role="alert">

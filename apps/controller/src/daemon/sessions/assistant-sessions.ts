@@ -8,16 +8,13 @@
  * the caller's transaction commits.
  */
 import * as Effect from "effect/Effect";
-import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { NotFound } from "@hercule/contract";
-import { CurrentActor } from "../../actor";
 import { AssistantSessions } from "../../assistants";
-import { afterCommit } from "../../db";
 import { sessionRepository } from "../../sessions";
-import { absorbFailures } from "../absorbing";
+import { makeForkAfterCommit } from "./after-commit";
 import { Live } from "./live";
 import { Placement } from "./placement";
 
@@ -25,36 +22,9 @@ const make = Effect.gen(function* () {
   const rows = yield* sessionRepository;
   const placement = yield* Placement;
   const live = yield* Live;
-  // Runs the frame-sending half of a start, a give or a stop on a fiber of
-  // this layer, not of the request. The request's context holds its
-  // transaction's connection, which is gone by the time the frames are sent.
-  const fork = yield* FiberSet.makeRuntime<never>();
-
-  /**
-   * Schedules `send` to run once the caller's transaction commits, and not at
-   * all if it rolls back. A failure is logged, not returned: the caller's
-   * write is already durable, and the dispatch and flush passes retry.
-   *
-   * The forked fiber does not inherit the request's context, so the actor
-   * behind the request is carried over explicitly: the audit entries `send`
-   * writes, such as a stop's, name the person who asked for it.
-   */
-  const sendAfterCommit = (
-    failureMessage: string,
-    send: Effect.Effect<void, unknown>,
-  ): Effect.Effect<void> =>
-    Effect.flatMap(CurrentActor, (actor) =>
-      afterCommit(() => {
-        // The fiber yields first, so the request that stored the rows is
-        // answered before the runner is told anything.
-        fork(
-          Effect.andThen(
-            Effect.yieldNow,
-            absorbFailures(failureMessage, Effect.provideService(send, CurrentActor, actor)),
-          ),
-        );
-      }),
-    );
+  // Runs the frame-sending half of a start, a give or a stop once the
+  // caller's transaction commits.
+  const sendAfterCommit = yield* makeForkAfterCommit;
 
   return AssistantSessions.of({
     start: (request) =>

@@ -250,8 +250,9 @@ const FAST = {
 
 describe("the command the controller spawns", () => {
   it("is this process's own binary, started as a local runner", () => {
-    // Spawn, never fork (spec 15 section 4). A compiled Hercule spawns
-    // `process.execPath` to start another Hercule.
+    // Spawn, never fork: `fork()` is broken in a Bun-compiled binary. A
+    // compiled Hercule spawns `process.execPath` to start another Hercule.
+    // Spec 15 section 11 owns the rule.
     expect(LOCAL_RUNNER_COMMAND).toEqual([process.execPath, "runner", "--local"]);
   });
 

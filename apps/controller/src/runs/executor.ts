@@ -4,9 +4,11 @@
  * stops it when the run is cancelled.
  *
  * The runs domain decides what a run does; it never decides where that work
- * runs. The controller daemon implements this port (`daemon/runs/`), and
- * gives each run a place to execute for as long as the controller lives
- * (ADR 0033, amendment of 2026-09-25).
+ * runs. A domain holds no long-lived fibers and knows nothing of the process
+ * lifetime, so a run that outlives its request needs something else to host
+ * it. The controller daemon implements this port (`daemon/runs/`), and gives
+ * each run a place to execute for as long as the controller lives. ADR 0033
+ * records this split between domains and the controller daemon.
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";

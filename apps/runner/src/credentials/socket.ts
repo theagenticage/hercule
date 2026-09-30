@@ -43,7 +43,10 @@ const EMPTY = "{}\n";
  */
 export const isSpeakable = (value: string): boolean => !/[\n\r\0]/.test(value);
 
-/** Returns the remote as `<host>/<path>`, the form spec 13 section 9 uses. */
+/**
+ * Returns the remote as `<host>/<path>`, the form a credential request carries.
+ * The controller converts it to the canonical form of the remote.
+ */
 const formatRemote = (question: HelperQuestion): string =>
   [question.host, question.path].filter((part) => part !== undefined && part.length > 0).join("/");
 

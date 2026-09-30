@@ -12,8 +12,10 @@ import {
   DELTA_FLUSH_BYTES,
   fold,
   computeOpenRequestAfter,
+  isRequestEvent,
   startTracking,
   type Folded,
+  type RequestEvent,
   type Tracked,
 } from "./stream";
 
@@ -27,14 +29,14 @@ const started: ProviderEvent = { ...base, _tag: "session.started" };
 
 const turnStarted: ProviderEvent = { ...base, _tag: "turn.started", turnId: TURN };
 
-const turnCompleted: ProviderEvent = {
+const turnCompleted: RequestEvent = {
   ...base,
   _tag: "turn.completed",
   turnId: TURN,
   state: "completed",
 };
 
-const exited: ProviderEvent = { ...base, _tag: "session.exited", reason: "stopped" };
+const exited: RequestEvent = { ...base, _tag: "session.exited", reason: "stopped" };
 
 const buildDelta = (itemId: string, text: string): ProviderEvent => ({
   ...base,
@@ -62,9 +64,9 @@ const request = {
   detail: { command: "ls -la" },
 } as const;
 
-const opened: ProviderEvent = { ...base, _tag: "request.opened", request };
+const opened: RequestEvent = { ...base, _tag: "request.opened", request };
 
-const resolved: ProviderEvent = {
+const resolved: RequestEvent = {
   ...base,
   _tag: "request.resolved",
   requestId: "r1",
@@ -228,7 +230,12 @@ describe("the open request", () => {
   });
 
   it("stays open when a different request is answered", () => {
-    const other: ProviderEvent = { ...resolved, requestId: "r2" };
+    const other: RequestEvent = {
+      ...base,
+      _tag: "request.resolved",
+      requestId: "r2",
+      decision: "allow",
+    };
 
     expect(computeOpenRequestAfter(other, request)).toBeUndefined();
     expect(computeOpenRequestAfter(resolved, null)).toBeUndefined();
@@ -243,7 +250,10 @@ describe("the open request", () => {
 
   it("is not changed by any other event", () => {
     for (const event of [started, turnStarted, buildDelta("i1", "hi"), buildCompletedItem("i1")]) {
-      expect(computeOpenRequestAfter(event, request), event._tag).toBeUndefined();
+      expect(isRequestEvent(event), event._tag).toBe(false);
+    }
+    for (const event of [opened, resolved, turnCompleted, exited]) {
+      expect(isRequestEvent(event), event._tag).toBe(true);
     }
   });
 });

@@ -1,6 +1,6 @@
 /**
  * Groups the sidebar's threads by project, and inside a project by workspace
- * (spec 14 §App shell, amended by #160 and #72).
+ * (spec 14 §App shell).
  *
  * - Projects are sorted newest first by their latest thread, in any of their
  *   workspace groups. The draft's project comes first, and the threads with

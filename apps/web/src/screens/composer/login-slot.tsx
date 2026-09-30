@@ -9,7 +9,7 @@ import { ProviderLogin } from "../provider-login";
  * The login drawer names its full target, such as `Log in to Claude Code on
  * atlas`. It names the account because the row offering the login is often
  * not the account in use. It names the machine because a credential is stored
- * on one machine and works only there (spec 06 §3.1).
+ * on one machine and works only there. Spec 06 §3.1 owns that rule.
  */
 export const buildLoginSlot =
   (client: HerculeClient, onLoggedIn: () => void) =>

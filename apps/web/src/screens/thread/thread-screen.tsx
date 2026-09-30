@@ -1,11 +1,11 @@
 /**
  * The thread surface: a centred 800px column of turns that streams live, with
- * the composer floating at the bottom (spec 14 §The thread surface).
+ * the composer floating at the bottom.
  *
  * An assistant's session uses the same surface with two changes: the crumb
  * links back to the assistant's conversation, and a card pointing to that
  * conversation takes the composer's place, because the user talks to an
- * assistant in its conversation.
+ * assistant in its conversation. Spec 14 §The thread surface owns the layout.
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";

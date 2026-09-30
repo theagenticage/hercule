@@ -542,7 +542,10 @@ describe("the shipped registry over the routes", () => {
  * a second boot does to it, read both from the table and through the route.
  */
 
-/** The event kinds from spec 08 section 5.1, written out because the list itself is what is tested. */
+/**
+ * The event kinds the GitHub plugin declares, written out because the list
+ * itself is what is tested. Spec 08 section 5.1 owns the list.
+ */
 const GITHUB_KINDS = [
   "github.notification",
   "github.issue.opened",

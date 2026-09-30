@@ -13,9 +13,10 @@ import { Effect, Layer } from "effect";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { NotificationServiceLayer } from "../notifications";
+import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { ConnectionReferences } from "./references";
 import { ConnectionTypesLayer } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer } from "./service";
 
@@ -26,17 +27,22 @@ afterEach(() => {
   homes = [];
 });
 
-/** Builds the real service over the real repositories, a `:memory:` database and a key file. */
+/**
+ * Builds the real service over the real repositories, a `:memory:` database and
+ * a key file. This test builds no other domain, so no record names a
+ * Connection.
+ */
 const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-connection-service-"));
   homes.push(home);
   return ConnectionServiceLayer.pipe(
+    Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
     Layer.provideMerge(PluginHostLayer),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(NotificationServiceLayer),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

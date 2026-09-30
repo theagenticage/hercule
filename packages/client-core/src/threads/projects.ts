@@ -1,8 +1,9 @@
 /**
- * Builds the rows of the project picker (spec 14 §The composer): "the project
- * comes first because it bounds everything below it". Each row shows how many
- * repos, threads and workspaces the project has, so the user can choose by
- * what is in a project rather than by its name alone.
+ * Builds the rows of the project picker. A new thread starts by picking its
+ * project, because the project bounds everything the composer offers below
+ * it: its repos and its workspaces. Each row shows how many repos, threads and
+ * workspaces the project has, so the user can choose by what is in a project
+ * rather than by its name alone. Spec 14 §The composer owns the picker.
  */
 import type { Project, Resource, Session, Workspace } from "@hercule/contract";
 import { pickProjectTone, type ProjectTone } from "./tone";

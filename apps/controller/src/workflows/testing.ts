@@ -7,7 +7,7 @@
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Issue, Trigger, Workflow } from "@hercule/contract";
+import type { Issue, Schedule, Trigger, TriggerKey, Workflow } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -23,8 +23,10 @@ import {
   send,
   withServer,
   type ServerHarness,
+  type ServerOptions,
 } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
 /** A valid UUIDv7 that is not the id of anything on the test controller. */
@@ -117,10 +119,13 @@ export interface SetUpController {
  * The controller has a provider for Agents and the local GitHub plugin for
  * triggers. `additionalPlugins` are installed too, for tests that need a
  * Connection type or a workflow action that GitHub does not declare.
+ * `timings` shortens the event router's and the scheduler's intervals, whose
+ * one-second defaults would make a test that waits for several passes slow.
  */
 export const withSetUpController = (
   body: (controller: SetUpController) => Promise<void>,
   additionalPlugins: ReadonlyArray<Plugin> = [],
+  timings: Pick<ServerOptions, "eventRoutingInterval" | "schedulerInterval"> = {},
 ): Promise<void> =>
   withServer(
     async (harness) => {
@@ -128,6 +133,7 @@ export const withSetUpController = (
       await body({ harness, base: harness.base, token });
     },
     {
+      ...timings,
       plugins: [
         createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
         localGithubPlugin,
@@ -261,6 +267,40 @@ export const queryTriggers = async (
   return ((await response.json()) as { items: ReadonlyArray<Trigger> }).items;
 };
 
+/**
+ * Reads one trigger through `trigger.query`. Fails the test when the workflow
+ * has no trigger with the id.
+ */
+export const readTrigger = async (
+  base: string,
+  token: string,
+  key: TriggerKey,
+): Promise<Trigger> => {
+  const triggers = await queryTriggers(base, token, `?workflowId=${key.workflowId}`);
+  const trigger = triggers.find((item) => item.triggerId === key.triggerId);
+  if (trigger === undefined)
+    expect.fail(`no trigger ${key.triggerId}: ${JSON.stringify(triggers)}`);
+  return trigger;
+};
+
+/** Returns a start trigger on `task.created`, as a save declares it, with `fields` replacing the defaults. */
+export const declareStartTrigger = (
+  triggerId: string,
+  fields: Partial<DeclaredTrigger> = {},
+): DeclaredTrigger => ({
+  triggerId,
+  kind: "start",
+  on: { kind: "task.created" },
+  inputs: undefined,
+  ...fields,
+});
+
+/** Returns a cron trigger with the schedule `on`, as a save declares it. By default it fires at 09:00 every day in Amsterdam. */
+export const declareCronTrigger = (
+  triggerId: string,
+  on: Schedule = { schedule: "0 9 * * *", timezone: "Europe/Amsterdam" },
+): DeclaredTrigger => declareStartTrigger(triggerId, { on });
+
 /** Asserts that no workflow and no trigger is stored, for example after a failed save. */
 export const expectNothingStored = async (base: string, token: string): Promise<void> => {
   expect((await queryWorkflows(base, token)).items).toEqual([]);
@@ -320,4 +360,65 @@ export const createConnection = async (
 export const disablePlugin = async (base: string, token: string, id: string): Promise<void> => {
   const response = await post(base, `/api/v1/plugins/${id}/disable`, {}, token);
   expect(response.status, await response.clone().text()).toBe(200);
+};
+
+/** Enables a workflow, so its start triggers start runs, or fails the test if the update fails. */
+export const enableWorkflow = async (base: string, token: string, id: string): Promise<void> => {
+  const response = await updateWorkflow(base, token, id, { enabled: true });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+/** Sends `trigger.pause` and returns the response, so a test can check a refusal too. */
+export const pauseTrigger = (
+  base: string,
+  token: string,
+  workflowId: string,
+  triggerId: string,
+): Promise<Response> =>
+  post(base, `/api/v1/workflows/${workflowId}/triggers/${triggerId}/pause`, {}, token);
+
+/** Sends `trigger.resume` and returns the response, so a test can check a refusal too. */
+export const resumeTrigger = (
+  base: string,
+  token: string,
+  workflowId: string,
+  triggerId: string,
+): Promise<Response> =>
+  post(base, `/api/v1/workflows/${workflowId}/triggers/${triggerId}/resume`, {}, token);
+
+/** The repository every `github.pr.labeled` event these tests emit is about. */
+export const LABELED_REPO = "octo/repo";
+
+/**
+ * Emits a `github.pr.labeled` event through `event.emit` and returns its id,
+ * or fails the test if the controller refuses it. `added` is the list of
+ * labels the event says were added. `connectionId` and `dedupKey` are sent
+ * only when given.
+ */
+export const emitLabeledEvent = async (
+  base: string,
+  token: string,
+  fields: {
+    readonly added: ReadonlyArray<string>;
+    readonly connectionId?: string;
+    readonly dedupKey?: string;
+  },
+): Promise<number> => {
+  const response = await post(
+    base,
+    "/api/v1/events/emit",
+    {
+      kind: "github.pr.labeled",
+      payload: {
+        subject: { repo: LABELED_REPO, url: `https://github.com/${LABELED_REPO}/pull/7` },
+        added: fields.added,
+        removed: [],
+      },
+      ...(fields.connectionId === undefined ? {} : { connectionId: fields.connectionId }),
+      ...(fields.dedupKey === undefined ? {} : { dedupKey: fields.dedupKey }),
+    },
+    token,
+  );
+  expect(response.ok, await response.clone().text()).toBe(true);
+  return ((await response.json()) as { readonly eventId: number }).eventId;
 };

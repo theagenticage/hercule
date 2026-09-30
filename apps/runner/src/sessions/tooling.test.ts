@@ -58,8 +58,9 @@ describe("the hercule binary a session calls", () => {
 
     const { binDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
-    // The exact path spec 15 section 2 names. Together with the PATH change, it
-    // makes `which hercule` work inside a session.
+    // The bin directory has one fixed place, `<home>/runner/bin`
+    // (spec 15 section 2). Together with the PATH change, it makes
+    // `which hercule` work inside a session.
     expect(binDir).toBe(join(home, "runner", "bin"));
     const link = join(binDir, "hercule");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);

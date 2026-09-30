@@ -274,17 +274,19 @@ const make = Effect.gen(function* () {
             );
           }
         }
-        if (decoded.connectionId !== undefined) {
-          yield* validateNamedConnection(decoded.kind, decoded.connectionId);
-        }
         // A project listed twice is the same link: the caller means a set, and
         // the join table holds one row per pair.
         const projectIds = [...new Set(decoded.projectIds ?? [])];
-        yield* validateNamedProjects(projectIds);
 
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Checked in the insert's transaction, so a Connection or project
+            // deleted after the check cannot leave the new resource naming it.
+            if (decoded.connectionId !== undefined) {
+              yield* validateNamedConnection(decoded.kind, decoded.connectionId);
+            }
+            yield* validateNamedProjects(projectIds);
             const at = yield* nowIso;
             const canonicalRemote =
               decoded.remote === undefined

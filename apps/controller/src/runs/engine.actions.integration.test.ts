@@ -217,7 +217,9 @@ describe("run.start as a step", () => {
 
         expect(run.status, `${description}: ${JSON.stringify(run)}`).toBe("failed");
         expect(expectStatus(run, "failed").failureReason, description).toBe("step-failed");
-        expect(expectStatus(run, "failed").failedStepId, description).toBe("start_child");
+        expect(expectStatus(run, "failed"), description).toMatchObject({
+          failedStepId: "start_child",
+        });
         const [record] = findStepRecords(run, "start_child");
         expect(record?.status, description).toBe("failed");
         expect(expectStatus(record, "failed").error.code, description).toBe(code);

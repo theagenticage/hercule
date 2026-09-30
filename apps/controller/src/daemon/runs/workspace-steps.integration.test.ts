@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { Run } from "@hercule/contract";
 import { MAX_WORKSPACE_STEPS } from "@hercule/protocol";
-import { get, send } from "../../http/testing";
+import { send } from "../../http/testing";
 import {
   findStepRecords,
   readRun,
@@ -16,7 +16,13 @@ import {
   startSentWorkflow,
   waitForRun,
 } from "../../runs/testing";
-import { waitUntil, WAIT_DEADLINE_MS, type Arranged, type Wire } from "../../sessions/testing";
+import {
+  waitForRunnerGone,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+  type Arranged,
+  type Wire,
+} from "../../sessions/testing";
 import {
   createGithubConnection,
   createRepo,
@@ -94,22 +100,6 @@ const waitForRunTo = (
 /** Reads the status of a run's `commit` step record. */
 const readCommitStatus = async (arranged: Arranged, runId: string): Promise<string | undefined> =>
   findStepRecords(await readRun(arranged.harness.base, arranged.token, runId), "commit")[0]?.status;
-
-/**
- * Waits until the runner no longer reads `online`, which happens once the
- * controller has seen its socket close. A socket that closes without a
- * goodbye leaves the runner `unreachable`.
- */
-const waitForRunnerGone = (arranged: Arranged): Promise<true> =>
-  waitUntil("took the runner off online", async () => {
-    const response = await get(
-      arranged.harness.base,
-      `/api/v1/runners/${arranged.runnerId}`,
-      arranged.token,
-    );
-    const runner = (await response.json()) as { readonly connectivity: string };
-    return runner.connectivity === "online" ? undefined : true;
-  });
 
 /**
  * Enlists a second runner whose hello lists no workspace action, like a

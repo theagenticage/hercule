@@ -77,7 +77,7 @@ One user-visible episode of a session: from a user input until the agent goes id
 _Avoid_: exchange, round, iteration
 
 **Request**:
-A provider-held question a session is parked on until an answer arrives; surfaced as the permission card docked on the thread's composer. A request is one of two different things sharing one slot. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respond` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by answers, each either one or more of the offered options or a custom string the user types. Only the rendering is alike.
+A provider-held question a session is parked on until an answer arrives; surfaced as the permission card docked on the thread's composer. A request is one of two different things sharing one slot. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respond` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by answers, each either one or more of the offered options or a custom string the user types. Only the rendering is alike.
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
@@ -186,7 +186,7 @@ _Avoid_: poll
 
 **Scheduled Wake**:
 Waking an assistant at a time rather than on an event: a prompt delivered into one of its conversations by the scheduler. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
-_Avoid_: cron job (reserved for workflow triggers), scheduled task
+_Avoid_: cron job (a workflow's cron trigger is the thing that fires on a cron schedule), scheduled task
 
 **Reminder**:
 A one-shot scheduled wake an assistant sets on itself (or the user sets for it), delivered back into the conversation that created it, so the assistant can act or speak at that time.
@@ -341,7 +341,7 @@ An event emitted by the controller itself rather than an external source (`run.c
 _Avoid_: internal event, system event
 
 **Core Kind**:
-An event kind the core declares rather than a plugin: `cron.tick`, which the Scheduler emits, and the kinds of the Platform Events. A trigger on a core kind names no Connection, because its events arrive through none. No plugin can declare a kind with the name of a core kind.
+An event kind the core declares rather than a plugin: `cron.tick`, which the Scheduler emits for cron triggers, and the kinds of the Platform Events. A trigger on a core kind names no Connection, because its events arrive through none. No trigger names `cron.tick`: a cron trigger writes a Schedule instead, and each tick reaches only the cron trigger it was emitted for. No plugin can declare a kind with the name of a core kind.
 _Avoid_: built-in kind, system kind, internal kind
 
 **Event**:
@@ -360,7 +360,7 @@ The one consumer of the event log. It walks the events past its own durable curs
 _Avoid_: matcher, dispatcher, event bus
 
 **Routing Table**:
-The routes one destination owns, one per live subscription today, one per enabled trigger later. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+The routes one kind of destination owns: one per live subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
 The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
@@ -368,6 +368,10 @@ The downstream consumer of one kind of row. It reads its own rows, whoever wrote
 **Matched Input**:
 The Queued Input the Event Router writes for a holder session when a route's condition holds, marked with the subscription and the event. Unique per that pair, so a second pass over the same event writes nothing.
 _Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
+
+**Trigger Effect**:
+One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`; a delivery starts its run later, in a transaction of its own, and marks it `spawned` with the run's id, or `discarded` when its event was pruned, or its trigger paused or its workflow disabled, before then, or when its start died of a bug. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
+_Avoid_: pending run (the run does not exist until the effect is delivered)
 
 **Expression**:
 A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.
@@ -378,8 +382,16 @@ A named, stored, editable source of execution plans. Owns its triggers; can be a
 _Avoid_: recipe
 
 **Trigger**:
-A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). Lives inside the workflow, not as a standalone routing entity.
+A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). What a trigger fires on is its `on`: an Event Selector, or for a start trigger a Schedule. A start trigger whose `on` is a Schedule is a **cron trigger**. Lives inside the workflow, not as a standalone routing entity.
 _Avoid_: rule, hook
+
+**Event Selector**:
+The `on` of a trigger that fires on events: an event kind, the Connection selection (a Connection id or `any`, absent for a core kind), and an optional filter expression over `event`. Every signal trigger has one; a start trigger has one or a Schedule.
+_Avoid_: trigger source, source (an Event Source is where an event comes from; the selector says which events a trigger accepts)
+
+**Schedule**:
+The `on` of a cron trigger: a five-field cron expression and an optional timezone, the user's timezone setting when absent. It has no filter, because the cron expression already sets when it fires. When it comes due, the Scheduler appends a `cron.tick` event through the one pipeline, and that event starts the run.
+_Avoid_: cron job, timer, `cron.tick` trigger (no trigger names `cron.tick`)
 
 **Step**:
 One node of an execution plan's graph. Two kinds in v1: an action step (calls a Workflow Action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
@@ -446,8 +458,12 @@ A persisted message from Hercule to its user ("run failed", "trigger paused", "a
 _Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer)
 
 **Bound Action**:
-One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions.
+One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions. The operation is one on a short curated list of bindable operations, or none at all; beside its label, every answer shows a **Describe Line**.
 _Avoid_: button (as the domain term), callback, quick action
+
+**Describe Line**:
+The line the core writes under a Bound Action to say what taking it does to the system ("Start a run of *Bugfix*", "Send *continue* to session *Design ordering module*"), built from the frozen operation with the current names of what it acts on. The producer never writes, changes or hides it; that is what makes the user's choice an informed one.
+_Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
 The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Also the name of the view that presents it (confirmed by ticket #30).

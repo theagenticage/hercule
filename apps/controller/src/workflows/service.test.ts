@@ -13,6 +13,7 @@ import { readEventsOfKind } from "../events/testing";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
 import { buildPluginStack } from "../plugins/testing";
+import { SettingsLayer } from "../settings";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "./index";
 import { buildFileTaskSource, buildTaskStep } from "./testing";
 
@@ -26,6 +27,7 @@ type Deps = WorkflowService | PluginHost | SqlClient.SqlClient;
 const layer = WorkflowServiceLayer.pipe(
   Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
   Layer.provide(Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) })),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(buildPluginStack()),
 );
 
@@ -137,7 +139,7 @@ const buildTriggeredSource = (name: string, triggerIds: ReadonlyArray<string>): 
     ...triggerIds.flatMap((id) => [
       `  - id: ${id}`,
       "    kind: start",
-      "    source:",
+      "    on:",
       "      kind: task.created",
     ]),
     "steps:",

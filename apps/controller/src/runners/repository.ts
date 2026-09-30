@@ -99,10 +99,17 @@ const COLUMNS =
   "disk_watermark_bytes, binary_version, protocol_version, negotiated_capabilities, " +
   "facts, watermark, last_seen_at";
 
-/** Spec 03 §5.3: roughly one session per 2 GiB, floor 1. */
+/**
+ * The memory one session is assumed to need. A runner's default session cap
+ * is its memory divided by this, and never less than one. Spec 03 §5.3 owns
+ * the rule.
+ */
 const BYTES_PER_SESSION = 2 * 1024 ** 3;
 
-/** Spec 03 §6.2: ten gibibytes, until the owner says otherwise. */
+/**
+ * The free disk space below which a runner takes no new placements, unless
+ * the owner sets another value for that runner. Spec 03 §6.2 owns the default.
+ */
 const DEFAULT_DISK_WATERMARK_BYTES = 10 * 1024 ** 3;
 
 /**

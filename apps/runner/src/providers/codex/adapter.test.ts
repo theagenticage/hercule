@@ -1001,10 +1001,10 @@ describe("hercule-as-a-tool on a Codex thread", () => {
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, { ...ctx, herculeTool: TOOL }));
     await settle();
 
-    // An `AGENTS.md` was the old way to send instructions (spec 06 section 9.1,
-    // amended 2026-09-14). A file here would be instructions the harness reads
-    // from a directory Hercule says is empty, and one more copy of the skill
-    // to keep up to date.
+    // Codex once got its instructions as an `AGENTS.md` in this directory;
+    // they now go in the developer instructions. A file here would be
+    // instructions the harness reads from a directory that must stay empty,
+    // and one more copy of the skill to keep up to date.
     expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
   });
@@ -1179,8 +1179,9 @@ describe("the structured result of a Codex turn with an output schema", () => {
       COMMAND,
     ]);
 
-    // Reported at once rather than retried: a retry is optional in spec 06
-    // section 7 and is not built. An earlier message is not the answer
+    // Reported at once rather than retried. The one such failure seen live was
+    // the API refusing the schema, and a second identical turn would be
+    // refused again (spec 06 section 7). An earlier message is not the answer
     // either, because the turn kept working after it.
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",

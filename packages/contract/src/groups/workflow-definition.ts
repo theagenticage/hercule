@@ -156,7 +156,7 @@ export const readFieldNotation = (ast: SchemaAST.AST): FieldNotation | undefined
 /** A CEL expression. Which values it can read depends on where it is written. */
 const Expression = Schema.String.annotate({ [NOTATION_ANNOTATION]: "expression" });
 
-/** A cron expression that sets when a `cron.tick` trigger fires. */
+/** A cron expression that sets when a cron trigger fires. */
 const CronSchedule = Schema.String.annotate({ [NOTATION_ANNOTATION]: "schedule" });
 
 /** Text with `{{ expr }}` templates, which a run fills in from `inputs` and `steps`. */
@@ -288,8 +288,16 @@ export const ConnectionSelection = Schema.String.check(
   ),
 );
 
-/** The events a trigger listens for. */
-const EventSelector = closedStruct({
+/**
+ * The events a trigger accepts: the event kind, the Connection they arrive
+ * through, and an optional filter.
+ */
+export const EventSelector = closedStruct({
+  /**
+   * An event kind, such as `github.issue.opened` or `task.created`. The part
+   * before the first dot is a namespace, which is not always the Event
+   * Source: `task.created` comes from the core.
+   */
   kind: EventKind,
   /** Absent for a kind the core emits, because those events arrive through no Connection. */
   connectionId: Schema.optionalKey(ConnectionSelection),
@@ -297,28 +305,58 @@ const EventSelector = closedStruct({
   filter: Schema.optionalKey(Expression),
 });
 
-/** A trigger that starts a new run for each event it accepts. */
+export type EventSelector = Schema.Schema.Type<typeof EventSelector>;
+
+/**
+ * When a cron trigger fires. It has no filter, because the cron expression
+ * already sets when it fires.
+ */
+export const Schedule = closedStruct({
+  schedule: CronSchedule,
+  /** The time zone of the schedule. When absent, the user's timezone setting is used. */
+  timezone: Schema.optionalKey(Timezone),
+});
+
+export type Schedule = Schema.Schema.Type<typeof Schedule>;
+
+/**
+ * What makes a start trigger start a run: an event it accepts, or its
+ * schedule coming due. A schedule is the only way to fire on time, so no
+ * trigger listens for the event the Scheduler emits.
+ */
+export const TriggerOn = Schema.Union([EventSelector, Schedule]);
+
+export type TriggerOn = Schema.Schema.Type<typeof TriggerOn>;
+
+/** Returns whether a trigger's `on` is a schedule rather than an event selector. */
+export const isSchedule = (on: TriggerOn): on is Schedule => "schedule" in on;
+
+/**
+ * Whether a trigger fires on events or on a schedule: `event` when its `on`
+ * is an event selector, `schedule` when it is a schedule.
+ */
+export const TriggerFiresOn = Schema.Literals(["event", "schedule"]);
+
+export type TriggerFiresOn = Schema.Schema.Type<typeof TriggerFiresOn>;
+
+/** A trigger that starts a new run for each event it accepts, or each time its schedule comes due. */
 const StartTrigger = closedStruct({
   id: NodeId,
   kind: Schema.Literal("start"),
-  source: EventSelector,
+  on: TriggerOn,
   /** Maps each input name to an expression over `event`. */
   inputs: Schema.optionalKey(Schema.Record(Schema.String, Expression)),
   /** The maximum number of runs the trigger can start in one time window. */
   spawnBound: Schema.optionalKey(
     closedStruct({ maxRuns: PositiveInt, windowSeconds: PositiveInt }),
   ),
-  /** On a `cron.tick` trigger only. */
-  schedule: Schema.optionalKey(CronSchedule),
-  /** The time zone of the schedule. When absent, the user's timezone setting is used. */
-  timezone: Schema.optionalKey(Timezone),
 });
 
 /** A trigger that resumes a live run each time an event correlates with that run. */
 const SignalTrigger = closedStruct({
   id: NodeId,
   kind: Schema.Literal("signal"),
-  source: EventSelector,
+  on: EventSelector,
   /** The event is delivered to the run when both expressions give equal values. */
   correlation: closedStruct({
     /** An expression over `event`. */
@@ -574,7 +612,7 @@ const describeEmptyValue = (
 
 /**
  * Returns the error for a key the author left out. An input's `required` has
- * no default (spec 07 section 1), so the author decides it for each input,
+ * no default (spec 07 section 1). So the author decides it for each input,
  * and the error asks for that decision instead of naming the key alone.
  */
 const describeMissingKey = (path: ReadonlyArray<string>): string =>
@@ -582,14 +620,196 @@ const describeMissingKey = (path: ReadonlyArray<string>): string =>
     ? "Say whether this input is required: add required: true or required: false."
     : `Add ${String(path.at(-1))}. It is required here.`;
 
+/** The event selector keys that a schedule does not take, each with the error that says why. */
+const SCHEDULE_REFUSED_KEYS: ReadonlyMap<string, string> = new Map([
+  [
+    "filter",
+    "A schedule has no filter, because the schedule already sets when the trigger fires. Remove filter.",
+  ],
+  ["connectionId", "A schedule comes through no Connection. Remove connectionId."],
+]);
+
+/** The first sentence of every error about a schedule on a signal trigger. */
+const SIGNAL_TRIGGER_HAS_NO_SCHEDULE =
+  "A signal trigger resumes a run when an event arrives, so it cannot fire on a schedule.";
+
 /**
- * Returns the issues for one leaf of a failed definition decode, or
- * `undefined` to keep the schema library's message. `value` is the whole
- * decoded value, used to quote what the author wrote.
+ * Returns which shape of `on` the author meant, judged by the keys written:
+ *
+ * - `event` when `kind` is written, or, without `kind` or `schedule`,
+ *   `connectionId` or `filter`;
+ * - `schedule` when `schedule` is written, or, without `kind` or `schedule`,
+ *   `timezone`;
+ * - `undefined` when both `kind` and `schedule` are written, or none of the
+ *   keys above.
+ */
+const inferTriggerFiresOn = (on: Readonly<Record<string, unknown>>): TriggerFiresOn | undefined => {
+  const has = (key: string): boolean => Object.hasOwn(on, key);
+  if (has("kind") && has("schedule")) return undefined;
+  if (has("kind")) return "event";
+  if (has("schedule")) return "schedule";
+  if (has("connectionId") || has("filter")) return "event";
+  return has("timezone") ? "schedule" : undefined;
+};
+
+/**
+ * Returns the error for a key a trigger had before `on` replaced it:
+ * `source`, or `schedule` or `timezone` beside `kind: start`. The advice
+ * depends on the rest of the trigger, so that following it does not lead to
+ * the next error. For example, a signal trigger cannot move its schedule
+ * under `on`, and neither can a trigger whose `on` already has one, so both
+ * are told to remove it. Returns `undefined` for any other key.
+ */
+const describeMovedTriggerKey = (
+  trigger: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined => {
+  if (key === "source") {
+    return Object.hasOwn(trigger, "on")
+      ? "on is already written, and source is its old name. Remove source."
+      : "source is now called on. Rename source to on.";
+  }
+  if (key !== "schedule" && key !== "timezone") return undefined;
+  if (trigger["kind"] === "signal") return `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} Remove ${key}.`;
+  const on = trigger["on"];
+  if (isRecord(on) && Object.hasOwn(on, key)) return `on already has a ${key}. Remove this one.`;
+  if (isRecord(on) && inferTriggerFiresOn(on) === "event") {
+    return key === "schedule"
+      ? "on already accepts events, and a trigger cannot also fire on a schedule. Remove schedule."
+      : "Only a schedule has a timezone. Remove timezone.";
+  }
+  return key === "schedule"
+    ? "A schedule goes under on, in place of an event kind. Move schedule under on."
+    : "A timezone goes under on, beside the schedule. Move timezone under on.";
+};
+
+/**
+ * Returns the issues for a trigger key that needs its own message, or
+ * `undefined` for any other issue. `path` is where the issue is, and `value`
+ * is the whole decoded value. It runs before any other description, because
+ * the right message depends on the rest of the trigger, not only on the
+ * issue. The cases:
+ *
+ * - a key of the shape before `on`: see `describeMovedTriggerKey`. The error
+ *   that `on` is missing is dropped when the same move fixes it;
+ * - `filter` or `connectionId` in a schedule: say that a schedule takes
+ *   neither;
+ * - `timezone` in an event selector: say that only a schedule has one;
+ * - a schedule under a signal trigger's `on`: say that a signal trigger
+ *   accepts only events, and drop the errors that follow from it: that
+ *   `kind` is missing, and that `timezone` is not known;
+ * - a timezone without a schedule under a signal trigger's `on`: say that a
+ *   signal trigger cannot fire on a schedule.
+ */
+const describeTriggerKeyIssue = (
+  issue: SchemaIssue.Issue,
+  path: ReadonlyArray<string>,
+  value: unknown,
+): ReadonlyArray<Issue> | undefined => {
+  const [list, index, key, onKey] = path;
+  if (list !== "triggers" || index === undefined || key === undefined) return undefined;
+  const trigger = readValueAt(value, ["triggers", index]);
+  if (!isRecord(trigger)) return undefined;
+  if (path.length === 3) {
+    const moved = describeMovedTriggerKey(trigger, key);
+    if (moved !== undefined) return [{ path, message: moved }];
+    // The error for the old key already tells the author to write on.
+    const hasOldKeyInPlaceOfOn =
+      Object.hasOwn(trigger, "source") ||
+      (trigger["kind"] !== "signal" && Object.hasOwn(trigger, "schedule"));
+    return key === "on" && issue._tag === "MissingKey" && hasOldKeyInPlaceOfOn ? [] : undefined;
+  }
+  const on = trigger["on"];
+  if (path.length !== 4 || key !== "on" || onKey === undefined || !isRecord(on)) return undefined;
+  const shape = inferTriggerFiresOn(on);
+  if (trigger["kind"] === "signal" && Object.hasOwn(on, "schedule")) {
+    if (onKey === "schedule") {
+      const fix = Object.hasOwn(on, "kind")
+        ? "Remove schedule."
+        : "Write kind in place of schedule, with connectionId and filter if needed.";
+      return [{ path, message: `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} ${fix}` }];
+    }
+    if (onKey === "kind" || (onKey === "timezone" && shape === "schedule")) return [];
+  }
+  if (trigger["kind"] === "signal" && onKey === "timezone") {
+    return [{ path, message: `${SIGNAL_TRIGGER_HAS_NO_SCHEDULE} Remove timezone.` }];
+  }
+  if (onKey === "timezone" && shape === "event") {
+    return [{ path, message: "Only a schedule has a timezone. Remove timezone." }];
+  }
+  const refused = SCHEDULE_REFUSED_KEYS.get(onKey);
+  return refused !== undefined && shape === "schedule" ? [{ path, message: refused }] : undefined;
+};
+
+/**
+ * Lists keys the author wrote, for an error message: each one quoted and
+ * truncated, and at most three, so a message stays short however many keys
+ * were written.
+ */
+const listWrittenKeys = (keys: ReadonlyArray<string>): string => {
+  const shown = keys.slice(0, 3).map(quoteAuthorText);
+  const more = keys.length - shown.length;
+  return more === 0 ? shown.join(", ") : `${shown.join(", ")} and ${more} more`;
+};
+
+/** The ways to write a start trigger's `on`, for an error message. */
+const TRIGGER_ON_CHOICES =
+  "Write kind, with connectionId and filter if needed, to accept events of that kind, " +
+  "or write schedule, with timezone if needed, to fire on a schedule.";
+
+/**
+ * Returns the issues for a start trigger's `on` that is neither an event
+ * selector nor a schedule. `written` is the value at `path`, and `value` is
+ * the whole decoded value.
+ *
+ * The schema library reports the errors of both shapes, so an author who
+ * wrote a schedule would also read that `kind` is missing. This function
+ * decides which shape the author meant by the keys written, and reports only
+ * that shape's errors. When it cannot tell, it returns one error that
+ * explains the two shapes.
+ */
+const listTriggerOnIssues = (
+  written: unknown,
+  path: ReadonlyArray<string>,
+  value: unknown,
+): ReadonlyArray<Issue> => {
+  if (!isRecord(written)) {
+    const what = written === null ? "on has no value." : `on is ${describeWritten(written)}.`;
+    return [{ path, message: `${what} ${TRIGGER_ON_CHOICES}` }];
+  }
+  const shape = inferTriggerFiresOn(written);
+  if (shape === undefined) {
+    const keys = Object.keys(written);
+    const what =
+      Object.hasOwn(written, "kind") && Object.hasOwn(written, "schedule")
+        ? "on accepts events or fires on a schedule, not both."
+        : keys.length === 0
+          ? "on is empty."
+          : `on has neither kind nor schedule, only ${listWrittenKeys(keys)}.`;
+    return [{ path, message: `${what} ${TRIGGER_ON_CHOICES}` }];
+  }
+  const decoded = Schema.decodeUnknownResult(shape === "event" ? EventSelector : Schedule)(
+    written,
+    { errors: "all" },
+  );
+  return Result.isSuccess(decoded)
+    ? []
+    : listSchemaIssues(decoded.failure.issue, {
+        path,
+        describeIssue: (issue, issuePath) => describeDefinitionIssue(issue, issuePath, value),
+      });
+};
+
+/**
+ * Returns the issues for one leaf of a failed definition decode, or for a
+ * union whose members all failed. Returns `undefined` to keep the schema
+ * library's message for a leaf, or to report each member's issues for a
+ * union. `value` is the whole decoded value, used to quote what the author
+ * wrote.
  *
  * The schema library describes an expected shape as a line of TypeScript,
  * which does not help a workflow author. So this function writes its own
- * message for four cases:
+ * message for these cases:
  *
  * - A missing key: tell the author to add it.
  * - A key with no value where a plain value belongs: give the kind of value
@@ -599,28 +819,41 @@ const describeMissingKey = (path: ReadonlyArray<string>): string =>
  * - An unknown `kind` in a union whose members are told apart by `kind`:
  *   reports the error at `kind`, because the author only got that one word
  *   wrong.
+ * - A start trigger's `on` that fits neither of its shapes: see
+ *   `listTriggerOnIssues`.
+ * - A trigger key that needs its own message: see `describeTriggerKeyIssue`.
  */
-const describeDefinitionLeaf = (
-  leaf: SchemaIssue.Issue,
+const describeDefinitionIssue = (
+  issue: SchemaIssue.Issue,
   path: ReadonlyArray<string>,
   value: unknown,
 ): ReadonlyArray<Issue> | undefined => {
-  switch (leaf._tag) {
+  const triggerKeyIssues = describeTriggerKeyIssue(issue, path, value);
+  if (triggerKeyIssues !== undefined) return triggerKeyIssues;
+  switch (issue._tag) {
     case "MissingKey":
       return [{ path, message: describeMissingKey(path) }];
     case "InvalidType": {
       const written = readValueAt(value, path);
-      if (!SchemaAST.isObjects(leaf.ast)) {
-        return written === null ? describeEmptyValue(leaf.ast, path) : undefined;
+      if (!SchemaAST.isObjects(issue.ast)) {
+        return written === null ? describeEmptyValue(issue.ast, path) : undefined;
       }
       return [
         { path, message: `Write a mapping of fields here, not ${describeWritten(written)}.` },
       ];
     }
     case "AnyOf": {
-      const kinds = listKinds(leaf.ast);
+      // Matched by identity, so wrapping or annotating `TriggerOn` where a
+      // start trigger uses it would stop this match. The tests that expect
+      // only one shape's errors for a bad `on` fail when that happens.
+      if (issue.ast === TriggerOn.ast) {
+        return listTriggerOnIssues(readValueAt(value, path), path, value);
+      }
+      // Any other union with member issues is reported member by member.
+      if (issue.issues.length > 0) return undefined;
+      const kinds = listKinds(issue.ast);
       if (kinds.length === 0) {
-        return readValueAt(value, path) === null ? describeEmptyValue(leaf.ast, path) : undefined;
+        return readValueAt(value, path) === null ? describeEmptyValue(issue.ast, path) : undefined;
       }
       const choices = joinChoices(kinds);
       const written = readValueAt(value, path);
@@ -726,7 +959,7 @@ export const decodeWorkflowDefinition = (
     truncateIssues([
       ...(Result.isFailure(decoded)
         ? listSchemaIssues(decoded.failure.issue, {
-            describeLeaf: (leaf, path) => describeDefinitionLeaf(leaf, path, value),
+            describeIssue: (issue, path) => describeDefinitionIssue(issue, path, value),
           })
         : []),
       ...repeated,

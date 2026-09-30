@@ -16,6 +16,7 @@
  * manual: what the command does and when to use it, what it returns, and
  * what to call next, by its exact spelling. A field's line is one line.
  */
+import { OWN_SESSION_ALIAS } from "./bound-operations";
 import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
 
@@ -511,7 +512,7 @@ export const CLI = {
 
   "notification.query": {
     command: "notification list",
-    help: "Lists notifications, newest first, open decisions and resolved ones alike. Use it to find the id that `hercule notification read` and `hercule notification withdraw` take.",
+    help: "Lists notifications, newest first, open decisions and resolved ones alike. Use it to find the id that `hercule notification read`, `hercule notification act` and `hercule notification withdraw` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--kind", "triage.unsure", "--since", "2026-09-15T00:00:00.000Z"] },
@@ -530,7 +531,7 @@ export const CLI = {
   },
   "notification.read": {
     command: "notification read",
-    help: "Reads one notification in full: its body, what it is about, its answers, and how it was resolved.",
+    help: "Reads one notification in full: its body, what it is about, its answers, and how it was resolved. Each answer of an open decision shows what taking it does; take one with `hercule notification act`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -542,7 +543,7 @@ export const CLI = {
   },
   "notification.create": {
     command: "notification create",
-    help: "Raises a notification for the user. With --action it is a decision the user answers; without, it is informational. The body is markdown. Returns the notification's id.",
+    help: `Raises a notification for the user. With --action it is a decision the user answers; without, it is informational. The body is markdown. An answer runs one operation as the user when the user takes it: task.update, run.start or session.input, with the operation's whole input as one object, ids included. A session binds session.input only to itself: to ask the user a question and get the answer back as your next input, use sessionId "${OWN_SESSION_ALIAS}". A session in an assistant's conversation asks in the conversation instead. Returns the notification's id.`,
     examples: [
       {
         args: ["--kind", "triage.fyi", "--title", "Dependabot opened three PRs", "--body-stdin"],
@@ -555,7 +556,15 @@ export const CLI = {
           "--title",
           "Which architecture for the ordering module?",
           "--action",
-          '{"id":"event-sourced","label":"Event-sourced","operation":null,"primary":true}',
+          JSON.stringify({
+            id: "event-sourced",
+            label: "Event-sourced",
+            operation: {
+              op: "session.input",
+              input: { sessionId: OWN_SESSION_ALIAS, text: "Event-sourced" },
+            },
+            primary: true,
+          }),
           "--action",
           '{"id":"neither","label":"Neither","operation":null}',
         ],
@@ -574,7 +583,7 @@ export const CLI = {
       },
       actions: {
         flag: "action",
-        help: "A JSON answer: id, label, optional description and primary, and operation, a contract operation and its input, or null to run nothing. Repeat it for each answer.",
+        help: 'A JSON answer: id, label, optional description and primary, and operation, {"op":"<operation>","input":{...}} or null to run nothing. Repeat it for each answer.',
       },
       subject: {
         flag: "subject",
@@ -593,6 +602,19 @@ export const CLI = {
         resolves: "notification.query",
       },
       reason: { flag: "reason", help: "One line the user reads under the withdrawn decision." },
+    },
+  },
+  "notification.act": {
+    command: "notification act",
+    help: "Takes one answer of an open decision: runs its operation as you and resolves the decision. If the operation fails, the decision stays open and the error is returned. Read the answers and what each one does with `hercule notification read`.",
+    examples: [{ args: ["1f3a9c2e", "--action", "event-sourced"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The notification's id, or a tail of eight or more characters.",
+        resolves: "notification.query",
+      },
+      actionId: { flag: "action", help: "The id of the answer to take." },
     },
   },
 
@@ -1091,9 +1113,8 @@ export const CLI = {
           "triggers:",
           "  - id: weekday_morning",
           "    kind: start",
-          "    source:",
-          "      kind: cron.tick",
-          '    schedule: "0 9 * * 1-5"',
+          "    on:",
+          '      schedule: "0 9 * * 1-5"',
           "steps:",
           "  - id: file_task",
           "    kind: action",
@@ -1190,9 +1211,8 @@ export const CLI = {
           "triggers:",
           "  - id: weekday_morning",
           "    kind: start",
-          "    source:",
-          "      kind: cron.tick",
-          '    schedule: "0 9 * * 1-5"',
+          "    on:",
+          '      schedule: "0 9 * * 1-5"',
           "steps:",
           "  - id: file_task",
           "    kind: action",
@@ -1218,11 +1238,12 @@ export const CLI = {
 
   "trigger.query": {
     command: "trigger list",
-    help: "Lists the triggers of every workflow, newest first. Each row shows the event kind the trigger listens for, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
+    help: "Lists the triggers of every workflow, newest first. Each row shows what the trigger fires on, an event kind or a schedule, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
     examples: [
       { args: [] },
       { args: ["--workflow", "1f3a9c2e"] },
-      { args: ["--kind", "start", "--event-kind", "cron.tick"] },
+      { args: ["--on", "schedule"] },
+      { args: ["--event-kind", "github.pr.labeled"] },
       { args: ["--status", "paused"] },
     ],
     fields: {
@@ -1235,14 +1256,56 @@ export const CLI = {
         flag: "kind",
         help: "start for triggers that start runs, signal for triggers that resume a live run.",
       },
+      on: {
+        flag: "on",
+        help: "event for triggers that fire on events, schedule for cron triggers, which fire on a schedule.",
+      },
       eventKind: {
         flag: "event-kind",
-        help: "Only the triggers on this event kind, such as cron.tick or github.pr.labeled.",
+        help: "Only the triggers on this event kind, such as github.pr.labeled. A cron trigger is on no event kind: use --on schedule to list the cron triggers.",
       },
       status: {
         flag: "status",
         help: "Only start triggers that are active or paused; signal triggers have no status.",
       },
+    },
+  },
+  "trigger.pause": {
+    command: "trigger pause",
+    help: "Pauses a start trigger, so it starts no run until you resume it with `hercule trigger resume`. Events that arrive while it is paused are dropped, not kept for later, and a cron trigger's scheduled times pass without firing. The workflow's source does not change, and saving a new source keeps the pause. Pausing a paused trigger changes nothing.",
+    examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
+    fields: {
+      workflowId: {
+        positional: true,
+        help: "The trigger's workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      triggerId: {
+        positional: true,
+        help: "The trigger's id in the workflow's source, such as weekday_morning.",
+      },
+    },
+    errors: {
+      invalid_state: "the trigger is a signal trigger, which has no status and cannot be paused",
+    },
+  },
+  "trigger.resume": {
+    command: "trigger resume",
+    help: "Resumes a paused start trigger, so it starts runs again from the next event it matches. Events that arrived while it was paused do not start runs, and a cron trigger fires next at its next scheduled time. Resuming an active trigger changes nothing.",
+    examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
+    fields: {
+      workflowId: {
+        positional: true,
+        help: "The trigger's workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      triggerId: {
+        positional: true,
+        help: "The trigger's id in the workflow's source, such as weekday_morning.",
+      },
+    },
+    errors: {
+      invalid_state: "the trigger is a signal trigger, which has no status and cannot be resumed",
     },
   },
 
@@ -2689,7 +2752,7 @@ export const NOUNS = {
   notification: {
     summary:
       "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
-    flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
+    flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification act to answer a decision, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",

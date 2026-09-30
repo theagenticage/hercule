@@ -27,6 +27,16 @@ export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily }
 
 export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 
+export {
+  decodeBindableOperation,
+  dispatchBindableOperation,
+  OWN_SESSION_ALIAS,
+  type BindableOperation,
+  type BindableOperationHandlers,
+  type BindableOperationId,
+  type BindableOperationInput,
+} from "./bound-operations";
+
 export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
 export {
@@ -264,6 +274,7 @@ export {
   TaskFilter,
   TaskPriority,
   TaskStatus,
+  TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
   refuseEmptyTaskUpdate,
@@ -283,9 +294,13 @@ export {
   MAX_NOTIFICATION_SUBJECTS,
   MAX_NOTIFICATION_TITLE_LENGTH,
   MAX_WITHDRAW_REASON_LENGTH,
+  DescribeLine,
+  DescribeLinePart,
   MuteKey,
   NOTIFICATION_SORT_FIELDS,
   Notification,
+  NotificationActInput,
+  NotificationAction,
   NotificationCreateInput,
   NotificationCreateResult,
   NotificationFilter,
@@ -368,6 +383,11 @@ export {
   ANY_CONNECTION,
   collectReachableSteps,
   decodeWorkflowDefinition,
+  EventSelector,
+  isSchedule,
+  Schedule,
+  TriggerFiresOn,
+  TriggerOn,
   truncateIssues,
   listEntrySteps,
   readFieldNotation,
@@ -398,6 +418,7 @@ export {
   RunFilter,
   RunInputs,
   RunOrigin,
+  RunStartCall,
   RunStartInput,
   RunStarted,
   RunStatus,
@@ -405,14 +426,20 @@ export {
   StepError,
   StepRecord,
   StepStatus,
+  TriggerEvent,
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
+export { APPROVAL_ANSWER_LABELS, describeApprovalAnswer } from "./approval-answers";
 export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {
+  CronTickEventPayload,
+  SkippedTicks,
   TRIGGER_SORT_FIELDS,
   Trigger,
   TriggerFilter,
+  TriggerHealth,
+  TriggerKey,
   TriggerKind,
   TriggerStatus,
 } from "./groups/trigger";

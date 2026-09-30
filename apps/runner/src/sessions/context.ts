@@ -1,8 +1,8 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
- * frame holds ids, and this file turns them into paths and an environment
- * (spec 06 section 4). Only this file knows where an instance's home or a
- * workspace lives on the runner.
+ * frame holds ids, and this file turns them into paths and an environment.
+ * Only this file knows where an instance's home or a workspace lives on the
+ * runner. The controller never sees a path (spec 06 section 4).
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -20,7 +20,7 @@ export interface Machine {
   readonly scratchDir: string;
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
-  /** The Hercule tool, prepared once at runner start (spec 06 section 9.3). */
+  /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
   readonly herculeTool: ProviderRunnerContext["herculeTool"];
   /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
@@ -124,8 +124,9 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
  *
  * A session without a workspace gets an empty scratch directory, not the
  * runner's own cwd, because every harness reads instruction files out of its
- * cwd (spec 06 section 9.1). The rest of spec 06 section 4.2 (empty setting
- * sources, auto memory off, strict MCP) is up to the adapter.
+ * cwd. The adapter does the rest of keeping stray context out of the session:
+ * empty setting sources, auto memory off, and a strict MCP config
+ * (spec 06 section 9.1).
  */
 const placeSession = (
   frame: SessionStart,

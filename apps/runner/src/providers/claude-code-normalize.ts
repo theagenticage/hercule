@@ -1,8 +1,8 @@
 /**
  * Converts the Claude Agent SDK's message stream into the normalized event
- * taxonomy (spec 06 section 6). `normalize` takes one message and a small
- * mutable state, and returns events. It does not call the SDK or read the clock
- * itself.
+ * taxonomy. `normalize` takes one message and a small mutable state, and
+ * returns events. It does not call the SDK or read the clock itself. Spec 06
+ * section 6 owns the taxonomy.
  *
  * The state is needed because the taxonomy groups what the SDK reports as a
  * flat sequence of messages:
@@ -94,8 +94,10 @@ export const buildNormalizingState = (
 });
 
 /**
- * The item kind for each Claude tool name. Only the families that spec 06
- * section 6.3 defines are mapped; every other tool is a plain `tool_call`.
+ * The item kind for each Claude tool name. Only the tool families the
+ * taxonomy has an item kind for are mapped: shell commands, file changes, web
+ * search, subagents and plans. Every other tool is a plain `tool_call`
+ * (spec 06 section 6.3).
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   Bash: "command_execution",
@@ -123,11 +125,11 @@ export const classifyTool = (name: string): ItemKind => TOOL_KINDS[name] ?? "too
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
 
 /**
- * Informational messages from Claude that are dropped on purpose (spec 06
- * section 6.7). Rate-limit and auth updates belong in the snapshot, not in
- * session events, and progress messages hold nothing a transcript reader
- * wants. A message type that is neither in this list nor handled below still
- * becomes an `unknown` item rather than disappearing.
+ * Informational messages from Claude that are dropped on purpose. Rate-limit
+ * and auth updates belong in the capability snapshot, not in session events,
+ * and progress messages hold nothing a transcript reader wants. A message type
+ * that is neither in this list nor handled below still becomes an `unknown`
+ * item rather than disappearing. Spec 06 section 6.7 lists what is trimmed.
  */
 const TRIMMED: ReadonlySet<string> = new Set([
   // Top-level message types.

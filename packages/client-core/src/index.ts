@@ -54,6 +54,8 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
+export { isWebLink } from "./web-link";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject } from "./json-shape";
 export { listJsonLines } from "./json-lines";
@@ -114,14 +116,17 @@ export { isMutationRunning } from "./mutation-running";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
+  buildBoundActionRows,
   chooseNotificationMark,
   describeProducer,
   describeResolution,
+  formatDescribeLine,
   formatUnseenCount,
   isNotificationMuted,
   parseMuteKind,
   toggleMuteKey,
   UNSEEN_COUNT_READ_LIMIT,
+  type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
 export { describeRefusalReason } from "./plugin-refusal";

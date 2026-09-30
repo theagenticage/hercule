@@ -415,8 +415,8 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
  * Checks that the Claude CLI really finds the skill of an explicitly loaded
  * plugin with `settingSources: []`. The SDK's types document that `plugins`
  * loads a local plugin directory, but not how it combines with
- * `settingSources`, and hercule-as-a-tool on Claude depends on it (spec 06
- * section 9.3).
+ * `settingSources`, and hercule-as-a-tool on Claude depends on it. Spec 06
+ * section 9.3 owns how the skill reaches a session.
  *
  * The plugin directory is written by the runner's own `prepareTooling` into a
  * temporary home. The skill text is written by this test, not the shipped

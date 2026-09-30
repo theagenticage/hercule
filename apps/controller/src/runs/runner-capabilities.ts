@@ -5,12 +5,12 @@
  * workspace action in the plan, so a runner on an older build is never handed
  * a step it cannot run.
  *
- * `run.start` refuses a plan that no runner can run, and pinning fails a run
- * whose only capable runners were retired or reserved after it started. A
- * reserved runner never counts, because a run names no runner and is never
- * pinned to a reserved one. Both use the
- * message `describeMissingCapableRunner` returns, so the user reads the same
- * advice in both places.
+ * `run.start` refuses a plan that no runner can run. Pinning fails a run
+ * whose only capable runners were retired or reserved after it started, and
+ * a run a start trigger started with no capable runner at all. A reserved
+ * runner never counts, because a run names no runner and is never pinned to
+ * a reserved one. Both use the message `describeMissingCapableRunner`
+ * returns, so the user reads the same advice in both places.
  */
 import type { WorkflowDefinition } from "@hercule/contract";
 import { buildWorkspaceActionCapability } from "@hercule/protocol";

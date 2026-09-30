@@ -38,7 +38,10 @@ export const pickProjectHue = <Hue>(
   return index < 0 ? palette[0] : palette[index % palette.length]!;
 };
 
-/** The identity hue of a project's dot in the web app. The design language defines two (§Color doctrine). */
+/**
+ * The identity hue of a project's dot in the web app. The design language
+ * defines two (docs/design-language.md §Color doctrine).
+ */
 export type ProjectTone = "hercule" | "ops";
 
 const TONES: readonly [ProjectTone, ...ProjectTone[]] = ["hercule", "ops"];

@@ -5,8 +5,8 @@ import { DoneMark, WorkingMark, cn } from "@hercule/ui";
 import { HeaderRow } from "../header-row";
 
 /**
- * The thread's header row, as set by spec 14 §The thread surface: the project
- * crumb, then the title, then the actions on the right. A thread with no
+ * Renders the thread's header row: the project crumb, then the title, then
+ * the actions on the right. A thread with no
  * project shows `Threads /` as its crumb. An assistant's session shows
  * `Assistants / <name> /`, the name linking to the assistant's conversation.
  *
@@ -15,7 +15,8 @@ import { HeaderRow } from "../header-row";
  * The workspace name is not repeated here, because the lip already shows it.
  *
  * The thread screen draws this row instead of the shell's top bar, because
- * the shell's title would repeat the same information one row higher.
+ * the shell's title would repeat the same information one row higher. Spec 14
+ * §The thread surface owns the row.
  */
 export function ThreadChrome({
   crumb,

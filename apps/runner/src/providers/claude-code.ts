@@ -86,7 +86,7 @@ export interface ClaudeSession {
 export interface ClaudeStream extends AsyncIterable<SDKMessage> {
   /** Ends the turn that is running; the session stays up for the next one. */
   readonly interrupt: () => Promise<void>;
-  /** Takes effect on the next turn this session opens (spec 06 section 10.1). */
+  /** Switches the session's model, starting with the next turn it opens. */
   readonly setModel: (model: string) => Promise<void>;
   /** Ends the query. The CLI is a child process, and it does not exit on its own. */
   readonly close: () => void;
@@ -227,11 +227,11 @@ const hasCredentialSource = (source: string | undefined): boolean =>
   source !== undefined && source !== "none";
 
 /**
- * Checks whether the harness has a usable login (spec 06 §3.2). That is not the
- * same as knowing the account. A login stored in the instance's own config
+ * Checks whether the harness has a usable login. That is not the same as
+ * knowing the account. A login stored in the instance's own config
  * directory reports an email. A credential passed in through the environment,
  * an OAuth token or an API key, reports only where it came from, and works
- * just as well.
+ * just as well (spec 06 section 3.2).
  */
 const hasCredential = (account: Account): boolean =>
   account.email !== undefined ||

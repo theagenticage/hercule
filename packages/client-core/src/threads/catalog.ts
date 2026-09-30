@@ -1,8 +1,9 @@
 /**
  * Reads a provider instance's catalog. A catalog belongs to one instance on
- * one runner (spec 06 §3.1), so every function here takes the runner the
- * thread is placed on: the same instance can offer a model list on one runner
- * and nothing at all on another.
+ * one runner, because each runner has its own copy of the harness, with its
+ * own version and login (spec 06 §3.1). So every function here takes the
+ * runner the thread is placed on: the same instance can offer a model list on
+ * one runner and nothing at all on another.
  */
 import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
 

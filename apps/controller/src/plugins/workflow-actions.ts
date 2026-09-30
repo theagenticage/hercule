@@ -34,15 +34,14 @@ import {
   Id,
   MAX_PLUGIN_MESSAGE_LENGTH,
   page,
-  refuseEmptyTaskUpdate,
-  RunInputs,
+  RunStartCall,
   RunStarted,
   Task,
   TaskCreateInput,
   NotificationCreateInput,
   NotificationCreateResult,
   TaskFilter,
-  TaskUpdateInput,
+  TaskUpdateCall,
   type OperationId,
   type WorkflowActionRunsIn,
 } from "@hercule/contract";
@@ -272,10 +271,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     displayName: "Update a task",
     description:
       "Changes fields of the Task with the id taskId. Fields left out of the params are not changed.",
-    // The operation's input plus `taskId`, because an API request sends the
-    // task id in the path and a step has no path. The check is the one the
-    // operation uses, so both reject an update that changes no field.
-    input: Schema.Struct({ taskId: Id, ...TaskUpdateInput.fields }).check(refuseEmptyTaskUpdate),
+    input: TaskUpdateCall,
     output: Task,
   },
   {
@@ -295,10 +291,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     displayName: "Start a run",
     description:
       "Starts a run of the stored workflow with the id workflowId, and does not wait for it to finish. The output holds the new run's id.",
-    // Of the operation's input, only a stored workflow: a step that starts a
-    // run of a workflow written into its own params would be a sub-workflow,
-    // which is not built yet.
-    input: Schema.Struct({ workflowId: Id, inputs: Schema.optionalKey(RunInputs) }),
+    input: RunStartCall,
     output: RunStarted,
   },
   {

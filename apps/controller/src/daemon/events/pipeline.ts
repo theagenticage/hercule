@@ -17,8 +17,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SessionService } from "../../sessions";
-import type { NotificationService } from "../../notifications";
+import type { Notifier } from "../../notifications";
+import type { SessionService } from "../../sessions";
+import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
@@ -71,5 +72,11 @@ export class Pipeline extends Context.Service<Pipeline, Effect.Success<typeof ma
 export const PipelineLayer: Layer.Layer<
   Pipeline,
   never,
-  EventRouter | SessionService | NotificationService | Live | SqlClient.SqlClient
+  | EventRouter
+  | SessionService
+  | Notifier
+  | TriggerHealth
+  | TriggerEffects
+  | Live
+  | SqlClient.SqlClient
 > = Layer.effect(Pipeline)(make);

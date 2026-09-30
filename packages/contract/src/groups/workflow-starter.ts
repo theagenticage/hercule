@@ -16,15 +16,14 @@ export const STARTER_WORKFLOW_SOURCE = `# A workflow defines when a run starts a
 name: Weekday planning
 description: Files a task at 09:00 on weekdays, and starts work on it.
 
-# A start trigger starts a run each time an event of its kind arrives.
-# cron.tick events arrive on a schedule with five fields: minute, hour, day
+# A start trigger starts a run each time an event of a kind arrives, or each
+# time its schedule comes due. A schedule has five fields: minute, hour, day
 # of the month, month and day of the week.
 triggers:
   - id: weekdays
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 9 * * 1-5"
+    on:
+      schedule: "0 9 * * 1-5"
 
 # A step either calls an action, such as task.create, or gives a prompt to
 # an Agent. A run starts at each step that no edge leads into.

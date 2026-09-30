@@ -30,6 +30,7 @@ import { RunInputsCard } from "../../../screens/runs/run-inputs-card";
 import { RunOutputCard } from "../../../screens/runs/run-output-card";
 import { StepList } from "../../../screens/runs/step-list";
 import { StepTimeline } from "../../../screens/runs/step-timeline";
+import { TriggeringEventCard } from "../../../screens/runs/triggering-event-card";
 import { RerunQuestion, useRerun } from "./-rerun-question";
 
 /** How a run's steps are shown below its graph. */
@@ -55,7 +56,8 @@ const PAGE_PADDING = 32;
  * Renders a run's page: the header, the frozen plan drawn as the workflow
  * graph with each step's progress on it, and below it the steps, as a list or
  * on a timeline, beside the inputs the run started with and, once it has
- * one, the run's output.
+ * one, the run's output. A run a trigger started shows the event that started
+ * it above its inputs, because the inputs were made from that event.
  *
  * While the run is live, one clock ticks for the whole page, so the header,
  * the graph and the steps count the same time.
@@ -335,6 +337,16 @@ export function RunPage({
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}
           <div className="flex flex-col gap-6 @min-[882px]:w-[400px] @min-[882px]:shrink-0">
+            {run.triggerEvent === undefined ? null : (
+              <section aria-labelledby="run-triggering-event">
+                <div className={SECTION_HEADING}>
+                  <LaneLabel id="run-triggering-event" className="mb-0">
+                    Triggering event
+                  </LaneLabel>
+                </div>
+                <TriggeringEventCard event={run.triggerEvent} timezone={timezone} />
+              </section>
+            )}
             <section aria-labelledby="run-inputs">
               <div className={SECTION_HEADING}>
                 <LaneLabel id="run-inputs" className="mb-0">

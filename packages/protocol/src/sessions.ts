@@ -20,7 +20,7 @@ import {
 } from "./primitives";
 
 /**
- * How much a session may do without asking first (spec 06 section 2). It is
+ * How much a session may do without asking first (spec 06 section 8). It is
  * part of `SessionSpec`, so the protocol owns it and the plugin host
  * re-exports it rather than declaring a second one.
  */
@@ -90,12 +90,13 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
- * What the controller sends for one session: ids, never paths (ADR 0002). The
- * runner resolves it to a `ProviderRunnerContext` on its own machine.
+ * What the controller sends for one session: ids, never paths. A workspace's
+ * path on disk belongs to the runner, and the controller never stores it. The
+ * runner resolves the spec to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it. The rest of spec 06 section 4 - `mcpServers` -
- * arrives with the feature that needs it.
+ * only when something sends it. `mcpServers`, the one field of spec 06
+ * section 4 that is not here yet, arrives with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
@@ -160,7 +161,8 @@ export const SessionBinding = Schema.Struct({
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
 /**
- * One turn's input. Attachments are an open item in spec 16 section B.
+ * One turn's input. It carries only text for now. Attachments can be added
+ * later without breaking this shape (spec 16 section B).
  * `modelSelection` is the session's current model, sent on every frame. A
  * harness accepts a model change only on the input that starts a turn, so an
  * adapter applies it there and ignores it the rest of the time.
@@ -178,8 +180,10 @@ export const Delivery = Schema.Literals(["opened", "steered"]);
 export type Delivery = Schema.Schema.Type<typeof Delivery>;
 
 /**
- * What the adapter reports an input did. This is the only reliable source:
- * inferring it from the order events arrive in is ruled out by ADR 0007.
+ * What the adapter reports an input did. This is the only reliable source.
+ * An input can race the end of a turn, so the order events arrive in cannot
+ * tell whether the input steered the turn or opened a new one. Only the
+ * adapter knows (ADR 0007).
  */
 export const SendResult = Schema.Struct({ turnId: Fact, delivery: Delivery });
 
@@ -613,8 +617,10 @@ export const SessionEvent = Schema.Struct({
 export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;
 
 /**
- * The most sessions one runner will ever report. The per-runner cap of spec 03
- * section 5.3 is well under it, so this only rejects a nonsense report.
+ * The most sessions one runner will ever report. A runner's own session cap,
+ * `maxConcurrentSessions`, is about one session per 2 GiB of RAM by default
+ * (spec 03 section 5.3). That is well under this limit, so the limit only
+ * rejects a nonsense report.
  */
 export const MAX_SESSIONS_PER_RUNNER = 256;
 

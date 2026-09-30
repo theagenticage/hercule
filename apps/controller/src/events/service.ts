@@ -19,9 +19,9 @@
  * sortable field. `since` and `until` filter on `received_at`, which increases
  * with the id, so a time window never conflicts with the order of the page.
  *
- * Audit entries and platform events are not written here. The audit writer
- * and the platform event writer append those, one row per change, inside that
- * change's transaction.
+ * Audit entries, platform events and the Scheduler's ticks are not written
+ * here. Their writers append them, one row per change, inside that change's
+ * transaction.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
@@ -59,7 +59,6 @@ import {
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
 import {
-  announce,
   decodeIntegerKeyCursor,
   encodeIntegerKeyCursor,
   buildKeyset,
@@ -68,9 +67,11 @@ import {
   uuidFromString,
   withTransaction,
 } from "../db";
+import { appendEvent } from "./append";
 import { SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
 import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
+import { isControllerSource, MANUAL_SOURCE } from "./sources";
 
 /** The filters and paging options of `event.query`. */
 const QueryInput = Schema.Struct({
@@ -308,7 +309,7 @@ const make = Effect.gen(function* () {
         const dedupKey = decoded.dedupKey ?? crypto.randomUUID();
         // Store each ref once, as `amend` does: a caller that wrote a ref twice
         // meant one thing, and later readers compare against the stored list.
-        const refs = JSON.stringify([...new Set(decoded.refs ?? [])]);
+        const refs = [...new Set(decoded.refs ?? [])];
 
         return yield* withTransaction(
           sql,
@@ -329,32 +330,29 @@ const make = Effect.gen(function* () {
                 );
               }
             }
-            const written = yield* sql<{ readonly id: number }>`
-              INSERT INTO events
-                (source, connection_id, system, kind, occurred_at, received_at,
-                 dedup_key, refs, url, payload, raw, actor)
-              VALUES
-                ('manual', ${connectionId}, ${readSystemFromKind(decoded.kind)}, ${decoded.kind}, ${at}, ${at},
-                 ${dedupKey}, ${refs}, NULL, ${JSON.stringify(decoded.payload)}, NULL, ${actor})
-              ON CONFLICT (ifnull(connection_id, x''), dedup_key) DO NOTHING
-              RETURNING id
+            const appended = yield* appendEvent(sql, {
+              source: MANUAL_SOURCE,
+              connectionId,
+              system: readSystemFromKind(decoded.kind),
+              kind: decoded.kind,
+              occurredAt: at,
+              receivedAt: at,
+              dedupKey,
+              refs,
+              payload: decoded.payload,
+              actor,
+            });
+            if (appended !== undefined) return { eventId: appended };
+            // The unique index blocked the insert, which means a manual event
+            // with this key was posted through this Connection before. Return
+            // the id of the event from that earlier post.
+            const existing = yield* sql<{ readonly id: number }>`
+              SELECT id FROM events
+              WHERE source = ${MANUAL_SOURCE}
+                AND ifnull(connection_id, x'') = ifnull(${connectionId}, x'')
+                AND dedup_key = ${dedupKey}
             `;
-            const appended = written[0];
-            if (appended === undefined) {
-              // The unique index blocked the insert, which means this caller
-              // has posted this key through this Connection before. Return the
-              // id of the event from that earlier post.
-              const existing = yield* sql<{ readonly id: number }>`
-                SELECT id FROM events
-                WHERE ifnull(connection_id, x'') = ifnull(${connectionId}, x'')
-                  AND dedup_key = ${dedupKey}
-              `;
-              return { eventId: existing[0]!.id };
-            }
-            // The log is a Live Topic of its own, so every appended row is
-            // announced.
-            yield* announce({ _tag: "event" });
-            return { eventId: appended.id };
+            return { eventId: existing[0]!.id };
           }),
         );
       }),
@@ -366,11 +364,11 @@ const make = Effect.gen(function* () {
      * matching on it.
      *
      * Only an event from outside the controller can be amended. An audit
-     * entry or a platform event records what the controller itself did, and
-     * nothing may rewrite it: an added ref could make a run's end match a
-     * subscription it was never about. Such an id fails with `NotFound`,
-     * exactly like an id that matches nothing, so the log's contents cannot
-     * be probed through this operation either.
+     * entry, a platform event or a Scheduler tick records what the controller
+     * itself did, and nothing may rewrite it: an added ref could make a run's
+     * end match a subscription it was never about. Such an id fails with
+     * `NotFound`, exactly like an id that matches nothing, so the log's
+     * contents cannot be probed through this operation either.
      *
      * The caller opens the transaction, because the read and the write must be
      * in one transaction and the caller has more to put inside it.
@@ -381,11 +379,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${input.id}
         `;
         const row = rows[0];
-        // Only the events the controller logs about itself, audit entries and
-        // platform events, have the source "platform". A core emitter added later, such as the
-        // Scheduler's `cron.tick`, must use its own source name, or its events
-        // could never be amended.
-        if (row === undefined || row.source === "platform") {
+        if (row === undefined || isControllerSource(row.source)) {
           return yield* Effect.fail(createNotFoundError("no such event"));
         }
         const held = parseEventRow(row);

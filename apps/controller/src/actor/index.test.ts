@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { ALL_OPERATIONS, readRequirement } from "@hercule/contract";
-import { CurrentActor, currentStamp, checkGrant, buildActorStamp, type Actor } from ".";
+import {
+  CurrentActor,
+  currentStamp,
+  checkGrant,
+  buildActorStamp,
+  requireUserActor,
+  type Actor,
+} from ".";
 
 const user: Actor = {
   _tag: "user",
@@ -104,5 +111,42 @@ describe("checkGrant", () => {
   it("lets that same session continue one, on the same grant", () => {
     expect(readRequirement("session.continue")).toBe("session.spawn");
     expect(checkGrant("session.continue", agent)).toBeUndefined();
+  });
+});
+
+describe("requireUserActor", () => {
+  /** Runs `requireUserActor` for `notification.act` as `actor` and returns the error, if any. */
+  const readRefusal = (actor: Actor, refusal?: string) =>
+    Effect.runPromise(
+      Effect.flip(requireUserActor("notification.act", refusal)).pipe(
+        Effect.provideService(CurrentActor, actor),
+        Effect.orElseSucceed(() => undefined),
+      ),
+    );
+
+  it("returns the user actor", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.provideService(requireUserActor("notification.act"), CurrentActor, user),
+      ),
+    ).resolves.toBe(user);
+  });
+
+  it("refuses a run, although a run passes every grant check", async () => {
+    const refused = await readRefusal(run);
+    expect(refused?.error.code).toBe("forbidden");
+    expect(refused?.error.message).toMatch(/only the user/);
+  });
+
+  it("refuses a session with the message the operation passes", async () => {
+    const refused = await readRefusal(
+      { ...agent, grants: ["notification.write"] },
+      "ask the user instead",
+    );
+    expect(refused?.error).toEqual({
+      code: "forbidden",
+      message: "ask the user instead",
+      details: { grant: "notification.write" },
+    });
   });
 });

@@ -168,7 +168,7 @@ const expectFinishedRun = (run: Run): void => {
   }
   expect("failureReason" in run, where).toBe(run.status === "failed");
   expect(run.finishedAt >= run.createdAt, where).toBe(true);
-  if (run.startedAt !== undefined) {
+  if ("startedAt" in run && run.startedAt !== undefined) {
     expect(run.startedAt >= run.createdAt, where).toBe(true);
     expect(run.finishedAt >= run.startedAt, where).toBe(true);
   }

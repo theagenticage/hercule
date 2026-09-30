@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard } from "@hercule/client-core";
+import { buildApprovalCard, formatDescribeLine } from "@hercule/client-core";
 import type { OpenRequest } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -119,9 +119,9 @@ describe("the dock", () => {
     for (const row of rows) {
       const answer = within(readDock()).getByRole("button", {
         name: row.label,
-        description: row.describe,
+        description: formatDescribeLine(row.describeLine),
       });
-      expect(answer.querySelector("kbd")?.textContent).toBe(keys[row.decision]);
+      expect(answer.querySelector("kbd")?.textContent).toBe(keys[row.id]);
     }
     expect(
       within(readDock())

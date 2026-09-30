@@ -65,10 +65,10 @@ export const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):
  * The workspace a thread opens in, unless the draft chooses another. There are
  * two values, not three. A former third value, `none`, could never be read
  * back as itself: a project with repos does not offer "no workspace" at all
- * (spec 14 §The composer, amended 2026-09-16, [#72]), and a project without
- * repos offers nothing else. So a stored `none` always behaved as unset.
- * Nothing is migrated: a row that still holds `none` fails to decode and is
- * treated as unset, which is how it already behaved.
+ * (spec 14 §The composer), and a project without repos offers nothing else.
+ * So a stored `none` always behaved as unset. Nothing is migrated: a row that
+ * still holds `none` fails to decode and is treated as unset, which is how it
+ * already behaved.
  */
 export const ThreadWorkspace = Schema.Literals(["primary", "ephemeral"]);
 

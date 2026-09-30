@@ -205,10 +205,9 @@ export const buildPickKey = (pick: WorkspacePick): string => {
  *
  * Returns the pick unchanged in these cases:
  *
- * - a worktree of several repos. Choosing a base per repo comes after v1
- *   (spec 14 §The composer, the Branch selector), and applying one branch to
- *   every repo could name a `main` that only one of them has. The field is
- *   read-only there for the same reason.
+ * - a worktree of several repos. Choosing a base per repo comes after v1,
+ *   and applying one branch to every repo could name a `main` that only one
+ *   of them has. The field is read-only there for the same reason.
  * - a joined workspace, or a thread with no checkout: there is no branch to
  *   change.
  */
@@ -223,8 +222,8 @@ export const withBranch = (pick: WorkspacePick, branch: string): WorkspacePick =
 
 /**
  * Returns the runner a pick requires, or `null` when the pick leaves the runner
- * free. An existing workspace is on one runner and never moves (spec 02
- * §Workspace), so joining it means running on that runner.
+ * free. An existing workspace is on one runner and never moves, so joining it
+ * means running on that runner.
  */
 export const findRunnerForPick = (
   pick: WorkspacePick,
@@ -372,10 +371,17 @@ export const buildComposerPlaceholder = ({
 };
 
 /**
- * Returns the lead sentence shown above a draft: where the thread will work,
- * in one of the four forms spec 14 §The composer defines. When no runner has
- * cloned the main workspace yet, its branch is unknown, so the branch clause
- * is left out rather than filled with a word for "unknown".
+ * Returns the lead sentence shown above a draft: where the thread will work.
+ * There is one form for each kind of pick:
+ *
+ * - no workspace: the thread works without a checkout;
+ * - the main workspace: the user and the agent share its files;
+ * - a new worktree: the thread gets its own worktree, on a new branch;
+ * - an existing workspace: the thread joins the threads already working there.
+ *
+ * When no runner has cloned the main workspace yet, its branch is unknown, so
+ * the branch clause is left out rather than filled with a word for "unknown".
+ * Spec 14 §The composer owns the wording.
  */
 export const buildWorkspaceLead = (
   pick: WorkspacePick,

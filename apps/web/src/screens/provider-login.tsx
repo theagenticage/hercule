@@ -2,6 +2,7 @@ import { useId, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
 import {
+  isWebLink,
   queryKeys,
   type HerculeClient,
   type SecretFieldOffer,
@@ -121,14 +122,21 @@ export function ProviderLogin({
             <p className="text-row text-muted">
               You will sign in at <b className="font-emph text-ink">{parseSiteHost(url)}</b>.
             </p>
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="max-w-full break-all font-mono text-fine text-live hover:underline"
-            >
-              {url}
-            </a>
+            {/* The address comes from the vendor's login tool on the runner,
+                so it is a link only when it is a web address. Any other
+                text, such as a `data:` address, is shown to copy. */}
+            {url !== undefined && isWebLink(url) ? (
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="max-w-full break-all font-mono text-fine text-live hover:underline"
+              >
+                {url}
+              </a>
+            ) : (
+              <p className="max-w-full break-all font-mono text-fine text-ink">{url}</p>
+            )}
             <Button
               className="-ml-2"
               onClick={() => {

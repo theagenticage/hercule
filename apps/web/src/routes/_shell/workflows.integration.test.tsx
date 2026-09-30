@@ -20,6 +20,7 @@ import { formatAge, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/cl
 import type {
   DeclaredEventKind,
   Issue,
+  Trigger,
   Workflow,
   WorkflowAction,
   WorkflowIssues,
@@ -95,7 +96,7 @@ const TRIAGE_SOURCE = [
   "triggers:",
   "  - id: labeled",
   "    kind: start",
-  "    source:",
+  "    on:",
   "      kind: github.pr.labeled",
   "      connectionId: any",
   "",
@@ -114,9 +115,8 @@ const NIGHTLY_SOURCE = `name: ${NIGHTLY_NAME}
 triggers:
   - id: nightly
     kind: start
-    source:
-      kind: cron.tick
-    schedule: "0 2 * * *"
+    on:
+      schedule: "0 2 * * *"
 steps:
   - id: sweep
     kind: action
@@ -158,7 +158,7 @@ const PROBLEM_SOURCE = `name: ${TRIAGE_NAME}
 triggers:
   - id: labeled
     kind: start
-    source:
+    on:
       kind: github.pr.labelled
       connectionId: any
 steps:
@@ -183,11 +183,11 @@ const UNKNOWN_ACTION_LINE = findLineNumber(PROBLEM_SOURCE, UNKNOWN_ACTION_LINE_T
 const SECOND_STEP_LINE = findLineNumber(PROBLEM_SOURCE, "  - id: comment");
 
 const UNKNOWN_KIND: Issue = {
-  path: ["triggers", "0", "source", "kind"],
+  path: ["triggers", "0", "on", "kind"],
   message:
     '"github.pr.labelled" is not a known event kind. ' +
-    "A trigger can listen for a core event kind or an event kind of an active plugin. " +
-    "The known event kinds are: cron.tick, task.created, github.pr.labeled.",
+    "A trigger can listen for a platform event kind or an event kind of an active plugin. " +
+    "The known event kinds are: task.created, github.pr.labeled.",
 };
 
 const UNKNOWN_ACTION: Issue = {
@@ -268,7 +268,6 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
 
 /** The event kinds that a trigger can use, as `eventKind.query` returns them. */
 const EVENT_KINDS: readonly DeclaredEventKind[] = [
-  { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
   { kind: "task.created", description: "A task was created.", connectionRequired: false },
   {
     kind: "github.pr.labeled",
@@ -413,6 +412,7 @@ const buildController = ({
     "GET /api/v1/workflow-actions": { body: WORKFLOW_ACTIONS },
     "GET /api/v1/event-kinds": { body: EVENT_KINDS },
     "GET /api/v1/agents": { body: { items: [] } },
+    "GET /api/v1/triggers": { body: { items: [] } },
     ...Object.fromEntries(ids.flatMap((id) => Object.entries(buildWorkflowRoutes(id)))),
     ...overrides,
   };
@@ -2071,5 +2071,258 @@ describe("Workflows > an unknown view", { timeout: EDITOR_TEST_TIMEOUT_MS }, () 
     for (const option of ["YAML", "Graph"] as const) {
       expect(getViewOption(option).getAttribute("aria-checked")).toBe("false");
     }
+  });
+});
+
+describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
+  const CONNECTION_ID = "0199c0ff-2222-7000-8000-00000000c0de";
+
+  const ON_LABEL: Trigger = {
+    workflowId: TRIAGE.id,
+    workflowName: TRIAGE_NAME,
+    triggerId: "on_label",
+    kind: "start",
+    on: { kind: "github.pull_request.labeled", connectionId: CONNECTION_ID },
+    status: "active",
+    health: { state: "ok" },
+    createdAt: TRIAGE.createdAt,
+    updatedAt: TRIAGE.updatedAt,
+  };
+
+  /** A cron trigger. Its times read in the user's timezone, Europe/Amsterdam. */
+  const WEEKDAYS: Trigger = {
+    ...ON_LABEL,
+    triggerId: "weekdays",
+    on: { schedule: "0 9 * * 1-5" },
+    nextFireAt: "2026-10-05T07:00:00.000Z",
+  };
+
+  const ON_REVIEW: Trigger = {
+    workflowId: TRIAGE.id,
+    workflowName: TRIAGE_NAME,
+    triggerId: "on_review",
+    kind: "signal",
+    on: { kind: "github.pull_request.reviewed", connectionId: "any" },
+    createdAt: TRIAGE.createdAt,
+    updatedAt: TRIAGE.updatedAt,
+  };
+
+  /**
+   * Returns the routes of a stub controller that holds `triggers` for the
+   * triage workflow, and pauses and resumes them like the real one.
+   */
+  const buildTriggerRoutes = (triggers: readonly Trigger[]): Readonly<Record<string, Handler>> => {
+    const held = [...triggers];
+    const setStatus = (triggerId: string, status: "active" | "paused"): Answer => {
+      const index = held.findIndex((trigger) => trigger.triggerId === triggerId);
+      const trigger = held[index];
+      if (trigger === undefined) throw new Error(`the controller holds no trigger ${triggerId}`);
+      held[index] = { ...trigger, status };
+      return { body: held[index] };
+    };
+    return {
+      "GET /api/v1/triggers": () => ({ body: { items: held } }),
+      ...Object.fromEntries(
+        triggers.flatMap((trigger) => {
+          const path = `/api/v1/workflows/${TRIAGE.id}/triggers/${trigger.triggerId}`;
+          return [
+            [`POST ${path}/pause`, () => setStatus(trigger.triggerId, "paused")],
+            [`POST ${path}/resume`, () => setStatus(trigger.triggerId, "active")],
+          ];
+        }),
+      ),
+    };
+  };
+
+  /**
+   * Opens the triage workflow holding `triggers`. `overrides` replaces the
+   * answers to the requests it names. The workflow is enabled unless
+   * `enabled` is false, because a disabled workflow's triggers show no next
+   * fire time.
+   */
+  const openTriggers = async (
+    triggers: readonly Trigger[],
+    {
+      overrides = {},
+      enabled = true,
+    }: { readonly overrides?: Readonly<Record<string, Handler>>; readonly enabled?: boolean } = {},
+  ) =>
+    openApp({
+      path: `/workflows/${TRIAGE.id}`,
+      workflows: LISTED_WORKFLOWS.map((workflow) =>
+        workflow.id === TRIAGE.id ? { ...workflow, enabled } : workflow,
+      ),
+      overrides: { ...buildTriggerRoutes(triggers), ...overrides },
+    });
+
+  const findTriggersPanel = () => screen.findByRole("region", { name: "Triggers" });
+
+  /** Returns the row of the trigger whose id is `triggerId`. */
+  const getTriggerRow = (panel: HTMLElement, triggerId: string): HTMLElement => {
+    const row = within(panel)
+      .getAllByRole("listitem")
+      .find((item) => readPageText(item).startsWith(triggerId));
+    if (row === undefined) throw new Error(`no row of the panel is for ${triggerId}`);
+    return row;
+  };
+
+  it("reads the workflow's own triggers, and shows no panel when it has none", async () => {
+    const { api } = await openTriggers([]);
+    await findEditor();
+
+    const reads = api.calls.filter((call) => call.path === "/api/v1/triggers");
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      expect(new URLSearchParams(read.search).get("workflowId")).toBe(TRIAGE.id);
+    }
+    expect(screen.queryByRole("region", { name: "Triggers" })).toBeNull();
+  });
+
+  it("lists each trigger in the controller's order, with what it fires on and its status", async () => {
+    await openTriggers([ON_LABEL, WEEKDAYS, ON_REVIEW]);
+    const panel = await findTriggersPanel();
+
+    expectInDocumentOrder([
+      getTriggerRow(panel, "on_label"),
+      getTriggerRow(panel, "weekdays"),
+      getTriggerRow(panel, "on_review"),
+    ]);
+    const row = getTriggerRow(panel, "on_label");
+    expect(readPageText(row)).toBe(
+      "on_label github.pull_request.labeled · connection 0000c0de active Pause",
+    );
+    // An active trigger whose filter works has no mark: only a state that
+    // needs attention does.
+    expect(row.querySelector("[data-mark]")).toBeNull();
+  });
+
+  it("shows a cron trigger's schedule and when it fires next, in the user's timezone", async () => {
+    await openTriggers([WEEKDAYS]);
+    const panel = await findTriggersPanel();
+
+    expect(readPageText(getTriggerRow(panel, "weekdays"))).toBe(
+      "weekdays 0 9 * * 1-5 next 5 Oct 09:00 active Pause",
+    );
+  });
+
+  it("says no trigger fires while the workflow is disabled, and shows no next fire time", async () => {
+    await openTriggers([WEEKDAYS], { enabled: false });
+    const panel = await findTriggersPanel();
+
+    expect(readPageText(panel)).toContain(
+      "Triggers The workflow is disabled, so no trigger fires.",
+    );
+    expect(readPageText(getTriggerRow(panel, "weekdays"))).toBe(
+      "weekdays 0 9 * * 1-5 active Pause",
+    );
+  });
+
+  it("marks a paused trigger, offers Resume, and shows no next fire time", async () => {
+    await openTriggers([{ ...WEEKDAYS, status: "paused" }]);
+    const row = getTriggerRow(await findTriggersPanel(), "weekdays");
+
+    expect(row.querySelector('[data-mark="paused"]')).not.toBeNull();
+    expect(readPageText(row)).toBe("weekdays 0 9 * * 1-5 paused Resume");
+  });
+
+  it("marks a trigger whose filter fails, and says why and when", async () => {
+    await openTriggers([
+      {
+        ...ON_LABEL,
+        health: {
+          state: "error",
+          message: "The filter reads event.payload.label, which the event does not have.",
+          at: "2026-09-27T15:21:00.000Z",
+        },
+      },
+    ]);
+    const row = getTriggerRow(await findTriggersPanel(), "on_label");
+
+    expect(row.querySelector('[data-mark="failed"]')).not.toBeNull();
+    expect(readPageText(row)).toContain(
+      "The filter reads event.payload.label, which the event does not have. · 27 Sep 17:21",
+    );
+  });
+
+  it("says which scheduled times a cron trigger missed", async () => {
+    await openTriggers([
+      {
+        ...WEEKDAYS,
+        skippedTicks: { from: "2026-09-24T07:00:00.000Z", until: "2026-09-25T07:00:00.000Z" },
+      },
+    ]);
+    const row = getTriggerRow(await findTriggersPanel(), "weekdays");
+
+    expect(readPageText(row)).toContain("Missed scheduled times from 24 Sep 09:00 to 25 Sep 09:00");
+  });
+
+  it("shows a signal trigger with no status and no button", async () => {
+    await openTriggers([ON_REVIEW]);
+    const row = getTriggerRow(await findTriggersPanel(), "on_review");
+
+    expect(readPageText(row)).toBe("on_review github.pull_request.reviewed · any connection");
+    expect(within(row).queryByRole("button")).toBeNull();
+  });
+
+  it("pauses and resumes a start trigger, and shows its new status", async () => {
+    const user = userEvent.setup();
+    const { api, queryClient } = await openTriggers([ON_LABEL]);
+    const panel = await findTriggersPanel();
+
+    await user.click(
+      within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Pause" }),
+    );
+    await waitForIdleRequests(queryClient);
+    expect(readPageText(getTriggerRow(panel, "on_label"))).toContain("paused Resume");
+
+    await user.click(
+      within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Resume" }),
+    );
+    await waitForIdleRequests(queryClient);
+    expect(readPageText(getTriggerRow(panel, "on_label"))).toContain("active Pause");
+
+    expect(listWrites(api).map(describeWrite)).toEqual([
+      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/pause`, undefined],
+      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/resume`, undefined],
+    ]);
+  });
+
+  it("shows under the row why a pause failed, and keeps the status", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = await openTriggers([ON_LABEL], {
+      overrides: {
+        [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/pause`]: {
+          status: 500,
+          body: buildErrorBody("internal", "The controller could not store the change."),
+        },
+      },
+    });
+    const panel = await findTriggersPanel();
+
+    await user.click(
+      within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Pause" }),
+    );
+    await waitForIdleRequests(queryClient);
+
+    const row = getTriggerRow(panel, "on_label");
+    expect(within(row).getByRole("alert").textContent).toBe(
+      "The controller could not store the change.",
+    );
+    expect(readPageText(row)).toContain("active Pause");
+  });
+
+  it("reads the triggers again when a live push names the workflow", async () => {
+    const { api, live } = await openTriggers([ON_LABEL]);
+    await findTriggersPanel();
+    await waitForWorkflowSubscription(live);
+    const readsBefore = api.calls.filter((call) => call.path === "/api/v1/triggers").length;
+
+    pushWorkflowChange(live, TRIAGE.id, "updated");
+
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path === "/api/v1/triggers").length).toBe(
+        readsBefore + 1,
+      );
+    });
   });
 });

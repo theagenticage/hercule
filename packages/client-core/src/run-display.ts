@@ -17,9 +17,10 @@ import type {
   RunStatus,
   Runner,
   StepStatus,
+  TriggerEvent,
   WorkflowAction,
 } from "@hercule/contract";
-import { describeActor, type ActorReading } from "./actor-display";
+import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
 import { formatDuration } from "./threads/duration";
 import { formatStamp } from "./time-context";
 
@@ -153,36 +154,73 @@ const describeUnlinkedCount = (
   return unlinkedCount === 0 ? "more" : `${String(unlinkedCount)}+ more`;
 };
 
-/** Who started a run, and how, if not by hand. */
-export interface RunOriginReading {
-  /** The user or a session, or for a run a `run.start` step started, the parent run. */
-  readonly starter: ActorReading;
-  /**
-   * How the run was started when that was not by hand: "through the API",
-   * or "at step <id>" for a run another run's step started.
-   */
-  readonly howStarted: string | undefined;
-}
+/**
+ * Who or what started a run, and how:
+ *
+ * - `actor`: the user, a session, or for a run a `run.start` step started,
+ *   the parent run. `link` is where its label links to.
+ * - `trigger`: a start trigger of the run's workflow, which is not an actor:
+ *   it acts for nobody and links nowhere.
+ *
+ * `label` names the starter in a few words, as the run list shows it after
+ * "by": "you", "session 7c82ebeb", "run 1f3a9c2e", "trigger weekday_morning".
+ * `howStarted` follows the label when the run was not started by hand:
+ * "through the API", "at step spawn" for a run another run's step started, or
+ * "on github.issue.opened" for the kind of event a trigger matched. A trigger
+ * run's summary holds no copy of the event, so it has no `howStarted`.
+ */
+export type RunOriginReading =
+  | {
+      readonly kind: "actor";
+      readonly label: string;
+      readonly link: ActorTarget;
+      readonly howStarted: string | undefined;
+    }
+  | {
+      readonly kind: "trigger";
+      readonly label: string;
+      /** The trigger's id in the workflow's source. */
+      readonly triggerId: string;
+      readonly howStarted: string | undefined;
+    };
 
 /**
- * Returns who started a run and how. A run started through the API reads
- * differently from one started by hand, even when the user started both,
- * because a workflow sent with the request is stored nowhere.
+ * Returns who or what started a run, and how. A run started through the API
+ * reads differently from one started by hand, even when the user started
+ * both, because a workflow sent with the request is stored nowhere. Takes a
+ * run or a run summary; only a run holds the event a trigger matched.
  */
-export const describeRunOrigin = (origin: RunOrigin): RunOriginReading => {
+export const describeRunOrigin = (run: {
+  readonly origin: RunOrigin;
+  readonly triggerEvent?: Pick<TriggerEvent, "kind">;
+}): RunOriginReading => {
+  const { origin } = run;
   switch (origin.kind) {
     case "manual":
-      return { starter: describeActor(origin.actor), howStarted: undefined };
+      return buildActorOriginReading(describeActor(origin.actor), undefined);
     case "api":
-      return { starter: describeActor(origin.actor), howStarted: "through the API" };
+      return buildActorOriginReading(describeActor(origin.actor), "through the API");
     case "action":
       // The run that started this one stamps its writes `run:<id>`.
+      return buildActorOriginReading(
+        describeActor(`run:${origin.parentRunId}`),
+        `at step ${origin.stepId}`,
+      );
+    case "trigger":
       return {
-        starter: describeActor(`run:${origin.parentRunId}`),
-        howStarted: `at step ${origin.stepId}`,
+        kind: "trigger",
+        label: `trigger ${origin.triggerId}`,
+        triggerId: origin.triggerId,
+        howStarted: run.triggerEvent === undefined ? undefined : `on ${run.triggerEvent.kind}`,
       };
   }
 };
+
+/** Builds the origin reading of a run that `starter` started, `howStarted` if not by hand. */
+const buildActorOriginReading = (
+  starter: ActorReading,
+  howStarted: string | undefined,
+): RunOriginReading => ({ kind: "actor", label: starter.label, link: starter.link, howStarted });
 
 /** When a run or a step record started and finished. Each is absent until it has happened. */
 export interface Timestamps {
@@ -300,8 +338,10 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
 };
 
 /**
- * Returns a failure reason in a few plain words: "step failed", "expression
- * error" for a template or a condition that could not be evaluated,
+ * Returns a failure reason in a few plain words: "step failed", "validation
+ * error" for a run a trigger could not start because its workflow or the
+ * inputs mapped from the event did not validate, "expression error" for a
+ * template or a condition that could not be evaluated,
  * "iteration limit" for an edge the run was to follow more often than its
  * `maxTraversals` allows, "controller error" for a run the controller
  * could not carry out, or "workspace failed" for a run whose workspace could
@@ -309,6 +349,8 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
+    case "validation-error":
+      return "validation error";
     case "step-failed":
       return "step failed";
     case "expression-error":

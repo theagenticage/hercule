@@ -24,8 +24,9 @@ interface DraftSearch {
 }
 
 /**
- * The draft thread screen (spec 14 §The composer): "Creating a thread is one
- * step, after the project."
+ * The draft thread screen. The user picks the project first, because the
+ * project bounds the repos and workspaces a thread can use; creating the
+ * thread is then this one screen. Spec 14 §The composer owns the flow.
  *
  * This is a static route, so `/threads/new` must match it and not the param
  * route beside it (`$sessionId.tsx`), which would read "new" as a session id.

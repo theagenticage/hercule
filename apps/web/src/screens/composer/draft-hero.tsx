@@ -10,10 +10,11 @@ const TONE = {
 } as const;
 
 /**
- * The heading and sentence a draft thread shows above its composer: what the
- * thread is for, and where it will run. When something blocks the thread from
- * starting, the blocker replaces the sentence, together with the action that
- * clears it. A blocker never gets a screen of its own (spec 14 §The composer).
+ * Renders the heading and sentence a draft thread shows above its composer:
+ * what the thread is for, and where it will run. When something blocks the
+ * thread from starting, the blocker replaces the sentence, together with the
+ * action that clears it. A blocker never gets a screen of its own, so the user
+ * clears it without leaving the draft. Spec 14 §The composer owns the rule.
  */
 export function DraftHero({
   subject,

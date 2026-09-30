@@ -11,12 +11,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { hashToken } from "../../credentials";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer } from "../../events";
-import { NotificationServiceLayer } from "../../notifications";
+import { NotifierLayer } from "../../notifications";
 import { RunnerConnectionsLayer, runnerRepository } from "../../runners";
 import { sweepUnreachableRunners } from "./unreachable-runners";
 
 const layer = RunnerConnectionsLayer.pipe(
-  Layer.provideMerge(NotificationServiceLayer),
+  Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );

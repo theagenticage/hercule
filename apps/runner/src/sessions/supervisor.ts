@@ -7,8 +7,9 @@
  * a connection. A session outlives the socket that started it, and the
  * controller uses the sequence number to recognise events it already has, so
  * restarting the count on a reconnect would make the controller drop events it
- * has never seen. There is no outbox yet either, so an event produced while the
- * socket is down is lost (spec 03 section 2.3).
+ * has never seen. There is no disk-backed outbox yet to replay events after a
+ * reconnect either, so an event produced while the socket is down is lost
+ * (spec 03 section 2.3).
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -563,8 +564,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           }
           // Ask the adapter, not the `live` table. A start for a session the
           // adapter still holds was sent again by the controller after a
-          // reconnect, and is a no-op rather than an error (spec 03 section
-          // 2.3).
+          // reconnect, and is a no-op rather than an error
+          // (spec 03 section 2.3).
           const held = yield* adapter.listSessions;
           if (held.some((binding) => binding.sessionId === frame.sessionId)) return;
           // An exit published while the socket was down reached no relay, so
@@ -580,8 +581,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
       /**
        * Delivers input to the session, or reports that it could not. The runner
-       * never queues input; queuing is the controller's job (spec 06 section
-       * 5). The `sessionInputResult` carries the adapter's report of what the
+       * never queues input; queuing is the controller's job
+       * (spec 06 section 5). The `sessionInputResult` carries the adapter's report of what the
        * input did, because only the adapter knows. The controller waits for it
        * under the Queued Input row's id, `requestId`.
        */

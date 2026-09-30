@@ -229,7 +229,7 @@ describe("a step that fails while other branches are running", () => {
 
           const failed = expectStatus(run, "failed");
           expect(failed.failureReason).toBe("step-failed");
-          expect(failed.failedStepId).toBe("broken");
+          expect(failed).toMatchObject({ failedStepId: "broken" });
           expect(expectStatus(findStepRecords(run, "broken")[0], "failed").error.code).toBe(
             "not_found",
           );
@@ -285,7 +285,7 @@ describe("a controller error at a step while other branches are running", () => 
 
           const failed = expectStatus(run, "failed");
           expect(failed.failureReason).toBe("controller-error");
-          expect(failed.failedStepId).toBe("create");
+          expect(failed).toMatchObject({ failedStepId: "create" });
           expect(expectStatus(findStepRecords(run, "create")[0], "failed").error.code).toBe(
             "unexpected",
           );
@@ -339,7 +339,7 @@ describe("a plugin action that ends in its own interrupt while other branches ar
 
           const failed = expectStatus(run, "failed");
           expect(failed.failureReason).toBe("controller-error");
-          expect(failed.failedStepId).toBe("halt");
+          expect(failed).toMatchObject({ failedStepId: "halt" });
           expect(expectStatus(findStepRecords(run, "halt")[0], "failed").error.code).toBe(
             "unexpected",
           );
@@ -435,7 +435,7 @@ describe("a controller that stops while a plugin action and a wait run on separa
           // the wait, which would have been resumed, is cancelled with it.
           const failed = expectStatus(run, "failed");
           expect(failed.failureReason).toBe("step-failed");
-          expect(failed.failedStepId).toBe("slow");
+          expect(failed).toMatchObject({ failedStepId: "slow" });
           expect(expectStatus(findStepRecords(run, "slow")[0], "failed").error.code).toBe(
             "interrupted",
           );

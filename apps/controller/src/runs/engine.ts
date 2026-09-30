@@ -106,7 +106,6 @@ import {
   createNotFoundError,
   Id,
   RunCancelInput,
-  type FailureReason,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -120,22 +119,31 @@ import {
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
-import { AfterCommit, afterCommit, nowIso, UUID_PATTERN } from "../db";
+import { AfterCommit, afterCommit, nowIso, UUID_PATTERN, withTransaction } from "../db";
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { RunExecutor } from "./executor";
-import { runRepository, type RunOutcome, type StepRecordId } from "./repository";
+import {
+  runRepository,
+  type ExecutionFailureReason,
+  type RunOutcome,
+  type StepRecordId,
+} from "./repository";
 import { decideRouting, isStepConditionMet } from "./routing";
 import {
   describeMissingCapableRunner,
   listCapableRunners,
   listWorkspaceActionIds,
 } from "./runner-capabilities";
-import { buildRunEndedEvent, buildRunFailedNotification } from "./run-events";
+import {
+  buildRunEndedEvent,
+  buildRunFailedNotification,
+  decideRunFailedUnlessRaised,
+} from "./run-events";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -146,7 +154,6 @@ import {
   type StepRecordKey,
 } from "./step";
 import { isUnfinished, listNextStepRecords, type UnfinishedStepRecord } from "./step-records";
-import { commitUninterruptibly } from "./transaction";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
@@ -342,7 +349,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const executor = yield* RunExecutor;
   const workspaceSteps = yield* WorkspaceSteps;
   const platformEvents = yield* PlatformEvents;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
@@ -352,8 +359,12 @@ export const makeRunEngine = Effect.gen(function* () {
   const afterCommitListener = yield* AfterCommit;
   // A new run is handed to the Run Executor through a function the engine
   // defines below, which itself calls `start` for the `run.start` action, so
-  // the reference is passed as a function.
-  const { start, rerun } = yield* makeRunStart((runId) => executeInBackground(runId));
+  // the reference is passed as a function. A run that cannot start ends
+  // through `writeRunEnding`, defined below for the same reason.
+  const { start, rerun, startTriggeredRun } = yield* makeRunStart(
+    (runId) => executeInBackground(runId),
+    (runId, outcome, at) => writeRunEnding(runId, outcome, at),
+  );
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -399,8 +410,9 @@ export const makeRunEngine = Effect.gen(function* () {
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
         if (outcome.status === "failed") {
-          yield* notifications.createCoreNotification(
+          yield* notifier.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
+            { unlessRaised: decideRunFailedUnlessRaised(run, outcome) },
           );
         }
       }
@@ -431,7 +443,7 @@ export const makeRunEngine = Effect.gen(function* () {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
     at: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -457,9 +469,9 @@ export const makeRunEngine = Effect.gen(function* () {
     runId: string,
     attempt: StepRecordKey,
     error: StepError,
-    failureReason: FailureReason,
+    failureReason: ExecutionFailureReason,
   ): Effect.Effect<void, SqlError> =>
-    commitUninterruptibly(
+    withTransaction(
       sql,
       Effect.flatMap(nowIso, (at) => writeStepFailure(runId, attempt, error, failureReason, at)),
     );
@@ -656,7 +668,7 @@ export const makeRunEngine = Effect.gen(function* () {
     record: StepRecordKey,
   ): Effect.Effect<StartedRecord, SqlError> =>
     Effect.catchTag(
-      commitUninterruptibly(
+      withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -850,7 +862,7 @@ export const makeRunEngine = Effect.gen(function* () {
           const run = found.value;
           if (!isUnfinished(run.status)) return;
           if (run.status === "pending") {
-            yield* commitUninterruptibly(
+            yield* withTransaction(
               sql,
               Effect.flatMap(nowIso, (at) => runs.start(runId, at)),
             );
@@ -952,7 +964,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * `controller-error` and no failed step: the error was not at any one step.
    */
   const failRunUnexpectedly = (runId: string): Effect.Effect<void, SqlError> =>
-    commitUninterruptibly(
+    withTransaction(
       sql,
       Effect.flatMap(nowIso, (at) =>
         writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
@@ -1070,6 +1082,9 @@ export const makeRunEngine = Effect.gen(function* () {
     /** `run.rerun`: starts a new run that re-runs an ended one (see `start.ts`). */
     rerun,
 
+    /** Writes the run of a start trigger that matched an event (see `start.ts`). */
+    startTriggeredRun,
+
     /**
      * `run.cancel`: cancels a pending or running run and returns it.
      *
@@ -1105,7 +1120,7 @@ export const makeRunEngine = Effect.gen(function* () {
           decodeCancel(input),
           createDecodeValidationError,
         );
-        return yield* commitUninterruptibly(
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const found = yield* runs.read(id);
@@ -1171,7 +1186,7 @@ export const makeRunEngine = Effect.gen(function* () {
               `Ignored the result of step ${stepId} from runner ${runnerId}: ${runId} is not a run id`,
             );
           }
-          const applied = yield* commitUninterruptibly(
+          const applied = yield* withTransaction(
             sql,
             Effect.gen(function* () {
               const found = yield* runs.read(runId);

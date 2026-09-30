@@ -13,7 +13,12 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-None open - every handed decision is resolved (the register above says where each landed).
+~~None open - every handed decision is resolved (the register above says where each landed).~~ *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* Bound actions left four questions open. Each is written where it applies, and each needs a decision before the operation can be bound:
+
+- 10 §7.4: **binding plugin actions.** No plugin action is on the list of operations an answer may run, so an Offer such as "Merge dev bumps" (`github/pr.merge`) cannot be bound yet. Open: which plugin actions may join the list, how a plugin action declares its describe line, and whether taking one needs the Connection it acts through to be named in the input. First needed by [#89](https://github.com/theagenticage/hercule/issues/89), the GitHub plugin's workflow actions.
+- 10 §5, §7.4: **binding `trigger.resume`.** The breaker's Resume answers need it on the list. [#87](https://github.com/theagenticage/hercule/issues/87) builds the operation and adds it, with its describe line.
+- 10 §7.4, §7.6: **binding `permission.decide`.** [#86](https://github.com/theagenticage/hercule/issues/86) builds the operation. Its "add to profile" answer edits a permission profile, and the test that guards the list refuses any operation in the `permission` family, for every producer. #86 decides how the core's Permission Request binds it: a narrower rule for core producers, or a list entry the test allows on purpose.
+- 06 §6.5, 10 §7.6: **answering a harness `question` from a notification.** A `question` request raises no notification, because `session.respond` sends a decision, not answers. The answer shape is pinned in 06 §6.5 and not built; no ticket owns it yet.
 
 ## B. Implementer's choices
 
@@ -33,6 +38,7 @@ Not design questions. The constraint is stated where one exists.
 - 14 §App shell (composer): the voice button is a placeholder for dictation, kept for the shape; no v1 feature is specced behind it.
 - 11 §5, 13 §6.1: the contract has no error shape for "the credential is good and the profile holds the grant, but the operation is the user's own" - `session.spawn` by a session actor, `secret.set`, `apiKey.create`, `conversation.send` *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*. Today it is 403 `forbidden` naming the operation's grant, with a message saying no grant confers it; `auth.wsTicket` is the exception and answers 401, because its requirement is `authenticated` and there is no grant for a 403 to name. A refusal code of its own would be additive. *(Noted 2026-09-15, [#68](https://github.com/theagenticage/hercule/issues/68).)*
 - 12 §2: a web conversation's `containerKey` is written as `null` by the conversation message writer, because the web channel has no platform container. Channel conversations (Discord, Slack) must write their container's key when they land; nothing reads it yet *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*.
+- 11 §1.4: where `me` is resolved. The rule accepts `me` wherever an id names the caller's own session, assistant or Agent. So far only `notification.create` resolves it, for `sessionId` inside a bound answer's input ([#85](https://github.com/theagenticage/hercule/issues/85)). Each other operation resolves it when it is built or when a caller first needs it. The constraint is the §1.4 rule: a session token resolves `me`, and any other caller gets `validation`. *(added 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85))*
 
 ## C. Verify at build time
 

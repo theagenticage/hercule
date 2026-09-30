@@ -20,10 +20,15 @@
  * waits for a step, so a caller reads the run with `run.read` to see how far
  * it got. `run.rerun` starts a new run with the inputs of one that has ended.
  *
+ * A start trigger starts a run when an event matches it. That run records the
+ * trigger and the event in its `origin`, and keeps a copy of the event in
+ * `triggerEvent`, so the run can still show what started it after the event
+ * log is pruned.
+ *
  * When a run ends, the controller emits `run.completed`, `run.failed` or
  * `run.cancelled` into the event pipeline, with one of the payloads below.
  */
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -39,6 +44,7 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
+import { Event, EventId } from "./event";
 import { WORKFLOW_CONTENT_FIELDS } from "./workflow";
 import { WorkflowDefinition } from "./workflow-definition";
 
@@ -66,6 +72,11 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
 /**
  * Why a run failed:
  *
+ * - `validation-error`: a start trigger matched an event, but its workflow no
+ *   longer passes the checks a run must pass to start: the definition, or the
+ *   inputs the trigger mapped from the event, did not validate. The run never
+ *   started, and `failureMessage` says what did not validate. A run started
+ *   by request never fails this way: the request is refused instead.
  * - `expression-error`: a template in a step's params, or a condition, could
  *   not be evaluated, or a condition gave something other than true or false.
  *   `failedStepId` names the step. For an edge's condition it names the
@@ -79,13 +90,15 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
  * - `workspace-failed`: the run's workspace could not be set up, for example
- *   because a setup command failed, or the runner that holds it was retired.
+ *   because a setup command failed, the runner that holds it was retired, or
+ *   no runner can run the workspace steps of a run a start trigger started.
  *   `failedStepId` names the workspace step that was running, if one was.
  *
  * The list grows as runs learn to do more; a client shows a reason it does not
  * know as the word itself.
  */
 const FAILURE_REASONS = [
+  "validation-error",
   "expression-error",
   "step-failed",
   "iteration-limit",
@@ -104,14 +117,27 @@ export type FailureReason = Schema.Schema.Type<typeof FailureReason>;
  * - `api`: an agent started it through the API. `actor` is its session.
  * - `action`: a `run.start` step of another run started it. `parentRunId` is
  *   that other run, and `stepId` the step.
+ * - `trigger`: a start trigger of the run's workflow matched an event.
+ *   `triggerId` is the trigger's id in the workflow's source, and `eventId`
+ *   the event's position in the log.
  */
 export const RunOrigin = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("manual"), actor: Actor }),
   Schema.Struct({ kind: Schema.Literal("api"), actor: Actor }),
   Schema.Struct({ kind: Schema.Literal("action"), parentRunId: Id, stepId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("trigger"), triggerId: Schema.String, eventId: EventId }),
 ]);
 
 export type RunOrigin = Schema.Schema.Type<typeof RunOrigin>;
+
+/**
+ * The copy of the event that started a run, taken when the run was written.
+ * It is the event as the log held it then, without `raw`: the vendor payload
+ * is kept in the log for debugging only, and no filter or mapping reads it.
+ */
+export const TriggerEvent = Event.mapFields(Struct.omit(["raw"]));
+
+export type TriggerEvent = Schema.Schema.Type<typeof TriggerEvent>;
 
 /**
  * Why a step failed. `code` is a short word a program can act on, such as
@@ -208,6 +234,8 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
  *   the fields only a run failed at a step has (`failedEdge`), which
  *   `failedAtStepFields` holds.
+ * - `failed` with `validation-error`: `finishedAt` and `failureMessage`. The
+ *   run never started, so it has no `startedAt`.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
  * - `failed` with `workspace-failed`: `startedAt` and `finishedAt`, and
@@ -247,6 +275,14 @@ const buildRunStatusVariants = <
     Schema.Struct({
       ...fields,
       status: Schema.Literal("failed"),
+      failureReason: Schema.Literal("validation-error"),
+      /** What did not validate, a sentence for a person. */
+      failureMessage: Schema.String,
+      finishedAt: Timestamp,
+    }),
+    Schema.Struct({
+      ...fields,
+      status: Schema.Literal("failed"),
       failureReason: Schema.Literal("controller-error"),
       failedStepId: Schema.optionalKey(Schema.String),
       startedAt: Schema.optionalKey(Timestamp),
@@ -280,6 +316,8 @@ export const Run = Schema.Union(
       /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
       inputs: Schema.Record(Schema.String, Schema.Json),
       origin: RunOrigin,
+      /** The event that started the run, for a run a start trigger started. */
+      triggerEvent: Schema.optionalKey(TriggerEvent),
       /**
        * The runner the run is pinned to. Set when the run's first workspace
        * step starts; every workspace step of the run runs there.
@@ -346,8 +384,9 @@ export const RunFilter = Schema.Struct({
   /** Only runs created at or before this instant. */
   until: Schema.optionalKey(Timestamp),
   /**
-   * Only runs started by this actor: `user`, `session:<id>`, or `run:<id>`
-   * for the runs a run's `run.start` steps started.
+   * Only runs started by this actor: `user`, `session:<id>`, `run:<id>` for
+   * the runs a run's `run.start` steps started, or `system` for the runs a
+   * start trigger started.
    */
   actor: Schema.optionalKey(Actor),
   /** Only the re-runs of this run. */
@@ -386,6 +425,20 @@ export const RunStartInput = closedStruct({
 });
 
 export type RunStartInput = Schema.Schema.Type<typeof RunStartInput>;
+
+/**
+ * One call of `run.start` that runs a stored workflow: the workflow's id and
+ * the values its run starts with. A workflow step and a bound answer send this
+ * shape. Neither may send a workflow's source: a step that starts a run of a
+ * workflow written into its own params would be a sub-workflow, which does
+ * not exist yet, and an answer holds ids, not documents.
+ */
+export const RunStartCall = closedStruct({
+  workflowId: Id,
+  inputs: Schema.optionalKey(RunInputs),
+});
+
+export type RunStartCall = Schema.Schema.Type<typeof RunStartCall>;
 
 /** The response to starting a run: the id to read it by. */
 export const RunStarted = Schema.Struct({ runId: Id });
@@ -457,13 +510,15 @@ export type RunCompletedEventPayload = Schema.Schema.Type<typeof RunCompletedEve
 
 /**
  * The payload of `run.failed`, which the controller emits when a run fails.
- * `failureReason`, `failedStepId` and `failedEdge` are the run record's.
+ * `failureReason`, `failedStepId`, `failedEdge` and `failureMessage` are the
+ * run record's.
  */
 export const RunFailedEventPayload = Schema.Struct({
   ...RUN_EVENT_FIELDS,
   failureReason: FailureReason,
   failedStepId: Schema.optionalKey(Schema.String),
   failedEdge: Schema.optionalKey(FailedEdge),
+  failureMessage: Schema.optionalKey(Schema.String),
 });
 
 export type RunFailedEventPayload = Schema.Schema.Type<typeof RunFailedEventPayload>;

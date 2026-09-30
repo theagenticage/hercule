@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { formatTimeContext } from "@hercule/client-core";
 import type { Notification } from "@hercule/contract";
 import {
+  buildErrorBody,
   expectInDocumentOrder,
   readPageText,
   renderApp,
@@ -94,9 +95,12 @@ const buildNotificationQuery =
 const buildController = ({
   notifications,
   user = {},
+  handlers = {},
 }: {
   readonly notifications: Notification[];
   readonly user?: Readonly<Record<string, unknown>>;
+  /** More operations the controller serves, such as `notification.act`. */
+  readonly handlers?: Readonly<Record<string, Handler>>;
 }) => {
   let stored: Record<string, unknown> = {
     "onboarding.completedSteps": ["timezone", "assistant"],
@@ -111,6 +115,7 @@ const buildController = ({
       return { body: { controller: {}, user: stored } };
     },
     "GET /api/v1/notifications": buildNotificationQuery(() => notifications),
+    ...handlers,
   });
   return { api, readStored: () => stored };
 };
@@ -208,47 +213,6 @@ describe("Notifications > the list", () => {
     expect(getRow("Reconnect gmail?").querySelector("[data-mark=cancelled]")).not.toBeNull();
   });
 
-  it("lists an open decision's answers as disabled rows, and a resolved decision's not at all", async () => {
-    const actions = [
-      {
-        id: "start",
-        label: "Start Bugfix",
-        description: "Opens a session on the task.",
-        operation: null,
-        primary: true,
-      },
-      { id: "dismiss", label: "Dismiss", operation: null },
-    ];
-    const { api } = buildController({
-      notifications: [
-        buildNotification(1, 10, { actions, title: "Start Bugfix?", status: "open" }),
-        buildNotification(2, 20, {
-          actions,
-          title: "Merge PR #94?",
-          resolution: {
-            kind: "decided",
-            actor: "user",
-            origin: "web",
-            at: buildTimestampMinutesAgo(15),
-          },
-        }),
-      ],
-    });
-    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
-
-    const open = getRow("Start Bugfix?");
-    const answers = within(open).getAllByRole("button", { name: /Start Bugfix|Dismiss/ });
-    expect(answers.map((answer) => readPageText(answer))).toEqual([
-      "Start BugfixOpens a session on the task.",
-      "Dismiss",
-    ]);
-    for (const answer of answers) expect(answer).toHaveProperty("disabled", true);
-    expect(readPageText(open)).toContain("Answering from here is not built yet.");
-    const resolved = getRow("Merge PR #94?");
-    expect(within(resolved).queryByRole("button", { name: /Start Bugfix|Dismiss/ })).toBeNull();
-    expect(readPageText(resolved)).not.toContain("not built yet");
-  });
-
   it("pages through the list with Load more", async () => {
     const notifications = Array.from({ length: 51 }, (_, n) => buildNotification(n, n + 1));
     const { api } = buildController({ notifications });
@@ -276,6 +240,161 @@ describe("Notifications > the list", () => {
     });
 
     expect(await screen.findByText("Fresh one")).toBeDefined();
+  });
+});
+
+describe("Notifications > answering a decision", () => {
+  const DECISION_ID = buildId(101);
+  const ACT = `POST /api/v1/notifications/${DECISION_ID}/act`;
+  /** The answers as the controller stores them, without describe lines. */
+  const stored: Notification["actions"] = [
+    {
+      id: "start",
+      label: "Start Bugfix",
+      description: "Opens a session on the task.",
+      operation: { op: "run.start", input: { workflowId: WORKFLOW_ID } },
+      primary: true,
+    },
+    { id: "dismiss", label: "Dismiss", operation: null },
+  ];
+  /** The answers of the open decision, with the describe lines the controller adds. */
+  const answers: Notification["actions"] = [
+    {
+      ...stored[0]!,
+      describeLine: [
+        { kind: "text", text: "Start a run of " },
+        { kind: "marked", text: "Bugfix" },
+      ],
+    },
+    { ...stored[1]!, describeLine: [{ kind: "text", text: "Does nothing" }] },
+  ];
+  const open = buildNotification(1, 10, {
+    actions: answers,
+    title: "Start Bugfix?",
+    status: "open",
+  });
+  /** The same decision once the user took `start` in the web app. */
+  const decided: Notification = {
+    ...open,
+    actions: stored,
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      actionId: "start",
+      actor: "user",
+      origin: "web",
+      at: new Date().toISOString(),
+    },
+  };
+
+  /** Returns the answer rows of the open decision. */
+  const getAnswers = (): HTMLElement[] =>
+    within(getRow("Start Bugfix?")).getAllByRole("button", { name: /Start Bugfix|Dismiss/ });
+
+  it("shows each answer's label, what it does and its description, and a resolved decision's not at all", async () => {
+    const { api } = buildController({
+      notifications: [
+        open,
+        buildNotification(2, 20, { ...decided, id: buildId(102), title: "Merge PR #94?" }),
+      ],
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    const rows = getAnswers();
+    expect(rows.map((row) => readPageText(row))).toEqual([
+      "Start BugfixStart a run of BugfixOpens a session on the task.",
+      "DismissDoes nothing",
+    ]);
+    for (const row of rows) expect(row).toHaveProperty("disabled", false);
+    // The entity's name is set apart in ink; an answer that runs nothing is in italics.
+    expect(within(rows[0]!).getByText("Bugfix").className).toContain("text-ink");
+    expect(within(rows[1]!).getByText("Does nothing").className).toContain("italic");
+    expect(within(rows[0]!).getByText("Start a run of", { exact: false }).className).not.toContain(
+      "italic",
+    );
+    const resolved = getRow("Merge PR #94?");
+    expect(within(resolved).queryByRole("button", { name: /Start Bugfix|Dismiss/ })).toBeNull();
+  });
+
+  it("takes the clicked answer, disables the rows until it is taken, then shows the decision resolved", async () => {
+    const notifications = [open];
+    let finish = (): void => {};
+    const { api } = buildController({
+      notifications,
+      handlers: {
+        [ACT]: () =>
+          new Promise((resolve) => {
+            finish = () => {
+              notifications[0] = decided;
+              resolve({ body: decided });
+            };
+          }),
+      },
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    await userEvent.setup().click(getAnswers()[0]!);
+
+    await waitFor(() => {
+      for (const row of getAnswers()) expect(row).toHaveProperty("disabled", true);
+    });
+    expect(
+      api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/act")),
+    ).toEqual([expect.objectContaining({ body: { actionId: "start" } })]);
+    act(() => {
+      finish();
+    });
+
+    await waitFor(() => {
+      expect(readPageText(getRow("Start Bugfix?"))).toContain("decided in the web app");
+    });
+    expect(within(getRow("Start Bugfix?")).queryByRole("button", { name: /Dismiss/ })).toBeNull();
+    expect(getRow("Start Bugfix?").querySelector("[data-mark=done]")).not.toBeNull();
+  });
+
+  it("keeps the decision open and shows the error when the answer cannot be taken", async () => {
+    const { api } = buildController({
+      notifications: [open],
+      handlers: {
+        [ACT]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", "The workflow Bugfix is disabled."),
+        },
+      },
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    await userEvent.setup().click(getAnswers()[0]!);
+
+    const alert = await within(getRow("Start Bugfix?")).findByRole("alert");
+    expect(alert.textContent).toBe("The workflow Bugfix is disabled.");
+    expect(getRow("Start Bugfix?").querySelector("[data-mark=decision]")).not.toBeNull();
+    for (const row of getAnswers()) expect(row).toHaveProperty("disabled", false);
+  });
+
+  it("reads the notifications again when the answer cannot be taken, so a decision resolved elsewhere shows as resolved", async () => {
+    const notifications = [open];
+    const { api } = buildController({
+      notifications,
+      handlers: {
+        // The decision was answered from another place just before this click.
+        [ACT]: () => {
+          notifications[0] = decided;
+          return {
+            status: 409,
+            body: buildErrorBody("invalid_state", "The decision is already resolved."),
+          };
+        },
+      },
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    await userEvent.setup().click(getAnswers()[0]!);
+
+    await waitFor(() => {
+      expect(readPageText(getRow("Start Bugfix?"))).toContain("decided in the web app");
+    });
+    expect(within(getRow("Start Bugfix?")).queryByRole("button", { name: /Dismiss/ })).toBeNull();
   });
 });
 

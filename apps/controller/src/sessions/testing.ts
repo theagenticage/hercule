@@ -30,7 +30,7 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
-import type { Grant, Input, Profile, Session } from "@hercule/contract";
+import type { Grant, Input, Notification, Profile, Runner, Session } from "@hercule/contract";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -362,6 +362,42 @@ export const listSessions = async (arranged: Arranged): Promise<ReadonlyArray<Se
   return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
 };
 
+/**
+ * Returns the approval notifications about a session's requests, newest
+ * first, as `notification.query` returns them. The query cannot filter by
+ * subject, so the notifications about other sessions are dropped here.
+ */
+export const readApprovalNotifications = async (
+  arranged: Arranged,
+  sessionId: string,
+): Promise<ReadonlyArray<Notification>> => {
+  const response = await get(
+    arranged.harness.base,
+    "/api/v1/notifications?kind=core.approval",
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  const page = (await response.json()) as { readonly items: ReadonlyArray<Notification> };
+  return page.items.filter((notification) =>
+    (notification.subject ?? []).some(
+      (subject) => subject.kind === "request" && subject.sessionId === sessionId,
+    ),
+  );
+};
+
+/**
+ * Waits until the one approval notification about a session's request is
+ * resolved, and returns it.
+ */
+export const waitForResolvedApprovalNotification = (
+  arranged: Arranged,
+  sessionId: string,
+): Promise<Notification> =>
+  waitUntil("resolved the approval notification", async () => {
+    const [notification] = await readApprovalNotifications(arranged, sessionId);
+    return notification?.status === "resolved" ? notification : undefined;
+  });
+
 /** Returns one session's inputs, oldest first, as the API returns them. */
 export const listInputs = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
   const response = await get(
@@ -473,6 +509,24 @@ export const waitForSession = (
   waitUntil("moved the session", async () => {
     const session = await readSession(arranged, id);
     return ready(session) ? session : undefined;
+  });
+
+/**
+ * Waits until the controller has seen the runner's socket close, and returns
+ * the runner. Once the runner no longer reads `online`, the controller has
+ * dropped its connection, so a frame sent then fails for that reason and not
+ * because of a race. A socket that closes without a goodbye leaves the runner
+ * `unreachable`.
+ */
+export const waitForRunnerGone = (arranged: Arranged): Promise<Runner> =>
+  waitUntil("saw the runner disconnect", async () => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/runners/${arranged.runnerId}`,
+      arranged.token,
+    );
+    const runner = (await response.json()) as Runner;
+    return runner.connectivity === "online" ? undefined : runner;
   });
 
 /**

@@ -14,6 +14,7 @@ import type { MuteKey, Notification } from "@hercule/contract";
 import { Button, EmptyState, cn, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { notificationsQuery, settingsQuery } from "../../../app/queries";
+import { DecisionLedger } from "../../../screens/notifications/decision-ledger";
 import { NotificationRow } from "../../../screens/notifications/notification-row";
 import { NoNotifications } from "./-no-notifications";
 import { useSinceMarker } from "./-since-marker";
@@ -95,6 +96,11 @@ function Notifications(): JSX.Element | null {
               setMuted.mutate(toggleMuteKey(muted, notification.muteKey));
             }
           }}
+          answers={
+            notification.status === "open" ? (
+              <DecisionLedger client={client} notification={notification} />
+            ) : null
+          }
         />
       ))}
     </ul>

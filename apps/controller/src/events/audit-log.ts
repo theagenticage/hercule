@@ -83,6 +83,8 @@ export const AUDIT_KINDS = [
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
+  "trigger.paused",
+  "trigger.resumed",
   "session.spawned",
   "session.interrupted",
   "session.responded",
@@ -90,6 +92,7 @@ export const AUDIT_KINDS = [
   "session.continued",
   "session.reconciled",
   "notification.created",
+  "notification.decided",
   "notification.withdrawn",
 ] as const;
 
@@ -146,11 +149,16 @@ const RECORD_KINDS = {
   "workflow.created": "created",
   "workflow.updated": "updated",
   "workflow.deleted": "deleted",
+  // A trigger has no Live Topic of its own. It is part of its workflow, so
+  // the record these entries name is the workflow.
+  "trigger.paused": "updated",
+  "trigger.resumed": "updated",
   "session.spawned": "created",
   // The record it names is the new session, which is what came into being.
   "session.continued": "created",
   "session.reconciled": "updated",
   "notification.created": "created",
+  "notification.decided": "updated",
   "notification.withdrawn": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 

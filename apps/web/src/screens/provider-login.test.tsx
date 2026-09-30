@@ -6,6 +6,9 @@
  *   back here;
  * - the vendor printed a one-time code, and the browser completes the login
  *   on its own. The drawer only shows the code and sends nothing.
+ *
+ * It also checks that the login address is a link only when it is a web
+ * address.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -116,5 +119,24 @@ describe("a login where the user pastes back a code", () => {
       screen.getByRole("button", { name: /submit/i }),
     ]);
     expect(listSentCodes(api)).toEqual([]);
+  });
+});
+
+describe("the login address", () => {
+  it("is a link when it is a web address", async () => {
+    await openLoginPanel({ [LOGIN]: { body: { url: PASTE_URL } } });
+
+    const link = await screen.findByRole("link", { name: PASTE_URL });
+    expect(link.getAttribute("href")).toBe(PASTE_URL);
+  });
+
+  it("is shown as text, not a link, when it is not a web address", async () => {
+    const dataUrl = "data:text/html,<h1>Sign in</h1>";
+    await openLoginPanel({ [LOGIN]: { body: { url: dataUrl } } });
+
+    await waitFor(() => {
+      expect(readPageText()).toContain(dataUrl);
+    });
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

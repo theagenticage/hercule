@@ -5,9 +5,9 @@
  * The menu lists the four access modes, always in the same order. A mode the
  * provider does not support is dimmed, with a note naming the mode it falls
  * back to. The fallback uses the same downward-only rule the controller uses
- * when it starts a session (`findNearestSupportedAccessMode`, spec 06 §8.4),
- * so a mode the menu shows as available is one the controller actually
- * grants.
+ * when it starts a session, `findNearestSupportedAccessMode`, so a mode the
+ * menu shows as available is one the controller actually grants. Spec 06 §8.4
+ * owns the fallback rule.
  */
 import {
   ACCESS_MODE_CHAIN,

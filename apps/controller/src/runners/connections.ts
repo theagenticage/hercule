@@ -50,7 +50,7 @@ import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { NotificationService } from "../notifications";
+import { Notifier } from "../notifications";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
-  const notifications = yield* NotificationService;
+  const notifier = yield* Notifier;
 
   const reachable = new Map<string, Reachable>();
   // Unbounded, so a runner's hello never waits for a slow subscriber. It
@@ -418,8 +418,9 @@ const make = Effect.gen(function* () {
     /**
      * Checks whether this runner has an open connection right now. For a
      * caller deciding whether to start work only a connected runner can
-     * finish. A caller that just has a frame to send uses `tell`, which finds
-     * out by trying.
+     * finish, or whether to commit a change that a frame will then carry to
+     * the runner. A caller whose frame goes with no write uses `tell`, which
+     * finds out by trying.
      */
     holdsConnection: (id: string): Effect.Effect<boolean> => Effect.sync(() => reachable.has(id)),
 
@@ -649,14 +650,14 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           for (const runner of yield* runners.listUnreachableSeenBefore(cutoff)) {
-            yield* notifications.createCoreNotification(
+            yield* notifier.createCoreNotification(
               {
                 kind: "core.runner-unreachable",
                 title: `Runner ${runner.name} is unreachable`,
                 body: "Its connection dropped without a goodbye, and it has not reconnected. Work placed on it waits until it does.",
                 subject: [{ kind: "runner", id: runner.id }],
               },
-              { unlessRaisedSince: runner.lastSeenAt },
+              { unlessRaised: { since: runner.lastSeenAt } },
             );
           }
         }),
@@ -687,5 +688,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog | NotificationService
+  SqlClient.SqlClient | AuditLog | Notifier
 > = Layer.effect(RunnerConnections)(make);

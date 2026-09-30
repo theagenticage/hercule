@@ -56,7 +56,6 @@ const CATALOG: EditorProps["catalog"] = {
     { id: FIXER_ID, name: "Fixer" },
   ],
   eventKinds: [
-    { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
     { kind: "task.created", description: "A task was created.", connectionRequired: false },
     {
       kind: "github.pr.labeled",
@@ -78,7 +77,7 @@ const buildReviewWorkflowSource = (action: string): string =>
     "triggers:",
     "  - id: labelled",
     "    kind: start",
-    "    source:",
+    "    on:",
     "      kind: github.pr.labeled",
     "      connectionId: any",
     "      filter: event.payload.number > 3",
@@ -101,11 +100,11 @@ const LOOP_SOURCE = [
   "triggers:",
   "  - id: assigned",
   "    kind: start",
-  "    source:",
+  "    on:",
   "      kind: task.updated",
   "  - id: checks_failed",
   "    kind: signal",
-  "    source:",
+  "    on:",
   "      kind: github.checks.failed",
   "      connectionId: any",
   "    correlation:",
@@ -113,7 +112,7 @@ const LOOP_SOURCE = [
   "      run: steps.open_pr.output.prNumber",
   "  - id: pr_merged",
   "    kind: signal",
-  "    source:",
+  "    on:",
   "      kind: github.pr.merged",
   "      connectionId: any",
   "    correlation:",
@@ -172,7 +171,7 @@ const LINEAR_SOURCE = [
   "triggers:",
   "  - id: labelled",
   "    kind: start",
-  "    source:",
+  "    on:",
   "      kind: github.pr.labeled",
   "      connectionId: any",
   "steps:",
@@ -475,20 +474,19 @@ describe("completion", () => {
     expect(readSource()).toBe(`${source}${REVIEWER_ID}`);
   });
 
-  it("offers the catalog's event kinds after kind: in a trigger's source", async () => {
+  it("offers the catalog's event kinds after kind: in a trigger's on", async () => {
     const { user } = await openEditorAtEnd(
       [
         "name: Review",
         "triggers:",
         "  - id: labelled",
         "    kind: start",
-        "    source:",
+        "    on:",
         "      kind: ",
       ].join("\n"),
     );
 
     expect(sortCompletionLabels(await requestCompletions(user))).toEqual([
-      "cron.tick",
       "github.pr.labeled",
       "task.created",
     ]);
@@ -740,7 +738,7 @@ describe("diagnostics", () => {
       message: "task.creat is not an action. Write one of task.create, task.update, task.query.",
     };
     const warning: Issue = {
-      path: ["triggers", "0", "source", "filter"],
+      path: ["triggers", "0", "on", "filter"],
       message: "This filter admits every labelled pull request.",
     };
     const onIssuesChange = vi.fn<ReportIssues>();

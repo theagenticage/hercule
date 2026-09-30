@@ -36,9 +36,9 @@ import { ProjectPicker } from "../screens/project-picker";
 import { ThreadRowView } from "../screens/thread-row";
 
 /**
- * The threads face of the sidebar: the threads grouped by project and, inside
- * a project, by workspace (spec 14 §App shell, amended by #160 and #72).
- * `buildThreadGroups` does the grouping; this component only draws it.
+ * Renders the threads face of the sidebar: the threads grouped by project
+ * and, inside a project, by workspace. `buildThreadGroups` does the grouping;
+ * this component only draws it. Spec 14 §App shell owns the layout.
  *
  * The `ui.threadRows` setting (`rows`) decides how much each row shows.
  *
@@ -141,7 +141,7 @@ export function ThreadsFace({
         </button>
         {/* The New project button. It shows a `+`, like the project and
             workspace headers below, because the marks family has no folder
-            glyph and #35 fixed which glyphs it has. */}
+            glyph and its set of glyphs is closed (spec 14 §Iconography). */}
         <button
           type="button"
           aria-label="New project"
