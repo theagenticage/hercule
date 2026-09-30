@@ -2233,7 +2233,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
 
     // The pick itself writes nothing: neither the input route nor the update
@@ -2270,7 +2270,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
@@ -2308,7 +2308,7 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "medium" }));
+    await user.click(await screen.findByRole("button", { name: "Medium" }));
 
     // The stored `high` belongs to the other model, and the server drops it
     // when the model changes, so the options show the descriptor's default.
@@ -2338,7 +2338,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2347,7 +2347,7 @@ describe("Thread: model options are sent with the submission", () => {
     // The selector still shows high after the picks are cleared. It can only
     // do that by reading the session again after the input changed it.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
 
     // The next submission shows that the picks were cleared: it carries none.
@@ -2394,7 +2394,7 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "medium" }));
+    await user.click(await screen.findByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2411,7 +2411,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
     await act(async () => {
       release();
@@ -2422,7 +2422,7 @@ describe("Thread: model options are sent with the submission", () => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     });
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
     // The picks are cleared, and the next send uses the session the server
     // stored, not the one the cache held while the read was pending.
@@ -2454,9 +2454,9 @@ describe("Thread: model options are sent with the submission", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
-    await user.click(screen.getByRole("button", { name: "high" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
 
     const high = await screen.findByRole<HTMLButtonElement>("radio", { name: "High" });
     expect(high.getAttribute("aria-checked")).toBe("true");

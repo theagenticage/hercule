@@ -5,7 +5,7 @@
  * compares the main pane with the app's thread screen (thread.tsx).
  *
  * First it stops every animation, so the waiting faces show the frame the
- * app draws. Then it makes exactly twelve edits, each where the app draws
+ * app draws. Then it makes exactly eleven edits, each where the app draws
  * something else than the book, for the reason given:
  *
  * 1. removes the provenance line, "Started 09:02 from ...": v1 does not
@@ -36,9 +36,7 @@
  * 10. sets the model pill's text to the model's name, "Opus 5.5": the pill
  *     shows the name the provider's catalog gives the model, and shows the
  *     provider by its logo, as the web app's composer does;
- * 11. sets the model options' text to client-core's label, which writes the
- *     effort in lower case: "high", where the book writes "High";
- * 12. removes the syntax colours from the code block: the book's colours are
+ * 11. removes the syntax colours from the code block: the book's colours are
  *     sample highlighting, and the app loads no highlighter.
  *
  * Last, it scrolls the transcript to its bottom again, where crew.js put it
@@ -49,7 +47,6 @@
  */
 import {
   buildApprovalCard,
-  buildOptionsLabel,
   buildThreadBlocks,
   describeAgent,
   formatMessageTime,
@@ -193,15 +190,7 @@ findElementByText(composer, ".lip > span", "Own worktree").remove();
 // 10. The model pill.
 replaceTextAfterIcon(findElement(composer, ".pick--pill"), CLAUDE_OPUS.name);
 
-// 11. The model options.
-const optionsLabel = buildOptionsLabel(
-  CLAUDE_OPUS.options,
-  FIX_THREAD.session.modelSelection.options,
-);
-if (optionsLabel === null) throw new Error("The thread fixture's model has no options label.");
-replaceTextAfterIcon(findElementByText(composer, ".composer-row .pick", "High"), optionsLabel);
-
-// 12. The code block's syntax colours.
+// 11. The code block's syntax colours.
 for (const span of findElement(transcript, ".codeblock").querySelectorAll("span")) {
   span.replaceWith(span.textContent);
 }

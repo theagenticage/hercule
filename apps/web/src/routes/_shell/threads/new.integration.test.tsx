@@ -13,7 +13,7 @@
  *   menu rows.
  * - The send button's accessible name contains "send".
  * - The model options selector is labelled with the chosen effort choice's
- *   `label` in lower case (e.g. "Medium" shows as "medium").
+ *   `label` as the descriptor writes it ("Medium").
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -262,11 +262,11 @@ describe("Composer: draft defaults", () => {
     expect(voice.disabled).toBe(true);
 
     // The model pill shows the default model. Its options are in the selector
-    // next to it, labelled with the effort choice "Medium" in lower case.
+    // next to it, labelled with the effort choice "Medium".
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Claude Sonnet 5" })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "medium" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Medium" })).toBeDefined();
 
     expect(screen.getByRole("button", { name: /approval required/i })).toBeDefined();
 
@@ -461,7 +461,7 @@ describe("Composer: model menu", () => {
     const user = userEvent.setup();
     await openApp();
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
 
     // `SegmentedControl` is built on Radix's `ToggleGroup` with
     // `type="single"`, which gives each item `role="radio"` (see the
@@ -495,13 +495,13 @@ describe("Composer: model menu", () => {
     const user = userEvent.setup();
     await openApp();
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     // As in the "renders a select option..." test above, `SegmentedControl`
     // gives each choice `role="radio"`, not `role="button"`.
     await user.click(screen.getByRole("radio", { name: "High" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
   });
 });
@@ -558,7 +558,7 @@ describe("Composer: sending", () => {
 
     // The picks are made in the model options popover: the `effort` row, and
     // the `thinking` row, which is on by default and is turned off here.
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.click(screen.getByRole("radio", { name: "off" }));
     await user.keyboard("{Escape}");
@@ -677,7 +677,7 @@ describe("Routing: /threads/new is the static route", () => {
  * - The model pill is the button whose accessible name contains the model's
  *   *display* name ("Claude Sonnet 5").
  * - The model options selector is the button whose accessible name is its
- *   label text ("medium", "high", "high ⚡").
+ *   label text ("Medium", "High", "High ⚡").
  * - A boolean descriptor is a segmented `off · on` row, like every other
  *   descriptor.
  * - The older-models fold and every menu row are buttons with their text.
@@ -1087,12 +1087,12 @@ const WITH_OPTIONS = buildProviderInstance(
 );
 
 describe("Composer: the model options selector's label", () => {
-  it("shows the effort choice in lower case, updates on a pick, and adds a bolt when fast mode is on", async () => {
+  it("shows the effort choice's label, updates on a pick, and adds a bolt when fast mode is on", async () => {
     const user = userEvent.setup();
     await openApp([WITH_OPTIONS]);
 
-    // `medium` is the descriptor's default, from its label "Medium" in lower case.
-    const selector = await screen.findByRole("button", { name: "medium" });
+    // "Medium" is the label of the descriptor's default, `medium`.
+    const selector = await screen.findByRole("button", { name: "Medium" });
 
     await user.click(selector);
     const menu = await screen.findByRole("dialog");
@@ -1102,12 +1102,12 @@ describe("Composer: the model options selector's label", () => {
 
     await user.click(within(menu).getByRole("radio", { name: "High" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
 
     await user.click(within(menu).getByRole("radio", { name: "on" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high ⚡" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High ⚡" })).toBeDefined();
     });
   });
 });
