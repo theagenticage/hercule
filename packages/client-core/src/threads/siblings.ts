@@ -46,3 +46,28 @@ export const buildSiblingTabs = ({
   if (draft) tabs.push({ sessionId: null, title: "New thread", mark: "draft", active: true });
   return tabs.length < 2 ? [] : tabs;
 };
+
+/**
+ * Returns the threads the desktop's thread header shows as tabs: one per
+ * thread of `session`'s workspace, in the workspace's thread order, taken
+ * from `threads`. Returns `session` alone when it has no workspace, or when
+ * its workspace is not in `workspaces`.
+ *
+ * `session` always has a tab, and its tab shows `session` rather than its
+ * entry in `threads`: `session` is the thread screen's own read, so the tab
+ * never disagrees with the rest of the screen. A thread that has exited no
+ * longer works in its workspace, so the workspace does not list it; its tab
+ * is then the last.
+ */
+export const listThreadTabs = (
+  session: Session,
+  threads: readonly Session[],
+  workspaces: readonly Workspace[],
+): readonly Session[] => {
+  const workspace = workspaces.find((each) => each.id === session.workspaceId);
+  if (workspace === undefined) return [session];
+  const tabs = workspace.sessionIds.flatMap((id) =>
+    id === session.id ? [session] : threads.filter((each) => each.id === id),
+  );
+  return workspace.sessionIds.includes(session.id) ? tabs : [...tabs, session];
+};

@@ -1,0 +1,134 @@
+/**
+ * Tests the queued inputs against the stubbed controller: one row per input,
+ * which one runs next, Steer and Cancel, and what a row shows when one of
+ * them fails.
+ */
+import { describe, expect, it } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { Input } from "@hercule/contract";
+import { buildErrorBody, FIXTURE_THREAD_IDS, THREAD_FIXTURES } from "../../app/testing";
+import { QueuedInputs } from "./queued-inputs";
+import { renderThreadPart } from "./testing";
+
+const { queued } = THREAD_FIXTURES;
+const OLDER = queued.inputs[0]!;
+const NEWER = queued.inputs[1]!;
+
+/** The path of the session's inputs, and of each input under it. */
+const INPUTS = `/api/v1/sessions/${FIXTURE_THREAD_IDS.flaky}/inputs`;
+
+/** Returns the row that shows `input`. */
+const readRow = (input: Input): HTMLElement => screen.getByText(input.text).closest(".queued")!;
+
+/** Returns the text of every row, in order. */
+const readRows = (): readonly (string | null)[] =>
+  [...document.querySelectorAll(".queued-text")].map((text) => text.textContent);
+
+/**
+ * Renders the queued fixture thread. The controller lists the inputs in
+ * `remaining`, newest first as it does, so a test that steers or cancels one
+ * can take it out of the list.
+ */
+const renderQueue = (
+  handlers: Parameters<typeof renderThreadPart>[1]["handlers"] = {},
+  remaining: Input[] = [OLDER, NEWER],
+) =>
+  renderThreadPart(QueuedInputs, {
+    thread: queued,
+    handlers: {
+      [`GET ${INPUTS}`]: () => ({ body: { items: [...remaining].reverse() } }),
+      ...handlers,
+    },
+  });
+
+describe("the queued inputs", () => {
+  it("draws one row per input, oldest first, and says the first runs next", async () => {
+    await renderQueue();
+
+    expect(readRows()).toEqual([OLDER.text, NEWER.text]);
+    expect(within(readRow(OLDER)).getByText("queued · runs next")).toBeTruthy();
+    expect(within(readRow(NEWER)).getByText("queued")).toBeTruthy();
+  });
+
+  it("steers an input into the running turn, then reads the queue again", async () => {
+    const user = userEvent.setup();
+    const remaining = [OLDER, NEWER];
+    const { calls } = await renderQueue(
+      {
+        [`POST ${INPUTS}/${OLDER.id}/steer`]: () => {
+          remaining.shift();
+          return { body: { inputId: OLDER.id, result: "steered" } };
+        },
+      },
+      remaining,
+    );
+
+    await user.click(within(readRow(OLDER)).getByRole("button", { name: "Steer" }));
+
+    await waitFor(() => {
+      expect(readRows()).toEqual([NEWER.text]);
+    });
+    expect(calls.filter((call) => call.path === INPUTS).map((call) => call.method)).toEqual([
+      "GET",
+      "GET",
+    ]);
+    // The input that runs next is now the one that was second.
+    expect(within(readRow(NEWER)).getByText("queued · runs next")).toBeTruthy();
+  });
+
+  it("cancels an input, then reads the queue again", async () => {
+    const user = userEvent.setup();
+    const remaining = [OLDER, NEWER];
+    await renderQueue(
+      {
+        [`DELETE ${INPUTS}/${NEWER.id}`]: () => {
+          remaining.pop();
+          return { body: { ...NEWER, status: "cancelled" } };
+        },
+      },
+      remaining,
+    );
+
+    await user.click(within(readRow(NEWER)).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(readRows()).toEqual([OLDER.text]);
+    });
+  });
+
+  it("shows in the row why Steer failed, and keeps the input", async () => {
+    const user = userEvent.setup();
+    await renderQueue({
+      [`POST ${INPUTS}/${OLDER.id}/steer`]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The turn has already finished."),
+      },
+    });
+
+    await user.click(within(readRow(OLDER)).getByRole("button", { name: "Steer" }));
+
+    expect((await within(readRow(OLDER)).findByRole("alert")).textContent).toBe(
+      "The turn has already finished.",
+    );
+    expect(readRows()).toEqual([OLDER.text, NEWER.text]);
+  });
+
+  it("shows why an input's last delivery failed", async () => {
+    await renderQueue({}, [{ ...OLDER, reason: "The runner went offline." }, NEWER]);
+
+    expect(within(readRow(OLDER)).getByText("The runner went offline.")).toBeTruthy();
+  });
+
+  it("offers no Steer or Cancel for an assistant's conversation", async () => {
+    await renderThreadPart(QueuedInputs, {
+      thread: {
+        ...queued,
+        session: { ...queued.session, conversationId: "01a06d02-7800-7000-8000-000000000001" },
+      },
+    });
+
+    expect(readRows()).toEqual([OLDER.text, NEWER.text]);
+    expect(screen.queryAllByRole("button")).toEqual([]);
+  });
+});

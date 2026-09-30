@@ -1,19 +1,27 @@
 /**
- * Tests the age clock: one timer for the earliest label change, none when
- * nothing is watched or the window is hidden, and a fresh read of the time on
- * show and on focus. Timers and the date are faked, so each test says exactly
- * when the clock wakes.
+ * Tests the age clock: one timer for the earliest label change, ages and
+ * durations alike, none when nothing is watched or the window is hidden, and
+ * a fresh read of the time on show and on focus. Timers and the date are
+ * faked, so each test says exactly when the clock wakes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { formatAge } from "@hercule/client-core";
-import { createAgeClock, useAgeLabel, useAgeWords, type AgeClock } from "./age-clock";
+import { findNextAgeChange, findNextDurationChange, formatAge } from "@hercule/client-core";
+import {
+  createAgeClock,
+  useAgeLabel,
+  useAgeWords,
+  useDurationText,
+  type AgeClock,
+} from "./age-clock";
 
 const NOW = new Date("2026-09-10T09:00:00.000Z");
 /** Reads "now" until 09:00:30, when it turns into "1m". */
 const HALF_A_MINUTE_AGO = "2026-09-10T08:59:30.000Z";
 /** Reads "1h" until 10:00:00, when it turns into "2h". */
 const AN_HOUR_AGO = "2026-09-10T08:00:00.000Z";
+/** A duration from here reads "12s" until 09:00:00.500, when it turns into "13s". */
+const TWELVE_SECONDS_AGO = "2026-09-10T08:59:48.000Z";
 
 /** Sets what `document.visibilityState` reads, and tells the page it changed, as a hide or show does. */
 const setVisibility = (state: DocumentVisibilityState): void => {
@@ -28,9 +36,18 @@ const setVisibility = (state: DocumentVisibilityState): void => {
  */
 const unwatches: Array<() => void> = [];
 
-/** Watches the age of `at` on `clock`, and removes the label after the test. Returns what `watch` returns. */
-const watchLabel = (clock: AgeClock, at: string, onChange: () => void): (() => void) => {
-  const unwatch = clock.watch(at, onChange);
+/**
+ * Watches the age of `at` on `clock`, or with `findNextChange` another kind of
+ * label that counts from `at`, and removes the label after the test. Returns
+ * what `watch` returns.
+ */
+const watchLabel = (
+  clock: AgeClock,
+  at: string,
+  onChange: () => void,
+  findNextChange: (since: string, now: Date) => Date = findNextAgeChange,
+): (() => void) => {
+  const unwatch = clock.watch((now) => findNextChange(at, now), onChange);
   unwatches.push(unwatch);
   return unwatch;
 };
@@ -71,6 +88,24 @@ describe("the age clock", () => {
     expect(formatAge(HALF_A_MINUTE_AGO, clock.readNow())).toBe("1m");
     expect(formatAge(AN_HOUR_AGO, clock.readNow())).toBe("1h");
     // The next change is "1m" turning into "2m", still one timer.
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps the same one timer for an age and a duration", () => {
+    const clock = createAgeClock();
+    const onAgeChange = vi.fn();
+    const onDurationChange = vi.fn();
+    watchLabel(clock, HALF_A_MINUTE_AGO, onAgeChange);
+    watchLabel(clock, TWELVE_SECONDS_AGO, onDurationChange, findNextDurationChange);
+    expect(vi.getTimerCount()).toBe(1);
+
+    // The duration changes first, every second.
+    vi.advanceTimersByTime(499);
+    expect(onDurationChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onDurationChange).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(1000);
+    expect(onDurationChange).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(1);
   });
 
@@ -157,7 +192,7 @@ describe("the age clock", () => {
   });
 });
 
-describe("useAgeLabel and useAgeWords", () => {
+describe("useAgeLabel, useAgeWords and useDurationText", () => {
   it("watch the clock only while the label is on screen", () => {
     const { rerender } = renderHook(
       ({ onScreen }: { onScreen: boolean }) => useAgeLabel(HALF_A_MINUTE_AGO, onScreen),
@@ -169,6 +204,48 @@ describe("useAgeLabel and useAgeWords", () => {
     expect(vi.getTimerCount()).toBe(1);
 
     rerender({ onScreen: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("share one timer with a duration, and set none while the window is hidden", () => {
+    const { result } = renderHook(() => ({
+      age: useAgeLabel(HALF_A_MINUTE_AGO, true),
+      duration: useDurationText(
+        TWELVE_SECONDS_AGO,
+        true,
+        (now) => `Working for ${Math.round((now - Date.parse(TWELVE_SECONDS_AGO)) / 1000)}s`,
+      ),
+    }));
+    expect(result.current).toEqual({ age: "now", duration: "Working for 12s" });
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(result.current.duration).toBe("Working for 13s");
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => {
+      setVisibility("hidden");
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(result.current.duration).toBe("Working for 13s");
+
+    act(() => {
+      setVisibility("visible");
+    });
+    expect(result.current.duration).toBe("Working for 18s");
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("set no timer for a duration that is not counting", () => {
+    const { result } = renderHook(() =>
+      useDurationText(TWELVE_SECONDS_AGO, false, () => "Worked for 12s"),
+    );
+    expect(result.current).toBe("Worked for 12s");
     expect(vi.getTimerCount()).toBe(0);
   });
 

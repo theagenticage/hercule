@@ -10,10 +10,11 @@ import {
   type ConfigDraft,
   type ConnectionType,
   type HerculeClient,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**

@@ -1,9 +1,9 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, FormCard, Input, Select } from "@hercule/ui";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import type { OwnerKind } from "@hercule/contract";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 /**
  * The owner kinds a user may write secrets for. `core` is left out: it is the

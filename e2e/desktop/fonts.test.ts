@@ -52,17 +52,22 @@ describe("the fonts at launch", () => {
       { family: "Password bullet", firstRange: "U+2022", status: "unloaded" },
     ]);
 
-    // The stylesheet names every font's address, so a font requested before
-    // it was requested by the preload. A second request for the preloaded
+    // The stylesheets name every font's address, so a font requested before
+    // them was requested by the preload. A second request for the preloaded
     // file would mean the page's own request did not match the preload, and
-    // the file was read twice.
-    expect(
-      requests
-        .filter((request) => ["font", "stylesheet"].includes(request.resourceType()))
-        .map((request) =>
-          request.resourceType() === "stylesheet" ? "stylesheet" : stripFontHash(request.url()),
-        ),
-    ).toEqual([PRELOADED_FONT, "stylesheet", "limelight-latin-400-normal"]);
+    // the file was read twice. How many stylesheets the page links depends on
+    // how the build splits the CSS between the shell and the thread route's
+    // chunk, which this test does not check.
+    const loads = requests
+      .filter((request) => ["font", "stylesheet"].includes(request.resourceType()))
+      .map((request) =>
+        request.resourceType() === "stylesheet" ? "stylesheet" : stripFontHash(request.url()),
+      );
+    expect(loads.filter((load) => load !== "stylesheet")).toEqual([
+      PRELOADED_FONT,
+      "limelight-latin-400-normal",
+    ]);
+    expect(loads.indexOf("stylesheet")).toBe(1);
 
     // Chromium warns in the console about a preload whose credentials mode
     // does not match the font's request, and about a preload nothing uses.

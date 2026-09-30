@@ -89,6 +89,13 @@ export const Checkout = Schema.Struct({
   /** Every local branch the machine found, in its order. */
   branches: Schema.Array(Schema.String),
   defaultBranch: Schema.NullOr(Schema.String),
+  /**
+   * The branch this checkout's own branch was started from, as the caller
+   * named it. Null when the caller named none, and the machine started it
+   * from the resource's default branch; also null on a main workspace, which
+   * starts no branch of its own.
+   */
+  baseBranch: Schema.NullOr(Schema.String),
 });
 
 export type Checkout = Schema.Schema.Type<typeof Checkout>;

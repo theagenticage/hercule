@@ -1,0 +1,131 @@
+/* The composer: the card and the lip under it, with the dock and the queued
+   inputs stacked above. It floats over the bottom of the transcript, as
+   glass. The rules are the Bureau book's `.composer-wrap` through `.lip`.
+   Each departure from the book says why.
+
+   Left out of the book: the scrolled shrink, its folds and the transitions
+   that animate them, because the composer does not shrink yet. */
+.composer-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 24px 18px;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+}
+.composer {
+  pointer-events: auto;
+  width: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+.composer-card {
+  position: relative;
+  z-index: 2;
+  border-radius: var(--r-xl);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+}
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 16px 4px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  font-size: var(--t-14);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.composer-input::placeholder {
+  color: var(--faint);
+}
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 8px;
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pick:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pick--pill {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+.pick .br {
+  opacity: 0.85;
+}
+.send {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  margin-left: 4px;
+}
+.send--off {
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  color: var(--faint);
+}
+.lip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 16px;
+  padding: 7px 4px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.lip .spacer {
+  flex: 1;
+}
+
+/* Not in the book, whose field always takes text. The field takes no text
+   yet, so the pointer stays an arrow over it rather than an I-beam. */
+.composer-input[aria-disabled="true"] {
+  cursor: default;
+}
+/* Not in the book, whose model names are short. When the row runs out of
+   room, the model's name ellipsizes and the other controls keep their
+   size. */
+.pick--pill {
+  min-width: 0;
+}
+.pick--pill > :not(.pick-name) {
+  flex: none;
+}
+.pick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

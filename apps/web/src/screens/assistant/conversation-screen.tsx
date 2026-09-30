@@ -15,6 +15,7 @@ import {
   flattenMessagePages,
   type HerculeClient,
   type Live,
+  readErrorMessage,
 } from "@hercule/client-core";
 import { Button } from "@hercule/ui";
 import { useLiveInvalidation } from "../../app/live-invalidation";
@@ -24,7 +25,6 @@ import {
   currentConversationSessionQuery,
 } from "../../app/queries";
 import { ContentColumn } from "../content-column";
-import { readErrorMessage } from "../save-status";
 import { findScrollingElement, useStickToBottom } from "../use-stick-to-bottom";
 import { ActivityRow } from "./activity-row";
 import { ConversationChrome } from "./conversation-chrome";

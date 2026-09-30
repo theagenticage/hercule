@@ -10,12 +10,14 @@ import { Route as ThreadRoute } from "../routes/_connected/_shell/threads/$sessi
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  THREAD_FIXTURES,
   type Answer,
   type Handler,
 } from "../app/testing";
@@ -27,16 +29,26 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
+// The tests below swap the thread route's component for one that throws, so
+// each test puts the route's own component back afterwards.
+const threadComponent = ThreadRoute.options.component;
+
 afterEach(() => {
-  // The thread route has no component of its own yet, so taking away the
-  // one a test gave it restores the route.
-  Reflect.deleteProperty(ThreadRoute.options, "component");
+  if (threadComponent === undefined) Reflect.deleteProperty(ThreadRoute.options, "component");
+  else ThreadRoute.update({ component: threadComponent });
   vi.restoreAllMocks();
 });
 
-/** Starts the app signed in at `path`, with the sidebar fixture and `handlers` on top. */
+/**
+ * Starts the app signed in at `path`, with the sidebar fixture, the reads of
+ * the runbook thread, and `handlers` on top.
+ */
 const startSignedIn = async (handlers: Readonly<Record<string, Handler>> = {}, path = "/") => {
-  const calls = stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...handlers });
+  const calls = stubApi({
+    ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+    ...buildThreadHandlers(THREAD_FIXTURES.waiting),
+    ...handlers,
+  });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   return { calls, ...(await renderApp(fake, { path })) };
 };

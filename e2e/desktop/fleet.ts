@@ -13,6 +13,10 @@
  * instance. The controller also starts a runner of its own, on this machine,
  * which may be logged in to a real provider: a thread that lands there would
  * run a real agent.
+ *
+ * A thread can also play a script: the turn its prompt opens reports the work
+ * the script describes, through the real runner protocol, and `waitForTurn`
+ * waits for the controller to have recorded where a turn has got to.
  */
 import type {
   Project,
@@ -20,13 +24,34 @@ import type {
   Resource,
   Session,
   SpawnWorkspace,
+  TranscriptRow,
 } from "../../packages/contract/src/index";
+import type { TurnState } from "../../packages/protocol/src/index";
 import { setTimeout as sleep } from "node:timers/promises";
 import { PASSWORD, USERNAME } from "../../scripts/controller-process.ts";
-import { enlistScriptedRunner, type ScriptedRunner } from "../../scripts/scripted-runner.ts";
+import {
+  enlistScriptedRunner,
+  type ScriptedRunner,
+  type ScriptStep,
+} from "../../scripts/scripted-runner.ts";
 
 /** How many spawns are in flight at once; SQLite writes one at a time anyway. */
 const SPAWN_CONCURRENCY = 8;
+
+/** How long `waitForTurn` waits before it fails. */
+const TURN_WAIT_MS = 10_000;
+
+/** How often `waitForTurn` reads the transcript again. */
+const TURN_POLL_MS = 25;
+
+/**
+ * Where a turn has got to, as its session's transcript records it:
+ *
+ * - `running`: the turn has started, and no Request is open;
+ * - `waiting`: a Request opened during the turn is still open;
+ * - `completed`, `failed`, `interrupted`: the turn ended that way.
+ */
+export type TurnProgress = "running" | "waiting" | TurnState;
 
 /** Where a batch of threads goes. */
 export interface ThreadPlacement {
@@ -67,6 +92,25 @@ export interface Fleet {
     count: number,
     placement: ThreadPlacement,
   ) => Promise<ReadonlyArray<Session>>;
+  /**
+   * Spawns one thread whose first turn plays `script`, as `playScript` on its
+   * runner does. The prompt is the user's first message, and the next
+   * "Thread N" title when it is left out. Returns the thread as the spawn
+   * returned it, and `played`, which settles as `playScript` does: await it,
+   * so a script that fails fails the caller.
+   */
+  readonly spawnScriptedThread: (
+    placement: ThreadPlacement & { readonly prompt?: string },
+    script: ReadonlyArray<ScriptStep>,
+  ) => Promise<{ readonly thread: Session; readonly played: Promise<void> }>;
+  /**
+   * Waits until the session's turn number `turn`, counting from 1, has
+   * reached `progress` in the transcript the controller wrote. Only the
+   * transcript is read, every 25 ms, so a turn that passes through a state
+   * faster than that may never be seen in it. Fails after 10 s, saying where
+   * the turn got to.
+   */
+  readonly waitForTurn: (sessionId: string, turn: number, progress: TurnProgress) => Promise<void>;
   /** Takes every enlisted runner that is still connected offline, so nothing holds the process open. */
   readonly disconnectRunners: () => Promise<void>;
 }
@@ -88,6 +132,25 @@ export async function connectFleet(url: string): Promise<Fleet> {
   let instanceId: string | undefined;
   let spawned = 0;
 
+  /** Spawns one thread with `prompt`, pinned to the placement's runner and the Claude Code instance. */
+  const spawnThread = (
+    prompt: string,
+    { runner, projectId, workspace }: ThreadPlacement,
+  ): Promise<Session> =>
+    call<Session>("POST", "/sessions", {
+      prompt,
+      runnerId: runner.runnerId,
+      instanceId,
+      ...(projectId === undefined ? {} : { projectId }),
+      ...(workspace === undefined ? {} : { workspace }),
+    });
+
+  /** Returns the next "Thread N" title; the numbers run on across every spawn. */
+  const buildNextTitle = (): string => {
+    spawned += 1;
+    return `Thread ${spawned}`;
+  };
+
   return {
     token,
     enlistRunner: async (name, options = {}) => {
@@ -101,22 +164,34 @@ export async function connectFleet(url: string): Promise<Fleet> {
     createProject: (name) => call<Project>("POST", "/projects", { name }),
     createRepository: (remote, projectIds = []) =>
       call<Resource>("POST", "/resources", { kind: "repo", remote, projectIds }),
-    spawnThreads: async (count, { runner, projectId, workspace }) => {
+    spawnThreads: async (count, placement) => {
       const threads: Array<Session> = [];
       for (let first = 0; first < count; first += SPAWN_CONCURRENCY) {
-        const batch = Array.from({ length: Math.min(SPAWN_CONCURRENCY, count - first) }, () => {
-          spawned += 1;
-          return call<Session>("POST", "/sessions", {
-            prompt: `Thread ${spawned}`,
-            runnerId: runner.runnerId,
-            instanceId,
-            ...(projectId === undefined ? {} : { projectId }),
-            ...(workspace === undefined ? {} : { workspace }),
-          });
-        });
+        const batch = Array.from({ length: Math.min(SPAWN_CONCURRENCY, count - first) }, () =>
+          spawnThread(buildNextTitle(), placement),
+        );
         threads.push(...(await Promise.all(batch)));
       }
       return threads;
+    },
+    spawnScriptedThread: async (placement, script) => {
+      const thread = await spawnThread(placement.prompt ?? buildNextTitle(), placement);
+      return { thread, played: placement.runner.playScript(thread.id, script) };
+    },
+    waitForTurn: async (sessionId, turn, progress) => {
+      const deadline = Date.now() + TURN_WAIT_MS;
+      for (;;) {
+        const rows = await readTranscript(call, sessionId);
+        const reached = computeTurnProgress(rows, turn);
+        if (reached === progress) return;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `turn ${turn} of session ${sessionId} never became ${progress}; ` +
+              (reached === undefined ? "it never started" : `it is ${reached}`),
+          );
+        }
+        await sleep(TURN_POLL_MS);
+      }
     },
     disconnectRunners: async () => {
       await Promise.all(runners.map((runner) => runner.goOffline()));
@@ -146,6 +221,57 @@ async function waitForLoggedInProbe(
     await sleep(20);
   }
   throw new Error(`the controller never probed runner ${runnerId}`);
+}
+
+/** Reads a session's whole transcript, oldest row first, a page of 500 rows at a time. */
+async function readTranscript(
+  call: <T>(method: string, path: string) => Promise<T>,
+  sessionId: string,
+): Promise<ReadonlyArray<TranscriptRow>> {
+  const rows: Array<TranscriptRow> = [];
+  let cursor: string | undefined;
+  do {
+    const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+    const page = await call<{
+      readonly items: ReadonlyArray<TranscriptRow>;
+      readonly nextCursor?: string;
+    }>("GET", `/sessions/${sessionId}/transcript?limit=500${query}`);
+    rows.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return rows;
+}
+
+/**
+ * Returns where the session's turn number `turn`, counting from 1, has got
+ * to in the transcript `rows`, or `undefined` if that turn has not started.
+ * A Request event carries no turn id, so a Request belongs to the turn it
+ * opened during: the rows are in order, and a harness asks only while a turn
+ * runs.
+ */
+function computeTurnProgress(
+  rows: ReadonlyArray<TranscriptRow>,
+  turn: number,
+): TurnProgress | undefined {
+  let started = 0;
+  let turnId: string | undefined;
+  let openRequestId: string | undefined;
+  for (const { event } of rows) {
+    if (turnId === undefined) {
+      if (event._tag === "turn.started") {
+        started += 1;
+        if (started === turn) turnId = event.turnId;
+      }
+      continue;
+    }
+    if (event._tag === "turn.completed" && event.turnId === turnId) return event.state;
+    if (event._tag === "request.opened") openRequestId = event.request.requestId;
+    if (event._tag === "request.resolved" && event.requestId === openRequestId) {
+      openRequestId = undefined;
+    }
+  }
+  if (turnId === undefined) return undefined;
+  return openRequestId === undefined ? "running" : "waiting";
 }
 
 /**

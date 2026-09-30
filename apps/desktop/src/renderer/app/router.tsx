@@ -6,15 +6,17 @@
  * the same router.
  */
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import { RenderFailure } from "../screens/render-failure";
 import type { RouterContext } from "./context";
+import { createLaunchHistory } from "./last-thread";
 
 /**
- * Returns a new router that starts at `/`. It renders the query cache's
- * provider around every route, so the app and a test render the router alone.
- * A route that fails shows `RenderFailure`.
+ * Returns a new router. It starts at the last open thread of the saved
+ * controller when one is stored, and at `/` otherwise (see `last-thread.ts`).
+ * It renders the query cache's provider around every route, so the app and a
+ * test render the router alone. A route that fails shows `RenderFailure`.
  *
  * The router also empties the query cache and its own cache of past screens
  * when the user is signed out. It does so when a navigation ends with no
@@ -40,7 +42,7 @@ export const createAppRouter = (context: RouterContext) => {
   const router = createRouter({
     routeTree,
     context,
-    history: createMemoryHistory(),
+    history: createLaunchHistory(context.controller?.url ?? null),
     defaultErrorComponent: RenderFailure,
     Wrap: ({ children }) => (
       <QueryClientProvider client={context.queryClient}>{children}</QueryClientProvider>

@@ -86,9 +86,17 @@ async function runElectron(
       // The CPU keeps each difference in its own cell, and draws the same
       // pixels on any machine, including CI's virtual Macs.
       "--disable-gpu-rasterization",
+      // The app's scroll bars are the system's overlay scroll bars, which
+      // macOS draws only while a page scrolls (spec 17). A captured window
+      // draws its scroll bars all the time, and the book styles its own, so
+      // no capture draws any.
+      "--hide-scrollbars",
       `--user-data-dir=${userDataDir}`,
     ],
-    { env: buildAppEnv(), stdio: "inherit" },
+    // The pages draw times in the system time zone, as the app does. UTC
+    // makes the fixtures' times read the same on every machine: 09:04 in the
+    // fixture is 09:04 on the page.
+    { env: { ...buildAppEnv(), TZ: "UTC" }, stdio: "inherit" },
   );
   const passOn = (signal: NodeJS.Signals) => electron.kill(signal);
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, passOn);

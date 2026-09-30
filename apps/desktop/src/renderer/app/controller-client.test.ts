@@ -51,6 +51,38 @@ describe("fetchWithTimeout", () => {
     expect(failure).toBe("TimeoutError");
   });
 
+  it.each([
+    ["a steer", "/api/v1/sessions/s-1/inputs/i-1/steer"],
+    ["a message sent to a session", "/api/v1/sessions/s-1/input"],
+  ])("gives %s, which waits on the runner, 15 seconds", async (_case, path) => {
+    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
+    const response = await fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method: "POST" });
+    let failure: string | undefined;
+    response.text().catch((error: unknown) => {
+      failure = (error as DOMException).name;
+    });
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(failure).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(failure).toBe("TimeoutError");
+  });
+
+  it("gives another operation on a steer's path 5 seconds", async () => {
+    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
+    const response = await fetchWithTimeout(
+      "http://127.0.0.1:4937/api/v1/sessions/s-1/inputs/i-1",
+      { method: "DELETE" },
+    );
+    let failure: string | undefined;
+    response.text().catch((error: unknown) => {
+      failure = (error as DOMException).name;
+    });
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(failure).toBe("TimeoutError");
+  });
+
   it.each<[string, () => Promise<void>]>([
     [
       "the body has been read to the end",
@@ -132,5 +164,36 @@ describe("createControllerClient", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(failure).toBeInstanceOf(ConnectionError);
     expect((failure as ConnectionError).message).toBe("cannot reach http://127.0.0.1:4937");
+  });
+
+  it("returns a steer the controller answers after 8 seconds, past the usual limit", async () => {
+    const inputId = "01a06d02-7700-7000-8000-000000000001";
+    // Answers after 8 seconds, unless the request's signal aborts first.
+    stubFetch(
+      (signal) =>
+        new Promise((resolve, reject) => {
+          const answer = setTimeout(() => {
+            resolve(
+              new Response(JSON.stringify({ inputId, result: "steered" }), {
+                headers: { "content-type": "application/json" },
+              }),
+            );
+          }, 8000);
+          signal.addEventListener("abort", () => {
+            clearTimeout(answer);
+            reject(signal.reason as Error);
+          });
+        }),
+    );
+    const client = createControllerClient("http://127.0.0.1:4937", {
+      read: () => "bearer",
+      write: () => {},
+    });
+    const steer = client.input.steer({
+      params: { id: "01a06d02-7400-7000-8000-000000000001", inputId },
+    });
+
+    await vi.advanceTimersByTimeAsync(8000);
+    await expect(steer).resolves.toEqual({ inputId, result: "steered" });
   });
 });

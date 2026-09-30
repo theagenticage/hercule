@@ -10,7 +10,6 @@ import {
   decideThreadPose,
   decideThreadRowEnd,
   formatRequestQuestion,
-  pickProjectHue,
   type ExpandedSections,
   type Pose,
   type ProjectGroup,
@@ -20,14 +19,7 @@ import {
   type WaitingSection,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
-
-/**
- * Bureau's three project tints, as the book's `.proj--<tint>` classes name
- * them. A project's tint follows its position in the project list.
- */
-const PROJECT_TINTS = ["webshop", "payments", "ops"] as const;
-
-export type ProjectTint = (typeof PROJECT_TINTS)[number];
+import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
 
 /**
  * The end of a thread row, as one string so a memoized row can compare it:
@@ -257,10 +249,7 @@ const buildProjectContents = (
       projectId: project.projectId,
       // Only the group of the threads in no project has no name.
       name: project.name ?? "No project",
-      tint:
-        project.projectId === null
-          ? null
-          : pickProjectHue(project.projectId, projects, PROJECT_TINTS),
+      tint: project.projectId === null ? null : pickProjectTint(project.projectId, projects),
     },
   ];
   for (const lane of project.workspaces) {

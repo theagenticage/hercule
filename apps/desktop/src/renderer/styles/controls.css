@@ -1,6 +1,7 @@
-/* The controls every screen shares: the buttons, the navigation rows, the
-   counts and the text field. The rules and class names are the Bureau book's,
-   as its system.css spells them. Each departure from the book says why. */
+/* The controls every screen shares: the buttons, the answer ledger, the
+   pills, the navigation rows, the counts and the text field. The rules and
+   class names are the Bureau book's, as its system.css spells them. Each
+   departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -53,6 +54,14 @@
   background: var(--hover);
   color: var(--ink);
 }
+/* A smaller button, for answers inside a row or a card, such as a queued
+   message's Steer and Cancel. */
+.btn--sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+  gap: 5px;
+}
 /* A suggested answer that cannot act yet, such as Sign in before both fields
    hold text. The book draws no disabled control, so this follows macOS: a
    default button that cannot act loses its accent and becomes a plain
@@ -98,6 +107,67 @@
   width: 22px;
   height: 22px;
   border-radius: var(--r-xs);
+}
+
+/* ---------- Answers ---------- */
+/* The ledger: each answer on its own line with what the click does. Buttons
+   share one width, so their left and right edges line up down the ledger.
+   A row is one button: the `.btn` inside it is drawn as a span. */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ans {
+  display: grid;
+  grid-template-columns: 156px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 38px;
+  padding: 4px 12px 4px 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.ans:hover {
+  background: var(--hover);
+}
+.ans > .btn {
+  width: 100%;
+}
+.ans-desc {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ans kbd {
+  justify-self: end;
+}
+/* An answer that was already given. As with a button whose action is
+   running, the row keeps its colour and its focus, and neither it nor its
+   button reacts to the pointer. */
+.ans[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+/* ---------- Pills ---------- */
+/* A floating glass layer holding a few controls, such as the thread header's
+   tabs. Only content shows through it: no gradient and no glow behind. Every
+   value comes from --glass-level, so at 0 this is a solid, flat surface. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
 }
 
 /* ---------- Navigation rows ---------- */

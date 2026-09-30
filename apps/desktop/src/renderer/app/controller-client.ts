@@ -1,6 +1,7 @@
 /**
  * The clients the app talks to the controller through. Every request they
- * send gives up after 5 seconds.
+ * send gives up after 5 seconds, or after 15 for an operation that waits on
+ * the runner.
  *
  * A controller can accept a connection and never answer, or send the headers
  * and never the body, and neither Chromium nor the client gives up on its own.
@@ -13,6 +14,7 @@ import {
   type HerculeClient,
   type TokenStore,
 } from "@hercule/client-core";
+import { api } from "@hercule/contract";
 
 /**
  * How long a request waits for the controller's whole answer. Main's check of
@@ -23,10 +25,58 @@ import {
 const REQUEST_TIMEOUT_MS = 5000;
 
 /**
+ * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for
+ * the controller's whole answer. The controller itself waits up to 10 seconds
+ * for the runner to confirm the message (spec 17 §Reaching the controller).
+ * A limit shorter than that would report a failure for a message that still
+ * arrives, and a user who sent it again would send it twice.
+ */
+const RUNNER_WAIT_TIMEOUT_MS = 15_000;
+
+/**
+ * The operations whose answer waits on the runner: sending a message to a
+ * session, and steering a queued input into its running turn. They are read
+ * from the API declaration the client is built from, so their method and path
+ * cannot drift from the requests the client sends.
+ */
+const RUNNER_WAITING_OPERATIONS = [
+  api.groups.session.endpoints.input,
+  api.groups.input.endpoints.steer,
+];
+
+/**
+ * Returns a pattern that matches the path of any call of an operation whose
+ * path is `path`, such as `/api/v1/sessions/:id/input`: each `:param` matches
+ * one path segment. The API's paths hold only letters, `-`, `/` and
+ * `:param`s, so no character needs escaping.
+ */
+const buildPathPattern = (path: string): RegExp =>
+  new RegExp(`^${path.replace(/:[^/]+/g, "[^/]+")}$`);
+
+/** The method and path pattern of each operation that waits on the runner, built once at load. */
+const RUNNER_WAITING_ROUTES = RUNNER_WAITING_OPERATIONS.map((operation) => ({
+  method: operation.method,
+  pattern: buildPathPattern(operation.path),
+}));
+
+/**
+ * Returns how long a request with `method` to `url` may take: longer for an
+ * operation that waits on the runner, REQUEST_TIMEOUT_MS for any other.
+ */
+const decideRequestTimeout = (url: string, method: string): number => {
+  const { pathname } = new URL(url);
+  return RUNNER_WAITING_ROUTES.some(
+    (route) => route.method === method && route.pattern.test(pathname),
+  )
+    ? RUNNER_WAIT_TIMEOUT_MS
+    : REQUEST_TIMEOUT_MS;
+};
+
+/**
  * Sends one request like `fetch`, and aborts it when the whole answer, body
- * included, takes longer than REQUEST_TIMEOUT_MS. The client reports the
- * abort as a `ConnectionError`, as it does when nothing answers. The client
- * passes a signal of its own, which still aborts the request too.
+ * included, takes longer than its limit (`decideRequestTimeout`). The client
+ * reports the abort as a `ConnectionError`, as it does when nothing answers.
+ * The client passes a signal of its own, which still aborts the request too.
  *
  * The timer stops once the request is over: the request fails before an
  * answer arrives, the answer has no body, or the body has been read to the
@@ -36,15 +86,18 @@ const REQUEST_TIMEOUT_MS = 5000;
  * One answer keeps the timer running anyway. For a status the contract does
  * not declare, the client fails without reading or cancelling the body, and
  * nothing tells this function that the body is no longer wanted. The timer
- * then fires after the full 5 seconds and aborts the request, which closes
- * the connection. That costs one wakeup, and the connection stays open for up
- * to 5 seconds after such an answer.
+ * then fires after the full limit and aborts the request, which closes the
+ * connection. That costs one wakeup, and the connection stays open for up to
+ * the limit after such an answer.
  */
 export const fetchWithTimeout: FetchLike = async (url, init) => {
   const timeout = new AbortController();
-  const timer = setTimeout(() => {
-    timeout.abort(new DOMException("The controller did not answer in time.", "TimeoutError"));
-  }, REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => {
+      timeout.abort(new DOMException("The controller did not answer in time.", "TimeoutError"));
+    },
+    decideRequestTimeout(url, init?.method ?? "GET"),
+  );
   const stopTimer = (): void => {
     clearTimeout(timer);
   };

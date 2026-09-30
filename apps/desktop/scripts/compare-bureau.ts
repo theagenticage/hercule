@@ -4,8 +4,8 @@
  * docs/design/crew-bureau, which is kept byte for byte as the design
  * prototype made it (spec 17).
  *
- * It also compares the app's sidebar with the sidebar of the book's
- * session-active.html, over the sidebar's region of the window.
+ * It also compares two regions of the book's session-active.html with the
+ * app's: the sidebar, and the main pane with the thread screen.
  *
  * It runs in two processes. This script, on Node:
  * - checks that the book's tokens.css and font files are byte-identical to
@@ -13,7 +13,7 @@
  *   differences with no clear cause;
  * - serves the sheets and runs Electron with scripts/bureau-capture.ts as its
  *   main file (see scripts/sheet-server.ts), which draws, captures and
- *   compares both pairs of sheets and prints the report;
+ *   compares each pair of sheets and prints the report;
  * - exits with Electron's exit code.
  *
  * It needs no build: the sheets are served from source.

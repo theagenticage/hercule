@@ -51,6 +51,7 @@ export {
   ApiError,
   ConnectionError,
   isNotFound,
+  readErrorMessage,
   readValidationIssues,
   RequestError,
 } from "./errors";
@@ -152,9 +153,20 @@ export {
   type GlyphTone,
 } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
-export { type AccessModeMenuItem } from "./threads/access-modes";
+export { ACCESS_MODES, formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
 export { buildApprovalCard } from "./threads/approval";
+export {
+  buildThreadBlocks,
+  type AgentBlock,
+  type EndingBlock,
+  type LiveBlock,
+  type ThreadBlock,
+  type UserBlock,
+  type WaitingBlock,
+  type WorkBlock,
+  type WorkItem,
+} from "./threads/blocks";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
 export type { LoginTarget } from "./threads/catalog";
 export {
@@ -174,8 +186,13 @@ export type {
   ThreadKind,
   ThreadPicks,
 } from "./threads/config";
-export { formatDuration } from "./threads/duration";
+export { findNextDurationChange, formatDuration } from "./threads/duration";
 export { buildHeadline, buildLanes, type Lane, type LaneKind } from "./threads/lanes";
+export {
+  describeMessageMeta,
+  describeWaitingNote,
+  formatMessageTime,
+} from "./threads/message-time";
 export { buildThreadModelField } from "./threads/model-field";
 export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
 export { findOpenItem } from "./threads/open-item";
@@ -187,7 +204,9 @@ export {
   type Pose,
   type ThreadRowEnd,
 } from "./threads/pose";
-export { mergeTranscript } from "./threads/transcript";
+export { createTailBuffer, type TailBuffer } from "./threads/tail-buffer";
+export { splitStreamingText, type StreamingText } from "./threads/streaming-text";
+export { findNewRows, mergeTranscript } from "./threads/transcript";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
@@ -195,6 +214,7 @@ export { decideRelatedReads, type RelatedReads } from "./threads/related-reads";
 export { formatRequestQuestion } from "./threads/request-question";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
+export { describeAgent } from "./threads/model-name";
 export {
   buildThreadGroups,
   type DraftPlace,
@@ -209,11 +229,16 @@ export {
   type SidebarSections,
   type WaitingSection,
 } from "./threads/sidebar-sections";
-export { buildSiblingTabs, type ThreadTab } from "./threads/siblings";
+export { buildSiblingTabs, listThreadTabs, type ThreadTab } from "./threads/siblings";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
 export { pickProjectHue, pickProjectTone, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
+export {
+  buildThreadWorkspaceLabel,
+  type ThreadWorkspaceLabelPiece,
+} from "./threads/thread-workspace";
+export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
 export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
   buildComposerPlaceholder,
@@ -235,8 +260,13 @@ export {
 export { buildRunnerMenu } from "./threads/runner-menu";
 export { buildSubmission } from "./threads/submission";
 export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread-defaults";
-export { describeThreadItem, describeTurnDivider, showsTurnDivider } from "./threads/turn-divider";
-export { buildTurns, type ThreadItem, type ThreadTurn } from "./threads/turns";
+export {
+  describeThreadItem,
+  describeTurnDivider,
+  describeTurnEnding,
+  showsTurnDivider,
+} from "./threads/turn-divider";
+export { buildTurns, mayBeRunningTurn, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

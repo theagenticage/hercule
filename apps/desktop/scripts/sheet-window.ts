@@ -35,6 +35,9 @@ export interface Rect {
 /** The sidebar's region of the window, in CSS pixels: its 272 px column, the full height. */
 export const SIDEBAR_REGION: Rect = { x: 0, y: 0, width: 272, height: HEIGHT };
 
+/** The main pane's region of the window, in CSS pixels: everything right of the sidebar, the full height. */
+export const MAIN_PANE_REGION: Rect = { x: 272, y: 0, width: WIDTH - 272, height: HEIGHT };
+
 /**
  * Opens `url` in a hidden window with a 1440 × 900 content area and waits
  * until the page sets `data-ready` on `<html>`. When `moduleUrl` is given,

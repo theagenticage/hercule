@@ -13,6 +13,7 @@ import {
   withBranch,
   buildWorkspaceMenu,
   type Thread,
+  readErrorMessage,
 } from "@hercule/client-core";
 import {
   localRunnerQuery,
@@ -23,7 +24,6 @@ import {
   sessionsQuery,
   workspacesQuery,
 } from "../../app/queries";
-import { readErrorMessage } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
 import { ComposerCard } from "./composer-card";
 import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";

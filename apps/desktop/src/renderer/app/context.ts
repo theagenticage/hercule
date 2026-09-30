@@ -22,8 +22,10 @@ export interface SavedController {
   readonly client: HerculeClient;
   /**
    * The live connection to the controller. It is created here and does not
-   * connect until the shell starts it (see `useLiveConnection`). Screens never
-   * touch the socket: pushes invalidate query keys.
+   * connect until the shell starts it (see `useLiveConnection`). Most screens
+   * never touch it: pushes invalidate query keys. The thread screen is the
+   * exception, and subscribes to its thread's stream and tap through
+   * `useThreadLive`.
    */
   readonly live: Live;
 }

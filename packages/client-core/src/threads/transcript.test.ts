@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
-import { mergeTranscript } from "./transcript";
+import { findNewRows, mergeTranscript } from "./transcript";
 
 const buildRow = (position: number): TranscriptRow => ({
   position,
@@ -44,5 +44,15 @@ describe("mergeTranscript", () => {
     // The same reference, so a cache that receives this delivery does not
     // notify its observers about rows it already had.
     expect(mergeTranscript(held, [buildRow(1), buildRow(2)])).toBe(held);
+  });
+});
+
+describe("findNewRows", () => {
+  it("returns the incoming rows the cache does not hold, in arrival order", () => {
+    expect(
+      listPositions(
+        findNewRows([buildRow(1), buildRow(2)], [buildRow(4), buildRow(2), buildRow(3)]),
+      ),
+    ).toEqual([4, 3]);
   });
 });

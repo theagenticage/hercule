@@ -9,6 +9,9 @@
  * - in the first two projects, one more thread, waiting on a Request;
  * - every other thread idle.
  *
+ * On request, `growTranscript` also plays turns into one idle thread until its
+ * transcript is long, and `streamTurn` streams a long answer into it.
+ *
  * An idle thread's row shows its age, and the perf script counts how often
  * the app's age clock fires while nothing happens. For that count to mean
  * something, every age on screen must be hours old, so that no label changes
@@ -32,7 +35,7 @@ import { promisify } from "node:util";
 import type { Project, Runner, Session } from "../../../packages/contract/src/index";
 import { connectFleet } from "../../../e2e/desktop/fleet.ts";
 import { completeSetup, ROOT, startController } from "../../../scripts/controller-process.ts";
-import type { ScriptedRunner } from "../../../scripts/scripted-runner.ts";
+import type { ScriptedRunner, ScriptStep } from "../../../scripts/scripted-runner.ts";
 
 /** The projects the threads are spread over, in the order they are created. */
 const PROJECT_NAMES = ["Webshop", "Payments", "Ops", "Docs"] as const;
@@ -64,7 +67,57 @@ const TWO_MINUTES_MS = 120_000;
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
 
+/** What the user asks in each turn `growTranscript` plays. */
+const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
+
+/**
+ * The agent's answer at the end of each turn `growTranscript` plays: a
+ * paragraph with inline code and bold, a list and a code block, so the
+ * transcript renders every kind of Markdown block a real answer has.
+ */
+const LONG_THREAD_ANSWER = [
+  "The checkout test fails because `fetchOrders` resolves after the test's timeout. " +
+    "The mock server answers in **120 ms**, and the test waits 100 ms.",
+  "",
+  "- The timeout comes from `vitest.config.ts`.",
+  "- The mock's delay comes from `mocks/orders.ts`.",
+  "- Nothing else in the suite waits on the mock server.",
+  "",
+  "```ts",
+  "const orders = await fetchOrders({ retry: 2 });",
+  "expect(orders).toHaveLength(3);",
+  "```",
+  "",
+  "I added a retry, and the test passes now.",
+].join("\n");
+
+/**
+ * Each turn `growTranscript` plays: a message, a command, a file change, the
+ * command again and the answer, which the transcript shows as a message, a
+ * work stretch and a message. The text is written without a delay between
+ * words, so the thread grows fast; nothing measures these turns.
+ */
+const LONG_THREAD_TURN: ReadonlyArray<ScriptStep> = [
+  { kind: "message", text: "Let me run the failing test first.", deltaMs: 0 },
+  { kind: "command", command: "pnpm test checkout" },
+  { kind: "file_change", path: "src/checkout/orders.test.ts" },
+  { kind: "command", command: "pnpm test checkout" },
+  { kind: "message", text: LONG_THREAD_ANSWER, deltaMs: 0 },
+  { kind: "end", state: "completed" },
+];
+
+/** What the user asks in the turn `streamTurn` plays. */
+const STREAM_QUESTION = "Explain where the time goes when a thread streams.";
+
 const runFile = promisify(execFile);
+
+/** A thread whose transcript `growTranscript` grew. */
+export interface LongThread {
+  readonly id: string;
+  readonly title: string;
+  /** How many rows its transcript holds. */
+  readonly rowCount: number;
+}
 
 /** A controller full of threads, and what the perf script does to it between launches. */
 export interface ThreadFixture {
@@ -93,6 +146,25 @@ export interface ThreadFixture {
   readonly nudge: () => void;
   /** Returns the process ID of the running controller, found by the port it listens on. */
   readonly readControllerPid: () => Promise<number>;
+  /**
+   * Plays turns into one idle thread until its transcript holds at least
+   * `rowCount` rows, and returns the thread. Each turn is the user's question
+   * and the agent's work and answer. The thread is idle again afterwards, so
+   * `prepareLaunch` finds every thread in the state it expects.
+   *
+   * The thread is the idle thread the controller lists first, which is in
+   * the first project. `prepareLaunch` sets that one the least far back of
+   * all the idle threads but the two-minute row, so it is among the first
+   * project's three newest idle threads, which the sidebar always shows.
+   */
+  readonly growTranscript: (rowCount: number) => Promise<LongThread>;
+  /**
+   * Sends the idle thread `sessionId` a question, which opens a turn, and
+   * streams one long answer of generated Markdown into that turn for `forMs`,
+   * a word every 2 ms, which is full speed. Resolves once the turn has
+   * completed.
+   */
+  readonly streamTurn: (sessionId: string, forMs: number) => Promise<void>;
 }
 
 /**
@@ -292,7 +364,61 @@ export async function runWithThreadFixture<T>(
         return Number(stdout.trim().split("\n")[0]);
       };
 
-      return await use({ url, growTo, prepareLaunch, nudge, readControllerPid });
+      /** Returns how many rows the transcript of the thread `sessionId` holds, reading every page. */
+      const countTranscriptRows = async (sessionId: string): Promise<number> => {
+        let count = 0;
+        let cursor: string | undefined;
+        do {
+          const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+          const page = await call<{
+            readonly items: readonly unknown[];
+            readonly nextCursor?: string;
+          }>("GET", `/sessions/${sessionId}/transcript?limit=${String(THREAD_PAGE)}${query}`);
+          count += page.items.length;
+          cursor = page.nextCursor;
+        } while (cursor !== undefined);
+        return count;
+      };
+
+      /** Waits until the thread `sessionId` is idle, so its next question opens a turn rather than queueing. */
+      const waitForIdle = (sessionId: string): Promise<void> =>
+        waitFor(
+          async () => (await call<Session>("GET", `/sessions/${sessionId}`)).status === "idle",
+          `thread ${sessionId} idle`,
+        );
+
+      const growTranscript = async (rowCount: number): Promise<LongThread> => {
+        const thread = (await listThreads()).find((candidate) => candidate.status === "idle");
+        if (thread === undefined) throw new Error("the controller has no idle thread to grow");
+        const runner = runnerBySessionId.get(thread.id)!;
+        let rows = await countTranscriptRows(thread.id);
+        while (rows < rowCount) {
+          await call("POST", `/sessions/${thread.id}/input`, { text: LONG_THREAD_QUESTION });
+          await runner.playScript(thread.id, LONG_THREAD_TURN);
+          await waitForIdle(thread.id);
+          rows = await countTranscriptRows(thread.id);
+        }
+        return { id: thread.id, title: thread.title, rowCount: rows };
+      };
+
+      const streamTurn = async (sessionId: string, forMs: number): Promise<void> => {
+        await call("POST", `/sessions/${sessionId}/input`, { text: STREAM_QUESTION });
+        await runnerBySessionId.get(sessionId)!.playScript(sessionId, [
+          { kind: "stream", forMs },
+          { kind: "end", state: "completed" },
+        ]);
+        await waitForIdle(sessionId);
+      };
+
+      return await use({
+        url,
+        growTo,
+        prepareLaunch,
+        nudge,
+        readControllerPid,
+        growTranscript,
+        streamTurn,
+      });
     } finally {
       await Promise.all(runners.map((runner) => runner.goOffline()));
       await controller.stop();

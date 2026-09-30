@@ -1,9 +1,8 @@
 import { Fragment, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { buildApprovalCard, type HerculeClient } from "@hercule/client-core";
+import { buildApprovalCard, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 import { cn, DecisionMark } from "@hercule/ui";
-import { readErrorMessage } from "../save-status";
 
 /**
  * The permission card: the request the session is parked on, docked onto the

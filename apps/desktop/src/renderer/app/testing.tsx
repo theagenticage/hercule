@@ -8,21 +8,26 @@
  * screens are the ones that ship, so a change to any of them shows up in the
  * tests.
  */
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
 import { stubWebSocketInto, type StubSocket } from "@hercule/client-core/testing";
 import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
-import type {
-  MutableLiveTopic,
-  OpenRequest,
-  Project,
-  ProviderInstance,
-  Resource,
-  Runner,
-  Session,
-  Workspace,
+import {
+  buildSessionStreamTopic,
+  buildSessionTapTopic,
+  type Input,
+  type MutableLiveTopic,
+  type OpenRequest,
+  type Project,
+  type ProviderInstance,
+  type Resource,
+  type Runner,
+  type Session,
+  type TapItem,
+  type TranscriptRow,
+  type Workspace,
 } from "@hercule/contract";
 import type { Bridge, EncodedIpcPayload } from "../../ipc/bridge";
 import type { ControllerUrlSaveOutcome } from "../../ipc/contract";
@@ -254,6 +259,47 @@ const APPROVAL_REQUEST: OpenRequest = {
   detail: { command: "git push" },
 };
 
+/** The fixture threads, one per `FIXTURE_THREAD_IDS` entry. */
+const FIXTURE_THREADS = {
+  runbook: buildFixtureThread({
+    id: FIXTURE_THREAD_IDS.runbook,
+    title: "Write the retry runbook",
+    status: "busy",
+    openRequest: APPROVAL_REQUEST,
+    projectId: WORLD.WEBSHOP_PROJECT.id,
+    workspaceId: WORLD.THREAD_3F1.id,
+    lastActivityAt: "2026-09-10T09:05:00.000Z",
+  }),
+  flaky: buildFixtureThread({
+    id: FIXTURE_THREAD_IDS.flaky,
+    title: "Fix flaky webhook tests",
+    status: "busy",
+    projectId: WORLD.WEBSHOP_PROJECT.id,
+    workspaceId: WORLD.THREAD_3F1.id,
+    lastActivityAt: "2026-09-10T09:04:00.000Z",
+  }),
+  bunPin: buildFixtureThread({
+    id: FIXTURE_THREAD_IDS.bunPin,
+    title: "Bump the Bun pin",
+    projectId: WORLD.WEBSHOP_PROJECT.id,
+    workspaceId: WORLD.PRIMARY.id,
+    lastActivityAt: "2026-09-10T09:03:00.000Z",
+  }),
+  backupsKey: buildFixtureThread({
+    id: FIXTURE_THREAD_IDS.backupsKey,
+    title: "Rotate the backups key",
+    status: "exited",
+    projectId: WORLD.OPS_PROJECT.id,
+    exitedAt: "2026-09-10T09:02:00.000Z",
+    lastActivityAt: "2026-09-10T09:02:00.000Z",
+  }),
+  pricingPage: buildFixtureThread({
+    id: FIXTURE_THREAD_IDS.pricingPage,
+    title: "Sketch the pricing page",
+    lastActivityAt: "2026-09-10T09:01:00.000Z",
+  }),
+};
+
 /**
  * A sidebar with something in every place: two projects, a worktree two
  * threads share, a main workspace, a thread with no workspace, and a thread
@@ -263,43 +309,11 @@ const APPROVAL_REQUEST: OpenRequest = {
  */
 export const SIDEBAR_FIXTURE: SidebarRecords = {
   threads: [
-    buildFixtureThread({
-      id: FIXTURE_THREAD_IDS.runbook,
-      title: "Write the retry runbook",
-      status: "busy",
-      openRequest: APPROVAL_REQUEST,
-      projectId: WORLD.WEBSHOP_PROJECT.id,
-      workspaceId: WORLD.THREAD_3F1.id,
-      lastActivityAt: "2026-09-10T09:05:00.000Z",
-    }),
-    buildFixtureThread({
-      id: FIXTURE_THREAD_IDS.flaky,
-      title: "Fix flaky webhook tests",
-      status: "busy",
-      projectId: WORLD.WEBSHOP_PROJECT.id,
-      workspaceId: WORLD.THREAD_3F1.id,
-      lastActivityAt: "2026-09-10T09:04:00.000Z",
-    }),
-    buildFixtureThread({
-      id: FIXTURE_THREAD_IDS.bunPin,
-      title: "Bump the Bun pin",
-      projectId: WORLD.WEBSHOP_PROJECT.id,
-      workspaceId: WORLD.PRIMARY.id,
-      lastActivityAt: "2026-09-10T09:03:00.000Z",
-    }),
-    buildFixtureThread({
-      id: FIXTURE_THREAD_IDS.backupsKey,
-      title: "Rotate the backups key",
-      status: "exited",
-      projectId: WORLD.OPS_PROJECT.id,
-      exitedAt: "2026-09-10T09:02:00.000Z",
-      lastActivityAt: "2026-09-10T09:02:00.000Z",
-    }),
-    buildFixtureThread({
-      id: FIXTURE_THREAD_IDS.pricingPage,
-      title: "Sketch the pricing page",
-      lastActivityAt: "2026-09-10T09:01:00.000Z",
-    }),
+    FIXTURE_THREADS.runbook,
+    FIXTURE_THREADS.flaky,
+    FIXTURE_THREADS.bunPin,
+    FIXTURE_THREADS.backupsKey,
+    FIXTURE_THREADS.pricingPage,
   ],
   projects: [WORLD.WEBSHOP_PROJECT, WORLD.OPS_PROJECT],
   workspaces: [{ ...WORLD.PRIMARY, sessionIds: [FIXTURE_THREAD_IDS.bunPin] }, WORLD.THREAD_3F1],
@@ -307,6 +321,367 @@ export const SIDEBAR_FIXTURE: SidebarRecords = {
   runners: [WORLD.MOSS],
   providers: [],
   username: "rogier",
+};
+
+/** A thread as the stubbed controller holds it: its session, its transcript and its inputs. */
+export interface ThreadRecords {
+  readonly session: Session;
+  /** The transcript's rows, in position order. */
+  readonly transcript: readonly TranscriptRow[];
+  /** Every input the session was given, oldest first, whatever its status. */
+  readonly inputs: readonly Input[];
+}
+
+/** A provider event, as a transcript row holds it. */
+type ProviderEvent = TranscriptRow["event"];
+
+/** Removes the fields every event has from each event type of `Event`. */
+type OmitEventBase<Event> = Event extends unknown
+  ? Omit<Event, "eventId" | "sessionId" | "at">
+  : never;
+
+/**
+ * A provider event without the fields every event has, which `buildTranscript`
+ * and `buildNextRows` fill in.
+ */
+export type EventBody = OmitEventBase<ProviderEvent>;
+
+/** One event of a fixture transcript, and how many seconds after the transcript's start it happened. */
+type TranscriptStep = readonly [seconds: number, event: EventBody];
+
+/**
+ * Returns the transcript rows of `steps` for the session `sessionId`, with
+ * positions from 1 and times counted from `startAt`.
+ */
+const buildTranscript = (
+  sessionId: string,
+  startAt: string,
+  steps: readonly TranscriptStep[],
+): TranscriptRow[] =>
+  steps.map(([seconds, body], index) => {
+    const at = new Date(Date.parse(startAt) + seconds * 1000).toISOString();
+    return {
+      position: index + 1,
+      at,
+      event: { ...body, eventId: `event-${index + 1}`, sessionId, at },
+    };
+  });
+
+/**
+ * Returns the rows that follow `thread`'s transcript, one per body, as the
+ * thread's stream delivers them. Positions continue from the last row, and
+ * every row has the last row's time. Throws when the thread has no rows.
+ */
+export const buildNextRows = (thread: ThreadRecords, ...bodies: EventBody[]): TranscriptRow[] => {
+  const last = thread.transcript.at(-1);
+  if (last === undefined) throw new Error("buildNextRows needs a thread with at least one row.");
+  const sessionId = thread.session.id;
+  return bodies.map((body, index) => {
+    const position = last.position + index + 1;
+    return {
+      position,
+      at: last.at,
+      event: { ...body, eventId: `event-${position}`, sessionId, at: last.at },
+    };
+  });
+};
+
+/** Returns the steps of a user message: its item starts and completes at once, holding the text. */
+const writeUserMessage = (seconds: number, turnId: string, text: string): TranscriptStep[] => {
+  const item = {
+    turnId,
+    itemId: `${turnId}-user`,
+    kind: "user_message",
+    detail: { text },
+  } as const;
+  return [
+    [seconds, { _tag: "item.started", ...item }],
+    [seconds, { _tag: "item.completed", ...item, status: "completed" }],
+  ];
+};
+
+/**
+ * Returns the steps of one item that runs from `from` to `to` seconds: its
+ * start, the text it streams (as one row, as the controller stores a short
+ * item's text) and its completion. `text` is left out for an item that
+ * streams none.
+ */
+const runItem = (
+  [from, to]: readonly [number, number],
+  item: {
+    readonly turnId: string;
+    readonly itemId: string;
+    readonly kind: Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+    readonly detail?: Record<string, string>;
+    readonly text?: { readonly streamKind: TapItem["streamKind"]; readonly delta: string };
+  },
+): TranscriptStep[] => {
+  const { text, ...fields } = item;
+  return [
+    [from, { _tag: "item.started", ...fields }],
+    ...(text === undefined
+      ? []
+      : [
+          [
+            to,
+            { _tag: "content.delta", turnId: item.turnId, itemId: item.itemId, ...text },
+          ] as const,
+        ]),
+    [to, { _tag: "item.completed", ...fields, status: "completed" }],
+  ];
+};
+
+/** Returns an input the user sent to `sessionId` at `createdAt`, still queued. */
+const buildQueuedInput = (
+  id: string,
+  sessionId: string,
+  text: string,
+  createdAt: string,
+): Input => ({
+  id,
+  sessionId,
+  source: "user",
+  actor: "user",
+  text,
+  status: "queued",
+  delivery: null,
+  createdAt,
+  deliveredAt: null,
+  sentAt: null,
+  reason: null,
+});
+
+/** The item the running fixture thread's agent is writing, for a test that taps text into it. */
+export const RUNNING_ITEM_ID = "turn-1-answer";
+
+/** The rows of the running fixture thread, whose agent is writing its answer. */
+const RUNNING_TRANSCRIPT = buildTranscript(FIXTURE_THREAD_IDS.flaky, "2026-09-10T09:03:30.000Z", [
+  [0, { _tag: "turn.started", turnId: "turn-1", model: "claude-sonnet-5" }],
+  ...writeUserMessage(
+    0,
+    "turn-1",
+    "The webhook tests fail about one run in five. Find out why and fix it.",
+  ),
+  ...runItem([2, 21], {
+    turnId: "turn-1",
+    itemId: "turn-1-rerun",
+    kind: "command_execution",
+    detail: { command: "bun test test/webhooks --rerun-each 20" },
+    text: { streamKind: "command_output", delta: "57 pass\n3 fail\n" },
+  }),
+  [
+    22,
+    { _tag: "item.started", turnId: "turn-1", itemId: RUNNING_ITEM_ID, kind: "assistant_message" },
+  ],
+  [
+    24,
+    {
+      _tag: "content.delta",
+      turnId: "turn-1",
+      itemId: RUNNING_ITEM_ID,
+      streamKind: "assistant_text",
+      delta: "The three failures share one cause: ",
+    },
+  ],
+]);
+
+/**
+ * The fixture threads' records, for a test that opens a thread. Each thread
+ * is the sidebar fixture's thread of the same name, so the sidebar and the
+ * thread agree. Stub them with `buildThreadHandlers`.
+ */
+export const THREAD_FIXTURES = {
+  /**
+   * "Bump the Bun pin", idle: one finished turn with a user message, two
+   * commands, an agent message, three edits, two more commands and a final
+   * agent message in markdown.
+   */
+  finished: {
+    session: FIXTURE_THREADS.bunPin,
+    transcript: buildTranscript(FIXTURE_THREAD_IDS.bunPin, "2026-09-10T09:00:00.000Z", [
+      [0, { _tag: "turn.started", turnId: "turn-1", model: "claude-sonnet-5" }],
+      ...writeUserMessage(0, "turn-1", "Bump the Bun pin to 1.3.2 and make sure CI still passes."),
+      ...runItem([2, 5], {
+        turnId: "turn-1",
+        itemId: "turn-1-reasoning",
+        kind: "reasoning",
+        text: { streamKind: "reasoning_text", delta: "Find every place the version is pinned." },
+      }),
+      ...runItem([5, 6], {
+        turnId: "turn-1",
+        itemId: "turn-1-cat",
+        kind: "command_execution",
+        detail: { command: "cat .bun-version" },
+        text: { streamKind: "command_output", delta: "1.3.1\n" },
+      }),
+      ...runItem([6, 8], {
+        turnId: "turn-1",
+        itemId: "turn-1-search",
+        kind: "command_execution",
+        detail: { command: "rg -l 1.3.1 --glob '!node_modules'" },
+        text: {
+          streamKind: "command_output",
+          delta: ".bun-version\n.github/workflows/ci.yml\n.github/workflows/release.yml\n",
+        },
+      }),
+      ...runItem([9, 12], {
+        turnId: "turn-1",
+        itemId: "turn-1-plan",
+        kind: "assistant_message",
+        text: {
+          streamKind: "assistant_text",
+          delta: "The pin lives in `.bun-version` and in two workflows. I'll update all three.",
+        },
+      }),
+      ...runItem([13, 14], {
+        turnId: "turn-1",
+        itemId: "turn-1-edit-version",
+        kind: "file_change",
+        detail: { path: ".bun-version" },
+      }),
+      ...runItem([14, 16], {
+        turnId: "turn-1",
+        itemId: "turn-1-edit-ci",
+        kind: "file_change",
+        detail: { path: ".github/workflows/ci.yml" },
+      }),
+      ...runItem([16, 18], {
+        turnId: "turn-1",
+        itemId: "turn-1-edit-release",
+        kind: "file_change",
+        detail: { path: ".github/workflows/release.yml" },
+      }),
+      ...runItem([19, 41], {
+        turnId: "turn-1",
+        itemId: "turn-1-install",
+        kind: "command_execution",
+        detail: { command: "bun install" },
+        text: { streamKind: "command_output", delta: "412 packages installed [21.40s]\n" },
+      }),
+      ...runItem([41, 128], {
+        turnId: "turn-1",
+        itemId: "turn-1-test",
+        kind: "command_execution",
+        detail: { command: "bun test" },
+        text: { streamKind: "command_output", delta: "1204 pass\n0 fail\n" },
+      }),
+      ...runItem([129, 134], {
+        turnId: "turn-1",
+        itemId: "turn-1-answer",
+        kind: "assistant_message",
+        text: {
+          streamKind: "assistant_text",
+          delta:
+            "Done. The pin is now **1.3.2** in:\n\n- `.bun-version`\n- `.github/workflows/ci.yml`\n- `.github/workflows/release.yml`\n\n`bun install` and `bun test` pass.",
+        },
+      }),
+      [134, { _tag: "turn.completed", turnId: "turn-1", state: "completed" }],
+    ]),
+    inputs: [],
+  },
+  /**
+   * "Fix flaky webhook tests", busy: a turn that ran one command and whose
+   * agent is writing its answer, `RUNNING_ITEM_ID`, with the first words
+   * stored.
+   */
+  running: { session: FIXTURE_THREADS.flaky, transcript: RUNNING_TRANSCRIPT, inputs: [] },
+  /**
+   * "Write the retry runbook", busy and waiting on the user: the agent wrote
+   * a file, said so, and asks to run `git push` (the session's open Request).
+   */
+  waiting: {
+    session: FIXTURE_THREADS.runbook,
+    transcript: buildTranscript(FIXTURE_THREAD_IDS.runbook, "2026-09-10T08:55:00.000Z", [
+      [0, { _tag: "turn.started", turnId: "turn-1", model: "claude-sonnet-5" }],
+      ...writeUserMessage(
+        0,
+        "turn-1",
+        "Write a runbook for retrying failed webhook deliveries, then push it.",
+      ),
+      ...runItem([3, 40], {
+        turnId: "turn-1",
+        itemId: "turn-1-edit",
+        kind: "file_change",
+        detail: { path: "docs/runbooks/retry.md" },
+      }),
+      ...runItem([41, 43], {
+        turnId: "turn-1",
+        itemId: "turn-1-note",
+        kind: "assistant_message",
+        text: { streamKind: "assistant_text", delta: "The runbook is written. Pushing it now." },
+      }),
+      [
+        44,
+        {
+          _tag: "item.started",
+          turnId: "turn-1",
+          itemId: APPROVAL_REQUEST.itemId,
+          kind: "command_execution",
+          detail: { command: "git push" },
+        },
+      ],
+      [44, { _tag: "request.opened", request: APPROVAL_REQUEST }],
+    ]),
+    inputs: [],
+  },
+  /** The running thread with two messages queued behind its turn, oldest first. */
+  queued: {
+    session: FIXTURE_THREADS.flaky,
+    transcript: RUNNING_TRANSCRIPT,
+    inputs: [
+      buildQueuedInput(
+        "01a06d02-7700-7000-8000-000000000001",
+        FIXTURE_THREAD_IDS.flaky,
+        "Also check the retry test while you are there.",
+        "2026-09-10T09:03:50.000Z",
+      ),
+      buildQueuedInput(
+        "01a06d02-7700-7000-8000-000000000002",
+        FIXTURE_THREAD_IDS.flaky,
+        "And keep the fix to the webhooks package.",
+        "2026-09-10T09:03:58.000Z",
+      ),
+    ],
+  },
+  /** "Sketch the pricing page", idle: a turn that failed after its first command. */
+  failed: {
+    session: FIXTURE_THREADS.pricingPage,
+    transcript: buildTranscript(FIXTURE_THREAD_IDS.pricingPage, "2026-09-10T09:00:30.000Z", [
+      [0, { _tag: "turn.started", turnId: "turn-1", model: "claude-sonnet-5" }],
+      ...writeUserMessage(0, "turn-1", "Sketch the pricing page: three tiers, monthly and yearly."),
+      ...runItem([2, 3], {
+        turnId: "turn-1",
+        itemId: "turn-1-list",
+        kind: "command_execution",
+        detail: { command: "ls src/pages" },
+        text: { streamKind: "command_output", delta: "index.tsx\nabout.tsx\n" },
+      }),
+      [
+        4,
+        {
+          _tag: "turn.completed",
+          turnId: "turn-1",
+          state: "failed",
+          error: "The provider stopped answering: rate limit reached.",
+        },
+      ],
+    ]),
+    inputs: [],
+  },
+} satisfies Readonly<Record<string, ThreadRecords>>;
+
+/**
+ * Returns the handlers that answer a thread's reads from `thread`: its
+ * session, its transcript as one page, and its inputs, newest first, as the
+ * app asks for them.
+ */
+export const buildThreadHandlers = (thread: ThreadRecords): Readonly<Record<string, Handler>> => {
+  const path = `/api/v1/sessions/${thread.session.id}`;
+  return {
+    [`GET ${path}`]: { body: thread.session },
+    [`GET ${path}/transcript`]: { body: { items: thread.transcript } },
+    [`GET ${path}/inputs`]: { body: { items: [...thread.inputs].reverse() } },
+  };
 };
 
 /**
@@ -374,9 +749,68 @@ export interface LiveStub {
    * `topic`.
    */
   readonly pushInvalidation: (topic: MutableLiveTopic, ids?: readonly string[]) => void;
+  /**
+   * Sends the app stored rows on its subscription to `session:<sessionId>:stream`,
+   * with the last row's position as the cursor, as the controller does.
+   * Throws when the app has no socket or no such subscription.
+   */
+  readonly pushStreamRows: (sessionId: string, rows: readonly TranscriptRow[]) => void;
+  /**
+   * Sends the app an empty replay on its subscription to
+   * `session:<sessionId>:stream`, with the subscription's cursor. The
+   * controller answers every stream subscription with the rows written after
+   * its cursor first, even when there are none, so the rows pushed after the
+   * replay are live rows. Throws when the app has no socket or no such
+   * subscription.
+   */
+  readonly pushEmptyReplay: (sessionId: string) => void;
+  /**
+   * Sends the app token deltas on its subscription to `session:<sessionId>:tap`.
+   * Throws when the app has no socket or no such subscription.
+   */
+  readonly pushTaps: (sessionId: string, taps: readonly TapItem[]) => void;
+  /**
+   * Rejects the cursor of the app's subscription to `session:<sessionId>:stream`,
+   * as the controller does when the transcript's log was replaced. The live
+   * connection then tells the app to read the transcript again, and
+   * subscribes again from the head.
+   */
+  readonly resetStream: (sessionId: string) => void;
   /** Closes the app's current socket from the controller's end, as a restart or a sleep does. */
   readonly drop: () => void;
 }
+
+/**
+ * Creates an empty `localStorage` held in memory.
+ *
+ * Under the Node versions this repository runs on, Node's own
+ * `localStorage`, which is missing unless Node is given a file to keep it in,
+ * hides jsdom's. So each test gets this one, and nothing one test stores,
+ * such as the last open thread, reaches the next.
+ */
+const createMemoryStorage = (): Storage => {
+  const held = new Map<string, string>();
+  return {
+    getItem: (key) => held.get(key) ?? null,
+    setItem: (key, value) => {
+      held.set(key, String(value));
+    },
+    removeItem: (key) => {
+      held.delete(key);
+    },
+    clear: () => {
+      held.clear();
+    },
+    key: (index) => [...held.keys()][index] ?? null,
+    get length() {
+      return held.size;
+    },
+  };
+};
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", createMemoryStorage());
+});
 
 /**
  * The live connections the current test's app built. A connection keeps its
@@ -427,6 +861,39 @@ const buildTestContext = async (
     pushInvalidation: (topic, ids = []) => {
       readSocket().push(topic, { _tag: "invalidate", ids, kind: "updated" });
     },
+    pushStreamRows: (sessionId, rows) => {
+      const last = rows.at(-1);
+      readSocket().push(buildSessionStreamTopic(sessionId), {
+        _tag: "delta",
+        ...(last === undefined ? {} : { cursor: String(last.position) }),
+        items: rows,
+      });
+    },
+    pushEmptyReplay: (sessionId) => {
+      const socket = readSocket();
+      const topic = buildSessionStreamTopic(sessionId);
+      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
+      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
+      const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
+      const cursor = (call?.payload as { readonly cursor?: string } | undefined)?.cursor;
+      socket.push(topic, { _tag: "delta", cursor, items: [] });
+    },
+    pushTaps: (sessionId, taps) => {
+      readSocket().push(buildSessionTapTopic(sessionId), { _tag: "delta", items: taps });
+    },
+    resetStream: (sessionId) => {
+      const socket = readSocket();
+      const topic = buildSessionStreamTopic(sessionId);
+      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
+      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
+      socket.fail(held.requestId, {
+        error: {
+          code: "validation",
+          message: "cursor is past the end of the log",
+          details: { issues: [] },
+        },
+      });
+    },
     drop: () => {
       readSocket().drop();
     },
@@ -459,17 +926,18 @@ export const startApp = async (fake: FakeBridge): Promise<RenderedApp> => {
  * renders it once the first navigation, entry guard included, has settled.
  * Stub the API with `stubApi` first.
  *
- * The app starts at `path`, `/` by default. A desktop window always starts at
- * `/`; another path lets a test open a screen, such as a thread at
+ * The app starts where it would at launch, unless `path` is given: at `/`,
+ * or at the last open thread when one is stored for the controller (see
+ * `last-thread.ts`). A path lets a test open a screen, such as a thread at
  * `/threads/<id>`, without clicking its way there.
  */
 export const renderApp = async (
   fake: FakeBridge,
-  { path = "/" }: { readonly path?: string } = {},
+  { path }: { readonly path?: string } = {},
 ): Promise<RenderedApp> => {
   const { context, live } = await buildTestContext(fake);
   const router = createAppRouter(context);
-  if (path !== "/") router.history.replace(path);
+  if (path !== undefined) router.history.replace(path);
   await router.load();
   render(<RouterProvider router={router} />);
   return { router, context, live };

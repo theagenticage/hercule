@@ -3,11 +3,17 @@
  *
  * - `showsTurnDivider(turn, live)` decides whether the turn shows one;
  * - `describeTurnDivider(turn, live, now)` returns its words;
+ * - `describeTurnEnding(turn)` returns the words for how a turn ended;
  * - `describeThreadItem(item)` returns the line an opened divider lists for
  *   one tool item.
  */
 import { describe, expect, it } from "vitest";
-import { describeThreadItem, describeTurnDivider, showsTurnDivider } from "./turn-divider";
+import {
+  describeThreadItem,
+  describeTurnDivider,
+  describeTurnEnding,
+  showsTurnDivider,
+} from "./turn-divider";
 import type { ThreadItem, ThreadTurn } from "./turns";
 
 const STARTED_AT = "2026-09-08T10:00:00.000Z";
@@ -76,6 +82,16 @@ describe("describeTurnDivider", () => {
     const turn = buildTurn({ duration: null, endState: null });
 
     expect(describeTurnDivider(turn, false, 0)).toBe("Cut short");
+  });
+});
+
+describe("describeTurnEnding", () => {
+  it.each([
+    [{ endState: "interrupted", duration: 4_000 }, "Stopped after 4s"],
+    [{ endState: "failed", duration: 4_000 }, "Failed after 4s"],
+    [{ endState: null, duration: null }, "Cut short"],
+  ] as const)("describes the ending %o as %s", (ending, words) => {
+    expect(describeTurnEnding(ending)).toBe(words);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   buildTurns,
   chooseStamps,
   findAnsweredAssistantId,
+  mayBeRunningTurn,
   type HerculeClient,
   type Live,
 } from "@hercule/client-core";
@@ -129,17 +130,19 @@ export function ThreadScreen({
             conversation. */}
         <div className="flex flex-1 flex-col gap-6 pb-4">
           {turns.map((turn, index) => {
-            // Only the last turn of a busy session can still be running.
+            // Only the last turn can still be running.
             //
             // - An earlier turn with no `turn.completed` was abandoned by an
             //   interrupt.
-            // - An unfinished last turn on an idle or exited session was
-            //   abandoned by the runner.
+            // - An unfinished last turn on a session that runs no harness
+            //   was abandoned by the runner. A session that reads `idle` has
+            //   only not been read again since the turn started.
             //
-            // Neither is running, so both show as finished with no duration,
-            // rather than as working since they were last updated.
+            // Neither abandoned turn is running, so both show as finished
+            // with no duration, rather than as working since they were last
+            // updated.
             const isLive =
-              session.status === "busy" && index === lastIndex && turn.duration === null;
+              mayBeRunningTurn(session.status) && index === lastIndex && turn.duration === null;
             return (
               <Turn
                 key={turn.turnId}

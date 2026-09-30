@@ -262,7 +262,7 @@ describe("Settings > Threads defaults", () => {
     const group = await screen.findByRole("radiogroup", { name: /access mode/i });
     expect(within(group).getAllByRole("radio")).toHaveLength(4);
 
-    await user.click(within(group).getByRole("radio", { name: "auto" }));
+    await user.click(within(group).getByRole("radio", { name: "Auto" }));
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);

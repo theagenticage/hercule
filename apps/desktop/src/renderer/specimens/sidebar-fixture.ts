@@ -14,12 +14,23 @@
  * (sidebar-states-fixture.ts) builds its threads on the same runner, from the
  * same model catalogs.
  */
-import type { OpenRequest, Project, ProviderInstance, Runner, Session } from "@hercule/contract";
+import type {
+  ModelOption,
+  OpenRequest,
+  Project,
+  ProviderInstance,
+  Runner,
+  Session,
+} from "@hercule/contract";
 import { buildProject, buildRunner, buildSession } from "@hercule/client-core/threads/testing";
 import type { SidebarRecords } from "./sidebar-page";
 
-/** The moment the specimen's clock stands still at: 2026-09-29 09:00 UTC. */
-export const SPECIMEN_NOW = Date.UTC(2026, 8, 29, 9, 0, 0);
+/**
+ * The moment the specimen's clock stands still at: 2026-09-29 09:41 UTC, ten
+ * minutes after the Fix thread's Request opened, as the book's "Waiting on
+ * you since 09:31 · 10m" has it. Every other time is counted back from it.
+ */
+export const SPECIMEN_NOW = Date.UTC(2026, 8, 29, 9, 41, 0);
 
 /**
  * The ids of the two threads waiting on the user. Each id hashes, through
@@ -35,19 +46,50 @@ export const SPECIMEN_NOW = Date.UTC(2026, 8, 29, 9, 0, 0);
 export const FIX_THREAD_ID = "01a0ec64-6e80-7000-8000-000000000024";
 export const MIGRATE_THREAD_ID = "01a0ec64-6e80-7000-8000-000000000019";
 
-/** A model a thread runs: the provider instance, the model's slug, and the name its catalog gives it. */
+/**
+ * A model a thread runs: the provider instance, the model's slug, the name
+ * its catalog gives it, and the options its catalog offers.
+ */
 export interface SpecimenModel {
   readonly instanceId: string;
   readonly slug: string;
   readonly name: string;
+  readonly options: ReadonlyArray<ModelOption>;
 }
 
 export const CLAUDE_SONNET: SpecimenModel = {
   instanceId: "i-claude",
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
+  options: [],
 };
-export const GPT: SpecimenModel = { instanceId: "i-codex", slug: "gpt-5.4", name: "GPT-5.4" };
+
+/** The model of the thread the thread specimen opens, with the effort option Claude Code reports. */
+export const CLAUDE_OPUS: SpecimenModel = {
+  instanceId: "i-claude",
+  slug: "claude-opus-5-5",
+  name: "Opus 5.5",
+  options: [
+    {
+      id: "effort",
+      label: "Effort",
+      kind: "select",
+      choices: [
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+      ],
+      default: "medium",
+    },
+  ],
+};
+
+export const GPT: SpecimenModel = {
+  instanceId: "i-codex",
+  slug: "gpt-5.4",
+  name: "GPT-5.4",
+  options: [],
+};
 
 /** One thread of the book's sidebar, and what the fixture gives it. */
 interface SpecimenThread {
@@ -215,7 +257,7 @@ const buildInstance = (
       harnessVersion: null,
       versionVerdict: "unknown",
       auth: { status: "ok" },
-      models: models.map(({ slug, name }) => ({ slug, name, options: [] })),
+      models: models.map(({ slug, name, options }) => ({ slug, name, options })),
     },
   ],
   createdAt: new Date(SPECIMEN_NOW).toISOString(),
@@ -224,7 +266,10 @@ const buildInstance = (
 
 /** The two provider instances, whose catalogs give the threads' models their names. */
 export const SPECIMEN_INSTANCES: ReadonlyArray<ProviderInstance> = [
-  buildInstance(CLAUDE_SONNET.instanceId, "claude-code", "Claude Code", [CLAUDE_SONNET]),
+  buildInstance(CLAUDE_SONNET.instanceId, "claude-code", "Claude Code", [
+    CLAUDE_SONNET,
+    CLAUDE_OPUS,
+  ]),
   buildInstance(GPT.instanceId, "codex", "Codex", [GPT]),
 ];
 

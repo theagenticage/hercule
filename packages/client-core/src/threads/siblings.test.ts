@@ -4,7 +4,7 @@
  * sorting by activity, and a draft that joins the workspace is the last tab.
  */
 import { describe, expect, it } from "vitest";
-import { buildSiblingTabs } from "./siblings";
+import { buildSiblingTabs, listThreadTabs } from "./siblings";
 import { THREAD_3F1, buildSession } from "./workspaces.testing";
 
 const SESSIONS = [
@@ -63,5 +63,41 @@ describe("buildSiblingTabs", () => {
     });
 
     expect(tabs.map((tab) => tab.sessionId)).toEqual(["s-flaky", "s-runbook"]);
+  });
+});
+
+describe("listThreadTabs", () => {
+  const FLAKY = SESSIONS[1]!;
+  const RUNBOOK = SESSIONS[0]!;
+  const IN_3F1 = { workspaceId: THREAD_3F1.id };
+
+  it("gives a thread with no workspace one tab, its own", () => {
+    expect(listThreadTabs(FLAKY, SESSIONS, [THREAD_3F1])).toEqual([FLAKY]);
+  });
+
+  it("gives a thread whose workspace is not listed one tab, its own", () => {
+    expect(listThreadTabs({ ...FLAKY, ...IN_3F1 }, SESSIONS, [])).toEqual([
+      { ...FLAKY, ...IN_3F1 },
+    ]);
+  });
+
+  it("keeps the workspace's order, and shows the open thread as it was passed in", () => {
+    const open = { ...FLAKY, ...IN_3F1, title: "Fix the flaky webhook tests" };
+
+    expect(listThreadTabs(open, SESSIONS, [THREAD_3F1])).toEqual([open, RUNBOOK]);
+  });
+
+  it("skips a thread of the workspace that is not in the thread list", () => {
+    const workspace = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] };
+    const open = { ...FLAKY, ...IN_3F1 };
+
+    expect(listThreadTabs(open, SESSIONS, [workspace])).toEqual([open, RUNBOOK]);
+  });
+
+  it("puts an exited thread, which its workspace no longer lists, last", () => {
+    const workspace = { ...THREAD_3F1, sessionIds: ["s-runbook"] };
+    const open = { ...FLAKY, ...IN_3F1, status: "exited" as const };
+
+    expect(listThreadTabs(open, SESSIONS, [workspace])).toEqual([RUNBOOK, open]);
   });
 });

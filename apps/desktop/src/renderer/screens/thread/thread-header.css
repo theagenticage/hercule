@@ -1,0 +1,80 @@
+/* The thread header: pills that float over the transcript, with no bar
+   behind them. The rules are the Bureau book's `.top`, `.pill-crumb` and
+   `.ptab`. Each departure from the book says why. */
+.top {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+/* The book takes clicks on every child of the header (`.top > *`), the
+   spacer included. Here only the pills take them, so the wheel and the
+   pointer reach the transcript between the pills.
+
+   The pills sit inside the shell's drag strip, the top 52px of the window,
+   so each one opts out of it to take clicks. */
+.top > .pill {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.pill-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.pill-crumb::after {
+  content: "/";
+  margin-left: 2px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+/* A thread of this workspace, as a tab: its state mark, its title, and an
+   age when idle. */
+.ptab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.ptab:hover {
+  background: var(--hover);
+}
+.ptab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ptab small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* Not in the book, whose titles are short. When the header runs out of
+   room, the tabs' pill shrinks and the pills on the right keep their place:
+   the project's name and each title ellipsize, and the marks, the ages and
+   the `+` keep their size. */
+.top > nav.pill,
+.pill-crumb,
+.ptab {
+  min-width: 0;
+}
+.ptab small {
+  flex: none;
+}
+.ptab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

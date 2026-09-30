@@ -301,6 +301,7 @@ const make = Effect.gen(function* () {
     branch: checkout.branch,
     branches: checkout.branches,
     defaultBranch: checkout.defaultBranch,
+    baseBranch: checkout.baseBranch,
   });
 
   /**

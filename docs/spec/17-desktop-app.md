@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 4 are built. Slices 5 to 8 are not.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 5 are built. Slices 6 to 8 are not.
 
 ## Scope of the first milestone
 
@@ -123,7 +123,7 @@ Measured 2026-09-29 against Electron 44.4.5:
     - Otherwise the check passes: main saves the URL and reloads the window, so the new CSP names the new controller.
 - **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again.
 - **A controller that does not answer at launch** is treated as down after 5 seconds. A connection can be accepted and never answered, and neither Chromium nor the client gives up on its own. While the app waits, and only once the wait is noticeable, it shows the lockup, "Connecting to `<url>`…", and a Change button that leads to the connect screen.
-- **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. Slice 6, which adds the composer, gives those two a limit above that wait. A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
+- **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. ~~Slice 6, which adds the composer, gives those two a limit above that wait.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): slice 5 gives those two a limit of 15 seconds, above that wait, because its queued rows already steer.)* A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
 - **Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.
 - **Changing controllers.** Changing the controller deletes the stored token (see [Auth and the token](#auth-and-the-token)).
 - **A screen that fails** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* shows spec 14's "This screen did not load" screen ([./14-web-app.md](./14-web-app.md), the row "A screen that threw while rendering"), with the failure's own message. It covers a read that fails as well as a render that throws. It differs from the web app's in two ways:
@@ -273,7 +273,9 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The window cannot be made smaller than 800 × 500 pt. Below a width of 776 an empty thread's composer no longer fits the main pane, and below a height of 440 its start cards no longer fit.
 - **Window state is remembered:** size, position and full-screen. A position that no longer lands on a display is moved onto the nearest one.
 - **Closing the window hides it.** `⌘W` and the red light hide the window, the dock icon shows it again, and `⌘Q` quits. The app keeps running while the window is hidden, so the dock badge and notifications keep working.
-- **The last open thread reopens at launch.**
+- **The last open thread reopens at launch.** *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* The app reopens what was open when it quit:
+  - The renderer stores the open thread's id per controller URL. Opening a thread stores it; leaving it for a screen that is not a thread removes it, so a quit on the new-thread screen launches on the new-thread screen.
+  - When the stored thread is gone at launch, the id is removed and the new-thread screen shows, because the user did not ask for that thread this time. A gone thread the user opens during use shows "This thread was not found." with a link to start a new thread.
 - **Menu:**
   - The standard app, Edit and Window menus, so text editing shortcuts work in every field.
   - File › New Thread `⌘N`.
@@ -364,6 +366,26 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 - **Search `⌘K`, the hide-sidebar button and Settings are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered.
 - **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
+**The thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread surface and the book's session pages, with these differences:
+
+- **A turn's work is shown per work stretch,** as the book draws it. A work stretch is the steps between two messages of one turn. Each stretch gets its own divider, and each agent message stands on its own with its face, its meta line and its body. Talk and work keep the order they happened in. Spec 14 and the web app draw one divider per turn, and join the agent's messages under it.
+  - The divider reads "Worked for 2m 14s ›" and a summary of the stretch. The summary counts its steps by kind, in the order each kind first appears: "ran 2 commands", "edited 3 files", "searched the web", "used 6 tools", "ran 1 subagent", "made a plan", "compacted the context", "hit 1 error", "did 1 other step". Reasoning is not counted, and a stretch of reasoning alone draws nothing.
+  - The book's "read 6 files" is not drawn: no transcript item says that a tool read a file, so such a read counts as a tool.
+  - Clicking the divider expands the stretch in place, one line per step, with spec 14's verb, target and result. Expansion is not stored.
+  - The stretch that is running reads "Working for 12s ›" and counts up. It shows no divider until its first step that is not reasoning, so no divider shows before the first step, or while the agent only reasons. It does not shimmer, as spec 14's does, because only the working face animates ([Rules](#rules), rule 2). While a Request is open, the stretch stops at the Request's opening and reads "Worked for".
+- **Messages carry their own time,** and there are no time separators, where spec 14 draws one above each turn. A user message has its time under the bubble; an agent message has it in its meta line, "Claude Code · Opus 5.5 · 09:04". The time is `09:04` when it falls on today in the system time zone, else `4 Sep 09:04`.
+- **The header is the book's:** the crumb with the project's tile and name, one tab per thread of the workspace, and a `+` that starts a new thread in the workspace (spec 14's "+ New thread here"). Spec 14 rejected a `+` beside the tabs; the book draws one, and the pages decide what is drawn. The open thread always has a tab: a thread that has exited no longer holds its workspace, so the workspace does not list it, and its tab is then the last. Open in editor and More are drawn inert, like the sidebar's Search. The book's "Changes +48 -12 | Commit" is left out, because nothing reports those numbers yet.
+- **The Requests dock answers from the keyboard only while it has focus:** ↩ allows, ⌥↩ allows always and esc denies, as the book's hints say. When one of its buttons has focus, ↩ presses that button, so a focused Deny is never turned into Allow. A Request that opens never moves focus. The words on the dock are `@hercule/client-core`'s, which no screen may reword, not the book's.
+- **The composer's lip** shows a main workspace as "Main workspace" and its branch, and an ephemeral workspace as its branch and the branch it was started from, "fix/3ds-eu-cards from main", as the book draws it. The machine is on the right. The book's "Own worktree" is not used, because [CONTEXT.md](../../CONTEXT.md) keeps "worktree" for the git mechanism.
+- **A message that is already being written when the app starts listening** shows its text as the controller stores it, 4 KB at a time, and not token by token. This happens when a thread is opened, when the window is shown again, and after a reconnect. It also happens to a message that started while the app was not listening, such as during an outage, whose first rows arrive in the stream's replay. A message that starts while the app listens streams token by token. A token carries no position within its message, so the app cannot place tokens after a gap without risking a hole or a repeat, and it waits for the stored text instead. [#290](https://github.com/theagenticage/hercule/issues/290) gives each token its position. The web app does the same ([spec 14 §Live model](./14-web-app.md#live-model-one-websocket-subscriptions-only)).
+- **A paragraph is drawn as markdown once the agent has finished it.** The paragraph the agent is writing is plain text. The message's text is joined before it is split into paragraphs: the stored text, then the streaming tokens after it.
+  - A paragraph ends at a blank line outside a code block. A code block being written stays plain text until it closes, so a blank line inside it does not end it.
+  - The controller stores an open message every 4 KB, and the cut can fall inside a word or a code block. The cut never ends a paragraph, so a word cut in two stays whole.
+  - Once the message ends, its whole text is drawn as markdown.
+  - The message renders once per finished paragraph. The tokens in between are painted into the paragraph being written, at most once per frame, without a render.
+  - Spec 14 draws the stored text as markdown and the tokens after it as plain text, until the message ends. There, a cut word breaks across two lines, and the tokens' finished paragraphs show their markdown marks.
+- **A thread that is gone** shows "This thread was not found." with a link to start a new thread. Any other failure shows [A screen that fails](#reaching-the-controller).
+
 **How the system is carried over:**
 
 - **Kept as they are:** `tokens.css` and the font files. They are the design system's source. Token names match the web app's (`--bg`, `--surface`, `--raised`, `--ink`, `--muted`, `--faint`, `--line`, `--line-soft`), except that `--attn` becomes `--you` / `--you-ink`.
@@ -432,7 +454,7 @@ These are starting budgets. The first performance pass measures the real thread 
 | Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB |
 | Idle, window visible, no thread working | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
 | Idle, window hidden or minimized | Renderer: no wakeups from the app *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): except the live connection's 30-second keepalive, because rule 3 keeps the `session` topic subscribed while hidden)* |
-| Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The tail paints at most once per frame |
+| Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The paragraph being written is painted at most once per frame |
 | The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
 | Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts` |
 | Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI |
@@ -592,6 +614,45 @@ These rules keep the budgets:
 - **The fixture writes the database once.** To give its threads ages, it stops the controller, backdates `last_activity_at`, and starts it again on the same port. The threads and their states come from the fleet. The ages are at most 6 hours 31 minutes, because the lost-runner sweep ends a session on an offline runner once it is older than the 8-hour absolute timeout.
 - **A launch through macOS's launcher is slower.** The budget and the table measure a launch spawned directly. `open`, which the Dock and Finder go through, adds about 100 ms: about 430 ms warm. A relaunch more than 15 seconds after quitting is cold ([Measuring](#measuring)).
 
+**Slice 5,** measured 2026-09-30 on the reference machine with the perf script, in one run of four launches and a streamed turn. The first three launches show the new-thread screen, with 40 threads and then 500, as in slice 4. The fourth reopens a thread of 501 transcript rows, with 500 threads in the list, and the streamed turn goes into that thread. The load average was 3.7 to 13.5 while measuring.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to window shown, warm | 500 ms | 318 to 345 ms on the new-thread screen; 421 ms with the long thread open |
+| Launch: spawn to the last open thread's transcript painted | 800 ms | 409 ms |
+| Launch: spawn to first paint | - | 249 to 289 ms |
+| Processes | 4 | 4 |
+| Memory, summed physical footprint | 220 MB | 201 to 211 MB with no thread open; **370 MB with the long thread open**: browser 47, GPU 253, network utility 8, renderer 62 |
+| Memory, renderer's physical footprint | 100 MB | 43 to 49 MB with no thread open; 62 MB with the long thread open |
+| Working set | - | 378 to 386 MB summed with no thread open, 423 MB with the long thread open; renderer 119 to 148 MB |
+| Wakeups while visible and idle | renderer none; GPU at most 12 a second | renderer 1 a second, which the script counts as none; GPU 0 |
+| Wakeups while hidden | renderer none | renderer 1 a second |
+| Age labels, 60 seconds visible | a timer only for an age on screen that shows minutes | 1 fire when the youngest age on screen is 2m; 0 when every age is over an hour |
+| Age labels, 60 seconds hidden | no timer | 0 fires |
+| Renderer main thread per `session` nudge, 500 threads | 16 ms | 12.5 ms; 13.4 ms with the long thread open |
+| Renderer main thread per `session` nudge, 40 threads | - | 5.3 to 5.7 ms |
+| Renderer CPU and controller CPU per nudge, 500 threads | - | 22.5 to 24.5 ms and 31.0 to 35.5 ms |
+| Streaming at full speed: the longest task on the renderer's main thread | 50 ms | 14.7 ms |
+| Streaming at full speed: writes to the paragraph being written | at most one a frame | 1,175 in 2,424 frames |
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | **282.1 kB** |
+| Main's startup file, minified | 160 kB | 137.6 kB |
+
+- **The streamed turn** is a word every 2 ms for 10 seconds, sent by a scripted runner. It is faster than any real agent, so a frame always has new words to paint.
+- **The long thread's GPU memory puts the summed footprint over its budget.** The GPU process reads 253 MB with the long thread open, against 100 to 115 MB with no thread open. A probe turned each effect off in turn, with the long thread open:
+
+  | Change | GPU footprint |
+  |---|---|
+  | none | 242 to 243 MB |
+  | no glass blur | 222 MB |
+  | no top fade on the transcript | 208 MB |
+  | neither | 135 MB |
+  | the transcript hidden | 175 MB |
+
+  - The blur is the glass `backdrop-filter` on the composer, the Requests dock, the queued inputs and the header's pills. The fade is the transcript's `mask-image`, which fades it in below the header.
+  - Together they cost about 108 MB with the long thread open, and about 63 MB with a thread of 2 rows. A thread of 2 rows already reads about 293 MB summed.
+  - **Open:** give up the fade, give up the blur, or raise the budget. Until then the thread is drawn as the book draws it.
+- **The first screen's JavaScript is 32 kB over its guide.** The chunks loaded at first paint are 219 kB, 10 kB more than slice 4's first screen. The thread's route adds 63 kB, and about 54 kB of that is the markdown parser: `react-markdown`, `remark-gfm` and `remark-breaks`. The shared chunk that holds React DOM is named after the thread's route, `_sessionId-*.js`, because the thread's route is one of the modules that use it; it is not the thread's code.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)).
@@ -619,10 +680,11 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
    - the screenshot comparison tool, run on the pieces: slice 3 draws no screen that a Bureau page shows
 4. **Sidebar.** Waiting on you, New thread, and threads grouped by project and workspace, kept live.
 5. **Thread view.**
-   - the transcript and streaming. `transcript.read` returns the whole transcript, with no paging. A performance pass measures a long thread.
-   - turn dividers and markdown
+   - the transcript and streaming. ~~`transcript.read` returns the whole transcript, with no paging.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): `transcript.read` has pages of up to 500 rows since slice 2. The app reads every page in order before it draws the thread, as the web app does.)* A performance pass measures a long thread.
+   - ~~turn dividers~~ work stretch dividers *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275), see **The thread** in [Design system](#design-system))* and markdown
    - the Requests dock
-   - queued inputs
+   - queued inputs, with Steer and Cancel
+   - the composer drawn inert, at its full size, so the dock and the queued inputs sit where they will stay *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))*
 6. **The composer on an active thread.**
    - send, steer and queue, stop
    - the model and its options, which stay live

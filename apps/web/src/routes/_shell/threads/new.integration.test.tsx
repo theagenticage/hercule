@@ -268,7 +268,7 @@ describe("Composer: draft defaults", () => {
     });
     expect(screen.getByRole("button", { name: "medium" })).toBeDefined();
 
-    expect(screen.getByRole("button", { name: /approval-required/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /approval required/i })).toBeDefined();
 
     expect(screen.getByText("No workspace")).toBeDefined();
     expect(screen.getByText(RUNNER.name)).toBeDefined();
@@ -291,7 +291,7 @@ describe("Composer: draft defaults", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDefined();
   });
 });
 
@@ -1129,13 +1129,13 @@ describe("Composer: the access mode menu", () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
-    await user.click(screen.getByRole("button", { name: /approval-required/i }));
+    await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
 
     // The rows are found by their text, not by their accessible name. The
-    // name joins the mode and its meaning, so "auto" would also match
-    // "auto-accept-edits".
-    for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"]) {
+    // name joins the mode and its meaning, so "Auto" would also match
+    // "Auto-accept edits".
+    for (const mode of ["Approval required", "Auto-accept edits", "Auto", "Full access"]) {
       expect(within(menu).getByText(mode, { exact: true })).toBeDefined();
     }
     // The four modes need no introduction, so this menu has no header.
@@ -1143,27 +1143,27 @@ describe("Composer: the access mode menu", () => {
 
     // The unsupported mode keeps its row and can still be picked. The row
     // shows which mode it will actually run as.
-    expect(readPageText(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
-    await user.click(within(menu).getByText("auto", { exact: true }));
+    expect(readPageText(menu)).toContain("runs as Auto-accept edits on Claude Code Work");
+    await user.click(within(menu).getByText("Auto", { exact: true }));
     await user.keyboard("{Escape}");
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDefined();
   });
 
   /**
-   * The fallback annotation names the provider that caused the fallback (spec
-   * 14 §The composer, `runs as auto-accept-edits on pi`). It is shown in the
-   * attention color below the mode's meaning, which every row keeps
-   * (ticket #70).
+   * The fallback annotation names the provider that caused the fallback,
+   * such as "runs as Auto-accept edits on pi" (spec 14 §The composer). It is
+   * shown in the attention color below the mode's meaning, which every row
+   * keeps (ticket #70).
    */
   it("shows each mode's meaning and names the provider in the fallback annotation, in the attention color", async () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
-    await user.click(screen.getByRole("button", { name: /approval-required/i }));
+    await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
 
     const MEANINGS = [
@@ -1178,7 +1178,7 @@ describe("Composer: the access mode menu", () => {
       expect(readPageText(menu)).toContain(meaning);
     }
 
-    const annotation = within(menu).getByText("runs as auto-accept-edits on Claude Code Work");
+    const annotation = within(menu).getByText("runs as Auto-accept edits on Claude Code Work");
     expect(annotation.className).toContain("text-attn");
     // The annotation names the provider, not a vague "this provider".
     expect(readPageText(menu)).not.toContain("on this provider");
@@ -1297,7 +1297,16 @@ const buildCheckout = (
   branch: string,
   branches: readonly string[],
   defaultBranch: string,
-) => ({ checkoutId: id, resourceId, form, subdirectory: null, branch, branches, defaultBranch });
+) => ({
+  checkoutId: id,
+  resourceId,
+  form,
+  subdirectory: null,
+  branch,
+  branches,
+  defaultBranch,
+  baseBranch: null,
+});
 
 const buildWorkspace = (
   id: string,

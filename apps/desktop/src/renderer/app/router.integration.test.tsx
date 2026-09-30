@@ -4,19 +4,33 @@ import faceCss from "../faces/face.css?raw";
 import iconCss from "../icons/icon.css?raw";
 import markCss from "../marks/mark.css?raw";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
+import projectTileCss from "../screens/project-tile.css?raw";
+import renderFailureCss from "../screens/render-failure.css?raw";
+import composerCss from "../screens/thread/composer.css?raw";
+import dockCss from "../screens/thread/dock.css?raw";
+import threadNotFoundCss from "../screens/thread/not-found.css?raw";
+import providerLogoCss from "../screens/thread/provider-logo.css?raw";
+import queuedInputsCss from "../screens/thread/queued-inputs.css?raw";
+import threadHeaderCss from "../screens/thread/thread-header.css?raw";
+import threadCss from "../screens/thread/thread.css?raw";
 import shellCss from "../shell/shell.css?raw";
 import sidebarCss from "../shell/sidebar.css?raw";
 import baseCss from "../styles/base.css?raw";
 import controlsCss from "../styles/controls.css?raw";
 import tokensCss from "../styles/tokens.css?raw";
+import { readLastThread } from "./last-thread";
 import {
+  buildSidebarHandlers,
+  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   neverAnswer,
   refuseConnection,
   renderApp,
+  SIDEBAR_FIXTURE,
   startApp,
   stubApi,
+  THREAD_FIXTURES,
 } from "./testing";
 
 /**
@@ -57,6 +71,15 @@ const APP_STYLESHEETS = [
   shellCss,
   sidebarCss,
   centeredScreenCss,
+  renderFailureCss,
+  projectTileCss,
+  threadNotFoundCss,
+  threadHeaderCss,
+  providerLogoCss,
+  dockCss,
+  composerCss,
+  queuedInputsCss,
+  threadCss,
   faceCss,
   iconCss,
   markCss,
@@ -120,6 +143,38 @@ describe("where the app starts", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       "This controller is not set up yet. Press Connect to finish setup in the browser.",
     );
+  });
+
+  it("opens the thread that was open last on this controller", async () => {
+    const thread = THREAD_FIXTURES.finished;
+    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, thread.session.id);
+    localStorage.setItem("last-thread:http://another.test", THREAD_FIXTURES.failed.session.id);
+    stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...buildThreadHandlers(thread) });
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    );
+    expect(router.state.location.pathname).toBe(`/threads/${thread.session.id}`);
+  });
+
+  it("opens the new-thread screen, and forgets the thread, when the last thread is gone", async () => {
+    const goneId = "01a06d02-7400-7000-8000-0000000000ff";
+    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, goneId);
+    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    );
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.queryByText("This thread was not found.")).toBeNull();
+    expect(readLastThread(CONTROLLER_URL)).toBeNull();
+  });
+
+  it("ignores a stored last thread that is not an id", async () => {
+    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, "../settings");
+    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    );
+    expect(router.state.location.pathname).toBe("/");
   });
 
   it("takes a signed-in user off the sign-in screen", async () => {

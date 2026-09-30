@@ -1,8 +1,12 @@
 import { useId, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
-import { queryKeys, type HerculeClient, type SecretFieldOffer } from "@hercule/client-core";
-import { readErrorMessage } from "./save-status";
+import {
+  queryKeys,
+  type HerculeClient,
+  type SecretFieldOffer,
+  readErrorMessage,
+} from "@hercule/client-core";
 
 /**
  * The Log in button for a provider, with the drawer that walks the user

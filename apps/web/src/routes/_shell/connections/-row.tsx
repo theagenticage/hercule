@@ -1,10 +1,15 @@
 import { Fragment, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
-import { queryKeys, type ConnectionType, type HerculeClient } from "@hercule/client-core";
+import {
+  queryKeys,
+  type ConnectionType,
+  type HerculeClient,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { Connection, ConnectionStatus } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
 

@@ -96,18 +96,6 @@
 .side-h--proj .proj {
   color: var(--muted);
 }
-/* Not in the book, whose project names are short. A long name ellipsizes
-   before the `+`, and the tile keeps its size. */
-.side-h--proj .proj {
-  min-width: 0;
-}
-.side-h--proj .proj::before {
-  flex: none;
-}
-.proj-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* A workspace label, under its project's header. The book has no workspace
    label; this one is designed from the section heading's family:
@@ -262,40 +250,4 @@ button.side-row--more {
 }
 .side-me .side-name {
   flex: 1;
-}
-
-/* A project is a place: a small rug swatch in its tint. */
-.proj {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-weight: var(--w-medium);
-  white-space: nowrap;
-}
-.proj::before {
-  content: "";
-  width: 11px;
-  height: 11px;
-  border-radius: 3.5px;
-  background: var(--rug);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 14%, transparent);
-  transform: rotate(45deg) scale(0.9);
-}
-.proj--webshop {
-  --rug: var(--proj-webshop);
-}
-.proj--payments {
-  --rug: var(--proj-payments);
-}
-.proj--ops {
-  --rug: var(--proj-ops);
-}
-/* Not in the book, which has no threads outside a project. The heading of
-   the threads in no project draws only the tile's outline, in the same place
-   and at the same size as a project's tile, so "No project" lines up with the
-   other projects' names and still has a mark before it. */
-.proj--none::before {
-  background: none;
-  box-shadow: inset 0 0 0 1px var(--faint);
 }

@@ -23,6 +23,9 @@
  *   that cursor and misses nothing. If the controller rejects the cursor, the
  *   log is no longer the one the cursor came from: the cursor is dropped and
  *   the subscriber is told, so it can start again.
+ * - A session's tap is never stored, so its subscriber holds no cursor, and
+ *   the taps sent while it was not subscribed are lost. It is told so each
+ *   time it subscribes again.
  */
 import {
   isAppendOnlyLiveTopic,
@@ -87,10 +90,21 @@ export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
 /**
  * An append-only topic's push.
  *
- * `reset` is true when the position in the log was lost. What the subscriber
- * holds no longer connects to what follows, so it must fetch its page again
- * rather than append after a gap. `cursor` is then `null`, because there is
- * no position.
+ * `reset` is true when what the subscriber holds may no longer connect to
+ * what follows, so it must fetch again, rather than append after a gap. The
+ * delta then holds no items, and `cursor` is `null`, because there is no
+ * position. That happens when:
+ *
+ * - the controller rejected the cursor, so the position in the log was lost;
+ * - a subscription with no cursor, such as a session's tap, starts again, so
+ *   what was sent while it was not subscribed is lost.
+ *
+ * `replay` is true for the first delta of a subscription made with a cursor,
+ * each time it is made: that delta holds what was written after the cursor
+ * before the subscription started. A long replay is sent in pages, and only
+ * the first page's delta is marked. The controller sends that delta even when
+ * nothing was written, so it also tells the subscriber the replay has been
+ * delivered.
  *
  * `gone` is true when the controller rejected the topic with `not_found`: the
  * session it names was never spawned, or no longer exists. Subscribing again
@@ -103,6 +117,7 @@ export interface LiveDelta {
   readonly cursor: string | null;
   readonly items: ReadonlyArray<Event | TranscriptRow | TapItem>;
   readonly reset: boolean;
+  readonly replay: boolean;
   readonly gone: boolean;
 }
 
@@ -204,15 +219,34 @@ export const createLive = (options: LiveOptions): Live => {
   let running: Fiber.Fiber<void> | null = null;
 
   /**
-   * Tells a mutable topic's subscriber that everything it watches may have
-   * changed. Used whenever pushes may have been missed and there is no way to
-   * know which records they were about: after a dropped connection, and after
-   * a subscription ended for any reason other than the caller unsubscribing.
+   * Tells a subscriber that it may have missed pushes it cannot get back. Used
+   * each time a subscription is about to start again: at the start of every
+   * connection, and before a subscription that ended for any reason other
+   * than the caller unsubscribing is retried.
+   *
+   * - A mutable topic's subscriber is told that everything it watches may have
+   *   changed, because there is no way to know which records the pushes were
+   *   about.
+   * - An append-only subscriber with no cursor, such as a session's tap, is
+   *   told to `reset`: its subscription starts again from the head.
+   * - An append-only subscriber with a cursor is told nothing: its
+   *   subscription resumes from the cursor and replays what it missed.
    */
   const sweep = (subscription: Subscription): void => {
     const topic = subscription.topic;
-    if (isAppendOnlyLiveTopic(topic)) return;
-    isolate(() => (subscription.handler as LiveInvalidateHandler)(buildQueryKeys(topic, [])));
+    if (!isAppendOnlyLiveTopic(topic)) {
+      isolate(() => (subscription.handler as LiveInvalidateHandler)(buildQueryKeys(topic, [])));
+    } else if (subscription.cursor === undefined) {
+      isolate(() =>
+        (subscription.handler as LiveDeltaHandler)({
+          cursor: null,
+          items: [],
+          reset: true,
+          replay: false,
+          gone: false,
+        }),
+      );
+    }
   };
 
   /**
@@ -231,8 +265,11 @@ export const createLive = (options: LiveOptions): Live => {
     }
   };
 
-  /** Passes one message to the subscription's callback. */
-  const deliver = (subscription: Subscription, message: LiveMessage): void => {
+  /**
+   * Passes one message to the subscription's callback. `replay` is true for
+   * the first message of a subscription made with a cursor.
+   */
+  const deliver = (subscription: Subscription, message: LiveMessage, replay: boolean): void => {
     isolate(() => {
       if (message._tag === "delta") {
         subscription.cursor = message.cursor;
@@ -240,6 +277,7 @@ export const createLive = (options: LiveOptions): Live => {
           cursor: message.cursor ?? null,
           items: message.items,
           reset: false,
+          replay,
           gone: false,
         });
         return;
@@ -263,11 +301,11 @@ export const createLive = (options: LiveOptions): Live => {
    * - `validation` on an append-only topic with a cursor: the log rejected the
    *   cursor, so the cursor is dropped, the subscriber is told to `reset`, and
    *   the subscription starts again from the head.
-   * - Anything else (falling behind, a failed read, a stream that ended): any
-   *   pushes in the meantime were missed, so a mutable subscriber refetches
-   *   everything, and the subscription is retried after a growing wait. An
-   *   error that keeps repeating then costs two frames a minute rather than a
-   *   flood.
+   * - Anything else (falling behind, a failed read, a stream that ended): the
+   *   subscription is retried after a growing wait, and just before that the
+   *   subscriber is told what it missed (`sweep`). Telling it after the wait
+   *   covers the pushes missed during the wait too. An error that keeps
+   *   repeating costs two frames a minute rather than a flood.
    *
    * Apart from `not_found`, nothing here ends a subscription for good: only
    * the caller does that.
@@ -280,9 +318,15 @@ export const createLive = (options: LiveOptions): Live => {
           subscription.cursor === undefined
             ? { topic: subscription.topic }
             : { topic: subscription.topic, cursor: subscription.cursor };
+        // The controller answers a subscription with a cursor with the replay
+        // first, even when there is nothing to replay (spec 14 §Live model).
+        let replay = subscription.cursor !== undefined;
         const outcome = yield* Effect.result(
           Stream.runForEach(rpc.subscribe(payload), (message: LiveMessage) =>
-            Effect.sync(() => deliver(subscription, message)),
+            Effect.sync(() => {
+              deliver(subscription, message, replay);
+              replay = false;
+            }),
           ),
         );
 
@@ -304,6 +348,7 @@ export const createLive = (options: LiveOptions): Live => {
               cursor: null,
               items: [],
               reset: false,
+              replay: false,
               gone: true,
             }),
           );
@@ -320,29 +365,31 @@ export const createLive = (options: LiveOptions): Live => {
               cursor: null,
               items: [],
               reset: true,
+              replay: false,
               gone: false,
             }),
           );
           continue;
         }
-        sweep(subscription);
         yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
+        sweep(subscription);
       }
     });
 
   /**
    * Does the work of one connection after the `hello` reply: tells subscribers
-   * that may have missed pushes to refetch, pings the controller to keep the
+   * that may have missed pushes (`sweep`), pings the controller to keep the
    * connection alive, and keeps the controller's subscriptions in step with
    * the registry.
    *
-   * Every mutable subscriber is told to refetch, whether or not an earlier
-   * connection carried it. A subscription made while there was no connection
-   * has the same gap as one that survived a drop: pushes sent between the
-   * screen's own fetch and this connection are lost. The cost is one refetch
-   * per subscriber on the first connection of a page load, which is worth it
-   * to close a gap that is otherwise invisible.
+   * Every mutable subscriber is told to refetch, and every tap subscriber to
+   * reset, whether or not an earlier connection carried it. A subscription
+   * made while there was no connection has the same gap as one that survived
+   * a drop: pushes sent between the screen's own fetch and this connection
+   * are lost. The cost is one refetch per subscriber on the first connection
+   * of a page load, which is worth it to close a gap that is otherwise
+   * invisible.
    */
   const runConnection = (rpc: LiveClient, closed: Latch.Latch) =>
     Effect.gen(function* () {

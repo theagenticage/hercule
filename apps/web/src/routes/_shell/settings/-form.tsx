@@ -1,7 +1,7 @@
+import { readErrorMessage } from "@hercule/client-core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { SettingsPatch } from "@hercule/contract";
-import { readErrorMessage } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
 
 /**

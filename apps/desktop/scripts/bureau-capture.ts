@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares two pairs of
+ * For each theme, Whitehaven and Orient Express, it compares three pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -15,14 +15,19 @@
  * - captures both windows, compares them pixel for pixel, and writes
  *   reference.png, app.png and diff.png to out/bureau-compare/<theme>/.
  *
- * The second pair is the sidebar. It:
- * - opens the book's session-active.html, edited by
- *   specimens/sidebar-reference.ts to show the fixture's data, and the app's
- *   sidebar specimen, drawn from the same fixture;
- * - captures the sidebar's region of both windows (x 0-272, the full height)
- *   and writes sidebar-reference.png, sidebar-app.png and sidebar-diff.png;
- * - checks that both sidebars draw the same items in the same boxes, and
- *   only then compares the regions pixel for pixel.
+ * The other pairs each compare one region of the book's session-active.html
+ * with the same region of an app specimen drawn from a fixture:
+ * - the sidebar (x 0-272): the book's page edited by
+ *   specimens/sidebar-reference.ts, and the sidebar specimen (sidebar.html);
+ * - the thread (x 272-1440, the main pane): the book's page edited by
+ *   specimens/thread-reference.ts, and the thread specimen (thread.html).
+ *
+ * Each reference module edits the book's page to show its fixture's data.
+ * For each region pair, the capture:
+ * - captures the region of both windows, the full height, and writes
+ *   <region>-reference.png, <region>-app.png and <region>-diff.png;
+ * - checks that both pages draw the same items in the same boxes, and only
+ *   then compares the regions pixel for pixel.
  *
  * Then it prints the report and exits with 0 when every pixel matches, and 1
  * when one does not or anything fails on the way.
@@ -46,6 +51,7 @@ import {
   captureSheet,
   DPR,
   HEIGHT,
+  MAIN_PANE_REGION,
   openSheet,
   SIDEBAR_REGION,
   startCaptureApp,
@@ -64,12 +70,44 @@ interface CellLayout {
   readonly piece: Rect;
 }
 
-/** Where a sidebar lays out one of its items, and the item's text, to name it in a report. */
-interface SidebarItem {
+/** Where a page lays out one of its items, and the item's text, to name it in a report. */
+interface PageItem {
   /** The selector that found the item, and its place among the items that selector found. */
   readonly name: string;
   readonly text: string;
   readonly box: Rect;
+}
+
+/**
+ * A region of the book's session-active.html that is compared with the same
+ * region of an app specimen.
+ */
+interface RegionPair {
+  /** The region's name in the report and in its images' file names. */
+  readonly name: string;
+  /** The module that edits the book's page to show the fixture's data, under /specimens/. */
+  readonly referenceModule: string;
+  /** The app's specimen page, under /specimens/. */
+  readonly specimenPage: string;
+  readonly region: Rect;
+  /** The element both pages' items are looked for in. */
+  readonly scope: string;
+  /**
+   * Every part whose box is compared, as a selector inside `scope`. The two
+   * pages differ in their markup where the book's differs from what React
+   * draws, such as a "more" row that is a button in the app and a link in
+   * the book, so the parts are named by class, not by tag.
+   */
+  readonly parts: ReadonlyArray<string>;
+}
+
+/** The outcome of one region pair's comparison in one theme. */
+interface RegionResult {
+  readonly name: string;
+  /** How many items were compared. */
+  readonly items: number;
+  /** The differences in the region, each named after the smallest item that holds it. */
+  readonly differences: ReadonlyArray<CellDifference>;
 }
 
 /** The outcome of one theme's comparison. */
@@ -80,10 +118,8 @@ interface ThemeResult {
   readonly differences: ReadonlyArray<CellDifference>;
   /** The specimen window's renderer process's working set, in kilobytes. */
   readonly rendererMemoryKb: number;
-  /** How many sidebar items were compared. */
-  readonly sidebarItems: number;
-  /** The differences in the sidebar's region, each named after the smallest item that holds it. */
-  readonly sidebarDifferences: ReadonlyArray<CellDifference>;
+  /** One result per region pair, in `REGION_PAIRS`' order. */
+  readonly regions: ReadonlyArray<RegionResult>;
 }
 
 // Runs in each sheet: every [data-cell] and its piece, the cell's first
@@ -97,9 +133,7 @@ const READ_LAYOUT = `[...document.querySelectorAll("[data-cell]")].map((cell) =>
 })`;
 
 // Every part of the sidebar whose box is compared, as a selector inside
-// `aside.side`. The two sidebars differ in their markup where the book's
-// differs from what React draws, such as a "more" row that is a button in the
-// app and a link in the book, so the parts are named by class, not by tag.
+// `aside.side`.
 const SIDEBAR_PARTS = [
   ".side-top > .icon-btn",
   ".side-top > .icon-btn > svg",
@@ -130,23 +164,112 @@ const SIDEBAR_PARTS = [
   ".side-me > .icon-btn > svg",
 ];
 
-// Runs in each sidebar page: every drawn element each part's selector finds,
-// in document order, then the sidebar itself. An element that is not drawn,
-// such as one in the book's hidden Hercule tab, has no box and is left out.
-const READ_SIDEBAR_ITEMS = `(() => {
-  const side = document.querySelector("aside.side");
+// Every part of the thread screen whose box is compared, as a selector
+// inside `main.main`. The book wraps some of the composer's rows in folds,
+// which the app does not draw yet, so the composer's parts are found at any
+// depth. Two parts are left out, and the pixel comparison checks them:
+// - the transcript's column: the app's holds the virtualizer's items, and its
+//   height depends on what the book leaves out below the composer;
+// - the phrases of a divider's summary, such as "ran 1 command". The book
+//   lays them out as flex items, each as tall as the line, and the app writes
+//   them as one line of text, so that the line can end in an ellipsis, and
+//   each phrase is as tall as its font. Both draw the same pixels.
+const THREAD_PARTS = [
+  ".top",
+  ".top > .pill",
+  ".pill-crumb",
+  ".pill-crumb > .proj",
+  ".ptab",
+  ".ptab > .mark",
+  ".ptab > small",
+  ".top .icon-btn",
+  ".top .icon-btn > svg",
+  ".transcript",
+  ".msg--me",
+  ".bubble",
+  ".bubble-meta",
+  ".worked",
+  ".worked > b",
+  ".worked .tools",
+  ".tx .msg",
+  ".tx .msg > svg",
+  ".msg-meta",
+  ".msg-body",
+  ".msg-body > p",
+  ".msg-body p > code",
+  ".codeblock",
+  ".waiting-note",
+  ".waiting-note > .mark",
+  ".composer-wrap",
+  ".composer",
+  ".queued",
+  ".queued > svg",
+  ".queued-text",
+  ".queued > .faint",
+  ".queued > .btn",
+  ".dock",
+  ".dock-q",
+  ".dock-q > svg",
+  ".dock-q code",
+  ".dock .ledger",
+  ".dock .ans",
+  ".dock .ans > .btn",
+  ".dock .ans-desc",
+  ".dock .ans > kbd",
+  ".composer-card",
+  ".composer-input",
+  ".composer-row",
+  ".composer-row > *",
+  ".composer-row svg",
+  ".lip",
+  ".lip > span",
+  ".lip svg",
+  ".lip .mono",
+  ".lip .faint",
+];
+
+/** The regions of session-active.html compared with an app specimen, in the order they are compared. */
+const REGION_PAIRS: ReadonlyArray<RegionPair> = [
+  {
+    name: "sidebar",
+    referenceModule: "sidebar-reference.ts",
+    specimenPage: "sidebar.html",
+    region: SIDEBAR_REGION,
+    scope: "aside.side",
+    parts: SIDEBAR_PARTS,
+  },
+  {
+    name: "thread",
+    referenceModule: "thread-reference.ts",
+    specimenPage: "thread.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: THREAD_PARTS,
+  },
+];
+
+/**
+ * Returns the script that reads a page's items: every drawn element each of
+ * `parts` finds inside `scope`, in document order, then `scope` itself. An
+ * element that is not drawn, such as one in the book's hidden Hercule tab,
+ * has no box and is left out.
+ */
+function buildReadItemsScript(scope: string, parts: ReadonlyArray<string>): string {
+  return `(() => {
+  const scope = document.querySelector(${JSON.stringify(scope)});
   const measure = (element) => {
     const { x, y, width, height } = element.getBoundingClientRect();
     return { x, y, width, height };
   };
   const describe = (element) => element.textContent.replace(/\\s+/g, " ").trim().slice(0, 40);
-  const items = ${JSON.stringify(SIDEBAR_PARTS)}.flatMap((selector) =>
-    [...side.querySelectorAll(selector)]
+  const items = ${JSON.stringify(parts)}.flatMap((selector) =>
+    [...scope.querySelectorAll(selector)]
       .filter((element) => element.getClientRects().length > 0)
       .map((element, index) => ({ name: selector + " #" + index, text: describe(element), box: measure(element) })),
   );
-  return [...items, { name: "aside.side", text: "", box: measure(side) }];
+  return [...items, { name: ${JSON.stringify(scope)}, text: "", box: measure(scope) }];
 })()`;
+}
 
 /** Returns where the sheet in `window` lays out each of its cells, in document order. */
 async function readLayout(window: BrowserWindow): Promise<ReadonlyArray<CellLayout>> {
@@ -224,13 +347,15 @@ function describeRect({ x, y, width, height }: Rect): string {
 }
 
 /**
- * Checks that the two sidebars draw the same items in the same boxes: for
- * each part, the same number of items, each in the same box. Fails with
- * "The sidebar's items differ" and the first differences otherwise.
+ * Checks that the book and the app draw the same items of the region `name`
+ * in the same boxes: for each part, the same number of items, each in the
+ * same box. Fails with "The <name>'s items differ" and the first differences
+ * otherwise.
  */
-function assertSameSidebarItems(
-  reference: ReadonlyArray<SidebarItem>,
-  specimen: ReadonlyArray<SidebarItem>,
+function assertSameItems(
+  name: string,
+  reference: ReadonlyArray<PageItem>,
+  specimen: ReadonlyArray<PageItem>,
 ): void {
   const differences: string[] = [];
   const specimenItems = new Map(specimen.map((item) => [item.name, item]));
@@ -252,54 +377,59 @@ function assertSameSidebarItems(
   }
   if (differences.length > 0) {
     throw new Error(
-      `The sidebar's items differ (${String(differences.length)}):\n  ${differences.slice(0, 40).join("\n  ")}\n` +
+      `The ${name}'s items differ (${String(differences.length)}):\n  ${differences.slice(0, 40).join("\n  ")}\n` +
         "Match the app's item to the book's box, then run pnpm compare:bureau again.",
     );
   }
 }
 
 /**
- * Compares the app's sidebar with the book's in `theme`, and writes both
- * captures of the sidebar's region and the picture of their differences to
- * `themeDir`. Returns how many items were compared, and the differences,
- * each named after the smallest item that holds it. Fails when a page does
- * not load, a capture has the wrong size, or an item's box differs.
+ * Compares the app's specimen with the book's session-active.html over the
+ * region of `pair` in `theme`, and writes both captures of the region and the
+ * picture of their differences to `themeDir`. Returns how many items were
+ * compared, and the differences, each named after the smallest item that
+ * holds it. Fails when a page does not load, a capture has the wrong size,
+ * or an item's box differs.
  */
-async function compareSidebar(
+async function compareRegion(
   sheetsUrl: string,
   theme: string,
   themeDir: string,
-): Promise<{ items: number; differences: ReadonlyArray<CellDifference> }> {
+  pair: RegionPair,
+): Promise<RegionResult> {
+  const { name, referenceModule, specimenPage, region, scope, parts } = pair;
   const [reference, specimen] = await Promise.all([
     openSheet(
       new URL(`/design/crew-bureau/desktop/session-active.html?theme=${theme}`, sheetsUrl).href,
-      new URL("sidebar-reference.ts", sheetsUrl).href,
+      new URL(referenceModule, sheetsUrl).href,
     ),
-    openSheet(`${sheetsUrl}sidebar.html?theme=${theme}`),
+    openSheet(`${sheetsUrl}${specimenPage}?theme=${theme}`),
   ]);
   try {
+    const readItems = buildReadItemsScript(scope, parts);
     const [referenceItems, specimenItems] = (await Promise.all([
-      reference.webContents.executeJavaScript(READ_SIDEBAR_ITEMS),
-      specimen.webContents.executeJavaScript(READ_SIDEBAR_ITEMS),
-    ])) as [ReadonlyArray<SidebarItem>, ReadonlyArray<SidebarItem>];
-    const referenceCapture = await captureSheet(reference, SIDEBAR_REGION);
-    const specimenCapture = await captureSheet(specimen, SIDEBAR_REGION);
-    writeCaptures(themeDir, "sidebar-", referenceCapture, specimenCapture);
-    assertSameSidebarItems(referenceItems, specimenItems);
+      reference.webContents.executeJavaScript(readItems),
+      specimen.webContents.executeJavaScript(readItems),
+    ])) as [ReadonlyArray<PageItem>, ReadonlyArray<PageItem>];
+    const referenceCapture = await captureSheet(reference, region);
+    const specimenCapture = await captureSheet(specimen, region);
+    writeCaptures(themeDir, `${name}-`, referenceCapture, specimenCapture);
+    assertSameItems(name, referenceItems, specimenItems);
 
     // A pixel is counted for the first item that holds it, so the smallest
     // items come first: a difference in a row's name is reported as the
     // name's, not the row's.
     const cells = [...referenceItems]
       .sort((a, b) => a.box.width * a.box.height - b.box.width * b.box.height)
-      .map(({ name, text, box }) => ({
-        name: text === "" ? name : `${name} "${text}"`,
-        left: (box.x - SIDEBAR_REGION.x) * DPR,
-        top: (box.y - SIDEBAR_REGION.y) * DPR,
-        width: box.width * DPR,
-        height: box.height * DPR,
+      .map((item) => ({
+        name: item.text === "" ? item.name : `${item.name} "${item.text}"`,
+        left: (item.box.x - region.x) * DPR,
+        top: (item.box.y - region.y) * DPR,
+        width: item.box.width * DPR,
+        height: item.box.height * DPR,
       }));
     return {
+      name,
       items: referenceItems.length,
       differences: compareBitmaps(referenceCapture.bitmap, specimenCapture.bitmap, cells),
     };
@@ -320,10 +450,10 @@ function readRendererMemoryKb(window: BrowserWindow): number {
 }
 
 /**
- * Compares the two sheets of pieces in `theme`, then the two sidebars, and
+ * Compares the two sheets of pieces in `theme`, then each region pair, and
  * writes each pair's captures and the picture of their differences to
  * out/bureau-compare/<theme>/. Returns the theme's result. Fails when a page
- * does not load, the layouts or the sidebar's items differ, or a capture has
+ * does not load, the layouts or a region's items differ, or a capture has
  * the wrong size.
  */
 async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResult> {
@@ -353,15 +483,17 @@ async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResu
     reference.destroy();
     specimen.destroy();
 
-    const sidebar = await compareSidebar(sheetsUrl, theme, themeDir);
+    const regions: RegionResult[] = [];
+    for (const pair of REGION_PAIRS) {
+      regions.push(await compareRegion(sheetsUrl, theme, themeDir, pair));
+    }
     return {
       theme,
       cells: cells.length,
       faces: cells.filter(({ name }) => name.startsWith("face/")).length,
       differences,
       rendererMemoryKb,
-      sidebarItems: sidebar.items,
-      sidebarDifferences: sidebar.differences,
+      regions,
     };
   } finally {
     // Destroying a window twice does nothing.
@@ -386,9 +518,9 @@ function buildDifferenceTable(
   ];
 }
 
-/** Checks whether the theme's pieces and sidebar both match the book's, pixel for pixel. */
-function matchesBook({ differences, sidebarDifferences }: ThemeResult): boolean {
-  return differences.length === 0 && sidebarDifferences.length === 0;
+/** Checks whether the theme's pieces and every region match the book's, pixel for pixel. */
+function matchesBook({ differences, regions }: ThemeResult): boolean {
+  return differences.length === 0 && regions.every((region) => region.differences.length === 0);
 }
 
 /** Builds the report of every theme's comparison, as `pnpm compare:bureau` prints it. */
@@ -403,23 +535,28 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
     if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
   }
-  lines.push(
-    `Sidebar comparison: ${String(first.sidebarItems)} items, x 0-${String(SIDEBAR_REGION.width)} of session-active.html`,
-  );
-  for (const { theme, sidebarDifferences } of results) {
-    const pixels = sidebarDifferences.reduce((sum, { pixels }) => sum + pixels, 0);
-    lines.push(`${theme.padEnd(17)}${String(pixels)} pixels differ`);
-    if (pixels > 0) lines.push(...buildDifferenceTable("item", sidebarDifferences));
-  }
+  REGION_PAIRS.forEach(({ name, region }, index) => {
+    lines.push(
+      `${name.slice(0, 1).toUpperCase()}${name.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
+        `x ${String(region.x)}-${String(region.x + region.width)} of session-active.html`,
+    );
+    for (const { theme, regions } of results) {
+      const { differences } = regions[index]!;
+      const pixels = differences.reduce((sum, each) => sum + each.pixels, 0);
+      lines.push(`${theme.padEnd(17)}${String(pixels)} pixels differ`);
+      if (pixels > 0) lines.push(...buildDifferenceTable("item", differences));
+    }
+  });
   lines.push(
     `Specimen renderer (${String(first.faces)} faces): ${String(Math.round(first.rendererMemoryKb / 1024))} MB (indicative)`,
   );
   const imagesDir = relative(repositoryDir, outputDir);
   const failing = results.filter((result) => !matchesBook(result));
   const themes = (failing.length > 0 ? failing : results).map(({ theme }) => theme);
+  const regionImages = REGION_PAIRS.map(({ name }) => `${name}-{reference,app,diff}.png`);
   for (const theme of themes) {
     lines.push(
-      `Images: ${join(imagesDir, theme)}/{reference,app,diff}.png and sidebar-{reference,app,diff}.png`,
+      `Images: ${join(imagesDir, theme)}/{reference,app,diff}.png, ${regionImages.join(", ")}`,
     );
   }
   // A cell that differs in both themes is counted once, and so is an item.
@@ -427,13 +564,17 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     failing.flatMap(({ differences }) => differences.map(({ cell }) => cell)),
   ).size;
   const differingItems = new Set(
-    failing.flatMap(({ sidebarDifferences }) => sidebarDifferences.map(({ cell }) => cell)),
+    failing.flatMap(({ regions }) =>
+      regions.flatMap(({ name, differences }) => differences.map(({ cell }) => `${name} ${cell}`)),
+    ),
   ).size;
+  const regionNames = REGION_PAIRS.map(({ name }) => `the ${name}`).join(" and ");
   lines.push(
     failing.length === 0
-      ? "PASSED: every cell and the sidebar match the Bureau book."
+      ? `PASSED: every cell, ${regionNames} match the Bureau book.`
       : `FAILED: ${String(differingCells)} ${differingCells === 1 ? "cell differs" : "cells differ"} ` +
-          `and ${String(differingItems)} sidebar ${differingItems === 1 ? "item differs" : "items differ"} from the Bureau book.`,
+          `and ${String(differingItems)} ${differingItems === 1 ? "item differs" : "items differ"} ` +
+          `in ${regionNames} from the Bureau book.`,
   );
   return `${lines.join("\n")}\n`;
 }

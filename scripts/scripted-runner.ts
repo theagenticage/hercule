@@ -12,13 +12,22 @@
  * - a probe with a logged-in report that offers one model;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
  * - a session start with `session.started`, unless starts are held;
- * - an input by starting a turn, which runs until the caller completes it,
- *   so a spawned thread settles busy, unless the session is set to crash on it;
+ * - an input by starting a turn and reporting the user's message in it, or,
+ *   while a turn runs, by reporting the message as steered into that turn.
+ *   A turn runs until the caller or a script ends it, so a spawned thread
+ *   settles busy. A session set to crash on its next input exits instead;
  * - a stop with `session.exited` for the reason `stopped`;
- * - an interrupt by ending the running turn as `interrupted`;
+ * - an interrupt by withdrawing the open Request, if any, and ending the
+ *   running turn as `interrupted`;
  * - a response to the open Request with `request.resolved`.
  *
- * Nothing else happens until the caller calls a method.
+ * Nothing else happens until the caller calls a method. The simple methods
+ * each report one change: a turn starts, a Request opens, the session exits.
+ * `playScript` reports a whole turn's work instead: reasoning, messages that
+ * stream word by word, tool calls that may ask for approval and wait for the
+ * user's answer. It reports the same events, with the same details, that the
+ * Claude Code adapter in `apps/runner/src/providers` reports for that work, so
+ * a screen sees what it would see from a real agent.
  *
  * Like `controller-process.ts`, it uses only Node's APIs, imports nothing from
  * a test framework, and uses only TypeScript that Node can strip, because the
@@ -27,10 +36,12 @@
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { Schema } from "effect";
 import type {
   ApprovalDecision,
   ControllerToRunner,
   ExitReason,
+  ItemKind,
   JoinAnswer,
   OpenRequest,
   ProbeResult,
@@ -38,6 +49,7 @@ import type {
   RunnerFacts,
   RunnerToController,
   SessionBinding,
+  StreamKind,
   TurnState,
 } from "../packages/protocol/src/index";
 
@@ -71,8 +83,111 @@ const PROBE_RESULT: ProbeResult = {
 
 const APPROVAL_DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
 
+/** The tool result Claude Code reports when the user denies a tool call. */
+const REFUSED = "the user did not allow this";
+
+/** The tool result Claude Code reports when the user cancels the turn from a Request. */
+const CANCELLED = "the user cancelled this turn";
+
+/** The tool result a scripted tool call reports when it succeeds. */
+const TOOL_OUTPUT = "ok";
+
+/** How long a script waits between the words of a message or reasoning, by default. */
+const WORD_DELAY_MS = 20;
+
+/** How long a `stream` step waits between two deltas, by default. */
+const STREAM_DELAY_MS = 2;
+
+/**
+ * The Markdown a `stream` step repeats: a heading, a paragraph, a list and a
+ * code block, so a long message exercises every block the thread view renders.
+ * Each block ends with a blank line, so the blocks can follow each other in
+ * any number.
+ */
+const STREAM_BLOCKS: ReadonlyArray<string> = [
+  "## Where the time goes\n\n",
+  "The controller keeps the deltas of one item in a buffer and writes a row " +
+    "once the buffer holds 4 KiB, so a long answer costs a handful of writes " +
+    "rather than one per word. The page renders every delta as it arrives.\n\n",
+  "- The sidebar re-renders only the row whose status changed.\n" +
+    "- The transcript appends to the open block instead of parsing the whole message again.\n" +
+    "- A code block is highlighted once it is closed.\n\n",
+  "```ts\nconst rows = await readTranscript(sessionId);\nfor (const row of rows) {\n" +
+    "  renderRow(row);\n}\n```\n\n",
+];
+
 /** The kinds of Request a harness can open. */
 export type RequestKind = OpenRequest["kind"];
+
+/**
+ * One piece of work in a scripted turn. `playScript` plays a list of steps in
+ * order into the session's running turn. Each step reports the events the
+ * Claude Code adapter reports for the same work:
+ *
+ * - `reasoning` and `message` stream `text` as a reasoning or an assistant
+ *   message item, one delta per word, `deltaMs` apart (20 by default).
+ * - `stream` streams one long assistant message of generated Markdown, one
+ *   delta per word, `deltaMs` apart (2 by default), for `forMs`. It stops at
+ *   the first block boundary after that, so the Markdown is never cut off
+ *   inside a code block.
+ * - `command`, `file_change`, `tool` and `web_search` report a tool call as
+ *   Claude Code's `Bash`, `Edit`, the named tool, and `WebSearch`. The call
+ *   runs for `forMs` (0 by default) and succeeds. With `ask`, it first opens a
+ *   Request for approval and waits for the user's answer; see `playScript`.
+ *   `tool` is for a tool Claude Code files as a plain tool call, such as
+ *   `WebFetch` or an MCP tool (`mcp__<server>__<tool>`), not for `Bash` or
+ *   `Edit`, which have their own steps.
+ * - `pause` waits for `forMs` without reporting anything.
+ * - `end` ends the turn in `state`, with `error` when it failed. It must be the
+ *   last step. A script without one leaves the turn running.
+ */
+export type ScriptStep =
+  | { readonly kind: "reasoning"; readonly text: string; readonly deltaMs?: number }
+  | { readonly kind: "message"; readonly text: string; readonly deltaMs?: number }
+  | { readonly kind: "stream"; readonly forMs: number; readonly deltaMs?: number }
+  | {
+      readonly kind: "command";
+      readonly command: string;
+      readonly forMs?: number;
+      readonly ask?: boolean;
+    }
+  | {
+      readonly kind: "file_change";
+      readonly path: string;
+      readonly forMs?: number;
+      readonly ask?: boolean;
+    }
+  | {
+      readonly kind: "tool";
+      readonly name: string;
+      readonly input?: Schema.JsonObject;
+      readonly forMs?: number;
+      readonly ask?: boolean;
+    }
+  | {
+      readonly kind: "web_search";
+      readonly query: string;
+      readonly forMs?: number;
+      readonly ask?: boolean;
+    }
+  | { readonly kind: "pause"; readonly forMs: number }
+  | { readonly kind: "end"; readonly state: TurnState; readonly error?: string };
+
+/** A tool call a script step makes, in the shape Claude Code reports it. */
+interface ToolCall {
+  readonly kind: ItemKind;
+  /** The `item.started` detail: the tool's name and input, and for a plain tool call whether it is an MCP tool. */
+  readonly detail: {
+    readonly name: string;
+    readonly input: Schema.JsonObject;
+    readonly kind?: "mcp" | "native";
+  };
+  /** The Request that asks the user to approve the call, without its ids. */
+  readonly approval: DistributiveOmit<OpenRequest, "requestId" | "itemId">;
+}
+
+/** `Omit` applied to each member of a union, so each member keeps its own fields. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /**
  * The WebSocket constructor with the options argument that Node and Bun
@@ -97,6 +212,10 @@ interface HostedSession {
   turnId: string | undefined;
   /** The Request the session is parked on, if any. */
   requestId: string | undefined;
+  /** Stops the script playing into the running turn, if any. */
+  script: AbortController | undefined;
+  /** Resumes the script that opened the open Request, with the decision that resolved it. */
+  resumeScript: ((decision: ApprovalDecision) => void) | undefined;
 }
 
 /** A scripted runner, joined to a controller and connected to it. */
@@ -134,7 +253,29 @@ export interface ScriptedRunner {
    * withdraws the question. Fails if no Request is open.
    */
   readonly resolveRequest: (sessionId: string, decision: ApprovalDecision) => void;
-  /** Ends the session for the given reason. The runner no longer holds it. */
+  /**
+   * Plays a script into the session's running turn: each step reports its
+   * events in order, over the time the step takes. Waits up to 5 s for a turn
+   * to be running, as the one a spawn's prompt opens, and fails if none starts.
+   *
+   * A step with `ask` parks the script on its Request until the user answers:
+   *
+   * - `allow` and `allow_always` run the tool call, and the script goes on;
+   * - `deny` fails the tool call, and the script goes on, as the model would;
+   * - `cancel` fails the tool call and ends the turn as `interrupted`.
+   *
+   * Resolves once the last step has been played, or as soon as the turn ends
+   * some other way: a cancel, an interrupt, `completeTurn`, or the session's
+   * exit. An interrupt leaves a message that was streaming unfinished, as
+   * Claude Code does. Fails if the session is already playing a script, if an
+   * `end` step is not the last step, or if the connection closes before the
+   * script is done.
+   */
+  readonly playScript: (sessionId: string, script: ReadonlyArray<ScriptStep>) => Promise<void>;
+  /**
+   * Ends the session for the given reason, first withdrawing the open Request
+   * if there is one. The runner no longer holds the session.
+   */
   readonly endSession: (sessionId: string, reason: ExitReason) => void;
   /**
    * Makes the session crash when its next input arrives, before it answers
@@ -250,36 +391,285 @@ export async function enlistScriptedRunner(
     });
   };
 
-  /** Ends the running turn in the given state. Fails if no turn is running. */
-  const completeTurn = (sessionId: string, state: TurnState): void => {
+  /**
+   * Reports the user's message as an item of the running turn, as the Claude
+   * Code adapter does for every input it delivers. A message steered into a
+   * turn that was already running is marked `steered`.
+   */
+  const reportUserMessage = (sessionId: string, text: string, steered: boolean): void => {
+    const session = findSession(sessionId);
+    const turnId = session.turnId;
+    if (turnId === undefined) throw new Error(`session ${sessionId} has no running turn`);
+    const item = {
+      turnId,
+      itemId: randomUUID(),
+      kind: "user_message",
+      detail: { text, ...(steered ? { steered: true } : {}) },
+    } as const;
+    reportEvent(session, { _tag: "item.started", ...stampEvent(sessionId), ...item });
+    reportEvent(session, {
+      _tag: "item.completed",
+      ...stampEvent(sessionId),
+      ...item,
+      status: "completed",
+    });
+  };
+
+  /**
+   * Stops the script playing into the session's turn, if any. The script's
+   * waits fail at once, so it reports nothing more.
+   */
+  const stopScript = (session: HostedSession): void => {
+    session.script?.abort();
+    session.script = undefined;
+    session.resumeScript = undefined;
+  };
+
+  /**
+   * Ends the running turn in the given state, with an error message when it
+   * failed, and stops the script playing into it. Fails if no turn is running.
+   */
+  const completeTurn = (sessionId: string, state: TurnState, error?: string): void => {
     const session = findSession(sessionId);
     if (session.turnId === undefined) {
       throw new Error(`session ${sessionId} has no running turn to complete`);
     }
     const turnId = session.turnId;
     session.turnId = undefined;
-    reportEvent(session, { _tag: "turn.completed", ...stampEvent(sessionId), turnId, state });
+    stopScript(session);
+    reportEvent(session, {
+      _tag: "turn.completed",
+      ...stampEvent(sessionId),
+      turnId,
+      state,
+      ...(error === undefined ? {} : { error }),
+    });
   };
 
+  /**
+   * Reports that the open Request is resolved, and resumes the script parked
+   * on it with the decision.
+   */
   const reportRequestResolved = (
     sessionId: string,
     requestId: string,
     decision: ApprovalDecision,
   ): void => {
     const session = findSession(sessionId);
+    const resumeScript = session.resumeScript;
     session.requestId = undefined;
+    session.resumeScript = undefined;
     reportEvent(session, {
       _tag: "request.resolved",
       ...stampEvent(sessionId),
       requestId,
       decision,
     });
+    resumeScript?.(decision);
+  };
+
+  /**
+   * Resolves the open Request as `cancel`, if there is one, as Claude Code
+   * does before a turn is interrupted or the session exits: a Request left
+   * open after that would ask about work that is no longer happening.
+   */
+  const withdrawRequest = (sessionId: string): void => {
+    const requestId = findSession(sessionId).requestId;
+    if (requestId !== undefined) reportRequestResolved(sessionId, requestId, "cancel");
   };
 
   const endSession = (sessionId: string, reason: ExitReason): void => {
     const session = findSession(sessionId);
+    // Stop the script first, so the withdrawal does not resume it.
+    stopScript(session);
+    withdrawRequest(sessionId);
     reportEvent(session, { _tag: "session.exited", ...stampEvent(sessionId), reason });
     sessions.delete(sessionId);
+  };
+
+  /**
+   * Waits up to 5 s for the session to be held with a turn running, and
+   * returns the session and the turn's id. Fails if no turn starts in that
+   * time.
+   */
+  const waitForRunningTurn = async (
+    sessionId: string,
+  ): Promise<{ readonly session: HostedSession; readonly turnId: string }> => {
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      const session = sessions.get(sessionId);
+      if (session?.turnId !== undefined) return { session, turnId: session.turnId };
+      if (Date.now() > deadline) {
+        throw new Error(`session ${sessionId} has no running turn on runner ${runnerId}`);
+      }
+      await sleep(10);
+    }
+  };
+
+  /**
+   * Reports one text item the way Claude Code streams it: `item.started`, one
+   * `content.delta` per piece of text, `delayMs` apart, and `item.completed`.
+   * The item id has the shape Claude Code gives a streamed block: the API
+   * message's id and the block's index.
+   */
+  const streamTextItem = async (
+    sessionId: string,
+    turnId: string,
+    kind: "assistant_message" | "reasoning",
+    streamKind: StreamKind,
+    pieces: Iterable<string>,
+    delayMs: number,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const session = findSession(sessionId);
+    const itemId = `msg_${randomBytes(12).toString("hex")}#0`;
+    reportEvent(session, { _tag: "item.started", ...stampEvent(sessionId), turnId, itemId, kind });
+    for (const delta of pieces) {
+      await sleep(delayMs, undefined, { signal });
+      reportEvent(session, {
+        _tag: "content.delta",
+        ...stampEvent(sessionId),
+        turnId,
+        itemId,
+        streamKind,
+        delta,
+      });
+    }
+    reportEvent(session, {
+      _tag: "item.completed",
+      ...stampEvent(sessionId),
+      turnId,
+      itemId,
+      kind,
+      status: "completed",
+    });
+  };
+
+  /**
+   * Reports one tool call the way Claude Code does. With `ask`, the call first
+   * opens its Request and waits for the answer: a denied or cancelled call
+   * fails with the result Claude Code gives the model, and a cancelled call
+   * also ends the turn as `interrupted`.
+   */
+  const runToolCall = async (
+    sessionId: string,
+    turnId: string,
+    call: ToolCall,
+    options: { readonly forMs?: number; readonly ask?: boolean },
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const session = findSession(sessionId);
+    const itemId = `toolu_${randomBytes(12).toString("hex")}`;
+    const completeItem = (status: "completed" | "failed", content: string): void =>
+      reportEvent(session, {
+        _tag: "item.completed",
+        ...stampEvent(sessionId),
+        turnId,
+        itemId,
+        kind: call.kind,
+        status,
+        detail: { content },
+      });
+    reportEvent(session, {
+      _tag: "item.started",
+      ...stampEvent(sessionId),
+      turnId,
+      itemId,
+      kind: call.kind,
+      detail: call.detail,
+    });
+    if (options.ask === true) {
+      const request: OpenRequest = { ...call.approval, requestId: randomUUID(), itemId };
+      const answered = new Promise<ApprovalDecision>((resolve, reject) => {
+        session.resumeScript = resolve;
+        signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+      });
+      session.requestId = request.requestId;
+      reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
+      const decision = await answered;
+      if (decision === "deny") return completeItem("failed", REFUSED);
+      if (decision === "cancel") {
+        completeItem("failed", CANCELLED);
+        return completeTurn(sessionId, "interrupted");
+      }
+    }
+    await sleep(options.forMs ?? 0, undefined, { signal });
+    completeItem("completed", TOOL_OUTPUT);
+  };
+
+  /** Plays one step of a script into the given turn, which is running. */
+  const playStep = async (
+    sessionId: string,
+    turnId: string,
+    step: ScriptStep,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    switch (step.kind) {
+      case "reasoning":
+        return streamTextItem(
+          sessionId,
+          turnId,
+          "reasoning",
+          "reasoning_text",
+          splitIntoWords(step.text),
+          step.deltaMs ?? WORD_DELAY_MS,
+          signal,
+        );
+      case "message":
+        return streamTextItem(
+          sessionId,
+          turnId,
+          "assistant_message",
+          "assistant_text",
+          splitIntoWords(step.text),
+          step.deltaMs ?? WORD_DELAY_MS,
+          signal,
+        );
+      case "stream":
+        return streamTextItem(
+          sessionId,
+          turnId,
+          "assistant_message",
+          "assistant_text",
+          generateMarkdownWords(Date.now() + step.forMs),
+          step.deltaMs ?? STREAM_DELAY_MS,
+          signal,
+        );
+      case "command":
+      case "file_change":
+      case "tool":
+      case "web_search":
+        return runToolCall(sessionId, turnId, buildToolCall(step), step, signal);
+      case "pause":
+        await sleep(step.forMs, undefined, { signal });
+        return;
+      case "end":
+        return completeTurn(sessionId, step.state, step.error);
+    }
+  };
+
+  const playScript = async (sessionId: string, script: ReadonlyArray<ScriptStep>) => {
+    const end = script.findIndex((step) => step.kind === "end");
+    if (end !== -1 && end !== script.length - 1) {
+      throw new Error(`the end step is step ${end + 1} of ${script.length}; it must be the last`);
+    }
+    const { session, turnId } = await waitForRunningTurn(sessionId);
+    if (session.script !== undefined) {
+      throw new Error(`session ${sessionId} is already playing a script`);
+    }
+    const controller = new AbortController();
+    session.script = controller;
+    try {
+      for (const step of script) {
+        if (controller.signal.aborted) return;
+        await playStep(sessionId, turnId, step, controller.signal);
+      }
+    } catch (error) {
+      // A stopped script fails its wait; that is how it learns the turn ended.
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      if (session.script === controller) session.script = undefined;
+    }
   };
 
   const answerFrame = (frame: ControllerToRunner): void => {
@@ -316,6 +706,8 @@ export async function enlistScriptedRunner(
           nativeSessionId: undefined,
           turnId: undefined,
           requestId: undefined,
+          script: undefined,
+          resumeScript: undefined,
         });
         if (!holding) reportStarted(frame.sessionId, true);
         return;
@@ -338,7 +730,7 @@ export async function enlistScriptedRunner(
           delivery: running ? "steered" : "opened",
         });
         if (!running) startTurn(frame.sessionId);
-        return;
+        return reportUserMessage(frame.sessionId, frame.input.text, running);
       }
       // A frame can cross a session's exit on the wire: the controller sends it
       // before it has handled the `session.exited` this runner already sent.
@@ -353,7 +745,12 @@ export async function enlistScriptedRunner(
       case "sessionInterrupt": {
         const session = sessions.get(frame.sessionId);
         if (session?.turnId === undefined) return;
-        return completeTurn(frame.sessionId, "interrupted");
+        // A script parked on the open Request takes the withdrawal as a
+        // cancel, and ends the turn itself, after failing its tool call.
+        const parked = session.resumeScript !== undefined;
+        withdrawRequest(frame.sessionId);
+        if (!parked) completeTurn(frame.sessionId, "interrupted");
+        return;
       }
       default:
         // Every other frame asks for work a scripted runner does not do.
@@ -450,6 +847,7 @@ export async function enlistScriptedRunner(
       }
       reportRequestResolved(sessionId, requestId, decision);
     },
+    playScript,
     endSession,
     crashSessionOnNextInput: (sessionId) => {
       crashing.add(sessionId);
@@ -523,5 +921,83 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
           ],
         },
       };
+  }
+}
+
+/**
+ * Builds the tool call a script step makes: the item Claude Code reports for
+ * the tool the step names, and the Request that asks to approve it. The tools
+ * are the ones Claude Code files under each item kind: `Bash` is a command,
+ * `Edit` a file change, `WebSearch` a web search, and any other tool a plain
+ * tool call.
+ */
+function buildToolCall(
+  step: Extract<ScriptStep, { readonly kind: "command" | "file_change" | "tool" | "web_search" }>,
+): ToolCall {
+  switch (step.kind) {
+    case "command":
+      return {
+        kind: "command_execution",
+        detail: { name: "Bash", input: { command: step.command } },
+        approval: {
+          kind: "command_approval",
+          decisions: APPROVAL_DECISIONS,
+          detail: { command: step.command },
+        },
+      };
+    case "file_change":
+      return {
+        kind: "file_change",
+        detail: { name: "Edit", input: { file_path: step.path } },
+        approval: {
+          kind: "file_change_approval",
+          decisions: APPROVAL_DECISIONS,
+          detail: { paths: [step.path] },
+        },
+      };
+    case "tool":
+      return {
+        kind: "tool_call",
+        detail: {
+          name: step.name,
+          input: step.input ?? {},
+          kind: step.name.startsWith("mcp__") ? "mcp" : "native",
+        },
+        approval: {
+          kind: "tool_approval",
+          decisions: APPROVAL_DECISIONS,
+          detail: { toolName: step.name },
+        },
+      };
+    case "web_search":
+      return {
+        kind: "web_search",
+        detail: { name: "WebSearch", input: { query: step.query } },
+        approval: {
+          kind: "tool_approval",
+          decisions: APPROVAL_DECISIONS,
+          detail: { toolName: "WebSearch" },
+        },
+      };
+  }
+}
+
+/**
+ * Splits text into words, each with the whitespace that follows it, so the
+ * words joined again are exactly the text. A message streams one word per
+ * delta.
+ */
+function splitIntoWords(text: string): ReadonlyArray<string> {
+  return text.split(/(?<=\s)(?=\S)/);
+}
+
+/**
+ * Generates the words of a long Markdown message: the stream blocks, over and
+ * over, until the first block boundary at or after `until`, a time in
+ * milliseconds since the epoch. It always generates at least one block.
+ */
+function* generateMarkdownWords(until: number): Generator<string> {
+  for (let index = 0; index === 0 || Date.now() < until; index += 1) {
+    yield* splitIntoWords(STREAM_BLOCKS[index % STREAM_BLOCKS.length]!);
   }
 }

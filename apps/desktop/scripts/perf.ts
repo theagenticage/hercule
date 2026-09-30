@@ -15,8 +15,9 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Three measured launches: with 40 threads, with 40 threads and one row
- *    that shows minutes, and, after spawning 460 more, with 500 threads.
+ * 2. Four measured launches: with 40 threads, with 40 threads and one row
+ *    that shows minutes, and, after spawning 460 more, with 500 threads, the
+ *    last time with a thread of 500 transcript rows open (see step 3).
  *    Before each of them the fixture restarts the controller with every idle
  *    thread's last activity set hours back. Then the script starts the app
  *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
@@ -34,6 +35,19 @@
  *      `measureNudges`);
  *    - the launch times: how long from spawn until the window was shown,
  *      and until each step that leads up to it.
+ * 3. For the fourth launch, the fixture first plays turns into one idle
+ *    thread until its transcript holds 500 rows. The script opens that
+ *    thread once, through Playwright, so the app opens it again at every
+ *    later launch (see `openThreadOnce`). The fourth launch's first screen is
+ *    then the thread with its whole transcript, so its `first-screen` mark
+ *    is when the transcript painted, and its memory is read with the thread
+ *    open.
+ * 4. One more plain launch, which reopens the same thread, measures a turn
+ *    that streams into it at full speed (see `measureStreaming`).
+ *
+ * The first thread screen's JavaScript is not measured here: `pnpm
+ * build:desktop` checks it, and prints it as "the first screen", because the
+ * thread's route is among the routes its check counts.
  *
  * The age clock is the one timer that keeps the age labels on screen
  * current, and it marks each fire with `performance.mark("age-clock-fire")`.
@@ -141,8 +155,9 @@ import {
   signInOnce,
   stopApp,
   writeSettings,
+  type Inspector,
 } from "./packaged-app.ts";
-import { runWithThreadFixture, type ThreadFixture } from "./perf-fixture.ts";
+import { runWithThreadFixture, type LongThread, type ThreadFixture } from "./perf-fixture.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
 /** The limits of spec 17's budget table that one launch of the app can check. */
@@ -160,7 +175,15 @@ const BUDGET = {
   // thread again on each `session` nudge; past this limit it moves to
   // updating only the threads the nudge names.
   rendererMainThreadPerNudgeMs: 16,
+  transcriptPaintMs: 800,
+  streamingTaskMs: 50,
 } as const;
+
+/** How many rows the transcript of the thread the fourth launch opens holds at least. */
+const LONG_THREAD_ROWS = 500;
+
+/** How long the measured turn streams (see `measureStreaming`). */
+const STREAM_MS = 10_000;
 
 /**
  * When memory is read, in milliseconds after the page opens. Slices 1 and 2
@@ -385,6 +408,26 @@ async function warmUpApp(userDataDir: string): Promise<void> {
   await sleep(3_000);
 }
 
+/**
+ * Starts the signed-in app on `userDataDir`, opens the thread titled `title`
+ * from the sidebar, waits for its transcript, and quits. The app then opens
+ * that thread again at its next launch, as it does for a user who quit with
+ * the thread open. Fails when the sidebar does not show the thread.
+ */
+async function openThreadOnce(userDataDir: string, title: string): Promise<void> {
+  const app = await launchTestPackage(userDataDir);
+  try {
+    const page = await app.firstWindow();
+    await page
+      .locator("a.side-row")
+      .filter({ has: page.getByText(title, { exact: true }) })
+      .click();
+    await page.getByRole("region", { name: "Transcript" }).waitFor();
+  } finally {
+    await quitApp(app);
+  }
+}
+
 /** How long a launch took, in milliseconds from spawn, step by step. */
 interface LaunchTimes {
   /** Until main's Node environment was ready, before any of the app's own code ran. */
@@ -446,14 +489,19 @@ interface PlainLaunch {
  *   `LaunchTimes`), the measures that need a connection to main and to the
  *   page.
  *
+ * With `opensThread`, the app is expected to open the last open thread, so
+ * the first screen is that thread's transcript.
+ *
  * Fails when the app does not open its page within 10 s, when the window is
  * not visible while it is sampled, when main showed the window without its
- * first screen, when the first screen is not the shell, or when the app does
- * not quit cleanly afterwards.
+ * first screen, when the first screen is not the shell, or not the thread's
+ * transcript when `opensThread` is set, or when the app does not quit
+ * cleanly afterwards.
  */
 async function measurePlainLaunch(
   userDataDir: string,
   fixture: ThreadFixture,
+  opensThread: boolean,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
   const app = await launchPlainApp(userDataDir);
@@ -547,6 +595,9 @@ async function measurePlainLaunch(
       // Only the shell has a <main>; the connect and sign-in screens do not.
       if ((await page.getByRole("main").count()) === 0) {
         throw new Error("the app did not open on the shell, so it was not signed in");
+      }
+      if (opensThread && (await page.getByRole("region", { name: "Transcript" }).count()) === 0) {
+        throw new Error("the app did not open the last open thread");
       }
       measured = {
         launch: {
@@ -768,6 +819,229 @@ async function measureNudges(
   }
 }
 
+/** What one turn streaming at full speed into the open thread cost the renderer. */
+interface StreamingCost {
+  /** The longest task the renderer's main thread ran, in milliseconds. */
+  readonly longestTaskMs: number;
+  /** How many of the main thread's tasks took over 50 ms. */
+  readonly longTasks: number;
+  /** How many times the page changed the text of the paragraph being written. */
+  readonly paragraphWrites: number;
+  /** How many frames the page drew meanwhile. */
+  readonly frames: number;
+}
+
+/**
+ * The trace category that holds `RunTask`, the event Chromium records for
+ * each task a thread runs. It is the category DevTools' Performance panel
+ * records.
+ */
+const TIMELINE_CATEGORY = "disabled-by-default-devtools.timeline";
+
+/** One event of a Chromium trace, with only the fields the script reads. */
+interface TraceEvent {
+  readonly name: string;
+  /** The phase: `X` for an event with a duration, `M` for metadata such as a thread's name. */
+  readonly ph: string;
+  readonly pid: number;
+  readonly tid: number;
+  /** The duration, in microseconds, of an event whose phase is `X`. */
+  readonly dur?: number;
+  readonly args?: { readonly name?: string };
+}
+
+/**
+ * Starts the signed-in app on `userDataDir` as a plain process, where it
+ * opens `thread` again, and streams one turn into the thread at full speed:
+ * a word every 2 ms for 10 s (see the fixture's `streamTurn`). Returns what
+ * the turn cost the renderer, from the user's question until the turn
+ * completed:
+ *
+ * - the longest task on the renderer's main thread, and how many took over
+ *   50 ms, from a Chromium trace of the whole turn;
+ * - how often the page changed the text of the paragraph being written, and
+ *   how many frames it drew, from an observer and an animation frame loop in
+ *   the page.
+ *
+ * The trace is recorded over the page's DevTools connection, which stays
+ * open for the whole turn. Tracing costs the renderer a little time of its
+ * own, so the tasks err long.
+ *
+ * Fails when the app does not open the thread, when the paragraph being
+ * written never shows text, which means the stream did not reach the page,
+ * when the trace lost events, or when the app does not quit cleanly
+ * afterwards.
+ */
+async function measureStreaming(
+  userDataDir: string,
+  fixture: ThreadFixture,
+  thread: LongThread,
+): Promise<StreamingCost> {
+  const app = await launchPlainApp(userDataDir);
+  let measured: StreamingCost;
+  try {
+    const { port } = new URL(app.endpoint);
+    await waitForPageTarget(port);
+    const page = await connectInspector(await findPageSocketUrl(port));
+    try {
+      const evaluate = (expression: string) =>
+        page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+      // The first screen is marked once the thread's screen has committed, and
+      // with it the tap's subscription, so the stream's deltas reach the page.
+      const deadline = Date.now() + 10_000;
+      while ((await evaluate(READ_TRANSCRIPT_SHOWN)) !== true) {
+        if (Date.now() > deadline) throw new Error("the app did not open the last open thread");
+        await sleep(100);
+      }
+      await evaluate(RECORD_PARAGRAPH_WRITES);
+      await page.send("Tracing.start", {
+        transferMode: "ReturnAsStream",
+        traceConfig: { includedCategories: [TIMELINE_CATEGORY] },
+      });
+      await fixture.streamTurn(thread.id, STREAM_MS);
+      await page.send("Tracing.end");
+      const taskMs = findRendererMainTasks(await readTrace(page)).map(
+        (event) => event.dur! / 1_000,
+      );
+      const { paragraphWrites, frames } = (await evaluate("globalThis.streamingCounts")) as {
+        paragraphWrites: number;
+        frames: number;
+      };
+      if (paragraphWrites === 0) {
+        throw new Error(
+          "the paragraph being written never showed text, so the stream never reached the page",
+        );
+      }
+      measured = {
+        longestTaskMs: Math.max(...taskMs),
+        longTasks: taskMs.filter((ms) => ms > BUDGET.streamingTaskMs).length,
+        paragraphWrites,
+        frames,
+      };
+    } finally {
+      page.close();
+    }
+  } finally {
+    if (app.process.exitCode === null && app.process.signalCode === null) {
+      await stopApp(app.process.pid!);
+    }
+  }
+  if (app.process.exitCode !== 0) {
+    const ending = app.process.signalCode ?? `code ${String(app.process.exitCode)}`;
+    throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
+  }
+  return measured;
+}
+
+/**
+ * An expression that evaluates, in the page, to whether the page has marked
+ * its first screen and shows a thread's transcript.
+ */
+const READ_TRANSCRIPT_SHOWN = `performance.getEntriesByName("first-screen").length > 0 &&
+  document.querySelector('section[aria-label="Transcript"]') !== null`;
+
+/**
+ * An expression that starts counting, in the page's `globalThis.streamingCounts`,
+ * how often the page changes the text of the paragraph being written and how
+ * many frames it draws. A change is one observer callback with a change
+ * inside that paragraph: the callback runs once after each task that changed
+ * the page.
+ */
+const RECORD_PARAGRAPH_WRITES = `(() => {
+  const counts = { paragraphWrites: 0, frames: 0 };
+  globalThis.streamingCounts = counts;
+  const isInOpenParagraph = (node) =>
+    (node instanceof Element ? node : node.parentElement)?.closest(".streaming") != null;
+  new MutationObserver((records) => {
+    if (records.some((record) => isInOpenParagraph(record.target))) counts.paragraphWrites += 1;
+  }).observe(document.querySelector('section[aria-label="Transcript"]'), {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
+  const countFrame = () => {
+    counts.frames += 1;
+    requestAnimationFrame(countFrame);
+  };
+  requestAnimationFrame(countFrame);
+})()`;
+
+/**
+ * Waits for the trace that `Tracing.end` finished on `page`, and returns its
+ * events. Fails when the trace lost events because its buffer filled up.
+ */
+async function readTrace(page: Inspector): Promise<TraceEvent[]> {
+  const { stream, dataLossOccurred } = (await page.waitForEvent("Tracing.tracingComplete")) as {
+    stream: string;
+    dataLossOccurred: boolean;
+  };
+  if (dataLossOccurred) throw new Error("the trace's buffer filled up, so the trace lost events");
+  let text = "";
+  for (;;) {
+    const chunk = (await page.send("IO.read", { handle: stream })) as {
+      data: string;
+      eof: boolean;
+      base64Encoded?: boolean;
+    };
+    text +=
+      chunk.base64Encoded === true ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
+    if (chunk.eof) break;
+  }
+  await page.send("IO.close", { handle: stream });
+  const trace = JSON.parse(text) as { traceEvents: TraceEvent[] } | TraceEvent[];
+  return Array.isArray(trace) ? trace : trace.traceEvents;
+}
+
+/**
+ * Returns the tasks the renderer's main thread ran in `events`: the `RunTask`
+ * events of the thread named `CrRendererMain`. The app has one renderer.
+ * Fails when the trace holds no such task.
+ */
+function findRendererMainTasks(events: readonly TraceEvent[]): TraceEvent[] {
+  const mainThreads = new Set(
+    events
+      .filter((event) => event.name === "thread_name" && event.args?.name === "CrRendererMain")
+      .map((event) => `${String(event.pid)}:${String(event.tid)}`),
+  );
+  const tasks = events.filter(
+    (event) =>
+      event.name === "RunTask" &&
+      event.ph === "X" &&
+      mainThreads.has(`${String(event.pid)}:${String(event.tid)}`),
+  );
+  if (tasks.length === 0) throw new Error("the trace holds no task of the renderer's main thread");
+  return tasks;
+}
+
+/** Prints what streaming one turn into the open thread cost, against its budget. */
+function reportStreaming(cost: StreamingCost, thread: LongThread): void {
+  console.log(
+    `## Streaming a turn at full speed, a word every 2 ms for ${String(STREAM_MS / 1_000)} s, ` +
+      `into a thread of ${String(thread.rowCount)} transcript rows`,
+  );
+  console.log();
+  console.log(
+    formatTable(
+      ["Budget", "Limit", "Measured", "Within"],
+      [
+        [
+          "Renderer main thread, longest task",
+          `no task over ${String(BUDGET.streamingTaskMs)} ms`,
+          `${cost.longestTaskMs.toFixed(1)} ms (${String(cost.longTasks)} over ${String(BUDGET.streamingTaskMs)} ms)`,
+          cost.longTasks === 0 ? "yes" : "over",
+        ],
+        [
+          "Paragraph writes",
+          "at most one a frame, over the whole turn",
+          `${String(cost.paragraphWrites)} in ${String(cost.frames)} frames`,
+          cost.paragraphWrites <= cost.frames ? "yes" : "over",
+        ],
+      ],
+    ),
+  );
+  console.log();
+}
+
 /** Formats a process's CPU and wakeups as table cells, or dashes when it was not running. */
 function formatUse(sample: ProcessUse | undefined): string[] {
   if (sample === undefined) return ["-", "-"];
@@ -781,6 +1055,8 @@ interface MeasuredLaunch extends PlainLaunch {
   readonly threadCount: number;
   /** Whether one row on screen showed minutes, so the age clock should fire once while visible. */
   readonly twoMinuteRow: boolean;
+  /** The thread the app opened at launch, or `null` when it opened on the new-thread screen. */
+  readonly openThread: LongThread | null;
   /** The machine's load average over the minute before the app was spawned. */
   readonly loadAtSpawn: number;
 }
@@ -837,6 +1113,16 @@ function reportLaunch(measured: MeasuredLaunch): void {
       `${launch.windowShownMs.toFixed(0)} ms`,
       launch.windowShownMs <= BUDGET.launchMs,
     ],
+    ...(measured.openThread === null
+      ? []
+      : [
+          [
+            "Launch, spawn to the last thread's transcript",
+            `painted within ${BUDGET.transcriptPaintMs} ms of spawn (warm, signed in)`,
+            `${launch.firstScreenMs.toFixed(0)} ms`,
+            launch.firstScreenMs <= BUDGET.transcriptPaintMs,
+          ] satisfies [string, string, string, boolean],
+        ]),
     [
       "Processes",
       `${BUDGET.processes}: browser, GPU, network utility, renderer`,
@@ -919,7 +1205,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
   console.log();
   console.log(
-    "Launch steps, in ms from spawn (first screen: the shell; not budgeted until slice 5):",
+    `Launch steps, in ms from spawn (first screen: ${measured.openThread === null ? "the new-thread screen" : "the last thread's transcript"}):`,
   );
   console.log(
     formatTable(
@@ -979,29 +1265,48 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log();
 }
 
-const launches = await runWithThreadFixture((fixture) =>
+const { launches, streaming, longThread } = await runWithThreadFixture((fixture) =>
   runInScratchUserDataDir(async (userDataDir) => {
     await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
     const measured: MeasuredLaunch[] = [];
-    const measure = async (threadCount: number, twoMinuteRow: boolean) => {
+    const measure = async (
+      name: string,
+      threadCount: number,
+      twoMinuteRow: boolean,
+      openThread: LongThread | null,
+    ) => {
       await fixture.prepareLaunch({ twoMinuteRow });
+      if (openThread !== null) await openThreadOnce(userDataDir, openThread.title);
       await warmUpApp(userDataDir);
       measured.push({
-        name: `${String(threadCount)} threads, run ${twoMinuteRow ? "2" : "1"}`,
+        name,
         threadCount,
         twoMinuteRow,
+        openThread,
         loadAtSpawn: loadavg()[0]!,
-        ...(await measurePlainLaunch(userDataDir, fixture)),
+        ...(await measurePlainLaunch(userDataDir, fixture, openThread !== null)),
       });
     };
-    await measure(40, false);
-    await measure(40, true);
+    await measure("40 threads, run 1", 40, false, null);
+    await measure("40 threads, run 2", 40, true, null);
     await fixture.growTo(500);
-    await measure(500, false);
-    return measured;
+    await measure("500 threads, run 1", 500, false, null);
+    const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
+    await measure(
+      `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
+      500,
+      false,
+      thread,
+    );
+    return {
+      launches: measured,
+      streaming: await measureStreaming(userDataDir, fixture, thread),
+      longThread: thread,
+    };
   }),
 );
 
 for (const launch of launches) reportLaunch(launch);
+reportStreaming(streaming, longThread);

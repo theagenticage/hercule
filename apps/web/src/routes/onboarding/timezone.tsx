@@ -1,12 +1,11 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-import { addCompletedStep, resolveBrowserTimezone } from "@hercule/client-core";
+import { addCompletedStep, resolveBrowserTimezone, readErrorMessage } from "@hercule/client-core";
 import { Button, Field } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
 import { CenteredScreen } from "../../screens/centered-screen";
-import { readErrorMessage } from "../../screens/save-status";
 import { TimezoneField } from "../../screens/timezone-field";
 
 /** The key of this step's save, so a second submit can see that one is running. */

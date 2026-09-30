@@ -22,7 +22,8 @@ import { useAgeLabel, useAgeWords } from "../app/age-clock";
 import { buildLook, Face } from "../faces";
 import { PlusIcon } from "../icons";
 import { Mark } from "../marks";
-import { ITEM_HEIGHTS, type ProjectTint, type RowEnd, type SectionKey } from "./sidebar-items";
+import { ProjectTile, type ProjectTint } from "../screens/project-tile";
+import { ITEM_HEIGHTS, type RowEnd, type SectionKey } from "./sidebar-items";
 
 /** What every item takes from the list: its key in the list, and the space above it. */
 interface Placement {
@@ -126,9 +127,7 @@ export const ProjectHeader = memo(function ProjectHeader({
       tabIndex={-1}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["project-header"] }}
     >
-      <span className={`proj proj--${tint ?? "none"}`}>
-        <span className="proj-name">{name}</span>
-      </span>
+      <ProjectTile tint={tint} name={name} />
       {projectId === null ? null : (
         <Link
           to="/"

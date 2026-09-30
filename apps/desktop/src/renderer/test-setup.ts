@@ -16,3 +16,15 @@ Object.defineProperty(document, "fonts", {
   configurable: true,
   get: () => ({ ready: Promise.resolve() }),
 });
+
+/**
+ * jsdom has no `ResizeObserver`. The thread screen watches the composer's
+ * height with one, so each test that opens a thread would fail without it.
+ * The stub reports no sizes. A test that needs a resize replaces it with
+ * `vi.stubGlobal("ResizeObserver", ...)`.
+ */
+window.ResizeObserver = class {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+};

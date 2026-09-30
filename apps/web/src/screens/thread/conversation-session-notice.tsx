@@ -1,11 +1,10 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import { buildButtonClassName } from "@hercule/ui";
 import { answeredAssistantQuery } from "../../app/queries";
 import { StopButton } from "../composer/controls";
-import { readErrorMessage } from "../save-status";
 
 /**
  * The card an assistant's session shows where a thread has its composer. The

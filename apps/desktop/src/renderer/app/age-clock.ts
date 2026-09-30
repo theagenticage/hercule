@@ -1,14 +1,20 @@
 /**
- * The age clock: the one timer behind every age label on screen, such as a
- * thread row's "20m".
+ * The age clock: the one timer behind every label on screen that counts the
+ * time since a moment. There are two kinds of such labels:
  *
- * A label changes only at the moments `findNextAgeChange` names, minutes or
- * hours apart. So instead of a timer per label, or one that ticks every
- * second, the clock keeps a single timer for the earliest of those moments
- * among the labels on screen. When it fires, the clock reads the time once
- * and each label compares its own text: only a label whose text changed draws
- * again. With no label on screen, or with the window hidden, there is no
- * timer at all, so an idle app does no work.
+ * - an age, such as a thread row's "20m" or the "10m" a thread has waited on
+ *   its open Request (`useAgeLabel`), which changes minutes or hours apart
+ *   (`findNextAgeChange`);
+ * - a duration, such as a live turn's "Working for 12s"
+ *   (`useDurationText`), which changes every second under an hour
+ *   (`findNextDurationChange`).
+ *
+ * Instead of a timer per label, or one that ticks every second, the clock
+ * keeps a single timer for the earliest moment at which some label on screen
+ * changes. When it fires, the clock reads the time once and each label
+ * compares its own text: only a label whose text changed draws again. With no
+ * label on screen, or with the window hidden, there is no timer at all, so an
+ * idle app does no work.
  *
  * A timer may not count the time the Mac slept. The clock therefore also
  * reads the time again when the window is shown, when it gets focus, and when
@@ -19,7 +25,12 @@
  * the clock follows the one window this page runs in.
  */
 import { useCallback, useSyncExternalStore } from "react";
-import { describeAge, findNextAgeChange, formatAge } from "@hercule/client-core";
+import {
+  describeAge,
+  findNextAgeChange,
+  findNextDurationChange,
+  formatAge,
+} from "@hercule/client-core";
 
 /**
  * The longest delay `setTimeout` keeps. A longer one runs after 1 ms instead,
@@ -34,8 +45,13 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * How early a timer may fire and still count as firing on time. A timer
  * counts time on a clock that ignores the corrections made to the wall clock,
  * so it can fire slightly before the wall clock reaches the moment it was set
- * for. A label that counts minutes can change a second early without anyone
- * seeing it, and treating the fire as late would cost a second timer.
+ * for. The gap grows with the timer's length:
+ *
+ * - A label that counts minutes waits long, and can change a second early
+ *   without anyone seeing it. Treating the fire as early would cost a second
+ *   timer.
+ * - A label that counts seconds keeps the timer under a second long, so its
+ *   fires are early by far less than a second.
  */
 const EARLY_FIRE_TOLERANCE_MS = 1_000;
 
@@ -46,12 +62,15 @@ export interface AgeClock {
    */
   readNow(): Date;
   /**
-   * Registers a label that shows the age of `at`, while it is on screen.
-   * Reads the time, so a label that appears is never out of date, and sets the
-   * timer. `onChange` is called whenever the clock reads a time at which some
-   * label's text changed. Returns a function that removes the label.
+   * Registers a label while it is on screen. `findNextChange` returns the
+   * first moment after `now` at which the label's text changes, such as
+   * `findNextAgeChange` for the label's own moment.
+   *
+   * Reads the time, so a label that appears is never out of date, and sets
+   * the timer. `onChange` is called whenever the clock reads a time at which
+   * some label's text changed. Returns a function that removes the label.
    */
-  watch(at: string, onChange: () => void): () => void;
+  watch(findNextChange: (now: Date) => Date, onChange: () => void): () => void;
   /**
    * Reads the time again, calls every registered label's `onChange` if some
    * label's text changed, and sets the timer for the next change.
@@ -62,8 +81,8 @@ export interface AgeClock {
 /** Creates an age clock. Exported for tests; the app uses `ageClock`. */
 export const createAgeClock = (): AgeClock => {
   let now = new Date();
-  /** Each registered label's `onChange`, and the time its age counts from. */
-  const watched = new Map<() => void, string>();
+  /** Each registered label's `onChange`, and the function that finds its next change. */
+  const watched = new Map<() => void, (now: Date) => Date>();
   /** The earliest moment, in milliseconds, at which a registered label's text changes. */
   let nextChange: number | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -76,8 +95,8 @@ export const createAgeClock = (): AgeClock => {
     clearTimeout(timer);
     timer = undefined;
     nextChange = null;
-    for (const at of watched.values()) {
-      const change = findNextAgeChange(at, now).getTime();
+    for (const findNextChange of watched.values()) {
+      const change = findNextChange(now).getTime();
       if (nextChange === null || change < nextChange) nextChange = change;
     }
     if (nextChange === null || document.visibilityState === "hidden") return;
@@ -115,12 +134,12 @@ export const createAgeClock = (): AgeClock => {
 
   return {
     readNow: () => now,
-    watch: (at, onChange) => {
+    watch: (findNextChange, onChange) => {
       if (watched.size === 0) {
         document.addEventListener("visibilitychange", followVisibility);
         window.addEventListener("focus", refresh);
       }
-      watched.set(onChange, at);
+      watched.set(onChange, findNextChange);
       refresh();
       return () => {
         watched.delete(onChange);
@@ -139,21 +158,26 @@ export const createAgeClock = (): AgeClock => {
 export const ageClock = createAgeClock();
 
 /**
- * Returns `format(at, now)` for the age clock's current time, and draws the
- * calling component again whenever that text changes. The label registers
- * with the clock only while `onScreen` is true; off screen it keeps the text
- * it had, and reads a fresh one as soon as it is on screen again.
+ * Returns `format(now)` for the age clock's current time, and draws the
+ * calling component again whenever that text changes. `findNextChange` finds
+ * when the text of a label counting from `since` changes next, and is one of
+ * the stable functions `findNextAgeChange` and `findNextDurationChange`.
+ *
+ * The label registers with the clock only while `counting` is true. Otherwise
+ * it keeps the text it had, and reads a fresh one as soon as it counts again.
  */
-const useAgeText = (
-  at: string,
-  onScreen: boolean,
-  format: (at: string, now: Date) => string,
+const useClockText = (
+  since: string,
+  counting: boolean,
+  findNextChange: (since: string, now: Date) => Date,
+  format: (now: Date) => string,
 ): string => {
   const subscribe = useCallback(
-    (onChange: () => void) => (onScreen ? ageClock.watch(at, onChange) : () => {}),
-    [at, onScreen],
+    (onChange: () => void) =>
+      counting ? ageClock.watch((now) => findNextChange(since, now), onChange) : () => {},
+    [since, counting, findNextChange],
   );
-  return useSyncExternalStore(subscribe, () => format(at, ageClock.readNow()));
+  return useSyncExternalStore(subscribe, () => format(ageClock.readNow()));
 };
 
 /**
@@ -162,7 +186,7 @@ const useAgeText = (
  * only while the label is inside the visible part of the list.
  */
 export const useAgeLabel = (at: string, onScreen: boolean): string =>
-  useAgeText(at, onScreen, formatAge);
+  useClockText(at, onScreen, findNextAgeChange, (now) => formatAge(at, now));
 
 /**
  * Returns the age of `at` in words, such as "20 minutes ago" (`describeAge`),
@@ -171,4 +195,27 @@ export const useAgeLabel = (at: string, onScreen: boolean): string =>
  * in the same render.
  */
 export const useAgeWords = (at: string, onScreen: boolean): string =>
-  useAgeText(at, onScreen, describeAge);
+  useClockText(at, onScreen, findNextAgeChange, (now) => describeAge(at, now));
+
+/**
+ * Returns `describe(now)`, where `now` is the age clock's current time in
+ * milliseconds since the epoch, and keeps it current while `counting` is
+ * true. The text is read again at each moment the duration since `since`
+ * shows a new number of seconds, or of minutes past an hour
+ * (`findNextDurationChange`), and the component draws again only when the
+ * text changed.
+ *
+ * A work stretch's divider reads, for example:
+ *
+ * ```ts
+ * useDurationText(block.startedAt, block.endedAt === null, (now) => describeWorkStretch(block, now))
+ * ```
+ *
+ * A stretch that has ended passes `counting: false`, and sets no timer.
+ */
+export const useDurationText = (
+  since: string,
+  counting: boolean,
+  describe: (now: number) => string,
+): string =>
+  useClockText(since, counting, findNextDurationChange, (now) => describe(now.getTime()));

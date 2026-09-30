@@ -4,6 +4,7 @@
  * and only the caller should read one.
  */
 import type { ProviderInstance, Session, ThreadRows } from "@hercule/contract";
+import { findModelName } from "./model-name";
 import { isSettled, WORKING_STATUSES } from "./status";
 
 /** A row's state marker: working, waiting for input, or over. */
@@ -37,22 +38,6 @@ export const decideThreadMark = (session: Session): ThreadMark => {
 };
 
 /**
- * Returns the display name of the thread's model from the catalog, such as
- * `Claude Sonnet 5`, rather than the slug `claude-sonnet-5`. When no snapshot
- * offers the slug any more, returns the slug itself rather than a blank,
- * because the thread still runs on that model.
- */
-const findModelName = (instances: readonly ProviderInstance[], session: Session): string => {
-  const slug = session.modelSelection.model;
-  const instance = instances.find((each) => each.id === session.instanceId);
-  for (const snapshot of instance?.snapshots ?? []) {
-    const model = snapshot.models.find((each) => each.slug === slug);
-    if (model !== undefined) return model.name;
-  }
-  return slug;
-};
-
-/**
  * Returns a row for each session, sorted by `compareNewestFirst`: the most
  * recently active first, and sessions active at the same moment by id.
  */
@@ -68,6 +53,12 @@ export const buildThreadRows = (
       mark: decideThreadMark(session),
       title: session.title,
       activityAt: session.lastActivityAt,
-      secondLine: mode === "meta" ? findModelName(instances, session) : null,
+      secondLine:
+        mode === "meta"
+          ? findModelName(
+              instances.find((each) => each.id === session.instanceId),
+              session.modelSelection.model,
+            )
+          : null,
     }))
     .sort(compareNewestFirst);

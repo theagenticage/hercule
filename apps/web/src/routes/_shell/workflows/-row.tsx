@@ -1,10 +1,10 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import type { WorkflowSummary } from "@hercule/contract";
 import { Switch, cn } from "@hercule/ui";
-import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 /**
  * Renders one workflow in the list: its name, its description, a switch that

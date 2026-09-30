@@ -1,10 +1,10 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
-import { formatStamp, queryKeys, type HerculeClient } from "@hercule/client-core";
+import { formatStamp, queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 /**
  * The row for one stored secret: its owner, its name, and when it was last

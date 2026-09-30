@@ -91,6 +91,13 @@ export class ConnectionError extends Error {
   }
 }
 
+/**
+ * Returns the message of an error. A rejected value that is not an `Error`
+ * is converted to a string, so there is always something to show.
+ */
+export const readErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /** Returns true when the error is a `not_found` response from the controller. */
 export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "not_found";

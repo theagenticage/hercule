@@ -1,0 +1,142 @@
+/**
+ * Tests the thread route's loading: the reads it makes before the screen
+ * renders, the thread it stores as the last open one, and what it shows when
+ * the thread does not exist or cannot be read.
+ */
+import { describe, expect, it } from "vitest";
+import { act, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { queryKeys } from "@hercule/client-core";
+import { createLaunchHistory, readLastThread } from "../../../../app/last-thread";
+import {
+  buildErrorBody,
+  buildSidebarHandlers,
+  buildThreadHandlers,
+  CONTROLLER_URL,
+  createFakeBridge,
+  renderApp,
+  SIDEBAR_FIXTURE,
+  stubApi,
+  THREAD_FIXTURES,
+} from "../../../../app/testing";
+
+/** A thread id no controller holds. */
+const GONE_ID = "01a06d02-7400-7000-8000-0000000000ff";
+
+/** Starts the app signed in at `path`, with the sidebar fixture and the finished thread's reads. */
+const openApp = (path: string, handlers: Parameters<typeof stubApi>[0] = {}) => {
+  const calls = stubApi({
+    ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+    ...buildThreadHandlers(THREAD_FIXTURES.finished),
+    ...handlers,
+  });
+  const app = renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+    path,
+  });
+  return { calls, app };
+};
+
+describe("the thread route", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+
+  it("reads the session, the transcript and the queued inputs before the screen renders", async () => {
+    const { app } = openApp(`/threads/${sessionId}`);
+    const { router, context } = await app;
+    expect(router.state.location.pathname).toBe(`/threads/${sessionId}`);
+    const cache = context.queryClient;
+    expect(cache.getQueryData(queryKeys.session(sessionId))).toEqual(thread.session);
+    expect(cache.getQueryData(queryKeys.transcript(sessionId))).toEqual(thread.transcript);
+    expect(cache.getQueryData(queryKeys.inputs(sessionId))).toEqual([]);
+  });
+
+  it("reads every page of a transcript that does not fit on one", async () => {
+    const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: (call) =>
+        call.query.cursor === "page-2"
+          ? { body: { items: thread.transcript.slice(10) } }
+          : { body: { items: thread.transcript.slice(0, 10), nextCursor: "page-2" } },
+    });
+    const { context } = await app;
+    expect(context.queryClient.getQueryData(queryKeys.transcript(sessionId))).toEqual(
+      thread.transcript,
+    );
+    expect(
+      calls.filter((call) => call.path === transcriptPath).map((call) => call.query.cursor),
+    ).toEqual([undefined, "page-2"]);
+  });
+
+  it("stores the thread as the last open one for its controller", async () => {
+    const { app } = openApp(`/threads/${sessionId}`);
+    await app;
+    expect(readLastThread(CONTROLLER_URL)).toBe(sessionId);
+    expect(readLastThread("http://another.test")).toBeNull();
+  });
+
+  it("shows that a thread is not found, with a link to a new thread, and forgets it", async () => {
+    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, GONE_ID);
+    const { app } = openApp(`/threads/${GONE_ID}`);
+    const { router } = await app;
+
+    expect(router.state.location.pathname).toBe(`/threads/${GONE_ID}`);
+    const heading = screen.getByRole("heading", { name: "This thread was not found." });
+    // The screen fills the main pane, beside the sidebar, not the whole window.
+    expect(screen.getByRole("main").contains(heading)).toBe(true);
+    expect(readLastThread(CONTROLLER_URL)).toBeNull();
+
+    await userEvent.click(screen.getByRole("link", { name: "Start a new thread" }));
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("asks for a gone thread once, rather than retrying a 404", async () => {
+    const { app, calls } = openApp(`/threads/${GONE_ID}`);
+    await app;
+    expect(calls.filter((call) => call.path === `/api/v1/sessions/${GONE_ID}`)).toHaveLength(1);
+  });
+
+  it("forgets the thread open before a gone one, so the next launch starts at the new-thread screen", async () => {
+    const { app } = openApp(`/threads/${sessionId}`);
+    const { router } = await app;
+    await act(() => router.navigate({ to: "/threads/$sessionId", params: { sessionId: GONE_ID } }));
+    expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
+    expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
+  });
+
+  it("shows the render failure at once for another error, and keeps the thread stored", async () => {
+    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, sessionId);
+    const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: {
+        status: 500,
+        body: buildErrorBody("internal", "The transcript could not be read."),
+      },
+    });
+    await app;
+    expect(screen.getByRole("heading", { name: "This screen did not load" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe("The transcript could not be read.");
+    // The controller answered, so asking again would get the same answer.
+    expect(calls.filter((call) => call.path === transcriptPath)).toHaveLength(1);
+    expect(readLastThread(CONTROLLER_URL)).toBe(sessionId);
+  });
+
+  it("stores the thread the user opens last", async () => {
+    const { app } = openApp(`/threads/${sessionId}`, buildThreadHandlers(THREAD_FIXTURES.failed));
+    const { router } = await app;
+    await act(() =>
+      router.navigate({
+        to: "/threads/$sessionId",
+        params: { sessionId: THREAD_FIXTURES.failed.session.id },
+      }),
+    );
+    expect(readLastThread(CONTROLLER_URL)).toBe(THREAD_FIXTURES.failed.session.id);
+  });
+
+  it("forgets the thread when the user leaves it for the new-thread screen", async () => {
+    const { app } = openApp(`/threads/${sessionId}`);
+    const { router } = await app;
+    await act(() => router.navigate({ to: "/" }));
+    // The next launch starts where this one quit.
+    expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
+  });
+});
