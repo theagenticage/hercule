@@ -495,8 +495,9 @@ These are starting budgets. The first performance pass measures the real thread 
 |---|---|
 | Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
 | Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one |
-| Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB |
-| Idle, window visible, no thread working | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
+| Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): with a text field focused and with none, because a focused field costs the GPU process 400 MB more while the glass blur is on screen; see [Measured](#measured))* |
+| Idle, window visible, no thread working *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): and no text field focused)* | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
+| Idle, window visible, a text field focused | *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* No wakeups from the app beyond what a focused field costs an empty Electron window: at most 63 a second for the GPU and 4 for the renderer on the reference machine. The field's blinking caret keeps Chromium drawing frames, about 60 a second, however still the rest of the page is |
 | Idle, window hidden or minimized | Renderer: no wakeups from the app *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): except the live connection's 30-second keepalive, because rule 3 keeps the `session` topic subscribed while hidden)* |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The paragraph being written is painted at most once per frame |
 | The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
@@ -528,7 +529,7 @@ These rules keep the budgets:
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)*
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
-5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all.
+5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
@@ -552,6 +553,7 @@ These rules keep the budgets:
   - **Memory is read 13 seconds after the page opens,** from outside the app. The budget limits the physical footprint, which `footprint` reports and Activity Monitor shows. The working set, the resident size `ps` reports and the number `app.getAppMetrics()` gives on macOS, is recorded beside it without a budget. It counts the Electron framework's pages, which all four processes share, once in each process, so it reads about 200 MB above the footprint however little the app holds. Slices 1 and 2 were budgeted on the working set, 420 MB summed and 180 MB for the renderer; slice 3 moved the budget to the footprint.
   - **CPU and wakeups** come from `app.getAppMetrics()`, which the script calls in main through its Node inspector, connecting only for each call. A wakeup is the kernel's count of a process's interrupt wakeups. The visible sample starts 30 seconds after the page opens, so it measures the app at rest, not the one-off timers that fire after a page loads.
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
+  - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **The script does not yet control whether a text field is focused,** and a focused field changes both memory and wakeups ([Measured](#measured)). The new-thread composer takes focus when its screen opens, but its caret blinks only while macOS has made the app active, and whether macOS does that at a plain launch varies from launch to launch. Measuring both states on purpose, one with nothing focused and one with the composer focused through DevTools focus emulation, is part of [#301](https://github.com/theagenticage/hercule/issues/301).
   - ~~**Long tasks** come from a `PerformanceObserver` in the renderer.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **Long tasks** come from a Chromium trace of a turn streaming into the fixture thread, recorded over the page's DevTools connection. A long task is a task on the renderer's main thread that runs over 50 ms: the page cannot react to input until it ends. The trace needs no measuring code in the app. Tracing costs the renderer a little time of its own, so the tasks err long.
 - **CI checks what does not depend on the machine:**
   - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
@@ -697,6 +699,40 @@ These rules keep the budgets:
   - **Accepted for the first prototype** (decided 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275)): the thread is drawn as the book draws it, blur and fade included, and the summed footprint stays over its budget. The budget is not raised. A later performance pass brings the footprint under it.
 - **The first screen's JavaScript is 32 kB over its guide.** The chunks loaded at first paint are 219 kB, 10 kB more than slice 4's first screen. The thread's route adds 63 kB, and about 48 kB of that is the markdown parser: `react-markdown`, `remark-gfm` and `remark-breaks`, measured alone in a production build. The shared chunk that holds React DOM is named after the thread's route, `_sessionId-*.js`, because the thread's route is one of the modules that use it; it is not the thread's code.
   - **Handed to [#295](https://github.com/theagenticage/hercule/issues/295)** (decided 2026-09-30): both apps parse markdown with marked's lexer, about 34 kB smaller, and draw it as React elements. Until then, the overrun is accepted for the first prototype, like the footprint's.
+
+**The first milestone's finish,** measured 2026-09-30 on the reference machine with the perf script, after slice 8, in one run of four launches and a streamed turn, as in slice 5. The load average was 3.4 to 10.7 while measuring. In the two launches with 40 threads, the new-thread composer's caret was blinking; in the other two, nothing was focused ([Measuring](#measuring)).
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Launch: spawn to window shown, warm | 500 ms | 361 to 410 ms on the new-thread screen; 368 ms with the long thread open |
+| Launch: spawn to the last open thread's transcript painted | 800 ms | 363 ms |
+| Launch: spawn to first paint | - | 235 to 307 ms |
+| Processes | 4 | 4 |
+| Memory, summed physical footprint, nothing focused | 220 MB | **306 MB** on the new-thread screen with 500 threads; **371 MB** with the long thread open: browser 51, GPU 246, network utility 8, renderer 66 |
+| Memory, summed physical footprint, the composer focused | 220 MB | **694 and 696 MB** on the new-thread screen with 40 threads: browser 53 to 55, GPU 589, network utility 8, renderer 44 to 45 |
+| Memory, renderer's physical footprint | 100 MB | 44 to 53 MB on the new-thread screen; 66 MB with the long thread open |
+| Working set | - | 393 to 410 MB summed on the new-thread screen, 428 MB with the long thread open; renderer 123 to 149 MB |
+| Wakeups while visible and idle, nothing focused | renderer none; GPU at most 12 a second | renderer 1 a second, which the script counts as none; GPU 2 |
+| Wakeups while visible and idle, the composer focused | renderer at most 4 a second; GPU at most 63 | **renderer 5; GPU 65 and 66** |
+| Wakeups while hidden | renderer none | renderer 0 to 1 a second |
+| Age labels, 60 seconds visible | a timer only for an age on screen that shows minutes | 1 fire when the youngest age on screen is 2m; 0 when every age is over an hour |
+| Age labels, 60 seconds hidden | no timer | 0 fires |
+| Renderer main thread per `session` nudge, 500 threads | 16 ms | 10.3 ms; 13.1 ms with the long thread open |
+| Renderer main thread per `session` nudge, 40 threads | - | 5.0 to 8.2 ms |
+| Renderer CPU and controller CPU per nudge, 500 threads | - | 19.0 to 24.5 ms and 21.5 to 30.5 ms |
+| Streaming at full speed: the longest task on the renderer's main thread | 50 ms | 15.6 ms |
+| Streaming at full speed: writes to the paragraph being written | at most one a frame | 1,161 in 2,369 frames |
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | **300.3 kB**: 240.8 kB at first paint, 59.5 kB for the thread's route |
+| Main's startup file, minified | 160 kB | 150.2 kB |
+
+- **A focused text field is what puts the new-thread screen 400 MB over.** The launches with 40 threads read about 390 MB more than the one with 500 on the same screen, all of it in the GPU process. Probes in one session, turning one thing off at a time, found the cause:
+  - The glass blur's `backdrop-filter` makes Chromium create render surfaces. With those on screen, macOS cannot take the page's layers as overlays, so Chromium composites every frame itself.
+  - While frames keep coming, macOS holds 400 to 470 MB of GPU driver memory for that, and cannot purge it. A blinking caret keeps frames coming, as do typing and a streaming turn. When the frames stop, the footprint drops within about 5 seconds.
+  - One blurred element on screen is enough. With the composer focused, the GPU process read 585 MB as drawn, 403 MB without the composer's blur, and 107 MB with no blur anywhere.
+- **The focused field's wakeups are Chromium's.** An empty Electron window with one focused text field reads 62 to 63 GPU wakeups a second and 4 in the renderer, so the app adds about 3 and 1. The new budget row for a focused field sets the empty window's reading as the limit.
+- **Accepted for the first prototype** (decided 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275)): the app keeps the book's glass, and the summed footprint stays over its budget, far over with a field focused. The budget is not raised. [#301](https://github.com/theagenticage/hercule/issues/301) decides between keeping the blur and avoiding its cost, and drawing the persistent surfaces solid.
+- **Reduce transparency still drew a blur, and now draws none.** It sets `--glass-level` to 0, which computed to `backdrop-filter: blur(0px) saturate(1)`. That changes no pixel, but Chromium still drew a backdrop filter for it, at the full 587 MB, against rule 5's "no blur at all". Reduce transparency now also sets the filter to `none`, and an end-to-end test checks it.
+- **The first screen's JavaScript grew by 18 kB over slices 6 to 8,** to 50 kB over its guide. [#295](https://github.com/theagenticage/hercule/issues/295) still holds the markdown parser, the largest part of the overrun.
 
 ## Slices
 
