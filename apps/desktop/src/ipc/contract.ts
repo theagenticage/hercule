@@ -28,6 +28,7 @@
  *   Electron logs it.
  */
 import { Schema } from "effect";
+import type * as ClientCore from "@hercule/client-core";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
 
 /**
@@ -86,6 +87,29 @@ export const ControllerUrlSaveOutcome = Schema.TaggedUnion({
 });
 export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
 
+/** A menu item the page carries out: Sign Out, New Thread, or Send. */
+export const MenuCommand = Schema.Literals(["signOut", "newThread", "send"]);
+export type MenuCommand = typeof MenuCommand.Type;
+
+/** A thread the Go menu lists: the session it opens, and the title its item shows. */
+export const GoMenuThread = Schema.Struct({ sessionId: Schema.String, title: Schema.String });
+export type GoMenuThread = typeof GoMenuThread.Type;
+
+/**
+ * A thread waiting on the user, as client-core's `listWaitingThreads` returns
+ * it. The schema's fields must match client-core's type one for one, so a
+ * field added to one and not the other fails the typecheck.
+ */
+export const WaitingThread = Schema.Struct({
+  sessionId: Schema.String,
+  requestId: Schema.String,
+  title: Schema.String,
+  question: Schema.String,
+} satisfies {
+  readonly [Field in keyof ClientCore.WaitingThread]: Schema.Codec<ClientCore.WaitingThread[Field]>;
+});
+export type WaitingThread = ClientCore.WaitingThread;
+
 /**
  * The IPC channels from the renderer to main, keyed by name. A name is
  * `<entity>.<verb>`, like an operation id in the public API, and the bridge
@@ -100,7 +124,7 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   /**
    * Checks the controller at the URL the user typed and, when it is ready for
    * the desktop app, saves the URL and reloads the window. Saving a different
-   * controller removes the stored token.
+   * controller signs the user out and removes the stored token.
    */
   "controllerUrl.save": {
     request: Schema.String,
@@ -144,13 +168,35 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   },
   /**
    * Reports that the frame that draws the page's first screen, fonts
-   * included, has reached the window. Main
-   * shows the window if it has not shown yet, and otherwise does nothing: the
-   * page reports again after each reload, and more than one screen can report
-   * at launch, so a second report is normal and never refused.
+   * included, has reached the window. Main shows the window if it has not
+   * shown yet, and otherwise does nothing: the page reports again after each
+   * reload, and more than one screen can report at launch, so a second report
+   * is normal and never refused.
    */
   "firstScreen.report": {
     request: Schema.Undefined,
+    response: Schema.Void,
+  },
+  /**
+   * Sends the first nine threads the sidebar shows, top to bottom, each once,
+   * for the Go menu: one per shortcut, ⌘1 to ⌘9. Choosing one shows the
+   * window and opens it through `thread.open`. Main cannot read the sidebar,
+   * so the renderer sends the list each time it changes.
+   */
+  "goMenu.set": {
+    request: Schema.Array(GoMenuThread).check(Schema.isMaxLength(9)),
+    response: Schema.Void,
+  },
+  /**
+   * Sends every thread waiting on the user, whenever the thread list
+   * changes. Main counts them on the dock badge and shows a native
+   * notification for each Request that opens (see `ThreadNotifications`).
+   * Main cannot read the thread list, so the renderer sends it; main keeps
+   * what it has shown, so a list sent twice, as after a reload, shows
+   * nothing twice.
+   */
+  "waitingThreads.set": {
+    request: Schema.Array(WaitingThread),
     response: Schema.Void,
   },
 } as const satisfies Record<`${string}.${string}`, RendererToMainIpcChannel>;
@@ -173,11 +219,15 @@ export interface MainToRendererIpcChannel {
  */
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   /**
-   * Asks the renderer to carry out a menu item the user chose: Sign Out, or
-   * New Thread.
+   * Asks the renderer to carry out a menu item the user chose: Sign Out, New
+   * Thread, or Send.
    */
   "menu.command": {
-    payload: Schema.Literals(["signOut", "newThread"]),
+    payload: MenuCommand,
+  },
+  /** Asks the renderer to open a thread: its notification or its Go menu item was chosen. */
+  "thread.open": {
+    payload: Schema.Struct({ sessionId: Schema.String }),
   },
 } as const satisfies Record<`${string}.${string}`, MainToRendererIpcChannel>;
 

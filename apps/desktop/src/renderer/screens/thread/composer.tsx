@@ -52,7 +52,7 @@ import { ModelMenu } from "./model-menu";
 import { OptionsMenu } from "./options-menu";
 import { ProviderLogo } from "./provider-logo";
 import { QueuedInputs } from "./queued-inputs";
-import { isSendKey } from "./send-key";
+import { isSendKey, useSendOnMenuCommand } from "./send-key";
 import "./composer.css";
 
 /** What one send carried: the request, and the picks it was built from. */
@@ -266,6 +266,7 @@ export function ThreadComposer({
     });
     scrollTranscriptToBottom();
   };
+  useSendOnMenuCommand(submit);
   const stop = (): void => {
     if (interrupt.isPending) return;
     clearFailure();

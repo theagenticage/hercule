@@ -37,6 +37,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   type Call,
+  type FakeBridge,
   type Handler,
   type ThreadRecords,
 } from "../../app/testing";
@@ -52,6 +53,8 @@ export interface RenderedThreadPart {
   readonly queryClient: QueryClient;
   /** What each thread's composer holds and has not sent. */
   readonly pendingSubmissions: PendingSubmissions;
+  /** Sends a menu command, as main does when the user picks the menu item. */
+  readonly sendMenuCommand: FakeBridge["sendMenuCommand"];
 }
 
 /**
@@ -65,7 +68,7 @@ export interface RenderedThreadPart {
  * answer to `session.respond`.
  *
  * The router has the app's `_connected` route id, so the part finds the
- * controller in its route context, and the app's paths `/` and
+ * bridge and the controller in its route context, and the app's paths `/` and
  * `/threads/$sessionId`, so the part's links resolve. It starts at the
  * thread, whose loader reads everything the thread screen's loaders read.
  * So, as in the app, nothing waits once this returns.
@@ -88,7 +91,10 @@ export const renderThreadPart = async (
     ...buildThreadHandlers(thread),
     ...handlers,
   });
-  const { bridge } = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const { bridge, sendMenuCommand } = createFakeBridge({
+    controllerUrl: CONTROLLER_URL,
+    token: "bearer",
+  });
   const { controller, queryClient } = await buildRouterContext(bridge);
   if (controller === null) throw new Error("The fake bridge must hold a controller URL.");
   const { client } = controller;
@@ -97,7 +103,7 @@ export const renderThreadPart = async (
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",
-    beforeLoad: () => ({ controller }),
+    beforeLoad: () => ({ bridge, controller }),
   });
   const threadRoute = createRoute({
     getParentRoute: () => connectedRoute,
@@ -129,5 +135,10 @@ export const renderThreadPart = async (
   });
   await router.load();
   render(<RouterProvider router={router} />);
-  return { calls, queryClient, pendingSubmissions: controller.pendingSubmissions };
+  return {
+    calls,
+    queryClient,
+    pendingSubmissions: controller.pendingSubmissions,
+    sendMenuCommand,
+  };
 };

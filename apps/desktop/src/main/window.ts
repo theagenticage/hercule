@@ -171,6 +171,7 @@ const make = Effect.gen(function* () {
     reload: Effect.sync(() => window.webContents.reload()),
     show: Effect.sync(visibility.showWindow),
     showFirstTime: Effect.sync(visibility.showWindowFirstTime),
+    isFocused: Effect.sync(() => window.isFocused()),
     send: (name, payload) =>
       Effect.map(encodeIpcPayload(name, payload), (encoded) =>
         window.webContents.send(name, encoded),

@@ -46,6 +46,12 @@ export class MainWindow extends Context.Service<
     readonly showFirstTime: Effect.Effect<void>;
 
     /**
+     * Returns whether the window has the keyboard focus. It has not while it
+     * is hidden or minimized, and while another app is in front.
+     */
+    readonly isFocused: Effect.Effect<boolean>;
+
+    /**
      * Sends `payload` to the page on the main-to-renderer channel `name`,
      * encoded against the IPC contract.
      */

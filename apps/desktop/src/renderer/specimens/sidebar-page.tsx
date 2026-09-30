@@ -136,13 +136,15 @@ const refuseRequest: FetchLike = (url) =>
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
   new Error(
-    `The shell specimen calls nothing in main, but the page called ${call}. ` +
-      "Add the record it reads to the specimen's query cache.",
+    `The shell specimen refuses ${call}, because the page reads everything from the ` +
+      "specimen's query cache. Add the record the page needs there.",
   );
 
 /**
- * The bridge the page passes to the app. It fails every call, for the same
- * reason the client refuses every request, and sends no menu command.
+ * The bridge the page passes to the app. It refuses every call, for the same
+ * reason the client refuses every request, except what the shell sends main
+ * for the Go menu, the dock badge and the notifications: it accepts that,
+ * and ignores it. It sends no menu command and opens no thread.
  */
 const REFUSING_BRIDGE: Bridge = {
   controllerUrl: {
@@ -159,8 +161,17 @@ const REFUSING_BRIDGE: Bridge = {
   firstScreen: {
     report: () => Promise.reject(buildBridgeCallError("firstScreen.report")),
   },
+  goMenu: {
+    set: () => Promise.resolve(undefined),
+  },
+  waitingThreads: {
+    set: () => Promise.resolve(undefined),
+  },
   menu: {
     onCommand: () => () => undefined,
+  },
+  thread: {
+    onOpen: () => () => undefined,
   },
 };
 

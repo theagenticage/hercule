@@ -19,6 +19,7 @@ import {
   type WaitingSection,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
+import type { GoMenuThread } from "../../ipc/contract";
 import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
 
 /**
@@ -359,6 +360,28 @@ export const buildSidebarItems = (sources: SidebarItemSources): readonly Sidebar
       ),
     ),
   ];
+};
+
+/** How many threads the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
+const GO_MENU_THREAD_LIMIT = 9;
+
+/**
+ * Returns the first nine threads the sidebar shows, top to bottom, for the Go
+ * menu. A waiting thread shows twice, under Waiting on you and in its project,
+ * and is listed once, where it shows first.
+ */
+export const listGoMenuThreads = (items: readonly SidebarItem[]): GoMenuThread[] => {
+  const threads = new Map<string, GoMenuThread>();
+  for (const item of items) {
+    if (threads.size === GO_MENU_THREAD_LIMIT) break;
+    if (
+      (item.kind === "waiting-row" || item.kind === "thread-row") &&
+      !threads.has(item.sessionId)
+    ) {
+      threads.set(item.sessionId, { sessionId: item.sessionId, title: item.title });
+    }
+  }
+  return [...threads.values()];
 };
 
 /**

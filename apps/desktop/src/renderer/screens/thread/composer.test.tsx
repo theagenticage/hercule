@@ -1,6 +1,6 @@
 /**
  * Tests the composer against the stubbed controller: the placeholder in each
- * state of the thread, sending with ⏎, Stop, the picks a message carries,
+ * state of the thread, sending with ⏎ and the menu's Send, Stop, the picks a message carries,
  * the text and a failed send kept per thread, the shrunk composer, the lip, and the order of
  * the stack above the card.
  *
@@ -234,6 +234,20 @@ describe("the composer", () => {
     await waitFor(() => {
       expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
     });
+  });
+
+  it("sends the message with Thread > Send in the menu, and nothing when the field is blank", async () => {
+    const user = userEvent.setup();
+    const { calls, sendMenuCommand } = await renderComposer(IDLE);
+
+    sendMenuCommand("send");
+    await user.type(readField(), "Ship it");
+    sendMenuCommand("send");
+
+    await waitFor(() => {
+      expect(readField().value).toBe("");
+    });
+    expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
   });
 
   it("starts a new line with ⇧⏎, and sends nothing for blank text or the ⏎ that ends a composition", async () => {

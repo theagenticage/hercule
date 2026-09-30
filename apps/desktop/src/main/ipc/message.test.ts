@@ -89,6 +89,29 @@ describe("the requests of the renderer-to-main channels", () => {
     { name: "runnerIdentity.read", valid: [{ port: 4939 }], invalid: [{ port: 4938 }] },
     { name: "runnerIdentity.read", valid: [{ port: 4948 }], invalid: [{ port: 4949 }] },
     { name: "runnerIdentity.read", valid: [{ port: 4940 }], invalid: [{ port: 22 }] },
+    // The Go menu has a shortcut for each of the first nine threads only.
+    {
+      name: "goMenu.set",
+      valid: [
+        Array.from({ length: 9 }, (_, index) => ({
+          sessionId: `s-${String(index)}`,
+          title: "A thread",
+        })),
+      ],
+      invalid: [
+        Array.from({ length: 10 }, (_, index) => ({
+          sessionId: `s-${String(index)}`,
+          title: "A thread",
+        })),
+      ],
+    },
+    {
+      name: "waitingThreads.set",
+      valid: [
+        [{ sessionId: "s-1", requestId: "r-1", title: "A thread", question: "Run git push?" }],
+      ],
+      invalid: [[{ sessionId: "s-1", title: "A thread", question: "Run git push?" }]],
+    },
   ];
 
   it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {

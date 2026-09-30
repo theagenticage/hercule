@@ -30,13 +30,10 @@ import {
   type TranscriptRow,
   type Workspace,
 } from "@hercule/contract";
-import type { Bridge, EncodedIpcPayload } from "../../ipc/bridge";
-import type { ControllerUrlSaveOutcome } from "../../ipc/contract";
+import type { Bridge, EncodedIpcPayload, EncodedIpcRequest } from "../../ipc/bridge";
+import type { ControllerUrlSaveOutcome, MenuCommand } from "../../ipc/contract";
 import { buildRouterContext, type RouterContext } from "./context";
 import { createAppRouter } from "./router";
-
-/** A menu command main sends the page, such as `signOut`. */
-export type MenuCommand = EncodedIpcPayload<"menu.command">;
 
 /** The address of the stubbed controller. */
 export const CONTROLLER_URL = "http://controller.test";
@@ -50,6 +47,12 @@ export interface FakeBridge {
   readonly savedUrls: readonly string[];
   /** Sends a menu command, as main does when the user picks the menu item. */
   readonly sendMenuCommand: (command: MenuCommand) => void;
+  /** Each list of threads the app sent main for the Go menu, oldest first. */
+  readonly goMenus: readonly EncodedIpcRequest<"goMenu.set">[];
+  /** Each list of threads waiting on the user the app sent main, oldest first. */
+  readonly waitingThreadLists: readonly EncodedIpcRequest<"waitingThreads.set">[];
+  /** Asks the app to open a thread, as main does for Go and a notification's click. */
+  readonly openThread: (sessionId: string) => void;
 }
 
 /**
@@ -73,6 +76,9 @@ export const createFakeBridge = ({
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
   const menuListeners = new Set<(command: MenuCommand) => void>();
+  const threadListeners = new Set<(payload: EncodedIpcPayload<"thread.open">) => void>();
+  const goMenus: EncodedIpcRequest<"goMenu.set">[] = [];
+  const waitingThreadLists: EncodedIpcRequest<"waitingThreads.set">[] = [];
   return {
     bridge: {
       controllerUrl: {
@@ -95,20 +101,45 @@ export const createFakeBridge = ({
       firstScreen: {
         report: () => Promise.resolve(undefined),
       },
+      goMenu: {
+        set: (threads) => {
+          goMenus.push(threads);
+          return Promise.resolve(undefined);
+        },
+      },
+      waitingThreads: {
+        set: (threads) => {
+          waitingThreadLists.push(threads);
+          return Promise.resolve(undefined);
+        },
+      },
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);
           return () => menuListeners.delete(listener);
         },
       },
+      thread: {
+        onOpen: (listener) => {
+          threadListeners.add(listener);
+          return () => threadListeners.delete(listener);
+        },
+      },
     },
     tokenWrites,
     savedUrls,
+    goMenus,
+    waitingThreadLists,
+    // Main sends these from outside React, so the updates they cause are
+    // wrapped in `act`, which applies them before the test goes on.
     sendMenuCommand: (command) => {
-      // Main sends the command from outside React, so the updates it causes
-      // are wrapped in `act`, which applies them before the test goes on.
       act(() => {
         for (const listener of menuListeners) listener(command);
+      });
+    },
+    openThread: (sessionId) => {
+      act(() => {
+        for (const listener of threadListeners) listener({ sessionId });
       });
     },
   };

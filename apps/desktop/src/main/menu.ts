@@ -1,10 +1,10 @@
 /**
- * The app's menu bar: the app menu, File, Edit and Window, each with the
- * items macOS users expect there, and the MainMenu service, through which
- * main enables and disables Sign Out.
+ * The app's menu bar: the app menu, File, Edit, Go, Thread and Window, and
+ * the MainMenu service, through which main changes it while the app runs.
  *
  * Main carries out none of the app's own items itself. It shows the window
- * and sends the page a menu command, and the page acts on it.
+ * and sends the page a menu command, or asks it to open a thread, and the
+ * page acts on it.
  *
  * There is no View menu in the packaged app, so it has no page zoom and no
  * reload. In development a View menu adds Reload and Toggle Developer Tools.
@@ -17,33 +17,46 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
+import type { GoMenuThread, MenuCommand } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
 import { MainWindow } from "./main-window";
-
-/** The id of the Sign Out item, by which main finds it to enable or disable it. */
-const SIGN_OUT_ITEM_ID = "signOut";
 
 /**
  * Builds the menu bar's template, for `Menu.buildFromTemplate`.
  *
  * - The app menu holds what Electron's own app menu holds: About, Services,
  *   Hide, Hide Others, Show All and Quit. Sign Out sits above Quit, between
- *   separators. It is enabled when `signOutEnabled` is true, and choosing it
- *   calls `signOut`.
+ *   separators. It is enabled when `signedIn` is true, and choosing it calls
+ *   `signOut`.
  * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
  *   keeps running.
+ * - Go lists `goThreads`, the first nine threads of the sidebar, with ⌘1 to
+ *   ⌘9, each titled with its thread's title. Choosing one calls
+ *   `openThread` with its session id. With no thread, Go holds one dimmed
+ *   "No Threads".
+ * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
+ *   cannot tell whether the page has anything to send, and with nothing to
+ *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
  * - `development` adds the View menu.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
  * no extra item. Its role still names it after the app.
+ *
+ * The page sees a key press before the menu does, and a page that handles
+ * the press stops the menu's item. So ⌘1 to ⌘9 pick a project while the
+ * project picker is open, and ⌘↵ in a message field sends once, from the
+ * field.
  */
 export const buildMenuTemplate = (options: {
   readonly development: boolean;
-  readonly signOutEnabled: boolean;
+  readonly signedIn: boolean;
+  readonly goThreads: ReadonlyArray<GoMenuThread>;
   readonly signOut: () => void;
   readonly newThread: () => void;
+  readonly openThread: (sessionId: string) => void;
+  readonly send: () => void;
 }): Array<MenuItemConstructorOptions> => {
   const appMenu: MenuItemConstructorOptions = {
     role: "appMenu",
@@ -57,9 +70,9 @@ export const buildMenuTemplate = (options: {
       { role: "unhide" },
       { type: "separator" },
       {
-        id: SIGN_OUT_ITEM_ID,
+        id: "signOut",
         label: "Sign Out",
-        enabled: options.signOutEnabled,
+        enabled: options.signedIn,
         click: options.signOut,
       },
       { type: "separator" },
@@ -88,6 +101,21 @@ export const buildMenuTemplate = (options: {
     },
     { role: "editMenu" },
     ...(options.development ? [view] : []),
+    {
+      label: "Go",
+      submenu:
+        options.goThreads.length === 0
+          ? [{ label: "No Threads", enabled: false }]
+          : options.goThreads.map((thread, index) => ({
+              label: thread.title,
+              accelerator: `CmdOrCtrl+${String(index + 1)}`,
+              click: () => options.openThread(thread.sessionId),
+            })),
+    },
+    {
+      label: "Thread",
+      submenu: [{ label: "Send", accelerator: "CmdOrCtrl+Enter", click: options.send }],
+    },
     { role: "windowMenu" },
   ];
 };
@@ -96,17 +124,32 @@ export const buildMenuTemplate = (options: {
 export class MainMenu extends Context.Service<
   MainMenu,
   {
-    /** Enables Sign Out when `enabled` is true, and disables it otherwise. */
-    readonly setSignOutEnabled: (enabled: boolean) => Effect.Effect<void>;
+    /**
+     * Enables Sign Out when `signedIn` is true. Otherwise disables it and
+     * empties the Go menu, whose threads the app can no longer open.
+     */
+    readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
+
+    /**
+     * Replaces the threads the Go menu lists, the first nine of the sidebar.
+     * Does nothing while the user is signed out: a page that is still
+     * leaving the shell may send its threads after the user signed out.
+     */
+    readonly setGoThreads: (threads: ReadonlyArray<GoMenuThread>) => Effect.Effect<void>;
   }
 >()("hercule/desktop/MainMenu") {}
 
 /**
  * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
- * makes it the app's. Sign Out starts enabled when a login token is stored.
- * Choosing Sign Out or New Thread shows the window and sends the page the
- * `signOut` or `newThread` menu command, and the page carries it out.
- * `development` adds the View menu.
+ * makes it the app's. Sign Out starts enabled when a login token is stored,
+ * and Go starts empty until the page lists the sidebar's threads.
+ *
+ * Choosing Sign Out, New Thread or Send shows the window and sends the page
+ * that menu command. Choosing a thread in Go shows the window and asks the
+ * page to open it. `development` adds the View menu.
+ *
+ * Each change builds the menu bar again, because macOS does not show a new
+ * label on an item that is already built.
  *
  * The layer needs the window, which is built only once the app is ready, so
  * the menu is also made the app's only then, as Electron requires.
@@ -120,24 +163,44 @@ export const makeMainMenuLayer = (
       const window = yield* MainWindow;
       const settings = yield* AppSettings;
       const runFork = yield* FiberSet.makeRuntime();
-      const signOutEnabled = (yield* settings.readEncryptedToken) !== null;
-      const menu = Menu.buildFromTemplate(
-        buildMenuTemplate({
-          development,
-          signOutEnabled,
-          signOut: () =>
-            runFork(Effect.andThen(window.show, window.send("menu.command", "signOut"))),
-          newThread: () =>
-            runFork(Effect.andThen(window.show, window.send("menu.command", "newThread"))),
-        }),
-      );
-      Menu.setApplicationMenu(menu);
-      // The template has the item, so the menu built from it has it too.
-      const signOut = menu.getMenuItemById(SIGN_OUT_ITEM_ID)!;
+      /** Shows the window and sends the page `command`. */
+      const sendMenuCommand = (command: MenuCommand): void => {
+        runFork(Effect.andThen(window.show, window.send("menu.command", command)));
+      };
+      let signedIn = (yield* settings.readEncryptedToken) !== null;
+      let goThreads: ReadonlyArray<GoMenuThread> = [];
+
+      /** Builds the menu bar from the current state and makes it the app's. */
+      const installMenuBar = (): void => {
+        Menu.setApplicationMenu(
+          Menu.buildFromTemplate(
+            buildMenuTemplate({
+              development,
+              signedIn,
+              goThreads,
+              signOut: () => sendMenuCommand("signOut"),
+              newThread: () => sendMenuCommand("newThread"),
+              send: () => sendMenuCommand("send"),
+              openThread: (sessionId) =>
+                runFork(Effect.andThen(window.show, window.send("thread.open", { sessionId }))),
+            }),
+          ),
+        );
+      };
+      installMenuBar();
+
       return {
-        setSignOutEnabled: (enabled) =>
+        setSignedIn: (next) =>
           Effect.sync(() => {
-            signOut.enabled = enabled;
+            signedIn = next;
+            if (!next) goThreads = [];
+            installMenuBar();
+          }),
+        setGoThreads: (threads) =>
+          Effect.sync(() => {
+            if (!signedIn) return;
+            goThreads = threads;
+            installMenuBar();
           }),
       };
     }),

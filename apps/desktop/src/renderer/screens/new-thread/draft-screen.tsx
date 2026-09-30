@@ -28,6 +28,7 @@ import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
 import { pickProjectTint } from "../project-tile";
 import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
+import { useSendOnMenuCommand } from "../thread/send-key";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
@@ -189,6 +190,7 @@ export function DraftScreen({
       },
     );
   };
+  useSendOnMenuCommand(submit);
 
   return (
     <>

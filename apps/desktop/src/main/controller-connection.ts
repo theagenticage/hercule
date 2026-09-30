@@ -17,6 +17,7 @@ import type { ControllerUrlSaveOutcome } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
 import { MainWindow } from "./main-window";
+import { StoredToken } from "./stored-token";
 
 /**
  * Returns the origin of `text` when `text` is an http or https URL with
@@ -49,10 +50,10 @@ export class ControllerConnection extends Context.Service<
      *
      * - `InvalidUrl` when `input` is not a controller's origin; see
      *   parseControllerUrl. Nothing is requested;
-     * - `Saved` when the controller is ready for the app. The URL is saved,
-     *   which removes the stored token when the URL is new, and the window
-     *   reloads, so the page's Content Security Policy names the new
-     *   controller;
+     * - `Saved` when the controller is ready for the app. A URL other than
+     *   the saved one signs the user out first, as Sign Out does. The URL is
+     *   saved, and the window reloads, so the page's Content Security Policy
+     *   names the new controller;
      * - `SetupIncomplete` when the controller is not set up yet. Its setup
      *   page opens in the browser, because setup is done in the web app;
      * - the check's outcome otherwise; see ControllerCheckOutcome.
@@ -64,17 +65,18 @@ export class ControllerConnection extends Context.Service<
 >()("hercule/desktop/ControllerConnection") {}
 
 /**
- * Builds the connection service on the settings file and the window.
- * `openInBrowser` opens a URL in the default browser and never fails. The
- * check sends its requests with `fetchWithoutRedirects`.
+ * Builds the connection service on the settings file, the stored token and
+ * the window. `openInBrowser` opens a URL in the default browser and never
+ * fails. The check sends its requests with `fetchWithoutRedirects`.
  */
 export const makeControllerConnectionLayer = (
   openInBrowser: (url: string) => Effect.Effect<void>,
   fetchWithoutRedirects: FetchWithoutRedirects,
-): Layer.Layer<ControllerConnection, never, AppSettings | MainWindow> =>
+): Layer.Layer<ControllerConnection, never, AppSettings | StoredToken | MainWindow> =>
   Layer.effect(ControllerConnection)(
     Effect.gen(function* () {
       const settings = yield* AppSettings;
+      const storedToken = yield* StoredToken;
       const window = yield* MainWindow;
       return ControllerConnection.of({
         save: (input) =>
@@ -84,6 +86,16 @@ export const makeControllerConnectionLayer = (
             const { checkController } = yield* Effect.promise(() => import("./controller-check"));
             const outcome = yield* checkController(origin, fetchWithoutRedirects);
             if (outcome._tag === "Ready") {
+              // The token belongs to the controller saved before. Signing out
+              // at once empties the menu, the dock badge and the
+              // notifications, which are about that controller's threads,
+              // without waiting for the reloaded page to find no token.
+              if (origin !== (yield* settings.readControllerUrl)) {
+                // Only storing a token can fail with NoControllerSaved.
+                yield* storedToken
+                  .write(null)
+                  .pipe(Effect.catchTag("NoControllerSaved", Effect.die));
+              }
               // The settings file is in the app's own folder, so a write that
               // fails is a defect.
               yield* settings

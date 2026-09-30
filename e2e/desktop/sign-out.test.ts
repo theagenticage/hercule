@@ -10,7 +10,12 @@
 import type { ElectronApplication } from "playwright";
 import { describe, expect, it } from "vitest";
 import { readSettings } from "../../apps/desktop/scripts/packaged-app";
-import { launchWithSavedController, signInAndReadToken, startControllerForTest } from "./harness";
+import {
+  chooseMenuItem,
+  launchWithSavedController,
+  signInAndReadToken,
+  startControllerForTest,
+} from "./harness";
 
 /** Checks whether the Sign Out item in the app menu is enabled. */
 function isSignOutEnabled(app: ElectronApplication): Promise<boolean | undefined> {
@@ -38,12 +43,7 @@ describe("Sign Out", () => {
     await expect.poll(() => isSignOutEnabled(app)).toBe(true);
     expect(await readControllerWithToken(controller.url, token)).toBe(200);
 
-    await app.evaluate(({ Menu }) => {
-      const signOut = Menu.getApplicationMenu()!.getMenuItemById("signOut")!;
-      // Electron types `click` as a bare `Function`. Called with no
-      // arguments, it runs the item's handler as a click with the mouse does.
-      (signOut.click as () => void)();
-    });
+    await chooseMenuItem(app, "Hercule", "Sign Out");
 
     // The sign-in screen shows once the controller has answered the logout.
     await page.getByRole("button", { name: "Sign in" }).waitFor();

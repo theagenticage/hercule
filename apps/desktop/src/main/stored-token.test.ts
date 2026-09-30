@@ -11,6 +11,7 @@ import { MainWindow } from "./main-window";
 import { MainMenu } from "./menu";
 import { KeychainError, SafeStorage } from "./safe-storage";
 import { StoredToken, StoredTokenLayer } from "./stored-token";
+import { ThreadNotifications } from "./thread-notifications";
 
 let folder: string;
 let file: string;
@@ -43,52 +44,68 @@ const makeFakeSafeStorage = (failing: boolean): Layer.Layer<SafeStorage> =>
     },
   });
 
-/** What the fakes of the menu and the window saw. */
+/** What the fakes of the menu, the window and the notifications saw. */
 interface Seen {
-  /** Each state Sign Out was set to, in order. */
-  readonly signOutEnabled: Array<boolean>;
+  /** Each signed-in state the menu was set to, in order. */
+  readonly signedIn: Array<boolean>;
+  /** Each signed-in state the notifications were set to, in order. */
+  readonly notificationsSignedIn: Array<boolean>;
   /** Each warning the window showed, in order. */
   readonly warnings: Array<string>;
 }
 
-/** Builds fakes of the menu and the window that record what they are asked into `seen`. */
-const makeFakeMenuAndWindow = (seen: Seen): Layer.Layer<MainMenu | MainWindow> =>
+/**
+ * Builds fakes of the menu, the window and the notifications that record
+ * what they are asked into `seen`.
+ */
+const makeFakeMenuWindowAndNotifications = (
+  seen: Seen,
+): Layer.Layer<MainMenu | MainWindow | ThreadNotifications> =>
   Layer.mergeAll(
     Layer.succeed(MainMenu)({
-      setSignOutEnabled: (enabled) =>
+      setSignedIn: (signedIn) =>
         Effect.sync(() => {
-          seen.signOutEnabled.push(enabled);
+          seen.signedIn.push(signedIn);
         }),
+      setGoThreads: () => Effect.void,
     }),
     Layer.succeed(MainWindow)({
       load: Effect.void,
       reload: Effect.void,
       show: Effect.void,
       showFirstTime: Effect.void,
+      isFocused: Effect.succeed(false),
       send: () => Effect.void,
       showWarning: (message) =>
         Effect.sync(() => {
           seen.warnings.push(message);
         }),
     }),
+    Layer.succeed(ThreadNotifications)({
+      setSignedIn: (signedIn) =>
+        Effect.sync(() => {
+          seen.notificationsSignedIn.push(signedIn);
+        }),
+      setWaitingThreads: () => Effect.void,
+    }),
   );
 
 /**
  * Runs `effect` against a token service built on the settings file `file`,
  * with a fake Keychain that fails when `keychainFailing` is true. Returns the
- * effect's exit and what the menu and the window saw.
+ * effect's exit and what the menu, the window and the notifications saw.
  */
 const runWithStoredToken = async <A, E>(
   effect: Effect.Effect<A, E, StoredToken>,
   keychainFailing = false,
 ): Promise<{ exit: Exit.Exit<A, E> } & Seen> => {
-  const seen: Seen = { signOutEnabled: [], warnings: [] };
+  const seen: Seen = { signedIn: [], notificationsSignedIn: [], warnings: [] };
   const layer = StoredTokenLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
         makeAppSettingsLayer(file).pipe(Layer.provide(NodeFileSystem.layer)),
         makeFakeSafeStorage(keychainFailing),
-        makeFakeMenuAndWindow(seen),
+        makeFakeMenuWindowAndNotifications(seen),
       ),
     ),
   );
@@ -116,11 +133,12 @@ const storedTokenFor = (controllerUrl: string, token: string) =>
   sealedInBase64(JSON.stringify({ controllerUrl, token }));
 
 describe("the stored token", () => {
-  it("reads as null, with Sign Out disabled, when none is stored", async () => {
+  it("reads as null, and tells the menu and the notifications that the user is signed out, when none is stored", async () => {
     writeConnectedSettings();
     expect(await runWithStoredToken(read)).toEqual({
       exit: Exit.succeed(null),
-      signOutEnabled: [false],
+      signedIn: [false],
+      notificationsSignedIn: [false],
       warnings: [],
     });
   });
@@ -130,7 +148,8 @@ describe("the stored token", () => {
     const outcome = await runWithStoredToken(Effect.andThen(write("secret-token"), read));
     expect(outcome).toEqual({
       exit: Exit.succeed("secret-token"),
-      signOutEnabled: [true, true],
+      signedIn: [true, true],
+      notificationsSignedIn: [true, true],
       warnings: [],
     });
     expect(readFileObject()).toEqual({
@@ -140,12 +159,30 @@ describe("the stored token", () => {
     expect(readFileText()).not.toContain("secret-token");
   });
 
-  it("is removed when null is written, with Sign Out disabled", async () => {
+  it("is removed when null is written, and tells the menu and the notifications that the user signed out", async () => {
     writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "secret-token") });
     const outcome = await runWithStoredToken(Effect.andThen(write(null), read));
     expect(outcome).toEqual({
       exit: Exit.succeed(null),
-      signOutEnabled: [false, false],
+      signedIn: [false, false],
+      notificationsSignedIn: [false, false],
+      warnings: [],
+    });
+    expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+  });
+
+  it("stays removed when the user signs out while the sign-in before is still being saved", async () => {
+    writeConnectedSettings();
+    const outcome = await runWithStoredToken(
+      Effect.andThen(
+        Effect.all([write("secret-token"), write(null)], { concurrency: "unbounded" }),
+        read,
+      ),
+    );
+    expect(outcome).toEqual({
+      exit: Exit.succeed(null),
+      signedIn: [true, false, false],
+      notificationsSignedIn: [true, false, false],
       warnings: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
@@ -154,7 +191,12 @@ describe("the stored token", () => {
   it("is removed, and reads as null, when the Keychain cannot decrypt it", async () => {
     writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "secret-token") });
     const outcome = await runWithStoredToken(read, true);
-    expect(outcome).toEqual({ exit: Exit.succeed(null), signOutEnabled: [false], warnings: [] });
+    expect(outcome).toEqual({
+      exit: Exit.succeed(null),
+      signedIn: [false],
+      notificationsSignedIn: [false],
+      warnings: [],
+    });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
   });
 
@@ -177,7 +219,8 @@ describe("the stored token", () => {
     writeFileSync(file, JSON.stringify(settings));
     expect(await runWithStoredToken(read)).toEqual({
       exit: Exit.succeed(null),
-      signOutEnabled: [false],
+      signedIn: [false],
+      notificationsSignedIn: [false],
       warnings: [],
     });
     expect(readFileObject()).toEqual(after);
@@ -190,7 +233,8 @@ describe("the stored token", () => {
     expect(outcome).toEqual({
       exit: Exit.void,
       // The user stays signed in until the app quits, so Sign Out is enabled.
-      signOutEnabled: [true],
+      signedIn: [true],
+      notificationsSignedIn: [true],
       warnings: [
         "Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.",
       ],
@@ -202,7 +246,8 @@ describe("the stored token", () => {
     const outcome = await runWithStoredToken(write("secret-token"));
     expect(outcome).toEqual({
       exit: Exit.fail(new NoControllerSaved()),
-      signOutEnabled: [],
+      signedIn: [],
+      notificationsSignedIn: [],
       warnings: [],
     });
   });

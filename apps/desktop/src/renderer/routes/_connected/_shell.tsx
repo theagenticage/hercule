@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import { listWaitingThreads } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import {
@@ -27,6 +28,11 @@ import { Shell } from "../../shell";
  * The shell also owns the project picker, which File > New Thread (⌘N) and
  * the sidebar's New thread open. With no project to pick, both open a Draft
  * Thread in no project instead.
+ *
+ * While the user is signed in, the shell sends main the threads waiting on
+ * the user whenever the thread list changes, for the dock badge and the
+ * threads' notifications. It opens the thread main names when the user
+ * chooses it in the Go menu or clicks its notification.
  */
 export const Route = createFileRoute("/_connected/_shell")({
   loader: async ({ context: { controller, queryClient } }) => {
@@ -63,6 +69,7 @@ function ShellLayout(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
+  const threads = useSuspenseQuery(threadsQuery(controller.client)).data;
   const hasProjects = useSuspenseQuery(projectsQuery(controller.client)).data.length > 0;
   const [picking, setPicking] = useState(false);
 
@@ -86,6 +93,14 @@ function ShellLayout(): JSX.Element {
     else openDraft(undefined);
   }, [hasProjects, openDraft]);
 
+  // Main shows the badge and the notifications, and keeps which it has
+  // shown, but only the page holds the thread list.
+  useEffect(() => {
+    bridge.waitingThreads.set(listWaitingThreads(threads)).catch((error: unknown) => {
+      console.error("Could not update the dock badge and the threads' notifications:", error);
+    });
+  }, [bridge, threads]);
+
   // Only a signed-in user can start a thread, so only the shell listens for
   // File > New Thread.
   useEffect(
@@ -94,6 +109,17 @@ function ShellLayout(): JSX.Element {
         if (command === "newThread") openNewThread();
       }),
     [bridge, openNewThread],
+  );
+
+  // A thread opened from the menu or a notification replaces whatever the
+  // user was doing, the project picker included.
+  useEffect(
+    () =>
+      bridge.thread.onOpen(({ sessionId }) => {
+        setPicking(false);
+        void navigate({ to: "/threads/$sessionId", params: { sessionId } });
+      }),
+    [bridge, navigate],
   );
 
   return (

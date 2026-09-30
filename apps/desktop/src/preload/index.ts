@@ -66,8 +66,17 @@ const bridge: Bridge = {
   firstScreen: {
     report: () => invokeChannel("firstScreen.report"),
   },
+  goMenu: {
+    set: (threads) => invokeChannel("goMenu.set", threads),
+  },
+  waitingThreads: {
+    set: (threads) => invokeChannel("waitingThreads.set", threads),
+  },
   menu: {
     onCommand: (listener) => subscribeToChannel("menu.command", listener),
+  },
+  thread: {
+    onOpen: (listener) => subscribeToChannel("thread.open", listener),
   },
 };
 

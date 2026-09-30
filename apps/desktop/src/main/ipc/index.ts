@@ -9,8 +9,10 @@ import { RENDERER_TO_MAIN_IPC_CHANNELS } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
 import { MainWindow } from "../main-window";
+import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
 import { StoredToken } from "../stored-token";
+import { ThreadNotifications } from "../thread-notifications";
 import { answerIpcMessage } from "./message";
 
 type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
@@ -20,7 +22,13 @@ type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
  * adds it to this union, and main's runtime must then provide it.
  */
 export type IpcHandlerServices =
-  AppSettings | ControllerConnection | MainWindow | RunnerIdentity | StoredToken;
+  | AppSettings
+  | ControllerConnection
+  | MainMenu
+  | MainWindow
+  | RunnerIdentity
+  | StoredToken
+  | ThreadNotifications;
 
 /**
  * The errors a handler fails with when the request makes no sense in main's
@@ -48,6 +56,9 @@ const IPC_HANDLERS: {
   "token.write": (token) => StoredToken.use((storedToken) => storedToken.write(token)),
   "runnerIdentity.read": ({ port }) => RunnerIdentity.use((identity) => identity.read(port)),
   "firstScreen.report": () => MainWindow.use((window) => window.showFirstTime),
+  "goMenu.set": (threads) => MainMenu.use((menu) => menu.setGoThreads(threads)),
+  "waitingThreads.set": (threads) =>
+    ThreadNotifications.use((notifications) => notifications.setWaitingThreads(threads)),
 };
 
 /**

@@ -15,6 +15,7 @@ import {
 } from "./controller-connection";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
 import { MainWindow } from "./main-window";
+import { StoredToken } from "./stored-token";
 
 /**
  * Node's `fetch`, told not to follow redirects, in place of the app's, which
@@ -104,12 +105,21 @@ describe("ControllerConnection.save", () => {
 
   /**
    * Saves `input` through a connection service built on the settings file
-   * `file`, with fakes of the window and the browser. Returns the outcome,
-   * how many times the window reloaded, and each URL opened in the browser.
+   * `file`, with fakes of the stored token, the window and the browser.
+   * Returns the outcome, each token written, how many times the window
+   * reloaded, and each URL opened in the browser.
    */
   const save = async (input: string) => {
+    const tokenWrites: Array<string | null> = [];
     let reloads = 0;
     const opened: Array<string> = [];
+    const storedToken = Layer.succeed(StoredToken)({
+      read: Effect.succeed(null),
+      write: (token) =>
+        Effect.sync(() => {
+          tokenWrites.push(token);
+        }),
+    });
     const window = Layer.succeed(MainWindow)({
       load: Effect.void,
       reload: Effect.sync(() => {
@@ -117,6 +127,7 @@ describe("ControllerConnection.save", () => {
       }),
       show: Effect.void,
       showFirstTime: Effect.void,
+      isFocused: Effect.succeed(false),
       send: () => Effect.void,
       showWarning: () => Effect.void,
     });
@@ -130,6 +141,7 @@ describe("ControllerConnection.save", () => {
       Layer.provide(
         Layer.mergeAll(
           makeAppSettingsLayer(file).pipe(Layer.provide(NodeFileSystem.layer)),
+          storedToken,
           window,
         ),
       ),
@@ -140,24 +152,37 @@ describe("ControllerConnection.save", () => {
         layer,
       ),
     );
-    return { outcome, reloads, opened };
+    return { outcome, tokenWrites, reloads, opened };
   };
 
   const readFileObject = (): unknown => JSON.parse(readFileSync(file, "utf8"));
 
-  it("saves the origin of a ready controller, drops the old token, and reloads the window", async () => {
+  it("signs the user out, saves the origin of a ready controller, and reloads the window", async () => {
     writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }));
     expect(await save(` ${origin.toUpperCase()}/ `)).toEqual({
       outcome: { _tag: "Saved", origin },
+      tokenWrites: [null],
       reloads: 1,
       opened: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: origin });
   });
 
+  it("keeps the user signed in when the ready controller is the one already saved", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
+    expect(await save(origin)).toEqual({
+      outcome: { _tag: "Saved", origin },
+      tokenWrites: [],
+      reloads: 1,
+      opened: [],
+    });
+    expect(readFileObject()).toEqual({ controllerUrl: origin, token: "AAEC" });
+  });
+
   it("refuses an invalid URL without a request, and saves nothing", async () => {
     expect(await save(`${origin}/api`)).toEqual({
       outcome: { _tag: "InvalidUrl" },
+      tokenWrites: [],
       reloads: 0,
       opened: [],
     });
@@ -169,6 +194,7 @@ describe("ControllerConnection.save", () => {
     setUp = false;
     expect(await save(origin)).toEqual({
       outcome: { _tag: "SetupIncomplete", origin },
+      tokenWrites: [],
       reloads: 0,
       opened: [`${origin}/setup`],
     });
@@ -179,6 +205,7 @@ describe("ControllerConnection.save", () => {
     redirectTo = "https://hercule.example.com/api/v1/setup";
     expect(await save(origin)).toEqual({
       outcome: { _tag: "Redirected", origin, targetOrigin: "https://hercule.example.com" },
+      tokenWrites: [],
       reloads: 0,
       opened: [],
     });

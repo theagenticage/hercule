@@ -1,6 +1,7 @@
 /**
  * Tests the shell route's data and wiring: the loader's reads, the live
- * connection that keeps them current, and File > New Thread.
+ * connection that keeps them current, File > New Thread, and what the shell
+ * sends main for the dock badge, the threads' notifications and the Go menu.
  *
  * Each test makes the sidebar's reads active with query observers of its
  * own, so that an invalidation reads again whatever the sidebar's components
@@ -10,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryObserver, type QueryClient } from "@tanstack/react-query";
-import type { Session } from "@hercule/contract";
+import type { OpenRequest, Session } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import type { RouterContext } from "../../app/context";
 import { invalidateWithoutCancelling } from "../../app/live-invalidation";
@@ -386,6 +387,122 @@ describe("File > New Thread", () => {
     fake.sendMenuCommand("newThread");
     await waitFor(() => {
       expect(router.state.location.href).toBe("/");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("the threads waiting on the user", () => {
+  /** The fixture's one waiting thread, as the shell sends it to main. */
+  const RUNBOOK_WAITING = {
+    sessionId: FIXTURE_THREAD_IDS.runbook,
+    requestId: "req-1",
+    title: "Write the retry runbook",
+    question: "Run git push?",
+  };
+
+  it("are sent to main when the shell opens", async () => {
+    const { fake } = await startShell();
+
+    expect(fake.waitingThreadLists).toEqual([[RUNBOOK_WAITING]]);
+  });
+
+  it("are sent to main again when a thread starts waiting, and when its Request is answered elsewhere", async () => {
+    const TEST_REQUEST: OpenRequest = {
+      requestId: "req-2",
+      itemId: "tool-2",
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command: "pnpm test" },
+    };
+    let threads = SIDEBAR_FIXTURE.threads;
+    const setFlakyRequest = (openRequest: OpenRequest | null): void => {
+      threads = threads.map((thread) =>
+        thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequest } : thread,
+      );
+    };
+    const { fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+
+    setFlakyRequest(TEST_REQUEST);
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
+    });
+    await waitFor(() => {
+      expect(fake.waitingThreadLists.at(-1)).toEqual([
+        RUNBOOK_WAITING,
+        {
+          sessionId: FIXTURE_THREAD_IDS.flaky,
+          requestId: "req-2",
+          title: "Fix flaky webhook tests",
+          question: "Run pnpm test?",
+        },
+      ]);
+    });
+
+    // Answered elsewhere, such as in the web app.
+    setFlakyRequest(null);
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
+    });
+    await waitFor(() => {
+      expect(fake.waitingThreadLists.at(-1)).toEqual([RUNBOOK_WAITING]);
+    });
+  });
+});
+
+describe("the Go menu", () => {
+  it("sends main the sidebar's threads, top to bottom, once", async () => {
+    const { fake } = await startShell();
+
+    expect(fake.goMenus).toEqual([
+      [
+        { sessionId: FIXTURE_THREAD_IDS.runbook, title: "Write the retry runbook" },
+        { sessionId: FIXTURE_THREAD_IDS.flaky, title: "Fix flaky webhook tests" },
+        { sessionId: FIXTURE_THREAD_IDS.bunPin, title: "Bump the Bun pin" },
+        { sessionId: FIXTURE_THREAD_IDS.backupsKey, title: "Rotate the backups key" },
+        { sessionId: FIXTURE_THREAD_IDS.pricingPage, title: "Sketch the pricing page" },
+      ],
+    ]);
+  });
+
+  it("sends main the threads again when the sidebar's threads change", async () => {
+    let threads = SIDEBAR_FIXTURE.threads;
+    const { fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+
+    threads = threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.bunPin
+        ? { ...thread, title: "Bump the Bun pin to 1.3" }
+        : thread,
+    );
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.bunPin]);
+    });
+
+    await waitFor(() => {
+      expect(fake.goMenus).toHaveLength(2);
+    });
+    expect(fake.goMenus[1]?.map((thread) => thread.title)).toEqual([
+      "Write the retry runbook",
+      "Fix flaky webhook tests",
+      "Bump the Bun pin to 1.3",
+      "Rotate the backups key",
+      "Sketch the pricing page",
+    ]);
+  });
+
+  it("opens the thread main asks for, and closes the project picker", async () => {
+    const { fake, router } = await startShell();
+    fake.sendMenuCommand("newThread");
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    fake.openThread(FIXTURE_THREAD_IDS.bunPin);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
     });
     expect(screen.queryByRole("dialog")).toBeNull();
   });

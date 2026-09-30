@@ -11,7 +11,10 @@
  *   program that edits the settings file could change the saved URL, and the
  *   app would send the token to a server of that program's choosing.
  * - Sign Out in the menu is enabled exactly while the renderer holds a token:
- *   every read and every write sets it.
+ *   every read and every write sets it. While the user is signed out, the Go
+ *   menu, the dock badge and the threads' notifications are empty too: they
+ *   are about threads the app can no longer open, after a sign-out or a
+ *   switch to another controller.
  *
  * This module imports no Electron, so it is unit tested with fakes of the
  * services it uses.
@@ -26,6 +29,7 @@ import { AppSettings, NoControllerSaved } from "./app-settings";
 import { MainWindow } from "./main-window";
 import { MainMenu } from "./menu";
 import { SafeStorage } from "./safe-storage";
+import { ThreadNotifications } from "./thread-notifications";
 
 /** What the sheet says when the Keychain cannot encrypt the token. */
 const KEYCHAIN_WARNING =
@@ -38,12 +42,25 @@ const TokenForController = Schema.fromJsonString(
 const encodeTokenForController = Schema.encodeSync(TokenForController);
 const decodeTokenForController = Schema.decodeUnknownOption(TokenForController);
 
-/** Builds the token service on the settings file, the Keychain, the menu and the window. */
+/**
+ * Builds the token service on the settings file, the Keychain, the menu, the
+ * window and the threads' notifications.
+ */
 const make = Effect.gen(function* () {
   const settings = yield* AppSettings;
   const safeStorage = yield* SafeStorage;
   const menu = yield* MainMenu;
   const window = yield* MainWindow;
+  const notifications = yield* ThreadNotifications;
+
+  /**
+   * Tells the menu and the threads' notifications whether the user is signed
+   * in. Signed in, Sign Out is enabled and the app may ask to notify.
+   * Signed out, Sign Out is disabled, and the Go menu, the dock badge and the
+   * threads' notifications are emptied.
+   */
+  const reflectSignedIn = (signedIn: boolean): Effect.Effect<void> =>
+    Effect.andThen(menu.setSignedIn(signedIn), notifications.setSignedIn(signedIn));
 
   /**
    * Logs that the stored token is removed and why, `reason`, removes it, and
@@ -93,52 +110,62 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Encrypts `token` together with the saved controller URL, and stores it.
-   * When the Keychain cannot encrypt it, stores nothing and shows the user a
-   * warning sheet. Fails with NoControllerSaved when no controller URL is
-   * saved.
+   * Encrypts `token` together with `controllerUrl`, the saved controller URL,
+   * and stores it. When the Keychain cannot encrypt it, stores nothing and
+   * shows the user a warning sheet.
    */
-  const encryptAndStore = (token: string): Effect.Effect<void, NoControllerSaved> =>
-    Effect.gen(function* () {
-      const controllerUrl = yield* settings.readControllerUrl;
-      if (controllerUrl === null) return yield* new NoControllerSaved();
-      yield* safeStorage.encrypt(encodeTokenForController({ controllerUrl, token })).pipe(
-        Effect.matchEffect({
-          onFailure: (error) =>
-            Effect.logWarning(
-              `Did not store the login token, because the Keychain could not encrypt it: ${error.message}`,
-            ).pipe(Effect.andThen(window.showWarning(KEYCHAIN_WARNING))),
-          onSuccess: settings.saveEncryptedToken,
-        }),
-        // The settings file is in the app's own folder, so a write that fails
-        // is a defect.
-        Effect.catchTag("PlatformError", Effect.die),
-      );
-    });
+  const encryptAndStore = (controllerUrl: string, token: string): Effect.Effect<void> =>
+    safeStorage.encrypt(encodeTokenForController({ controllerUrl, token })).pipe(
+      Effect.matchEffect({
+        onFailure: (error) =>
+          Effect.logWarning(
+            `Did not store the login token, because the Keychain could not encrypt it: ${error.message}`,
+          ).pipe(Effect.andThen(window.showWarning(KEYCHAIN_WARNING))),
+        onSuccess: settings.saveEncryptedToken,
+      }),
+      // The settings file is in the app's own folder, so a write that fails
+      // is a defect. A saved controller URL is never removed, so the one
+      // this token was read with is still saved.
+      Effect.catchTags({ PlatformError: Effect.die, NoControllerSaved: Effect.die }),
+    );
 
   return {
     /**
      * Returns the stored login token, or null when none is stored, and
-     * enables Sign Out exactly when a token is returned. A token that cannot
-     * be used, such as one stored for another controller URL, is removed and
-     * reads as null; see decryptStoredToken.
+     * enables Sign Out exactly when a token is returned; see
+     * reflectSignedIn. A token that cannot be used, such as one stored for
+     * another controller URL, is removed and reads as null; see
+     * decryptStoredToken.
      */
-    read: Effect.tap(decryptStoredToken, (token) => menu.setSignOutEnabled(token !== null)),
+    read: Effect.tap(decryptStoredToken, (token) => reflectSignedIn(token !== null)),
 
     /**
      * Stores `token`, encrypted, or removes the stored token when `token` is
-     * null, and enables Sign Out exactly when `token` is not null. When the
-     * Keychain cannot encrypt the token, stores nothing and shows the user a
-     * warning sheet; the user stays signed in until the app quits.
+     * null, and enables Sign Out exactly when `token` is not null; see
+     * reflectSignedIn. When the Keychain cannot encrypt the token, stores
+     * nothing and shows the user a warning sheet; the user stays signed in
+     * until the app quits.
      *
      * Fails with NoControllerSaved, and changes nothing, when a token is given
      * and no controller URL is saved.
      */
     write: (token: string | null): Effect.Effect<void, NoControllerSaved> =>
-      (token === null
-        ? settings.saveEncryptedToken(null).pipe(Effect.catchTag("PlatformError", Effect.die))
-        : encryptAndStore(token)
-      ).pipe(Effect.andThen(menu.setSignOutEnabled(token !== null))),
+      // The page does not wait for a write, so a sign-in and the sign-out
+      // after it can both be under way. The menu and the notifications change
+      // before the slow save, in the order the writes came, so that a
+      // sign-in whose save ends last cannot enable Sign Out again.
+      Effect.gen(function* () {
+        if (token === null) {
+          yield* reflectSignedIn(false);
+          return yield* settings
+            .saveEncryptedToken(null)
+            .pipe(Effect.catchTag("PlatformError", Effect.die));
+        }
+        const controllerUrl = yield* settings.readControllerUrl;
+        if (controllerUrl === null) return yield* new NoControllerSaved();
+        yield* reflectSignedIn(true);
+        yield* encryptAndStore(controllerUrl, token);
+      }),
   };
 });
 
@@ -151,5 +178,5 @@ export class StoredToken extends Context.Service<StoredToken, Effect.Success<typ
 export const StoredTokenLayer: Layer.Layer<
   StoredToken,
   never,
-  AppSettings | SafeStorage | MainMenu | MainWindow
+  AppSettings | SafeStorage | MainMenu | MainWindow | ThreadNotifications
 > = Layer.effect(StoredToken)(make);

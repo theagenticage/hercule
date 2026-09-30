@@ -19,7 +19,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
-import { arrangeFleet, keepWindowOnTop, openSignedIn, startIdentityServerForTest } from "./harness";
+import {
+  arrangeFleet,
+  chooseMenuItem,
+  keepWindowOnTop,
+  openSignedIn,
+  startIdentityServerForTest,
+} from "./harness";
 
 /**
  * Waits until the controller's own runner is online, then retires it. Fails
@@ -48,13 +54,7 @@ describe("a new thread", () => {
     const { app, page } = await openSignedIn(url);
     await keepWindowOnTop(app);
 
-    await app.evaluate(({ Menu }) => {
-      const file = Menu.getApplicationMenu()!.items.find((item) => item.label === "File")!;
-      const newThread = file.submenu!.items.find((item) => item.label === "New Thread")!;
-      // Electron types `click` as a bare `Function`. Called with no
-      // arguments, it runs the item's handler as a click with the mouse does.
-      (newThread.click as () => void)();
-    });
+    await chooseMenuItem(app, "File", "New Thread");
     const picker = page.getByRole("dialog", { name: "New thread in" });
     await picker.waitFor();
     expect(await picker.locator(".proj-name").allTextContents()).toEqual(["notes", "webshop"]);

@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 7 are built. Slice 8 is not.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, except the `link.open` channel (see [The IPC contract](#the-ipc-contract)).
 
 ## Scope of the first milestone
 
@@ -235,18 +235,20 @@ Only the storage differs:
 - **A refused message is a bug.** Main refuses a message that does not decode, a sender other than the app's main frame, and a request that makes no sense in main's current state. It logs the refusal, and the promise in the renderer rejects with its message. The renderer never shows a refusal to the user as if the user had caused it.
 - **A defect,** an error nobody expected, rejects the promise too, and Electron logs it.
 
-The first milestone's channels:
+The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* `goMenu.set` is added, because the Go menu lists the threads the sidebar shows and only the renderer knows them. `waitingThreads.set` replaces `badge.set`, `notification.show` and `notification.close`: the renderer sends every thread waiting on the user, and main decides the badge and which notifications to show or remove. Main then keeps which notifications it has shown, so a reload of the page cannot show them again, and main knows whether the user is signed in before the page sends anything, so a page still leaving the shell after a sign-out cannot bring them back.
 
 | Channel | Direction | Purpose |
 |---|---|---|
 | `token.read` / `token.write` | renderer → main | the stored token (see [Auth and the token](#auth-and-the-token)) |
 | `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one and saving it. Not the public API's `controller.read`, which describes the controller itself |
 | `runnerIdentity.read` | renderer → main | the local-runner probe |
-| `badge.set` | renderer → main | the dock badge count |
-| `notification.show` / `notification.close` | renderer → main | a thread's notification, keyed by session id |
-| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser |
+| `goMenu.set` | renderer → main | the threads the sidebar shows, top to bottom, for the Go menu |
+| ~~`badge.set`~~ | ~~renderer → main~~ | ~~the dock badge count~~ |
+| ~~`notification.show` / `notification.close`~~ | ~~renderer → main~~ | ~~a thread's notification, keyed by session id~~ |
+| `waitingThreads.set` | renderer → main | every thread waiting on the user, for the dock badge and the threads' notifications |
+| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. Not built yet: it arrives with the draft's Log in button, which is its first caller. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
 | `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
-| `thread.open` | main → renderer | a notification click or a menu shortcut asks for a thread |
+| `thread.open` | main → renderer | a notification click or a Go menu item asks for a thread |
 | `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread or Send |
 
 A new channel is added to the contract, and to this table, in the same change.
@@ -279,15 +281,21 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - When the stored thread is gone at launch, the id is removed and the new-thread screen shows, because the user did not ask for that thread this time. A gone thread the user opens during use shows "This thread was not found." with a link to start a new thread.
 - **Menu:**
   - The standard app, Edit and Window menus, so text editing shortcuts work in every field.
+  - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
   - File › New Thread `⌘N`.
-  - Thread › Send `⌘↵`.
-  - Go › the first nine threads of the sidebar, `⌘1` to `⌘9`, in sidebar order.
-  - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says.
+  - Thread › Send `⌘↵`. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It is always enabled. It sends what the open thread's composer or the draft holds, as ⏎ in the message field does, and does nothing when there is nothing to send.
+  - Go › the first nine threads of the sidebar, `⌘1` to `⌘9`, in sidebar order. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* Each thread is listed once, by its title: a waiting thread is listed where "Waiting on you" shows it, and a thread a "more" row hides is not listed. With no thread, and while signed out, Go holds one dimmed "No Threads".
+  - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
 - **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (`Session.openRequest`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+  - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
 - **Notifications:**
   - When a thread starts waiting on you and the window is not focused, main shows a native notification.
   - Clicking it focuses the window and opens the thread.
+  - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* The notification's title is the thread's title and its body is the question, such as "Run git push?".
+  - A thread has at most one notification. A new Request on the thread replaces it; when the new Request opens while the window is focused, the old notification is removed and no new one shows.
+  - Launching the app, or signing in, shows no notification for the threads that already wait; the badge counts them.
+  - Signing out, or connecting to another controller, hides the badge, removes every notification and empties Go. They stay empty until the user signs in again.
 - **Answered anywhere clears everywhere** ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)):
   - When a Request is answered anywhere - here, in the web app or from the CLI - its notification is removed and the badge drops, at the moment the `session` nudge arrives.
   - A Request opening or closing already sends that nudge ([./14-web-app.md](./14-web-app.md) §Live model).

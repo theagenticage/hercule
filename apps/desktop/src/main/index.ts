@@ -25,7 +25,7 @@ import { writeSync } from "node:fs";
 import inspector from "node:inspector";
 import path from "node:path";
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
-import { app, Menu, protocol, safeStorage } from "electron";
+import { app, Menu, Notification, protocol, safeStorage } from "electron";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { answerAppRequest, makeAppSchemeLayer } from "./app-scheme";
@@ -41,6 +41,7 @@ import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { openInBrowser, secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
+import { makeThreadNotificationsLayer } from "./thread-notifications";
 import { MainWindowLayer } from "./window";
 
 /**
@@ -52,17 +53,30 @@ const devServerUrl = app.isPackaged ? null : (process.env.HERCULE_DESKTOP_DEV_SE
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
-  const windowAndMenu = makeMainMenuLayer(Menu, !app.isPackaged).pipe(
-    Layer.provideMerge(MainWindowLayer),
-  );
+  const threadNotifications = makeThreadNotificationsLayer({
+    Notification,
+    setBadgeCount: (count) => app.setBadgeCount(count),
+    // Electron has no call that only asks. The first call that needs
+    // notifications, `isSupported` among them, sets up Electron's
+    // notification support, and on macOS that asks the user, once. This was
+    // observed with Electron 44.
+    askToNotify: () => {
+      Notification.isSupported();
+    },
+  });
+  const windowMenuAndNotifications = Layer.mergeAll(
+    makeMainMenuLayer(Menu, !app.isPackaged),
+    threadNotifications,
+  ).pipe(Layer.provideMerge(MainWindowLayer));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage))),
-      makeControllerConnectionLayer(openInBrowser, fetchWithoutRedirects),
+      makeControllerConnectionLayer(openInBrowser, fetchWithoutRedirects).pipe(
+        Layer.provideMerge(StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage)))),
+      ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
     ).pipe(
-      Layer.provideMerge(windowAndMenu),
+      Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
       Layer.provide(NodeFileSystem.layer),
     ),

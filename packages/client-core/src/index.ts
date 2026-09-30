@@ -297,6 +297,7 @@ export {
   showsTurnDivider,
 } from "./threads/turn-divider";
 export { buildTurns, mayBeRunningTurn, type ThreadItem, type ThreadTurn } from "./threads/turns";
+export { listWaitingThreads, type WaitingThread } from "./threads/waiting-threads";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

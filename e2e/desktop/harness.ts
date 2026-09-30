@@ -107,6 +107,11 @@ export interface LaunchedApp {
  * before the wait for its page to load. A test that must act before the
  * window shows does it there; the window can still show while it runs.
  *
+ * The app shows no thread notification: main's are only recorded, for
+ * `readThreadNotifications`, so that a test run puts no banner on the
+ * developer's screen. The first run on a Mac that signs in still has macOS
+ * ask, once, whether the app may notify.
+ *
  * The 200 ms keep the tests on the path users take: no user quits within
  * 200 ms of the window appearing, while macOS may still be placing it. A quit
  * that early is also one of the two things that must happen together for
@@ -133,6 +138,8 @@ export async function launchForTest(
   const appendMainOutput = (chunk: Buffer) => (mainOutput += chunk.toString());
   app.process().stdout?.on("data", appendMainOutput);
   app.process().stderr?.on("data", appendMainOutput);
+
+  await recordThreadNotifications(app);
 
   const page = await app.firstWindow();
   await prepareFirstWindow?.(app, page);
@@ -285,6 +292,16 @@ export async function openThread(page: Page, title: string): Promise<void> {
 }
 
 /**
+ * Returns the title of the thread the sidebar marks as open, or null when no
+ * thread is open. A thread that waits has two rows, both marked, with the
+ * same title.
+ */
+export async function readOpenThreadTitle(page: Page): Promise<string | null> {
+  const open = page.locator('nav[aria-label="Threads"] a.side-row[aria-current="page"] .side-name');
+  return (await open.count()) === 0 ? null : open.first().textContent();
+}
+
+/**
  * Replaces `shell.openExternal` in main with a function that only records the
  * URL, so a test can check what the app would open without opening the
  * developer's browser. Returns a function that reads the recorded URLs.
@@ -305,6 +322,127 @@ export async function recordExternalOpens(
   });
   return () =>
     app.evaluate(() => (globalThis as { openedExternally?: string[] }).openedExternally ?? []);
+}
+
+/** A thread notification main made, as `readThreadNotifications` returns it. */
+export interface RecordedThreadNotification {
+  readonly title: string;
+  readonly body: string;
+  /** "shown" once main has shown it, and "closed" once main has removed it. */
+  readonly state: "shown" | "closed";
+}
+
+/**
+ * Replaces `show` and `close` on Electron's notifications with functions that
+ * only record what main did, and keeps each notification main shows on
+ * main's `globalThis`, as a function handed to `app.evaluate` cannot close
+ * over anything in this file. Main makes its thread notifications from
+ * Electron's own class, whose methods live on its prototype, so the
+ * replacements apply to every notification main makes from now on.
+ */
+async function recordThreadNotifications(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ Notification }) => {
+    const shown: Array<Electron.Notification & { closedForTest?: true }> = [];
+    (globalThis as { shownThreadNotifications?: typeof shown }).shownThreadNotifications = shown;
+    Notification.prototype.show = function (this: (typeof shown)[number]) {
+      shown.push(this);
+    };
+    Notification.prototype.close = function (this: (typeof shown)[number]) {
+      this.closedForTest = true;
+    };
+  });
+}
+
+/** Returns every thread notification main has shown since the app started, oldest first. */
+export function readThreadNotifications(
+  app: ElectronApplication,
+): Promise<RecordedThreadNotification[]> {
+  return app.evaluate(() =>
+    (
+      (
+        globalThis as {
+          shownThreadNotifications?: Array<Electron.Notification & { closedForTest?: true }>;
+        }
+      ).shownThreadNotifications ?? []
+    ).map(({ title, body, closedForTest }) => ({
+      title,
+      body,
+      state: closedForTest === true ? ("closed" as const) : ("shown" as const),
+    })),
+  );
+}
+
+/**
+ * Clicks the thread notification main showed at `index`, counting from the
+ * oldest, as the user does. Fails when main has shown no notification at
+ * `index`.
+ */
+export async function clickThreadNotification(
+  app: ElectronApplication,
+  index: number,
+): Promise<void> {
+  const clicked = await app.evaluate((_electron, at) => {
+    const shown = (globalThis as { shownThreadNotifications?: Electron.Notification[] })
+      .shownThreadNotifications;
+    return shown?.[at]?.emit("click") ?? false;
+  }, index);
+  if (!clicked) throw new Error(`main has shown no thread notification at ${String(index)}`);
+}
+
+/** An item of the menu bar, as `readMenuItems` returns it. */
+export interface MenuItemState {
+  readonly label: string;
+  readonly accelerator: string | null;
+  readonly enabled: boolean;
+}
+
+/** Returns the labels of the menu bar's menus, left to right. */
+export function readMenuLabels(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(({ Menu }) =>
+    (Menu.getApplicationMenu()?.items ?? []).map((menu) => menu.label),
+  );
+}
+
+/** Returns the items of the menu labelled `menuLabel`, top to bottom, separators left out. */
+export function readMenuItems(
+  app: ElectronApplication,
+  menuLabel: string,
+): Promise<MenuItemState[]> {
+  return app.evaluate(({ Menu }, label) => {
+    const menu = Menu.getApplicationMenu()?.items.find((item) => item.label === label);
+    return (menu?.submenu?.items ?? [])
+      .filter((item) => item.type !== "separator")
+      .map((item) => ({
+        label: item.label,
+        accelerator: item.accelerator ?? null,
+        enabled: item.enabled,
+      }));
+  }, menuLabel);
+}
+
+/**
+ * Chooses the item labelled `itemLabel` in the menu labelled `menuLabel`, as
+ * a click with the mouse does. Fails when the menu bar has no such item.
+ */
+export async function chooseMenuItem(
+  app: ElectronApplication,
+  menuLabel: string,
+  itemLabel: string,
+): Promise<void> {
+  const found = await app.evaluate(
+    ({ Menu }, [menu, item]) => {
+      const chosen = Menu.getApplicationMenu()
+        ?.items.find((each) => each.label === menu)
+        ?.submenu?.items.find((each) => each.label === item);
+      if (chosen === undefined) return false;
+      // Electron types `click` as a bare `Function`. Called with no
+      // arguments, it runs the item's handler as a click with the mouse does.
+      (chosen.click as () => void)();
+      return true;
+    },
+    [menuLabel, itemLabel] as const,
+  );
+  if (!found) throw new Error(`the menu bar has no item "${itemLabel}" in "${menuLabel}"`);
 }
 
 /**

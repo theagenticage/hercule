@@ -1,9 +1,9 @@
 /**
  * Tests the new-thread screen as the app opens it at `/`: the question and
- * the lead, a draft that cannot start, starting a thread with ⏎, a start the
- * controller refuses, a start made once when the user comes back while it
- * runs, the draft kept per place, the start cards, and the picks a start
- * carries.
+ * the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
+ * Send, a start the controller refuses, a start made once when the user
+ * comes back while it runs, the draft kept per place, the start cards, and
+ * the picks a start carries.
  *
  * The menus are the browser's popovers, which jsdom does not implement, so
  * their content is tested on its own. Here a pick is written into the
@@ -66,12 +66,10 @@ const openDraft = async (path: string, handlers: Readonly<Record<string, Handler
     "POST /api/v1/sessions": { body: STARTED.session },
     ...handlers,
   });
-  const app = await renderApp(
-    createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    { path },
-  );
+  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const app = await renderApp(fake, { path });
   const field = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
-  return { calls, field, ...app };
+  return { calls, fake, field, ...app };
 };
 
 /** Returns the requests that started a thread. */
@@ -212,6 +210,20 @@ describe("the new-thread screen", () => {
     expect(
       (await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value,
     ).toBe("");
+  });
+
+  it("starts the thread with Thread > Send in the menu", async () => {
+    const { calls, fake, field, router } = await openDraft(`/?project=${WEBSHOP.id}`);
+
+    await userEvent.type(field, "Fix the cart");
+    fake.sendMenuCommand("send");
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${STARTED.session.id}`);
+    });
+    expect(readSpawns(calls).map((call) => call.body)).toEqual([
+      expect.objectContaining({ prompt: "Fix the cart" }),
+    ]);
   });
 
   it("keeps the draft and shows why when the controller refuses the start", async () => {

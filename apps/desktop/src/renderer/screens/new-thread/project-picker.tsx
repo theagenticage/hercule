@@ -79,11 +79,14 @@ export function ProjectPicker({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
-    if (event.metaKey) {
-      const row = /^[1-9]$/.test(event.key) ? rows[Number(event.key) - 1] : undefined;
-      if (row === undefined) return;
+    if (event.metaKey && (/^[1-9]$/.test(event.key) || event.key === "Enter")) {
+      // The page sees a shortcut before the menu does, and a handled one
+      // never reaches the menu. Every ⌘1 to ⌘9 and ⌘↵ is handled, even a
+      // number with no project, so that the Go menu does not open a thread and
+      // Thread > Send does not send the message behind the picker.
       event.preventDefault();
-      openProject(row.projectId);
+      const row = event.key === "Enter" ? undefined : rows[Number(event.key) - 1];
+      if (row !== undefined) openProject(row.projectId);
       return;
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

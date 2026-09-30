@@ -3,7 +3,7 @@
  * the keys that move between them and pick one, and the ways it closes.
  */
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   buildSidebarHandlers,
@@ -81,6 +81,17 @@ describe("the project picker", () => {
       expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
     });
     expect(screen.queryByRole("dialog", { name: "New thread in" })).toBeNull();
+  });
+
+  it("keeps every ⌘1 to ⌘9 and ⌘↵ from the menu, whose Go items and Send would act behind it", async () => {
+    const { dialog, router } = await openPicker();
+    const row = document.activeElement!;
+
+    // A key event the page handled returns false, and the menu never sees it.
+    expect(fireEvent.keyDown(row, { key: "3", metaKey: true })).toBe(false);
+    expect(fireEvent.keyDown(row, { key: "Enter", metaKey: true })).toBe(false);
+    expect(dialog.open).toBe(true);
+    expect(router.state.location.pathname).toBe(THREAD_PATH);
   });
 
   it("gives the focus back to the message field when the project picked is the open draft's", async () => {

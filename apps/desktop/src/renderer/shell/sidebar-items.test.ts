@@ -21,6 +21,7 @@ import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/
 import {
   buildExpandedSections,
   buildSidebarItems,
+  listGoMenuThreads,
   pickFocusFallback,
   type SectionKey,
   type SidebarItem,
@@ -366,6 +367,50 @@ describe("buildSidebarItems", () => {
 
   it("returns no items when there are no threads", () => {
     expect(buildItems({ threads: [] })).toEqual([]);
+  });
+});
+
+describe("listGoMenuThreads", () => {
+  it("lists the threads top to bottom, a waiting thread once, where it shows first", () => {
+    expect(listGoMenuThreads(buildItems({ threads: WORLD_THREADS }))).toEqual([
+      { sessionId: "s-runbook", title: "s-runbook" },
+      { sessionId: "s-flaky", title: "s-flaky" },
+      { sessionId: "s-bun", title: "s-bun" },
+      { sessionId: "s-keys", title: "s-keys" },
+      { sessionId: "s-price", title: "s-price" },
+    ]);
+  });
+
+  it("lists no thread a more row hides", () => {
+    const threads = [1, 2, 3, 4, 5, 6, 7].map((minutes) =>
+      thread(`s-${String(minutes)}`, minutes, { projectId: OPS_PROJECT.id }),
+    );
+    expect(listGoMenuThreads(buildItems({ threads })).map((each) => each.sessionId)).toEqual([
+      "s-7",
+      "s-6",
+      "s-5",
+      "s-4",
+      "s-3",
+    ]);
+  });
+
+  it("lists only the first nine threads, one per shortcut", () => {
+    const threads = Array.from({ length: 12 }, (_, index) =>
+      thread(`s-${String(12 - index)}`, 12 - index, { projectId: OPS_PROJECT.id }),
+    );
+    const items = buildItems({ threads, expanded: new Set(["project:p-ops"]) });
+    expect(listGoMenuThreads(items).map((each) => each.sessionId)).toEqual(
+      ["12", "11", "10", "9", "8", "7", "6", "5", "4"].map((number) => `s-${number}`),
+    );
+  });
+
+  it("lists no draft", () => {
+    const items = buildItems({
+      threads: [],
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
+    });
+    expect(items.some((item) => item.kind === "draft-row")).toBe(true);
+    expect(listGoMenuThreads(items)).toEqual([]);
   });
 });
 

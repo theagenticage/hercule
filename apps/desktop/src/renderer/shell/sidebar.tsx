@@ -1,4 +1,4 @@
-import { useCallback, useState, type JSX } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatch, useRouteContext } from "@tanstack/react-router";
 import {
@@ -19,7 +19,12 @@ import {
 import { useRelatedReads } from "../app/related-reads";
 import { ComposeIcon, SearchIcon, SidebarIcon } from "../icons";
 import { useOpenDraft } from "./open-draft";
-import { buildExpandedSections, buildSidebarItems, type SectionKey } from "./sidebar-items";
+import {
+  buildExpandedSections,
+  buildSidebarItems,
+  listGoMenuThreads,
+  type SectionKey,
+} from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import "./sidebar.css";
@@ -42,9 +47,12 @@ import "./sidebar.css";
  * The lists it reads are in the cache before the shell renders, because the
  * shell's loader reads them, so nothing here waits in practice. A live push
  * updates the cache, and only the rows whose thread changed draw again.
+ *
+ * It also sends main the threads it shows, top to bottom, for the Go menu,
+ * each time they or their titles change.
  */
 export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
+  const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
@@ -103,6 +111,20 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
     draftMeta: draft?.rowMeta ?? null,
   });
   const counts = countThreadsByPose(poses.values());
+
+  // Most renders leave the Go menu as it was, and main builds the whole menu
+  // bar again for each list it is sent, so a list is sent only when it
+  // differs from the last one sent.
+  const goMenuThreads = listGoMenuThreads(items);
+  const goMenuKey = JSON.stringify(goMenuThreads);
+  const sentGoMenuKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (sentGoMenuKey.current === goMenuKey) return;
+    sentGoMenuKey.current = goMenuKey;
+    bridge.goMenu.set(goMenuThreads).catch((error: unknown) => {
+      console.error("Could not update the Go menu:", error);
+    });
+  });
 
   return (
     <aside className="side">
