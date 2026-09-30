@@ -150,7 +150,7 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way, and CI runs it on macOS. `pnpm test:desktop` launches the packaged app, so it needs the build before it.
+The desktop pair works the same way. `pnpm test:desktop` launches the packaged app, so it needs the build before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. CI runs only `pnpm build:desktop` and `pnpm compare:bureau`, on macOS. The end-to-end suite checks windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three, so run `pnpm test:desktop` on a Mac before a PR that changes the desktop app.
 
 ```
 pnpm build:desktop # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
