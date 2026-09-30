@@ -49,7 +49,11 @@
    right edge, as wide as a classic scroll bar, stays unmasked. The mask
    cannot be told where the scroll bar is, so the width is the constant
    above. No text reaches that strip, because `.column` keeps at least 24px
-   from either edge. */
+   from either edge.
+
+   The gradient ends with `--transcript-bottom-fade`, the stops that fade
+   the transcript out above the composer's lip (composer.css). Where it is
+   not set, the gradient stays opaque to the bottom. */
 .top ~ .transcript,
 .top ~ .hello {
   --header-clearance: 108px;
@@ -63,7 +67,8 @@
       rgb(0 0 0 / 0.15) 64px,
       rgb(0 0 0 / 0.5) 79px,
       rgb(0 0 0 / 0.85) 94px,
-      #000 var(--header-clearance)
+      #000 var(--header-clearance),
+      var(--transcript-bottom-fade, #000)
     ),
     linear-gradient(#000 0 0);
   mask-size:

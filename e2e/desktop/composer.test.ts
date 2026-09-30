@@ -14,6 +14,8 @@
  * - the composer shrinks while the transcript is scrolled up, `dock-mini`
  *   answers a Request without expanding it, and a click on the field
  *   expands it again;
+ * - with the transcript scrolled up, none of it shows below the full
+ *   composer's card, where the lip is, and it shows below the shrunk one;
  * - the field grows with its text up to eight lines, then scrolls.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
@@ -98,6 +100,68 @@ function readDistanceFromBottom(page: Page): Promise<number> {
   return page
     .locator('section[aria-label="Transcript"]')
     .evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+}
+
+/**
+ * Scrolls the transcript so that the paragraph starting with `start` begins
+ * 4px above the bottom of the composer's card. Its first line then runs into
+ * the strip below the card.
+ */
+async function scrollParagraphToCardBottom(page: Page, start: string): Promise<void> {
+  await page.evaluate((start) => {
+    const transcript = document.querySelector('section[aria-label="Transcript"]')!;
+    const paragraph = [...transcript.querySelectorAll(".msg-body p")].find((each) =>
+      each.textContent?.startsWith(start),
+    )!;
+    const card = document.querySelector(".composer-card")!;
+    transcript.scrollTop +=
+      paragraph.getBoundingClientRect().top - (card.getBoundingClientRect().bottom - 4);
+  }, start);
+}
+
+/** Waits until the composer's transitions, such as its 4px drop, have finished. */
+async function waitForComposerTransitions(page: Page): Promise<void> {
+  await page
+    .locator(".composer")
+    .evaluate((composer) =>
+      Promise.all(composer.getAnimations({ subtree: true }).map((each) => each.finished)),
+    );
+}
+
+/**
+ * Checks whether any of the transcript shows below the composer's card,
+ * across the card's width: the strip the lip sits in. The strip is captured
+ * twice, as drawn and with the transcript hidden, and the transcript shows
+ * there when the two captures differ.
+ *
+ * The lip is hidden in both captures, because Chromium draws its text a
+ * shade differently once the transcript behind it is hidden.
+ */
+async function showsTranscriptBelowCard(page: Page): Promise<boolean> {
+  const transcript = page.locator('section[aria-label="Transcript"]');
+  const setVisibility = (selector: string, visibility: string): Promise<void> =>
+    page.evaluate(
+      ([selector, visibility]) => {
+        for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+          element.style.visibility = visibility;
+        }
+      },
+      [selector, visibility] as const,
+    );
+  const card = await readBox(page.locator(".composer-card"));
+  const pane = await readBox(transcript);
+  const clip = {
+    x: card.left,
+    y: card.bottom,
+    width: card.width,
+    height: pane.bottom - card.bottom,
+  };
+  await setVisibility(".lip", "hidden");
+  const drawn = await page.screenshot({ clip });
+  await setVisibility('section[aria-label="Transcript"]', "hidden");
+  const hidden = await page.screenshot({ clip });
+  await setVisibility('section[aria-label="Transcript"], .lip', "");
+  return !drawn.equals(hidden);
 }
 
 /** Returns `count` lines of text, numbered from 1, joined by newlines. */
@@ -343,6 +407,41 @@ describe("the composer", () => {
     await expect.poll(() => composer.root.getAttribute("class")).toBe("composer");
     expect(await composer.field.evaluate((field) => field === document.activeElement)).toBe(true);
     await expect.poll(() => readDistanceFromBottom(page)).toBeLessThan(1);
+  });
+
+  it("hides the transcript below the full composer's card, where the lip is, and shows it below the shrunk one", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const { played } = await fleet.spawnScriptedThread(
+      { runner, prompt: "Why does the checkout test fail?" },
+      [
+        { kind: "message", text: LONG_ANSWER, deltaMs: 1 },
+        { kind: "end", state: "completed" },
+      ],
+    );
+    await played;
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Why does the checkout test fail?");
+    const composer = locateComposer(page);
+
+    // Scrolled up with the focus elsewhere, the composer shrinks. The
+    // paragraph is placed again once the card has its shrunk size.
+    await scrollParagraphToCardBottom(page, "Paragraph 20 ");
+    await expect.poll(() => composer.root.getAttribute("class")).toBe("composer is-scrolled");
+    await waitForComposerTransitions(page);
+    await scrollParagraphToCardBottom(page, "Paragraph 20 ");
+    expect(await showsTranscriptBelowCard(page)).toBe(true);
+
+    // With the focus in the field, the composer stays full size while the
+    // transcript is scrolled up.
+    await composer.field.click();
+    await expect.poll(() => composer.root.getAttribute("class")).toBe("composer");
+    await waitForComposerTransitions(page);
+    await scrollParagraphToCardBottom(page, "Paragraph 20 ");
+    await expect.poll(() => readDistanceFromBottom(page)).toBeGreaterThan(200);
+    expect(await composer.root.getAttribute("class")).toBe("composer");
+    expect(await showsTranscriptBelowCard(page)).toBe(false);
   });
 
   it("grows the field with its text up to eight lines, then scrolls it", async () => {

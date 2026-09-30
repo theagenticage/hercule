@@ -148,6 +148,31 @@ button.pick:not([aria-disabled="true"]):hover,
 .lip .spacer {
   flex: 1;
 }
+/* Not in the book. The lip has no card behind it, so while the composer is
+   full size and the reader scrolls up, the transcript's lines pass under
+   the lip and collide with its workspace and machine. So the transcript
+   fades out at its bottom, as it fades out under the header:
+
+   - it is hidden below the card, over `--lip-clearance`: the wrap's 18px
+     bottom padding and the lip, which is its 7px top padding and one line
+     of `--t-12` at the body's line height, 1.45;
+   - it fades in over the lower 36px of the card, on the header fade's
+     curve, so its glass shows no hard line.
+
+   The book lets text read under the shrunk composer, which has no lip, so
+   the fade holds only while the composer is full size. At the bottom of the
+   transcript the faded strip holds only the space under the last block, so
+   the fade shows only while the reader is scrolled up. The mask itself is
+   in thread-header.css. */
+.transcript:has(~ .composer-wrap > .composer:not(.is-scrolled)) {
+  --lip-clearance: calc(18px + 7px + 1.45 * var(--t-12));
+  --transcript-bottom-fade:
+    #000 calc(100% - var(--lip-clearance) - 36px),
+    rgb(0 0 0 / 0.85) calc(100% - var(--lip-clearance) - 27px),
+    rgb(0 0 0 / 0.5) calc(100% - var(--lip-clearance) - 18px),
+    rgb(0 0 0 / 0.15) calc(100% - var(--lip-clearance) - 9px),
+    transparent calc(100% - var(--lip-clearance));
+}
 
 /* Shrunk while the transcript is scrolled away from its bottom. Only the
    field, and the Request's `dock-mini`, stay. */
