@@ -4,7 +4,7 @@
  * sorting by activity, and a draft that joins the workspace is the last tab.
  */
 import { describe, expect, it } from "vitest";
-import { buildSiblingTabs, listThreadTabs } from "./siblings";
+import { buildSiblingTabs, listThreadTabs, listWorkspaceThreads } from "./siblings";
 import { THREAD_3F1, buildSession } from "./workspaces.testing";
 
 const SESSIONS = [
@@ -99,5 +99,17 @@ describe("listThreadTabs", () => {
     const open = { ...FLAKY, ...IN_3F1, status: "exited" as const };
 
     expect(listThreadTabs(open, SESSIONS, [workspace])).toEqual([RUNBOOK, open]);
+  });
+});
+
+describe("listWorkspaceThreads", () => {
+  it("has no threads when there is no workspace", () => {
+    expect(listWorkspaceThreads(undefined, SESSIONS)).toEqual([]);
+  });
+
+  it("keeps the workspace's order, and skips a thread that is not in the thread list", () => {
+    const workspace = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] };
+
+    expect(listWorkspaceThreads(workspace, SESSIONS)).toEqual([SESSIONS[1], SESSIONS[0]]);
   });
 });

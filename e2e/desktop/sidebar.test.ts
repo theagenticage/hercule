@@ -50,13 +50,18 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  * - a thread row: its accessible name and its end, as
  *   "Thread 1, working | mark:working", "Thread 4, working | queued" or
  *   "Thread 5, idle | now";
- * - a "more" row: its label, "35 more threads".
+ * - a "more" row: its label, "35 more threads";
+ * - the Draft Thread's row: its name and its end, "New thread | draft".
+ *
+ * The app opens on a Draft Thread in no project, so every list ends in the
+ * draft's row, under "No project".
  */
 function readSidebarItems(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     [...document.querySelectorAll('nav[aria-label="Threads"] .side-item')].map((item) => {
       const readText = (selector: string) => item.querySelector(selector)?.textContent ?? "";
-      const name = item.getAttribute("aria-label");
+      // The draft's row is not a link, so its text is its name.
+      const name = item.getAttribute("aria-label") ?? readText(".side-name");
       if (item.matches(".side-h--proj")) return `project ${readText(".proj-name")}`;
       if (item.matches(".side-h")) return item.textContent;
       if (item.matches(".side-ws")) return `workspace ${readText(".side-ws-name")}`;
@@ -107,7 +112,7 @@ describe("the sidebar", () => {
     });
 
     await signInAndReadToken(page, url);
-    await page.getByRole("navigation", { name: "Threads" }).waitFor();
+    await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
 
     // The controller greets a new connection, so a socket that received a
     // frame is one the policy let through and the controller accepted.
@@ -190,6 +195,8 @@ describe("the sidebar", () => {
         "workspace webshop · studio",
         "Thread 3, waiting on you | mark:waiting",
         "Thread 1, working | mark:working",
+        "project No project",
+        "New thread | draft",
       ]);
     expect(await readCounts(page)).toBe("3 working · 1 waiting · 0 idle");
   });
@@ -200,7 +207,11 @@ describe("the sidebar", () => {
     const [thread] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(thread!.id, "busy");
     const { page } = await openSignedIn(url);
-    const working = ["project No project", "Thread 1, working | mark:working"];
+    const working = [
+      "project No project",
+      "Thread 1, working | mark:working",
+      "New thread | draft",
+    ];
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
 
     const waitingRow = page.locator("a.side-row--wait", { hasText: "Thread 1" });
@@ -214,6 +225,7 @@ describe("the sidebar", () => {
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
       "Thread 1, waiting on you | mark:waiting",
+      "New thread | draft",
     ]);
 
     await client.session.respond({
@@ -245,6 +257,8 @@ describe("the sidebar", () => {
         "project Webshop",
         "workspace webshop · studio",
         "Thread 1, working | mark:working",
+        "project No project",
+        "New thread | draft",
       ]);
 
     await fleet.spawnThreads(1, { runner, projectId: webshop.id, workspace: primary });
@@ -255,6 +269,8 @@ describe("the sidebar", () => {
         "workspace webshop · studio",
         "Thread 2, working | mark:working",
         "Thread 1, working | mark:working",
+        "project No project",
+        "New thread | draft",
       ]);
 
     // The new worktree is in no list the app holds, so the app reads the
@@ -275,6 +291,8 @@ describe("the sidebar", () => {
         "workspace webshop · studio",
         "Thread 2, working | mark:working",
         "Thread 1, working | mark:working",
+        "project No project",
+        "New thread | draft",
       ]);
   });
 
@@ -291,6 +309,7 @@ describe("the sidebar", () => {
       "project No project",
       "Thread 2, idle | now",
       "Thread 1, working | mark:working",
+      "New thread | draft",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
 
@@ -301,6 +320,7 @@ describe("the sidebar", () => {
         "project No project",
         "Thread 2, can't be reached | offline",
         "Thread 1, can't be reached | offline",
+        "New thread | draft",
       ]);
     expect(await readCounts(page)).toBe("0 working · 0 waiting · 0 idle");
 

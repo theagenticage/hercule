@@ -117,7 +117,7 @@ export function ChromeAction(props: {
 
 /**
  * The New thread here link: starts another thread in the same workspace. A
- * thread without a workspace does not show it.
+ * thread without a workspace, or in one that is not ready, does not show it.
  */
 export function NewThreadHere({
   projectId,

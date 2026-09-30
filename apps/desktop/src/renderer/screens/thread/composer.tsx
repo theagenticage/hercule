@@ -1,8 +1,13 @@
 import { useRef, useSyncExternalStore, type FocusEvent, type JSX, type Ref } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useIsMutating,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  applyPick,
+  applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
   buildOptionsLabel,
@@ -47,6 +52,7 @@ import { ModelMenu } from "./model-menu";
 import { OptionsMenu } from "./options-menu";
 import { ProviderLogo } from "./provider-logo";
 import { QueuedInputs } from "./queued-inputs";
+import { isSendKey } from "./send-key";
 import "./composer.css";
 
 /** What one send carried: the request, and the picks it was built from. */
@@ -135,10 +141,11 @@ export function ThreadComposer({
     pendingSubmissions.read(sessionId),
   );
   const fieldRef = useRef<HTMLTextAreaElement>(null);
-  // Set when a send starts and cleared when it settles. `isPending` reaches
-  // the render only after `mutate`, so a second ⏎ in between would still
-  // see it false; the ref is set at once.
-  const sendingRef = useRef(false);
+  // The send is keyed by the thread, so a composer mounted again while its
+  // send is still on the way, after the user left and came back, finds it
+  // running and does not send the message twice.
+  const sendKey = ["thread-input", sessionId];
+  const sending = useIsMutating({ mutationKey: sendKey }) > 0;
   // Whether the pointer went down on the shrunk composer, anywhere but on
   // `dock-mini`'s answers. By the time the click arrives, the focus it moved
   // has already expanded the composer.
@@ -174,6 +181,7 @@ export function ThreadComposer({
   const note = buildPendingModelNote("active", pending.picks);
 
   const input = useMutation({
+    mutationKey: sendKey,
     mutationFn: (sent: SentSubmission) =>
       client.session.input({ params: { id: sessionId }, payload: sent.payload }),
     // Registered here rather than passed to `mutate`, so it also runs when
@@ -183,7 +191,8 @@ export function ThreadComposer({
       // the cache, so the pill never shows the old model in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
       // What was typed or picked while the message was on its way belongs to
-      // the next message, so only what was sent is cleared.
+      // the next message, so only what was sent is cleared. The thread had no
+      // failure since the send began.
       const now = pendingSubmissions.read(sessionId);
       pendingSubmissions.write(sessionId, {
         message: now.message.text === sent.payload.text ? { text: "" } : now.message,
@@ -198,8 +207,14 @@ export function ThreadComposer({
         });
       }
     },
-    onSettled: () => {
-      sendingRef.current = false;
+    // Kept in the pending submission rather than read from `input.error`: a
+    // composer mounted again, after the user left and came back, has a
+    // mutation of its own, which never saw this send fail.
+    onError: (error) => {
+      pendingSubmissions.write(sessionId, {
+        ...pendingSubmissions.read(sessionId),
+        failure: readErrorMessage(error),
+      });
     },
   });
   const interrupt = useMutation({
@@ -208,8 +223,16 @@ export function ThreadComposer({
     // controller read it before the interrupt, still busy, so writing it
     // could bring back a Stop the live `session` push has already cleared.
   });
-  const error = input.error ?? interrupt.error;
-  const canSend = readOnly === null && pending.message.text.trim() !== "" && !input.isPending;
+  const error =
+    pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
+  const canSend = readOnly === null && pending.message.text.trim() !== "" && !sending;
+
+  const clearFailure = (): void => {
+    const now = pendingSubmissions.read(sessionId);
+    if (now.failure !== undefined) {
+      pendingSubmissions.write(sessionId, { message: now.message, picks: now.picks });
+    }
+  };
 
   const writeText = (text: string): void => {
     pendingSubmissions.write(sessionId, {
@@ -219,19 +242,22 @@ export function ThreadComposer({
   };
   // Each pick is compared with the thread's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.
-  const pick = (step: ComposerPick): void => {
+  const pick = (steps: readonly ComposerPick[]): void => {
     const now = pendingSubmissions.read(sessionId);
     pendingSubmissions.write(sessionId, {
       ...now,
-      picks: applyPick(catalogs, base, now.picks, step),
+      picks: applyPicks(catalogs, base, now.picks, steps),
     });
   };
   const submit = (): void => {
-    if (!canSend || sendingRef.current) return;
+    // The cache knows at once that a send is running. `sending` knows only
+    // after the next render, and two quick presses of ⏎ can both arrive
+    // before it.
+    if (!canSend || queryClient.isMutating({ mutationKey: sendKey }) > 0) return;
     const submission = buildSubmission(thread, pending.picks, pending.message);
     // A thread that has started always takes an input rather than a spawn.
     if (submission.kind !== "input") return;
-    sendingRef.current = true;
+    clearFailure();
     if (interrupt.isError) interrupt.reset();
     input.mutate({
       payload: submission.payload,
@@ -242,7 +268,7 @@ export function ThreadComposer({
   };
   const stop = (): void => {
     if (interrupt.isPending) return;
-    if (input.isError) input.reset();
+    clearFailure();
     interrupt.mutate();
   };
 
@@ -301,13 +327,7 @@ export function ThreadComposer({
               writeText(event.target.value);
             }}
             onKeyDown={(event) => {
-              // ⏎ sends and ⇧⏎ starts a new line. The ⏎ that ends an IME
-              // composition does not send, or it would cut a Japanese or
-              // Chinese sentence off mid-word. Chromium marks that ⏎ with
-              // `isComposing`, and some input methods with the legacy
-              // `keyCode` 229, "the IME handled this key".
-              if (event.key !== "Enter" || event.shiftKey) return;
-              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (!isSendKey(event)) return;
               event.preventDefault();
               submit();
             }}
@@ -340,7 +360,7 @@ export function ThreadComposer({
                       selected={config.options}
                       modelName={pill.name}
                       onPick={(id, value) => {
-                        pick({ kind: "option", id, value });
+                        pick([{ kind: "option", id, value }]);
                       }}
                     />
                   )}
@@ -351,7 +371,7 @@ export function ThreadComposer({
               <ComposerMenu
                 label="Model"
                 align="end"
-                wide
+                width="wide"
                 disabled={readOnly !== null}
                 triggerClassName="pick pick--pill"
                 trigger={
@@ -368,9 +388,10 @@ export function ThreadComposer({
                   <ModelMenu
                     catalogs={catalogs}
                     config={config}
+                    kind="active"
                     recent={readRecentModels(controller.url)}
-                    onPick={(model) => {
-                      pick({ kind: "model", value: model });
+                    onPick={(picks) => {
+                      pick(picks);
                       close();
                     }}
                   />
@@ -403,7 +424,7 @@ export function ThreadComposer({
             </div>
             {error === null ? null : (
               <p className="composer-error" role="alert">
-                {readErrorMessage(error)}
+                {error}
               </p>
             )}
           </div>

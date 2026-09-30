@@ -80,14 +80,30 @@ describe("the thread header", () => {
   });
 
   it("links + to a new thread in the thread's workspace", async () => {
+    const { session } = THREAD_FIXTURES.finished;
     await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.finished });
 
     const primary = SIDEBAR_FIXTURE.workspaces[0]!;
+    expect(session.workspaceId).toBe(primary.id);
     expect(
       within(readTabStrip())
         .getByRole("link", { name: "New thread in this workspace" })
         .getAttribute("href"),
-    ).toBe(`/?workspace=${primary.id}`);
+    ).toBe(`/?project=${session.projectId!}&workspace=${primary.id}`);
+  });
+
+  it("draws no + while the thread's workspace is not ready, because a new thread could not join it", async () => {
+    const [primary, ...others] = SIDEBAR_FIXTURE.workspaces;
+    await renderThreadPart(ThreadHeader, {
+      thread: THREAD_FIXTURES.finished,
+      handlers: {
+        "GET /api/v1/workspaces": {
+          body: { items: [{ ...primary!, status: "provisioning" }, ...others] },
+        },
+      },
+    });
+
+    expect(readLinkNames()).toEqual(["Bump the Bun pin, idle"]);
   });
 
   it("draws a thread in no project and no workspace with its one tab and no +", async () => {

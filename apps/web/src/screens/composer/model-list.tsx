@@ -85,7 +85,7 @@ export function ModelList({
             marker={renderMarker(<ProviderLogo providerId={instance.providerId} />)}
             name={instance.name}
             detail={describeLogin(instance)}
-            note={instance.dimmed === null ? `${String(instance.modelCount)} models ›` : undefined}
+            note={instance.dimmed === null ? `${instance.models} ›` : undefined}
             dimmed={instance.dimmed}
             trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}
             onPick={() => {

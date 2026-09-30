@@ -6,23 +6,23 @@
  *   Bureau book's;
  * - sidebar-states.tsx, which draws the sidebar states the book never draws;
  * - thread.tsx, which also opens a thread, and whose thread screen
- *   `pnpm compare:bureau` compares with the book's.
+ *   `pnpm compare:bureau` compares with the book's;
+ * - draft.tsx, which opens a Draft Thread in a project, and whose draft
+ *   screen `pnpm compare:bureau` compares with the book's.
  *
  * The page builds a router whose routes have the app's route ids, so the
- * sidebar and the thread screen find the controller in their route context,
- * and the sidebar marks the open thread as it does in the app. The query
- * cache holds every record the page reads before the first render. The
- * client refuses every request, and no live connection runs, so the page
- * never talks to a controller.
+ * sidebar and the screens find the controller in their route context, and
+ * the sidebar marks the open thread or draft as it does in the app. The
+ * query cache holds every record the page reads before the first render. The
+ * client refuses every request, the bridge refuses every call, and no live
+ * connection runs, so the page never talks to a controller or to main.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
  *
  * A page that shows ages must import ./fixed-clock before this module,
  * because the app's age clock reads the time as soon as its module loads.
  */
-import "../styles/tokens.css";
-import "../styles/base.css";
-import "../styles/controls.css";
+import "../styles/base-layer.css";
 import type { JSX } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -34,6 +34,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useSearch,
 } from "@tanstack/react-router";
 import type {
   Input,
@@ -43,24 +44,40 @@ import type {
   Runner,
   Session,
   SignedInUser,
+  Task,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
-import { createClient, type FetchLike, type HerculeClient } from "@hercule/client-core";
 import {
+  createClient,
+  type FetchLike,
+  type HerculeClient,
+  type ThreadPicks,
+} from "@hercule/client-core";
+import type { Bridge } from "../../ipc/bridge";
+import {
+  localRunnerQuery,
+  profilesQuery,
   projectsQuery,
   providersQuery,
   queuedInputsQuery,
   resourcesQuery,
   runnersQuery,
   sessionQuery,
+  settingsQuery,
+  startTasksQuery,
   threadsQuery,
   transcriptQuery,
   userQuery,
   workspacesQuery,
 } from "../app/queries";
-import { createPendingSubmissions } from "../app/pending-submissions";
+import {
+  buildDraftKey,
+  createPendingSubmissions,
+  type PendingSubmissions,
+} from "../app/pending-submissions";
 import { createQueryClient } from "../app/query-client";
+import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { ThreadScreen } from "../screens/thread/thread-screen";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
@@ -85,6 +102,21 @@ export interface ThreadScreenRecords {
   readonly queuedInputs: ReadonlyArray<Input>;
 }
 
+/** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
+export interface DraftScreenRecords {
+  readonly projectId: string;
+  /** The project's open tasks the start cards offer, most urgent first, as the start cards' query returns them. */
+  readonly startTasks: ReadonlyArray<Task>;
+  /** What the user picked in the draft's composer, which the draft's pending submission holds. */
+  readonly picks: ThreadPicks;
+}
+
+/** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
+interface OpenScreens {
+  readonly thread?: ThreadScreenRecords;
+  readonly draft?: DraftScreenRecords;
+}
+
 /** An address that never answers. The client sends nothing to it. */
 const CONTROLLER_URL = "http://controller.invalid";
 
@@ -101,15 +133,50 @@ const refuseRequest: FetchLike = (url) =>
     ),
   );
 
+/** Returns an error for a bridge call the page made, naming `call`. */
+const buildBridgeCallError = (call: string): Error =>
+  new Error(
+    `The shell specimen calls nothing in main, but the page called ${call}. ` +
+      "Add the record it reads to the specimen's query cache.",
+  );
+
 /**
- * Stores every list of `records` in the query cache, and the records of
- * `thread` when one is given, each under the key the page reads it by.
+ * The bridge the page passes to the app. It fails every call, for the same
+ * reason the client refuses every request, and sends no menu command.
+ */
+const REFUSING_BRIDGE: Bridge = {
+  controllerUrl: {
+    read: () => Promise.reject(buildBridgeCallError("controllerUrl.read")),
+    save: () => Promise.reject(buildBridgeCallError("controllerUrl.save")),
+  },
+  token: {
+    read: () => Promise.reject(buildBridgeCallError("token.read")),
+    write: () => Promise.reject(buildBridgeCallError("token.write")),
+  },
+  runnerIdentity: {
+    read: () => Promise.reject(buildBridgeCallError("runnerIdentity.read")),
+  },
+  firstScreen: {
+    report: () => Promise.reject(buildBridgeCallError("firstScreen.report")),
+  },
+  menu: {
+    onCommand: () => () => undefined,
+  },
+};
+
+/**
+ * Stores every list of `records` in the query cache, and the records of each
+ * screen in `screens`, each under the key the page reads it by.
+ *
+ * At `/` the app shows a Draft Thread, which the sidebar draws as a row, so
+ * the cache also holds what the draft is built from: no setting set, no
+ * profile, and no runner on this Mac.
  */
 const seedQueryCache = (
   queryClient: QueryClient,
   client: HerculeClient,
   records: SidebarRecords,
-  thread: ThreadScreenRecords | undefined,
+  { thread, draft }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
@@ -118,44 +185,70 @@ const seedQueryCache = (
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
   queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
-  if (thread === undefined) return;
-  const sessionId = thread.session.id;
-  queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
-  queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
-  queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+  queryClient.setQueryData(settingsQuery(client).queryKey, { controller: {}, user: {} });
+  queryClient.setQueryData(profilesQuery(client).queryKey, []);
+  queryClient.setQueryData(localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey, null);
+  if (draft !== undefined) {
+    queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
+  }
+  if (thread !== undefined) {
+    const sessionId = thread.session.id;
+    queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
+    queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
+    queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+  }
 };
 
-/** Renders the shell around the matched screen, as the app's `_shell` layout route does. */
+/**
+ * Renders the shell around the matched screen, as the app's `_shell` layout
+ * route does. New thread does nothing: the page has no project picker.
+ */
 function ShellLayout(): JSX.Element {
   return (
-    <Shell>
+    <Shell onNewThread={() => undefined}>
       <Outlet />
     </Shell>
   );
 }
 
 /**
+ * Renders the Draft Thread in the project and the workspace that the address
+ * names, as the app's new-thread route does.
+ */
+function NewThreadScreen(): JSX.Element {
+  const search = useSearch({ from: "/_connected/_shell/" });
+  return <DraftScreen projectId={search.project ?? null} workspaceId={search.workspace ?? null} />;
+}
+
+/**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * and the two screens the sidebar links to, `/` and `/threads/$sessionId`,
  * starting at `path`. The ids are the app's, because the sidebar and the
- * thread screen read their context, and the sidebar its selected thread, by
- * route id.
+ * screens read their context, and the sidebar its selected thread or draft,
+ * by route id.
  *
- * The thread's screen draws the thread screen for `openThreadId`, when one
- * is given; every other screen draws nothing.
+ * `/` draws the draft screen, as in the app. The thread's screen draws the
+ * thread screen for `openThreadId`, when one is given, and nothing
+ * otherwise.
  */
-const buildRouter = (client: HerculeClient, path: string, openThreadId: string | undefined) => {
+const buildRouter = (
+  client: HerculeClient,
+  pendingSubmissions: PendingSubmissions,
+  path: string,
+  openThreadId: string | undefined,
+) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",
     // `live` is null: the sidebar never touches the live connection.
     beforeLoad: () => ({
+      bridge: REFUSING_BRIDGE,
       controller: {
         url: CONTROLLER_URL,
         client,
         live: null,
-        pendingSubmissions: createPendingSubmissions(),
+        pendingSubmissions,
       },
     }),
   });
@@ -167,7 +260,7 @@ const buildRouter = (client: HerculeClient, path: string, openThreadId: string |
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
-        createRoute({ getParentRoute: () => shellRoute, path: "/" }),
+        createRoute({ getParentRoute: () => shellRoute, path: "/", component: NewThreadScreen }),
         createRoute({
           getParentRoute: () => shellRoute,
           path: "threads/$sessionId",
@@ -186,11 +279,12 @@ const buildRouter = (client: HerculeClient, path: string, openThreadId: string |
 };
 
 /**
- * Checks that the page drew the sidebar's thread rows, and the transcript
- * when `drawsThread` is true, and started no read. Fails with the keys of
- * the reads it started, or with what it did not draw, otherwise.
+ * Checks that the page drew the sidebar's thread rows, the transcript when
+ * `screens` opens a thread, and the start cards with the focus in the message
+ * field when it opens a draft, and started no read. Fails with the keys of the
+ * reads it started, or with what it did not draw, otherwise.
  */
-const assertShellDrawn = (queryClient: QueryClient, drawsThread: boolean): void => {
+const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void => {
   const reads = queryClient.getQueryCache().findAll({ fetchStatus: "fetching" });
   if (reads.length > 0) {
     throw new Error(
@@ -201,28 +295,52 @@ const assertShellDrawn = (queryClient: QueryClient, drawsThread: boolean): void 
   if (document.querySelector(".side-row") === null) {
     throw new Error("The sidebar drew no thread row. Check the page's console for the error.");
   }
-  if (drawsThread && document.querySelector(".tx-item") === null) {
+  if (screens.thread !== undefined && document.querySelector(".tx-item") === null) {
     throw new Error("The thread screen drew no block. Check the page's console for the error.");
+  }
+  if (screens.draft !== undefined) {
+    if (document.querySelector(".start") === null) {
+      throw new Error(
+        "The draft screen drew no start card. Check the page's console for the error.",
+      );
+    }
+    // The app's draft screen puts the focus in its message field as it opens,
+    // and the book's draft does the same. The capture window is hidden and
+    // never has the system's focus, so neither page draws the caret, and the
+    // pixels cannot show whether the field has the focus. This check does.
+    if (!(document.activeElement?.matches(".composer-input") ?? false)) {
+      throw new Error(
+        "The draft screen's message field does not have the focus, as it has in the app.",
+      );
+    }
   }
 };
 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with the app's address at `path`, and the thread screen of `thread` when
- * one is given. Returns once the page is in the document. Fails when the
- * page has no `#root`, draws nothing, or tries to read a record the cache
- * does not hold.
+ * with the app's address at `path`, and the records of each screen in
+ * `screens`. A draft's picks are written to its pending submission before
+ * the first render, as if the user had made them. Returns once the page is
+ * in the document. Fails when the page has no `#root`, draws nothing, or
+ * tries to read a record the cache does not hold.
  */
 async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
-  thread: ThreadScreenRecords | undefined,
+  screens: OpenScreens,
 ): Promise<void> {
   applySheetTheme();
   const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
   const queryClient = createQueryClient();
-  seedQueryCache(queryClient, client, records, thread);
-  const router = buildRouter(client, path, thread?.session.id);
+  seedQueryCache(queryClient, client, records, screens);
+  const pendingSubmissions = createPendingSubmissions();
+  if (screens.draft !== undefined) {
+    pendingSubmissions.write(buildDraftKey(screens.draft.projectId, null), {
+      message: { text: "" },
+      picks: screens.draft.picks,
+    });
+  }
+  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
   await router.load();
 
   const root = document.getElementById("root");
@@ -234,18 +352,20 @@ async function mountShellSpecimen(
       </QueryClientProvider>,
     );
   });
-  assertShellDrawn(queryClient, thread !== undefined);
+  assertShellDrawn(queryClient, screens);
 }
 
 /**
  * Applies the URL's theme and draws the shell into `#root`, from `records`,
  * with the app's address at `path`: `/threads/<id>` to select a thread in the
- * sidebar, or `/` for none. The thread's screen stays empty. Returns once the
- * sidebar is in the document. Fails when the page has no `#root`, the sidebar
- * draws no row, or it tries to read a record the cache does not hold.
+ * sidebar, where the screen stays empty, or `/` for a Draft Thread in no
+ * project, which the sidebar draws as a row and the screen as the app does.
+ * Returns once the sidebar is in the document. Fails when the page has no
+ * `#root`, the sidebar draws no row, or it tries to read a record the cache
+ * does not hold.
  */
 export async function mountSidebarSpecimen(records: SidebarRecords, path: string): Promise<void> {
-  await mountShellSpecimen(records, path, undefined);
+  await mountShellSpecimen(records, path, {});
 }
 
 /**
@@ -259,5 +379,22 @@ export async function mountThreadSpecimen(
   records: SidebarRecords,
   thread: ThreadScreenRecords,
 ): Promise<void> {
-  await mountShellSpecimen(records, `/threads/${thread.session.id}`, thread);
+  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Draft Thread of `draft` open: the sidebar draws it as a row, and
+ * the main pane shows the app's real draft screen, with `draft`'s picks made
+ * and its project's start cards, and the focus in the message field, as the
+ * app puts it there. Returns once the start cards are in the document. Fails
+ * when the page has no `#root`, draws no sidebar row or no start card, leaves
+ * the message field without the focus, or tries to read a record the cache
+ * does not hold.
+ */
+export async function mountDraftSpecimen(
+  records: SidebarRecords,
+  draft: DraftScreenRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
 }

@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { buildThreadGroups, type ProjectGroup } from "./groups";
+import { buildThreadGroups, type DraftPlace, type ProjectGroup } from "./groups";
 import type { Pose } from "./pose";
 import { buildSidebarSections, type ExpandedSections } from "./sidebar-sections";
 import {
@@ -37,7 +37,7 @@ const buildThread = (id: string, minutes: number, over: Partial<Session> = {}): 
 
 const buildGroups = (
   sessions: readonly Session[],
-  draft: { projectId: string | null; workspaceId: string | null } | null = null,
+  draft: DraftPlace | null = null,
 ): readonly ProjectGroup[] =>
   buildThreadGroups({
     sessions,
@@ -328,7 +328,11 @@ describe("buildSidebarSections: a project", () => {
 
   it("keeps the group the draft being written joins, though it has no thread yet", () => {
     const [webshop] = buildSidebarSections({
-      groups: buildGroups(THREADS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }),
+      groups: buildGroups(THREADS, {
+        projectId: WEBSHOP_PROJECT.id,
+        workspaceId: null,
+        createsWorkspace: true,
+      }),
       poses: POSES,
       expanded: COLLAPSED,
       selectedId: null,

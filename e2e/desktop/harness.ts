@@ -18,7 +18,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,11 @@ import type { ElectronApplication, Page } from "playwright";
 import { expect, onTestFinished } from "vitest";
 import type { Bridge } from "../../apps/desktop/src/ipc/bridge";
 import { createClient, type HerculeClient } from "../../packages/client-core/src/index";
-import type { Session } from "../../packages/contract/src/index";
+import {
+  IDENTITY_PORT,
+  IDENTITY_PORT_COUNT,
+  type Session,
+} from "../../packages/contract/src/index";
 import {
   buildAppArgs,
   findExecutable,
@@ -253,7 +257,7 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
 export async function openSignedIn(url: string): Promise<LaunchedApp> {
   const launched = await launchWithSavedController(url);
   await signInAndReadToken(launched.page, url);
-  await launched.page.getByRole("navigation", { name: "Threads" }).waitFor();
+  await launched.page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
   return launched;
 }
 
@@ -273,7 +277,7 @@ export async function keepWindowOnTop(app: ElectronApplication): Promise<void> {
 /** Clicks the sidebar row of the thread titled `title`, and waits for its transcript. */
 export async function openThread(page: Page, title: string): Promise<void> {
   await page
-    .getByRole("navigation", { name: "Threads" })
+    .getByRole("navigation", { name: "Threads", exact: true })
     .locator("a.side-row", { hasText: title })
     .first()
     .click();
@@ -369,6 +373,11 @@ export async function startLoopbackServer(
 ): Promise<LoopbackServer> {
   const server = createServer(handle);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return describeLoopbackServer(server);
+}
+
+/** Returns the origin of `server`, which listens on 127.0.0.1, and a function that stops it. */
+function describeLoopbackServer(server: Server): LoopbackServer {
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
@@ -378,6 +387,46 @@ export async function startLoopbackServer(
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       }),
   };
+}
+
+/**
+ * Starts a server for the current test that answers a runner's identity
+ * request, `GET /identity`, with the runner id `readRunnerId` returns, and
+ * stops it when the test finishes. Returns the port it listens on.
+ *
+ * The app asks only the ports a runner's identity endpoint can listen on, so
+ * the server takes the first of them that is free, as a runner does. A
+ * runner already on this Mac, the controller's own or the user's, holds one.
+ * Fails when all of them are taken.
+ */
+export async function startIdentityServerForTest(readRunnerId: () => string): Promise<number> {
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/identity") {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ runnerId: readRunnerId() }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  const listen = (port: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      const refuse = (): void => resolve(false);
+      server.once("error", refuse);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", refuse);
+        resolve(true);
+      });
+    });
+  for (let port = IDENTITY_PORT; port < IDENTITY_PORT + IDENTITY_PORT_COUNT; port += 1) {
+    if (await listen(port)) {
+      onTestFinished(describeLoopbackServer(server).close);
+      return port;
+    }
+  }
+  throw new Error(
+    `none of the ${String(IDENTITY_PORT_COUNT)} identity ports from ${String(IDENTITY_PORT)} was free`,
+  );
 }
 
 /** Starts a loopback server for the current test, and stops it when the test finishes. */

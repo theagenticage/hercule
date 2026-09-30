@@ -1,6 +1,7 @@
 /**
  * The items of the sidebar's thread list: section headers, workspace labels,
- * thread rows and "more" rows, drawn as the Bureau book's crew.js draws them.
+ * thread rows, the draft's row and "more" rows, drawn as the Bureau book's
+ * crew.js draws them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
  * as its top margin. The list stacks the items one under another, so an item
@@ -12,8 +13,8 @@
  * Every item's root carries `data-key`, which the list uses to keep the
  * focused item mounted, and the class `side-item`, which the end-to-end tests
  * find the items by. Every item's root can take focus: rows are links or
- * buttons, and headings take focus from code only (`tabIndex={-1}`), for when
- * the focused item leaves the list.
+ * buttons, and headings and the draft's row take focus from code only
+ * (`tabIndex={-1}`), for when the focused item leaves the list.
  */
 import { memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
@@ -106,8 +107,8 @@ export const WaitingRow = memo(function WaitingRow({
  *
  * The heading of the threads in no project (`projectId` and `tint` are
  * `null`) draws an empty outline where a project's tile sits, so its name
- * lines up with the other projects' names. It has no `+`, because a new
- * thread always starts in a project.
+ * lines up with the other projects' names. Its `+` opens a new thread in no
+ * project.
  */
 export const ProjectHeader = memo(function ProjectHeader({
   itemKey,
@@ -128,35 +129,40 @@ export const ProjectHeader = memo(function ProjectHeader({
       style={{ marginTop: leading, height: ITEM_HEIGHTS["project-header"] }}
     >
       <ProjectTile tint={tint} name={name} />
-      {projectId === null ? null : (
-        <Link
-          to="/"
-          search={{ project: projectId }}
-          className="icon-btn icon-btn--sm"
-          title={`New thread in ${name}`}
-        >
-          <PlusIcon size={14} />
-        </Link>
-      )}
+      <Link
+        to="/"
+        search={projectId === null ? {} : { project: projectId }}
+        // Marked as the current page only on its own draft. By default the
+        // router also marks it on any draft whose search holds its own, so
+        // the no-project + would be marked on every draft.
+        activeOptions={{ exact: true }}
+        className="icon-btn icon-btn--sm"
+        title={projectId === null ? "New thread in no project" : `New thread in ${name}`}
+      >
+        <PlusIcon size={14} />
+      </Link>
     </h3>
   );
 });
 
 /**
  * Renders a workspace group's label under its project's heading. `clip` may
- * be cut short with an ellipsis; `keep`, the machine's name, never is. A
- * workspace that exists has a `+`, shown on hover and on focus, that opens a
- * new thread joining the workspace. The threads with no workspace have no
- * `+`: there is no workspace to join.
+ * be cut short with an ellipsis; `keep`, the machine's name, never is. When
+ * `joinableWorkspaceId` is set, the label has a `+`, shown on hover and on
+ * focus, that opens a new thread in `projectId` joining that workspace. The
+ * threads with no workspace, and a workspace that is not ready, have no `+`:
+ * there is no workspace a new thread could join.
  */
 export const WorkspaceLabel = memo(function WorkspaceLabel({
   itemKey,
   leading,
-  workspaceId,
+  projectId,
+  joinableWorkspaceId,
   clip,
   keep,
 }: Placement & {
-  readonly workspaceId: string | null;
+  readonly projectId: string;
+  readonly joinableWorkspaceId: string | null;
   readonly clip: string;
   readonly keep: string;
 }): JSX.Element {
@@ -171,10 +177,11 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
         <span className="side-ws-clip">{clip}</span>
         {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
       </span>
-      {workspaceId === null ? null : (
+      {joinableWorkspaceId === null ? null : (
         <Link
           to="/"
-          search={{ workspace: workspaceId }}
+          search={{ project: projectId, workspace: joinableWorkspaceId }}
+          activeOptions={{ exact: true }}
           className="icon-btn icon-btn--sm"
           title={`New thread in ${joinLabelText({ clip, keep })}`}
         >
@@ -280,6 +287,34 @@ export const ThreadRow = memo(function ThreadRow({
         </span>
       )}
     </Link>
+  );
+});
+
+/**
+ * Renders the row of the Draft Thread open in the main pane: "New thread",
+ * where it will work and on which machine (`meta`), and "draft" at its end.
+ * It is marked as the open screen, like the open thread's row. It is not a
+ * link, because it leads to the screen it marks.
+ */
+export const DraftRow = memo(function DraftRow({
+  itemKey,
+  leading,
+  meta,
+}: Placement & { readonly meta: string }): JSX.Element {
+  return (
+    <div
+      className="side-row is-on side-item"
+      data-key={itemKey}
+      tabIndex={-1}
+      aria-current="page"
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["draft-row"] }}
+    >
+      <span className="side-text">
+        <span className="side-name">New thread</span>
+        <span className="side-meta">{meta}</span>
+      </span>
+      <span className="side-end">draft</span>
+    </div>
   );
 });
 

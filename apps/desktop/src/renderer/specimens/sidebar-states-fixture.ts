@@ -417,7 +417,7 @@ const buildSceneRecords = (threads: ReadonlyArray<Session>): SidebarRecords => (
 /** One scene of the sidebar states specimen. */
 export interface SidebarScene {
   readonly records: SidebarRecords;
-  /** The app's address: `/threads/<id>` opens that thread, `/` opens none. */
+  /** The app's address: `/threads/<id>` opens that thread, `/` a Draft Thread in no project. */
   readonly path: string;
   /** The text of the "more" row the page presses once the sidebar is drawn, or `null` to press none. */
   readonly pressMore: string | null;

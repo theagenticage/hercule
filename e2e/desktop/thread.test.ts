@@ -440,7 +440,7 @@ describe("the thread view", () => {
     writeSettings(userDataDir, { controllerUrl: url });
     const first = await launchForTest(userDataDir);
     await signInAndReadToken(first.page, url);
-    await first.page.getByRole("navigation", { name: "Threads" }).waitFor();
+    await first.page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
     await openThread(first.page, "Why does the checkout test fail?");
     await expect.poll(() => readTranscript(first.page)).toEqual(transcript);
     await first.close();

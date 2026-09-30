@@ -28,6 +28,7 @@
  *   Electron logs it.
  */
 import { Schema } from "effect";
+import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
 
 /**
  * An IPC channel the renderer calls and main answers: the renderer sends one
@@ -118,6 +119,28 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   "token.write": {
     request: Schema.NullOr(Schema.NonEmptyString),
     response: Schema.Void,
+  },
+  /**
+   * Returns the id of the runner that answers on 127.0.0.1 at the port, or
+   * null when nothing answers there, or something that is not a runner does.
+   * Main sends only `GET http://127.0.0.1:<port>/identity`: the request names
+   * the port and nothing else. See spec 17 (§The "local" runner).
+   *
+   * Only the ten ports a runner's identity endpoint can listen on are
+   * accepted. Any other port would let the page make main probe every
+   * service on the Mac. The web app's Content Security Policy limits its page
+   * to the same ten ports for the same reason.
+   */
+  "runnerIdentity.read": {
+    request: Schema.Struct({
+      port: Schema.Int.check(
+        Schema.isBetween({
+          minimum: IDENTITY_PORT,
+          maximum: IDENTITY_PORT + IDENTITY_PORT_COUNT - 1,
+        }),
+      ),
+    }),
+    response: Schema.NullOr(Schema.String),
   },
   /**
    * Reports that the frame that draws the page's first screen, fonts

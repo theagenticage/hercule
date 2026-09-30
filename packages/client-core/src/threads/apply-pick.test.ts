@@ -1,6 +1,7 @@
 /**
  * Tests `applyPick(catalogs, config, picks, pick)`, which applies one
- * selector choice to the picks the composer holds. The tests check that:
+ * selector choice to the picks the composer holds, and `applyPicks`, which
+ * applies several in order. The tests check that:
  *
  * - the model options belong to the model that offered them, so anything
  *   that changes the catalog clears them;
@@ -10,8 +11,15 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
 import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
-import { applyPick } from "./apply-pick";
-import type { ThreadConfig } from "./config";
+import {
+  addWorkspacePicks,
+  applyPick,
+  applyPicks,
+  buildModelPicks,
+  buildWorkspacePicks,
+} from "./apply-pick";
+import type { ThreadConfig, ThreadPicks } from "./config";
+import { MOSS, PRIMARY, THREAD_3F1, WEBSHOP } from "./workspaces.testing";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...BARE,
@@ -145,5 +153,74 @@ describe("applyPick", () => {
         { kind: "runnerId", value: REMOTE.id },
       ),
     ).toEqual({ model: SONNET.slug, runnerId: REMOTE.id });
+  });
+});
+
+describe("applyPicks", () => {
+  it("applies the picks in order, so a model picked after its account is kept", () => {
+    const picks = applyPicks(CATALOGS, CONFIG, { options: { effort: "low" } }, [
+      { kind: "instanceId", value: CODEX.id },
+      { kind: "model", value: "gpt-5-mini" },
+    ]);
+    expect(picks).toEqual({ instanceId: CODEX.id, runnerId: REMOTE.id, model: "gpt-5-mini" });
+  });
+});
+
+describe("buildModelPicks", () => {
+  it("picks only the model on the account the thread runs on, so a picked machine stays", () => {
+    // The user switched the draft to Codex, then picked the local machine
+    // over Codex's default, the remote one.
+    const held: ThreadPicks = { instanceId: CODEX.id, runnerId: LOCAL.id, model: GPT.slug };
+    const current = { ...CONFIG, ...held };
+    const picks = applyPicks(
+      CATALOGS,
+      CONFIG,
+      held,
+      buildModelPicks(current, CODEX.id, "gpt-5-mini"),
+    );
+    expect(picks).toEqual({ instanceId: CODEX.id, runnerId: LOCAL.id, model: "gpt-5-mini" });
+  });
+
+  it("picks the account before the model when the model is another account's", () => {
+    expect(buildModelPicks(CONFIG, CODEX.id, GPT.slug)).toEqual([
+      { kind: "instanceId", value: CODEX.id },
+      { kind: "model", value: GPT.slug },
+    ]);
+  });
+});
+
+describe("buildWorkspacePicks", () => {
+  it("picks the machine of a workspace that exists, which never moves", () => {
+    const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
+    expect(buildWorkspacePicks(joined, [PRIMARY, THREAD_3F1])).toEqual([
+      { kind: "workspace", value: joined },
+      { kind: "runnerId", value: MOSS.id },
+    ]);
+  });
+
+  it("leaves the machine alone for a workspace that does not exist yet", () => {
+    const fresh = { kind: "primary", resourceId: WEBSHOP.id } as const;
+    expect(buildWorkspacePicks(fresh, [PRIMARY])).toEqual([{ kind: "workspace", value: fresh }]);
+  });
+});
+
+describe("addWorkspacePicks", () => {
+  it("adds a joined workspace and its machine, and keeps the model options", () => {
+    const held: ThreadPicks = { runnerId: REMOTE.id, options: { effort: "low" } };
+    const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
+    expect(addWorkspacePicks(held, joined, [THREAD_3F1])).toEqual({
+      workspace: joined,
+      runnerId: MOSS.id,
+      options: { effort: "low" },
+    });
+  });
+
+  it("keeps the picked machine for a workspace that does not exist yet", () => {
+    const held: ThreadPicks = { runnerId: REMOTE.id };
+    const fresh = { kind: "none" } as const;
+    expect(addWorkspacePicks(held, fresh, [THREAD_3F1])).toEqual({
+      workspace: fresh,
+      runnerId: REMOTE.id,
+    });
   });
 });

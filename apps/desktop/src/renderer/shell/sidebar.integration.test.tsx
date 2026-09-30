@@ -23,8 +23,10 @@ import {
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  type Handler,
   type SidebarRecords,
 } from "../app/testing";
+import { buildDraftKey } from "../app/pending-submissions";
 
 // Every thread row names its thread with `describePose`, so its calls count
 // the rows that drew. The function itself is the real one.
@@ -50,15 +52,18 @@ afterEach(() => {
 /**
  * Starts the app signed in at `path`, with the controller holding `records`
  * and answering the thread list from `readThreads` when given, and returns
- * the thread list's `nav` with the app.
+ * the thread list's `nav` with the app. `handlers` replace the controller's
+ * answers to the operations they name.
  */
 const startSidebar = async ({
   records = SIDEBAR_FIXTURE,
   readThreads,
+  handlers = {},
   path = "/",
 }: {
   readonly records?: SidebarRecords;
   readonly readThreads?: () => readonly Session[];
+  readonly handlers?: Readonly<Record<string, Handler>>;
   readonly path?: string;
 } = {}) => {
   const calls = stubApi({
@@ -66,6 +71,7 @@ const startSidebar = async ({
     ...(readThreads === undefined
       ? {}
       : { "GET /api/v1/sessions": () => ({ body: { items: readThreads() } }) }),
+    ...handlers,
   });
   const app = await renderApp(
     createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
@@ -104,7 +110,7 @@ const readFocusedKey = (): string | null =>
 
 describe("the sidebar", () => {
   it("lists Waiting on you, then each project, each thread named by its title and its state", async () => {
-    const { nav } = await startSidebar();
+    const { nav } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
     expect(
       within(nav)
@@ -132,24 +138,28 @@ describe("the sidebar", () => {
       "Bump the Bun pin, idle",
       "New thread in ops",
       "Rotate the backups key, can't be reached",
+      "New thread in no project",
       "Sketch the pricing page, idle",
     ]);
     expect(readCounts()).toBe("1 working · 1 waiting · 2 idle");
     expect(screen.getByText("rogier")).toBeTruthy();
   });
 
-  it(`heads the threads in no project "No project", with an outline tile and no +, above those threads`, async () => {
-    const { nav } = await startSidebar();
+  it(`heads the threads in no project "No project", with an outline tile and a +, above those threads`, async () => {
+    const { nav, router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
     const heading = within(nav).getByRole("heading", { name: "No project" });
     // `proj--none` draws the tile as an empty outline, in no project's tint.
     expect(heading.querySelector(".proj")?.className).toBe("proj proj--none");
-    expect(within(heading).queryByRole("link")).toBeNull();
     // The heading is the last section's, so every item below it is in its group.
     const items = [...nav.querySelectorAll(".side-item")];
     expect(
       items.slice(items.indexOf(heading) + 1).map((item) => item.getAttribute("aria-label")),
     ).toEqual(["Sketch the pricing page, idle"]);
+    await userEvent.click(within(heading).getByRole("link", { name: "New thread in no project" }));
+    await waitFor(() => {
+      expect(router.state.location.href).toBe("/");
+    });
   });
 
   it("describes each row by its question, or by its model and its age", async () => {
@@ -214,8 +224,12 @@ describe("the sidebar", () => {
     const readHref = (name: string) => within(nav).getByRole("link", { name }).getAttribute("href");
     expect(readHref("New thread in webshop")).toBe(`/?project=${webshop!.id}`);
     expect(readHref("New thread in ops")).toBe(`/?project=${ops!.id}`);
-    expect(readHref("New thread in hercule/thread-3f1")).toBe(`/?workspace=${thread3f1!.id}`);
-    expect(readHref("New thread in webshop · moss")).toBe(`/?workspace=${primary!.id}`);
+    expect(readHref("New thread in hercule/thread-3f1")).toBe(
+      `/?project=${webshop!.id}&workspace=${thread3f1!.id}`,
+    );
+    expect(readHref("New thread in webshop · moss")).toBe(
+      `/?project=${webshop!.id}&workspace=${primary!.id}`,
+    );
 
     await userEvent.click(within(nav).getByRole("link", { name: "New thread in webshop" }));
     await waitFor(() => {
@@ -224,13 +238,87 @@ describe("the sidebar", () => {
     expect(router.state.location.pathname).toBe("/");
   });
 
-  it("opens the new-thread screen from New thread", async () => {
-    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+  it("opens the project picker from New thread", async () => {
+    await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
-    await userEvent.click(screen.getByRole("link", { name: "New thread ⌘N" }));
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
+    await userEvent.click(screen.getByRole("button", { name: "New thread ⌘N" }));
+    expect(await screen.findByRole("dialog", { name: "New thread in" })).toBeTruthy();
+  });
+
+  it("draws the Draft Thread as the current row of the group it will join, and moves it with the pick", async () => {
+    const [webshop] = SIDEBAR_FIXTURE.projects;
+    const [, thread3f1] = SIDEBAR_FIXTURE.workspaces;
+    const { nav, router } = await startSidebar({
+      path: `/?project=${webshop!.id}&workspace=${thread3f1!.id}`,
     });
+
+    /** Returns the key of each item from the draft's project heading down to the draft's row. */
+    const readDraftGroup = (): readonly (string | null)[] => {
+      const keys = [...nav.querySelectorAll(".side-item")].map((item) =>
+        item.getAttribute("data-key"),
+      );
+      return keys.slice(keys.indexOf(`header:project:${webshop!.id}`), keys.indexOf("draft") + 1);
+    };
+    const draft = await waitFor(() => {
+      const row = nav.querySelector<HTMLElement>('[data-key="draft"]');
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    expect(draft.getAttribute("aria-current")).toBe("page");
+    expect(draft.textContent).toBe("New thread" + "hercule/thread-3f1 · moss" + "draft");
+    // The draft's project comes first, and the draft is the last row of the
+    // workspace it joins.
+    expect(readDraftGroup()).toEqual([
+      `header:project:${webshop!.id}`,
+      `workspace:project:${webshop!.id}:${thread3f1!.id}`,
+      `thread:${FIXTURE_THREAD_IDS.runbook}`,
+      `thread:${FIXTURE_THREAD_IDS.flaky}`,
+      "draft",
+    ]);
+
+    // A new workspace does not exist until the thread starts, so the draft
+    // sits right under its project's heading.
+    const { pendingSubmissions } = router.options.context.controller!;
+    const key = buildDraftKey(webshop!.id, thread3f1!.id);
+    act(() => {
+      pendingSubmissions.write(key, {
+        ...pendingSubmissions.read(key),
+        picks: {
+          workspace: {
+            kind: "ephemeral",
+            checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
+          },
+        },
+      });
+    });
+    expect(readDraftGroup()).toEqual([`header:project:${webshop!.id}`, "draft"]);
+    expect(nav.querySelector('[data-key="draft"]')?.textContent).toBe(
+      "New thread" + "New workspace · moss" + "draft",
+    );
+  });
+
+  it("draws a Draft Thread in no project as the last row, under No project", async () => {
+    const { nav } = await startSidebar();
+
+    // No project stays the last group even while its draft is open.
+    expect(
+      within(nav)
+        .getAllByRole("heading")
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "Waiting on you 1",
+      "webshop",
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "ops",
+      "No project",
+    ]);
+    const heading = within(nav).getByRole("heading", { name: "No project" });
+    const items = [...nav.querySelectorAll(".side-item")];
+    expect(items.slice(items.indexOf(heading) + 1).map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Sketch the pricing page"),
+      "New thread" + "No workspace · moss" + "draft",
+    ]);
   });
 
   it("draws Hide the sidebar, Search and Settings as buttons that do nothing yet", async () => {
@@ -400,11 +488,25 @@ describe("the sidebar", () => {
     expect(document.activeElement?.textContent).toBe("Waiting on you 1");
   });
 
-  it("says so when there are no threads", async () => {
+  it("lists only the Draft Thread when there are no threads", async () => {
     const { nav } = await startSidebar({ records: NO_SIDEBAR_RECORDS });
 
+    const items = [...nav.querySelectorAll(".side-item")].map((item) => item.textContent);
+    expect(items).toEqual(["No project", "New thread" + "No workspace · no machine" + "draft"]);
+    expect(within(nav).queryByText("No threads yet")).toBeNull();
+    expect(readCounts()).toBe("0 working · 0 waiting · 0 idle");
+  });
+
+  it("says so when there are no threads and no draft is open", async () => {
+    // The last thread was deleted while it was open, so the thread screen
+    // says it was not found, and no draft is being written.
+    const { nav } = await startSidebar({
+      records: NO_SIDEBAR_RECORDS,
+      path: "/threads/01a06d02-7400-7000-8000-0000000000ff",
+    });
+
+    expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
     expect(within(nav).getByText("No threads yet")).toBeTruthy();
     expect(within(nav).queryAllByRole("link")).toEqual([]);
-    expect(readCounts()).toBe("0 working · 0 waiting · 0 idle");
   });
 });

@@ -1,16 +1,18 @@
 /**
- * Tests the model menu's content on a thread that has started: Recent, the
- * thread's account with its older models folded, the other accounts, the
- * filter, and the model each row picks.
+ * Tests the model menu's content: Recent, the thread's account with its older
+ * models folded, the other accounts, the filter, and the picks each row makes,
+ * on a thread that has started and on a Draft Thread.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
+  type ComposerPick,
   type RecentModel,
   type ThreadCatalogs,
   type ThreadConfig,
+  type ThreadKind,
 } from "@hercule/client-core";
 import type { ProviderInstance } from "@hercule/contract";
 import { FIXTURE_INSTANCE, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
@@ -19,7 +21,7 @@ import { ModelMenu } from "./model-menu";
 /** The fixture instance's one snapshot, from moss. */
 const SNAPSHOT = FIXTURE_INSTANCE.snapshots[0]!;
 
-/** A second Claude Code account on moss, which a started thread cannot switch to. */
+/** A second Claude Code account on moss, which only a Draft Thread can switch to. */
 const WORK_INSTANCE: ProviderInstance = {
   ...FIXTURE_INSTANCE,
   id: "01a06d02-7600-7000-8000-000000000002",
@@ -29,6 +31,24 @@ const WORK_INSTANCE: ProviderInstance = {
       ...SNAPSHOT,
       auth: { status: "ok", identity: "work@example.com", planLabel: "Claude Pro" },
       models: [{ slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] }],
+    },
+  ],
+};
+
+/** The fixture instance with five more models, so the accounts hold more than eight. */
+const MANY_INSTANCE: ProviderInstance = {
+  ...FIXTURE_INSTANCE,
+  snapshots: [
+    {
+      ...SNAPSHOT,
+      models: [
+        ...SNAPSHOT.models,
+        ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
+          slug: `claude-haiku-${version}`,
+          name: `Claude Haiku ${version}`,
+          options: [],
+        })),
+      ],
     },
   ],
 };
@@ -47,17 +67,20 @@ const buildCatalogs = (instances: readonly ProviderInstance[]): ThreadCatalogs =
 const renderMenu = ({
   instances = [FIXTURE_INSTANCE, WORK_INSTANCE],
   config = CONFIG,
+  kind = "active",
   recent = [],
 }: {
   readonly instances?: readonly ProviderInstance[];
   readonly config?: ThreadConfig;
+  readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
 } = {}) => {
-  const onPick = vi.fn<(model: string) => void>();
+  const onPick = vi.fn<(picks: readonly ComposerPick[]) => void>();
   render(
     <ModelMenu
       catalogs={buildCatalogs(instances)}
       config={config}
+      kind={kind}
       recent={recent}
       onPick={onPick}
     />,
@@ -108,7 +131,7 @@ describe("the model menu", () => {
     expect(screen.getByRole("button", { name: "Claude Sonnet 5 · default" })).toBeTruthy();
   });
 
-  it("shows the older models on request, and hands each row's model to onPick", async () => {
+  it("shows the older models on request, and hands each row's model pick to onPick", async () => {
     const user = userEvent.setup();
     const onPick = renderMenu({
       recent: [{ instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
@@ -124,33 +147,50 @@ describe("the model menu", () => {
     await user.click(screen.getByRole("button", { name: "Claude Opus 5 · personal" }));
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
 
-    expect(onPick.mock.calls).toEqual([["claude-opus-5"], ["claude-sonnet-4"]]);
+    expect(onPick.mock.calls).toEqual([
+      [[{ kind: "model", value: "claude-opus-5" }]],
+      [[{ kind: "model", value: "claude-sonnet-4" }]],
+    ]);
   });
 
   it("offers a filter once the accounts hold more than eight models, focused, which narrows every section", async () => {
     const user = userEvent.setup();
-    const many: ProviderInstance = {
-      ...FIXTURE_INSTANCE,
-      snapshots: [
-        {
-          ...SNAPSHOT,
-          models: [
-            ...SNAPSHOT.models,
-            ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
-              slug: `claude-haiku-${version}`,
-              name: `Claude Haiku ${version}`,
-              options: [],
-            })),
-          ],
-        },
-      ],
-    };
-    renderMenu({ instances: [many, WORK_INSTANCE] });
+    renderMenu({ instances: [MANY_INSTANCE, WORK_INSTANCE] });
 
     const filter = screen.getByRole("textbox", { name: "Filter models" });
     expect(document.activeElement).toBe(filter);
     await user.type(filter, "haiku 4.2");
 
     expect(readSections().slice(1)).toEqual([["personal", "Claude Haiku 4.2"]]);
+  });
+
+  it("lets a Draft Thread switch to another account, which picks the account alone", async () => {
+    const user = userEvent.setup();
+    const onPick = renderMenu({ kind: "draft" });
+
+    expect(readSections()[1]).toEqual(["work · work@example.com · Claude Pro1 model"]);
+    await user.click(
+      screen.getByRole("button", { name: "work · work@example.com · Claude Pro1 model" }),
+    );
+
+    expect(onPick.mock.calls).toEqual([[[{ kind: "instanceId", value: WORK_INSTANCE.id }]]]);
+  });
+
+  it("lists another account's matching models on a Draft Thread, each picking the account and the model", async () => {
+    const user = userEvent.setup();
+    const onPick = renderMenu({ kind: "draft", instances: [MANY_INSTANCE, WORK_INSTANCE] });
+
+    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku 5");
+    expect(readSections().slice(1)).toEqual([["work", "Claude Haiku 5 · default"]]);
+    await user.click(screen.getByRole("button", { name: "Claude Haiku 5 · default" }));
+
+    expect(onPick.mock.calls).toEqual([
+      [
+        [
+          { kind: "instanceId", value: WORK_INSTANCE.id },
+          { kind: "model", value: "claude-haiku-5" },
+        ],
+      ],
+    ]);
   });
 });

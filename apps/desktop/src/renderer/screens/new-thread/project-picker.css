@@ -1,0 +1,53 @@
+/* The project picker. The book draws no picker, so this is spec 14's: a box
+   520px wide, 18vh from the top of the window, over a scrim. Its surface is
+   Bureau's glass, as every surface that floats (`.pop` in menus.css). */
+.picker {
+  flex-direction: column;
+  width: 520px;
+  max-width: calc(100% - 48px);
+  max-height: calc(100% - 18vh - 24px);
+  margin: 18vh auto auto;
+  outline: none;
+}
+/* Only while open: a closed dialog is hidden by the browser's own
+   `display: none`, which a plain `display` here would override. The picker
+   is closed for a moment when it mounts, before it opens, and after Esc
+   closes it, before it unmounts. */
+.picker[open] {
+  display: flex;
+}
+.picker::backdrop {
+  background: var(--scrim);
+}
+/* The rows scroll between the header and the key legend, which stay. */
+.picker-rows {
+  min-height: 0;
+  overflow-y: auto;
+}
+.picker-row {
+  padding: 7px 8px;
+  font-size: var(--t-13);
+}
+.picker-row .proj {
+  color: var(--ink);
+}
+/* The line under the name starts where the name does, past the tile. */
+.picker-row .grow small {
+  padding-left: 17px;
+}
+/* The row with focus is the one ⏎ picks, so it is marked however the focus
+   got there: by the keyboard, or by the picker opening. The mark is the
+   row's background, as a selected row in the sidebar, rather than the
+   focus ring. */
+.picker-row:focus {
+  outline: none;
+  background: var(--selected);
+}
+.picker-keys {
+  display: flex;
+  gap: 14px;
+  color: var(--faint);
+}
+.picker-keys kbd {
+  margin-right: 3px;
+}

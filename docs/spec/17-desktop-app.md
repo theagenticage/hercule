@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 6 are built. Slices 7 and 8 are not.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 7 are built. Slice 8 is not.
 
 ## Scope of the first milestone
 
@@ -145,9 +145,10 @@ default-src 'self'; script-src 'self'; connect-src <controller> <controller-ws>;
 
 ### The "local" runner
 
-`detectLocalRunner(runners, fetch)` in `client-core` takes the `fetch` it probes with. The desktop app passes a `fetch` that asks main through the bridge.
+`detectLocalRunner(runners, probe)` in `client-core` takes the probe that asks one port which runner is listening there. The web app's probe uses `fetch`. The desktop app's probe asks main through the bridge, with only the port.
 
-- **Main makes the request.** It sends only `GET http://127.0.0.1:<port>/identity`, and refuses any other host, method or path.
+- **Main makes the request.** It sends only `GET http://127.0.0.1:<port>/identity`, and returns only the `runnerId` of the answer.
+- **Main accepts only the ten identity ports,** 4939 to 4948, the ones the web app's CSP names. Any other port would let the page make main probe every service on the Mac.
 - **Why main does it:** the runner's identity endpoint allows only the controller's origin in CORS, and the renderer's CSP names only the controller.
 - **No runner change is needed.**
 
@@ -357,7 +358,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Expanding is not stored: a relaunch collapses every section. The book draws no way to collapse one, so there is none.
 - **Threads are grouped by project, then by workspace,** as spec 14 says. The book draws no workspace label, so the label is Bureau's lane label, in the UI face (item 2 above). A lane label that follows a row has 8px more space above it than one under a project header, so it does not read as the row's third line. A row's second line is the model's name, because the lane label already names the workspace.
 - **A project header has no thread count,** where spec 14 puts one: the book draws none, and the pages decide what is drawn.
-- **The threads with no project have a header, "No project",** where spec 14 gives them none. In place of the identity tile, it has the tile's outline in `--faint` with no fill. It has no `+`, because a draft always starts in a project. Without a header, a capped project's "more" row sits between two groups and reads as belonging to either.
+- **The threads with no project have a header, "No project",** where spec 14 gives them none. In place of the identity tile, it has the tile's outline in `--faint` with no fill. ~~It has no `+`, because a draft always starts in a project.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): a draft can have no project (see **A new thread** below), so the header has a `+` that opens that draft.)* Without a header, a capped project's "more" row sits between two groups and reads as belonging to either.
 - **A waiting thread is listed twice:** in Waiting on you, and in its project with the waiting mark, as the book draws it. In Waiting on you, its second line is the open Request as one question: "Run git push?", "Change adyen.ts?", "Change 3 files?", "Read `<file>`?", "Run `<tool>`?", or a question's first line in the agent's words. With nothing waiting, the section is not drawn.
 - **The foot counts threads by pose:** "`<n>` working · `<n>` waiting · `<n>` idle".
   - Asleep and away threads are not counted, so a fleet with hundreds of old threads reads "3 working · 2 waiting · 4 idle", not "470 idle".
@@ -374,7 +375,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Clicking the divider expands the stretch in place, one line per step, with spec 14's verb, target and result. Expansion is not stored.
   - The stretch that is running reads "Working for 12s ›" and counts up. It shows no divider until its first step that is not reasoning, so no divider shows before the first step, or while the agent only reasons. It does not shimmer, as spec 14's does, because only the working face animates ([Rules](#rules), rule 2). While a Request is open, the stretch stops at the Request's opening and reads "Worked for".
 - **Messages carry their own time,** and there are no time separators, where spec 14 draws one above each turn. A user message has its time under the bubble; an agent message has it in its meta line, "Claude Code · Opus 5.5 · 09:04". The time is `09:04` when it falls on today in the system time zone, else `4 Sep 09:04`.
-- **The header is the book's:** the crumb with the project's tile and name, one tab per thread of the workspace, and a `+` that starts a new thread in the workspace (spec 14's "+ New thread here"). Spec 14 rejected a `+` beside the tabs; the book draws one, and the pages decide what is drawn. The open thread always has a tab: a thread that has exited no longer holds its workspace, so the workspace does not list it, and its tab is then the last. Open in editor and More are drawn inert, like the sidebar's Search. The book's "Changes +48 -12 | Commit" is left out, because nothing reports those numbers yet.
+- **The header is the book's:** the crumb with the project's tile and name, one tab per thread of the workspace, and a `+` that starts a new thread in the workspace (spec 14's "+ New thread here"), shown only while the workspace is ready (see **A new thread** below). Spec 14 rejected a `+` beside the tabs; the book draws one, and the pages decide what is drawn. The open thread always has a tab: a thread that has exited no longer holds its workspace, so the workspace does not list it, and its tab is then the last. Open in editor and More are drawn inert, like the sidebar's Search. The book's "Changes +48 -12 | Commit" is left out, because nothing reports those numbers yet.
 - **The Requests dock answers from the keyboard only while it has focus:** ↩ allows, ⌥↩ allows always and esc denies, as the book's hints say. When one of its buttons has focus, ↩ presses that button, so a focused Deny is never turned into Allow. A Request that opens never moves focus. The words on the dock are `@hercule/client-core`'s, which no screen may reword, not the book's.
 - **The composer's lip** shows a main workspace as "Main workspace" and its branch, and an ephemeral workspace as its branch and the branch it was started from, "fix/3ds-eu-cards from main", as the book draws it. The machine is on the right. The book's "Own worktree" is not used, because [CONTEXT.md](../../CONTEXT.md) keeps "worktree" for the git mechanism.
 - **Stop takes Send's place while a turn runs,** as the book's assistant page draws it. Spec 14 draws Stop beside the round send. While a turn runs, ⏎ still sends: the controller steers the message into the turn or queues it behind the turn. Stop keeps Send's 4px left margin, which the book's Stop lacks, so nothing in the row moves when a turn starts or ends.
@@ -396,6 +397,25 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - The message renders once per finished paragraph. The tokens in between are painted into the paragraph being written, at most once per frame, without a render.
   - Spec 14 draws the stored text as markdown and the tokens after it as plain text, until the message ends. There, a cut word breaks across two lines, and the tokens' finished paragraphs show their markdown marks.
 - **A thread that is gone** shows "This thread was not found." with a link to start a new thread. Any other failure shows [A screen that fails](#reaching-the-controller).
+
+**A new thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread creation and the book's `session-empty.html`, with these differences:
+
+- **New thread opens the project picker,** from File › New Thread `⌘N` and the sidebar's New thread row. It is a glass `<dialog>` over a scrim, 520px wide and 18vh from the top. Spec 14 draws it `--raised` with a border; Bureau draws every surface that floats as glass. ↑↓ move and wrap, ⏎ picks, Esc closes, and `⌘1` to `⌘9` pick directly. There is no "New project" row, because the desktop cannot create projects. With no projects there is nothing to pick, so New thread opens the draft with no project at once.
+- **A draft can have no project.** The new-thread screen with no project is a draft with no project, and the thread it starts has none. The "No project" header's `+` opens it. Its heading is "What should the agent do?", and it has no start cards.
+- **The lip uses [CONTEXT.md](../../CONTEXT.md)'s words, in the UI face.** The book's lip says "New worktree" and sets the branch in monospace. The desktop says "New workspace" or "Main workspace", as the web's workspace menu does, and sets the branch in the UI face (item 2 above). There is no rule between the workspace and the branch, where the web draws one, because the book draws none.
+- **The machine menu has no "Add machine →" foot,** because the desktop has no machine screen to open. The foot keeps its sentence: "The thread runs where you say; nothing moves it later."
+- **The machine menu leaves out retired runners,** where spec 14 lists every machine. A retired runner can never host a thread again, and runners are never deleted, so the menu would fill up with machines that are gone. A started thread still shows the retired runner it ran on. The web app does the same, because both read `buildRunnerMenu` in `@hercule/client-core`.
+- **A draft that cannot start** shows "Can't start yet." and the reason in place of the sentence, and Send is off. Spec 14's Log in button is not drawn yet.
+- **A new thread joins only a ready workspace.** A workspace label's `+` and the thread header's `+` show only while the workspace is ready, because the controller refuses to start a thread in a workspace that is still being set up, failed, was deleted or was lost. A draft whose workspace stops being ready while it is open cannot start, and says why: "The workspace it joins could not be set up". Neither can a draft whose machine is retired after the user picked it: the reason is "moss is retired", and the lip's machine reads "moss · retired". The web app does the same, because both read `@hercule/client-core`.
+- **The start cards** are the book's "Start from Intake" section under the lip, which spec 14 does not have. They are up to three open Tasks of the draft's project, the most urgent first. Each card shows:
+  - the GitHub mark when the Task came from GitHub, else the tasks glyph;
+  - "Proposal" when the Task has the `proposed` label, else "Task";
+  - its priority as bars at the right: 4 for urgent, drawn in `--fail` as the book does, 3 for high, 2 for normal, 1 for low;
+  - its title.
+
+  A click adds the Task's title and description to the Message Draft, after a blank line when the field already holds text, and focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
+- **The open draft is a row in the sidebar,** as the book draws it: "New thread", with its workspace and machine on the second line, and "draft" at its end. It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".
+- **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 
 **How the system is carried over:**
 
@@ -722,6 +742,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 - **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
   - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from `docs/design/crew-bureau/`, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's sidebar with the sidebar of the book's `session-active.html`, item by item, with the app fed the book's threads at the book's time.
+  - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's draft screen with the main pane of the book's `session-empty.html`, item by item, with the book's page edited where the app draws other words or marks (see **A new thread** in [Design system](#design-system)).
   - Both sheets render in one Electron, hidden, at DPR 2, in sRGB, with GPU rasterization off. With GPU rasterization, a change in one cell also moved pixels in its neighbours, and the result could vary with the machine's GPU.
   - It fails first if the book's `tokens.css` or font files differ from the app's, or if any cell sits in a different place, so each pixel it reports is a drawing difference.
   - The comparison is exact: no tolerance, on every channel of every device pixel. It writes the reference, the app's capture and a diff image to `apps/desktop/out/bureau-compare/`.

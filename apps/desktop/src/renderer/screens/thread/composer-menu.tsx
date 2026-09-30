@@ -2,8 +2,7 @@ import { useId, useState, type JSX, type ReactNode } from "react";
 import "./menus.css";
 
 /**
- * Renders a trigger in the composer's row and the menu it opens above
- * itself.
+ * Renders a trigger in the composer and the menu it opens above itself.
  *
  * The menu is the browser's own popover (`popover="auto"`), opened by the
  * trigger's `popovertarget`. The browser closes it on Esc, on a click
@@ -15,8 +14,9 @@ import "./menus.css";
  * - `label` names the menu for assistive technology.
  * - `align` is the edge the menu shares with its trigger: `start` for a menu
  *   that grows to the right, `end` for one that grows to the left.
- * - `wide` makes the menu 360px wide instead of 320px, as spec 14 sizes the
- *   model menu.
+ * - `width` sizes the menu, as spec 14 sizes each one: `narrow` is 320px,
+ *   `wide` 360px for the model menu, and `widest` 420px for the workspace
+ *   and machine menus, whose rows carry a second line.
  * - `disabled` leaves the trigger drawn but unable to open the menu.
  * - `children` draws the menu's content. It is called only while the menu
  *   is open, so a closed menu costs nothing, and anything the content holds,
@@ -26,7 +26,7 @@ import "./menus.css";
 export function ComposerMenu({
   label,
   align,
-  wide = false,
+  width = "narrow",
   disabled,
   triggerClassName,
   trigger,
@@ -34,7 +34,7 @@ export function ComposerMenu({
 }: {
   readonly label: string;
   readonly align: "start" | "end";
-  readonly wide?: boolean;
+  readonly width?: "narrow" | "wide" | "widest";
   readonly disabled: boolean;
   readonly triggerClassName: string;
   readonly trigger: ReactNode;
@@ -67,7 +67,7 @@ export function ComposerMenu({
         popover="auto"
         role="dialog"
         aria-label={label}
-        className={`menu menu--${align}${wide ? " menu--wide" : ""}`}
+        className={`pop menu menu--${align} menu--${width}`}
         onToggle={(event) => {
           setOpen(event.newState === "open");
         }}

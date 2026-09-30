@@ -15,7 +15,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   isNotFound,
-  listLoopbackEndpoints,
   queryKeys,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
@@ -333,9 +332,7 @@ export const localRunnerQuery = (
   runners: ReadonlyArray<Runner>,
 ) =>
   queryOptions({
-    queryKey: queryKeys.localRunner(
-      listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
-    ),
+    queryKey: queryKeys.localRunner(runners),
     queryFn: () => detect(runners),
     retry: false,
   });

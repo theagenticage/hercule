@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
+import { readLimitedBody } from "./limited-body";
 
 /**
  * What the check found at a controller's origin:
@@ -64,31 +65,6 @@ const API_METHODS: ReadonlyArray<Method> = [
 /** The methods CORS always allows, so a preflight's answer need not list them. */
 const SAFELISTED_METHODS: ReadonlyArray<string> = ["GET", "HEAD", "POST"];
 
-/**
- * The longest body the check reads. The setup state is a few bytes; the
- * limit stops an endpoint that streams for the whole timeout from filling
- * main's memory.
- */
-const BODY_LIMIT_BYTES = 64 * 1024;
-
-/**
- * Reads the body of `response` as text, or returns null as soon as it is
- * longer than BODY_LIMIT_BYTES, and then stops reading it.
- */
-const readLimitedBody = async (response: Pick<Response, "body">): Promise<string | null> => {
-  if (response.body === null) return "";
-  const chunks: Array<Uint8Array> = [];
-  let length = 0;
-  // A fetch body is a stream of bytes; Node's types leave the chunk untyped.
-  for await (const chunk of response.body as ReadableStream<Uint8Array>) {
-    length += chunk.byteLength;
-    // Leaving the loop cancels the stream.
-    if (length > BODY_LIMIT_BYTES) return null;
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-};
-
 /** The parts of the controller's answer to the setup read that the check uses. */
 interface SetupReadAnswer {
   readonly status: number;
@@ -96,7 +72,7 @@ interface SetupReadAnswer {
   readonly location: string | null;
   /** The `access-control-allow-origin` header, or null when there is none. */
   readonly allowedOrigin: string | null;
-  /** The body, or null when it is longer than BODY_LIMIT_BYTES. */
+  /** The body, or null when it is longer than 64 KiB; see readLimitedBody. */
   readonly body: string | null;
 }
 

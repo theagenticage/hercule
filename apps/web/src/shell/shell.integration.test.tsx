@@ -648,6 +648,27 @@ describe("the Threads face groups threads by project and workspace", () => {
     );
   });
 
+  it("offers no + on the group of a workspace that is not ready, because a new thread could not join it", async () => {
+    await renderApp({
+      path: "/",
+      api: stubApi({
+        ...withProjects(),
+        "GET /api/v1/workspaces": {
+          body: { items: [W_PRIMARY, { ...W_THREAD_3F1, status: "failed" }] },
+        },
+      }).fetch,
+      token: "held",
+    });
+
+    await getThreadsNav().findByText("hercule/thread-3f1");
+    expect(
+      getThreadsNav().queryByRole("link", { name: "New thread in hercule/thread-3f1" }),
+    ).toBeNull();
+    expect(
+      getThreadsNav().getByRole("link", { name: "New thread in webshop · moss" }),
+    ).toBeTruthy();
+  });
+
   it("puts threads with no project last, without a header", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 

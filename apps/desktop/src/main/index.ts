@@ -37,6 +37,7 @@ import { loadMainWindow, showMainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
 import { findRefusedArgument } from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
+import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { openInBrowser, secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
@@ -58,6 +59,7 @@ const startApp = (): void => {
     Layer.mergeAll(
       StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage))),
       makeControllerConnectionLayer(openInBrowser, fetchWithoutRedirects),
+      makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
     ).pipe(
       Layer.provideMerge(windowAndMenu),

@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  applyPick,
+  addWorkspacePicks,
+  applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
   computeEffectiveConfig,
@@ -10,7 +11,6 @@ import {
   pushRecent,
   queryKeys,
   findResumeBlockedReason,
-  findRunnerForPick,
   buildSubmission,
   readThreadConfig,
   type ComposerFields,
@@ -167,21 +167,16 @@ export function useComposerModel(
     // Each pick is compared with the thread's own configuration, not with
     // earlier picks, so picking the configured value again clears the pick.
     pick: (...steps) => {
-      setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
+      setPicks((held) => applyPicks(catalogs, base, held, steps));
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so
       // one message is never sent twice.
       if (sendingRef.current || spawn.isPending || input.isPending) return;
-      // A draft is spawned with the workspace the composer resolved, even when
-      // it is the default the user never touched. An existing workspace also
-      // fixes the machine.
-      const workspace = fields.workspace.value;
-      const settled = findRunnerForPick(workspace, catalogs.workspaces ?? []);
       const sent = buildSubmission(
         thread,
         thread.kind === "draft"
-          ? { ...picks, workspace, ...(settled === null ? {} : { runnerId: settled }) }
+          ? addWorkspacePicks(picks, fields.workspace.value, catalogs.workspaces ?? [])
           : picks,
         { text: message },
       );

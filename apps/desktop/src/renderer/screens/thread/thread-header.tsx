@@ -1,10 +1,11 @@
-import { useId, type JSX } from "react";
+import { useId, type JSX, type ReactNode } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
   decideThreadPose,
   decideThreadRowEnd,
   describePose,
+  isJoinable,
   listThreadTabs,
 } from "@hercule/client-core";
 import type { Runner, Session } from "@hercule/contract";
@@ -18,7 +19,7 @@ import {
 } from "../../app/queries";
 import { EditorIcon, MoreIcon, PlusIcon } from "../../icons";
 import { Mark } from "../../marks";
-import { pickProjectTint, ProjectTile } from "../project-tile";
+import { pickProjectTint, ProjectTile, type ProjectTint } from "../project-tile";
 import "./thread-header.css";
 
 /**
@@ -34,7 +35,8 @@ const SELECTED_TAB_PROPS = { className: "is-on" } as const;
  * - The first pill holds the thread's project, one tab per thread of the
  *   thread's workspace, in the workspace's order, and a `+` that opens a new
  *   thread in the workspace. A thread alone in its workspace, or in none, has
- *   one tab: its own. A thread in no workspace has no `+`.
+ *   one tab: its own. A thread in no workspace, or in one that is not ready,
+ *   has no `+`, because a new thread could not join it.
  * - Open in editor and More are drawn but do nothing yet, and carry
  *   `aria-disabled` to say so.
  *
@@ -51,38 +53,35 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
 
-  const tabs = listThreadTabs(session, threads, workspaces);
   const project = projects.find((each) => each.id === session.projectId);
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const workspace = workspaces.find((each) => each.id === session.workspaceId);
 
   return (
     <header className="top">
-      <nav className="pill" aria-label="Threads in this workspace">
-        <span className="pill-crumb">
-          {project === undefined ? (
-            <ProjectTile tint={null} name="No project" />
-          ) : (
-            <ProjectTile tint={pickProjectTint(project.id, projects)} name={project.name} />
-          )}
-        </span>
-        {tabs.map((tab) => (
-          <ThreadTab
-            key={tab.id}
-            session={tab}
-            runner={tab.runnerId === null ? undefined : runnersById.get(tab.runnerId)}
-          />
-        ))}
-        {session.workspaceId === null ? null : (
+      <ThreadTabsPill
+        project={
+          project === undefined
+            ? null
+            : { name: project.name, tint: pickProjectTint(project.id, projects) }
+        }
+        tabs={listThreadTabs(session, threads, workspaces)}
+        runners={runners}
+      >
+        {workspace === undefined || !isJoinable(workspace) ? null : (
           <Link
             to="/"
-            search={{ workspace: session.workspaceId }}
+            search={
+              session.projectId === null
+                ? { workspace: workspace.id }
+                : { project: session.projectId, workspace: workspace.id }
+            }
             className="icon-btn"
             title="New thread in this workspace"
           >
             <PlusIcon />
           </Link>
         )}
-      </nav>
+      </ThreadTabsPill>
       <span className="spacer" />
       <span className="pill">
         <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">
@@ -95,6 +94,41 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
         </button>
       </span>
     </header>
+  );
+}
+
+/**
+ * Renders a header's first pill: the project, then one tab per thread in
+ * `tabs`, then `children`. `project` is `null` for a thread in no project,
+ * which the pill calls "No project". Each tab's pose is drawn with the
+ * runner it names in `runners`.
+ */
+export function ThreadTabsPill({
+  project,
+  tabs,
+  runners,
+  children,
+}: {
+  readonly project: { readonly name: string; readonly tint: ProjectTint } | null;
+  readonly tabs: readonly Session[];
+  readonly runners: readonly Runner[];
+  readonly children: ReactNode;
+}): JSX.Element {
+  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  return (
+    <nav className="pill" aria-label="Threads in this workspace">
+      <span className="pill-crumb">
+        <ProjectTile tint={project?.tint ?? null} name={project?.name ?? "No project"} />
+      </span>
+      {tabs.map((tab) => (
+        <ThreadTab
+          key={tab.id}
+          session={tab}
+          runner={tab.runnerId === null ? undefined : runnersById.get(tab.runnerId)}
+        />
+      ))}
+      {children}
+    </nav>
   );
 }
 

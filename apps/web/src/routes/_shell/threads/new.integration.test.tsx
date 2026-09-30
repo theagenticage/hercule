@@ -357,7 +357,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(readPageText()).toContain("no provider instance is set up");
+    expect(readPageText()).toContain("No provider instance is set up");
   });
 });
 
@@ -450,8 +450,8 @@ describe("Composer: model menu", () => {
     expect(within(menu).getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
-    // The other instance (B) is collapsed to one row: "<n> models".
-    expect(readPageText()).toContain("1 models");
+    // The other instance (B) is collapsed to one row that counts its models.
+    expect(readPageText()).toContain("1 model ›");
 
     expect(screen.queryByText(/custom model/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/model/i)).toBeNull();
@@ -484,7 +484,7 @@ describe("Composer: model menu", () => {
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     // Instance B is collapsed to a one-row summary. Clicking that row is the
     // "click to switch" of spec 14 §The composer.
-    await user.click(screen.getByRole("button", { name: /work.*1 models/i }));
+    await user.click(screen.getByRole("button", { name: /work.*1 model\b/i }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
@@ -580,6 +580,53 @@ describe("Composer: sending", () => {
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
       options: { effort: "high", thinking: false },
+    });
+  });
+
+  it("keeps the picked machine when another model of the same account is picked after it", async () => {
+    const user = userEvent.setup();
+    const cove: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
+    // The second account, with two models, logged in on both machines.
+    const work = buildProviderInstance(
+      INSTANCE_B.id,
+      "work",
+      "Claude Code",
+      [RUNNER.id, cove.id].map((runnerId) =>
+        buildSnapshot(runnerId, "work@example.com", "Claude Pro", [
+          { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+          { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+        ]),
+      ),
+    );
+    const { api } = await openApp(
+      [INSTANCE_A, work],
+      {},
+      {
+        "GET /api/v1/runners": { body: { items: [RUNNER, cove] } },
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    );
+
+    // Switch to the second account, pick the other machine, then another
+    // model of the same account.
+    await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /work.*2 models\b/i);
+    await user.click(screen.getByRole("button", { name: /^machine moss/ }));
+    await pickRow(user, /^cove/);
+    await user.click(screen.getByRole("button", { name: /claude haiku 5/i }));
+    await pickRow(user, /claude opus 5/i);
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      const spawn = api.calls.find(
+        (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+      );
+      expect(spawn?.body).toMatchObject({
+        instanceId: work.id,
+        model: "claude-opus-5",
+        runnerId: cove.id,
+      });
     });
   });
 

@@ -9,6 +9,7 @@ import { RENDERER_TO_MAIN_IPC_CHANNELS } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
 import { MainWindow } from "../main-window";
+import { RunnerIdentity } from "../runner-identity";
 import { StoredToken } from "../stored-token";
 import { answerIpcMessage } from "./message";
 
@@ -18,7 +19,8 @@ type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
  * The services the IPC handlers use. A handler that needs another service
  * adds it to this union, and main's runtime must then provide it.
  */
-export type IpcHandlerServices = AppSettings | ControllerConnection | MainWindow | StoredToken;
+export type IpcHandlerServices =
+  AppSettings | ControllerConnection | MainWindow | RunnerIdentity | StoredToken;
 
 /**
  * The errors a handler fails with when the request makes no sense in main's
@@ -44,6 +46,7 @@ const IPC_HANDLERS: {
   "controllerUrl.save": (input) => ControllerConnection.use((connection) => connection.save(input)),
   "token.read": () => StoredToken.use((storedToken) => storedToken.read),
   "token.write": (token) => StoredToken.use((storedToken) => storedToken.write(token)),
+  "runnerIdentity.read": ({ port }) => RunnerIdentity.use((identity) => identity.read(port)),
   "firstScreen.report": () => MainWindow.use((window) => window.showFirstTime),
 };
 

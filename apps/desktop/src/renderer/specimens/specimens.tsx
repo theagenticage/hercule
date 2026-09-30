@@ -13,8 +13,7 @@
  * input is `src/renderer/index.html`, and eslint refuses any import of this
  * folder from outside it.
  */
-import "../styles/tokens.css";
-import "../styles/base.css";
+import "../styles/base-layer.css";
 import "./sheet.css";
 import type { JSX } from "react";
 import { flushSync } from "react-dom";

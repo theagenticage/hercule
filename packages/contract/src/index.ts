@@ -222,6 +222,8 @@ export {
 } from "./groups/connection";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {
+  IDENTITY_PORT,
+  IDENTITY_PORT_COUNT,
   JoinTokenRef,
   MAX_RUNNER_LABELS,
   MAX_RUNNER_LABEL_LENGTH,

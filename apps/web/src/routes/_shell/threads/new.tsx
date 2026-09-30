@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { buildSiblingTabs, computeThreadDefaults } from "@hercule/client-core";
+import { buildDraftConfig, buildSiblingTabs } from "@hercule/client-core";
 import {
   localRunnerQuery,
   profilesQuery,
@@ -76,31 +76,18 @@ function NewThread(): JSX.Element {
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
 
   const joined = workspaces.find((each) => each.id === search.workspace);
-  const defaults = computeThreadDefaults(
-    settings.user,
+  // The composer applies the user's picks on top of this config. It decides
+  // where a draft that joins no workspace opens, and which runner a joined
+  // workspace uses.
+  const config = buildDraftConfig({
+    settingsUser: settings.user,
     instances,
     runners,
     profiles,
     localRunnerId,
-  );
-
-  // The config is rebuilt on every render instead of being captured once, so
-  // a provider login that finishes while the draft is open still reaches it.
-  // The composer applies the user's picks on top of this config.
-  //
-  // The search params are passed on unchanged: the project, and the workspace
-  // to join if there is one. The composer decides where a draft with no
-  // workspace opens, and which runner a joined workspace uses.
-  const config = {
-    ...defaults,
-    options: {},
     projectId: search.project ?? null,
-    workspace:
-      search.workspace === undefined
-        ? null
-        : ({ kind: "existing", workspaceId: search.workspace } as const),
-    preferredWorkspace: settings.user["thread.workspace"] ?? null,
-  };
+    workspaceId: search.workspace ?? null,
+  });
 
   return (
     <div className="flex flex-1 flex-col">

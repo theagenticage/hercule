@@ -85,6 +85,10 @@ describe("the requests of the renderer-to-main channels", () => {
     { name: "token.read", valid: [], invalid: ["a token"] },
     { name: "token.write", valid: ["a token"], invalid: [42] },
     { name: "token.write", valid: [null], invalid: [""] },
+    // Only the ten ports a runner's identity endpoint can listen on.
+    { name: "runnerIdentity.read", valid: [{ port: 4939 }], invalid: [{ port: 4938 }] },
+    { name: "runnerIdentity.read", valid: [{ port: 4948 }], invalid: [{ port: 4949 }] },
+    { name: "runnerIdentity.read", valid: [{ port: 4940 }], invalid: [{ port: 22 }] },
   ];
 
   it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {

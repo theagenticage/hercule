@@ -1,5 +1,11 @@
 import { useState, type JSX, type ReactNode } from "react";
-import type { ComposerPick, LoginTarget, ModelMenu, ModelPill } from "@hercule/client-core";
+import {
+  buildModelPicks,
+  type ComposerPick,
+  type LoginTarget,
+  type ModelMenu,
+  type ModelPill,
+} from "@hercule/client-core";
 import { PillLabel } from "./controls";
 import { ModelList } from "./model-list";
 import { SelectorShell } from "./selector-shell";
@@ -75,7 +81,7 @@ export function ModelSelector({
             // Each row belongs to an account, so picking a row found through
             // the filter or Recent switches the account and the model together.
             onPickModel={(instanceId, model) => {
-              pick({ kind: "instanceId", value: instanceId }, { kind: "model", value: model });
+              pick(...buildModelPicks(menu.current, instanceId, model));
             }}
             onPickInstance={(instanceId) => {
               pick({ kind: "instanceId", value: instanceId });

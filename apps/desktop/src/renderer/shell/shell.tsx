@@ -5,7 +5,7 @@ import "./shell.css";
 /**
  * Renders the shell: the sidebar on the left, and beside it the main pane,
  * which holds the open screen (`children`). The shell fills the window and
- * never scrolls itself.
+ * never scrolls itself. The sidebar's New thread calls `onNewThread`.
  *
  * The shell owns the window's drag strip, the band along the top of the
  * window by which it is dragged, as by a title bar. No other element in the
@@ -14,11 +14,17 @@ import "./shell.css";
  * the document, so a control that sits over it comes later, and its
  * `no-drag` takes precedence over the strip's `drag`.
  */
-export function Shell({ children }: { readonly children: ReactNode }): JSX.Element {
+export function Shell({
+  onNewThread,
+  children,
+}: {
+  readonly onNewThread: () => void;
+  readonly children: ReactNode;
+}): JSX.Element {
   return (
     <div className="app">
       <div className="drag-strip" />
-      <Sidebar />
+      <Sidebar onNewThread={onNewThread} />
       <main className="main">{children}</main>
     </div>
   );

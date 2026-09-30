@@ -12,6 +12,36 @@
   gap: 8px;
   pointer-events: none;
 }
+/* What scrolls under the header is hidden across the whole header row and
+   fades in below it: text left there, even faint, would show between the
+   pills, cut in half at their edges. Text is fully visible again at
+   --header-clearance.
+
+   The book's rule is for the thread's transcript, which puts its first
+   block at the clearance; transcript.tsx places it there too
+   (`HEADER_CLEARANCE`), so the two values must stay equal.
+
+   The draft screen's column (`.hello`) is not in the book, whose draft
+   never scrolls, but a short window scrolls it. Its padding keeps its top
+   at the clearance (new-thread.css). It fades the same way, but only while
+   it is scrolled away from its top: a mask also changes how the edges of
+   the text and the face are smoothed, so the column the book draws takes
+   none. */
+.top ~ .transcript,
+.top ~ .hello {
+  --header-clearance: 108px;
+}
+.top ~ .transcript,
+.top ~ .hello.is-scrolled {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 50px,
+    rgb(0 0 0 / 0.15) 64px,
+    rgb(0 0 0 / 0.5) 79px,
+    rgb(0 0 0 / 0.85) 94px,
+    #000 var(--header-clearance)
+  );
+}
 /* The book takes clicks on every child of the header (`.top > *`), the
    spacer included. Here only the pills take them, so the wheel and the
    pointer reach the transcript between the pills.

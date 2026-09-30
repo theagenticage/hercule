@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares four pairs of
+ * For each theme, Whitehaven and Orient Express, it compares five pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -15,15 +15,18 @@
  * - captures both windows, compares them pixel for pixel, and writes
  *   reference.png, app.png and diff.png to out/bureau-compare/<theme>/.
  *
- * The other pairs each compare one region of the book's session-active.html
- * with the same region of an app specimen drawn from a fixture:
- * - the sidebar (x 0-272): the book's page edited by
+ * The other pairs each compare one region of a book page with the same
+ * region of an app specimen drawn from a fixture:
+ * - the sidebar (x 0-272) of session-active.html: the book's page edited by
  *   specimens/sidebar-reference.ts, and the sidebar specimen (sidebar.html);
- * - the thread (x 272-1440, the main pane): the book's page edited by
- *   specimens/thread-reference.ts, and the thread specimen (thread.html);
+ * - the thread (x 272-1440, the main pane) of session-active.html: the
+ *   book's page edited by specimens/thread-reference.ts, and the thread
+ *   specimen (thread.html);
  * - the scrolled thread: the same main pane with the transcript scrolled
  *   away from its bottom and the composer shrunk. Both pages are opened with
- *   `?state=scrolled`.
+ *   `?state=scrolled`;
+ * - the draft (the main pane) of session-empty.html: the book's page edited
+ *   by specimens/draft-reference.ts, and the draft specimen (draft.html).
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -81,13 +84,12 @@ interface PageItem {
   readonly box: Rect;
 }
 
-/**
- * A region of the book's session-active.html that is compared with the same
- * region of an app specimen.
- */
+/** A region of a book page that is compared with the same region of an app specimen. */
 interface RegionPair {
   /** The region's name in the report and in its images' file names. */
   readonly name: string;
+  /** The book's page, under /design/crew-bureau/desktop/. */
+  readonly bookPage: string;
   /** The module that edits the book's page to show the fixture's data, under /specimens/. */
   readonly referenceModule: string;
   /** The app's specimen page, under /specimens/. */
@@ -240,10 +242,49 @@ const THREAD_PARTS = [
   ".lip .faint",
 ];
 
-/** The regions of session-active.html compared with an app specimen, in the order they are compared. */
+// Every part of the draft screen whose box is compared, as a selector inside
+// `main.main`. The composer's field is left out, for the thread's reason:
+// the book's fills the card, and the app's sits 8px inside it with 8px less
+// padding. The pixel comparison checks it.
+const DRAFT_PARTS = [
+  ".top",
+  ".top > .pill",
+  ".pill-crumb",
+  ".pill-crumb > .proj",
+  ".ptab",
+  ".ptab > svg",
+  ".top .icon-btn",
+  ".top .icon-btn > svg",
+  ".hello",
+  ".hello .column",
+  ".newbie",
+  ".newbie-face",
+  ".newbie-face > svg",
+  ".newbie h1",
+  ".newbie p",
+  ".composer",
+  ".composer-card",
+  ".composer-row",
+  ".composer-row > *",
+  ".composer-row svg",
+  ".lip",
+  ".lip > *",
+  ".lip svg",
+  ".starts-h",
+  ".starts-h > svg",
+  ".starts",
+  ".start",
+  ".start-top",
+  ".start-top > *",
+  ".start-top .bars > i",
+  ".start > b",
+];
+
+/** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
     name: "sidebar",
+    bookPage: "session-active.html",
     referenceModule: "sidebar-reference.ts",
     specimenPage: "sidebar.html",
     region: SIDEBAR_REGION,
@@ -252,6 +293,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "thread",
+    bookPage: "session-active.html",
     referenceModule: "thread-reference.ts",
     specimenPage: "thread.html",
     region: MAIN_PANE_REGION,
@@ -260,12 +302,22 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "scrolled-thread",
+    bookPage: "session-active.html",
     referenceModule: "thread-reference.ts",
     specimenPage: "thread.html",
     state: "scrolled",
     region: MAIN_PANE_REGION,
     scope: "main.main",
     parts: THREAD_PARTS,
+  },
+  {
+    name: "draft",
+    bookPage: "session-empty.html",
+    referenceModule: "draft-reference.ts",
+    specimenPage: "draft.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: DRAFT_PARTS,
   },
 ];
 
@@ -409,8 +461,8 @@ function assertSameItems(
 }
 
 /**
- * Compares the app's specimen with the book's session-active.html over the
- * region of `pair` in `theme`, and writes both captures of the region and the
+ * Compares the app's specimen with the book's page over the region of `pair`
+ * in `theme`, and writes both captures of the region and the
  * picture of their differences to `themeDir`. Returns how many items were
  * compared, and the differences, each named after the smallest item that
  * holds it. Fails when a page does not load, a capture has the wrong size,
@@ -422,11 +474,11 @@ async function compareRegion(
   themeDir: string,
   pair: RegionPair,
 ): Promise<RegionResult> {
-  const { name, referenceModule, specimenPage, state, region, scope, parts } = pair;
+  const { name, bookPage, referenceModule, specimenPage, state, region, scope, parts } = pair;
   const query = `?theme=${theme}${state === undefined ? "" : `&state=${state}`}`;
   const [reference, specimen] = await Promise.all([
     openSheet(
-      new URL(`/design/crew-bureau/desktop/session-active.html${query}`, sheetsUrl).href,
+      new URL(`/design/crew-bureau/desktop/${bookPage}${query}`, sheetsUrl).href,
       new URL(referenceModule, sheetsUrl).href,
     ),
     openSheet(`${sheetsUrl}${specimenPage}${query}`),
@@ -561,11 +613,11 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
     if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
   }
-  REGION_PAIRS.forEach(({ name, state, region }, index) => {
+  REGION_PAIRS.forEach(({ name, bookPage, state, region }, index) => {
     const words = name.replaceAll("-", " ");
     lines.push(
       `${words.slice(0, 1).toUpperCase()}${words.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
-        `x ${String(region.x)}-${String(region.x + region.width)} of session-active.html` +
+        `x ${String(region.x)}-${String(region.x + region.width)} of ${bookPage}` +
         (state === undefined ? "" : `?state=${state}`),
     );
     for (const { theme, regions } of results) {
@@ -596,15 +648,19 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
       regions.flatMap(({ name, differences }) => differences.map(({ cell }) => `${name} ${cell}`)),
     ),
   ).size;
-  const regionNames = new Intl.ListFormat("en").format(
-    REGION_PAIRS.map(({ name }) => `the ${name.replaceAll("-", " ")}`),
+  const nameRegions = (pairs: ReadonlyArray<RegionPair>): string =>
+    new Intl.ListFormat("en").format(pairs.map(({ name }) => `the ${name.replaceAll("-", " ")}`));
+  // The failure names only the regions that differ, so a reader knows where to look.
+  const differingPairs = REGION_PAIRS.filter((_, index) =>
+    failing.some(({ regions }) => regions[index]!.differences.length > 0),
   );
   lines.push(
     failing.length === 0
-      ? `PASSED: every cell, ${regionNames} match the Bureau book.`
+      ? `PASSED: every cell, ${nameRegions(REGION_PAIRS)} match the Bureau book.`
       : `FAILED: ${String(differingCells)} ${differingCells === 1 ? "cell differs" : "cells differ"} ` +
-          `and ${String(differingItems)} ${differingItems === 1 ? "item differs" : "items differ"} ` +
-          `in ${regionNames} from the Bureau book.`,
+          `and ${String(differingItems)} ${differingItems === 1 ? "item differs" : "items differ"}` +
+          (differingPairs.length === 0 ? "" : ` in ${nameRegions(differingPairs)}`) +
+          " from the Bureau book.",
   );
   return `${lines.join("\n")}\n`;
 }

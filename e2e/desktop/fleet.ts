@@ -69,12 +69,16 @@ export interface Fleet {
   /**
    * Enlists a scripted runner under `name` and returns it once the controller
    * can place threads on it: it is online, and its probe of the Claude Code
-   * instance reported a login. `maxConcurrentSessions` overrides the cap the
-   * controller derives from the runner's memory, which is 32.
+   * instance reported a login.
+   *
+   * - `maxConcurrentSessions` overrides the cap the controller derives from
+   *   the runner's memory, which is 32.
+   * - `identityPort` is the port the runner reports for its identity
+   *   endpoint; see `enlistScriptedRunner`.
    */
   readonly enlistRunner: (
     name: string,
-    options?: { readonly maxConcurrentSessions?: number },
+    options?: { readonly maxConcurrentSessions?: number; readonly identityPort?: number },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;
   /** Creates a repository resource for `remote`, filed under the given projects. */
@@ -153,11 +157,11 @@ export async function connectFleet(url: string): Promise<Fleet> {
 
   return {
     token,
-    enlistRunner: async (name, options = {}) => {
+    enlistRunner: async (name, { identityPort, ...settings } = {}) => {
       const joinToken = await call<{ readonly token: string }>("POST", "/runners/join-tokens");
-      const runner = await enlistScriptedRunner(url, joinToken.token);
+      const runner = await enlistScriptedRunner(url, joinToken.token, { identityPort });
       runners.push(runner);
-      await call("PATCH", `/runners/${runner.runnerId}`, { name, ...options });
+      await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
       instanceId = await waitForLoggedInProbe(call, runner.runnerId);
       return runner;
     },

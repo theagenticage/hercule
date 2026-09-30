@@ -346,10 +346,16 @@ export interface ScriptedRunner {
  * it holds no sessions yet. Returns the runner once the controller has
  * answered its hello, so the runner is already online. Fails if the join is
  * refused or the controller does not answer the hello within 5 s.
+ *
+ * `identityPort` is the port the runner reports for its identity endpoint,
+ * 4939 by default. The scripted runner serves nothing there. A test that
+ * wants a client to find this runner on its own machine serves `/identity`
+ * on that port itself.
  */
 export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
+  { identityPort = FACTS.identityPort }: { readonly identityPort?: number | undefined } = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",
@@ -814,7 +820,7 @@ export async function enlistScriptedRunner(
             capabilities: [],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
-            facts: FACTS,
+            facts: { ...FACTS, identityPort },
           } satisfies RunnerToController),
         );
       };

@@ -1,6 +1,6 @@
 import { useCallback, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
+import { useMatch, useRouteContext } from "@tanstack/react-router";
 import {
   buildSidebarSections,
   buildThreadGroups,
@@ -18,6 +18,7 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { ComposeIcon, SearchIcon, SidebarIcon } from "../icons";
+import { useOpenDraft } from "./open-draft";
 import { buildExpandedSections, buildSidebarItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
@@ -28,9 +29,10 @@ import "./sidebar.css";
  *
  * - the top strip, where macOS draws the window's traffic lights, with the
  *   Hide the sidebar button;
- * - New thread and Search;
+ * - New thread, which calls `onNewThread`, and Search;
  * - the thread list: Waiting on you, then the threads grouped by project and
- *   workspace;
+ *   workspace, with the Draft Thread's row, while one is open, in the group
+ *   it will join;
  * - the foot: the thread counts and the signed-in user.
  *
  * Hide the sidebar, Search and Settings are drawn but do nothing yet, and
@@ -41,7 +43,7 @@ import "./sidebar.css";
  * shell's loader reads them, so nothing here waits in practice. A live push
  * updates the cache, and only the rows whose thread changed draw again.
  */
-export function Sidebar(): JSX.Element {
+export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
@@ -52,6 +54,7 @@ export function Sidebar(): JSX.Element {
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
   useRelatedReads(threads, projects, workspaces);
+  const draft = useOpenDraft();
 
   const selectedId =
     useMatch({ from: "/_connected/_shell/threads/$sessionId", shouldThrow: false })?.params
@@ -84,6 +87,7 @@ export function Sidebar(): JSX.Element {
     runners,
     instances,
     mode: "meta",
+    draft: draft?.place ?? null,
   });
   const sections = buildSidebarSections({
     groups,
@@ -91,7 +95,13 @@ export function Sidebar(): JSX.Element {
     expanded: buildExpandedSections(expanded, groups),
     selectedId,
   });
-  const items = buildSidebarItems({ sections, sessions, runners: runnersById, projects });
+  const items = buildSidebarItems({
+    sections,
+    sessions,
+    runners: runnersById,
+    projects,
+    draftMeta: draft?.rowMeta ?? null,
+  });
   const counts = countThreadsByPose(poses.values());
 
   return (
@@ -105,10 +115,10 @@ export function Sidebar(): JSX.Element {
           "New thread ⌘N", not "New thread⌘N". A row is a flex box, which
           draws no space between its items, so the layout is the book's. */}
       <div className="side-actions">
-        <Link to="/" className="nav-row">
+        <button type="button" className="nav-row" onClick={onNewThread}>
           <ComposeIcon />
           <span>New thread</span> <kbd>⌘N</kbd>
-        </Link>
+        </button>
         <button type="button" className="nav-row" aria-disabled="true">
           <SearchIcon />
           <span>Search</span> <kbd>⌘K</kbd>

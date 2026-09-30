@@ -1,9 +1,7 @@
-// The design tokens, the page base and the controls come first, so that every
-// component's stylesheet, imported through the route tree below, follows them
-// in the cascade.
-import "./styles/tokens.css";
-import "./styles/base.css";
-import "./styles/controls.css";
+// The design tokens, the page base and the controls. Every component's
+// stylesheet, imported through the route tree below, overrides them; the
+// stylesheet explains how.
+import "./styles/base-layer.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";

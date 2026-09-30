@@ -33,6 +33,7 @@ import {
   type SidebarItem,
 } from "./sidebar-items";
 import {
+  DraftRow,
   MoreRow,
   ProjectHeader,
   ThreadRow,
@@ -111,7 +112,8 @@ const renderItem = (
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          workspaceId={item.workspaceId}
+          projectId={item.projectId}
+          joinableWorkspaceId={item.joinableWorkspaceId}
           clip={item.clip}
           keep={item.keep}
         />
@@ -131,6 +133,8 @@ const renderItem = (
           onScreen={onScreen}
         />
       );
+    case "draft-row":
+      return <DraftRow key={item.key} itemKey={item.key} leading={item.leading} meta={item.meta} />;
     case "more":
       return (
         <MoreRow

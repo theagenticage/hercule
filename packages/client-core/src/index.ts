@@ -114,7 +114,12 @@ export {
 } from "./run-inputs";
 export { createLive, type Live } from "./live/live";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
-export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
+export {
+  buildFetchIdentityProbe,
+  detectLocalRunner,
+  listLoopbackEndpoints,
+  type IdentityProbe,
+} from "./local-runner";
 export {
   chooseNotificationMark,
   describeProducer,
@@ -167,11 +172,18 @@ export {
   type WorkBlock,
   type WorkItem,
 } from "./threads/blocks";
-export { applyPick, type ComposerPick } from "./threads/apply-pick";
+export {
+  addWorkspacePicks,
+  applyPicks,
+  buildModelPicks,
+  buildWorkspacePicks,
+  type ComposerPick,
+} from "./threads/apply-pick";
 export type { LoginTarget } from "./threads/catalog";
 export {
   buildComposerFields,
   buildPendingModelNote,
+  describeMachineRow,
   type ComposerBlocked,
   type ComposerFields,
   type MachineRow,
@@ -179,6 +191,12 @@ export {
 } from "./threads/composer-fields";
 export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
 export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
+export {
+  buildDraftView,
+  type DraftAddress,
+  type DraftReads,
+  type DraftView,
+} from "./threads/draft-view";
 export type {
   MessageDraft,
   Thread,
@@ -220,6 +238,7 @@ export {
   buildThreadGroups,
   type DraftPlace,
   decideDraftPlace,
+  decideDraftPlaceForPick,
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
@@ -230,7 +249,12 @@ export {
   type SidebarSections,
   type WaitingSection,
 } from "./threads/sidebar-sections";
-export { buildSiblingTabs, listThreadTabs, type ThreadTab } from "./threads/siblings";
+export {
+  buildSiblingTabs,
+  listThreadTabs,
+  listWorkspaceThreads,
+  type ThreadTab,
+} from "./threads/siblings";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
 export { pickProjectHue, pickProjectTone, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
@@ -244,12 +268,12 @@ export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
   buildComposerPlaceholder,
   findDraftSubject,
+  isJoinable,
   joinLabelText,
   joinPhraseText,
   parsePreferredWorkspace,
   listProjectRepos,
   formatRepoName,
-  findRunnerForPick,
   withBranch,
   formatWorkspaceLabel,
   formatWorkspaceName,
@@ -260,7 +284,12 @@ export {
 } from "./threads/workspaces";
 export { buildRunnerMenu } from "./threads/runner-menu";
 export { buildSubmission } from "./threads/submission";
-export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread-defaults";
+export { appendToMessage, buildStartCards, type StartCard } from "./threads/start-cards";
+export {
+  buildDraftConfig,
+  computeInstanceDefaults,
+  computeThreadDefaults,
+} from "./threads/thread-defaults";
 export {
   describeThreadItem,
   describeTurnDivider,

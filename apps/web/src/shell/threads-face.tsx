@@ -254,7 +254,7 @@ function ProjectLane({
       )}
       {group.workspaces.map((lane) => (
         <WorkspaceLane
-          key={lane.workspaceId ?? "none"}
+          key={lane.key}
           lane={lane}
           projectId={group.projectId}
           now={now}
@@ -302,7 +302,7 @@ function WorkspaceLane({
               <span className="shrink-0 whitespace-pre">{lane.label.keep}</span>
             </span>
           )}
-          {lane.workspaceId === null || projectId === null ? null : (
+          {!lane.joinable || lane.workspaceId === null || projectId === null ? null : (
             <Plus
               name={`New thread in ${joinLabelText(lane.label)}`}
               search={{ project: projectId, workspace: lane.workspaceId }}

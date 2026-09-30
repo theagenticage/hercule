@@ -37,8 +37,8 @@ import type { AttachOpenParagraph } from "./use-thread-live";
 
 /**
  * The space above the first block, under the floating header: the book's
- * `--header-clearance`, which thread.css sets on `.transcript`. The two must
- * be equal, because the virtualizer places the first block here.
+ * `--header-clearance`, which thread-header.css sets on `.transcript`. The
+ * two must be equal, because the virtualizer places the first block here.
  */
 const HEADER_CLEARANCE = 108;
 

@@ -43,6 +43,13 @@ export {
   Toolchain as RunnerToolchain,
 } from "@hercule/protocol";
 
+/**
+ * The loopback ports a runner's identity endpoint can listen on: the
+ * `IDENTITY_PORT_COUNT` ports from `IDENTITY_PORT`. A client that finds the
+ * local runner asks only these ports, and refuses to ask any other.
+ */
+export { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/protocol";
+
 /** The longest runner name. A name is what the fleet list shows, not a note. */
 export const MAX_RUNNER_NAME_LENGTH = 128;
 

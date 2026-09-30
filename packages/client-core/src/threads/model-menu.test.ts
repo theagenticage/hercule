@@ -291,7 +291,7 @@ describe("buildModelMenu: the other instances", () => {
     expect(menu.others).toHaveLength(1);
     expect(menu.others[0]).toMatchObject({
       instanceId: CODEX.id,
-      modelCount: 1,
+      models: "1 model",
       identity: "rogier@example.com",
       planLabel: "Pro",
       dimmed: null,

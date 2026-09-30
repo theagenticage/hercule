@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSidebarSections, buildThreadGroups, decideThreadPose } from "@hercule/client-core";
+import {
+  buildSidebarSections,
+  buildThreadGroups,
+  decideThreadPose,
+  type DraftPlace,
+} from "@hercule/client-core";
 import {
   buildProject,
   buildSession,
@@ -12,7 +17,7 @@ import {
   WEBSHOP,
   WEBSHOP_PROJECT,
 } from "@hercule/client-core/threads/testing";
-import type { OpenRequest, Project, Runner, Session } from "@hercule/contract";
+import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/contract";
 import {
   buildExpandedSections,
   buildSidebarItems,
@@ -43,28 +48,34 @@ const waiting = (id: string, minutes: number, over: Partial<Session> = {}): Sess
 /**
  * Returns the sidebar's items for `threads`, built the way the sidebar builds
  * them: client-core's groups, poses and sections, then `buildSidebarItems`.
+ * With a `draft`, its row's second line is "draft meta".
  */
 const buildItems = ({
   threads,
   runners = [MOSS],
   projects = [WEBSHOP_PROJECT, OPS_PROJECT],
+  workspaces = [PRIMARY, THREAD_3F1],
   expanded = new Set(),
   selectedId = null,
+  draft = null,
 }: {
   readonly threads: readonly Session[];
   readonly runners?: readonly Runner[];
   readonly projects?: readonly Project[];
+  readonly workspaces?: readonly Workspace[];
   readonly expanded?: ReadonlySet<SectionKey>;
   readonly selectedId?: string | null;
+  readonly draft?: DraftPlace | null;
 }): readonly SidebarItem[] => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   const groups = buildThreadGroups({
     sessions: threads,
     projects,
-    workspaces: [PRIMARY, THREAD_3F1],
+    workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
     runners,
     mode: "meta",
+    draft,
   });
   const poses = new Map(
     threads.map((session) => [
@@ -86,6 +97,7 @@ const buildItems = ({
     sessions: new Map(threads.map((session) => [session.id, session])),
     runners: runnersById,
     projects,
+    draftMeta: draft === null ? null : "draft meta",
   });
 };
 
@@ -183,11 +195,30 @@ describe("buildSidebarItems", () => {
     // work in one place, and the threads in no project, have no label.
     expect(
       items.flatMap((item) =>
-        item.kind === "workspace-label" ? [[item.workspaceId, item.clip, item.keep]] : [],
+        item.kind === "workspace-label" ? [[item.joinableWorkspaceId, item.clip, item.keep]] : [],
       ),
     ).toEqual([
       [THREAD_3F1.id, "hercule/thread-3f1", ""],
       [null, "no workspace", ""],
+    ]);
+  });
+
+  it("offers no workspace for a new thread to join on the label of a workspace that is not ready", () => {
+    const items = buildItems({
+      threads: [
+        thread("s-worktree", 2, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }),
+        thread("s-bare", 1, { projectId: WEBSHOP_PROJECT.id }),
+      ],
+      workspaces: [PRIMARY, { ...THREAD_3F1, status: "failed" }],
+    });
+
+    expect(
+      items.flatMap((item) =>
+        item.kind === "workspace-label" ? [[item.joinableWorkspaceId, item.clip]] : [],
+      ),
+    ).toEqual([
+      [null, "hercule/thread-3f1"],
+      [null, "no workspace"],
     ]);
   });
 
@@ -209,6 +240,40 @@ describe("buildSidebarItems", () => {
       ["workspace:project:p-webshop:none", 9],
       ["thread:s-bare", 1],
     ]);
+  });
+
+  it("puts the draft's row last in its group, and as much space after it as after a thread row", () => {
+    const threads = [
+      thread("s-worktree", 3, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }),
+      thread("s-primary", 2, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }),
+    ];
+    const joined = buildItems({
+      threads,
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id, createsWorkspace: false },
+    });
+    const ownGroup = buildItems({
+      threads,
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
+    });
+
+    expect(joined.map(({ key, leading }) => [key, leading])).toEqual([
+      ["header:project:p-webshop", 8],
+      ["workspace:project:p-webshop:ws-thread-3f1", 1],
+      ["thread:s-worktree", 1],
+      ["draft", 1],
+      ["workspace:project:p-webshop:ws-primary", 9],
+      ["thread:s-primary", 1],
+    ]);
+    // A draft that creates its workspace sits directly under the header.
+    expect(ownGroup.map(({ key, leading }) => [key, leading])).toEqual([
+      ["header:project:p-webshop", 8],
+      ["draft", 1],
+      ["workspace:project:p-webshop:ws-thread-3f1", 9],
+      ["thread:s-worktree", 1],
+      ["workspace:project:p-webshop:ws-primary", 9],
+      ["thread:s-primary", 1],
+    ]);
+    expect(findItem(joined, "draft")).toMatchObject({ kind: "draft-row", meta: "draft meta" });
   });
 
   it(`heads the threads in no project "No project", with no tint and no project to start a thread in`, () => {

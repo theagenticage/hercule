@@ -28,3 +28,32 @@ window.ResizeObserver = class {
   unobserve(): void {}
   disconnect(): void {}
 };
+
+/**
+ * jsdom has a `<dialog>` element with an `open` attribute, but no
+ * `showModal` or `close`. The project picker opens with `showModal`, and
+ * closes with `close`, which fires `close` on the dialog as a browser does,
+ * and does nothing on a dialog that is already closed, as a browser does.
+ *
+ * The stub closes a modal dialog on Esc as a browser does: an Escape keydown
+ * that no handler prevented fires `cancel` on the dialog, then closes it
+ * unless `cancel` was prevented too. It has no other modal behaviour: the
+ * page behind the dialog stays reachable.
+ */
+HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+  this.open = true;
+  const closeOnEscape = (event: KeyboardEvent): void => {
+    if (!this.open || !this.isConnected) {
+      document.removeEventListener("keydown", closeOnEscape);
+      return;
+    }
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (this.dispatchEvent(new Event("cancel", { cancelable: true }))) this.close();
+  };
+  document.addEventListener("keydown", closeOnEscape);
+};
+HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+  if (!this.open) return;
+  this.open = false;
+  this.dispatchEvent(new Event("close"));
+};

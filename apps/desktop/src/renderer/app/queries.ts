@@ -5,9 +5,10 @@
  * key the same reads the same way, and a live push lists the keys the cache
  * uses.
  */
-import { queryOptions } from "@tanstack/react-query";
-import { ApiError, queryKeys, type HerculeClient } from "@hercule/client-core";
-import { MAX_PAGE_LIMIT, type Input } from "@hercule/contract";
+import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { ApiError, detectLocalRunner, queryKeys, type HerculeClient } from "@hercule/client-core";
+import { MAX_PAGE_LIMIT, type Input, type Runner, type Task } from "@hercule/contract";
+import type { Bridge } from "../../ipc/bridge";
 
 /**
  * Reads whether the controller's first run has been completed. Works without
@@ -121,6 +122,93 @@ export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * The options of a read that no live topic covers and that only a Draft
+ * Thread uses: the settings and the permission profiles. Such a read is
+ * fetched again each time the new-thread screen opens, so a change made
+ * elsewhere, such as a default model set in the web app, reaches the next
+ * Draft Thread. The screen's loader decides that, see `readOnOpen`.
+ *
+ * Nothing else fetches it: it never goes stale on its own, so a component
+ * that starts reading it, such as the sidebar's draft row, finds it fresh.
+ * Like every other read, it is not fetched again when the window gets focus
+ * or the network comes back.
+ */
+const READ_ON_OPEN_OPTIONS = {
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+/** Reads the controller's settings, whose user part holds the defaults of a new thread. */
+export const settingsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.settings(),
+    queryFn: () => client.settings.read(),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/** Reads every permission profile, one of which a new thread runs under. */
+export const profilesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.profiles(),
+    queryFn: () => readEveryPage((page) => client.profile.query({ query: page })),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Finds which of `runners` runs on this Mac, and returns its id, or `null`
+ * when none does. Main asks each identity port for the page: the page's
+ * Content Security Policy lets it reach only the controller, and a runner
+ * lets only the controller's origin read its identity.
+ *
+ * The key holds each online runner's identity port, so the probe runs again
+ * only when those change: a runner comes online, goes away or moves port.
+ * The runners read, which the live connection keeps current, decides that.
+ * A probe that finds nothing is an answer, not a failure, so it never
+ * retries.
+ *
+ * While a new probe runs, the query keeps the previous answer. Otherwise a
+ * runner coming online would blank the draft's machine until the probe
+ * returns, and a screen that suspends on the read would flash its fallback.
+ */
+export const localRunnerQuery = (bridge: Bridge, runners: ReadonlyArray<Runner>) =>
+  queryOptions({
+    queryKey: queryKeys.localRunner(runners),
+    queryFn: () => detectLocalRunner(runners, (port) => bridge.runnerIdentity.read({ port })),
+    retry: false,
+    placeholderData: keepPreviousData,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** How many open tasks a Draft Thread offers to start from. */
+const START_TASK_COUNT = 3;
+
+/**
+ * Reads the open tasks of `projectId` a Draft Thread offers to start from:
+ * the three most urgent. The key sits under the `tasks` prefix, so a push on
+ * the `task` topic reads them again while a Draft Thread shows them.
+ */
+export const startTasksQuery = (client: HerculeClient, projectId: string) =>
+  queryOptions({
+    queryKey: [
+      ...queryKeys.tasks({ projectId, status: ["open"] }),
+      { sort: "priority", limit: START_TASK_COUNT },
+    ],
+    queryFn: async (): Promise<readonly Task[]> => {
+      const page = await client.task.query({
+        query: {
+          projectId,
+          status: ["open"],
+          sort: { field: "priority", direction: "asc" },
+          limit: START_TASK_COUNT,
+        },
+      });
+      return page.items;
+    },
     ...LIVE_KEPT_READ_OPTIONS,
   });
 

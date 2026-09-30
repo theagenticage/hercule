@@ -6,6 +6,7 @@ import {
   createClient,
   createLive,
   createTokenStore,
+  buildFetchIdentityProbe,
   detectLocalRunner,
 } from "@hercule/client-core";
 import { createAppRouter } from "./app/router";
@@ -32,7 +33,10 @@ const router = createAppRouter(
     queryClient,
     live,
     detectLocalRunner: (runners) =>
-      detectLocalRunner(runners, (url, init) => globalThis.fetch(url, init)),
+      detectLocalRunner(
+        runners,
+        buildFetchIdentityProbe((url, init) => globalThis.fetch(url, init)),
+      ),
   },
   createBrowserHistory(),
 );

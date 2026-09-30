@@ -30,7 +30,10 @@ import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
  */
 export type RowEnd = "working" | "waiting" | "queued" | "offline" | "age";
 
-/** Which section an item belongs to: `waiting`, or `project:<id>`, with `none` for the threads in no project. */
+/**
+ * Which section an item belongs to: `waiting`, or `project:<id>`, with `none`
+ * for the threads in no project.
+ */
 export type SectionKey = string;
 
 /**
@@ -49,7 +52,7 @@ export type SidebarItemContent =
   | {
       readonly kind: "project-header";
       readonly key: string;
-      /** `null` for the threads in no project, whose heading has an outline tile and no `+`. */
+      /** `null` for the threads in no project, whose heading has an outline tile. */
       readonly projectId: string | null;
       readonly name: string;
       /** `null` for the threads in no project. */
@@ -58,8 +61,14 @@ export type SidebarItemContent =
   | {
       readonly kind: "workspace-label";
       readonly key: string;
-      /** `null` for the threads that work without a checkout. */
-      readonly workspaceId: string | null;
+      /** The project the workspace is in, which a new thread joining it starts in. */
+      readonly projectId: string;
+      /**
+       * The workspace a new thread started from the label joins. `null` for
+       * the threads that work without a checkout, and for a workspace that is
+       * not ready, which a new thread cannot join.
+       */
+      readonly joinableWorkspaceId: string | null;
       readonly clip: string;
       readonly keep: string;
     }
@@ -73,9 +82,18 @@ export type SidebarItemContent =
       readonly end: RowEnd;
       readonly activityAt: string;
     }
+  | {
+      readonly kind: "draft-row";
+      readonly key: string;
+      /** Where the draft will work and on which machine, such as "New workspace · studio-mac". */
+      readonly meta: string;
+    }
   | { readonly kind: "more"; readonly key: string; readonly label: string };
 
-/** One entry of the sidebar's list: what it draws, the section it belongs to, and the space above it. */
+/**
+ * One entry of the sidebar's list: what it draws, the section it belongs to,
+ * and the space above it.
+ */
 export type SidebarItem = SidebarItemContent & {
   readonly section: SectionKey;
   /**
@@ -95,7 +113,8 @@ export type SidebarItemKind = SidebarItem["kind"];
  *
  * - a section header (`h3.side-h`) is 24;
  * - a Waiting on you row (`.side-row--wait`) is 38;
- * - a thread row (`.side-row`) is 35;
+ * - a thread row (`.side-row`) is 35, and so is the draft's row, which is
+ *   drawn as one;
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
  *
  * The book has no workspace label, so its 22 is this app's own design.
@@ -106,6 +125,7 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "project-header": 24,
   "workspace-label": 22,
   "thread-row": 35,
+  "draft-row": 35,
   more: 28,
 };
 
@@ -116,10 +136,11 @@ const SECTION_LEADING = 8;
 const ITEM_LEADING = 1;
 
 /**
- * The space above a workspace label that follows a thread row: the usual gap
- * plus 8 px, so the label starts a new group of rows instead of reading as the
- * row's third line. A label right after its project's header keeps the usual
- * gap. The book draws no workspace label, so this spacing is the design's own.
+ * The space above a workspace label that follows a thread row, or the draft's
+ * row: the usual gap plus 8 px, so the label starts a new group of rows
+ * instead of reading as the row's third line. A label right after its
+ * project's header keeps the usual gap. The book draws no workspace label, so
+ * this spacing is the design's own.
  */
 const WORKSPACE_LABEL_LEADING = ITEM_LEADING + 8;
 
@@ -161,7 +182,10 @@ const flattenRowEnd = (end: ThreadRowEnd): RowEnd => {
   }
 };
 
-/** Returns the text of a section's "more" row, such as "27 more waiting on you" or "1 more thread". */
+/**
+ * Returns the text of a section's "more" row, such as "27 more waiting on
+ * you" or "1 more thread".
+ */
 const formatMoreLabel = (section: "waiting" | "project", hidden: number): string =>
   section === "waiting"
     ? `${String(hidden)} more waiting on you`
@@ -174,15 +198,27 @@ export interface SidebarItemSources {
   readonly runners: ReadonlyMap<string, Runner>;
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
+  /**
+   * The second line of the draft's row, while a Draft Thread is open, or
+   * `null`. The row is drawn in the workspace group the sections mark as
+   * holding the draft.
+   */
+  readonly draftMeta: string | null;
 }
 
-/** Returns the space above `content`, which follows `previous` in its section, or starts it when `previous` is undefined. */
+/**
+ * Returns the space above `content`, which follows `previous` in its
+ * section, or starts it when `previous` is undefined.
+ */
 const decideLeading = (
   content: SidebarItemContent,
   previous: SidebarItemContent | undefined,
 ): number => {
   if (previous === undefined) return SECTION_LEADING;
-  if (content.kind === "workspace-label" && previous.kind === "thread-row") {
+  if (
+    content.kind === "workspace-label" &&
+    (previous.kind === "thread-row" || previous.kind === "draft-row")
+  ) {
     return WORKSPACE_LABEL_LEADING;
   }
   return ITEM_LEADING;
@@ -199,7 +235,10 @@ const placeInSection = (
     leading: decideLeading(content, contents[index - 1]),
   }));
 
-/** Returns what Waiting on you draws: its header, its rows, and its "more" row when it hides some. */
+/**
+ * Returns what Waiting on you draws: its header, its rows, and its "more" row
+ * when it hides some.
+ */
 const buildWaitingContents = (
   waiting: WaitingSection,
   sessions: ReadonlyMap<string, Session>,
@@ -234,12 +273,17 @@ const buildWaitingContents = (
 
 /**
  * Returns what a project's section draws: its header, then per workspace
- * group its label (when the group has one) and its rows, then its "more" row
- * when it hides some. The threads in no project are headed "No project".
+ * group its label (when the group has one), its rows and, in the group that
+ * holds the draft, the draft's row, then its "more" row when it hides some.
+ * The threads in no project are headed "No project".
+ *
+ * The draft's row is its group's last, as its tab is the last of the
+ * header's tabs. A draft that starts a new workspace has a group of its own,
+ * right under the project's header.
  */
 const buildProjectContents = (
   project: ProjectSection,
-  { sessions, runners, projects }: SidebarItemSources,
+  { sessions, runners, projects, draftMeta }: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
   const contents: SidebarItemContent[] = [
@@ -253,11 +297,14 @@ const buildProjectContents = (
     },
   ];
   for (const lane of project.workspaces) {
-    if (lane.label !== null) {
+    // Only the threads in no project have no project id, and they are one
+    // group with no label.
+    if (lane.label !== null && project.projectId !== null) {
       contents.push({
         kind: "workspace-label",
-        key: `workspace:${section}:${lane.workspaceId ?? "none"}`,
-        workspaceId: lane.workspaceId,
+        key: `workspace:${section}:${lane.key}`,
+        projectId: project.projectId,
+        joinableWorkspaceId: lane.joinable ? lane.workspaceId : null,
         clip: lane.label.clip,
         keep: lane.label.keep,
       });
@@ -276,6 +323,9 @@ const buildProjectContents = (
         end: flattenRowEnd(decideThreadRowEnd(session, runner)),
         activityAt: row.activityAt,
       });
+    }
+    if (lane.draft && draftMeta !== null) {
+      contents.push({ kind: "draft-row", key: "draft", meta: draftMeta });
     }
   }
   if (project.hiddenCount > 0) {

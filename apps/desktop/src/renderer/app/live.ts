@@ -2,11 +2,12 @@
  * Runs the live connection while the shell is mounted, and keeps the
  * sidebar's reads current through it.
  *
- * The shell subscribes to three topics:
+ * The shell subscribes to four topics:
  *
  * - `session`, for the thread list (and an open thread's own reads);
  * - `runner`, for the runners, whose connectivity draws a thread as away;
- * - `provider`, for the providers, whose catalogs name each thread's model.
+ * - `provider`, for the providers, whose catalogs name each thread's model;
+ * - `task`, for the open tasks a Draft Thread offers to start from.
  *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
@@ -27,7 +28,7 @@ import { ageClock } from "./age-clock";
 import { invalidateWithoutCancelling } from "./live-invalidation";
 
 /** The topics the shell keeps subscribed. */
-const SHELL_TOPICS: readonly MutableLiveTopic[] = ["session", "runner", "provider"];
+const SHELL_TOPICS: readonly MutableLiveTopic[] = ["session", "runner", "provider", "task"];
 
 /**
  * Subscribes to the shell's topics, then starts the live connection, and

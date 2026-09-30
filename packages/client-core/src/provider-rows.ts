@@ -68,10 +68,8 @@ const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undef
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
-const describeModelCount = (
-  snapshot: ProviderInstance["snapshots"][number] | undefined,
-): string => {
-  const count = snapshot?.models.length ?? 0;
+/** Returns how many models an account has, in words: "no models", "1 model", "3 models". */
+export const describeModelCount = (count: number): string => {
   if (count === 0) return "no models";
   return count === 1 ? "1 model" : `${String(count)} models`;
 };
@@ -103,7 +101,7 @@ export const buildProviderRows = (
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
       // Without an adapter, show that instead of what a stale snapshot reported.
       account: adapter ? describeAccount(snapshot) : NO_ADAPTER,
-      models: describeModelCount(snapshot),
+      models: describeModelCount(snapshot?.models.length ?? 0),
       loggedIn: snapshot?.auth.status === "ok",
       install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
       // A provider whose credential is typed in has no vendor login page, so

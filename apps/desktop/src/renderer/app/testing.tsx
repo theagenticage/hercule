@@ -56,15 +56,19 @@ export interface FakeBridge {
  * Creates a bridge that answers as main would for a user whose settings hold
  * `controllerUrl` and whose Keychain holds `token`. `save` answers each
  * Connect; by default the controller checks out and the URL is saved.
+ * `runnerIdentities` maps a loopback port to the runner id that answers
+ * there; any other port answers nothing, as a Mac with no runner does.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
   token = null,
   save = (url) => Promise.resolve({ _tag: "Saved", origin: url }),
+  runnerIdentities = {},
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
   readonly save?: (url: string) => Promise<ControllerUrlSaveOutcome>;
+  readonly runnerIdentities?: Readonly<Record<number, string>>;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
@@ -84,6 +88,9 @@ export const createFakeBridge = ({
           tokenWrites.push(next);
           return Promise.resolve(undefined);
         },
+      },
+      runnerIdentity: {
+        read: ({ port }) => Promise.resolve(runnerIdentities[port] ?? null),
       },
       firstScreen: {
         report: () => Promise.resolve(undefined),
@@ -187,6 +194,10 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
 /**
  * Returns the handlers that answer the sidebar's seven reads from `records`.
  * Each list comes back as one page, with no cursor to a next one.
+ *
+ * They also answer the three reads a Draft Thread adds, which the app makes
+ * whenever it opens at `/`: the settings, with none set, the profiles, and
+ * the project's open tasks, of which there are none.
  */
 export const buildSidebarHandlers = (
   records: SidebarRecords,
@@ -198,6 +209,9 @@ export const buildSidebarHandlers = (
   "GET /api/v1/runners": { body: { items: records.runners } },
   "GET /api/v1/providers": { body: records.providers },
   "GET /api/v1/user": { body: { username: records.username } },
+  "GET /api/v1/settings": { body: { controller: {}, user: {} } },
+  "GET /api/v1/profiles": { body: { items: [] } },
+  "GET /api/v1/tasks": { body: { items: [] } },
 });
 
 /**

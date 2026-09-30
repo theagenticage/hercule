@@ -13,8 +13,10 @@ import type {
   MutableLiveTopic,
   NotificationFilter,
   RunFilter,
+  Runner,
   TaskFilter,
 } from "@hercule/contract";
+import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
@@ -124,8 +126,15 @@ export const queryKeys = {
     "unseen",
     since ?? null,
   ],
-  /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
-  localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
+  /**
+   * Keyed on the loopback endpoints detection asks among `runners`, because
+   * the result depends on them. The same runners read again, with the same
+   * endpoints, gives the same key, so detection does not run again.
+   */
+  localRunner: (runners: ReadonlyArray<Runner>): LiveQueryKey => [
+    "local-runner",
+    listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
+  ],
 } as const;
 
 /**

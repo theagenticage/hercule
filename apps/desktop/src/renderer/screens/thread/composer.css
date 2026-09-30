@@ -137,7 +137,9 @@ button.pick:not([aria-disabled="true"]):hover,
   color: var(--faint);
   font-size: var(--t-12);
 }
-.lip span {
+/* The book's rule, kept out of a Draft Thread's lip menus, which sit inside
+   the lip and lay out their own rows. */
+.lip span:not(.pop span) {
   display: inline-flex;
   align-items: center;
   gap: 5px;

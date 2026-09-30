@@ -8,10 +8,10 @@
  *   changes the catalog (another model, account or runner) drops them, rather
  *   than keeping a value the new catalog never offered.
  */
-import type { AccessMode } from "@hercule/contract";
+import type { AccessMode, Workspace } from "@hercule/contract";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { computeInstanceDefaults } from "./thread-defaults";
-import type { WorkspacePick } from "./workspaces";
+import { findRunnerForPick, type WorkspacePick } from "./workspaces";
 
 export type ComposerPick =
   | { readonly kind: "model"; readonly value: string }
@@ -82,4 +82,77 @@ export const applyPick = (
     case "workspace":
       return { ...picks, workspace: pick.value };
   }
+};
+
+/**
+ * Applies several selector choices to the picks, in order, each as
+ * `applyPick` applies it. One choice in a menu can set more than one field,
+ * so `buildModelPicks` and `buildWorkspacePicks` return a list. The order
+ * matters: picking an account resets the model, so the account comes before
+ * the model.
+ */
+export const applyPicks = (
+  catalogs: ThreadCatalogs,
+  config: ThreadConfig,
+  picks: ThreadPicks,
+  steps: readonly ComposerPick[],
+): ThreadPicks => steps.reduce((held, step) => applyPick(catalogs, config, held, step), picks);
+
+/**
+ * Returns the picks that choose `model` of the account `instanceId`, for a
+ * thread that runs on the account `current.instanceId`, picks applied:
+ *
+ * - the model alone, when the thread already runs on that account;
+ * - the account, then the model, when it does not.
+ *
+ * The account is not picked again when it already applies, because picking
+ * an account resets the machine and the model to that account's defaults,
+ * and a machine the user picked would be lost.
+ */
+export const buildModelPicks = (
+  current: Pick<ThreadConfig, "instanceId">,
+  instanceId: string,
+  model: string,
+): readonly ComposerPick[] =>
+  current.instanceId === instanceId
+    ? [{ kind: "model", value: model }]
+    : [
+        { kind: "instanceId", value: instanceId },
+        { kind: "model", value: model },
+      ];
+
+/**
+ * Returns the picks that choose `workspace`: the workspace, then, for a
+ * workspace that exists, the machine it is on. A workspace is on one runner
+ * and never moves, so joining it means running there.
+ */
+export const buildWorkspacePicks = (
+  workspace: WorkspacePick,
+  workspaces: readonly Workspace[],
+): readonly ComposerPick[] => {
+  const runnerId = findRunnerForPick(workspace, workspaces);
+  return runnerId === null
+    ? [{ kind: "workspace", value: workspace }]
+    : [
+        { kind: "workspace", value: workspace },
+        { kind: "runnerId", value: runnerId },
+      ];
+};
+
+/**
+ * Returns `picks` with `workspace` picked and, for a workspace that exists,
+ * the machine it is on.
+ *
+ * A Draft Thread starts in the workspace its composer shows, even when that
+ * is a default the user never picked, so the start adds it to the picks.
+ * Unlike `applyPick`, this keeps the model options: the user picked them
+ * while the composer showed this workspace and its machine.
+ */
+export const addWorkspacePicks = (
+  picks: ThreadPicks,
+  workspace: WorkspacePick,
+  workspaces: readonly Workspace[],
+): ThreadPicks => {
+  const runnerId = findRunnerForPick(workspace, workspaces);
+  return { ...picks, workspace, ...(runnerId === null ? {} : { runnerId }) };
 };

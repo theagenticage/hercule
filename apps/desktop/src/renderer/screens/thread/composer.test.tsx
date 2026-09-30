@@ -1,7 +1,7 @@
 /**
  * Tests the composer against the stubbed controller: the placeholder in each
  * state of the thread, sending with ⏎, Stop, the picks a message carries,
- * the text kept per thread, the shrunk composer, the lip, and the order of
+ * the text and a failed send kept per thread, the shrunk composer, the lip, and the order of
  * the stack above the card.
  *
  * The menus are the browser's popovers, which jsdom does not implement, so
@@ -12,7 +12,7 @@
  * checks that the controller received only that one. So a key that wrongly
  * sent a message shows up however late its request would have arrived.
  */
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -131,6 +131,44 @@ const readLip = (): readonly (readonly [string | null, string | null])[] =>
     part.textContent,
     part.getAttribute("title"),
   ]);
+
+/**
+ * Renders the composer for `thread` with a "Leave" button beside it, which
+ * unmounts the composer as leaving the thread does, and mounts it again on
+ * the next click, as coming back does. The controller holds each message
+ * until the test calls the returned `answer`.
+ */
+const renderLeavableComposer = async (thread: ThreadRecords) => {
+  const held = holdAnswer();
+  const rendered = await renderThreadPart(
+    function LeavableComposer({ sessionId }) {
+      const [shown, setShown] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setShown(!shown)}>
+            Leave
+          </button>
+          {shown ? (
+            <ThreadComposer
+              sessionId={sessionId}
+              shrunk={false}
+              onFocusChange={() => {}}
+              scrollTranscriptToBottom={() => {}}
+            />
+          ) : null}
+        </>
+      );
+    },
+    {
+      thread,
+      handlers: {
+        "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+        [buildInputOperation(thread)]: held.handler,
+      },
+    },
+  );
+  return { ...rendered, answer: held.answer };
+};
 
 /** Returns a handler that answers once the test calls the returned `answer`. */
 const holdAnswer = (): { readonly handler: Handler; readonly answer: (with_: Answer) => void } => {
@@ -260,6 +298,36 @@ describe("the composer", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     });
     expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }, { text: "Ship it" }]);
+  });
+
+  it("shows why a message failed when the user left while it was on its way and came back", async () => {
+    const user = userEvent.setup();
+    const { answer } = await renderLeavableComposer(IDLE);
+    await user.type(readField(), "Ship it{Enter}");
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    answer({ status: 409, body: buildErrorBody("invalid_state", "The session has exited.") });
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("The session has exited.");
+    expect(readField().value).toBe("Ship it");
+  });
+
+  it("does not send a message twice when the user leaves and comes back while it is on its way", async () => {
+    const user = userEvent.setup();
+    const { answer, calls } = await renderLeavableComposer(IDLE);
+    await user.type(readField(), "Ship it{Enter}");
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBe("true");
+    await user.type(readField(), "{Enter}");
+    answer(OPENED);
+
+    await waitFor(() => {
+      expect(readField().value).toBe("");
+    });
+    expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
   });
 
   it("draws Stop in Send's place while a turn runs, which interrupts the turn once, and ⏎ still sends", async () => {

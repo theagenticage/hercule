@@ -39,13 +39,22 @@ import {
   listProjectRepos,
   findReadyPrimary,
   buildWorkspaceLabelParts,
+  isJoinable,
   type WorkspaceLabel,
+  type WorkspacePick,
 } from "./workspaces";
 
 export interface WorkspaceGroup {
   /**
+   * Tells a project's groups apart, as a key for a list: the workspace's id,
+   * `none` for the threads with no workspace, or `draft` for the group of a
+   * draft whose workspace does not exist yet.
+   */
+  readonly key: string;
+  /**
    * The workspace the group's threads are in. `null` for the threads with no
-   * workspace, and for the one group that holds every thread with no project.
+   * workspace, for the one group that holds every thread with no project, and
+   * for the group of a draft whose workspace does not exist yet.
    */
   readonly workspaceId: string | null;
   /**
@@ -60,6 +69,11 @@ export interface WorkspaceGroup {
    *   by workspace.
    */
   readonly label: WorkspaceLabel | null;
+  /**
+   * Whether a new thread can join the group's workspace, see `isJoinable`.
+   * Always `false` for a group with no workspace.
+   */
+  readonly joinable: boolean;
   /** Whether the draft being written joins this group. */
   readonly draft: boolean;
   readonly rows: readonly ThreadRow[];
@@ -81,7 +95,18 @@ export interface ProjectGroup {
 /** Where the draft being written will go, from the address it was opened at. */
 export interface DraftPlace {
   readonly projectId: string | null;
+  /**
+   * The workspace the thread opens in, when that workspace exists already.
+   * `null` when the thread works with no workspace, or creates its workspace
+   * as it starts.
+   */
   readonly workspaceId: string | null;
+  /**
+   * Whether the thread creates its workspace as it starts: a new worktree, or
+   * a main workspace its runner has not cloned yet. Until then the draft has
+   * a group of its own.
+   */
+  readonly createsWorkspace: boolean;
 }
 
 /**
@@ -89,11 +114,8 @@ export interface DraftPlace {
  *
  * - When the address names a workspace, the draft goes there.
  * - Otherwise the draft will open in the project's default workspace
- *   (`decideDefaultWorkspacePick`). If that is a main workspace already
- *   cloned on the draft's runner, the draft joins that workspace's group,
- *   next to the threads it will sit beside, not under "no workspace".
- * - If the main workspace is not cloned yet, it has no group, so the draft
- *   sits directly under the project until the runner has cloned it.
+ *   (`decideDefaultWorkspacePick`), and goes where `decideDraftPlaceForPick`
+ *   puts that pick.
  */
 export const decideDraftPlace = ({
   projectId,
@@ -112,21 +134,66 @@ export const decideDraftPlace = ({
   readonly runnerId: string | null;
   readonly preferred?: ThreadWorkspace | null;
 }): DraftPlace => {
-  if (workspaceId !== null || projectId === null) return { projectId, workspaceId };
-  const pick = decideDefaultWorkspacePick(listProjectRepos(resources, projectId), preferred);
-  if (pick.kind !== "primary") return { projectId, workspaceId: null };
-  return {
-    projectId,
-    workspaceId: findReadyPrimary(workspaces, pick.resourceId, runnerId)?.id ?? null,
-  };
+  if (projectId === null) return { projectId, workspaceId, createsWorkspace: false };
+  const pick: WorkspacePick =
+    workspaceId === null
+      ? decideDefaultWorkspacePick(listProjectRepos(resources, projectId), preferred)
+      : { kind: "existing", workspaceId };
+  return decideDraftPlaceForPick({ projectId, pick, workspaces, runnerId });
 };
 
-/** Checks whether the draft being written joins this group. */
+/**
+ * Returns the group a draft in a project belongs to, once its workspace pick
+ * is known:
+ *
+ * - an existing workspace: that workspace's group;
+ * - a main workspace already cloned on the draft's runner: that workspace's
+ *   group;
+ * - no workspace: the group of the threads with no workspace;
+ * - a new worktree, or a main workspace the runner has not cloned yet: a
+ *   group of its own, because the workspace does not exist until the thread
+ *   starts.
+ *
+ * An app that lets the user change the pick before the thread starts calls
+ * this, so the sidebar follows the pick.
+ */
+export const decideDraftPlaceForPick = ({
+  projectId,
+  pick,
+  workspaces,
+  runnerId,
+}: {
+  readonly projectId: string;
+  readonly pick: WorkspacePick;
+  readonly workspaces: readonly Workspace[];
+  /** The runner the draft would run on. A main workspace exists on one runner. */
+  readonly runnerId: string | null;
+}): DraftPlace => {
+  switch (pick.kind) {
+    case "existing":
+      return { projectId, workspaceId: pick.workspaceId, createsWorkspace: false };
+    case "primary": {
+      const cloned = findReadyPrimary(workspaces, pick.resourceId, runnerId);
+      return {
+        projectId,
+        workspaceId: cloned?.id ?? null,
+        createsWorkspace: cloned === undefined,
+      };
+    }
+    case "ephemeral":
+      return { projectId, workspaceId: null, createsWorkspace: true };
+    case "none":
+      return { projectId, workspaceId: null, createsWorkspace: false };
+  }
+};
+
+/** Checks whether the draft being written joins the group of the threads in `workspaceId`. */
 const holdsDraft = (
   draft: DraftPlace | null,
   joins: boolean,
   workspaceId: string | null,
-): boolean => draft !== null && joins && draft.workspaceId === workspaceId;
+): boolean =>
+  draft !== null && joins && !draft.createsWorkspace && draft.workspaceId === workspaceId;
 
 /**
  * Returns the time of a project group's latest thread, in any of its
@@ -152,12 +219,12 @@ const decideGroupProjectId = (
 ): string | null => (projectId !== null && listed.has(projectId) ? projectId : null);
 
 /**
- * Returns a group's sort rank inside its project: the draft's own group with no
- * workspace first, then each worktree in catalog order, then the main
- * workspace, then the threads that work without a checkout.
+ * Returns the sort rank of a group of threads inside its project: each
+ * worktree in catalog order, then the main workspace, then the threads that
+ * work without a checkout.
  */
 const rankLane = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
-  if (lane.workspaceId === null) return lane.draft ? -1 : workspaces.length + 2;
+  if (lane.workspaceId === null) return workspaces.length + 2;
   const workspace = workspaces.find((each) => each.id === lane.workspaceId);
   if (workspace === undefined || workspace.kind === "primary") return workspaces.length + 1;
   return workspaces.findIndex((each) => each.id === lane.workspaceId);
@@ -224,7 +291,16 @@ export const buildThreadGroups = ({
     if (projectId === null) {
       return {
         ...header,
-        workspaces: [{ workspaceId: null, label: null, draft: joins, rows: held }],
+        workspaces: [
+          {
+            key: "none",
+            workspaceId: null,
+            label: null,
+            joinable: false,
+            draft: joins,
+            rows: held,
+          },
+        ],
       };
     }
 
@@ -233,24 +309,30 @@ export const buildThreadGroups = ({
       const workspaceId = sessionsById.get(row.id)?.workspaceId ?? null;
       byWorkspace.set(workspaceId, [...(byWorkspace.get(workspaceId) ?? []), row]);
     }
-    if (joins && !byWorkspace.has(draftPlace.workspaceId))
+    const createsWorkspace = joins && draftPlace.createsWorkspace;
+    if (joins && !createsWorkspace && !byWorkspace.has(draftPlace.workspaceId))
       byWorkspace.set(draftPlace.workspaceId, []);
 
-    const alone = byWorkspace.size === 1;
+    // A draft whose workspace does not exist yet has a group of its own, with
+    // no label, directly under the project's header, because that is where
+    // the user just started it.
+    const draftLanes: WorkspaceGroup[] = createsWorkspace
+      ? [{ key: "draft", workspaceId: null, label: null, joinable: false, draft: true, rows: [] }]
+      : [];
+    const alone = byWorkspace.size + draftLanes.length === 1;
     const lanes = [...byWorkspace].map(([workspaceId, rowsIn]): WorkspaceGroup => {
       const workspace = workspaces.find((each) => each.id === workspaceId);
       return {
+        key: workspaceId ?? "none",
         workspaceId,
-        // "no workspace" labels the threads that work without a checkout. A
-        // group that holds only the draft is different: the draft sits there
-        // until it has a workspace, directly under the project's header, with
-        // no label.
+        // "no workspace" labels the threads that work without a checkout.
         label:
           workspace === undefined
-            ? alone || (holdsDraft(draftPlace, joins, workspaceId) && rowsIn.length === 0)
+            ? alone
               ? null
               : { clip: "no workspace", keep: "" }
             : buildWorkspaceLabelParts(workspace, resources, runners),
+        joinable: isJoinable(workspace),
         draft: holdsDraft(draftPlace, joins, workspaceId),
         rows: rowsIn,
       };
@@ -260,10 +342,10 @@ export const buildThreadGroups = ({
       ...header,
       // The prototype's order: the worktrees first, in catalog order, then the
       // repo's main workspace, then the threads that work without a checkout.
-      // A draft with no workspace yet is not in that last group: it sits
-      // directly under the project's header, before everything, because that
-      // is where the user just started it.
-      workspaces: lanes.sort((a, b) => rankLane(a, workspaces) - rankLane(b, workspaces)),
+      workspaces: [
+        ...draftLanes,
+        ...lanes.sort((a, b) => rankLane(a, workspaces) - rankLane(b, workspaces)),
+      ],
     };
   });
 

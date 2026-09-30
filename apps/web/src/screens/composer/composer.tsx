@@ -9,9 +9,9 @@ import {
   buildPendingModelNote,
   listProjectRepos,
   queryKeys,
-  findRunnerForPick,
   withBranch,
   buildWorkspaceMenu,
+  buildWorkspacePicks,
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -200,12 +200,7 @@ export function Composer({
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={handleOpenChange}
         onPickWorkspace={(picked) => {
-          // An existing workspace also fixes the machine. `findRunnerForPick`
-          // decides that, not this component.
-          const settled = findRunnerForPick(picked, workspaces);
-          if (settled === null) model.pick({ kind: "workspace", value: picked });
-          else
-            model.pick({ kind: "workspace", value: picked }, { kind: "runnerId", value: settled });
+          model.pick(...buildWorkspacePicks(picked, workspaces));
         }}
         onPickBranch={(picked) => {
           model.pick({ kind: "workspace", value: withBranch(pick, picked) });

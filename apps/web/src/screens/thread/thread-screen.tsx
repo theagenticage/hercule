@@ -14,6 +14,7 @@ import {
   buildTurns,
   chooseStamps,
   findAnsweredAssistantId,
+  isJoinable,
   mayBeRunningTurn,
   type HerculeClient,
   type Live,
@@ -114,7 +115,7 @@ export function ThreadScreen({
         tabs={buildSiblingTabs({ workspace, sessions, activeSessionId: session.id })}
         actions={
           <>
-            {workspace === undefined ? null : (
+            {workspace === undefined || !isJoinable(workspace) ? null : (
               <NewThreadHere projectId={session.projectId} workspaceId={workspace.id} />
             )}
             <ChromeAction title="More (not built)" icon disabled>

@@ -7,7 +7,7 @@
  * happen to read.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryObserver, type QueryClient } from "@tanstack/react-query";
 import type { Session } from "@hercule/contract";
@@ -78,7 +78,7 @@ const countReads = (calls: readonly Call[], path: string): number =>
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * three subscriptions and every read has settled, including the reads the
+ * four subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -93,10 +93,10 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's three subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's four subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
-    expect([...live.readTopics()].sort()).toEqual(["provider", "runner", "session"]);
+    expect([...live.readTopics()].sort()).toEqual(["provider", "runner", "session", "task"]);
     expect(queryClient.isFetching()).toBe(0);
   });
 };
@@ -363,13 +363,30 @@ describe("the shell's live connection", () => {
 });
 
 describe("File > New Thread", () => {
-  it("opens the new-thread screen", async () => {
+  it("opens the project picker, whose pick opens a Draft Thread in that project", async () => {
     const { fake, router } = await startShell({ path: `/threads/${FIXTURE_THREAD_IDS.runbook}` });
+
+    fake.sendMenuCommand("newThread");
+    const picker = await screen.findByRole("dialog", { name: "New thread in" });
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.runbook}`);
+
+    await userEvent.click(within(picker).getByRole("button", { name: /^ops/ }));
+    await waitFor(() => {
+      expect(router.state.location.href).toBe(`/?project=${SIDEBAR_FIXTURE.projects[1]!.id}`);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens a Draft Thread in no project at once when there is no project to pick", async () => {
+    const { fake, router } = await startShell({
+      path: `/threads/${FIXTURE_THREAD_IDS.runbook}`,
+      handlers: { "GET /api/v1/projects": { body: { items: [] } } },
+    });
 
     fake.sendMenuCommand("newThread");
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.location.href).toBe("/");
     });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

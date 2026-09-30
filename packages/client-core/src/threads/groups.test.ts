@@ -9,12 +9,19 @@
  *   whose project is not in the project list joins them;
  * - the threads with no project form one unlabelled group, newest first,
  *   whatever workspaces they are in;
+ * - a new thread can join a group's workspace only while it is ready;
  * - the draft being written sits in the group it will belong to once it
- *   starts, and a draft for a project not in the project list sits with the
+ *   starts, a draft whose workspace does not exist yet has a group of its
+ *   own, and a draft for a project not in the project list sits with the
  *   threads with no project.
  */
 import { describe, expect, it } from "vitest";
-import { decideDraftPlace, buildThreadGroups } from "./groups";
+import {
+  decideDraftPlace,
+  decideDraftPlaceForPick,
+  buildThreadGroups,
+  type DraftPlace,
+} from "./groups";
 import { joinLabelText } from "./workspaces";
 import {
   MOSS,
@@ -62,9 +69,7 @@ const SESSIONS = [
   }),
 ];
 
-const buildGroups = (
-  draft: { projectId: string | null; workspaceId: string | null } | null = null,
-) =>
+const buildGroups = (draft: DraftPlace | null = null) =>
   buildThreadGroups({
     sessions: SESSIONS,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
@@ -92,10 +97,10 @@ describe("decideDraftPlace", () => {
         workspaces: [PRIMARY, THREAD_3F1],
         runnerId: MOSS.id,
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id });
+    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false });
   });
 
-  it("puts the draft under no workspace while no runner has cloned the repo", () => {
+  it("gives the draft a group of its own while its runner has not cloned the repo", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -104,10 +109,10 @@ describe("decideDraftPlace", () => {
         workspaces: [],
         runnerId: MOSS.id,
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null });
+    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true });
   });
 
-  it("puts the draft under no workspace when the project opens in a new worktree", () => {
+  it("gives the draft a group of its own when the project opens in a new worktree", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -117,7 +122,7 @@ describe("decideDraftPlace", () => {
         runnerId: MOSS.id,
         preferred: "ephemeral",
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null });
+    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true });
   });
 
   it("uses the workspace the address names, whatever the project's default", () => {
@@ -129,7 +134,50 @@ describe("decideDraftPlace", () => {
         workspaces: [PRIMARY, THREAD_3F1],
         runnerId: MOSS.id,
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id });
+    ).toEqual({
+      projectId: WEBSHOP_PROJECT.id,
+      workspaceId: THREAD_3F1.id,
+      createsWorkspace: false,
+    });
+  });
+});
+
+describe("decideDraftPlaceForPick", () => {
+  const place = (
+    pick: Parameters<typeof decideDraftPlaceForPick>[0]["pick"],
+    runnerId: string | null,
+  ) =>
+    decideDraftPlaceForPick({
+      projectId: WEBSHOP_PROJECT.id,
+      pick,
+      workspaces: [PRIMARY, THREAD_3F1],
+      runnerId,
+    });
+
+  it("follows a picked workspace, and a main workspace only on the runner that has it cloned", () => {
+    expect(place({ kind: "existing", workspaceId: THREAD_3F1.id }, null)).toMatchObject({
+      workspaceId: THREAD_3F1.id,
+      createsWorkspace: false,
+    });
+    expect(place({ kind: "primary", resourceId: WEBSHOP.id }, MOSS.id)).toMatchObject({
+      workspaceId: PRIMARY.id,
+      createsWorkspace: false,
+    });
+    expect(place({ kind: "primary", resourceId: WEBSHOP.id }, "r_elsewhere")).toMatchObject({
+      workspaceId: null,
+      createsWorkspace: true,
+    });
+  });
+
+  it("gives a draft that makes a new worktree a group of its own, and one with no workspace none", () => {
+    expect(place({ kind: "ephemeral", checkouts: [] }, MOSS.id)).toMatchObject({
+      workspaceId: null,
+      createsWorkspace: true,
+    });
+    expect(place({ kind: "none" }, MOSS.id)).toMatchObject({
+      workspaceId: null,
+      createsWorkspace: false,
+    });
   });
 });
 
@@ -227,8 +275,10 @@ describe("buildThreadGroups", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.workspaces).toEqual([
       {
+        key: "none",
         workspaceId: null,
         label: null,
+        joinable: false,
         draft: false,
         rows: [
           expect.objectContaining({ id: "s-main" }),
@@ -277,6 +327,24 @@ describe("buildThreadGroups", () => {
     ]);
   });
 
+  it("lets a new thread join a group's workspace only while it is ready", () => {
+    const joinable = buildThreadGroups({
+      sessions: SESSIONS,
+      projects: [WEBSHOP_PROJECT],
+      workspaces: [{ ...THREAD_3F1, status: "provisioning" }, PRIMARY],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: null,
+    })[0]?.workspaces.map((lane) => [lane.key, lane.joinable]);
+
+    expect(joinable).toEqual([
+      [THREAD_3F1.id, false],
+      [PRIMARY.id, true],
+      ["none", false],
+    ]);
+  });
+
   it("shows no label when all of a project's threads have no workspace, because there is nothing to tell apart", () => {
     expect(listLaneLabels(buildGroups()[1])).toEqual([null]);
   });
@@ -284,7 +352,11 @@ describe("buildThreadGroups", () => {
   // Groups follow the workspaces' order, so the draft does not move a group:
   // it joins the main workspace's group where that group already is.
   it("puts the draft in the group it will join, without moving the group", () => {
-    const webshop = buildGroups({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })[0];
+    const webshop = buildGroups({
+      projectId: WEBSHOP_PROJECT.id,
+      workspaceId: PRIMARY.id,
+      createsWorkspace: false,
+    })[0];
     const lane = webshop?.workspaces.find((each) => each.draft);
 
     expect(lane?.label === null ? null : joinLabelText(lane!.label)).toBe("webshop · moss");
@@ -303,48 +375,91 @@ describe("buildThreadGroups", () => {
       resources: [],
       runners: [],
       mode: "meta",
-      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null },
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
 
     expect(fresh.map((group) => group.name)).toEqual(["webshop"]);
     expect(fresh[0]?.workspaces[0]?.draft).toBe(true);
   });
 
-  it("shows no label for a group that holds only the draft, which has no workspace yet", () => {
+  // The threads with no workspace keep their place and their label: the
+  // draft's thread will not join them.
+  it("gives a draft whose workspace does not exist yet a group of its own, first and unlabelled", () => {
+    const webshop = buildGroups({
+      projectId: WEBSHOP_PROJECT.id,
+      workspaceId: null,
+      createsWorkspace: true,
+    })[0];
+
+    expect(webshop?.workspaces.map((lane) => [lane.key, lane.draft, lane.rows.length])).toEqual([
+      ["draft", true, 0],
+      [THREAD_3F1.id, false, 1],
+      [PRIMARY.id, false, 1],
+      ["none", false, 1],
+    ]);
+    expect(listLaneLabels(webshop)).toEqual([
+      null,
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "no workspace",
+    ]);
+  });
+
+  it("labels the threads with no workspace when a draft with its own group is their only neighbour", () => {
+    const lanes = buildThreadGroups({
+      sessions: SESSIONS.filter((each) => each.workspaceId === null),
+      projects: [WEBSHOP_PROJECT],
+      workspaces: [],
+      resources: [WEBSHOP],
+      runners: [MOSS],
+      mode: "meta",
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
+    })[0];
+
+    expect(listLaneLabels(lanes)).toEqual([null, "no workspace"]);
+  });
+
+  it("puts a draft with no workspace last among the threads with no workspace, where they are", () => {
+    const webshop = buildGroups({
+      projectId: WEBSHOP_PROJECT.id,
+      workspaceId: null,
+      createsWorkspace: false,
+    })[0];
+
+    expect(listLaneLabels(webshop)).toEqual([
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "no workspace",
+    ]);
+    expect(webshop?.workspaces.at(-1)?.draft).toBe(true);
+  });
+
+  it("labels the group a draft with no workspace starts, when the project's threads are all in workspaces", () => {
     const webshop = buildThreadGroups({
-      // Every thread of this project is in a workspace, so the draft's group
-      // holds nothing else.
       sessions: SESSIONS.filter((each) => each.workspaceId !== null),
       projects: [WEBSHOP_PROJECT],
       workspaces: [PRIMARY, THREAD_3F1],
       resources: [WEBSHOP],
       runners: [MOSS],
       mode: "meta",
-      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null },
-    })[0];
-    const lane = webshop?.workspaces.find((each) => each.draft);
-
-    expect(lane?.label).toBeNull();
-    expect(lane?.rows).toEqual([]);
-  });
-
-  it("keeps the no-workspace label when the draft joins threads that have no workspace", () => {
-    const loose = buildThreadGroups({
-      sessions: SESSIONS,
-      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-      workspaces: [PRIMARY, THREAD_3F1],
-      resources: [WEBSHOP],
-      runners: [MOSS],
-      mode: "meta",
-      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null },
+      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: false },
     })[0];
 
-    expect(listLaneLabels(loose)).toContain("no workspace");
+    expect(listLaneLabels(webshop)).toEqual([
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "no workspace",
+    ]);
+    expect(webshop?.workspaces.at(-1)).toMatchObject({ draft: true, rows: [] });
   });
 
   it("puts a draft with no project in the one group of the threads with no project, whatever its workspace", () => {
     for (const workspaceId of [null, PRIMARY.id]) {
-      const loose = buildGroups({ projectId: null, workspaceId }).at(-1);
+      const loose = buildGroups({
+        projectId: null,
+        workspaceId,
+        createsWorkspace: workspaceId === null,
+      }).at(-1);
 
       expect(loose?.projectId).toBeNull();
       expect(loose?.workspaces.map((lane) => [lane.label, lane.draft])).toEqual([[null, true]]);
@@ -354,7 +469,7 @@ describe("buildThreadGroups", () => {
   // A project created since the project list was read has no name yet, so a
   // group of its own would have a coloured dot but no name.
   it("puts a draft for a project not in the project list with the threads with no project", () => {
-    const groups = buildGroups({ projectId: "p-new", workspaceId: null });
+    const groups = buildGroups({ projectId: "p-new", workspaceId: null, createsWorkspace: true });
 
     expect(groups.map((group) => [group.projectId, group.tone])).toEqual([
       [WEBSHOP_PROJECT.id, expect.any(String)],

@@ -60,6 +60,9 @@ const bridge: Bridge = {
     read: () => invokeChannel("token.read"),
     write: (token) => invokeChannel("token.write", token),
   },
+  runnerIdentity: {
+    read: (request) => invokeChannel("runnerIdentity.read", request),
+  },
   firstScreen: {
     report: () => invokeChannel("firstScreen.report"),
   },

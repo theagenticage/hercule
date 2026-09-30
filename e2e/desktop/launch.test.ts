@@ -26,7 +26,12 @@ import {
   FIRST_SCREEN_TIMEOUT_MS,
   SHOWN_WITHOUT_FIRST_SCREEN_ERROR,
 } from "../../apps/desktop/src/main/window-visibility";
-import { launchForTest, launchWithSavedController, startServerForTest } from "./harness";
+import {
+  launchForTest,
+  launchWithSavedController,
+  startServerForTest,
+  type LaunchedApp,
+} from "./harness";
 
 /** The origin the app's page is served from. */
 const APP_ORIGIN = "app://hercule";
@@ -141,24 +146,47 @@ async function prepareFirstShowCapture(app: ElectronApplication, page: Page): Pr
 }
 
 /**
+ * Starts the app prepared by `prepareFirstShowCapture`, and returns it once
+ * main has shown the window with the preparation in place: main asked for
+ * the capture, and the caret was hidden before then.
+ *
+ * Playwright hands the test the window only once its page is running, so on
+ * a busy machine main can show the window before the preparation is done. A
+ * launch like that can check nothing, so it is quit and the app is started
+ * again. Fails after 3 such launches.
+ */
+async function launchWithFirstShowCapture(): Promise<LaunchedApp> {
+  for (let launch = 1; launch <= 3; launch += 1) {
+    const launched = await launchForTest(undefined, prepareFirstShowCapture);
+    const preparedBeforeShow = await launched.app.evaluate(() => {
+      const { caretHiddenAt, shownAt } = (globalThis as FirstShowGlobal).firstShow!;
+      return shownAt !== null && caretHiddenAt !== null && caretHiddenAt < shownAt;
+    });
+    if (preparedBeforeShow) return launched;
+    await launched.close();
+  }
+  throw new Error(
+    "main showed the window before the test could prepare to capture its page, in 3 launches",
+  );
+}
+
+/**
  * Captures the window's page 1 second after main first showed it, and
  * compares that capture, pixel by pixel, with the one main asked for as it
- * showed the window (see `prepareFirstShowCapture`).
+ * showed the window. The app must come from `launchWithFirstShowCapture`.
  *
- * Returns whether the caret was hidden before the show, how many device
- * pixels differ, and the smallest rectangle, in device pixels, that holds
- * them (null when none differ). Fails when main showed the window before the
- * preparation, or when the two captures differ in size.
+ * Returns how many device pixels differ, and the smallest rectangle, in
+ * device pixels, that holds them (null when none differ). Fails when the two
+ * captures differ in size.
  */
 function compareShowCaptureWithSettled(app: ElectronApplication): Promise<{
-  caretHiddenBeforeShow: boolean;
   differingPixels: number;
   box: { left: number; top: number; right: number; bottom: number } | null;
 }> {
   return app.evaluate(async ({ BrowserWindow }) => {
-    const { caretHiddenAt, shownAt, shownCapture } = (globalThis as FirstShowGlobal).firstShow!;
+    const { shownAt, shownCapture } = (globalThis as FirstShowGlobal).firstShow!;
     if (shownAt === null || shownCapture === null) {
-      throw new Error("main showed the window before the test could prepare to capture its page");
+      throw new Error("the app did not come from launchWithFirstShowCapture");
     }
     await new Promise((resolve) => setTimeout(resolve, shownAt + 1000 - performance.now()));
     const [window] = BrowserWindow.getAllWindows();
@@ -184,7 +212,6 @@ function compareShowCaptureWithSettled(app: ElectronApplication): Promise<{
       [left, top, right, bottom] = [Math.min(left, x), Math.min(top, y), Math.max(right, x), y];
     }
     return {
-      caretHiddenBeforeShow: caretHiddenAt !== null && caretHiddenAt < shownAt,
       differingPixels,
       box: differingPixels === 0 ? null : { left, top, right, bottom },
     };
@@ -241,7 +268,7 @@ it("shows the window on the connecting screen's report when the saved controller
 });
 
 it("the page already holds the whole first screen, the focus ring included, when main calls show()", async () => {
-  const { app, page } = await launchForTest(undefined, prepareFirstShowCapture);
+  const { app, page } = await launchWithFirstShowCapture();
 
   // The settled screen is the one a focused window draws. Another window can
   // take the focus from this one by now, such as a test running beside this
@@ -255,10 +282,6 @@ it("the page already holds the whole first screen, the focus ring included, when
     "the connect screen's address field has no focus ring, so the test checks nothing",
   ).toBe(true);
   const comparison = await compareShowCaptureWithSettled(app);
-  expect(
-    comparison.caretHiddenBeforeShow,
-    "the caret was hidden only after the window showed, so the two captures may differ by it",
-  ).toBe(true);
   expect(
     comparison.differingPixels,
     `the page's capture at show() differs from the settled screen in ${JSON.stringify(comparison.box)} (device pixels): main showed the window before its page had drawn all of the first screen`,

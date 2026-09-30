@@ -1,6 +1,6 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
-   pills, the segmented controls, the navigation rows, the counts and the
-   text field. The rules and
+   pills, the segmented controls, the navigation rows, the counts, the text
+   field, the priority bars and the section headings. The rules and
    class names are the Bureau book's, as its system.css spells them. Each
    departure from the book says why. */
 
@@ -306,4 +306,55 @@ input.field[type="password"] {
    normal spacing. */
 input.field[type="password"]:not(:placeholder-shown) {
   letter-spacing: -0.045em;
+}
+
+/* ---------- Priority bars ---------- */
+/* Four bars rising left to right, filled up to the priority: one for low,
+   four for urgent. Urgent fills all four in the failure colour. */
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.bars i:nth-child(1) {
+  height: 5px;
+}
+.bars i:nth-child(2) {
+  height: 7.5px;
+}
+.bars i:nth-child(3) {
+  height: 10px;
+}
+.bars i:nth-child(4) {
+  height: 12px;
+}
+.bars[data-p="1"] i:nth-child(-n + 1),
+.bars[data-p="2"] i:nth-child(-n + 2),
+.bars[data-p="3"] i:nth-child(-n + 3) {
+  background: var(--ink);
+}
+/* The book also lists urgent among the ink bars above, and overrides it
+   here with `!important`. Here urgent is left out above, so this rule has
+   nothing to override. */
+.bars[data-p="4"] i {
+  background: var(--fail);
+}
+
+/* ---------- Section headings ---------- */
+/* A small bold heading over a group, with an icon before it. */
+.section-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.005em;
 }

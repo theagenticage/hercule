@@ -79,12 +79,20 @@ const buildHeaders = (headers: Record<string, string | ReadonlyArray<string>>): 
  * request.
  *
  * The request sends no cookies or stored HTTP credentials, as the page's own
- * calls to the controller send none.
+ * calls to the controller send none. It neither reads nor fills the HTTP
+ * cache: each check must hear from the server now, since a kept answer could
+ * name a runner or a controller that has since left the port.
  */
 export const fetchWithoutRedirects: FetchWithoutRedirects = (url, { method, headers, signal }) =>
   new Promise((resolve, reject) => {
     signal.throwIfAborted();
-    const request = net.request({ url: url.href, method, redirect: "manual", credentials: "omit" });
+    const request = net.request({
+      url: url.href,
+      method,
+      redirect: "manual",
+      credentials: "omit",
+      cache: "no-store",
+    });
     for (const [name, value] of Object.entries(headers)) request.setHeader(name, value);
     /** Fails the request with `error`, and stops it. */
     const failRequest = (error: Error) => {
