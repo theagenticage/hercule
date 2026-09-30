@@ -76,7 +76,7 @@ describe("buildThreadWorkspaceLabel", () => {
   });
 
   it("says a thread has no workspace as the workspace menu does", () => {
-    expect(buildLabel(null, [PRIMARY])).toEqual([{ kind: "workspace", text: "None" }]);
+    expect(buildLabel(null, [PRIMARY])).toEqual([{ kind: "workspace", text: "No workspace" }]);
     expect(buildThreadWorkspaceLabel(buildSession({ id: "s1" }), [PRIMARY])).toEqual([
       { kind: "workspace", text: "No workspace" },
     ]);

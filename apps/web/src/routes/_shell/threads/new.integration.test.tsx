@@ -1738,7 +1738,7 @@ describe("Composer: the workspace selector", () => {
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
     expect(text).toContain("hercule/thread-8a0");
-    expect(text).not.toContain("None");
+    expect(text).not.toContain("No workspace");
   });
 
   it("shows the repo on each row and lists New workspace first in a multi-repo project", async () => {
@@ -1783,14 +1783,14 @@ describe("Composer: the workspace selector", () => {
     expect(readPageText(menu)).toContain("not cloned on moss · clones on first use");
   });
 
-  // A project with no source works in None, and the tooltip explains how to
-  // change that.
-  it("shows None as locked text in a project with no repo", async () => {
+  // A project with no source works in no workspace, and the tooltip explains
+  // how to change that.
+  it("shows No workspace as locked text in a project with no repo", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
     const locked = await screen.findByTitle("Add a repository to the project to work in one");
-    expect(readPageText(locked)).toContain("None");
+    expect(readPageText(locked)).toContain("No workspace");
     expect(locked.closest("button")).toBeNull();
 
     await user.click(locked);

@@ -71,7 +71,7 @@ export const buildDraftView = (
   address: DraftAddress,
   picks: ThreadPicks,
 ): DraftView => {
-  const { instances, runners, localRunnerId, projects, resources, workspaces, sessions } = reads;
+  const { instances, runners, localRunnerId, resources, workspaces, sessions } = reads;
   const base = buildDraftConfig({
     settingsUser: reads.settings.user,
     instances,
@@ -88,7 +88,6 @@ export const buildDraftView = (
   // talk about a machine the lead never named.
   const runnerId = fields.machine.runnerId;
   const workspaceMenu = buildWorkspaceMenu({
-    project: projects.find((each) => each.id === address.projectId),
     repos: listProjectRepos(resources, address.projectId),
     workspaces,
     sessions,
@@ -103,9 +102,6 @@ export const buildDraftView = (
   // right, so it names the workspace as a started thread's lip does.
   const workspaceLabel = joined?.kind === "primary" ? "Main workspace" : workspaceMenu.label;
   const machine = runners.find((each) => each.id === runnerId)?.name ?? "no machine";
-  // The menu calls no workspace "None", which reads as an answer only beside
-  // the menu's name. The row stands alone.
-  const where = pick.kind === "none" ? "No workspace" : workspaceLabel;
   return {
     catalogs: reads,
     base,
@@ -125,6 +121,6 @@ export const buildDraftView = (
       address.projectId === null
         ? { projectId: null, workspaceId: null, createsWorkspace: false }
         : decideDraftPlaceForPick({ projectId: address.projectId, pick, workspaces, runnerId }),
-    rowMeta: `${where} · ${machine}`,
+    rowMeta: `${workspaceLabel} · ${machine}`,
   };
 };

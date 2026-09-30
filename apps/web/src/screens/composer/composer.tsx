@@ -93,10 +93,8 @@ export function Composer({
       ? buildModelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
       : null;
   const projectId = model.config.projectId ?? null;
-  const project = projects.find((each) => each.id === projectId);
   const pick = fields.workspace.value;
   const menu = buildWorkspaceMenu({
-    project,
     repos: listProjectRepos(resources, projectId),
     workspaces,
     sessions,

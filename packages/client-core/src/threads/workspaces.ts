@@ -175,8 +175,8 @@ export const findBaseBranch = (
  * - a project with no repo has nowhere to work;
  * - a draft with no project has no project to add a repo to.
  *
- * In both, "None" is the only option, and the selector's reason tells the
- * user what would give them another option.
+ * In both, "No workspace" is the only option, and the selector's reason
+ * tells the user what would give them another option.
  */
 export const NO_WORKSPACE_REASON = "Add a repository to the project to work in one";
 

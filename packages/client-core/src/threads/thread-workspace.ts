@@ -33,8 +33,7 @@ const MAIN_WORKSPACE: ThreadWorkspaceLabelPiece = { kind: "workspace", text: "Ma
  * - an ephemeral workspace: its branch, with the branch it was started from.
  *   An ephemeral workspace is named after its branch, so no second piece
  *   repeats the name;
- * - no workspace: "None", or "No workspace" when the thread has no project
- *   either, as the workspace menu calls it.
+ * - no workspace: "No workspace", as the workspace menu calls it.
  *
  * An ephemeral workspace was started from the base branch the caller named,
  * or, when the caller named none, from its repo's default branch.
@@ -47,8 +46,7 @@ export const buildThreadWorkspaceLabel = (
   session: Session,
   workspaces: readonly Workspace[],
 ): readonly ThreadWorkspaceLabelPiece[] => {
-  if (session.workspaceId === null)
-    return [{ kind: "workspace", text: session.projectId === null ? "No workspace" : "None" }];
+  if (session.workspaceId === null) return [{ kind: "workspace", text: "No workspace" }];
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   const checkout = workspace?.checkouts[0];
   const branch = checkout?.branch ?? null;

@@ -14,8 +14,6 @@ import {
   THREAD_3F1,
   RUNBOOKS,
   WEBSHOP,
-  WEBSHOP_PROJECT,
-  buildProject,
   buildSession,
 } from "./workspaces.testing";
 
@@ -26,7 +24,6 @@ const SESSIONS = [
 
 const buildMenu = (over: Partial<Parameters<typeof buildWorkspaceMenu>[0]> = {}) =>
   buildWorkspaceMenu({
-    project: WEBSHOP_PROJECT,
     repos: [WEBSHOP],
     workspaces: [PRIMARY, THREAD_3F1],
     sessions: SESSIONS,
@@ -72,21 +69,11 @@ describe("buildWorkspaceMenu", () => {
     expect(row?.sub).toBe("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
   });
 
-  // None is offered only when there is nothing else to offer.
-  it("offers None alone in a project with no repo", () => {
-    const empty = buildMenu({
-      repos: [],
-      workspaces: [],
-      project: buildProject("p-sandbox", "sandbox"),
-    });
+  // No workspace is offered only when there is nothing else to offer.
+  it("offers No workspace alone when there is no repo", () => {
+    const empty = buildMenu({ repos: [], workspaces: [] });
 
-    expect(empty.rows.map((row) => row.name)).toEqual(["None"]);
-  });
-
-  it("calls the row No workspace for a draft with no project", () => {
-    const loose = buildMenu({ repos: [], workspaces: [], project: undefined });
-
-    expect(loose.rows.map((row) => row.name)).toEqual(["No workspace"]);
+    expect(empty.rows.map((row) => row.name)).toEqual(["No workspace"]);
   });
 
   it("uses the current row's name as the selector's label", () => {

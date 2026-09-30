@@ -49,7 +49,7 @@ describe("a new thread", () => {
     const lip = page.locator(".lip");
     expect(
       await lip.getByTitle("Add a repository to the project to work in one").textContent(),
-    ).toBe("None");
+    ).toBe("No workspace");
     await lip.getByRole("button", { name: "studio" }).click();
     const machineMenu = page.getByRole("dialog", { name: "Machine", exact: true });
     // The note follows the probe's answer, which may come after the menu opens.
