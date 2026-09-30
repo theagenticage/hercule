@@ -10,9 +10,9 @@ import { parseWorkflowSource, type Issue } from "@hercule/contract";
 import {
   decideIssueState,
   formatProblemCount,
-  locateIssues,
   parseWorkflowSourceWithRanges,
 } from "@hercule/client-core";
+import { locateIssues } from "./workflow-source";
 import { findUniqueOffset } from "./workflow-source.testing";
 
 /**

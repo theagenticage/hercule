@@ -1,28 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
+import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { makeAppSettingsLayer } from "./app-settings";
 import {
   ControllerConnection,
   makeControllerConnectionLayer,
   parseControllerUrl,
 } from "./controller-connection";
-import type { FetchWithoutRedirects } from "./fetch-without-redirects";
-import { MainWindow } from "./main-window";
 import { StoredToken } from "./stored-token";
-
-/**
- * Node's `fetch`, told not to follow redirects, in place of the app's, which
- * sends through Chromium's network stack and which only Electron can run.
- */
-const fetchWithoutRedirects: FetchWithoutRedirects = (url, init) =>
-  fetch(url, { ...init, redirect: "manual" });
+import {
+  type FakeHttpServer,
+  makeFakeMainWindow,
+  makeTemporarySettingsFile,
+  nodeFetchWithoutRedirects,
+  startFakeHttpServer,
+  type TemporarySettingsFile,
+} from "./testing";
 
 describe("parseControllerUrl", () => {
   it.each([
@@ -57,9 +50,8 @@ describe("parseControllerUrl", () => {
 });
 
 describe("ControllerConnection.save", () => {
-  let folder: string;
-  let file: string;
-  let server: Server;
+  let settingsFile: TemporarySettingsFile;
+  let server: FakeHttpServer;
   let origin: string;
   /** How many requests the fake controller received. */
   let requestCount: number;
@@ -68,13 +60,16 @@ describe("ControllerConnection.save", () => {
   /** Where the fake controller redirects the setup read, or null when it answers it. */
   let redirectTo: string | null;
 
+  beforeEach(() => {
+    settingsFile = makeTemporarySettingsFile();
+    return settingsFile.remove;
+  });
+
   beforeEach(async () => {
-    folder = mkdtempSync(join(tmpdir(), "hercule-desktop-connection-"));
-    file = join(folder, "settings.json");
     requestCount = 0;
     setUp = true;
     redirectTo = null;
-    server = createServer((request, response) => {
+    server = await startFakeHttpServer((request, response) => {
       requestCount++;
       const allowsApp = { "access-control-allow-origin": "app://hercule" };
       if (request.method === "OPTIONS") {
@@ -93,25 +88,18 @@ describe("ControllerConnection.save", () => {
           .end(JSON.stringify({ complete: setUp }));
       }
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  });
-
-  afterEach(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(folder, { recursive: true, force: true });
+    origin = server.origin;
+    return server.close;
   });
 
   /**
-   * Saves `input` through a connection service built on the settings file
-   * `file`, with fakes of the stored token, the window and the browser.
-   * Returns the outcome, each token written, how many times the window
-   * reloaded, and each URL opened in the browser.
+   * Saves `input` through a connection service built on the temporary
+   * settings file, with fakes of the stored token, the window and the
+   * browser. Returns the outcome, each token written, how many times the
+   * window reloaded, and each URL opened in the browser.
    */
   const save = async (input: string) => {
     const tokenWrites: Array<string | null> = [];
-    let reloads = 0;
     const opened: Array<string> = [];
     const storedToken = Layer.succeed(StoredToken)({
       read: Effect.succeed(null),
@@ -120,45 +108,31 @@ describe("ControllerConnection.save", () => {
           tokenWrites.push(token);
         }),
     });
-    const window = Layer.succeed(MainWindow)({
-      load: Effect.void,
-      reload: Effect.sync(() => {
-        reloads++;
-      }),
-      show: Effect.void,
-      showFirstTime: Effect.void,
-      isFocused: Effect.succeed(false),
-      send: () => Effect.void,
-      showWarning: () => Effect.void,
-    });
+    const window = makeFakeMainWindow();
     const layer = makeControllerConnectionLayer(
       (url) =>
         Effect.sync(() => {
           opened.push(url);
         }),
-      fetchWithoutRedirects,
-    ).pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          makeAppSettingsLayer(file).pipe(Layer.provide(NodeFileSystem.layer)),
-          storedToken,
-          window,
-        ),
-      ),
-    );
+      nodeFetchWithoutRedirects,
+    ).pipe(Layer.provide(Layer.mergeAll(settingsFile.layer, storedToken, window.layer)));
     const outcome = await Effect.runPromise(
       Effect.provide(
         ControllerConnection.use((connection) => connection.save(input)),
         layer,
       ),
     );
+    const reloads = window.calls.filter((call) => call === "reload").length;
     return { outcome, tokenWrites, reloads, opened };
   };
 
-  const readFileObject = (): unknown => JSON.parse(readFileSync(file, "utf8"));
+  const readFileObject = (): unknown => JSON.parse(readFileSync(settingsFile.path, "utf8"));
 
   it("signs the user out, saves the origin of a ready controller, and reloads the window", async () => {
-    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }));
+    writeFileSync(
+      settingsFile.path,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }),
+    );
     expect(await save(` ${origin.toUpperCase()}/ `)).toEqual({
       outcome: { _tag: "Saved", origin },
       tokenWrites: [null],
@@ -169,7 +143,7 @@ describe("ControllerConnection.save", () => {
   });
 
   it("keeps the user signed in when the ready controller is the one already saved", async () => {
-    writeFileSync(file, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
+    writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
     expect(await save(origin)).toEqual({
       outcome: { _tag: "Saved", origin },
       tokenWrites: [],
@@ -187,7 +161,7 @@ describe("ControllerConnection.save", () => {
       opened: [],
     });
     expect(requestCount).toBe(0);
-    expect(() => readFileSync(file)).toThrow();
+    expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 
   it("opens the setup page of a controller that is not set up, and saves nothing", async () => {
@@ -198,7 +172,7 @@ describe("ControllerConnection.save", () => {
       reloads: 0,
       opened: [`${origin}/setup`],
     });
-    expect(() => readFileSync(file)).toThrow();
+    expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 
   it("returns any other outcome of the check with the origin, and saves nothing", async () => {
@@ -209,6 +183,6 @@ describe("ControllerConnection.save", () => {
       reloads: 0,
       opened: [],
     });
-    expect(() => readFileSync(file)).toThrow();
+    expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 });

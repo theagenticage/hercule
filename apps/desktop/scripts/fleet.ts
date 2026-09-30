@@ -19,21 +19,19 @@
  * waits for the controller to have recorded where a turn has got to.
  */
 import type {
+  IDENTITY_PORT,
+  IDENTITY_PORT_COUNT,
   Project,
   ProviderInstance,
   Resource,
   Session,
   SpawnWorkspace,
   TranscriptRow,
-} from "../../packages/contract/src/index";
-import type { TurnState } from "../../packages/protocol/src/index";
-import { setTimeout as sleep } from "node:timers/promises";
-import { PASSWORD, USERNAME } from "../../scripts/controller-process.ts";
-import {
-  enlistScriptedRunner,
-  type ScriptedRunner,
-  type ScriptStep,
-} from "../../scripts/scripted-runner.ts";
+} from "../../../packages/contract/src/index";
+import type { TurnState } from "../../../packages/protocol/src/index";
+import { PASSWORD, USERNAME } from "../../../scripts/controller-process.ts";
+import { enlistScriptedRunner, type ScriptedRunner, type ScriptStep } from "./scripted-runner.ts";
+import { pollUntil } from "./poll.ts";
 
 /** How many spawns are in flight at once; SQLite writes one at a time anyway. */
 const SPAWN_CONCURRENCY = 8;
@@ -43,6 +41,22 @@ const TURN_WAIT_MS = 10_000;
 
 /** How often `waitForTurn` reads the transcript again. */
 const TURN_POLL_MS = 25;
+
+/**
+ * The port a scripted runner reports for its identity endpoint when the
+ * caller names none: the last of the ten ports a runner's identity endpoint
+ * can listen on. Nothing serves it, so the app's probe of that port finds no
+ * runner there. A real runner takes it only when the nine ports before it are
+ * taken. The first port is never reported: a runner the developer runs on
+ * this machine listens there, and no test or measurement may reach it.
+ *
+ * The port must be one of the ten, because main refuses to probe any other
+ * and logs each refusal. Plain Node cannot load the protocol package, so the
+ * two numbers are written out here, and `satisfies` fails the typecheck when
+ * the protocol's constants change.
+ */
+const UNSERVED_IDENTITY_PORT =
+  (4939 satisfies typeof IDENTITY_PORT) + (10 satisfies typeof IDENTITY_PORT_COUNT) - 1;
 
 /**
  * Where a turn has got to, as its session's transcript records it:
@@ -64,8 +78,14 @@ export interface ThreadPlacement {
 
 /** A controller signed in to, and the scripted runners enlisted on it. */
 export interface Fleet {
-  /** The user's API token, for calls the fleet does not wrap. */
+  /** The user's API token, for a client of the public API that the caller makes itself. */
   readonly token: string;
+  /**
+   * Calls one operation of the public API as the signed-in user, and returns
+   * its parsed response. `path` follows `/api/v1`, such as `/sessions`. Fails
+   * with the status and the response body when the call fails.
+   */
+  readonly call: <T>(method: string, path: string, body?: unknown) => Promise<T>;
   /**
    * Enlists a scripted runner under `name` and returns it once the controller
    * can place threads on it: it is online, and its probe of the Claude Code
@@ -74,7 +94,9 @@ export interface Fleet {
    * - `maxConcurrentSessions` overrides the cap the controller derives from
    *   the runner's memory, which is 32.
    * - `identityPort` is the port the runner reports for its identity
-   *   endpoint; see `enlistScriptedRunner`.
+   *   endpoint. A test that wants the app to find this runner on its own
+   *   machine serves `/identity` on that port itself. Without it, the runner
+   *   reports a port nothing serves.
    */
   readonly enlistRunner: (
     name: string,
@@ -107,6 +129,8 @@ export interface Fleet {
     placement: ThreadPlacement & { readonly prompt?: string },
     script: ReadonlyArray<ScriptStep>,
   ) => Promise<{ readonly thread: Session; readonly played: Promise<void> }>;
+  /** Reads a session's whole transcript, oldest row first, a page of 500 rows at a time. */
+  readonly readTranscript: (sessionId: string) => Promise<ReadonlyArray<TranscriptRow>>;
   /**
    * Waits until the session's turn number `turn`, counting from 1, has
    * reached `progress` in the transcript the controller wrote. Only the
@@ -155,11 +179,28 @@ export async function connectFleet(url: string): Promise<Fleet> {
     return `Thread ${spawned}`;
   };
 
+  /** Reads a session's whole transcript, oldest row first, a page of 500 rows at a time. */
+  const readTranscript = async (sessionId: string): Promise<ReadonlyArray<TranscriptRow>> => {
+    const rows: Array<TranscriptRow> = [];
+    let cursor: string | undefined;
+    do {
+      const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+      const page = await call<{
+        readonly items: ReadonlyArray<TranscriptRow>;
+        readonly nextCursor?: string;
+      }>("GET", `/sessions/${sessionId}/transcript?limit=500${query}`);
+      rows.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    return rows;
+  };
+
   return {
     token,
-    enlistRunner: async (name, { identityPort, ...settings } = {}) => {
+    call,
+    enlistRunner: async (name, { identityPort = UNSERVED_IDENTITY_PORT, ...settings } = {}) => {
       const joinToken = await call<{ readonly token: string }>("POST", "/runners/join-tokens");
-      const runner = await enlistScriptedRunner(url, joinToken.token, { identityPort });
+      const runner = await enlistScriptedRunner(url, joinToken.token, identityPort);
       runners.push(runner);
       await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
       instanceId = await waitForLoggedInProbe(call, runner.runnerId);
@@ -182,20 +223,22 @@ export async function connectFleet(url: string): Promise<Fleet> {
       const thread = await spawnThread(placement.prompt ?? buildNextTitle(), placement);
       return { thread, played: placement.runner.playScript(thread.id, script) };
     },
+    readTranscript,
     waitForTurn: async (sessionId, turn, progress) => {
-      const deadline = Date.now() + TURN_WAIT_MS;
-      for (;;) {
-        const rows = await readTranscript(call, sessionId);
-        const reached = computeTurnProgress(rows, turn);
-        if (reached === progress) return;
-        if (Date.now() > deadline) {
-          throw new Error(
+      let reached: TurnProgress | undefined;
+      await pollUntil(
+        async () => {
+          reached = computeTurnProgress(await readTranscript(sessionId), turn);
+          return reached === progress ? true : undefined;
+        },
+        {
+          timeoutMs: TURN_WAIT_MS,
+          intervalMs: TURN_POLL_MS,
+          timeoutMessage: () =>
             `turn ${turn} of session ${sessionId} never became ${progress}; ` +
-              (reached === undefined ? "it never started" : `it is ${reached}`),
-          );
-        }
-        await sleep(TURN_POLL_MS);
-      }
+            (reached === undefined ? "it never started" : `it is ${reached}`),
+        },
+      );
     },
     disconnectRunners: async () => {
       await Promise.all(runners.map((runner) => runner.goOffline()));
@@ -207,43 +250,29 @@ export async function connectFleet(url: string): Promise<Fleet> {
  * Waits until the Claude Code instance has a logged-in snapshot from the given
  * runner, and returns the instance's id. The controller probes every instance
  * on a runner when it connects, and places a thread only on a runner whose
- * snapshot shows a login. Fails after 10 s.
+ * snapshot shows a login. Fails at once when the controller has no Claude
+ * Code instance, and after 10 s when the probe has not reported a login.
  */
-async function waitForLoggedInProbe(
+function waitForLoggedInProbe(
   call: <T>(method: string, path: string) => Promise<T>,
   runnerId: string,
 ): Promise<string> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const instances = await call<ReadonlyArray<ProviderInstance>>("GET", "/providers");
-    const claudeCode = instances.find((instance) => instance.providerId === "claude-code");
-    if (claudeCode === undefined) throw new Error("the controller has no Claude Code instance");
-    const probed = claudeCode.snapshots.some(
-      (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
-    );
-    if (probed) return claudeCode.id;
-    await sleep(20);
-  }
-  throw new Error(`the controller never probed runner ${runnerId}`);
-}
-
-/** Reads a session's whole transcript, oldest row first, a page of 500 rows at a time. */
-async function readTranscript(
-  call: <T>(method: string, path: string) => Promise<T>,
-  sessionId: string,
-): Promise<ReadonlyArray<TranscriptRow>> {
-  const rows: Array<TranscriptRow> = [];
-  let cursor: string | undefined;
-  do {
-    const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
-    const page = await call<{
-      readonly items: ReadonlyArray<TranscriptRow>;
-      readonly nextCursor?: string;
-    }>("GET", `/sessions/${sessionId}/transcript?limit=500${query}`);
-    rows.push(...page.items);
-    cursor = page.nextCursor;
-  } while (cursor !== undefined);
-  return rows;
+  return pollUntil(
+    async () => {
+      const instances = await call<ReadonlyArray<ProviderInstance>>("GET", "/providers");
+      const claudeCode = instances.find((instance) => instance.providerId === "claude-code");
+      if (claudeCode === undefined) throw new Error("the controller has no Claude Code instance");
+      const probed = claudeCode.snapshots.some(
+        (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
+      );
+      return probed ? claudeCode.id : undefined;
+    },
+    {
+      timeoutMs: 10_000,
+      intervalMs: 20,
+      timeoutMessage: `the controller never probed runner ${runnerId}`,
+    },
+  );
 }
 
 /**

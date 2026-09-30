@@ -19,37 +19,25 @@ import {
   RUNNING_ITEM_ID,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubElementSize,
   THREAD_FIXTURES,
   type Handler,
   type ThreadRecords,
 } from "../../app/testing";
+import { holdAnimationFrames, type HeldFrames } from "./testing";
 
 /** The time the tests run at: 25 minutes after the finished thread started. */
 const NOW = new Date("2026-09-10T09:25:00.000Z");
 
-/** The animation frames requested and not run yet. The paragraph being written is painted in one. */
-let frames: Array<() => void> = [];
-
-/** Runs every animation frame requested so far. */
-const runFrames = (): void => {
-  const due = frames;
-  frames = [];
-  act(() => {
-    for (const frame of due) frame();
-  });
-};
+/** The animation frames, held until a test runs them. The paragraph being written is painted in one. */
+let frames: HeldFrames;
 
 beforeEach(() => {
   // Times are drawn in the system time zone, which differs between machines.
   vi.stubEnv("TZ", "Europe/Amsterdam");
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
-  frames = [];
-  vi.stubGlobal("requestAnimationFrame", (frame: () => void) => frames.push(frame));
-  vi.stubGlobal("cancelAnimationFrame", () => {});
-  // jsdom lays nothing out, so every element measures 0 and the virtualizer
-  // would find no room to draw a block in. The transcript measures 800 px.
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(800);
-  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+  frames = holdAnimationFrames();
+  stubElementSize(800, 800);
 });
 
 afterEach(() => {
@@ -167,7 +155,7 @@ const findOpenParagraph = (): Element => {
  */
 const expectOpenParagraphToShow = (text: string): Promise<void> =>
   waitFor(() => {
-    runFrames();
+    frames.run();
     expect(findOpenParagraph().textContent).toBe(text);
   });
 
@@ -336,15 +324,15 @@ describe("the thread screen", () => {
     expect(calls.filter((call) => call.path === transcriptPath)).toHaveLength(2);
     // Taps may have been missed while the stream was lost, so the message's
     // later taps can no longer be placed: its text shows only as its rows land.
-    runFrames();
+    frames.run();
     act(() => {
       live.pushTaps(sessionId, buildTaps("in the retry queue."));
     });
     // The tap has reached the thread once it asks for a frame to paint in.
     await waitFor(() => {
-      expect(frames).toHaveLength(1);
+      expect(frames.countWaiting()).toBe(1);
     });
-    runFrames();
+    frames.run();
     expect(findOpenParagraph().textContent).toBe("It is a race ");
   });
 

@@ -8,10 +8,17 @@
  */
 import { DESKTOP_APP_ORIGIN } from "@hercule/contract";
 import { Data, Effect, Schema } from "effect";
-import type { IpcReply, RendererToMainIpcChannel } from "../../ipc/contract";
+import {
+  type EncodedIpcResponse,
+  type IpcReply,
+  type IpcRequest,
+  type IpcResponse,
+  RENDERER_TO_MAIN_IPC_CHANNELS,
+  type RendererToMainIpcChannelName,
+} from "../../ipc/contract";
 
 /** The part of Electron's `WebFrameMain` that the sender check reads. */
-export interface WebFrame {
+interface WebFrame {
   readonly origin: string;
 }
 
@@ -19,7 +26,7 @@ export interface WebFrame {
  * The error a check of an IPC message fails with. `message` says why main
  * refuses the message; it goes back to the renderer and into main's log.
  */
-export class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
+class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
   readonly message: string;
 }> {}
 
@@ -33,7 +40,7 @@ export class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
  * Electron hands out one `WebFrameMain` object per frame, so comparing the
  * two objects compares the frames.
  */
-export const checkIpcSender = (
+const checkIpcSender = (
   senderFrame: WebFrame | null,
   mainFrame: WebFrame,
 ): Effect.Effect<void, IpcMessageRefused> => {
@@ -62,7 +69,7 @@ export const checkIpcSender = (
  * A channel that needs no request is sent with no argument rather than with
  * `undefined`, because Electron turns an `undefined` argument into `null`.
  */
-export const decodeIpcRequest = <IpcRequestSchema extends Schema.Top>(
+const decodeIpcRequest = <IpcRequestSchema extends Schema.Top>(
   schema: IpcRequestSchema,
   args: ReadonlyArray<unknown>,
 ): Effect.Effect<
@@ -110,22 +117,16 @@ export interface IpcMessage {
  * than a refusal.
  */
 export const answerIpcMessage = <
-  IpcChannel extends RendererToMainIpcChannel,
+  Name extends RendererToMainIpcChannelName,
   HandlerError extends Error,
   Services,
 >(
-  name: string,
-  channel: IpcChannel,
-  handler: (
-    request: IpcChannel["request"]["Type"],
-  ) => Effect.Effect<IpcChannel["response"]["Type"], HandlerError, Services>,
+  name: Name,
+  handler: (request: IpcRequest<Name>) => Effect.Effect<IpcResponse<Name>, HandlerError, Services>,
   message: IpcMessage,
-): Effect.Effect<
-  IpcReply<IpcChannel["response"]["Encoded"]>,
-  never,
-  Services | IpcChannel["request"]["DecodingServices"] | IpcChannel["response"]["EncodingServices"]
-> =>
+): Effect.Effect<IpcReply<EncodedIpcResponse<Name>>, never, Services> =>
   Effect.gen(function* () {
+    const channel = RENDERER_TO_MAIN_IPC_CHANNELS[name];
     yield* checkIpcSender(message.senderFrame, message.mainFrame);
     const request = yield* decodeIpcRequest(channel.request, message.args);
     const response = yield* handler(request);

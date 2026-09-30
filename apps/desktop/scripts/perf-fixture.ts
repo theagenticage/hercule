@@ -1,7 +1,7 @@
 /**
  * Fills a scratch controller with threads for the desktop perf script, and
  * sets how old they look. The threads are made through the fleet of scripted
- * runners in `e2e/desktop/fleet.ts`, as the end-to-end suite makes them:
+ * runners in `fleet.ts`, as the end-to-end suite makes them:
  *
  * - two runners, "studio" and "laptop", each holding half of the threads;
  * - four projects, each holding a quarter of them;
@@ -25,17 +25,19 @@
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
-import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import type { Project, Runner, Session } from "../../../packages/contract/src/index";
-import { connectFleet } from "../../../e2e/desktop/fleet.ts";
-import { completeSetup, ROOT, startController } from "../../../scripts/controller-process.ts";
-import type { ScriptedRunner, ScriptStep } from "../../../scripts/scripted-runner.ts";
+import {
+  findCompiledBinary,
+  startController,
+  startSetUpController,
+} from "../../../scripts/controller-process.ts";
+import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
+import { connectFleet } from "./fleet.ts";
+import { pollUntil } from "./poll.ts";
 
 /** The projects the threads are spread over, in the order they are created. */
 const PROJECT_NAMES = ["Webshop", "Payments", "Ops", "Docs"] as const;
@@ -109,8 +111,6 @@ const LONG_THREAD_TURN: ReadonlyArray<ScriptStep> = [
 /** What the user asks in the turn `streamTurn` plays. */
 const STREAM_QUESTION = "Explain where the time goes when a thread streams.";
 
-const runFile = promisify(execFile);
-
 /** A thread whose transcript `growTranscript` grew. */
 export interface LongThread {
   readonly id: string;
@@ -144,8 +144,8 @@ export interface ThreadFixture {
    * makes the controller push one change to the app.
    */
   readonly nudge: () => void;
-  /** Returns the process ID of the running controller, found by the port it listens on. */
-  readonly readControllerPid: () => Promise<number>;
+  /** Returns the process ID of the running controller. It changes when `prepareLaunch` restarts the controller. */
+  readonly readControllerPid: () => number;
   /**
    * Plays turns into one idle thread until its transcript holds at least
    * `rowCount` rows, and returns the thread. Each turn is the user's question
@@ -176,20 +176,14 @@ export interface ThreadFixture {
 export async function runWithThreadFixture<T>(
   use: (fixture: ThreadFixture) => Promise<T>,
 ): Promise<T> {
-  const binary = join(ROOT, "hercule");
-  if (!existsSync(binary)) {
-    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
-  }
   const home = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-home-"));
   try {
-    let controller = await startController({ home, binary });
+    let controller = await startSetUpController({ home });
     const runners: ScriptedRunner[] = [];
     try {
-      const ran = await completeSetup({ home, url: controller.url, binary });
-      if (ran.code !== 0)
-        throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
       const { url } = controller;
       const fleet = await connectFleet(url);
+      const { call } = fleet;
       runners.push(
         await fleet.enlistRunner("studio", { maxConcurrentSessions: RUNNER_CAPACITY }),
         await fleet.enlistRunner("laptop", { maxConcurrentSessions: RUNNER_CAPACITY }),
@@ -197,22 +191,6 @@ export async function runWithThreadFixture<T>(
       const projects: Project[] = [];
       for (const name of PROJECT_NAMES) projects.push(await fleet.createProject(name));
 
-      const call = async <R>(method: string, path: string, body?: unknown): Promise<R> => {
-        const response = await fetch(`${url}/api/v1${path}`, {
-          method,
-          headers: {
-            authorization: `Bearer ${fleet.token}`,
-            ...(body === undefined ? {} : { "content-type": "application/json" }),
-          },
-          body: body === undefined ? null : JSON.stringify(body),
-        });
-        if (!response.ok) {
-          throw new Error(
-            `${method} ${path} failed (${response.status}): ${await response.text()}`,
-          );
-        }
-        return (await response.json()) as R;
-      };
       const listThreads = async (): Promise<readonly Session[]> =>
         (
           await call<{ readonly items: readonly Session[] }>(
@@ -311,7 +289,7 @@ export async function runWithThreadFixture<T>(
           throw new Error(`the controller exited with ${String(stopped)}:\n${controller.output()}`);
         }
         setLastActivity(home, idleIds, twoMinuteRow ? firstProjectIdle[0]! : null);
-        controller = await startController({ home, binary, port });
+        controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
           await waitFor(
@@ -354,31 +332,11 @@ export async function runWithThreadFixture<T>(
         nudgedIsBusy = !nudgedIsBusy;
       };
 
-      const readControllerPid = async (): Promise<number> => {
-        const { stdout } = await runFile("lsof", [
-          "-nP",
-          `-iTCP:${String(controller.port)}`,
-          "-sTCP:LISTEN",
-          "-t",
-        ]);
-        return Number(stdout.trim().split("\n")[0]);
-      };
+      const readControllerPid = (): number => controller.pid;
 
-      /** Returns how many rows the transcript of the thread `sessionId` holds, reading every page. */
-      const countTranscriptRows = async (sessionId: string): Promise<number> => {
-        let count = 0;
-        let cursor: string | undefined;
-        do {
-          const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
-          const page = await call<{
-            readonly items: readonly unknown[];
-            readonly nextCursor?: string;
-          }>("GET", `/sessions/${sessionId}/transcript?limit=${String(THREAD_PAGE)}${query}`);
-          count += page.items.length;
-          cursor = page.nextCursor;
-        } while (cursor !== undefined);
-        return count;
-      };
+      /** Returns how many rows the transcript of the thread `sessionId` holds. */
+      const countTranscriptRows = async (sessionId: string): Promise<number> =>
+        (await fleet.readTranscript(sessionId)).length;
 
       /** Waits until the thread `sessionId` is idle, so its next question opens a turn rather than queueing. */
       const waitForIdle = (sessionId: string): Promise<void> =>
@@ -469,11 +427,11 @@ function setLastActivity(
 
 /** Waits until `isReady` returns true, checking every 50 ms, and fails after 30 s naming `what`. */
 async function waitFor(isReady: () => Promise<boolean>, what: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (!(await isReady())) {
-    if (Date.now() > deadline) throw new Error(`gave up waiting for ${what}`);
-    await sleep(50);
-  }
+  await pollUntil(async () => ((await isReady()) ? true : undefined), {
+    timeoutMs: 30_000,
+    intervalMs: 50,
+    timeoutMessage: `gave up waiting for ${what}`,
+  });
 }
 
 /** How many threads are busy, how many idle, and how many wait on a Request. */

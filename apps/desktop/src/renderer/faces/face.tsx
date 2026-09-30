@@ -9,28 +9,18 @@ import {
   drawTypewriter,
 } from "./face-parts";
 import type { Look } from "./look";
-import { describePose, type Pose } from "@hercule/client-core";
+import type { Pose } from "@hercule/client-core";
 import { buildBodyPath, SHAPE_METRICS } from "./shapes";
 import "./face.css";
 
 /**
- * How assistive technology meets a face:
+ * Renders a colleague's face: `look` drawn in `pose`, `size` CSS pixels
+ * square. Only the working pose moves, and only when `animated` is true and
+ * Reduce motion is off; every other pose ignores `animated`.
  *
- * - `label` names the colleague, and the face's accessible name is
- *   "<label>, <pose words>";
- * - `decorative` hides the face, for a place where the text beside it already
- *   says who it is and what state it is in, such as a sidebar row.
- */
-type FaceName =
-  | { readonly label: string; readonly decorative?: false }
-  | { readonly decorative: true; readonly label?: undefined };
-
-/**
- * Renders a colleague's face: `look` drawn in `pose`, `size` CSS pixels square,
- * named or hidden for assistive technology as `FaceName` describes. Only the
- * working pose moves, and only when
- * `animated` is true and Reduce motion is off; every other pose ignores
- * `animated`.
+ * The face is hidden from assistive technology. Every place that draws a face
+ * also writes who it is and what state it is in, such as a thread row's title
+ * and pose, so a name on the face would only repeat them.
  *
  * A still face is the Bureau book's `face` in crew.js, attribute for
  * attribute, without the eyes' blink group: the app does not blink, and
@@ -41,13 +31,12 @@ export function Face({
   pose,
   size,
   animated = false,
-  ...name
 }: {
   readonly look: Look;
   readonly pose: Pose;
   readonly size: number;
   readonly animated?: boolean;
-} & FaceName): JSX.Element {
+}): JSX.Element {
   // Small faces get thicker strokes and larger eyes, so they still read.
   const bold = size < 30;
   const { topY } = SHAPE_METRICS[look.shape];
@@ -55,9 +44,6 @@ export function Face({
   // Left unrounded, as crew.js leaves it.
   const highlightY = topY + 6.4;
   const tapping = animated && pose === "working";
-  const accessibility = name.decorative
-    ? { "aria-hidden": true }
-    : { role: "img", "aria-label": `${name.label}, ${describePose(pose)}` };
   const hue = { "--hue": `var(--hue-${look.hue})` };
   const drawing = (
     <>
@@ -91,7 +77,7 @@ export function Face({
         viewBox="3 1 45 45"
         width={size}
         height={size}
-        {...accessibility}
+        aria-hidden="true"
         style={hue}
       >
         {drawing}
@@ -105,7 +91,7 @@ export function Face({
   // the page's main thread also runs style and paint on every frame: 120
   // times a second on a 120 Hz display.
   return (
-    <span className="cr cr--working cr--animated" {...accessibility} style={hue}>
+    <span className="cr cr--working cr--animated" aria-hidden="true" style={hue}>
       <svg viewBox="3 1 45 45" width={size} height={size}>
         {drawing}
       </svg>

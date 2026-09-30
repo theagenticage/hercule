@@ -28,12 +28,12 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import { app, Menu, Notification, protocol, safeStorage } from "electron";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
-import { answerAppRequest, makeAppSchemeLayer } from "./app-scheme";
+import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
 import { makeAppSettingsLayer } from "./app-settings";
 import { makeControllerConnectionLayer } from "./controller-connection";
 import { fetchWithoutRedirects } from "./fetch-without-redirects";
 import { registerIpcHandlers } from "./ipc";
-import { loadMainWindow, showMainWindow } from "./main-window";
+import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
 import { findRefusedArgument } from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
@@ -88,13 +88,13 @@ const startApp = (): void => {
   );
   registerIpcHandlers(runtime);
 
-  app.on("activate", () => runtime.runFork(showMainWindow));
+  app.on("activate", () => runtime.runFork(MainWindow.use((window) => window.show)));
   // A second launch comes from another app, often a terminal, and macOS
   // leaves that app in front. The user launched Hercule to use it, so the
   // app takes focus from whichever app has it.
   app.on("second-instance", () => {
     app.focus({ steal: true });
-    runtime.runFork(showMainWindow);
+    runtime.runFork(MainWindow.use((window) => window.show));
   });
   // The app exits only once the runtime has shut down, so that a save of the
   // window's state that is under way finishes first. It exits even when the
@@ -105,8 +105,10 @@ const startApp = (): void => {
   });
 
   void app.whenReady().then(() => {
-    protocol.handle(APP_SCHEME, (request) => runtime.runPromise(answerAppRequest(request)));
-    runtime.runFork(loadMainWindow);
+    protocol.handle(APP_SCHEME, (request) =>
+      runtime.runPromise(AppScheme.use((scheme) => scheme.answer(request))),
+    );
+    runtime.runFork(MainWindow.use((window) => window.load));
   });
 };
 

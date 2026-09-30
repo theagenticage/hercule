@@ -197,6 +197,5 @@ export const toClientError = (
     }
   }
 
-  const message = failure instanceof Error ? failure.message : String(failure);
-  return new ApiError("internal", message, undefined, failure);
+  return new ApiError("internal", readErrorMessage(failure), undefined, failure);
 };

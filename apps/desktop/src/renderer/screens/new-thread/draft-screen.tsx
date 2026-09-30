@@ -11,8 +11,10 @@ import {
   appendToMessage,
   applyPicks,
   buildComposerPlaceholder,
+  buildRecentModel,
   buildSubmission,
   findDraftSubject,
+  isMutationRunning,
   joinPhraseText,
   listWorkspaceThreads,
   queryKeys,
@@ -26,7 +28,6 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
-import { pickProjectTint } from "../project-tile";
 import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
 import { useSendOnMenuCommand } from "../thread/send-key";
 import { DraftComposer } from "./draft-composer";
@@ -116,30 +117,15 @@ export function DraftScreen({
       // The thread screen opens on this session without reading it again.
       queryClient.setQueryData(queryKeys.session(session.id), session);
       void queryClient.invalidateQueries({ queryKey: threadsQuery(client).queryKey });
-      // What was typed or picked while the start was on its way stays in the
-      // draft, so only what was sent is cleared. The draft had no failure
-      // since the start began.
-      const now = pendingSubmissions.read(key);
-      pendingSubmissions.write(key, {
-        message: now.message.text === sent.text ? { text: "" } : now.message,
-        picks: now.picks === sent.picks ? {} : now.picks,
-      });
-      // Recent holds the models the user picked, never a default.
-      if (sent.picks.model !== undefined && sent.picks.model !== null && sent.instanceId !== null) {
-        rememberRecentModel(controller.url, {
-          instanceId: sent.instanceId,
-          model: sent.picks.model,
-        });
-      }
+      pendingSubmissions.clearSent(key, sent);
+      const recent = buildRecentModel(sent.picks, sent.instanceId);
+      if (recent !== null) rememberRecentModel(controller.url, recent);
     },
     // Kept in the draft rather than read from `spawn.error`: a screen mounted
     // again, after the user left and came back, has a mutation of its own,
     // which never saw this start fail.
     onError: (error) => {
-      pendingSubmissions.write(key, {
-        ...pendingSubmissions.read(key),
-        failure: readErrorMessage(error),
-      });
+      pendingSubmissions.recordFailure(key, readErrorMessage(error));
     },
   });
   // Whether the column is scrolled away from its top, so part of it is under
@@ -149,33 +135,20 @@ export function DraftScreen({
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const canSend = fields.blocked === null && pending.message.text.trim() !== "" && !starting;
 
-  const writeText = (text: string): void => {
-    pendingSubmissions.write(key, { ...pendingSubmissions.read(key), message: { text } });
-  };
   // Each pick is compared with the draft's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.
   const pick = (steps: readonly ComposerPick[]): void => {
-    const now = pendingSubmissions.read(key);
-    pendingSubmissions.write(key, {
-      ...now,
-      picks: applyPicks(catalogs, view.base, now.picks, steps),
-    });
+    const { picks } = pendingSubmissions.read(key);
+    pendingSubmissions.writePicks(key, applyPicks(catalogs, view.base, picks, steps));
   };
   const submit = (): void => {
-    // The cache knows at once that a start is running. `starting` knows only
-    // after the next render, and two quick presses of ⏎ can both arrive
-    // before it.
-    if (!canSend || queryClient.isMutating({ mutationKey: startKey }) > 0) return;
+    if (!canSend || isMutationRunning(queryClient, startKey)) return;
     const submission = buildSubmission(
       { kind: "draft", config: view.base },
       addWorkspacePicks(pending.picks, workspace, workspaces),
       pending.message,
     );
-    // A draft always starts a thread rather than sending an input.
-    if (submission.kind !== "spawn") return;
-    if (pending.failure !== undefined) {
-      pendingSubmissions.write(key, { message: pending.message, picks: pending.picks });
-    }
+    pendingSubmissions.clearFailure(key);
     spawn.mutate(
       {
         input: submission.input,
@@ -195,11 +168,8 @@ export function DraftScreen({
   return (
     <>
       <DraftHeader
-        project={
-          project === undefined
-            ? null
-            : { name: project.name, tint: pickProjectTint(project.id, projects) }
-        }
+        projectId={projectId}
+        projects={projects}
         tabs={listWorkspaceThreads(joinedWorkspace, catalogs.sessions)}
         runners={catalogs.runners}
       />
@@ -217,7 +187,6 @@ export function DraftScreen({
                 )}
                 pose="idle"
                 size={68}
-                decorative
               />
             </span>
             <h1>
@@ -245,9 +214,11 @@ export function DraftScreen({
             })}
             canSend={canSend}
             error={pending.failure ?? null}
-            recent={readRecentModels(controller.url)}
+            readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
-            onTextChange={writeText}
+            onTextChange={(text) => {
+              pendingSubmissions.writeText(key, text);
+            }}
             onPick={pick}
             onSubmit={submit}
           />
@@ -255,7 +226,8 @@ export function DraftScreen({
             <StartCards
               projectId={projectId}
               onStart={(message) => {
-                writeText(appendToMessage(pendingSubmissions.read(key).message.text, message));
+                const { text } = pendingSubmissions.read(key).message;
+                pendingSubmissions.writeText(key, appendToMessage(text, message));
                 fieldRef.current?.focus();
               }}
             />

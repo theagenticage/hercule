@@ -1,12 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+import { useCallback, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatch, useRouteContext } from "@tanstack/react-router";
-import {
-  buildSidebarSections,
-  buildThreadGroups,
-  countThreadsByPose,
-  decideThreadPose,
-} from "@hercule/client-core";
+import { useDraftThread } from "../app/draft-thread";
 import {
   projectsQuery,
   providersQuery,
@@ -17,14 +12,9 @@ import {
   workspacesQuery,
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
+import { useSendOnChange } from "../app/send-on-change";
 import { ComposeIcon, SearchIcon, SidebarIcon } from "../icons";
-import { useOpenDraft } from "./open-draft";
-import {
-  buildExpandedSections,
-  buildSidebarItems,
-  listGoMenuThreads,
-  type SectionKey,
-} from "./sidebar-items";
+import { buildSidebar, listGoMenuThreads, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import "./sidebar.css";
@@ -62,7 +52,14 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
   useRelatedReads(threads, projects, workspaces);
-  const draft = useOpenDraft();
+  // The Draft Thread the new-thread screen shows, while that screen is open.
+  // Its row reads the draft as the screen does, see `useDraftThread`.
+  const draftSearch = useMatch({ from: "/_connected/_shell/", shouldThrow: false })?.search;
+  const draft = useDraftThread(
+    draftSearch === undefined
+      ? null
+      : { projectId: draftSearch.project ?? null, workspaceId: draftSearch.workspace ?? null },
+  );
 
   const selectedId =
     useMatch({ from: "/_connected/_shell/threads/$sessionId", shouldThrow: false })?.params
@@ -76,55 +73,18 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
     setExpanded((current) => new Set(current).add(section));
   }, []);
 
-  const sessions = new Map(threads.map((session) => [session.id, session]));
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const poses = new Map(
-    threads.map((session) => [
-      session.id,
-      decideThreadPose(
-        session,
-        session.runnerId === null ? undefined : runnersById.get(session.runnerId),
-      ),
-    ]),
-  );
-  const groups = buildThreadGroups({
-    sessions: threads,
+  const { items, counts } = buildSidebar({
+    threads,
     projects,
     workspaces,
     resources,
     runners,
     instances,
-    mode: "meta",
-    draft: draft?.place ?? null,
-  });
-  const sections = buildSidebarSections({
-    groups,
-    poses,
-    expanded: buildExpandedSections(expanded, groups),
+    draft,
+    expanded,
     selectedId,
   });
-  const items = buildSidebarItems({
-    sections,
-    sessions,
-    runners: runnersById,
-    projects,
-    draftMeta: draft?.rowMeta ?? null,
-  });
-  const counts = countThreadsByPose(poses.values());
-
-  // Most renders leave the Go menu as it was, and main builds the whole menu
-  // bar again for each list it is sent, so a list is sent only when it
-  // differs from the last one sent.
-  const goMenuThreads = listGoMenuThreads(items);
-  const goMenuKey = JSON.stringify(goMenuThreads);
-  const sentGoMenuKey = useRef<string | null>(null);
-  useEffect(() => {
-    if (sentGoMenuKey.current === goMenuKey) return;
-    sentGoMenuKey.current = goMenuKey;
-    bridge.goMenu.set(goMenuThreads).catch((error: unknown) => {
-      console.error("Could not update the Go menu:", error);
-    });
-  });
+  useSendOnChange(listGoMenuThreads(items), bridge.goMenu.set, "Could not update the Go menu:");
 
   return (
     <aside className="side">

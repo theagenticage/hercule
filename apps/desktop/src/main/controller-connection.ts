@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import type { ControllerUrlSaveOutcome } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
+import { isHttpUrl } from "./http-url";
 import { MainWindow } from "./main-window";
 import { StoredToken } from "./stored-token";
 
@@ -31,9 +32,8 @@ import { StoredToken } from "./stored-token";
  * returns `http://example.com`.
  */
 export const parseControllerUrl = (text: string): string | null => {
-  if (!URL.canParse(text)) return null;
+  if (!isHttpUrl(text)) return null;
   const url = new URL(text);
-  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   // The full URL is its origin plus "/" exactly when it has no user name,
   // password, path, query or fragment; even an empty query, "?", counts.
   return url.href === `${url.origin}/` ? url.origin : null;

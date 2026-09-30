@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { POSES, type Pose } from "@hercule/client-core";
 import { buildLook, Face, type Look } from ".";
 
@@ -7,8 +7,6 @@ afterEach(cleanup);
 
 /** A look that wears nothing, so only the pose changes the face. */
 const PLAIN: Look = { hue: "iris", shape: "egg", accessories: [] };
-
-const LABEL = "Fix 3-D Secure checkout for EU cards";
 
 /** Renders a face with the given props, `PLAIN` idle at 34 px otherwise, and returns its root element. */
 function renderFace({
@@ -22,9 +20,7 @@ function renderFace({
   readonly size?: number;
   readonly animated?: boolean;
 }): SVGSVGElement {
-  const { container } = render(
-    <Face look={look} pose={pose} size={size} label={LABEL} animated={animated} />,
-  );
+  const { container } = render(<Face look={look} pose={pose} size={size} animated={animated} />);
   return container.querySelector("svg")!;
 }
 
@@ -62,28 +58,12 @@ describe("Face", () => {
     expect(body?.getAttribute("transform")).toBe("translate(0 -2)");
   });
 
-  const POSE_WORDS = [
-    ["working", "working"],
-    ["waiting", "waiting on you"],
-    ["idle", "idle"],
-    ["asleep", "asleep"],
-    ["failed", "failed"],
-    ["paused", "paused"],
-    ["done", "done"],
-    ["away", "can't be reached"],
-  ] as const satisfies ReadonlyArray<readonly [Pose, string]>;
-
-  it.each(POSE_WORDS)("draws the %s pose as an image named for the label and %j", (pose, words) => {
-    render(
-      <Face
-        look={buildLook("0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c60")}
-        pose={pose}
-        size={22}
-        label={LABEL}
-      />,
-    );
-    const face = screen.getByRole("img", { name: `${LABEL}, ${words}` });
-    expect(face.tagName).toBe("svg");
+  it.each(POSES)("draws the %s pose as an svg in the look's hue", (pose) => {
+    const face = renderFace({
+      look: buildLook("0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c60"),
+      pose,
+      size: 22,
+    });
     expect(face.getAttribute("class")).toBe(`cr cr--${pose}`);
     expect(face.getAttribute("viewBox")).toBe("3 1 45 45");
     expect(face.getAttribute("width")).toBe("22");
@@ -91,19 +71,15 @@ describe("Face", () => {
     expect(face.style.getPropertyValue("--hue")).toBe("var(--hue-lime)");
   });
 
-  it.each([false, true])(
-    "hides a decorative face from assistive technology, animated %s",
-    (animated) => {
-      const { container } = render(
-        <Face look={PLAIN} pose="working" size={24} animated={animated} decorative />,
-      );
-      const face = container.firstElementChild!;
-      expect(face.getAttribute("aria-hidden")).toBe("true");
-      expect(face.hasAttribute("role")).toBe(false);
-      expect(face.hasAttribute("aria-label")).toBe(false);
-      expect(screen.queryByRole("img")).toBeNull();
-    },
-  );
+  it.each([false, true])("hides the face from assistive technology, animated %s", (animated) => {
+    const { container } = render(
+      <Face look={PLAIN} pose="working" size={24} animated={animated} />,
+    );
+    const face = container.firstElementChild!;
+    expect(face.getAttribute("aria-hidden")).toBe("true");
+    expect(face.hasAttribute("role")).toBe(false);
+    expect(face.hasAttribute("aria-label")).toBe(false);
+  });
 
   // Below 30 px the eyes are 1.2 times larger: the eyes' x radius is 2.4
   // instead of 2, and the glint's radius is 0.84 instead of 0.7.
@@ -171,11 +147,8 @@ describe("Face", () => {
 
   it("with animated, draws the working face's paws each in its own svg, in a span face.css moves", () => {
     const still = renderFace({ pose: "working" });
-    const { container } = render(
-      <Face look={PLAIN} pose="working" size={34} label={LABEL} animated />,
-    );
-    const face = within(container).getByRole("img", { name: `${LABEL}, working` });
-    expect(container.firstElementChild).toBe(face);
+    const { container } = render(<Face look={PLAIN} pose="working" size={34} animated />);
+    const face = container.firstElementChild as HTMLElement;
     expect(face.tagName).toBe("SPAN");
     expect(face.getAttribute("class")).toBe("cr cr--working cr--animated");
     expect(face.style.getPropertyValue("--hue")).toBe("var(--hue-iris)");

@@ -6,6 +6,7 @@ import {
   applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
+  buildRecentModel,
   computeEffectiveConfig,
   parseRecentModels,
   pushRecent,
@@ -94,12 +95,11 @@ export function useComposerModel(
   const base = readThreadConfig(thread);
   const config = computeEffectiveConfig(base, picks);
   const fields = buildComposerFields(catalogs, config, thread.kind);
-  // Recent is updated only after a successful send, and records only a model
-  // the user picked, not a default.
+  // Recent is updated only after a successful send.
   const rememberRecentModel = (): void => {
-    const model = picks.model ?? null;
-    if (model === null || config.instanceId === null) return;
-    const next = pushRecent(recent, { instanceId: config.instanceId, model });
+    const pair = buildRecentModel(picks, config.instanceId);
+    if (pair === null) return;
+    const next = pushRecent(recent, pair);
     setRecent(next);
     writeRecent(next);
   };

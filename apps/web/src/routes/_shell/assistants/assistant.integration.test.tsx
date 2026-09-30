@@ -580,10 +580,9 @@ describe("Assistant conversation: earlier messages", () => {
     });
   });
 
-  // Added in review round 1 of #92 slice 3 (F-74), when a nudge cancelled
-  // the load and the screen had to ask for the page again. A nudge now never
-  // cancels a running read: the load finishes, and the list is read again
-  // after it for the nudge's change.
+  // A nudge never cancels a running read. The earlier page's load finishes,
+  // and the list is read again after it for the nudge's change, so the
+  // screen never has to ask for the earlier page twice.
   it("keeps loading the earlier messages when a conversation nudge arrives, and shows the nudge's message after them", async () => {
     const user = userEvent.setup();
     let messages = buildMessages(60);
@@ -622,9 +621,9 @@ describe("Assistant conversation: earlier messages", () => {
     expect(await findOnScreen("message 61")).toBeDefined();
   });
 
-  // Added in review round 2 of #92 slice 3 (D-89) for nudges, which no
-  // longer cancel the load. A send still does: the composer re-reads the
+  // Unlike a nudge, a send does cancel the load: the composer re-reads the
   // messages already shown, and that re-read cancels the earlier page's load.
+  // The earlier messages must still arrive.
   it("still loads the earlier messages when a send re-reads the list while they load", async () => {
     const user = userEvent.setup();
     let messages = buildMessages(60);

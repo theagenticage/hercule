@@ -1,24 +1,37 @@
 /**
- * Turns the sidebar's sections into the flat list of items the virtualized
- * list draws: section headers, workspace labels, rows and "more" rows, each
- * with a fixed height and the space the book puts above it.
+ * Builds what the sidebar draws from the lists it reads: the flat list of
+ * items the virtualized list draws (section headers, workspace labels, rows
+ * and "more" rows, each with a fixed height and the space the book puts above
+ * it), and the thread counts in the foot.
  *
  * Which threads are shown, in which order, and in what pose is decided in
  * client-core. This file only lays the result out in Bureau's geometry.
  */
 import {
+  buildSidebarSections,
+  buildThreadGroups,
+  countThreadsByPose,
   decideThreadPose,
   decideThreadRowEnd,
   formatRequestQuestion,
+  type DraftPlace,
   type ExpandedSections,
   type Pose,
   type ProjectGroup,
   type ProjectSection,
   type SidebarSections,
+  type ThreadCounts,
   type ThreadRowEnd,
   type WaitingSection,
 } from "@hercule/client-core";
-import type { Project, Runner, Session } from "@hercule/contract";
+import type {
+  Project,
+  ProviderInstance,
+  Resource,
+  Runner,
+  Session,
+  Workspace,
+} from "@hercule/contract";
 import type { GoMenuThread } from "../../ipc/contract";
 import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
 
@@ -35,7 +48,7 @@ export type RowEnd = "working" | "waiting" | "queued" | "offline" | "age";
  * Which section an item belongs to: `waiting`, or `project:<id>`, with `none`
  * for the threads in no project.
  */
-export type SectionKey = string;
+export type SectionKey = "waiting" | `project:${string}`;
 
 /**
  * What an item draws. Its `key` is unique in the list, and stays the same for
@@ -146,7 +159,7 @@ const ITEM_LEADING = 1;
 const WORKSPACE_LABEL_LEADING = ITEM_LEADING + 8;
 
 /** Returns the section key of a project's section. */
-export const buildProjectSectionKey = (projectId: string | null): SectionKey =>
+const buildProjectSectionKey = (projectId: string | null): SectionKey =>
   `project:${projectId ?? "none"}`;
 
 /** Returns the key of a section's header. */
@@ -159,7 +172,7 @@ const buildMoreRowKey = (section: SectionKey): string => `more:${section}`;
  * Returns which sections are expanded, in the shape `buildSidebarSections`
  * takes, from the keys of the sections whose "more" row the user pressed.
  */
-export const buildExpandedSections = (
+const buildExpandedSections = (
   expanded: ReadonlySet<SectionKey>,
   groups: readonly ProjectGroup[],
 ): ExpandedSections => ({
@@ -193,9 +206,10 @@ const formatMoreLabel = (section: "waiting" | "project", hidden: number): string
     : `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
 
 /** What the items need to know about the threads, beyond the sections. */
-export interface SidebarItemSources {
+interface SidebarItemSources {
   readonly sections: SidebarSections;
   readonly sessions: ReadonlyMap<string, Session>;
+  readonly poses: ReadonlyMap<string, Pose>;
   readonly runners: ReadonlyMap<string, Runner>;
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
@@ -284,7 +298,7 @@ const buildWaitingContents = (
  */
 const buildProjectContents = (
   project: ProjectSection,
-  { sessions, runners, projects, draftMeta }: SidebarItemSources,
+  { sessions, poses, runners, projects, draftMeta }: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
   const contents: SidebarItemContent[] = [
@@ -312,7 +326,8 @@ const buildProjectContents = (
     }
     for (const row of lane.rows) {
       const session = sessions.get(row.id);
-      if (session === undefined) continue;
+      const pose = poses.get(row.id);
+      if (session === undefined || pose === undefined) continue;
       const runner = session.runnerId === null ? undefined : runners.get(session.runnerId);
       contents.push({
         kind: "thread-row",
@@ -320,7 +335,7 @@ const buildProjectContents = (
         sessionId: row.id,
         title: row.title,
         secondLine: row.secondLine,
-        pose: decideThreadPose(session, runner),
+        pose,
         end: flattenRowEnd(decideThreadRowEnd(session, runner)),
         activityAt: row.activityAt,
       });
@@ -343,11 +358,10 @@ const buildProjectContents = (
  * Returns the sidebar's items, top to bottom: Waiting on you when a thread is
  * waiting, then each project's section in the order of `sections.projects`.
  *
- * A row whose session is missing from `sessions` is left out. The sections
- * are built from the same list, so this happens only if a caller mixes two
- * reads of the list.
+ * A row whose session is missing from `sessions` or `poses` is left out. All
+ * three are built from one read of the thread list, so this does not happen.
  */
-export const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
+const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
   const { sections, sessions } = sources;
   return [
     ...(sections.waiting === null
@@ -360,6 +374,88 @@ export const buildSidebarItems = (sources: SidebarItemSources): readonly Sidebar
       ),
     ),
   ];
+};
+
+/** What the sidebar is built from: the lists it reads, the open draft, and the user's choices. */
+export interface SidebarSources {
+  readonly threads: readonly Session[];
+  /** The project list in its own order, which decides each project's tint. */
+  readonly projects: readonly Project[];
+  readonly workspaces: readonly Workspace[];
+  readonly resources: readonly Resource[];
+  readonly runners: readonly Runner[];
+  /** The instances whose catalogs give a row its model name. */
+  readonly instances: readonly ProviderInstance[];
+  /**
+   * The open Draft Thread, or `null`: the group it will join, and the second
+   * line of its row, such as "New workspace · studio-mac".
+   */
+  readonly draft: { readonly place: DraftPlace; readonly rowMeta: string } | null;
+  /** The keys of the sections whose "more" row the user pressed. */
+  readonly expanded: ReadonlySet<SectionKey>;
+  /** The session id of the open thread, which its section always shows, or `null`. */
+  readonly selectedId: string | null;
+}
+
+/** What the sidebar draws: the items of its list, and the thread counts in its foot. */
+export interface Sidebar {
+  readonly items: readonly SidebarItem[];
+  readonly counts: ThreadCounts;
+}
+
+/**
+ * Returns what the sidebar draws from `sources`: its items, top to bottom,
+ * and how many threads are working, waiting and idle.
+ *
+ * Each thread's pose is decided once, here, and serves the order of the
+ * sections, the rows' marks and the counts.
+ */
+export const buildSidebar = ({
+  threads,
+  projects,
+  workspaces,
+  resources,
+  runners,
+  instances,
+  draft,
+  expanded,
+  selectedId,
+}: SidebarSources): Sidebar => {
+  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const poses = new Map(
+    threads.map((session) => [
+      session.id,
+      decideThreadPose(
+        session,
+        session.runnerId === null ? undefined : runnersById.get(session.runnerId),
+      ),
+    ]),
+  );
+  const groups = buildThreadGroups({
+    sessions: threads,
+    projects,
+    workspaces,
+    resources,
+    runners,
+    instances,
+    mode: "meta",
+    draft: draft?.place ?? null,
+  });
+  const sections = buildSidebarSections({
+    groups,
+    poses,
+    expanded: buildExpandedSections(expanded, groups),
+    selectedId,
+  });
+  const items = buildSidebarItems({
+    sections,
+    sessions: new Map(threads.map((session) => [session.id, session])),
+    poses,
+    runners: runnersById,
+    projects,
+    draftMeta: draft?.rowMeta ?? null,
+  });
+  return { items, counts: countThreadsByPose(poses.values()) };
 };
 
 /** How many threads the Go menu lists: one per shortcut, ⌘1 to ⌘9. */

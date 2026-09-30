@@ -60,11 +60,12 @@ export interface WorkspaceGroup {
   /**
    * The group's label, such as `hercule/thread-3f1`, `webshop · moss` or `no
    * workspace`, split into the two parts a narrow sidebar truncates
-   * separately. `null`:
+   * separately. A group whose workspace is not in the workspace list is
+   * labelled like the threads with no workspace. `null`:
    *
    * - for the no-workspace group when it is the project's only group, because
    *   the label tells groups apart and there is nothing to tell apart;
-   * - for a group that holds only the draft;
+   * - for the group of a draft whose workspace does not exist yet;
    * - for the one group of the threads with no project, which is not split
    *   by workspace.
    */

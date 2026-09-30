@@ -12,7 +12,11 @@
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
- * the sidebar marks the open thread or draft as it does in the app. The
+ * the sidebar marks the open thread or draft as it does in the app. It does
+ * not mount the app's own route tree, because the app's routes talk to the
+ * controller even when the cache holds everything they read: the new-thread
+ * route reads the settings and the profiles again each time it opens, and
+ * the shell's route starts the live connection. The
  * query cache holds every record the page reads before the first render. The
  * client refuses every request, the bridge refuses every call, and no live
  * connection runs, so the page never talks to a controller or to main.
@@ -346,10 +350,10 @@ async function mountShellSpecimen(
   seedQueryCache(queryClient, client, records, screens);
   const pendingSubmissions = createPendingSubmissions();
   if (screens.draft !== undefined) {
-    pendingSubmissions.write(buildDraftKey(screens.draft.projectId, null), {
-      message: { text: "" },
-      picks: screens.draft.picks,
-    });
+    pendingSubmissions.writePicks(
+      buildDraftKey(screens.draft.projectId, null),
+      screens.draft.picks,
+    );
   }
   const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
   await router.load();

@@ -7,14 +7,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AccessModeMenuItem } from "@hercule/client-core";
 import type { AccessMode } from "@hercule/contract";
+import { readMenuLines } from "../thread/testing";
 import { AccessModeMenu } from "./access-mode-menu";
-
-/** Returns each row's text and whether it is marked current, in order. */
-const readRows = (): readonly (readonly [string, boolean])[] =>
-  [...document.querySelectorAll(".line")].map((row) => [
-    row.textContent,
-    row.getAttribute("aria-current") === "true",
-  ]);
 
 describe("the access-mode menu", () => {
   const ROWS: readonly AccessModeMenuItem[] = [
@@ -36,7 +30,7 @@ describe("the access-mode menu", () => {
     const onPick = vi.fn<(mode: AccessMode) => void>();
     render(<AccessModeMenu value="approval-required" rows={ROWS} onPick={onPick} />);
 
-    expect(readRows()).toEqual([
+    expect(readMenuLines()).toEqual([
       ["Approval required" + "asks for every side-effecting action", true],
       [
         "Auto" +

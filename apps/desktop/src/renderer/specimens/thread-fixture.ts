@@ -23,7 +23,7 @@
  */
 import type { Input, OpenRequest, TranscriptRow, Workspace } from "@hercule/contract";
 import { buildCheckout, buildWorkspace } from "@hercule/client-core/threads/testing";
-import type { SidebarRecords, ThreadScreenRecords } from "./sidebar-page";
+import type { SidebarRecords, ThreadScreenRecords } from "./shell-page";
 import {
   buildSpecimenSession,
   CLAUDE_OPUS,

@@ -12,8 +12,8 @@
  * on.
  */
 import { describe, expect, it } from "vitest";
-import type { AccessMode } from "@hercule/contract";
-import { ACCESS_MODES, buildAccessModeMenu, formatAccessMode } from "./access-modes";
+import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
+import { buildAccessModeMenu, formatAccessMode } from "./access-modes";
 
 /** The provider's display name, as used in a dimmed row's note. */
 const PROVIDER = "Claude Code";
@@ -27,7 +27,7 @@ const ALL_NATIVE: Record<AccessMode, "native" | "unsupported"> = {
 
 describe("formatAccessMode", () => {
   it("names each mode with the Bureau book's words", () => {
-    expect(ACCESS_MODES.map(formatAccessMode)).toEqual([
+    expect(ACCESS_MODE_CHAIN.map(formatAccessMode)).toEqual([
       "Approval required",
       "Auto-accept edits",
       "Auto",

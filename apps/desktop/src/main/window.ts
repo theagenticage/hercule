@@ -17,8 +17,9 @@ import { app, BrowserWindow, dialog, nativeTheme, screen, type Event } from "ele
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import { MAIN_TO_RENDERER_IPC_CHANNELS } from "../ipc/contract";
 import { AppSettings, type Bounds, type WindowState } from "./app-settings";
-import { encodeIpcPayload } from "./ipc/payload";
 import { MainWindow } from "./main-window";
 import { RENDERER_URL } from "./renderer-origin";
 import { chooseWindowBackground } from "./window-background";
@@ -162,6 +163,8 @@ const make = Effect.gen(function* () {
     () => Effect.sync(() => app.off("before-quit", prepareToQuit)),
   );
 
+  const show = Effect.sync(visibility.showWindow);
+
   return MainWindow.of({
     load: Effect.tryPromise(() => window.loadURL(RENDERER_URL)).pipe(
       Effect.catch((error) =>
@@ -169,13 +172,19 @@ const make = Effect.gen(function* () {
       ),
     ),
     reload: Effect.sync(() => window.webContents.reload()),
-    show: Effect.sync(visibility.showWindow),
+    show,
     showFirstTime: Effect.sync(visibility.showWindowFirstTime),
     isFocused: Effect.sync(() => window.isFocused()),
-    send: (name, payload) =>
-      Effect.map(encodeIpcPayload(name, payload), (encoded) =>
-        window.webContents.send(name, encoded),
-      ),
+    showAndSend: (name, payload) =>
+      Effect.gen(function* () {
+        // A payload that does not encode is a bug in main, not something the
+        // caller can handle, so it is a defect.
+        const encoded = yield* Effect.orDie(
+          Schema.encodeEffect(MAIN_TO_RENDERER_IPC_CHANNELS[name].payload)(payload),
+        );
+        yield* show;
+        window.webContents.send(name, encoded);
+      }),
     showWarning: (message) =>
       Effect.sync(() => {
         void dialog.showMessageBox(window, { type: "warning", message, buttons: ["OK"] });

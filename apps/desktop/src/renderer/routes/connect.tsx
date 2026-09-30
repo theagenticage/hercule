@@ -1,6 +1,7 @@
 import { useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { isMutationRunning } from "@hercule/client-core";
 import type { ControllerUrlSaveOutcome } from "../../ipc/contract";
 import type { ConnectProblem } from "../app/entry-guard";
 import { CenteredScreen } from "../screens/centered-screen";
@@ -92,11 +93,8 @@ function Connect(): JSX.Element {
         onSubmit={(event) => {
           event.preventDefault();
           // Connect stays enabled while main checks the controller, so that
-          // it keeps focus, and a second press must do nothing. The cache
-          // knows at once that a save is running. `save.isPending` knows only
-          // after the next render, and two quick presses of Enter can both
-          // arrive before it.
-          if (queryClient.isMutating({ mutationKey: CONTROLLER_URL_SAVE_KEY }) > 0) return;
+          // it keeps focus, and a second press must do nothing.
+          if (isMutationRunning(queryClient, CONTROLLER_URL_SAVE_KEY)) return;
           save.mutate(address);
         }}
       >

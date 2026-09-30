@@ -1,5 +1,5 @@
 import { useId, type JSX } from "react";
-import { buildOptionsMenu } from "@hercule/client-core";
+import { buildOptionsMenu, parseOptionChoice } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
 
 /**
@@ -44,7 +44,7 @@ export function OptionsMenu({
                   type="button"
                   aria-pressed={choice.value === row.value}
                   onClick={() => {
-                    onPick(row.id, row.boolean ? choice.value === "on" : choice.value);
+                    onPick(row.id, parseOptionChoice(row, choice.value));
                   }}
                 >
                   {choice.label}

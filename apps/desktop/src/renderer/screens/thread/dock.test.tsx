@@ -16,6 +16,7 @@ import type { OpenRequest } from "@hercule/contract";
 import {
   buildErrorBody,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   THREAD_FIXTURES,
   type Answer,
   type Call,
@@ -272,16 +273,10 @@ describe("the dock", () => {
 
   it("ignores every answer while one is sent, and takes answers again when it fails", async () => {
     const user = userEvent.setup();
-    let fail = (): void => {};
+    const held = holdAnswer();
     const answers: Answer[] = [];
     const { calls } = await renderDock(COMMAND, () =>
-      answers.length > 0
-        ? answers.shift()!
-        : new Promise<Answer>((resolve) => {
-            fail = () => {
-              resolve({ status: 409, body: buildErrorBody("invalid_state", "Try again.") });
-            };
-          }),
+      answers.length > 0 ? answers.shift()! : held.handler(),
     );
 
     focus(readDock());
@@ -296,9 +291,7 @@ describe("the dock", () => {
     await user.click(within(readDock()).getByRole("button", { name: "Deny" }));
 
     answers.push(ACCEPTED);
-    act(() => {
-      fail();
-    });
+    held.answer({ status: 409, body: buildErrorBody("invalid_state", "Try again.") });
     await screen.findByRole("alert");
     focus(readDock());
     await user.keyboard("{Escape}");

@@ -2276,10 +2276,7 @@ export const CLI = {
       },
       text: { stdin: true, flag: "text", help: "The message to send." },
     },
-    errors: {
-      forbidden:
-        "only a user credential may send: the message is recorded as the owner's, so an agent's session token is refused",
-    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "session.query": {

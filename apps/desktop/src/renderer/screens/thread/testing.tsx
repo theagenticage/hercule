@@ -1,13 +1,14 @@
 /**
  * Test helpers for the parts of the thread screen: the header, the composer,
- * the dock and the queued inputs.
+ * the dock, the queued inputs, the menus and the paragraph being written.
  *
  * A part is rendered alone, so its test does not depend on the rest of the
  * screen. It still runs against the real client and the stubbed controller of
  * `app/testing`, whose cleanup runs after each test.
  */
 import type { JSX } from "react";
-import { render } from "@testing-library/react";
+import { vi } from "vitest";
+import { act, render } from "@testing-library/react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -19,16 +20,7 @@ import {
 } from "@tanstack/react-router";
 import { buildRouterContext } from "../../app/context";
 import type { PendingSubmissions } from "../../app/pending-submissions";
-import {
-  projectsQuery,
-  providersQuery,
-  queuedInputsQuery,
-  resourcesQuery,
-  runnersQuery,
-  sessionQuery,
-  threadsQuery,
-  workspacesQuery,
-} from "../../app/queries";
+import { ensureShellData, ensureThreadData } from "../../app/queries";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -70,8 +62,8 @@ export interface RenderedThreadPart {
  * The router has the app's `_connected` route id, so the part finds the
  * bridge and the controller in its route context, and the app's paths `/` and
  * `/threads/$sessionId`, so the part's links resolve. It starts at the
- * thread, whose loader reads everything the thread screen's loaders read.
- * So, as in the app, nothing waits once this returns.
+ * thread, whose loader makes the reads the shell's and the thread's loaders
+ * make. So, as in the app, nothing waits once this returns.
  */
 export const renderThreadPart = async (
   Part: ThreadPart,
@@ -110,14 +102,8 @@ export const renderThreadPart = async (
     path: "threads/$sessionId",
     loader: () =>
       Promise.all([
-        queryClient.ensureQueryData(threadsQuery(client)),
-        queryClient.ensureQueryData(projectsQuery(client)),
-        queryClient.ensureQueryData(workspacesQuery(client)),
-        queryClient.ensureQueryData(resourcesQuery(client)),
-        queryClient.ensureQueryData(runnersQuery(client)),
-        queryClient.ensureQueryData(providersQuery(client)),
-        queryClient.ensureQueryData(sessionQuery(client, sessionId)),
-        queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
+        ensureShellData(queryClient, client),
+        ensureThreadData(queryClient, client, sessionId),
       ]),
     component: () => <Part sessionId={sessionId} />,
   });
@@ -140,5 +126,50 @@ export const renderThreadPart = async (
     queryClient,
     pendingSubmissions: controller.pendingSubmissions,
     sendMenuCommand,
+  };
+};
+
+/** Returns each menu line's text and whether it is marked current, in order. */
+export const readMenuLines = (): readonly (readonly [string, boolean])[] =>
+  [...document.querySelectorAll(".line")].map((line) => [
+    line.textContent,
+    line.getAttribute("aria-current") === "true",
+  ]);
+
+/** The animation frames `holdAnimationFrames` holds. */
+export interface HeldFrames {
+  /** Runs every frame requested and not run yet, inside `act`, so the renders they cause are done. */
+  readonly run: () => void;
+  /** Returns how many frames are requested and not run yet. */
+  readonly countWaiting: () => number;
+  /** Returns how many frames were requested in all. */
+  readonly countRequested: () => number;
+}
+
+/**
+ * Replaces `requestAnimationFrame` with a stub that holds every frame until
+ * the test runs it, and returns the held frames. The paragraph being written
+ * is painted in a frame, so a test that holds them decides when it is
+ * painted.
+ */
+export const holdAnimationFrames = (): HeldFrames => {
+  let waiting: Array<() => void> = [];
+  let requested = 0;
+  vi.stubGlobal("requestAnimationFrame", (frame: () => void) => {
+    waiting.push(frame);
+    requested += 1;
+    return requested;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  return {
+    run: () => {
+      act(() => {
+        const due = waiting;
+        waiting = [];
+        for (const frame of due) frame();
+      });
+    },
+    countWaiting: () => waiting.length,
+    countRequested: () => requested,
   };
 };

@@ -19,10 +19,10 @@
 import { memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { describePose, joinLabelText, type Pose } from "@hercule/client-core";
-import { useAgeLabel, useAgeWords } from "../app/age-clock";
 import { buildLook, Face } from "../faces";
 import { PlusIcon } from "../icons";
 import { Mark } from "../marks";
+import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { ITEM_HEIGHTS, type RowEnd, type SectionKey } from "./sidebar-items";
 
@@ -90,7 +90,7 @@ export const WaitingRow = memo(function WaitingRow({
       aria-label={`${title}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
-      <Face look={buildLook(sessionId)} pose="waiting" size={24} decorative />
+      <Face look={buildLook(sessionId)} pose="waiting" size={24} />
       <span className="side-text">
         <span className="side-name">{title}</span>
         <span className="side-ask" id={questionId}>
@@ -193,33 +193,6 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
 });
 
 /**
- * Renders how long ago a thread was last active: "20m" on screen, and "20
- * minutes ago" in a hidden element with the id `descriptionId`, which the
- * row's description points at. `onScreen` says whether the row is in the
- * list's visible part, where the age is kept current.
- */
-function AgeLabel({
-  at,
-  onScreen,
-  descriptionId,
-}: {
-  readonly at: string;
-  readonly onScreen: boolean;
-  readonly descriptionId: string;
-}): JSX.Element {
-  const label = useAgeLabel(at, onScreen);
-  const words = useAgeWords(at, onScreen);
-  return (
-    <>
-      <span className="side-age">{label}</span>
-      <span id={descriptionId} hidden>
-        {words}
-      </span>
-    </>
-  );
-}
-
-/**
  * Renders a thread in its project: its title, its second line (the model's
  * name), and its end: the working or the waiting mark, a word, or its age.
  *
@@ -275,11 +248,17 @@ export const ThreadRow = memo(function ThreadRow({
       </span>
       {endIsMark ? (
         <span className="side-end">
-          <Mark state={end} decorative />
+          <Mark state={end} />
         </span>
       ) : end === "age" ? (
         <span className="side-end">
-          <AgeLabel at={activityAt} onScreen={onScreen} descriptionId={endId} />
+          <AgeLabel
+            at={activityAt}
+            onScreen={onScreen}
+            descriptionId={endId}
+            as="span"
+            className="side-age"
+          />
         </span>
       ) : (
         <span className="side-end" id={endId}>

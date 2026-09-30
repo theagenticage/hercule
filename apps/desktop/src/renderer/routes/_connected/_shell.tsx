@@ -4,15 +4,8 @@ import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-
 import { listWaitingThreads } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
-import {
-  projectsQuery,
-  providersQuery,
-  resourcesQuery,
-  runnersQuery,
-  threadsQuery,
-  userQuery,
-  workspacesQuery,
-} from "../../app/queries";
+import { useSendOnChange } from "../../app/send-on-change";
+import { ensureShellData, projectsQuery, threadsQuery } from "../../app/queries";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { ProjectPicker } from "../../screens/new-thread/project-picker";
 import { Shell } from "../../shell";
@@ -38,15 +31,7 @@ export const Route = createFileRoute("/_connected/_shell")({
   loader: async ({ context: { controller, queryClient } }) => {
     const { client } = controller;
     try {
-      await Promise.all([
-        queryClient.ensureQueryData(threadsQuery(client)),
-        queryClient.ensureQueryData(projectsQuery(client)),
-        queryClient.ensureQueryData(workspacesQuery(client)),
-        queryClient.ensureQueryData(resourcesQuery(client)),
-        queryClient.ensureQueryData(runnersQuery(client)),
-        queryClient.ensureQueryData(providersQuery(client)),
-        queryClient.ensureQueryData(userQuery(client)),
-      ]);
+      await ensureShellData(queryClient, client);
     } catch (error) {
       // The entry guard only checks that a token is saved. When the
       // controller rejects it, such as a token revoked from another device,
@@ -95,11 +80,11 @@ function ShellLayout(): JSX.Element {
 
   // Main shows the badge and the notifications, and keeps which it has
   // shown, but only the page holds the thread list.
-  useEffect(() => {
-    bridge.waitingThreads.set(listWaitingThreads(threads)).catch((error: unknown) => {
-      console.error("Could not update the dock badge and the threads' notifications:", error);
-    });
-  }, [bridge, threads]);
+  useSendOnChange(
+    listWaitingThreads(threads),
+    bridge.waitingThreads.set,
+    "Could not update the dock badge and the threads' notifications:",
+  );
 
   // Only a signed-in user can start a thread, so only the shell listens for
   // File > New Thread.

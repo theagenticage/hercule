@@ -28,9 +28,10 @@ import {
 import { flushSync } from "react-dom";
 import type { QueryClient } from "@tanstack/react-query";
 import {
+  buildStreamCursor,
   createTailBuffer,
-  findNewRows,
-  mergeTranscript,
+  decideStreamDelivery,
+  decideTapDelivery,
   queryKeys,
   splitStreamingText,
   type Live,
@@ -38,7 +39,6 @@ import {
 import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
-  type TapItem,
   type TranscriptRow,
 } from "@hercule/contract";
 
@@ -108,11 +108,12 @@ const isWindowVisible = (): boolean => document.visibilityState === "visible";
  * mounts the component again for another thread; the thread route keys the
  * screen by session id.
  *
- * What the hook does with each delivery:
+ * What the hook does with each delivery, as `decideStreamDelivery` and
+ * `decideTapDelivery` decide it:
  *
  * - Stream rows not held yet update the tail buffer first, and are then
- *   merged into the transcript with `mergeTranscript`. The subscription
- *   starts after the last held row.
+ *   merged into the cached transcript. The subscription starts after the
+ *   last held row (`buildStreamCursor`).
  * - A stream `reset` means rows may have been missed, so the transcript is
  *   read again, and the open items are skipped: their tails are cleared.
  * - A `gone` on either topic ends that subscription: the session no longer
@@ -212,19 +213,13 @@ export const useThreadLive = (
     const queryKey = queryKeys.transcript(sessionId);
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(queryKey) ?? [];
-    // Positions start at 1 and the controller replays every row after the
-    // cursor, so cursor 0 asks for the whole log, as a thread with no rows
-    // yet needs. Without a cursor, the stream would start at the head, and
-    // rows written since the loader read the transcript would be lost.
-    const cursor = String(readHeldRows().at(-1)?.position ?? 0);
     const unsubscribe = live.subscribe(
       buildSessionStreamTopic(sessionId),
       (delta) => {
-        if (delta.gone) {
+        const delivery = decideStreamDelivery(readHeldRows(), delta);
+        if (delivery.kind === "gone") {
           unsubscribe();
-          return;
-        }
-        if (delta.reset) {
+        } else if (delivery.kind === "reset") {
           // The live connection subscribes again from the head at once, while
           // the transcript is still being read, so a row written in between
           // is in neither. This gap is accepted: a reset happens only when
@@ -232,23 +227,14 @@ export const useThreadLive = (
           // stream back.
           skipOpenItems();
           void queryClient.invalidateQueries({ queryKey });
-          return;
+        } else if (delivery.kind === "rows") {
+          buffer.applyRows(delivery.fresh);
+          rowsLandingRef.current = true;
+          queryClient.setQueryData(queryKey, delivery.transcript);
+          if (delivery.replay) skipOpenItems();
         }
-        const held = readHeldRows();
-        // A delivery can repeat rows already held, such as those replayed
-        // after the loader's read. The tail buffer takes only new rows: a row
-        // applied twice no longer matches the tail, and its item would be
-        // skipped for no reason. The stream topic carries only transcript
-        // rows; the delivery's type is shared by every topic, so it lists the
-        // other shapes too.
-        const fresh = findNewRows(held, delta.items as readonly TranscriptRow[]);
-        if (fresh.length === 0) return;
-        buffer.applyRows(fresh);
-        rowsLandingRef.current = true;
-        queryClient.setQueryData(queryKey, mergeTranscript(held, fresh));
-        if (delta.replay) skipOpenItems();
       },
-      cursor,
+      buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
   }, [live, queryClient, sessionId, buffer, skipOpenItems]);
@@ -257,17 +243,15 @@ export const useThreadLive = (
     if (live === null || !visible) return;
     skipOpenItems();
     const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
-      if (delta.gone) {
+      const delivery = decideTapDelivery(delta);
+      if (delivery.kind === "gone") {
         unsubscribe();
-        return;
-      }
-      if (delta.reset) {
+      } else if (delivery.kind === "reset") {
         skipOpenItems();
-        return;
+      } else {
+        for (const tap of delivery.taps) buffer.appendTap(tap);
+        schedulePaint();
       }
-      // The tap topic carries only tap items; see the stream's cast above.
-      for (const tap of delta.items as readonly TapItem[]) buffer.appendTap(tap);
-      schedulePaint();
     });
     return unsubscribe;
   }, [live, sessionId, visible, buffer, schedulePaint, skipOpenItems]);

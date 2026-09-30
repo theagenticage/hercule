@@ -14,44 +14,22 @@ import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
-import { StubSocket, stubWebSocketInto } from "@hercule/client-core/testing";
+import {
+  createApiStub,
+  StubSocket,
+  stubWebSocketInto,
+  type Call,
+  type Handler,
+} from "@hercule/client-core/testing";
 import { createMemoryStorage } from "@hercule/ui/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
 
 const BASE_URL = "http://controller.test";
 
-/** One request the app made, as the stub received it. */
-export interface Call {
-  readonly method: string;
-  readonly path: string;
-  /** The query string as sent, including the leading `?`; empty when there was none. */
-  readonly search: string;
-  readonly body: unknown;
-  readonly token: string | null;
-}
-
-/** The response a stubbed operation returns. */
-export interface Answer {
-  readonly status?: number;
-  readonly body: unknown;
-}
-
-/**
- * The response for one operation, or a function that builds it. A function may
- * return a promise that resolves later, which lets a test keep one write
- * pending while it makes another.
- */
-export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
-
-/** Builds the error body the API sends. Only a `validation` error includes issues. */
-export const buildErrorBody = (code: string, message: string): { error: unknown } => ({
-  error: {
-    code,
-    message,
-    ...(code === "validation" ? { details: { issues: [{ path: [], message }] } } : {}),
-  },
-});
+// The fake API is shared with the desktop app's tests. A test imports it from
+// here with the rest of the harness.
+export { buildErrorBody, type Answer, type Call, type Handler } from "@hercule/client-core/testing";
 
 /**
  * The requests the app makes on its own, whatever screen is under test. A test
@@ -64,49 +42,15 @@ const HOUSEKEEPING: Readonly<Record<string, Handler>> = {
 
 /**
  * Returns a `fetch` that responds from the given handlers, keyed
- * `METHOD /path`, and records every call. An unstubbed path returns 404, so a
- * test that forgot a route notices. The housekeeping routes above are the
- * exception, because every screen's test would otherwise have to stub them.
+ * `METHOD /path`, and records every call (see `createApiStub`). An unstubbed
+ * path returns 404, so a test that forgot a route notices. The housekeeping
+ * routes above are the exception, because every screen's test would
+ * otherwise have to stub them.
  */
 export const stubApi = (
   handlers: Readonly<Record<string, Handler>>,
-): { readonly fetch: FetchLike; readonly calls: readonly Call[] } => {
-  const calls: Call[] = [];
-
-  const fetch: FetchLike = async (url, init) => {
-    const authorization = new Headers(init?.headers).get("authorization");
-    // The body may arrive as a stream rather than a string, so read it the way
-    // the controller does.
-    const sent = await new Request(url, init).text();
-    const call: Call = {
-      method: init?.method ?? "GET",
-      path: new URL(url).pathname,
-      search: new URL(url).search,
-      body: sent.length === 0 ? undefined : JSON.parse(sent),
-      token: authorization === null ? null : authorization.replace(/^Bearer /, ""),
-    };
-    calls.push(call);
-
-    const key = `${call.method} ${call.path}`;
-    const handler = handlers[key] ?? HOUSEKEEPING[key];
-    const answer: Answer =
-      handler === undefined
-        ? {
-            status: 404,
-            body: buildErrorBody("not_found", `no stub for ${call.method} ${call.path}`),
-          }
-        : typeof handler === "function"
-          ? await handler(call)
-          : handler;
-
-    return new Response(JSON.stringify(answer.body), {
-      status: answer.status ?? 200,
-      headers: { "content-type": "application/json" },
-    });
-  };
-
-  return { fetch, calls };
-};
+): { readonly fetch: FetchLike; readonly calls: readonly Call[] } =>
+  createApiStub({ ...HOUSEKEEPING, ...handlers });
 
 /**
  * The live connection as a test sees it: the topics the app subscribes to, and
@@ -139,7 +83,7 @@ export interface LiveStub {
    * append-only subscription from a page it already has sends this cursor in
    * its first `subscribe` call. Throws if nothing is subscribed to `topic`.
    */
-  cursorOf(topic: string): string | undefined;
+  readCursor(topic: string): string | undefined;
   /**
    * Closes the app's socket from the server side, as a network failure would.
    * The app then reconnects on its own schedule.
@@ -314,6 +258,11 @@ export const renderApp = async ({
   const sockets: StubSocket[] = [];
   const live = createLive({ client, baseUrl: BASE_URL, webSocket: stubWebSocketInto(sockets) });
   started.push(live);
+  const readSocket = (): StubSocket => {
+    const socket = sockets.at(-1);
+    if (socket === undefined) throw new Error("the app has not opened a socket");
+    return socket;
+  };
   const liveStub: LiveStub = {
     topics: () =>
       sockets
@@ -322,29 +271,15 @@ export const renderApp = async ({
         .map((each) => each.topic) ?? [],
     connected: () => sockets.at(-1)?.readyState === 1,
     push: (topic, message) => {
-      const socket = sockets.at(-1);
-      if (socket === undefined) throw new Error("the app has not opened a socket");
-      socket.push(topic, message);
+      readSocket().push(topic, message);
     },
     fail: (topic, error) => {
-      const socket = sockets.at(-1);
-      if (socket === undefined) throw new Error("the app has not opened a socket");
-      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
-      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
-      socket.fail(held.requestId, error);
+      const socket = readSocket();
+      socket.fail(socket.findSubscription(topic).requestId, error);
     },
-    cursorOf: (topic) => {
-      const socket = sockets.at(-1);
-      if (socket === undefined) throw new Error("the app has not opened a socket");
-      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
-      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
-      const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
-      return (call?.payload as { cursor?: string } | undefined)?.cursor;
-    },
+    readCursor: (topic) => readSocket().findSubscription(topic).cursor,
     drop: () => {
-      const socket = sockets.at(-1);
-      if (socket === undefined) throw new Error("the app has not opened a socket");
-      socket.drop();
+      readSocket().drop();
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -8,28 +8,13 @@
  * This file holds types only. The preload and the renderer import it with
  * `import type`, so neither loads the contract, nor Effect, at run time.
  */
-import type { MAIN_TO_RENDERER_IPC_CHANNELS, RENDERER_TO_MAIN_IPC_CHANNELS } from "./contract";
-
-type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
-type MainToRendererIpcChannels = typeof MAIN_TO_RENDERER_IPC_CHANNELS;
-
-/** The name of a renderer-to-main channel, such as `controllerUrl.read`. */
-export type RendererToMainIpcChannelName = keyof RendererToMainIpcChannels;
-
-/** The name of a main-to-renderer channel, such as `menu.command`. */
-export type MainToRendererIpcChannelName = keyof MainToRendererIpcChannels;
-
-/** The request of a channel in the form the renderer sends it. */
-export type EncodedIpcRequest<Name extends RendererToMainIpcChannelName> =
-  RendererToMainIpcChannels[Name]["request"]["Encoded"];
-
-/** The response of a channel in the form the renderer receives it. */
-export type EncodedIpcResponse<Name extends RendererToMainIpcChannelName> =
-  RendererToMainIpcChannels[Name]["response"]["Encoded"];
-
-/** The payload of a main-to-renderer channel in the form the renderer receives it. */
-export type EncodedIpcPayload<Name extends MainToRendererIpcChannelName> =
-  MainToRendererIpcChannels[Name]["payload"]["Encoded"];
+import type {
+  EncodedIpcPayload,
+  EncodedIpcRequest,
+  EncodedIpcResponse,
+  MainToRendererIpcChannelName,
+  RendererToMainIpcChannelName,
+} from "./contract";
 
 /**
  * The bridge function of one renderer-to-main channel. It takes no argument

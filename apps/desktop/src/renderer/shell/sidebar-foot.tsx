@@ -30,7 +30,7 @@ export const SidebarFoot = memo(function SidebarFoot({
         waiting · <b>{idle}</b> idle
       </div>
       <div className="side-me">
-        <UserAvatar name={username} size={24} decorative />
+        <UserAvatar name={username} size={24} />
         <span className="side-name">{username}</span>
         <button
           type="button"

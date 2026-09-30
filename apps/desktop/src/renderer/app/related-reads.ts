@@ -9,9 +9,8 @@
  */
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { decideRelatedReads, queryKeys } from "@hercule/client-core";
+import { decideRelatedReads, invalidateWithoutCancelling, queryKeys } from "@hercule/client-core";
 import type { Project, Session, Workspace } from "@hercule/contract";
-import { invalidateWithoutCancelling } from "./live-invalidation";
 
 /**
  * Compares `threads` with the thread list of the calling component's previous

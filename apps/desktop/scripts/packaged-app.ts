@@ -7,28 +7,22 @@
  *
  * It also holds what the perf script and the first-frame check share beyond
  * that: the connection to main's Node inspector, stopping the app by its
- * process ID, and the Markdown table each prints. The perf script and one
- * end-to-end test also start the app as a plain process, with no Playwright
+ * process ID, and the Markdown table each prints. The perf script and two
+ * end-to-end tests also start the app as a plain process, with no Playwright
  * attached (see `launchPlainApp`).
  *
  * The scripts run on plain Node and import this module by its `.ts` path, so
  * the module uses only TypeScript that Node can strip, and imports its
  * neighbours by their full file names too.
  */
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { setTimeout as sleep } from "node:timers/promises";
 import { _electron, type ElectronApplication, type Page } from "playwright";
-import {
-  completeSetup,
-  PASSWORD,
-  ROOT,
-  startController,
-  USERNAME,
-} from "../../../scripts/controller-process.ts";
+import { PASSWORD, startSetUpController, USERNAME } from "../../../scripts/controller-process.ts";
+import { pollUntil } from "./poll.ts";
 import { buildAppEnv } from "./processes.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
 
@@ -290,7 +284,8 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
  *
  * Closing the window only hides it, so a mistake in that handler can keep
  * `app.quit()` from finishing. After 10 seconds the process is killed, by the
- * PID Playwright started, and this fails saying so: nothing is left running.
+ * PID Playwright started, and this fails saying so: nothing is left running
+ * (see `waitForExitOrKill`).
  *
  * A crash while quitting is checked here because nothing else would notice
  * it: the test or the measurement is already done, and only the crash report
@@ -305,17 +300,20 @@ export async function quitApp(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ app }) => {
     setTimeout(() => app.quit(), 0);
   });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<true>((resolve) => {
-    timer = setTimeout(() => resolve(true), 10_000);
-  });
-  const outcome = await Promise.race([closed.then(() => false as const), timedOut]);
-  clearTimeout(timer);
-  if (outcome) {
-    child.kill("SIGKILL");
+  try {
+    await waitForExitOrKill(child.pid!, "the app", "app.quit()");
+  } finally {
     await closed;
-    throw new Error("the app was still running 10 s after app.quit(), so it was killed");
   }
+  assertExitedCleanly(child);
+}
+
+/**
+ * Checks that the app's process, which has ended, exited with code 0. Fails
+ * saying how it ended otherwise, such as on a crash while quitting: nothing
+ * else would notice that crash once the test or the measurement is done.
+ */
+export function assertExitedCleanly(child: ChildProcess): void {
   if (child.exitCode !== 0) {
     const ending = child.signalCode ?? `code ${String(child.exitCode)}`;
     throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
@@ -334,18 +332,10 @@ export function isWindowVisible(app: ElectronApplication): Promise<boolean> {
  * when the binary has not been built, or setup fails.
  */
 export async function runWithScratchController<T>(use: (url: string) => Promise<T>): Promise<T> {
-  const binary = join(ROOT, "hercule");
-  if (!existsSync(binary)) {
-    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
-  }
   const home = mkdtempSync(join(tmpdir(), "hercule-desktop-home-"));
   try {
-    const controller = await startController({ home, binary });
+    const controller = await startSetUpController({ home });
     try {
-      const ran = await completeSetup({ home, url: controller.url, binary });
-      if (ran.code !== 0) {
-        throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
-      }
       return await use(controller.url);
     } finally {
       await controller.stop();
@@ -361,12 +351,14 @@ export async function runWithScratchController<T>(use: (url: string) => Promise<
  * after the shell shows. Fails after 5 s.
  */
 async function waitForSavedToken(userDataDir: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (typeof readSettings(userDataDir)["token"] === "string") return;
-    await sleep(50);
-  }
-  throw new Error("main did not save the token within 5 s of signing in");
+  await pollUntil(
+    () => (typeof readSettings(userDataDir)["token"] === "string" ? true : undefined),
+    {
+      timeoutMs: 5_000,
+      intervalMs: 50,
+      timeoutMessage: "main did not save the token within 5 s of signing in",
+    },
+  );
 }
 
 /**
@@ -510,9 +502,33 @@ function isRunning(pid: number): boolean {
 }
 
 /**
+ * Waits up to 10 s for the process `pid` to end. Kills it when it is still
+ * running then, and fails saying that `name` was still running 10 s after
+ * `since`, so nothing is left running.
+ *
+ * For a child of this process, the exit code is known once this returns:
+ * Node reads it as it reaps the child, and a child that has not been reaped
+ * still counts as running.
+ */
+export async function waitForExitOrKill(pid: number, name: string, since: string): Promise<void> {
+  try {
+    await pollUntil(() => (isRunning(pid) ? undefined : true), {
+      timeoutMs: 10_000,
+      intervalMs: 50,
+      timeoutMessage: `${name} was still running 10 s after ${since}, so it was killed`,
+    });
+  } catch (error) {
+    // The wait fails only once the 10 s are up, and the message says the
+    // process was killed, so it is killed before the failure goes on.
+    process.kill(pid, "SIGKILL");
+    throw error;
+  }
+}
+
+/**
  * Stops the app's process `pid`: sends it SIGTERM, which quits the app as
- * `app.quit()` does, and waits until the process has ended. Kills it when it
- * is still running 10 s later, and then fails saying so.
+ * `app.quit()` does, and waits until the process has ended (see
+ * `waitForExitOrKill`).
  *
  * It needs only the process ID, so it also stops an app started through
  * LaunchServices, which is not a child of the script. A caller that spawned
@@ -522,16 +538,17 @@ function isRunning(pid: number): boolean {
 export async function stopApp(pid: number): Promise<void> {
   if (!isRunning(pid)) return;
   process.kill(pid, "SIGTERM");
-  const deadline = Date.now() + 10_000;
-  while (isRunning(pid)) {
-    if (Date.now() > deadline) {
-      process.kill(pid, "SIGKILL");
-      throw new Error(
-        `the app (process ${String(pid)}) was still running 10 s after SIGTERM, so it was killed`,
-      );
-    }
-    await sleep(100);
-  }
+  await waitForExitOrKill(pid, `the app (process ${String(pid)})`, "SIGTERM");
+}
+
+/**
+ * Stops an app started by `launchPlainApp` if it is still running (see
+ * `stopApp`). The PID of a process that has already exited may belong to
+ * another process by now, so an app that has exited is left alone.
+ */
+export async function stopPlainApp(app: PlainApp): Promise<void> {
+  const child = app.process;
+  if (child.exitCode === null && child.signalCode === null) await stopApp(child.pid!);
 }
 
 /** Formats a Markdown table. */

@@ -2,27 +2,15 @@
  * Tests the shell route's data and wiring: the loader's reads, the live
  * connection that keeps them current, File > New Thread, and what the shell
  * sends main for the dock badge, the threads' notifications and the Go menu.
- *
- * Each test makes the sidebar's reads active with query observers of its
- * own, so that an invalidation reads again whatever the sidebar's components
- * happen to read.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { onlineManager, QueryObserver, type QueryClient } from "@tanstack/react-query";
+import { onlineManager, type QueryClient } from "@tanstack/react-query";
+import { invalidateWithoutCancelling } from "@hercule/client-core";
 import type { OpenRequest, Session } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import type { RouterContext } from "../../app/context";
-import { invalidateWithoutCancelling } from "../../app/live-invalidation";
-import {
-  projectsQuery,
-  providersQuery,
-  resourcesQuery,
-  runnersQuery,
-  threadsQuery,
-  workspacesQuery,
-} from "../../app/queries";
+import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -40,37 +28,14 @@ import {
 // The shell runs `invalidateWithoutCancelling` once for each query key a push
 // lists, so its calls count the pushes the app has handled. The function
 // itself is the real one.
-vi.mock("../../app/live-invalidation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../app/live-invalidation")>();
+vi.mock("@hercule/client-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hercule/client-core")>();
   return { ...actual, invalidateWithoutCancelling: vi.fn(actual.invalidateWithoutCancelling) };
 });
 
-/** The query observers the current test made, removed after it. */
-const observers: Array<() => void> = [];
-
 afterEach(() => {
-  for (const unsubscribe of observers.splice(0)) unsubscribe();
   onlineManager.setOnline(true);
 });
-
-/** Makes the sidebar's list reads active, as the sidebar's components do. */
-const observeSidebarReads = (queryClient: QueryClient, context: RouterContext): void => {
-  const client = context.controller!.client;
-  for (const options of [
-    threadsQuery(client),
-    projectsQuery(client),
-    workspacesQuery(client),
-    resourcesQuery(client),
-    runnersQuery(client),
-    providersQuery(client),
-  ]) {
-    const observer = new QueryObserver(
-      queryClient,
-      options as ConstructorParameters<typeof QueryObserver>[1],
-    );
-    observers.push(observer.subscribe(() => {}));
-  }
-};
 
 /** Counts the reads of one path, such as `/api/v1/sessions`, among `calls`. */
 const countReads = (calls: readonly Call[], path: string): number =>
@@ -89,7 +54,6 @@ const startShell = async ({
   const calls = stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...handlers });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   const app = await renderApp(fake, { path });
-  observeSidebarReads(app.context.queryClient, app.context);
   await waitForShellLive(app.live, app.context.queryClient);
   return { calls, fake, ...app };
 };
@@ -128,7 +92,7 @@ describe("the shell's loader", () => {
       handlers: {
         "GET /api/v1/sessions": (call) => ({
           body:
-            call.query.cursor === undefined
+            new URLSearchParams(call.search).get("cursor") === null
               ? { items: [first], nextCursor: "page-2" }
               : { items: rest },
         }),
@@ -139,7 +103,9 @@ describe("the shell's loader", () => {
       SIDEBAR_FIXTURE.threads,
     );
     const reads = calls.filter((call) => call.path === "/api/v1/sessions");
-    expect(reads.slice(0, 2).map((call) => call.query)).toEqual([
+    expect(
+      reads.slice(0, 2).map((call) => Object.fromEntries(new URLSearchParams(call.search))),
+    ).toEqual([
       { thread: "true", limit: "500" },
       { thread: "true", limit: "500", cursor: "page-2" },
     ]);
@@ -449,6 +415,28 @@ describe("the threads waiting on the user", () => {
     await waitFor(() => {
       expect(fake.waitingThreadLists.at(-1)).toEqual([RUNBOOK_WAITING]);
     });
+  });
+
+  it("are not sent again when a change leaves them as they were", async () => {
+    let threads = SIDEBAR_FIXTURE.threads;
+    const { fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+
+    threads = threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.bunPin
+        ? { ...thread, title: "Bump the Bun pin to 1.3" }
+        : thread,
+    );
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.bunPin]);
+    });
+
+    // The Go menu is sent the new title, so the page has read the changed list.
+    await waitFor(() => {
+      expect(fake.goMenus).toHaveLength(2);
+    });
+    expect(fake.waitingThreadLists).toEqual([[RUNBOOK_WAITING]]);
   });
 });
 

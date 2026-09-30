@@ -238,7 +238,7 @@ const THREAD_PARTS = [
   ".lip",
   ".lip > span",
   ".lip svg",
-  ".lip .mono",
+  ".lip > span > span:not(.faint)",
   ".lip .faint",
 ];
 

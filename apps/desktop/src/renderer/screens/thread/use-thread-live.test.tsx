@@ -16,8 +16,9 @@ import {
   type TapItem,
   type TranscriptRow,
 } from "@hercule/contract";
-import { buildNextRows, THREAD_FIXTURES, type EventBody } from "../../app/testing";
+import { buildNextRows, setVisibility, THREAD_FIXTURES, type EventBody } from "../../app/testing";
 import { AgentMessage } from "./blocks";
+import { holdAnimationFrames, type HeldFrames } from "./testing";
 import { useThreadLive } from "./use-thread-live";
 
 /** A thread whose turn has finished, so no item is open when the hook mounts. */
@@ -93,18 +94,8 @@ const createFakeLive = () => {
   };
 };
 
-/** The animation frames requested and not run yet, and how many were requested in all. */
-let frames: Array<() => void> = [];
-let framesRequested = 0;
-
-/** Runs every animation frame requested so far, and the renders they cause. */
-const runFrames = (): void => {
-  act(() => {
-    const due = frames;
-    frames = [];
-    for (const frame of due) frame();
-  });
-};
+/** The animation frames, held until a test runs them. */
+let frames: HeldFrames;
 
 /**
  * Waits for the cache to tell its readers about a change, and for the render
@@ -113,23 +104,8 @@ const runFrames = (): void => {
 const settle = (): Promise<void> =>
   act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
-/** Sets what `document.visibilityState` reads, and tells the page it changed, as a hide or show does. */
-const setVisibility = (state: DocumentVisibilityState): void => {
-  act(() => {
-    Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-};
-
 beforeEach(() => {
-  frames = [];
-  framesRequested = 0;
-  vi.stubGlobal("requestAnimationFrame", (frame: () => void) => {
-    frames.push(frame);
-    framesRequested += 1;
-    return framesRequested;
-  });
-  vi.stubGlobal("cancelAnimationFrame", () => {});
+  frames = holdAnimationFrames();
 });
 
 afterEach(() => {
@@ -224,7 +200,7 @@ const mountHook = () => {
     </QueryClientProvider>,
   );
   // The tap's first subscription paints once; start each test with no frame due.
-  runFrames();
+  frames.run();
   return {
     fake,
     queryClient,
@@ -257,23 +233,23 @@ describe("useThreadLive", () => {
     const { fake, findOpenParagraph } = mountHook();
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
     await settle();
-    const requestedBefore = framesRequested;
+    const requestedBefore = frames.countRequested();
 
     fake.pushTaps("The fix ", "is to ");
     fake.pushTaps("await the ");
     fake.pushTaps("delivery.");
-    expect(framesRequested - requestedBefore).toBe(1);
+    expect(frames.countRequested() - requestedBefore).toBe(1);
     const paragraph = findOpenParagraph()!;
     expect(paragraph.textContent).toBe("");
 
-    runFrames();
+    frames.run();
     expect(paragraph.textContent).toBe("The fix is to await the delivery.");
     expect(paragraph.childNodes).toHaveLength(1);
 
     // A tap within a paragraph renders nothing: the same text node is written again.
     const node = paragraph.firstChild;
     fake.pushTaps(" Then retry.");
-    runFrames();
+    frames.run();
     expect(paragraph.textContent).toBe("The fix is to await the delivery. Then retry.");
     expect(paragraph.firstChild).toBe(node);
   });
@@ -281,7 +257,7 @@ describe("useThreadLive", () => {
   it("keeps taps that arrive before their item's first row, and paints them once it starts", async () => {
     const { fake, findOpenParagraph } = mountHook();
     fake.pushTaps("Early ");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()).toBeNull();
 
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
@@ -294,12 +270,12 @@ describe("useThreadLive", () => {
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The **fix** is ");
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual([]);
     expect(findOpenParagraph()?.textContent).toBe("The **fix** is ");
 
     fake.pushTaps("to await.\n\nThen ", "**retry**");
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual(["The fix is to await."]);
     expect(findOpenParagraph()?.previousElementSibling?.innerHTML).toBe(
       "The <strong>fix</strong> is to await.",
@@ -313,12 +289,12 @@ describe("useThreadLive", () => {
     await settle();
     // A blank line inside a code block does not end a paragraph.
     fake.pushTaps("```ts\nawait retry();\n\nreturn");
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual([]);
     expect(findOpenParagraph()?.textContent).toBe("```ts\nawait retry();\n\nreturn");
 
     fake.pushTaps(";\n```\n\nDone");
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual(["await retry();\n\nreturn;\n"]);
     expect(findOpenParagraph()?.textContent).toBe("Done");
   });
@@ -330,7 +306,7 @@ describe("useThreadLive", () => {
     fake.pushRows([started!]);
     await settle();
     fake.pushTaps("The fix ", "is to ");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
 
     // A tap's frame comes after the row landed and before the row shows. It
@@ -338,7 +314,7 @@ describe("useThreadLive", () => {
     // that text vanish for a frame.
     fake.pushTaps("await");
     fake.pushRows([stored!]);
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
     await settle();
     expect(findOpenParagraph()?.textContent).toBe("The fix is to await");
@@ -352,7 +328,7 @@ describe("useThreadLive", () => {
     fake.pushTaps("The fix ", "is to ");
     fake.pushRows([stored!]);
     await settle();
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
     const heldBefore = readHeldRows(queryClient);
 
@@ -360,7 +336,7 @@ describe("useThreadLive", () => {
     // start of the tail, "is to ", and skip the item when it is not there.
     fake.pushRows([started!, stored!]);
     await settle();
-    runFrames();
+    frames.run();
     expect(readHeldRows(queryClient)).toBe(heldBefore);
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
   });
@@ -370,18 +346,18 @@ describe("useThreadLive", () => {
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix ");
 
     fake.deliver(STREAM_TOPIC, { reset: true });
     await settle();
     expect(readTranscript).toHaveBeenCalledOnce();
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("");
     // Rows may have been missed, so the item's taps can no longer be lined up
     // with its rows.
     fake.pushTaps("await");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("");
   });
 
@@ -393,14 +369,14 @@ describe("useThreadLive", () => {
     fake.pushTaps("First.\n\n", "Second.\n\nThird");
     fake.pushRows([stored!]);
     await settle();
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual(["First.", "Second."]);
     expect(findOpenParagraph()?.textContent).toBe("Third");
 
     // The connection dropped, and the tail was dropped with it. What is left
     // is the stored text.
     fake.deliver(TAP_TOPIC, { reset: true });
-    runFrames();
+    frames.run();
     expect(readFinishedBlocks()).toEqual(["First."]);
     expect(findOpenParagraph()?.textContent).toBe("");
   });
@@ -410,7 +386,7 @@ describe("useThreadLive", () => {
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
-    runFrames();
+    frames.run();
 
     setVisibility("hidden");
     expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([STREAM_TOPIC]);
@@ -420,7 +396,7 @@ describe("useThreadLive", () => {
     // Taps sent while hidden are lost, so the item's text now comes only in
     // its rows.
     fake.pushTaps("await");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("");
   });
 
@@ -429,13 +405,13 @@ describe("useThreadLive", () => {
     fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix ");
 
     // The connection dropped and the tap was subscribed again.
     fake.deliver(TAP_TOPIC, { reset: true });
     fake.pushTaps("await");
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("");
   });
 
@@ -454,7 +430,7 @@ describe("useThreadLive", () => {
       fake.deliver(STREAM_TOPIC, { items: buildNextRows(THREAD, NEW_ITEM_STARTED), replay: true });
       await settle();
       if (!tapsFirst) fake.pushTaps("is 42.");
-      runFrames();
+      frames.run();
       expect(findOpenParagraph()?.textContent).toBe("");
     },
   );
@@ -470,7 +446,7 @@ describe("useThreadLive", () => {
     // nothing was written in between.
     fake.deliver(STREAM_TOPIC, { items: rows, replay: true });
     await settle();
-    runFrames();
+    frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix ");
   });
 

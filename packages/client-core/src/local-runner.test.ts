@@ -17,14 +17,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runner, RunnerFacts } from "@hercule/contract";
-import {
-  buildFetchIdentityProbe,
-  detectLocalRunner,
-  queryKeys,
-  type FetchLike,
-  type IdentityProbe,
-} from "./index";
-import { IDENTITY_TIMEOUT_MS } from "./local-runner";
+import { buildFetchIdentityProbe, detectLocalRunner, queryKeys, type FetchLike } from "./index";
+import { IDENTITY_TIMEOUT_MS, type IdentityProbe } from "./local-runner";
 
 const buildFacts = (identityPort: number): RunnerFacts => ({
   os: "darwin",

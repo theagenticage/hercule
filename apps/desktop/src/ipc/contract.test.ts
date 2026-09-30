@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest";
+import { Schema } from "effect";
+import { RENDERER_TO_MAIN_IPC_CHANNELS, type RendererToMainIpcChannelName } from "./contract";
+
+/** Builds the Go menu's list of `length` threads. */
+const buildGoMenuThreads = (length: number) =>
+  Array.from({ length }, (_, index) => ({ sessionId: `s-${String(index)}`, title: "A thread" }));
+
+describe("the requests of the renderer-to-main channels", () => {
+  const cases: ReadonlyArray<{
+    readonly name: RendererToMainIpcChannelName;
+    readonly valid: unknown;
+    readonly invalid: unknown;
+  }> = [
+    // A channel that needs no request is sent with no argument, which main
+    // decodes as undefined.
+    { name: "controllerUrl.read", valid: undefined, invalid: 42 },
+    { name: "controllerUrl.save", valid: "http://127.0.0.1:4937", invalid: 42 },
+    { name: "token.read", valid: undefined, invalid: "a token" },
+    { name: "token.write", valid: "a token", invalid: 42 },
+    { name: "token.write", valid: null, invalid: "" },
+    // Only the ten ports a runner's identity endpoint can listen on.
+    { name: "runnerIdentity.read", valid: { port: 4939 }, invalid: { port: 4938 } },
+    { name: "runnerIdentity.read", valid: { port: 4948 }, invalid: { port: 4949 } },
+    { name: "runnerIdentity.read", valid: { port: 4940 }, invalid: { port: 22 } },
+    // The Go menu has a shortcut for each of the first nine threads only.
+    { name: "goMenu.set", valid: buildGoMenuThreads(9), invalid: buildGoMenuThreads(10) },
+    {
+      name: "waitingThreads.set",
+      valid: [{ sessionId: "s-1", requestId: "r-1", title: "A thread", question: "Run git push?" }],
+      invalid: [{ sessionId: "s-1", title: "A thread", question: "Run git push?" }],
+    },
+  ];
+
+  it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {
+    const decode = Schema.decodeUnknownSync(RENDERER_TO_MAIN_IPC_CHANNELS[name].request);
+    expect(decode(valid)).toEqual(valid);
+    expect(() => decode(invalid)).toThrow();
+  });
+});

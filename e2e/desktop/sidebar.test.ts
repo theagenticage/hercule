@@ -1,7 +1,7 @@
 /**
  * Tests the sidebar's thread list in the packaged app, signed in to a real
  * controller whose threads a fleet of scripted runners puts in known states
- * (spec 17 §Slices, slice 4):
+ * (spec 17, §Design system, **The sidebar**):
  *
  * - the live socket connects from `app://hercule` under the release policy;
  * - the list groups the threads by project and by workspace, and each row
@@ -19,18 +19,11 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ConsoleMessage, Page } from "playwright";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
 import {
-  evaluateInMain,
-  launchPlainApp,
-  signInOnce,
-  stopApp,
-  writeSettings,
-} from "../../apps/desktop/scripts/packaged-app";
-import {
   arrangeFleet,
-  createUserDataDirForTest,
+  launchPlainAppForTest,
   launchWithSavedController,
   openSignedIn,
   signInAndReadToken,
@@ -378,23 +371,8 @@ describe("the sidebar", () => {
 
       // Playwright's focus emulation keeps a hidden page "visible", so its
       // timers are never throttled. This test starts the app as a plain
-      // process instead, and reads the page through main, which attaches
-      // nothing to the page.
-      const userDataDir = createUserDataDirForTest();
-      writeSettings(userDataDir, { controllerUrl: url });
-      await signInOnce(userDataDir);
-      const { process: child, inspectorUrl } = await launchPlainApp(userDataDir);
-      onTestFinished(async () => {
-        // The PID of a process that has already exited may belong to another
-        // process by now, so only a running app is stopped.
-        if (child.exitCode === null && child.signalCode === null) await stopApp(child.pid!);
-      });
-      const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
-      const evaluateInPage = (expression: string) =>
-        evaluateInMain(
-          inspectorUrl,
-          `${window}.webContents.executeJavaScript(${JSON.stringify(expression)})`,
-        );
+      // process instead.
+      const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
       const hasWaitingRow = `document.querySelector("a.side-row--wait") !== null`;
       await expect
         .poll(() => evaluateInPage(`document.querySelectorAll("a.side-row").length`), {
@@ -403,11 +381,9 @@ describe("the sidebar", () => {
         .toBe(1);
       // The list can be on the page before the window first shows. A window
       // hidden before then would show anyway once its first screen arrives.
-      await expect
-        .poll(() => evaluateInMain(inspectorUrl, `${window}.isVisible()`), { timeout: 10_000 })
-        .toBe(true);
+      await expect.poll(() => callWindowMethod("isVisible"), { timeout: 10_000 }).toBe(true);
 
-      await evaluateInMain(inspectorUrl, `${window}.hide()`);
+      await callWindowMethod("hide");
       // Chromium throttles a hidden page's timers harder once it has been
       // hidden for 5 minutes.
       await sleep(6 * 60_000);

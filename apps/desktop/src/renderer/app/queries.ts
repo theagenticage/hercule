@@ -5,8 +5,14 @@
  * key the same reads the same way, and a live push lists the keys the cache
  * uses.
  */
-import { keepPreviousData, queryOptions } from "@tanstack/react-query";
-import { ApiError, detectLocalRunner, queryKeys, type HerculeClient } from "@hercule/client-core";
+import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  ApiError,
+  detectLocalRunner,
+  queryKeys,
+  readEveryPage,
+  type HerculeClient,
+} from "@hercule/client-core";
 import { MAX_PAGE_LIMIT, type Input, type Runner, type Task } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
 
@@ -38,35 +44,11 @@ const LIVE_KEPT_READ_OPTIONS = {
   refetchOnReconnect: false,
 } as const;
 
-/** One page of a list, as every list operation returns it. */
-interface Page<Item> {
-  readonly items: ReadonlyArray<Item>;
-  readonly nextCursor?: string;
-}
-
-/**
- * Reads a list page by page, passing each page's cursor to the next read,
- * and returns every item. Fails when any page's read fails.
- *
- * The sidebar needs every record a label can come from. A list cut off after
- * its first page would leave threads without their workspace's label and
- * nothing would say so, and the workspace list grows with every thread that
- * gets a worktree of its own.
- */
-const readEveryPage = async <Item>(
-  readPage: (page: { readonly limit: number; readonly cursor?: string }) => Promise<Page<Item>>,
-): Promise<ReadonlyArray<Item>> => {
-  const items: Item[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await readPage(
-      cursor === undefined ? { limit: MAX_PAGE_LIMIT } : { limit: MAX_PAGE_LIMIT, cursor },
-    );
-    items.push(...page.items);
-    cursor = page.nextCursor;
-  } while (cursor !== undefined);
-  return items;
-};
+// The sidebar's list reads below follow the cursor to the last page, because
+// the sidebar needs every record a label can come from. A list cut off after
+// its first page would leave threads without their workspace's label and
+// nothing would say so, and the workspace list grows with every thread that
+// gets a worktree of its own.
 
 /**
  * Reads every thread: every session no Agent spawned. The sidebar lists all
@@ -290,3 +272,47 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/**
+ * Reads everything the shell shows into `queryClient`: the sidebar's records
+ * and the signed-in user. Resolves once every read is cached, and fails with
+ * the first read that fails.
+ *
+ * The shell's loader calls it, and so does a test that renders one part of a
+ * screen alone, so the part finds the same records cached as in the app.
+ */
+export const ensureShellData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(projectsQuery(client)),
+    queryClient.ensureQueryData(workspacesQuery(client)),
+    queryClient.ensureQueryData(resourcesQuery(client)),
+    queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(userQuery(client)),
+  ]);
+};
+
+/**
+ * Reads everything the thread screen shows of the thread `sessionId` into
+ * `queryClient`: its session, its whole transcript and its queued inputs.
+ * Resolves once every read is cached, and fails with the first read that
+ * fails, such as a `not_found` `ApiError` when no such session exists.
+ *
+ * The thread's loader calls it, and so does a test that renders one part of
+ * the thread screen alone.
+ */
+export const ensureThreadData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionId: string,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(sessionQuery(client, sessionId)),
+    queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
+    queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
+  ]);
+};

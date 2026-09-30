@@ -1,14 +1,7 @@
 import type { JSX, ReactNode } from "react";
-import type { ComposerBlocked, LoginTarget, Phrase, ProjectTone } from "@hercule/client-core";
+import type { ComposerBlocked, DraftSubject, LoginTarget, Phrase } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 import { Phrases } from "./phrases";
-
-/** What the draft is for, as named in its heading: a project or a workspace. */
-export interface DraftSubject {
-  readonly label: string;
-  /** The identity hue that underlines the name; null for a workspace, which has none. */
-  readonly tone: ProjectTone | null;
-}
 
 /** The two identity hues, written out in full so Tailwind generates them (see `ProjectDot`). */
 const TONE = {

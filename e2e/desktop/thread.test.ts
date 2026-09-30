@@ -1,7 +1,7 @@
 /**
  * Tests the thread view in the packaged app, signed in to a real controller
  * whose threads scripted runners fill with turns, streamed text and Requests
- * (spec 17 §Slices, slice 5):
+ * (spec 17, §Design system, **The thread**):
  *
  * - a thread opens from the sidebar, and its transcript shows its rows;
  * - a message streams into the tail before its row lands, then shows as
@@ -15,19 +15,14 @@
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import type { Page } from "playwright";
-import { describe, expect, it, onTestFinished } from "vitest";
-import {
-  evaluateInMain,
-  launchPlainApp,
-  signInOnce,
-  stopApp,
-  writeSettings,
-} from "../../apps/desktop/scripts/packaged-app";
+import { describe, expect, it } from "vitest";
+import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   createUserDataDirForTest,
   keepWindowOnTop,
   launchForTest,
+  launchPlainAppForTest,
   openSignedIn,
   openThread,
   signInAndReadToken,
@@ -346,23 +341,8 @@ describe("the thread view", () => {
 
     // Playwright's focus emulation keeps a hidden page "visible", and the tap
     // is unsubscribed only on a real hide. This test starts the app as a
-    // plain process instead, and reads the page through main, which attaches
-    // nothing to the page.
-    const userDataDir = createUserDataDirForTest();
-    writeSettings(userDataDir, { controllerUrl: url });
-    await signInOnce(userDataDir);
-    const { process: child, inspectorUrl } = await launchPlainApp(userDataDir);
-    onTestFinished(async () => {
-      // The PID of a process that has already exited may belong to another
-      // process by now, so only a running app is stopped.
-      if (child.exitCode === null && child.signalCode === null) await stopApp(child.pid!);
-    });
-    const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
-    const evaluateInPage = (expression: string) =>
-      evaluateInMain(
-        inspectorUrl,
-        `${window}.webContents.executeJavaScript(${JSON.stringify(expression)})`,
-      );
+    // plain process instead.
+    const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readLastSnapshot = () =>
       evaluateInPage("globalThis.messageSnapshots.at(-1)") as Promise<MessageSnapshot | undefined>;
@@ -375,7 +355,7 @@ describe("the thread view", () => {
       .toBe(true);
     // A window that another window covers also reads as hidden; see
     // keepWindowOnTop.
-    await evaluateInMain(inspectorUrl, `${window}.setAlwaysOnTop(true)`);
+    await callWindowMethod("setAlwaysOnTop", true);
     await expect.poll(readVisibility, { timeout: 10_000 }).toBe("visible");
     await evaluateInPage(`(${recordSentFrames.toString()})()`);
     await evaluateInPage(`${threadRow}.click()`);
@@ -391,7 +371,7 @@ describe("the thread view", () => {
     });
     await expect.poll(async () => (await readLastSnapshot())?.openParagraph ?? "").not.toBe("");
 
-    await evaluateInMain(inspectorUrl, `${window}.hide()`);
+    await callWindowMethod("hide");
     await expect.poll(readVisibility).toBe("hidden");
     const shownWhenHidden = readShownText((await readLastSnapshot())!);
     // The stream topic stays subscribed while the window is hidden, so the
@@ -399,7 +379,7 @@ describe("the thread view", () => {
     await expect
       .poll(async () => readShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
       .toBeGreaterThan(shownWhenHidden.length);
-    await evaluateInMain(inspectorUrl, `${window}.show()`);
+    await callWindowMethod("show");
     await expect.poll(readVisibility).toBe("visible");
     // The message must still be streaming, or the window was shown too late
     // for this test to check anything.

@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { buildThreadBlocks, type Pose } from "@hercule/client-core";
-import { buildNextRows, RUNNING_ITEM_ID, THREAD_FIXTURES } from "../../app/testing";
+import {
+  buildNextRows,
+  RUNNING_ITEM_ID,
+  setVisibility,
+  stubElementSize,
+  THREAD_FIXTURES,
+} from "../../app/testing";
 import { Transcript } from "./transcript";
 
 const THREAD = THREAD_FIXTURES.running;
@@ -34,23 +40,12 @@ const ROWS = [
 /** When the command started: `buildNextRows` gives the new rows the last row's time. */
 const COMMAND_STARTED_AT = Date.parse(THREAD.transcript.at(-1)!.at);
 
-/** Sets what `document.visibilityState` reads, and tells the page it changed, as a hide or show does. */
-const setVisibility = (state: DocumentVisibilityState): void => {
-  act(() => {
-    Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-};
-
 beforeEach(() => {
   vi.useFakeTimers({
     now: COMMAND_STARTED_AT + 12_000,
     toFake: ["setTimeout", "clearTimeout", "Date"],
   });
-  // jsdom lays nothing out, so every element measures 0 and the virtualizer
-  // would find no room to draw a block in. The transcript measures 800 px.
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(800);
-  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+  stubElementSize(800, 800);
 });
 
 afterEach(() => {

@@ -16,10 +16,11 @@ const GITHUB_MARK =
  * the task came from, whether it is a Proposal or a Task, its priority as
  * bars, and its title.
  *
- * A click hands the card's text, the title and the description, to
- * `onStart`, which adds it to the Message Draft. The cards render nothing
- * until the tasks are read, and nothing when the project has no open task,
- * so a failed read leaves the draft as it would be without them.
+ * A click hands the card's `message`, one line that points the thread's
+ * agent at the task, to `onStart`, which adds it to the Message Draft. The
+ * cards render nothing until the tasks are read, and nothing when the
+ * project has no open task, so a failed read leaves the draft as it would be
+ * without them.
  */
 export function StartCards({
   projectId,

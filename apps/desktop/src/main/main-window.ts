@@ -7,12 +7,7 @@
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import type { MainToRendererIpcChannelName } from "../ipc/bridge";
-import type { MAIN_TO_RENDERER_IPC_CHANNELS } from "../ipc/contract";
-
-/** The payload of the main-to-renderer channel `Name`, before main encodes it. */
-type MainToRendererIpcPayload<Name extends MainToRendererIpcChannelName> =
-  (typeof MAIN_TO_RENDERER_IPC_CHANNELS)[Name]["payload"]["Type"];
+import type { IpcPayload, MainToRendererIpcChannelName } from "../ipc/contract";
 
 /** The app's one window. */
 export class MainWindow extends Context.Service<
@@ -52,12 +47,15 @@ export class MainWindow extends Context.Service<
     readonly isFocused: Effect.Effect<boolean>;
 
     /**
-     * Sends `payload` to the page on the main-to-renderer channel `name`,
-     * encoded against the IPC contract.
+     * Shows and focuses the window, as `show` does, then sends `payload` to
+     * the page on the main-to-renderer channel `name`, encoded against the
+     * IPC contract. Every message main sends asks the page to act on
+     * something the user chose outside it, such as a menu item or a
+     * notification, so the user is shown the page that acts.
      */
-    readonly send: <Name extends MainToRendererIpcChannelName>(
+    readonly showAndSend: <Name extends MainToRendererIpcChannelName>(
       name: Name,
-      payload: MainToRendererIpcPayload<Name>,
+      payload: IpcPayload<Name>,
     ) => Effect.Effect<void>;
 
     /**
@@ -67,13 +65,3 @@ export class MainWindow extends Context.Service<
     readonly showWarning: (message: string) => Effect.Effect<void>;
   }
 >()("hercule/desktop/MainWindow") {}
-
-/** Loads the renderer's page into the window; see `MainWindow.load`. */
-export const loadMainWindow: Effect.Effect<void, never, MainWindow> = MainWindow.use(
-  (window) => window.load,
-);
-
-/** Shows and focuses the window; see `MainWindow.show`. */
-export const showMainWindow: Effect.Effect<void, never, MainWindow> = MainWindow.use(
-  (window) => window.show,
-);

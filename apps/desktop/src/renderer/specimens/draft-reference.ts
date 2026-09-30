@@ -30,47 +30,8 @@
 import { buildDraftView, buildStartCards } from "@hercule/client-core";
 import { CLAUDE_OPUS } from "./sidebar-fixture";
 import { DRAFT_PAGE_RECORDS, WEBSHOP_DRAFT } from "./draft-fixture";
+import { findElement, findElementByText, findElements, replaceTextAfterIcon } from "./book-page";
 import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
-
-/** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
-function findElement(scope: ParentNode, selector: string): Element {
-  const element = scope.querySelector(selector);
-  if (element === null) throw new Error(`The book's draft has no ${selector}.`);
-  return element;
-}
-
-/**
- * Returns every element inside `scope` that matches `selector`. Fails when
- * the count is not `count`, because each edit pairs the book's elements with
- * the fixture's records one to one.
- */
-function findElements(scope: ParentNode, selector: string, count: number): Element[] {
-  const elements = [...scope.querySelectorAll(selector)];
-  if (elements.length !== count) {
-    throw new Error(
-      `The book's draft has ${String(elements.length)} ${selector}, and the fixture ${String(count)}.`,
-    );
-  }
-  return elements;
-}
-
-/** Returns the element inside `scope` that matches `selector` and whose text is `text`. Fails when there is none. */
-function findElementByText(scope: ParentNode, selector: string, text: string): Element {
-  const element = [...scope.querySelectorAll(selector)].find(
-    (each) => each.textContent.trim() === text,
-  );
-  if (element === undefined) throw new Error(`The book's draft has no ${selector} "${text}".`);
-  return element;
-}
-
-/**
- * Replaces the text of a control that starts with an icon, such as a
- * `.pick`, with `text`, and keeps the icon. Fails when the control has no
- * icon.
- */
-function replaceTextAfterIcon(control: Element, text: string): void {
-  control.replaceChildren(findElement(control, "svg"), text);
-}
 
 /** The draft as the app builds it from the fixture, with nothing set in the settings. */
 const view = buildDraftView(

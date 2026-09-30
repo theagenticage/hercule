@@ -2,6 +2,8 @@ import { Fragment, useState, type JSX } from "react";
 import {
   buildModelMenu,
   buildModelPicks,
+  describeAccountRow,
+  describeModelRow,
   type ComposerPick,
   type ModelMenu as ModelMenuModel,
   type RecentModel,
@@ -9,7 +11,8 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import { CheckIcon, ChevronRightIcon } from "../../icons";
+import { ChevronRightIcon } from "../../icons";
+import { MenuLine } from "./menu-line";
 import { ProviderLogo } from "./provider-logo";
 
 type ModelRow = ModelMenuModel["current"]["rows"][number];
@@ -31,48 +34,45 @@ type ModelRow = ModelMenuModel["current"]["rows"][number];
  * name and each picks the account and the model together. An account that
  * is not logged in on the machine stays dimmed.
  *
- * `recent` is the Recent list as the app stores it, and `config` what the
- * thread runs with, picks included, so the check marks the model the next
- * message will use. `onPick` receives the picks a row makes, in order.
+ * `readRecent` returns the Recent list as the app stores it, and `config`
+ * is what the thread runs with, picks included, so the check marks the model
+ * the next message will use. `onPick` receives the picks a row makes, in
+ * order.
  *
  * The filter's text and whether the older models show are held here, so
- * they start afresh each time the menu opens.
+ * they start afresh each time the menu opens. The Recent list is read once,
+ * when the menu opens: it changes only when a message is sent.
  */
 export function ModelMenu({
   catalogs,
   config,
   kind,
-  recent,
+  readRecent,
   onPick,
 }: {
   readonly catalogs: ThreadCatalogs;
   readonly config: ThreadConfig;
   readonly kind: ThreadKind;
-  readonly recent: readonly RecentModel[];
+  readonly readRecent: () => readonly RecentModel[];
   readonly onPick: (picks: readonly ComposerPick[]) => void;
 }): JSX.Element {
   const [filter, setFilter] = useState("");
   const [older, setOlder] = useState(false);
+  const [recent] = useState(readRecent);
   const menu = buildModelMenu(catalogs, config, { kind, filter, recent });
   const { current } = menu;
 
   const renderModelRow = (providerId: string | null, row: ModelRow): JSX.Element => (
-    <button
+    <MenuLine
       key={`${row.instanceId}:${row.slug}`}
-      type="button"
-      className="line"
-      aria-current={row.current || undefined}
-      onClick={() => {
+      glyph={providerId === null ? null : <ProviderLogo providerId={providerId} size={13} />}
+      name={row.name}
+      detail={describeModelRow(row)}
+      current={row.current}
+      onPick={() => {
         onPick(buildModelPicks(config, row.instanceId, row.slug));
       }}
-    >
-      {providerId === null ? null : <ProviderLogo providerId={providerId} size={13} />}
-      <span className="grow">
-        <b>{row.name}</b>
-        {row.isDefault && !row.current ? " · default" : null}
-      </span>
-      {row.current ? <CheckIcon size={14} /> : null}
-    </button>
+    />
   );
 
   return (
@@ -96,35 +96,20 @@ export function ModelMenu({
       {menu.recent.length === 0 ? null : (
         <div className="pop-sec">
           <div className="q-h">Recent</div>
-          {menu.recent.map((row) => {
-            const body = (
-              <>
-                <ProviderLogo providerId={row.providerId} size={13} />
-                <span className="grow">
-                  <b>{row.name}</b>
-                  {row.account === null ? null : ` · ${row.account}`}
-                </span>
-                {row.dimmed === null ? null : <span className="faint">{row.dimmed}</span>}
-              </>
-            );
-            const key = `${row.instanceId}:${row.model}`;
-            return row.dimmed === null ? (
-              <button
-                key={key}
-                type="button"
-                className="line"
-                onClick={() => {
-                  onPick(buildModelPicks(config, row.instanceId, row.model));
-                }}
-              >
-                {body}
-              </button>
-            ) : (
-              <div key={key} className="line line--dimmed">
-                {body}
-              </div>
-            );
-          })}
+          {menu.recent.map((row) => (
+            <MenuLine
+              key={`${row.instanceId}:${row.model}`}
+              glyph={<ProviderLogo providerId={row.providerId} size={13} />}
+              name={row.name}
+              detail={row.account}
+              note={row.dimmed}
+              current={false}
+              inert={row.dimmed !== null}
+              onPick={() => {
+                onPick(buildModelPicks(config, row.instanceId, row.model));
+              }}
+            />
+          ))}
         </div>
       )}
       {/* A filter that matches none of the account's models leaves nothing under its name. */}
@@ -150,49 +135,28 @@ export function ModelMenu({
       )}
       {menu.others.length === 0 ? null : (
         <div className="pop-sec">
-          {menu.others.map((instance) => {
-            const account = (
-              <>
-                <ProviderLogo providerId={instance.providerId} size={13} />
-                <span className="grow">
-                  <b>{instance.name}</b>
-                  {[instance.identity, instance.planLabel]
-                    .filter((each) => each !== null)
-                    .map((each) => ` · ${each}`)}
-                </span>
-              </>
-            );
-            if (instance.dimmed !== null) {
-              return (
-                <div key={instance.instanceId} className="line line--dimmed">
-                  {account}
-                  <span className="faint">{instance.dimmed}</span>
-                </div>
-              );
-            }
-            if (instance.rows.length > 0) {
-              return (
-                <Fragment key={instance.instanceId}>
-                  <div className="q-h">{instance.name}</div>
-                  {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
-                </Fragment>
-              );
-            }
-            return (
-              <button
+          {menu.others.map((instance) =>
+            instance.dimmed === null && instance.rows.length > 0 ? (
+              <Fragment key={instance.instanceId}>
+                <div className="q-h">{instance.name}</div>
+                {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
+              </Fragment>
+            ) : (
+              <MenuLine
                 key={instance.instanceId}
-                type="button"
-                className="line"
-                onClick={() => {
+                glyph={<ProviderLogo providerId={instance.providerId} size={13} />}
+                name={instance.name}
+                detail={describeAccountRow(instance)}
+                note={instance.dimmed ?? instance.models}
+                current={false}
+                chevron={instance.dimmed === null}
+                inert={instance.dimmed !== null}
+                onPick={() => {
                   onPick([{ kind: "instanceId", value: instance.instanceId }]);
                 }}
-              >
-                {account}
-                <span className="faint">{instance.models}</span>
-                <ChevronRightIcon size={13} />
-              </button>
-            );
-          })}
+              />
+            ),
+          )}
         </div>
       )}
     </>

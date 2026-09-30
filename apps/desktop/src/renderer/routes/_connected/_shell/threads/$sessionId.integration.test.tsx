@@ -7,7 +7,11 @@ import { describe, expect, it } from "vitest";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
-import { createLaunchHistory, readLastThread } from "../../../../app/last-thread";
+import {
+  createLaunchHistory,
+  readLastThread,
+  rememberLastThread,
+} from "../../../../app/last-thread";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -54,7 +58,7 @@ describe("the thread route", () => {
     const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       [`GET ${transcriptPath}`]: (call) =>
-        call.query.cursor === "page-2"
+        new URLSearchParams(call.search).get("cursor") === "page-2"
           ? { body: { items: thread.transcript.slice(10) } }
           : { body: { items: thread.transcript.slice(0, 10), nextCursor: "page-2" } },
     });
@@ -63,8 +67,10 @@ describe("the thread route", () => {
       thread.transcript,
     );
     expect(
-      calls.filter((call) => call.path === transcriptPath).map((call) => call.query.cursor),
-    ).toEqual([undefined, "page-2"]);
+      calls
+        .filter((call) => call.path === transcriptPath)
+        .map((call) => new URLSearchParams(call.search).get("cursor")),
+    ).toEqual([null, "page-2"]);
   });
 
   it("stores the thread as the last open one for its controller", async () => {
@@ -75,7 +81,7 @@ describe("the thread route", () => {
   });
 
   it("shows that a thread is not found, with a link to a new thread, and forgets it", async () => {
-    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, GONE_ID);
+    rememberLastThread(CONTROLLER_URL, GONE_ID);
     const { app } = openApp(`/threads/${GONE_ID}`);
     const { router } = await app;
 
@@ -104,7 +110,7 @@ describe("the thread route", () => {
   });
 
   it("shows the render failure at once for another error, and keeps the thread stored", async () => {
-    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, sessionId);
+    rememberLastThread(CONTROLLER_URL, sessionId);
     const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       [`GET ${transcriptPath}`]: {

@@ -1,6 +1,7 @@
 /**
- * Helpers for the scripts that run Electron as a child process: `./dev.ts`,
- * `./compare-bureau.ts` and `./packaged-app.ts`.
+ * Helpers for the code that runs Electron as a child process: `./dev.ts`,
+ * `./sheet-server.ts`, `./packaged-app.ts` and the desktop end-to-end suite
+ * (`e2e/desktop/`).
  *
  * The perf script runs on plain Node and reaches this module through
  * `./packaged-app.ts`, so the module uses only TypeScript that Node can strip.

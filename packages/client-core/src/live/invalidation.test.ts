@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
-import { invalidateWithoutCancelling } from "./live-invalidation";
+import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/query-core";
+import { invalidateWithoutCancelling } from "./invalidation";
 
 const KEY = ["tasks"];
 

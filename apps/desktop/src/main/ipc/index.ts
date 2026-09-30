@@ -4,8 +4,12 @@
  */
 import { ipcMain } from "electron";
 import { Effect, type ManagedRuntime } from "effect";
-import type { RendererToMainIpcChannelName } from "../../ipc/bridge";
-import { RENDERER_TO_MAIN_IPC_CHANNELS } from "../../ipc/contract";
+import {
+  type IpcRequest,
+  type IpcResponse,
+  RENDERER_TO_MAIN_IPC_CHANNELS,
+  type RendererToMainIpcChannelName,
+} from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
 import { MainWindow } from "../main-window";
@@ -15,13 +19,11 @@ import { StoredToken } from "../stored-token";
 import { ThreadNotifications } from "../thread-notifications";
 import { answerIpcMessage } from "./message";
 
-type RendererToMainIpcChannels = typeof RENDERER_TO_MAIN_IPC_CHANNELS;
-
 /**
  * The services the IPC handlers use. A handler that needs another service
  * adds it to this union, and main's runtime must then provide it.
  */
-export type IpcHandlerServices =
+type IpcHandlerServices =
   | AppSettings
   | ControllerConnection
   | MainMenu
@@ -43,12 +45,8 @@ type IpcHandlerError = NoControllerSaved;
  */
 const IPC_HANDLERS: {
   readonly [Name in RendererToMainIpcChannelName]: (
-    request: RendererToMainIpcChannels[Name]["request"]["Type"],
-  ) => Effect.Effect<
-    RendererToMainIpcChannels[Name]["response"]["Type"],
-    IpcHandlerError,
-    IpcHandlerServices
-  >;
+    request: IpcRequest<Name>,
+  ) => Effect.Effect<IpcResponse<Name>, IpcHandlerError, IpcHandlerServices>;
 } = {
   "controllerUrl.read": () => AppSettings.use((settings) => settings.readControllerUrl),
   "controllerUrl.save": (input) => ControllerConnection.use((connection) => connection.save(input)),
@@ -74,7 +72,7 @@ export const registerIpcHandlers = (
   const registerIpcHandler = <Name extends RendererToMainIpcChannelName>(name: Name) =>
     ipcMain.handle(name, (event, ...args) =>
       runtime.runPromise(
-        answerIpcMessage(name, RENDERER_TO_MAIN_IPC_CHANNELS[name], IPC_HANDLERS[name], {
+        answerIpcMessage(name, IPC_HANDLERS[name], {
           senderFrame: event.senderFrame,
           mainFrame: event.sender.mainFrame,
           args,

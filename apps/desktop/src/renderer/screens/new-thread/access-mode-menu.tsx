@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { AccessModeMenuItem } from "@hercule/client-core";
 import type { AccessMode } from "@hercule/contract";
-import { MenuLine } from "./menu-line";
+import { MenuLine } from "../thread/menu-line";
 
 /**
  * Renders the content of a Draft Thread's access-mode menu: one row per mode,

@@ -14,6 +14,7 @@ import {
   useDurationText,
   type AgeClock,
 } from "./age-clock";
+import { setVisibility } from "./testing";
 
 const NOW = new Date("2026-09-10T09:00:00.000Z");
 /** Reads "now" until 09:00:30, when it turns into "1m". */
@@ -22,12 +23,6 @@ const HALF_A_MINUTE_AGO = "2026-09-10T08:59:30.000Z";
 const AN_HOUR_AGO = "2026-09-10T08:00:00.000Z";
 /** A duration from here reads "12s" until 09:00:00.500, when it turns into "13s". */
 const TWELVE_SECONDS_AGO = "2026-09-10T08:59:48.000Z";
-
-/** Sets what `document.visibilityState` reads, and tells the page it changed, as a hide or show does. */
-const setVisibility = (state: DocumentVisibilityState): void => {
-  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
-  document.dispatchEvent(new Event("visibilitychange"));
-};
 
 /**
  * The labels the current test watches, removed after it. A clock listens on

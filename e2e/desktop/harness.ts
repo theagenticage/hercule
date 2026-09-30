@@ -17,7 +17,7 @@
  * `scripts/controller-process.ts`. Run `pnpm build:binary` first as well.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -32,27 +32,33 @@ import {
   IDENTITY_PORT_COUNT,
   type Session,
 } from "../../packages/contract/src/index";
+import { connectFleet, type Fleet } from "../../apps/desktop/scripts/fleet";
 import {
+  assertExitedCleanly,
   buildAppArgs,
+  evaluateInMain,
   findExecutable,
   isWindowVisible,
+  launchPlainApp,
   launchTestPackage,
   quitApp,
   signIn,
+  signInOnce,
+  stopPlainApp,
+  waitForExitOrKill,
   writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
-  completeSetup,
+  findCompiledBinary,
   PASSWORD,
-  ROOT,
   startController,
+  startSetUpController,
   USERNAME,
   type Controller,
 } from "../../scripts/controller-process";
 import { createTemporaryHome } from "../harness";
-import { connectFleet, type Fleet } from "./fleet";
 
 /**
  * The page's global object, with the bridge the preload exposes on it as
@@ -203,26 +209,20 @@ export async function signInAndReadToken(page: Page, controllerUrl: string): Pro
  * can sign in; otherwise setup is still pending.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
- * Fails when the binary has not been built, or setup fails.
+ * Fails when the binary has not been built, when the controller does not
+ * start, or when setup fails.
  */
 export async function startControllerForTest(options: {
   readonly setUp: boolean;
 }): Promise<Controller> {
-  const binary = join(ROOT, "hercule");
-  if (!existsSync(binary)) {
-    throw new Error(`no compiled controller at ${binary}: run \`pnpm build:binary\` first.`);
-  }
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
-  const controller = await startController({ home, binary });
+  const controller = options.setUp
+    ? await startSetUpController({ home })
+    : await startController({ home, binary: findCompiledBinary() });
   onTestFinished(async () => {
     await controller.stop();
   });
-  if (options.setUp) {
-    const ran = await completeSetup({ home, url: controller.url, binary });
-    if (ran.code !== 0)
-      throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
-  }
   return controller;
 }
 
@@ -239,12 +239,27 @@ export interface ArrangedFleet {
  * Starts a controller for the current test that is set up, and connects a
  * fleet to it, with no runners yet. The controller is stopped and the
  * runners disconnected when the test finishes.
+ *
+ * The controller starts a runner of its own on this machine, which may be
+ * logged in to a real provider. It is retired before this returns, so no
+ * thread can land on it, and the app's probe for the runner on this machine
+ * cannot find it: a test that wants that probe to find a runner enlists a
+ * scripted one and serves its identity (see `startIdentityServerForTest`).
+ * Fails when that runner does not come online, or its retirement is refused.
  */
 export async function arrangeFleet(): Promise<ArrangedFleet> {
   const controller = await startControllerForTest({ setUp: true });
   const fleet = await connectFleet(controller.url);
   onTestFinished(fleet.disconnectRunners);
   const client = createClient({ baseUrl: controller.url, token: fleet.token });
+  const readRunners = async () => (await client.runner.query({ query: { limit: 10 } })).items;
+  await expect
+    .poll(async () => (await readRunners()).map((runner) => runner.connectivity), {
+      message: "the controller's own runner did not come online",
+    })
+    .toEqual(["online"]);
+  const [own] = await readRunners();
+  await client.runner.retire({ params: { id: own!.id }, payload: {} });
   return {
     url: controller.url,
     fleet,
@@ -447,28 +462,21 @@ export async function chooseMenuItem(
 
 /**
  * Waits for `child` to exit, and returns how it ended: its exit code, or the
- * signal that ended it. Fails if it is still running after 10 seconds, and
- * kills it by its PID; `name` says in that error which process it was.
+ * signal that ended it. Fails at once when `child` did not start. Fails if it
+ * is still running after 10 seconds, and kills it by its PID; `name` says in
+ * that error which process it was (see `waitForExitOrKill`).
  */
 export async function waitForExit(
   child: ChildProcess,
   name: string,
 ): Promise<number | NodeJS.Signals> {
-  if (child.exitCode !== null) return child.exitCode;
-  if (child.signalCode !== null) return child.signalCode;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await new Promise<number | NodeJS.Signals>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve(code ?? signal!));
-      timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        reject(new Error(`${name} was still running after 10 s, so it was killed`));
-      }, 10_000);
-    });
-  } finally {
-    clearTimeout(timer);
+  if (child.pid === undefined) throw new Error(`${name} did not start`);
+  // The PID of a process that has already exited may belong to another
+  // process by now, so only a running child is waited for by its PID.
+  if (child.exitCode === null && child.signalCode === null) {
+    await waitForExitOrKill(child.pid, name, "the test began to wait for it");
   }
+  return child.exitCode ?? child.signalCode!;
 }
 
 /**
@@ -490,6 +498,56 @@ export function runSecondInstance(
     stdio: "ignore",
   });
   return waitForExit(child, "the second instance");
+}
+
+/** The test package, started as a plain process by `launchPlainAppForTest`. */
+export interface PlainAppForTest {
+  /**
+   * Evaluates `expression` in the page of the app's one window, and returns
+   * the value it evaluates to, awaited when it is a promise. Fails when the
+   * expression throws.
+   */
+  readonly evaluateInPage: (expression: string) => Promise<unknown>;
+  /**
+   * Calls the method `method` of the app's one `BrowserWindow` in main, with
+   * `args`, and returns what the method returns. Fails when the call throws.
+   */
+  readonly callWindowMethod: (method: string, ...args: ReadonlyArray<unknown>) => Promise<unknown>;
+}
+
+/**
+ * Starts the test package for the current test as a plain process, signed in
+ * to the controller at `url`, on a fresh user data directory (see
+ * `launchPlainApp` and `signInOnce`). The app is stopped when the test
+ * finishes, and the test fails if the app did not quit cleanly.
+ *
+ * Nothing attaches to the page: the returned functions reach it through
+ * main's Node inspector, one connection per call. A test uses this app where
+ * Playwright would change what it checks, such as how the page runs while
+ * its window is hidden.
+ */
+export async function launchPlainAppForTest(url: string): Promise<PlainAppForTest> {
+  const userDataDir = createUserDataDirForTest();
+  writeSettings(userDataDir, { controllerUrl: url });
+  await signInOnce(userDataDir);
+  const app = await launchPlainApp(userDataDir);
+  onTestFinished(async () => {
+    await stopPlainApp(app);
+    assertExitedCleanly(app.process);
+  });
+  const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
+  return {
+    evaluateInPage: (expression) =>
+      evaluateInMain(
+        app.inspectorUrl,
+        `${window}.webContents.executeJavaScript(${JSON.stringify(expression)})`,
+      ),
+    callWindowMethod: (method, ...args) =>
+      evaluateInMain(
+        app.inspectorUrl,
+        `${window}.${method}(${args.map((arg) => JSON.stringify(arg)).join(", ")})`,
+      ),
+  };
 }
 
 /** A plain HTTP server on loopback that a test controls. */

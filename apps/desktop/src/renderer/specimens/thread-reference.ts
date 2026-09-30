@@ -5,7 +5,7 @@
  * compares the main pane with the app's thread screen (thread.tsx).
  *
  * First it stops every animation, so the waiting faces show the frame the
- * app draws. Then it makes exactly thirteen edits, each where the app draws
+ * app draws. Then it makes exactly fourteen edits, each where the app draws
  * something else than the book, for the reason given:
  *
  * 1. removes the provenance line, "Started 09:02 from ...": v1 does not
@@ -47,7 +47,10 @@
  *     composer is shrunk, to client-core's short question in plain text,
  *     and its two answers' labels to the card's: the app asks a Request in
  *     the same line as the sidebar's Waiting on you row (spec 17 §Design
- *     system, The thread).
+ *     system, The thread);
+ * 14. sets the lip's branch in the UI face, where the book sets it in
+ *     monospace: monospace is kept for code, commands and diffs (spec 17
+ *     §Design system, item 2).
  *
  * Last, it scrolls the transcript back to where crew.js put it before the
  * edits changed its height: to its bottom, or on the page's
@@ -68,39 +71,9 @@ import {
   type WorkBlock,
 } from "@hercule/client-core";
 import { CLAUDE_OPUS, SPECIMEN_INSTANCES, SPECIMEN_NOW } from "./sidebar-fixture";
+import { findElement, findElementByText, findElements, replaceTextAfterIcon } from "./book-page";
 import { computeScrolledTop, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 import { FIX_THREAD, PUSH_REQUEST } from "./thread-fixture";
-
-/** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
-function findElement(scope: ParentNode, selector: string): Element {
-  const element = scope.querySelector(selector);
-  if (element === null) throw new Error(`The book's thread has no ${selector}.`);
-  return element;
-}
-
-/**
- * Returns every element inside `scope` that matches `selector`. Fails when
- * the count is not `count`, because each edit pairs the book's elements with
- * the fixture's blocks one to one.
- */
-function findElements(scope: ParentNode, selector: string, count: number): Element[] {
-  const elements = [...scope.querySelectorAll(selector)];
-  if (elements.length !== count) {
-    throw new Error(
-      `The book's thread has ${String(elements.length)} ${selector}, and the fixture ${String(count)}.`,
-    );
-  }
-  return elements;
-}
-
-/** Returns the element inside `scope` that matches `selector` and whose text is `text`. Fails when there is none. */
-function findElementByText(scope: ParentNode, selector: string, text: string): Element {
-  const element = [...scope.querySelectorAll(selector)].find(
-    (each) => each.textContent.trim() === text,
-  );
-  if (element === undefined) throw new Error(`The book's thread has no ${selector} "${text}".`);
-  return element;
-}
 
 /** Returns a new element named `tag`, with the class `className` and the text `text`. */
 function buildElement(tag: string, className: string, text: string): HTMLElement {
@@ -108,15 +81,6 @@ function buildElement(tag: string, className: string, text: string): HTMLElement
   if (className !== "") element.className = className;
   element.textContent = text;
   return element;
-}
-
-/**
- * Replaces the text of a control that starts with an icon, such as a
- * `.pick`, with `text`, and keeps the icon. Fails when the control has no
- * icon.
- */
-function replaceTextAfterIcon(control: Element, text: string): void {
-  control.replaceChildren(findElement(control, "svg"), text);
 }
 
 const blocks = buildThreadBlocks(FIX_THREAD.transcript, FIX_THREAD.session);
@@ -225,6 +189,9 @@ const miniRows = card.rows.filter((row) => row.decision === "allow" || row.decis
 findElements(mini, ".btn", miniRows.length).forEach((button, index) => {
   button.textContent = miniRows[index]!.label;
 });
+
+// 14. The lip's branch in monospace.
+findElement(composer, ".lip .mono").classList.remove("mono");
 
 transcript.scrollTop =
   document.documentElement.dataset.state === "scrolled"

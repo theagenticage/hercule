@@ -1,8 +1,7 @@
 import type { JSX } from "react";
-import type { Runner, Session } from "@hercule/contract";
-import { ComposeIcon, MoreIcon } from "../../icons";
-import type { ProjectTint } from "../project-tile";
-import { ThreadTabsPill } from "../thread/thread-header";
+import type { Project, Runner, Session } from "@hercule/contract";
+import { ComposeIcon } from "../../icons";
+import { MorePill, ThreadTabsPill } from "../thread/thread-header";
 import "../thread/thread-header.css";
 
 /**
@@ -11,32 +10,31 @@ import "../thread/thread-header.css";
  * draft joins, and the draft's own "New thread" tab, selected; then More,
  * drawn but doing nothing yet.
  *
- * `project` is `null` for a draft in no project, which the crumb calls "No
- * project". `tabs` is empty unless the draft joins a workspace with threads.
+ * `projectId` is `null` for a draft in no project, which the crumb calls "No
+ * project"; `projects` is the project list the crumb finds it in. `tabs` is
+ * empty unless the draft joins a workspace with threads.
  */
 export function DraftHeader({
-  project,
+  projectId,
+  projects,
   tabs,
   runners,
 }: {
-  readonly project: { readonly name: string; readonly tint: ProjectTint } | null;
+  readonly projectId: string | null;
+  readonly projects: readonly Project[];
   readonly tabs: readonly Session[];
   readonly runners: readonly Runner[];
 }): JSX.Element {
   return (
     <header className="top">
-      <ThreadTabsPill project={project} tabs={tabs} runners={runners}>
+      <ThreadTabsPill projectId={projectId} projects={projects} tabs={tabs} runners={runners}>
         <span className="ptab is-on" aria-current="page">
           <ComposeIcon size={14} />
           New thread
         </span>
       </ThreadTabsPill>
       <span className="spacer" />
-      <span className="pill">
-        <button type="button" className="icon-btn" title="More" aria-disabled="true">
-          <MoreIcon />
-        </button>
-      </span>
+      <MorePill />
     </header>
   );
 }

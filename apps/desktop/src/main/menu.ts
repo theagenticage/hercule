@@ -49,7 +49,7 @@ import { MainWindow } from "./main-window";
  * project picker is open, and ⌘↵ in a message field sends once, from the
  * field.
  */
-export const buildMenuTemplate = (options: {
+const buildMenuTemplate = (options: {
   readonly development: boolean;
   readonly signedIn: boolean;
   readonly goThreads: ReadonlyArray<GoMenuThread>;
@@ -165,8 +165,12 @@ export const makeMainMenuLayer = (
       const runFork = yield* FiberSet.makeRuntime();
       /** Shows the window and sends the page `command`. */
       const sendMenuCommand = (command: MenuCommand): void => {
-        runFork(Effect.andThen(window.show, window.send("menu.command", command)));
+        runFork(window.showAndSend("menu.command", command));
       };
+      // Read from the settings file, so that Sign Out is right in the first
+      // menu bar, while the page still loads; the page's first token read
+      // sets it again. The threads' notifications start signed out, for the
+      // reason makeThreadNotificationsLayer gives.
       let signedIn = (yield* settings.readEncryptedToken) !== null;
       let goThreads: ReadonlyArray<GoMenuThread> = [];
 
@@ -181,8 +185,7 @@ export const makeMainMenuLayer = (
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               send: () => sendMenuCommand("send"),
-              openThread: (sessionId) =>
-                runFork(Effect.andThen(window.show, window.send("thread.open", { sessionId }))),
+              openThread: (sessionId) => runFork(window.showAndSend("thread.open", { sessionId })),
             }),
           ),
         );

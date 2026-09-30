@@ -323,6 +323,9 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../contract
+      '@tanstack/query-core':
+        specifier: 5.102.8
+        version: 5.102.8
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112

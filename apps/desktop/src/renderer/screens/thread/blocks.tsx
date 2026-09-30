@@ -56,13 +56,7 @@ function AgentFace({
   readonly pose: Pose;
 }): JSX.Element {
   return (
-    <Face
-      look={buildLook(sessionId)}
-      pose={pose}
-      size={FACE_SIZE}
-      animated={pose === "working"}
-      decorative
-    />
+    <Face look={buildLook(sessionId)} pose={pose} size={FACE_SIZE} animated={pose === "working"} />
   );
 }
 
@@ -327,7 +321,7 @@ export const WaitingNote = memo(function WaitingNote({
   const age = useAgeLabel(openedAt, onScreen);
   return (
     <div className="waiting-note">
-      <Mark state="waiting" decorative />
+      <Mark state="waiting" />
       {describeWaitingNote(formatBlockTime(openedAt, timezone, today), age)}
     </div>
   );

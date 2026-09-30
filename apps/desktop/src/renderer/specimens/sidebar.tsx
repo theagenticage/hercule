@@ -11,7 +11,7 @@
 // its module loads.
 import "./fixed-clock";
 import { FIX_THREAD_ID, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import { mountSidebarSpecimen } from "./sidebar-page";
+import { mountSidebarSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
 await mountSidebarSpecimen(SPECIMEN_RECORDS, `/threads/${FIX_THREAD_ID}`);

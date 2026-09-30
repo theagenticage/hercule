@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -13,17 +12,14 @@ import {
   NoControllerSaved,
   type WindowState,
 } from "./app-settings";
+import { makeTemporarySettingsFile } from "./testing";
 
-let folder: string;
 let file: string;
 
 beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), "hercule-desktop-settings-"));
-  file = join(folder, "settings.json");
-});
-
-afterEach(() => {
-  rmSync(folder, { recursive: true, force: true });
+  const settingsFile = makeTemporarySettingsFile();
+  file = settingsFile.path;
+  return settingsFile.remove;
 });
 
 /**

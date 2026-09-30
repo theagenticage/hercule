@@ -1,14 +1,14 @@
 import { Fragment, type JSX, type ReactNode } from "react";
-import type { LoginTarget, ModelMenu } from "@hercule/client-core";
+import {
+  describeAccountRow,
+  describeModelRow,
+  type LoginTarget,
+  type ModelMenu,
+} from "@hercule/client-core";
 import { ProviderLogo } from "@hercule/ui";
 import { Lane, renderMarker, MenuRow } from "./menu";
 
 type Row = ModelMenu["current"]["rows"][number];
-type Instance = ModelMenu["others"][number];
-
-/** Builds the detail shown beside an account's name: who is logged in, and on what plan. */
-const describeLogin = (instance: Instance): string =>
-  [instance.identity, instance.planLabel].filter((each) => each !== null).join(" · ");
 
 /** Classes that make the Log in on an account's row look like the row's note, not a button. */
 const ROW_LOGIN =
@@ -42,7 +42,7 @@ export function ModelList({
       key={`${row.instanceId}:${row.slug}`}
       marker={renderMarker(providerId === null ? null : <ProviderLogo providerId={providerId} />)}
       name={row.name}
-      detail={row.isDefault && !row.current ? "default" : null}
+      detail={describeModelRow(row)}
       note={row.current ? "✓" : undefined}
       current={row.current}
       onPick={() => {
@@ -84,7 +84,7 @@ export function ModelList({
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
             marker={renderMarker(<ProviderLogo providerId={instance.providerId} />)}
             name={instance.name}
-            detail={describeLogin(instance)}
+            detail={describeAccountRow(instance)}
             note={instance.dimmed === null ? `${instance.models} ›` : undefined}
             dimmed={instance.dimmed}
             trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}

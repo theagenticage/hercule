@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { resolveBrowserTimezone } from "@hercule/client-core";
+import { readErrorMessage, resolveBrowserTimezone } from "@hercule/client-core";
 import { SetupForm } from "@hercule/contract";
 import { Button, Field, Input } from "@hercule/ui";
 import { validate, type FieldErrors } from "../app/form";
@@ -59,7 +59,7 @@ function Setup(): JSX.Element {
       await client.setup.complete({ payload: checked.value });
     } catch (error) {
       client.presentToken(null);
-      setFailure(error instanceof Error ? error.message : String(error));
+      setFailure(readErrorMessage(error));
       setSubmitting(false);
       return;
     }

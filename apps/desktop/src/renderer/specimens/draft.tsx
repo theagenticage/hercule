@@ -10,7 +10,7 @@
 // its module loads.
 import "./fixed-clock";
 import { DRAFT_PAGE_RECORDS, WEBSHOP_DRAFT } from "./draft-fixture";
-import { mountDraftSpecimen } from "./sidebar-page";
+import { mountDraftSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
 await mountDraftSpecimen(DRAFT_PAGE_RECORDS, WEBSHOP_DRAFT);

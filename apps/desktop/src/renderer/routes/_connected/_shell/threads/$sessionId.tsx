@@ -7,7 +7,7 @@ import {
   isReopenedAtLaunch,
   rememberLastThread,
 } from "../../../../app/last-thread";
-import { queuedInputsQuery, sessionQuery, transcriptQuery } from "../../../../app/queries";
+import { ensureThreadData } from "../../../../app/queries";
 import { ThreadNotFound } from "../../../../screens/thread/not-found";
 import { ThreadScreen } from "../../../../screens/thread/thread-screen";
 
@@ -35,11 +35,7 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId")({
   loader: async ({ context: { controller, queryClient }, params: { sessionId }, location }) => {
     const { client, url } = controller;
     try {
-      await Promise.all([
-        queryClient.ensureQueryData(sessionQuery(client, sessionId)),
-        queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
-        queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
-      ]);
+      await ensureThreadData(queryClient, client, sessionId);
     } catch (error) {
       if (!isNotFound(error)) throw error;
       clearLastThread(url);

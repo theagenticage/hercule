@@ -1,7 +1,7 @@
 /**
  * Tests the dock badge and the threads' notifications in the packaged app,
  * signed in to a real controller whose threads run on a scripted runner
- * (spec 17 §Native behaviour, slice 8):
+ * (spec 17, §Native behaviour):
  *
  * - the badge counts the threads waiting on the user, and a Request that
  *   opens while the window is hidden shows a notification;

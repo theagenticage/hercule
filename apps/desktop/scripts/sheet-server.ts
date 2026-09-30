@@ -139,3 +139,18 @@ export async function runSheetCapture(captureScript: URL): Promise<number> {
     await rm(userDataDir, { recursive: true, force: true });
   }
 }
+
+/**
+ * Runs `run`, a capture script's whole work, and sets this process's exit
+ * code to the code `run` returns. When `run` fails, prints `FAILED:` and the
+ * error's message on stderr and sets the exit code to 1, so a failed capture
+ * ends with one line that says what went wrong.
+ */
+export async function runAndSetExitCode(run: () => Promise<number>): Promise<void> {
+  try {
+    process.exitCode = await run();
+  } catch (error) {
+    process.stderr.write(`FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}

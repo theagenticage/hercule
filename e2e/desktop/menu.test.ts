@@ -1,5 +1,5 @@
 /**
- * Tests the menu bar in the packaged app (spec 17 §Native behaviour, slice 8):
+ * Tests the menu bar in the packaged app (spec 17, §Native behaviour):
  *
  * - the menus stand in the order macOS users expect, and Go holds a dimmed
  *   "No Threads" while signed out;

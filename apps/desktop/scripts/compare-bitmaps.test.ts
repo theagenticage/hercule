@@ -84,6 +84,18 @@ describe("compareBitmaps", () => {
     ]);
   });
 
+  it("counts a pixel in two overlapping cells for the cell listed first", () => {
+    const app = buildWhiteBitmap();
+    paintSquare(app, 6 * DPR, 6 * DPR, 1);
+    const face = CELLS[0]!;
+    const wholeSheet: CellRect = { name: "sheet", left: 0, top: 0, width: WIDTH, height: HEIGHT };
+    const reportedCells = (cells: ReadonlyArray<CellRect>) =>
+      compareBitmaps(buildWhiteBitmap(), app, cells).map(({ cell }) => cell);
+
+    expect(reportedCells([face, wholeSheet])).toEqual(["face/idle/22"]);
+    expect(reportedCells([wholeSheet, face])).toEqual(["sheet"]);
+  });
+
   it("fails on bitmaps of different sizes", () => {
     const smaller: Bitmap = {
       width: WIDTH - DPR,

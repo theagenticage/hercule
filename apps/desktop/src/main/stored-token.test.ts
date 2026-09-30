@@ -1,28 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
+import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { makeAppSettingsLayer, NoControllerSaved } from "./app-settings";
-import { MainWindow } from "./main-window";
+import { NoControllerSaved } from "./app-settings";
 import { MainMenu } from "./menu";
 import { KeychainError, SafeStorage } from "./safe-storage";
 import { StoredToken, StoredTokenLayer } from "./stored-token";
+import {
+  makeFakeMainWindow,
+  makeTemporarySettingsFile,
+  type TemporarySettingsFile,
+} from "./testing";
 import { ThreadNotifications } from "./thread-notifications";
 
-let folder: string;
-let file: string;
+let settingsFile: TemporarySettingsFile;
 
 beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), "hercule-desktop-token-"));
-  file = join(folder, "settings.json");
-});
-
-afterEach(() => {
-  rmSync(folder, { recursive: true, force: true });
+  settingsFile = makeTemporarySettingsFile();
+  return settingsFile.remove;
 });
 
 /**
@@ -50,48 +46,12 @@ interface Seen {
   readonly signedIn: Array<boolean>;
   /** Each signed-in state the notifications were set to, in order. */
   readonly notificationsSignedIn: Array<boolean>;
-  /** Each warning the window showed, in order. */
-  readonly warnings: Array<string>;
+  /** Each call made to the window, in order; see FakeMainWindow. */
+  readonly window: Array<string>;
 }
 
 /**
- * Builds fakes of the menu, the window and the notifications that record
- * what they are asked into `seen`.
- */
-const makeFakeMenuWindowAndNotifications = (
-  seen: Seen,
-): Layer.Layer<MainMenu | MainWindow | ThreadNotifications> =>
-  Layer.mergeAll(
-    Layer.succeed(MainMenu)({
-      setSignedIn: (signedIn) =>
-        Effect.sync(() => {
-          seen.signedIn.push(signedIn);
-        }),
-      setGoThreads: () => Effect.void,
-    }),
-    Layer.succeed(MainWindow)({
-      load: Effect.void,
-      reload: Effect.void,
-      show: Effect.void,
-      showFirstTime: Effect.void,
-      isFocused: Effect.succeed(false),
-      send: () => Effect.void,
-      showWarning: (message) =>
-        Effect.sync(() => {
-          seen.warnings.push(message);
-        }),
-    }),
-    Layer.succeed(ThreadNotifications)({
-      setSignedIn: (signedIn) =>
-        Effect.sync(() => {
-          seen.notificationsSignedIn.push(signedIn);
-        }),
-      setWaitingThreads: () => Effect.void,
-    }),
-  );
-
-/**
- * Runs `effect` against a token service built on the settings file `file`,
+ * Runs `effect` against a token service built on the temporary settings file,
  * with a fake Keychain that fails when `keychainFailing` is true. Returns the
  * effect's exit and what the menu, the window and the notifications saw.
  */
@@ -99,31 +59,47 @@ const runWithStoredToken = async <A, E>(
   effect: Effect.Effect<A, E, StoredToken>,
   keychainFailing = false,
 ): Promise<{ exit: Exit.Exit<A, E> } & Seen> => {
-  const seen: Seen = { signedIn: [], notificationsSignedIn: [], warnings: [] };
+  const signedIn: Array<boolean> = [];
+  const notificationsSignedIn: Array<boolean> = [];
+  const window = makeFakeMainWindow();
   const layer = StoredTokenLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        makeAppSettingsLayer(file).pipe(Layer.provide(NodeFileSystem.layer)),
+        settingsFile.layer,
         makeFakeSafeStorage(keychainFailing),
-        makeFakeMenuWindowAndNotifications(seen),
+        window.layer,
+        Layer.succeed(MainMenu)({
+          setSignedIn: (next) =>
+            Effect.sync(() => {
+              signedIn.push(next);
+            }),
+          setGoThreads: () => Effect.void,
+        }),
+        Layer.succeed(ThreadNotifications)({
+          setSignedIn: (next) =>
+            Effect.sync(() => {
+              notificationsSignedIn.push(next);
+            }),
+          setWaitingThreads: () => Effect.void,
+        }),
       ),
     ),
   );
   const exit = await Effect.runPromiseExit(Effect.provide(effect, layer));
-  return { exit, ...seen };
+  return { exit, signedIn, notificationsSignedIn, window: window.calls };
 };
 
 const read = StoredToken.use((token) => token.read);
 const write = (value: string | null) => StoredToken.use((token) => token.write(value));
 
-const readFileText = (): string => readFileSync(file, "utf8");
+const readFileText = (): string => readFileSync(settingsFile.path, "utf8");
 const readFileObject = (): unknown => JSON.parse(readFileText());
 
 const CONTROLLER_URL = "http://127.0.0.1:4937";
 
 /** The settings of a connected app with no token stored. */
 const writeConnectedSettings = (extra: object = {}) =>
-  writeFileSync(file, JSON.stringify({ controllerUrl: CONTROLLER_URL, ...extra }));
+  writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: CONTROLLER_URL, ...extra }));
 
 /** Returns `text` as the fake Keychain encrypts it, in base64, as the settings file holds it. */
 const sealedInBase64 = (text: string) => Buffer.from(`sealed:${text}`).toString("base64");
@@ -139,7 +115,7 @@ describe("the stored token", () => {
       exit: Exit.succeed(null),
       signedIn: [false],
       notificationsSignedIn: [false],
-      warnings: [],
+      window: [],
     });
   });
 
@@ -150,7 +126,7 @@ describe("the stored token", () => {
       exit: Exit.succeed("secret-token"),
       signedIn: [true, true],
       notificationsSignedIn: [true, true],
-      warnings: [],
+      window: [],
     });
     expect(readFileObject()).toEqual({
       controllerUrl: CONTROLLER_URL,
@@ -166,7 +142,7 @@ describe("the stored token", () => {
       exit: Exit.succeed(null),
       signedIn: [false, false],
       notificationsSignedIn: [false, false],
-      warnings: [],
+      window: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
   });
@@ -183,7 +159,7 @@ describe("the stored token", () => {
       exit: Exit.succeed(null),
       signedIn: [true, false, false],
       notificationsSignedIn: [true, false, false],
-      warnings: [],
+      window: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
   });
@@ -195,7 +171,7 @@ describe("the stored token", () => {
       exit: Exit.succeed(null),
       signedIn: [false],
       notificationsSignedIn: [false],
-      warnings: [],
+      window: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
   });
@@ -216,12 +192,12 @@ describe("the stored token", () => {
       { controllerUrl: CONTROLLER_URL },
     ],
   ])("is removed, and reads as null, when %s", async (_case, settings, after) => {
-    writeFileSync(file, JSON.stringify(settings));
+    writeFileSync(settingsFile.path, JSON.stringify(settings));
     expect(await runWithStoredToken(read)).toEqual({
       exit: Exit.succeed(null),
       signedIn: [false],
       notificationsSignedIn: [false],
-      warnings: [],
+      window: [],
     });
     expect(readFileObject()).toEqual(after);
   });
@@ -235,8 +211,8 @@ describe("the stored token", () => {
       // The user stays signed in until the app quits, so Sign Out is enabled.
       signedIn: [true],
       notificationsSignedIn: [true],
-      warnings: [
-        "Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.",
+      window: [
+        "showWarning Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.",
       ],
     });
     expect(readFileText()).toBe(before);
@@ -248,7 +224,7 @@ describe("the stored token", () => {
       exit: Exit.fail(new NoControllerSaved()),
       signedIn: [],
       notificationsSignedIn: [],
-      warnings: [],
+      window: [],
     });
   });
 });

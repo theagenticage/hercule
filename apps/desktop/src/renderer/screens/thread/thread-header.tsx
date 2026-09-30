@@ -8,8 +8,7 @@ import {
   isJoinable,
   listThreadTabs,
 } from "@hercule/client-core";
-import type { Runner, Session } from "@hercule/contract";
-import { useAgeLabel, useAgeWords } from "../../app/age-clock";
+import type { Project, Runner, Session } from "@hercule/contract";
 import {
   projectsQuery,
   runnersQuery,
@@ -19,7 +18,8 @@ import {
 } from "../../app/queries";
 import { EditorIcon, MoreIcon, PlusIcon } from "../../icons";
 import { Mark } from "../../marks";
-import { pickProjectTint, ProjectTile, type ProjectTint } from "../project-tile";
+import { AgeLabel } from "../age-label";
+import { pickProjectTint, ProjectTile } from "../project-tile";
 import "./thread-header.css";
 
 /**
@@ -53,17 +53,13 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
 
-  const project = projects.find((each) => each.id === session.projectId);
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
 
   return (
     <header className="top">
       <ThreadTabsPill
-        project={
-          project === undefined
-            ? null
-            : { name: project.name, tint: pickProjectTint(project.id, projects) }
-        }
+        projectId={session.projectId}
+        projects={projects}
         tabs={listThreadTabs(session, threads, workspaces)}
         runners={runners}
       >
@@ -88,37 +84,56 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
           <EditorIcon />
         </button>
       </span>
-      <span className="pill">
-        <button type="button" className="icon-btn" title="More" aria-disabled="true">
-          <MoreIcon />
-        </button>
-      </span>
+      <MorePill />
     </header>
   );
 }
 
 /**
- * Renders a header's first pill: the project, then one tab per thread in
- * `tabs`, then `children`. `project` is `null` for a thread in no project,
- * which the pill calls "No project". Each tab's pose is drawn with the
- * runner it names in `runners`.
+ * Renders a header's More pill. More is drawn but does nothing yet, and
+ * carries `aria-disabled` to say so.
+ */
+export function MorePill(): JSX.Element {
+  return (
+    <span className="pill">
+      <button type="button" className="icon-btn" title="More" aria-disabled="true">
+        <MoreIcon />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Renders a header's first pill: the project `projectId`, then one tab per
+ * thread in `tabs`, then `children`.
+ *
+ * - `projectId` is `null` for a thread in no project, which the pill calls
+ *   "No project".
+ * - The project's tint follows its place in `projects`, as everywhere else.
+ * - Each tab's pose is drawn with the runner it names in `runners`.
  */
 export function ThreadTabsPill({
-  project,
+  projectId,
+  projects,
   tabs,
   runners,
   children,
 }: {
-  readonly project: { readonly name: string; readonly tint: ProjectTint } | null;
+  readonly projectId: string | null;
+  readonly projects: readonly Project[];
   readonly tabs: readonly Session[];
   readonly runners: readonly Runner[];
   readonly children: ReactNode;
 }): JSX.Element {
+  const project = projects.find((each) => each.id === projectId);
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   return (
     <nav className="pill" aria-label="Threads in this workspace">
       <span className="pill-crumb">
-        <ProjectTile tint={project?.tint ?? null} name={project?.name ?? "No project"} />
+        <ProjectTile
+          tint={project === undefined ? null : pickProjectTint(project.id, projects)}
+          name={project?.name ?? "No project"}
+        />
       </span>
       {tabs.map((tab) => (
         <ThreadTab
@@ -160,40 +175,15 @@ function ThreadTab({
       aria-label={`${session.title}, ${describePose(pose)}`}
       aria-describedby={end.kind === "mark" ? undefined : endId}
     >
-      {pose === "asleep" || pose === "away" ? null : <Mark state={pose} decorative />}
+      {pose === "asleep" || pose === "away" ? null : <Mark state={pose} />}
       <span className="ptab-title" title={session.title}>
         {session.title}
       </span>
       {end.kind === "mark" ? null : end.kind === "word" ? (
         <small id={endId}>{end.word}</small>
       ) : (
-        <TabAge at={end.at} descriptionId={endId} />
+        <AgeLabel at={end.at} onScreen descriptionId={endId} as="small" />
       )}
     </Link>
-  );
-}
-
-/**
- * Renders how long ago a tab's thread was last active: "20m" on screen, and
- * "20 minutes ago" in a hidden element with the id `descriptionId`, which the
- * tab's description points at. The header is always on screen, so the age
- * is always kept current.
- */
-function TabAge({
-  at,
-  descriptionId,
-}: {
-  readonly at: string;
-  readonly descriptionId: string;
-}): JSX.Element {
-  const label = useAgeLabel(at, true);
-  const words = useAgeWords(at, true);
-  return (
-    <>
-      <small>{label}</small>
-      <span id={descriptionId} hidden>
-        {words}
-      </span>
-    </>
   );
 }

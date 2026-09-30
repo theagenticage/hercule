@@ -4,9 +4,7 @@
  * capture when it is ready.
  */
 import { waitForPresentedFrame } from "../app/presented-frame";
-
-/** The two themes the sheets are compared in: Whitehaven (light) and Orient Express (dark). */
-const THEMES = ["whitehaven", "orient-express"];
+import { THEMES } from "./sheet-themes";
 
 /**
  * Sets the theme named by the page's `?theme=` on `<html>`, Whitehaven when

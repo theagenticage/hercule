@@ -319,6 +319,17 @@ export default tseslint.config(
     },
   },
   {
+    // The drag-region test reads every stylesheet the window loads, and a
+    // glob keeps that list complete as stylesheets are added. No build of
+    // the app includes a test, so the glob hides nothing from dep-lint.
+    files: ["apps/desktop/src/renderer/app/router.integration.test.tsx"],
+    rules: {
+      "no-restricted-syntax": browserSyntax({
+        more: [viteAssetUrlSyntax, ...specimensCalls, ...markupSyntax],
+      }),
+    },
+  },
+  {
     // A screen composes presentation; it does not reach into the frame around
     // it. Only the layout routes below mount the shell.
     files: ["apps/web/src/routes/**/*.tsx"],

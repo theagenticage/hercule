@@ -10,6 +10,7 @@
  * grants.
  */
 import {
+  ACCESS_MODE_CHAIN,
   findNearestSupportedAccessMode,
   type AccessMode,
   type DeclaredCapabilities,
@@ -22,14 +23,6 @@ export interface AccessModeMenuItem {
   readonly meaning: string;
   readonly dimmed: string | null;
 }
-
-/** The four access modes, from the most asking to the least. */
-export const ACCESS_MODES: readonly AccessMode[] = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
 
 /** The names the Bureau book gives the modes. */
 const LABELS: Readonly<Record<AccessMode, string>> = {
@@ -59,7 +52,7 @@ export const buildAccessModeMenu = (
   /** The provider's display name, used in the dimmed note to say which harness falls back. */
   providerName: string,
 ): readonly AccessModeMenuItem[] =>
-  ACCESS_MODES.map((mode) => {
+  ACCESS_MODE_CHAIN.map((mode) => {
     const fallback = findNearestSupportedAccessMode(mode, declared);
     const dimmed =
       fallback === undefined || fallback === mode

@@ -933,7 +933,7 @@ describe("Thread: token tap", () => {
       expect(live.topics()).toEqual(expect.arrayContaining([TAP, STREAM]));
     });
     act(() => {
-      live.push(STREAM, { _tag: "delta", items: [], cursor: live.cursorOf(STREAM) });
+      live.push(STREAM, { _tag: "delta", items: [], cursor: live.readCursor(STREAM) });
     });
     await settle();
   };
@@ -1619,7 +1619,7 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
-    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("0");
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("0");
 
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
@@ -1692,7 +1692,7 @@ describe("Thread: live subscriptions", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     // This thread has rows, so its cursor is its last position.
-    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("15");
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("15");
 
     await act(async () => {
       await router.navigate({ to: "/threads/$sessionId", params: { sessionId: OTHER_ID } });
@@ -1704,7 +1704,7 @@ describe("Thread: live subscriptions", () => {
     // The second thread's transcript is empty, so its cursor must start at
     // the beginning of its log. Any other value means the previous thread's
     // cursor leaked.
-    expect(live.cursorOf(buildSessionStreamTopic(OTHER_ID))).toBe("0");
+    expect(live.readCursor(buildSessionStreamTopic(OTHER_ID))).toBe("0");
   });
 });
 

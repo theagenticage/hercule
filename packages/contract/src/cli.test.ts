@@ -510,14 +510,10 @@ describe("the assistant and conversation rows", () => {
     expect(row?.examples?.map((example) => example.args)).toContainEqual(["7b41d0a5"]);
   });
 
-  it("sends the text from stdin, and explains that only a user credential may send", () => {
+  it("sends the text from stdin", () => {
     const row = table["conversation.send"];
     expect(row?.fields?.["id"]?.positional).toBe(true);
     expect(row?.fields?.["text"]?.stdin).toBe(true);
-    expect(
-      row?.errors?.["forbidden"]?.trim(),
-      "conversation.send has no forbidden help",
-    ).toBeTruthy();
     expect(
       row?.examples?.some(
         (example) => example.args.join(" ") === "7b41d0a5" && example.stdin !== undefined,
@@ -560,6 +556,7 @@ const USER_ONLY = [
   "secret.delete",
   "controller.read",
   "controller.update",
+  "conversation.send",
 ];
 
 /**

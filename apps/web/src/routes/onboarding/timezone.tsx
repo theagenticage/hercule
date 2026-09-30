@@ -1,7 +1,12 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-import { addCompletedStep, resolveBrowserTimezone, readErrorMessage } from "@hercule/client-core";
+import {
+  addCompletedStep,
+  isMutationRunning,
+  resolveBrowserTimezone,
+  readErrorMessage,
+} from "@hercule/client-core";
 import { Button, Field } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
@@ -44,10 +49,7 @@ function TimezoneStep(): JSX.Element {
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    // `save.isPending` reaches the render a tick after `mutate`, so a second
-    // Enter in the same tick would still see it false; the mutation cache
-    // knows at once.
-    if (queryClient.isMutating({ mutationKey: SAVE_KEY }) > 0) return;
+    if (isMutationRunning(queryClient, SAVE_KEY)) return;
     save.mutate(timezone);
   };
 

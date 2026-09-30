@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import { ACCESS_MODES, formatAccessMode } from "@hercule/client-core";
-import type { AccessMode } from "@hercule/contract";
+import { formatAccessMode } from "@hercule/client-core";
+import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
 import { SegmentedControl, SegmentedControlItem } from "@hercule/ui";
 
 /**
@@ -25,7 +25,7 @@ export function AccessModeControl({
         onChange(next as AccessMode);
       }}
     >
-      {ACCESS_MODES.map((mode) => (
+      {ACCESS_MODE_CHAIN.map((mode) => (
         <SegmentedControlItem key={mode} value={mode}>
           {formatAccessMode(mode)}
         </SegmentedControlItem>

@@ -1,24 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
-import faceCss from "../faces/face.css?raw";
-import iconCss from "../icons/icon.css?raw";
-import markCss from "../marks/mark.css?raw";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
-import projectTileCss from "../screens/project-tile.css?raw";
-import renderFailureCss from "../screens/render-failure.css?raw";
-import composerCss from "../screens/thread/composer.css?raw";
-import dockCss from "../screens/thread/dock.css?raw";
-import threadNotFoundCss from "../screens/thread/not-found.css?raw";
-import providerLogoCss from "../screens/thread/provider-logo.css?raw";
-import queuedInputsCss from "../screens/thread/queued-inputs.css?raw";
-import threadHeaderCss from "../screens/thread/thread-header.css?raw";
-import threadCss from "../screens/thread/thread.css?raw";
 import shellCss from "../shell/shell.css?raw";
-import sidebarCss from "../shell/sidebar.css?raw";
-import baseCss from "../styles/base.css?raw";
-import controlsCss from "../styles/controls.css?raw";
-import tokensCss from "../styles/tokens.css?raw";
-import { readLastThread } from "./last-thread";
+import { readLastThread, rememberLastThread } from "./last-thread";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -59,31 +43,17 @@ const expectDeclaration = (
 };
 
 /**
- * Every stylesheet the app's window loads, as text. A test cannot list the
- * folder: the renderer's program has no Node, and eslint keeps
- * `import.meta.glob` out of the desktop app. So a new stylesheet is added
- * here by name.
+ * Every stylesheet the app's window loads, as text: each one in the renderer
+ * but the specimen sheets', which only the specimen tool loads. A glob keeps
+ * the list complete as stylesheets are added.
  */
-const APP_STYLESHEETS = [
-  tokensCss,
-  baseCss,
-  controlsCss,
-  shellCss,
-  sidebarCss,
-  centeredScreenCss,
-  renderFailureCss,
-  projectTileCss,
-  threadNotFoundCss,
-  threadHeaderCss,
-  providerLogoCss,
-  dockCss,
-  composerCss,
-  queuedInputsCss,
-  threadCss,
-  faceCss,
-  iconCss,
-  markCss,
-];
+const APP_STYLESHEETS = Object.values(
+  import.meta.glob<string>(["../**/*.css", "!../specimens/**"], {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }),
+);
 
 /**
  * Returns the selector of each rule in `stylesheets` that declares
@@ -147,8 +117,8 @@ describe("where the app starts", () => {
 
   it("opens the thread that was open last on this controller", async () => {
     const thread = THREAD_FIXTURES.finished;
-    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, thread.session.id);
-    localStorage.setItem("last-thread:http://another.test", THREAD_FIXTURES.failed.session.id);
+    rememberLastThread(CONTROLLER_URL, thread.session.id);
+    rememberLastThread("http://another.test", THREAD_FIXTURES.failed.session.id);
     stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...buildThreadHandlers(thread) });
     const { router } = await renderApp(
       createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
@@ -158,7 +128,7 @@ describe("where the app starts", () => {
 
   it("opens the new-thread screen, and forgets the thread, when the last thread is gone", async () => {
     const goneId = "01a06d02-7400-7000-8000-0000000000ff";
-    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, goneId);
+    rememberLastThread(CONTROLLER_URL, goneId);
     stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
     const { router } = await renderApp(
       createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
@@ -169,7 +139,7 @@ describe("where the app starts", () => {
   });
 
   it("ignores a stored last thread that is not an id", async () => {
-    localStorage.setItem(`last-thread:${CONTROLLER_URL}`, "../settings");
+    rememberLastThread(CONTROLLER_URL, "../settings");
     stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
     const { router } = await renderApp(
       createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),

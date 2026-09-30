@@ -1,3 +1,37 @@
+import { beforeEach, vi } from "vitest";
+
+/**
+ * Creates an empty `localStorage` held in memory.
+ *
+ * Under the Node versions this repository runs on, Node's own
+ * `localStorage`, which is missing unless Node is given a file to keep it in,
+ * hides jsdom's. So each test gets this one, and nothing one test stores,
+ * such as the last open thread, reaches the next.
+ */
+const createMemoryStorage = (): Storage => {
+  const held = new Map<string, string>();
+  return {
+    getItem: (key) => held.get(key) ?? null,
+    setItem: (key, value) => {
+      held.set(key, String(value));
+    },
+    removeItem: (key) => {
+      held.delete(key);
+    },
+    clear: () => {
+      held.clear();
+    },
+    key: (index) => [...held.keys()][index] ?? null,
+    get length() {
+      return held.size;
+    },
+  };
+};
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", createMemoryStorage());
+});
+
 /**
  * jsdom has no `window.scrollTo`. The router calls it after every navigation,
  * including the first one at start-up, so without this stub each test that

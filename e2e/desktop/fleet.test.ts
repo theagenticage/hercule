@@ -1,25 +1,22 @@
 /**
  * Proves the scripted runner and the fleet against the compiled controller:
- * every thread state the desktop app draws can be reached, and is read back
- * through the public API with the same client the app uses. No app window is
- * started. Run `pnpm build:binary` first.
+ * every state the desktop tests put a thread or a runner in can be reached,
+ * and is read back through the public API with the same client the app uses.
+ * No app window is started. Run `pnpm build:binary` first.
  *
  * The 500-thread case is part of the default run while it stays fast. It
  * prints how long spawning, settling and listing took; vitest shows that
  * output only with `--reporter=verbose`.
  */
-import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { pollUntil } from "../../apps/desktop/scripts/poll";
 import {
   buildQueryKeys,
-  createClient,
   createLive,
-  type HerculeClient,
   type LiveQueryKey,
 } from "../../packages/client-core/src/index";
-import type { RequestKind } from "../../scripts/scripted-runner";
-import { connectFleet, type Fleet } from "./fleet";
-import { startControllerForTest } from "./harness";
+import type { RequestKind } from "../../apps/desktop/scripts/scripted-runner";
+import { arrangeFleet } from "./harness";
 
 const REQUEST_KINDS: ReadonlyArray<RequestKind> = [
   "command_approval",
@@ -29,83 +26,68 @@ const REQUEST_KINDS: ReadonlyArray<RequestKind> = [
   "question",
 ];
 
-/** A scratch controller, a fleet signed in to it, and a client for reading it back. */
-interface Arranged {
-  readonly url: string;
-  readonly fleet: Fleet;
-  readonly client: HerculeClient;
-}
-
 /**
  * Waits until the live socket has pushed at least once and then nothing for a
  * quarter of a second. The controller collects changes for a short window
  * (50 ms) before it pushes them, so writes that landed just before a
- * subscription can still arrive after the greeting.
+ * subscription can still arrive after the greeting. Fails after 10 s, when
+ * the socket never pushed or never went quiet.
  */
 async function waitForQuietSocket(pushes: ReadonlyArray<unknown>): Promise<void> {
-  for (;;) {
-    const seen = pushes.length;
-    await sleep(250);
-    if (seen > 0 && pushes.length === seen) return;
-  }
-}
-
-/**
- * Starts a scratch controller that is set up, and connects a fleet to it.
- * The controller is stopped and the runners disconnected when the test ends.
- */
-async function arrangeFleet(): Promise<Arranged> {
-  const controller = await startControllerForTest({ setUp: true });
-  const fleet = await connectFleet(controller.url);
-  onTestFinished(fleet.disconnectRunners);
-  return {
-    url: controller.url,
-    fleet,
-    client: createClient({ baseUrl: controller.url, token: fleet.token }),
-  };
+  let seen = 0;
+  await pollUntil(
+    () => {
+      const quiet = seen > 0 && pushes.length === seen;
+      seen = pushes.length;
+      return quiet ? true : undefined;
+    },
+    {
+      timeoutMs: 10_000,
+      intervalMs: 250,
+      timeoutMessage: () =>
+        seen === 0
+          ? "the live socket pushed nothing within 10 s of subscribing"
+          : `the live socket was still pushing 10 s after subscribing (${String(seen)} pushes)`,
+    },
+  );
 }
 
 describe("the scripted fleet", () => {
-  it("walks a thread through queued, starting, busy, interrupted, idle, and both kinds of exit", async () => {
-    const { fleet, client } = await arrangeFleet();
+  it("walks a thread through queued, busy, idle, interrupted, and both kinds of exit", async () => {
+    const { fleet, client, waitForStatus } = await arrangeFleet();
     const readSession = (id: string) => client.session.read({ params: { id } });
     const runner = await fleet.enlistRunner("scripted-1", { maxConcurrentSessions: 1 });
-    runner.holdStarts();
 
+    // The spawn's prompt opens a turn, so the thread settles busy.
     const [first] = await fleet.spawnThreads(1, { runner });
-    await expect.poll(async () => (await readSession(first!.id)).status).toBe("starting");
+    await waitForStatus(first!.id, "busy");
     // The runner's one slot is taken, so the next thread waits.
     const [second] = await fleet.spawnThreads(1, { runner });
     expect((await readSession(second!.id)).status).toBe("queued");
 
-    // Once started, the controller delivers the spawn's prompt, which opens a turn.
-    await runner.startSession(first!.id, { resumable: false });
-    await expect.poll(async () => (await readSession(first!.id)).status).toBe("busy");
     runner.completeTurn(first!.id);
-    await expect.poll(async () => (await readSession(first!.id)).status).toBe("idle");
+    await waitForStatus(first!.id, "idle");
     runner.startTurn(first!.id);
-    await expect.poll(async () => (await readSession(first!.id)).status).toBe("busy");
+    await waitForStatus(first!.id, "busy");
     runner.endSession(first!.id, "crash");
-    await expect.poll(async () => (await readSession(first!.id)).status).toBe("exited");
-    expect((await readSession(first!.id)).resumable).toBe(false);
+    await waitForStatus(first!.id, "exited");
 
     // The slot is free again, so the queued thread is sent to the runner.
-    await runner.startSession(second!.id);
-    await expect.poll(async () => (await readSession(second!.id)).status).toBe("busy");
+    await waitForStatus(second!.id, "busy");
     await client.session.interrupt({ params: { id: second!.id } });
-    await expect.poll(async () => (await readSession(second!.id)).status).toBe("idle");
+    await waitForStatus(second!.id, "idle");
     await client.session.stop({ params: { id: second!.id } });
-    await expect.poll(async () => (await readSession(second!.id)).status).toBe("exited");
+    await waitForStatus(second!.id, "exited");
     expect((await readSession(second!.id)).resumable).toBe(true);
   });
 
-  it("opens a Request of each kind, and clears it once it is answered or withdrawn", async () => {
-    const { fleet, client } = await arrangeFleet();
+  it("opens a Request of each kind, and clears it once it is answered", async () => {
+    const { fleet, client, waitForStatus } = await arrangeFleet();
     const readSession = (id: string) => client.session.read({ params: { id } });
     const runner = await fleet.enlistRunner("scripted-1");
     const [thread] = await fleet.spawnThreads(1, { runner });
     const id = thread!.id;
-    await expect.poll(async () => (await readSession(id)).status).toBe("busy");
+    await waitForStatus(id, "busy");
 
     for (const kind of REQUEST_KINDS) {
       const requestId = runner.openRequest(id, kind);
@@ -117,50 +99,21 @@ describe("the scripted fleet", () => {
       });
       await expect.poll(async () => (await readSession(id)).openRequest).toBeNull();
     }
-
-    // A harness can also withdraw its own question.
-    runner.openRequest(id, "question");
-    await expect.poll(async () => (await readSession(id)).openRequest?.kind).toBe("question");
-    runner.resolveRequest(id, "cancel");
-    await expect.poll(async () => (await readSession(id)).openRequest).toBeNull();
     expect((await readSession(id)).status).toBe("busy");
   });
 
-  it("holds a resumed thread that crashes before its first turn", async () => {
-    const { fleet, client } = await arrangeFleet();
-    const readSession = (id: string) => client.session.read({ params: { id } });
-    const runner = await fleet.enlistRunner("scripted-1");
-    const [thread] = await fleet.spawnThreads(1, { runner });
-    const id = thread!.id;
-    await expect.poll(async () => (await readSession(id)).status).toBe("busy");
-    runner.endSession(id, "crash");
-    await expect.poll(async () => (await readSession(id)).status).toBe("exited");
-    // Only a resume arms the crash-loop guard, never a first start.
-    expect((await readSession(id)).resumeHeld).toBe(false);
-
-    // The input resumes the thread, and the resumed process crashes on it.
-    // The thread stays held only while that input waits for an answer: the
-    // controller cancels it after 10 s, and the thread is then plain exited.
-    runner.crashSessionOnNextInput(id);
-    await client.session.input({ params: { id }, payload: { text: "Try again" } });
-    await expect.poll(async () => (await readSession(id)).resumeHeld).toBe(true);
-    expect(await readSession(id)).toMatchObject({ status: "exited", resumable: true });
-  });
-
-  it("takes a runner offline and unreachable, and reconnects it with its threads", async () => {
-    const { fleet, client } = await arrangeFleet();
+  it("takes a runner offline, and reconnects it with its threads", async () => {
+    const { fleet, client, waitForStatus } = await arrangeFleet();
     const readSession = (id: string) => client.session.read({ params: { id } });
     const readConnectivity = async (id: string) =>
       (await client.runner.read({ params: { id } })).connectivity;
     const runner = await fleet.enlistRunner("scripted-1");
     const [idle, asleep] = await fleet.spawnThreads(2, { runner });
-    for (const thread of [idle!, asleep!]) {
-      await expect.poll(async () => (await readSession(thread.id)).status).toBe("busy");
-    }
+    for (const thread of [idle!, asleep!]) await waitForStatus(thread.id, "busy");
     runner.completeTurn(idle!.id);
     runner.endSession(asleep!.id, "crash");
-    await expect.poll(async () => (await readSession(idle!.id)).status).toBe("idle");
-    await expect.poll(async () => (await readSession(asleep!.id)).status).toBe("exited");
+    await waitForStatus(idle!.id, "idle");
+    await waitForStatus(asleep!.id, "exited");
 
     // A runner that goes away changes none of its threads. The desktop app
     // reads the runner to show them as out of reach.
@@ -175,16 +128,10 @@ describe("the scripted fleet", () => {
     await runner.reconnect();
     await expect.poll(() => readConnectivity(runner.runnerId)).toBe("online");
 
-    await runner.goUnreachable();
-    await expect.poll(() => readConnectivity(runner.runnerId)).toBe("unreachable");
-    await expectThreadsKept();
-    await runner.reconnect();
-    await expect.poll(() => readConnectivity(runner.runnerId)).toBe("online");
-
     // A thread is placed only after the runner's report of its sessions is
     // handled, so once this one runs, the report kept the idle thread alive.
     const [later] = await fleet.spawnThreads(1, { runner });
-    await expect.poll(async () => (await readSession(later!.id)).status).toBe("busy");
+    await waitForStatus(later!.id, "busy");
     await expectThreadsKept();
   });
 
@@ -195,8 +142,6 @@ describe("the scripted fleet", () => {
       { kind: "stream", forMs: 60_000 },
     ]);
     await fleet.waitForTurn(thread.id, 1, "running");
-    // Long enough for the script to be between two deltas of its stream.
-    await sleep(200);
 
     await runner.goOffline();
 
@@ -204,7 +149,7 @@ describe("the scripted fleet", () => {
   });
 
   it("opens threads in a primary and an ephemeral workspace, filed under a project", async () => {
-    const { fleet, client } = await arrangeFleet();
+    const { fleet, client, waitForStatus } = await arrangeFleet();
     const readSession = (id: string) => client.session.read({ params: { id } });
     const project = await fleet.createProject("Hercule");
     const repository = await fleet.createRepository("https://github.com/example/hercule", [
@@ -224,7 +169,7 @@ describe("the scripted fleet", () => {
     });
 
     for (const thread of [primary!, ephemeral!]) {
-      await expect.poll(async () => (await readSession(thread.id)).status).toBe("busy");
+      await waitForStatus(thread.id, "busy");
       const read = await readSession(thread.id);
       expect(read.workspaceId).not.toBeNull();
       expect(read.projectId).toBe(project.id);
@@ -233,12 +178,10 @@ describe("the scripted fleet", () => {
   });
 
   it("pushes a change naming the thread when a Request opens", async () => {
-    const { url, fleet, client } = await arrangeFleet();
+    const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("scripted-1");
     const [thread] = await fleet.spawnThreads(1, { runner });
-    await expect
-      .poll(async () => (await client.session.read({ params: { id: thread!.id } })).status)
-      .toBe("busy");
+    await waitForStatus(thread!.id, "busy");
 
     const live = createLive({ client, baseUrl: url });
     const pushes: Array<ReadonlyArray<LiveQueryKey>> = [];

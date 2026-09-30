@@ -23,7 +23,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { designDir, runSheetCapture } from "./sheet-server.ts";
+import { designDir, runAndSetExitCode, runSheetCapture } from "./sheet-server.ts";
 
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -59,11 +59,7 @@ function assertSharedFilesMatch(): void {
   }
 }
 
-let exitCode = 1;
-try {
+await runAndSetExitCode(async () => {
   assertSharedFilesMatch();
-  exitCode = await runSheetCapture(new URL("bureau-capture.ts", import.meta.url));
-} catch (error) {
-  process.stderr.write(`FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
-}
-process.exitCode = exitCode;
+  return runSheetCapture(new URL("bureau-capture.ts", import.meta.url));
+});

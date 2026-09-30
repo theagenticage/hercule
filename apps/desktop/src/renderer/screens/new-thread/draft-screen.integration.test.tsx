@@ -22,6 +22,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_INSTANCE,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -245,27 +246,20 @@ describe("the new-thread screen", () => {
   });
 
   it("shows why the start failed when the user left while it ran and came back", async () => {
-    let answer = (): void => {};
+    const held = holdAnswer();
     const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "POST /api/v1/sessions": () =>
-        new Promise((resolve) => {
-          answer = () => {
-            resolve({
-              status: 409,
-              body: buildErrorBody("invalid_state", "moss is at its limit of 4 sessions."),
-            });
-          };
-        }),
+      "POST /api/v1/sessions": held.handler,
     });
     await userEvent.type(field, "Fix the cart{Enter}");
 
     await act(() =>
       router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
     );
-    await act(async () => {
-      answer();
-      await Promise.resolve();
+    held.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "moss is at its limit of 4 sessions."),
     });
+    await act(() => Promise.resolve());
     await act(() => router.navigate({ to: "/", search: { project: WEBSHOP.id } }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -277,19 +271,14 @@ describe("the new-thread screen", () => {
   });
 
   it("keeps what the user typed while the thread started, for the next draft", async () => {
-    let answer = (): void => {};
+    const held = holdAnswer();
     const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "POST /api/v1/sessions": () =>
-        new Promise((resolve) => {
-          answer = () => {
-            resolve({ body: STARTED.session });
-          };
-        }),
+      "POST /api/v1/sessions": held.handler,
     });
     await userEvent.type(field, "Fix the cart{Enter}");
     await userEvent.type(field, ", and the tests");
 
-    act(answer);
+    held.answer({ body: STARTED.session });
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/threads/${STARTED.session.id}`);
     });
@@ -301,14 +290,9 @@ describe("the new-thread screen", () => {
   });
 
   it("does not start the thread twice when the user leaves and comes back while it starts", async () => {
-    let answer = (): void => {};
+    const held = holdAnswer();
     const { calls, field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "POST /api/v1/sessions": () =>
-        new Promise((resolve) => {
-          answer = () => {
-            resolve({ body: STARTED.session });
-          };
-        }),
+      "POST /api/v1/sessions": held.handler,
     });
     await userEvent.type(field, "Fix the cart{Enter}");
     await waitFor(() => {
@@ -325,7 +309,7 @@ describe("the new-thread screen", () => {
     await userEvent.type(again, "{Enter}");
     expect(readSpawns(calls)).toHaveLength(1);
 
-    act(answer);
+    held.answer({ body: STARTED.session });
     await waitFor(() => {
       expect(again.value).toBe("");
     });
@@ -398,9 +382,8 @@ describe("the new-thread screen", () => {
     );
     expect(document.activeElement).toBe(field);
     // The cards ask for the project's most urgent open tasks.
-    expect(calls.find((call) => call.path === "/api/v1/tasks")?.query).toMatchObject({
-      projectId: WEBSHOP.id,
-    });
+    const tasksCall = calls.find((call) => call.path === "/api/v1/tasks");
+    expect(new URLSearchParams(tasksCall?.search).get("projectId")).toBe(WEBSHOP.id);
   });
 
   it("shows the picks in the lip and the lead, and starts the thread with them", async () => {
@@ -409,15 +392,12 @@ describe("the new-thread screen", () => {
     const key = buildDraftKey(WEBSHOP.id, null);
 
     act(() => {
-      pendingSubmissions.write(key, {
-        ...pendingSubmissions.read(key),
-        picks: {
-          workspace: {
-            kind: "ephemeral",
-            checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
-          },
-          accessMode: "full-access",
+      pendingSubmissions.writePicks(key, {
+        workspace: {
+          kind: "ephemeral",
+          checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
         },
+        accessMode: "full-access",
       });
     });
     expect(readLip()).toMatch(/^New workspace/);

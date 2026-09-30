@@ -14,6 +14,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -123,16 +124,11 @@ describe("the shell's reads failing", () => {
     // The first read of the projects fails. The second is held until the
     // test has seen the button say that it is trying.
     let projectReads = 0;
-    let answerSecondRead: () => void = () => {};
+    const secondRead = holdAnswer();
     const { calls } = await startSignedIn({
       "GET /api/v1/projects": () => {
         projectReads += 1;
-        if (projectReads === 1) return SERVER_ERROR;
-        return new Promise<Answer>((resolve) => {
-          answerSecondRead = () => {
-            resolve({ body: { items: SIDEBAR_FIXTURE.projects } });
-          };
-        });
+        return projectReads === 1 ? SERVER_ERROR : secondRead.handler();
       },
     });
     expect(screen.getByRole("alert")).toBeTruthy();
@@ -141,7 +137,7 @@ describe("the shell's reads failing", () => {
     const trying = await screen.findByRole("button", { name: "Trying again…" });
     expect(trying.getAttribute("aria-disabled")).toBe("true");
 
-    answerSecondRead();
+    secondRead.answer({ body: { items: SIDEBAR_FIXTURE.projects } });
     expect(await screen.findByRole("navigation", { name: "Threads" })).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(calls.filter((call) => call.path === "/api/v1/projects")).toHaveLength(2);

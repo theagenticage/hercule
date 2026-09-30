@@ -13,19 +13,48 @@ import {
   type ThreadPicks,
 } from "./config";
 
-export type Submission =
-  | { readonly kind: "spawn"; readonly input: SessionSpawnInput }
-  | {
-      readonly kind: "input";
-      readonly sessionId: string;
-      readonly payload: SessionInputPayload;
-    };
+/** The request that starts a Draft Thread. */
+interface SpawnSubmission {
+  readonly kind: "spawn";
+  readonly input: SessionSpawnInput;
+}
 
-export const buildSubmission = (
+/** The request that sends a message to a thread that has started. */
+interface InputSubmission {
+  readonly kind: "input";
+  readonly sessionId: string;
+  readonly payload: SessionInputPayload;
+}
+
+export type Submission = SpawnSubmission | InputSubmission;
+
+/**
+ * Returns the request that sends `message` with `picks` from `thread`: an
+ * input for a thread that has started, and a spawn for a Draft Thread.
+ *
+ * A caller that knows which kind of thread it holds gets that kind of request
+ * back, so it need not check the request's kind.
+ */
+export function buildSubmission(
+  thread: Extract<Thread, { kind: "active" }>,
+  picks: ThreadPicks,
+  message: MessageDraft,
+): InputSubmission;
+export function buildSubmission(
+  thread: Extract<Thread, { kind: "draft" }>,
+  picks: ThreadPicks,
+  message: MessageDraft,
+): SpawnSubmission;
+export function buildSubmission(
   thread: Thread,
   picks: ThreadPicks,
   message: MessageDraft,
-): Submission => {
+): Submission;
+export function buildSubmission(
+  thread: Thread,
+  picks: ThreadPicks,
+  message: MessageDraft,
+): Submission {
   if (thread.kind === "active") {
     const { model, options } = picks;
     return {
@@ -63,4 +92,4 @@ export const buildSubmission = (
       ...(workspace === null || workspace.kind === "none" ? {} : { workspace }),
     },
   };
-};
+}

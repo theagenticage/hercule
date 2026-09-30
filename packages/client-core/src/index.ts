@@ -44,8 +44,6 @@ export {
   buildRedirectUri,
   decideSetupFlow,
   type ConnectionType,
-  type CredentialField,
-  type SetupStep,
 } from "./connections";
 export {
   ApiError,
@@ -56,9 +54,9 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
-export { buildIdOptions, type IdOption } from "./id-options";
+export { buildIdOptions } from "./id-options";
 export { readJsonObject } from "./json-shape";
-export { listJsonLines, type JsonLine } from "./json-lines";
+export { listJsonLines } from "./json-lines";
 export { joinCommand } from "./join-command";
 export {
   buildRetireQuestion,
@@ -78,12 +76,10 @@ export {
   describeRunStatus,
   describeStepDuration,
   describeStepState,
-  describeUnstartedStep,
   findFailedEdge,
   formatElapsed,
   isRunLive,
   listRerunChoices,
-  type RerunChoice,
   readTimestamps,
   shouldRunRecede,
 } from "./run-display";
@@ -97,7 +93,6 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
-  type Timeline,
 } from "./run-graph";
 export { describeRunWorkspace, type RunWorkspaceReading } from "./run-workspace";
 export {
@@ -113,13 +108,11 @@ export {
   type RunInputValue,
 } from "./run-inputs";
 export { createLive, type Live } from "./live/live";
+export { invalidateWithoutCancelling } from "./live/invalidation";
+export { readEveryPage } from "./read-every-page";
+export { isMutationRunning } from "./mutation-running";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
-export {
-  buildFetchIdentityProbe,
-  detectLocalRunner,
-  listLoopbackEndpoints,
-  type IdentityProbe,
-} from "./local-runner";
+export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
   chooseNotificationMark,
   describeProducer,
@@ -135,42 +128,26 @@ export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
-export {
-  chooseNewSince,
-  choosePinOnOpen,
-  NEVER_CHECKED,
-  parseSincePin,
-  splitBySince,
-} from "./since-marker";
+export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
   chooseStamps,
-  formatDay,
   formatPreciseStamp,
   formatSince,
   formatStamp,
   formatTimeContext,
 } from "./time-context";
-export {
-  readPriorityGlyph,
-  describeProvenanceTarget,
-  shouldTaskRecede,
-  type GlyphTone,
-} from "./task-display";
+export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
-export { ACCESS_MODES, formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
+export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
 export { buildApprovalCard } from "./threads/approval";
 export {
   buildThreadBlocks,
   type AgentBlock,
   type EndingBlock,
-  type LiveBlock,
   type ThreadBlock,
-  type UserBlock,
-  type WaitingBlock,
   type WorkBlock,
-  type WorkItem,
 } from "./threads/blocks";
 export {
   addWorkspacePicks,
@@ -191,12 +168,7 @@ export {
 } from "./threads/composer-fields";
 export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
 export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
-export {
-  buildDraftView,
-  type DraftAddress,
-  type DraftReads,
-  type DraftView,
-} from "./threads/draft-view";
+export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {
   MessageDraft,
   Thread,
@@ -206,7 +178,7 @@ export type {
   ThreadPicks,
 } from "./threads/config";
 export { findNextDurationChange, formatDuration } from "./threads/duration";
-export { buildHeadline, buildLanes, type Lane, type LaneKind } from "./threads/lanes";
+export { buildHeadline, buildLanes, type LaneKind } from "./threads/lanes";
 export {
   describeMessageMeta,
   describeWaitingNote,
@@ -214,6 +186,7 @@ export {
 } from "./threads/message-time";
 export { buildThreadModelField } from "./threads/model-field";
 export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
+export { describeAccountRow, describeModelRow } from "./threads/model-menu-details";
 export { findOpenItem } from "./threads/open-item";
 export {
   decideThreadPose,
@@ -223,13 +196,19 @@ export {
   type Pose,
   type ThreadRowEnd,
 } from "./threads/pose";
-export { createTailBuffer, type TailBuffer } from "./threads/tail-buffer";
-export { splitStreamingText, type StreamingText } from "./threads/streaming-text";
-export { findNewRows, mergeTranscript } from "./threads/transcript";
+export { createTailBuffer } from "./threads/tail-buffer";
+export { splitStreamingText } from "./threads/streaming-text";
+export { buildStreamCursor, decideStreamDelivery, decideTapDelivery } from "./threads/thread-live";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
-export { parseRecentModels, pushRecent, type RecentModel } from "./threads/recent";
-export { decideRelatedReads, type RelatedReads } from "./threads/related-reads";
+export { parseOptionChoice } from "./threads/option-choice";
+export {
+  buildRecentModel,
+  parseRecentModels,
+  pushRecent,
+  type RecentModel,
+} from "./threads/recent";
+export { decideRelatedReads } from "./threads/related-reads";
 export { formatRequestQuestion } from "./threads/request-question";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
@@ -238,7 +217,6 @@ export {
   buildThreadGroups,
   type DraftPlace,
   decideDraftPlace,
-  decideDraftPlaceForPick,
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
@@ -256,35 +234,27 @@ export {
   type ThreadTab,
 } from "./threads/siblings";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
-export { pickProjectHue, pickProjectTone, type ProjectTone } from "./threads/tone";
+export { pickProjectHue, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
-export {
-  buildThreadWorkspaceLabel,
-  type ThreadWorkspaceLabelPiece,
-} from "./threads/thread-workspace";
+export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
 export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
   buildComposerPlaceholder,
+  type DraftSubject,
   findDraftSubject,
   isJoinable,
   joinLabelText,
   joinPhraseText,
-  parsePreferredWorkspace,
   listProjectRepos,
-  formatRepoName,
   withBranch,
   formatWorkspaceLabel,
-  formatWorkspaceName,
-  type DraftSubject,
   type Phrase,
-  type WorkspaceLabel,
   type WorkspacePick,
 } from "./threads/workspaces";
-export { buildRunnerMenu } from "./threads/runner-menu";
 export { buildSubmission } from "./threads/submission";
-export { appendToMessage, buildStartCards, type StartCard } from "./threads/start-cards";
+export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {
   buildDraftConfig,
   computeInstanceDefaults,
@@ -316,14 +286,12 @@ export {
   abbreviateEdgeCondition,
   buildWorkflowGraph,
   shortenCondition,
-  type WorkflowGraph,
   type WorkflowGraphEdge,
   type WorkflowGraphNode,
 } from "./workflow-graph";
 export {
   decideIssueState,
   formatProblemCount,
-  locateIssues,
   parseWorkflowSourceWithRanges,
   type LocatedIssue,
   type ParsedWorkflowSource,
@@ -336,8 +304,4 @@ export {
   markDraftSaved,
   type WorkflowDraft,
 } from "./workflow-draft";
-export {
-  decideWorkflowHeaderStatus,
-  type WorkflowHeaderFacts,
-  type WorkflowHeaderStatus,
-} from "./workflow-header-status";
+export { decideWorkflowHeaderStatus, type WorkflowHeaderStatus } from "./workflow-header-status";

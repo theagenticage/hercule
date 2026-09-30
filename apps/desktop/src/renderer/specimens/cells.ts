@@ -25,9 +25,7 @@ export type IconName =
   | "chevron-right"
   | "clock"
   | "compose"
-  | "diff"
   | "editor"
-  | "external"
   | "intake"
   | "laptop"
   | "mic"
@@ -78,9 +76,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["chevron-right", [13]],
   ["clock", [14]],
   ["compose", [14]],
-  ["diff", []],
   ["editor", []],
-  ["external", [12]],
   ["intake", [13, 14]],
   ["laptop", [13]],
   ["mic", []],

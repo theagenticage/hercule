@@ -43,7 +43,7 @@ describe("Sign Out from the app menu", () => {
         {
           method: "POST",
           path: "/api/v1/auth/logout",
-          query: {},
+          search: "",
           body: undefined,
           authorization: "Bearer bearer",
         },

@@ -8,11 +8,18 @@
  * screens are the ones that ship, so a change to any of them shows up in the
  * tests.
  */
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
-import { stubWebSocketInto, type StubSocket } from "@hercule/client-core/testing";
+import {
+  createApiStub,
+  stubWebSocketInto,
+  type Answer,
+  type Call,
+  type Handler,
+  type StubSocket,
+} from "@hercule/client-core/testing";
 import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildSessionStreamTopic,
@@ -30,8 +37,13 @@ import {
   type TranscriptRow,
   type Workspace,
 } from "@hercule/contract";
-import type { Bridge, EncodedIpcPayload, EncodedIpcRequest } from "../../ipc/bridge";
-import type { ControllerUrlSaveOutcome, MenuCommand } from "../../ipc/contract";
+import type { Bridge } from "../../ipc/bridge";
+import type {
+  ControllerUrlSaveOutcome,
+  EncodedIpcPayload,
+  EncodedIpcRequest,
+  MenuCommand,
+} from "../../ipc/contract";
 import { buildRouterContext, type RouterContext } from "./context";
 import { createAppRouter } from "./router";
 
@@ -145,34 +157,9 @@ export const createFakeBridge = ({
   };
 };
 
-/** One request the app sent the controller, as the stub received it. */
-export interface Call {
-  readonly method: string;
-  readonly path: string;
-  /** The URL's query parameters, such as `{ cursor: "…" }` for a list's next page. */
-  readonly query: Readonly<Record<string, string>>;
-  readonly body: unknown;
-  /** The `authorization` header, or `null` when the request had none. */
-  readonly authorization: string | null;
-}
-
-/** The response a stubbed operation returns. */
-export interface Answer {
-  readonly status?: number;
-  readonly body: unknown;
-}
-
-/**
- * The response for one operation, or a function that builds it. A function
- * that throws or rejects makes `fetch` reject, as it does when the controller
- * cannot be reached.
- */
-export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
-
-/** Builds the error body the API sends. */
-export const buildErrorBody = (code: string, message: string): { error: unknown } => ({
-  error: { code, message },
-});
+// The fake API is shared with the web app's tests. A test imports it from
+// here with the rest of the harness.
+export { buildErrorBody, type Answer, type Call, type Handler } from "@hercule/client-core/testing";
 
 /** The error `fetch` rejects with when nothing answers at the address. */
 export const refuseConnection = (): never => {
@@ -185,19 +172,51 @@ export const refuseConnection = (): never => {
  */
 export const neverAnswer = (): Promise<Answer> => new Promise(() => {});
 
-/** Returns a promise that rejects with the signal's reason when `signal` aborts, as `fetch` does. */
-const rejectOnAbort = (signal: AbortSignal | null | undefined): Promise<never> =>
-  new Promise((_resolve, reject) => {
-    signal?.addEventListener(
-      "abort",
-      () => {
-        // Every abort in the app passes an Error as its reason, such as the
-        // TimeoutError of `fetchWithTimeout`.
-        reject(signal.reason as Error);
-      },
-      { once: true },
-    );
+/**
+ * Returns a handler that holds its request until the test calls `answer`,
+ * and `answer`, which answers the latest held request with `reply` inside
+ * `act`. A test uses it to look at the screen while a request is on its way.
+ */
+export const holdAnswer = (): {
+  readonly handler: () => Promise<Answer>;
+  readonly answer: (reply: Answer) => void;
+} => {
+  let answer: (reply: Answer) => void = () => {};
+  return {
+    handler: () =>
+      new Promise<Answer>((resolve) => {
+        answer = resolve;
+      }),
+    answer: (reply) => {
+      act(() => {
+        answer(reply);
+      });
+    },
+  };
+};
+
+/**
+ * Sets what `document.visibilityState` reads and fires `visibilitychange`,
+ * as hiding or showing the window does. It runs inside `act`, so the renders
+ * the change causes are done when it returns.
+ */
+export const setVisibility = (state: DocumentVisibilityState): void => {
+  act(() => {
+    Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
   });
+};
+
+/**
+ * Makes every element measure `width` by `height` CSS pixels, until
+ * `vi.restoreAllMocks` runs. jsdom lays nothing out, so every element would
+ * measure 0, and a virtualized list, which reads its own size to know how
+ * many rows fit, would draw none.
+ */
+export const stubElementSize = (width: number, height: number): void => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width);
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
+};
 
 /** The records the sidebar reads, as the stubbed controller holds them. */
 export interface SidebarRecords {
@@ -812,40 +831,13 @@ export const buildThreadHandlers = (thread: ThreadRecords): Readonly<Record<stri
  * Any other unstubbed path returns 404, so a test that forgot a route notices.
  */
 export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): readonly Call[] => {
-  const calls: Call[] = [];
-  const withDefaults: Readonly<Record<string, Handler>> = {
+  const { fetch, calls } = createApiStub({
     "GET /api/v1/setup": { body: { complete: true } },
     "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
     ...buildSidebarHandlers(NO_SIDEBAR_RECORDS),
     ...handlers,
-  };
-  vi.stubGlobal("fetch", async (url: string, init?: RequestInit): Promise<Response> => {
-    const request = new Request(url, init);
-    const sent = await request.text();
-    const address = new URL(url);
-    const call: Call = {
-      method: request.method,
-      path: address.pathname,
-      query: Object.fromEntries(address.searchParams),
-      body: sent.length === 0 ? undefined : JSON.parse(sent),
-      authorization: request.headers.get("authorization"),
-    };
-    calls.push(call);
-    const handler = withDefaults[`${call.method} ${call.path}`];
-    const answer: Answer =
-      handler === undefined
-        ? {
-            status: 404,
-            body: buildErrorBody("not_found", `no stub for ${call.method} ${call.path}`),
-          }
-        : typeof handler === "function"
-          ? await Promise.race([handler(call), rejectOnAbort(init?.signal)])
-          : handler;
-    return new Response(JSON.stringify(answer.body), {
-      status: answer.status ?? 200,
-      headers: { "content-type": "application/json" },
-    });
   });
+  vi.stubGlobal("fetch", fetch);
   return calls;
 };
 
@@ -891,38 +883,6 @@ export interface LiveStub {
   /** Closes the app's current socket from the controller's end, as a restart or a sleep does. */
   readonly drop: () => void;
 }
-
-/**
- * Creates an empty `localStorage` held in memory.
- *
- * Under the Node versions this repository runs on, Node's own
- * `localStorage`, which is missing unless Node is given a file to keep it in,
- * hides jsdom's. So each test gets this one, and nothing one test stores,
- * such as the last open thread, reaches the next.
- */
-const createMemoryStorage = (): Storage => {
-  const held = new Map<string, string>();
-  return {
-    getItem: (key) => held.get(key) ?? null,
-    setItem: (key, value) => {
-      held.set(key, String(value));
-    },
-    removeItem: (key) => {
-      held.delete(key);
-    },
-    clear: () => {
-      held.clear();
-    },
-    key: (index) => [...held.keys()][index] ?? null,
-    get length() {
-      return held.size;
-    },
-  };
-};
-
-beforeEach(() => {
-  vi.stubGlobal("localStorage", createMemoryStorage());
-});
 
 /**
  * The live connections the current test's app built. A connection keeps its
@@ -984,10 +944,7 @@ const buildTestContext = async (
     pushEmptyReplay: (sessionId) => {
       const socket = readSocket();
       const topic = buildSessionStreamTopic(sessionId);
-      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
-      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
-      const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
-      const cursor = (call?.payload as { readonly cursor?: string } | undefined)?.cursor;
+      const { cursor } = socket.findSubscription(topic);
       socket.push(topic, { _tag: "delta", cursor, items: [] });
     },
     pushTaps: (sessionId, taps) => {
@@ -995,10 +952,7 @@ const buildTestContext = async (
     },
     resetStream: (sessionId) => {
       const socket = readSocket();
-      const topic = buildSessionStreamTopic(sessionId);
-      const held = socket.subscriptions().find((subscription) => subscription.topic === topic);
-      if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
-      socket.fail(held.requestId, {
+      socket.fail(socket.findSubscription(buildSessionStreamTopic(sessionId)).requestId, {
         error: {
           code: "validation",
           message: "cursor is past the end of the log",

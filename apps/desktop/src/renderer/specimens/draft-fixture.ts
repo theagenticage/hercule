@@ -27,7 +27,7 @@
 import type { ThreadPicks } from "@hercule/client-core";
 import type { Resource, Task, TaskPriority, Workspace } from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
-import type { DraftScreenRecords, SidebarRecords } from "./sidebar-page";
+import type { DraftScreenRecords, SidebarRecords } from "./shell-page";
 import { CLAUDE_OPUS, SPECIMEN_NOW, SPECIMEN_RECORDS, STUDIO_MAC } from "./sidebar-fixture";
 
 /** webshop's one repo. */

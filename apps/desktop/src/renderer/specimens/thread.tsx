@@ -13,7 +13,7 @@
 // its module loads.
 import "./fixed-clock";
 import { FIX_THREAD, THREAD_PAGE_RECORDS } from "./thread-fixture";
-import { mountThreadSpecimen } from "./sidebar-page";
+import { mountThreadSpecimen } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
 /**

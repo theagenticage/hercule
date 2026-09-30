@@ -9,7 +9,7 @@
  * `offsetHeight` and `offsetWidth`, which the list reads to size its visible
  * part, as a 272 x 800 sidebar.
  */
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
@@ -23,6 +23,7 @@ import {
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubElementSize,
   type Handler,
   type SidebarRecords,
 } from "../app/testing";
@@ -35,17 +36,12 @@ vi.mock("@hercule/client-core", async (importOriginal) => {
   return { ...actual, describePose: vi.fn(actual.describePose) };
 });
 
-let sizeStubs: ReadonlyArray<MockInstance> = [];
-
 beforeEach(() => {
-  sizeStubs = [
-    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(800),
-    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(272),
-  ];
+  stubElementSize(272, 800);
 });
 
 afterEach(() => {
-  for (const stub of sizeStubs) stub.mockRestore();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -281,13 +277,10 @@ describe("the sidebar", () => {
     const { pendingSubmissions } = router.options.context.controller!;
     const key = buildDraftKey(webshop!.id, thread3f1!.id);
     act(() => {
-      pendingSubmissions.write(key, {
-        ...pendingSubmissions.read(key),
-        picks: {
-          workspace: {
-            kind: "ephemeral",
-            checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
-          },
+      pendingSubmissions.writePicks(key, {
+        workspace: {
+          kind: "ephemeral",
+          checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
         },
       });
     });

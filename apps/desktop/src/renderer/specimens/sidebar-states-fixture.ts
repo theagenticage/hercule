@@ -39,7 +39,7 @@ import {
   SPECIMEN_NOW,
   STUDIO_MAC,
 } from "./sidebar-fixture";
-import type { SidebarRecords } from "./sidebar-page";
+import type { SidebarRecords } from "./shell-page";
 
 /** A runner that has gone offline. Its thread's row ends in "offline". */
 const BUILD_BOX: Runner = { ...buildRunner("r-build-box", "build-box"), connectivity: "offline" };

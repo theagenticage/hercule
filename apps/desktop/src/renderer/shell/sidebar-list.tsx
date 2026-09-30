@@ -1,5 +1,5 @@
 /**
- * The sidebar's thread list: the items `buildSidebarItems` returns, in the
+ * The sidebar's thread list: the items `buildSidebar` returns, in the
  * `nav` landmark "Threads", virtualized.
  *
  * Only the items in and near the visible part of the list are mounted, so a

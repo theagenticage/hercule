@@ -21,6 +21,7 @@ import {
   buildErrorBody,
   CONTROLLER_URL,
   FIXTURE_INSTANCE,
+  holdAnswer,
   SIDEBAR_FIXTURE,
   THREAD_FIXTURES,
   type Answer,
@@ -168,22 +169,6 @@ const renderLeavableComposer = async (thread: ThreadRecords) => {
     },
   );
   return { ...rendered, answer: held.answer };
-};
-
-/** Returns a handler that answers once the test calls the returned `answer`. */
-const holdAnswer = (): { readonly handler: Handler; readonly answer: (with_: Answer) => void } => {
-  let answer: (with_: Answer) => void = () => {};
-  return {
-    handler: () =>
-      new Promise<Answer>((resolve) => {
-        answer = resolve;
-      }),
-    answer: (with_) => {
-      act(() => {
-        answer(with_);
-      });
-    },
-  };
 };
 
 describe("the composer", () => {
@@ -459,9 +444,9 @@ describe("the composer", () => {
     const sessionId = IDLE.session.id;
 
     act(() => {
-      pendingSubmissions.write(sessionId, {
-        message: { text: "" },
-        picks: { model: "claude-opus-5", options: { effort: "high" } },
+      pendingSubmissions.writePicks(sessionId, {
+        model: "claude-opus-5",
+        options: { effort: "high" },
       });
     });
     expect(screen.getByRole("button", { name: "Claude Opus 5" })).toBeTruthy();
@@ -492,12 +477,12 @@ describe("the composer", () => {
     expect(pendingSubmissions.read(sessionId).message).toEqual({ text: "Half a thought" });
 
     act(() => {
-      pendingSubmissions.write(sessionId, { message: { text: "Written elsewhere" }, picks: {} });
+      pendingSubmissions.writeText(sessionId, "Written elsewhere");
     });
     expect(readField().value).toBe("Written elsewhere");
   });
 
-  it("draws a main workspace in the lip, then its branch in mono, then the machine", async () => {
+  it("draws a main workspace in the lip, then its branch in the UI face, then the machine", async () => {
     await renderComposer(IDLE);
 
     const workspaceLocked = "Create a new thread to change the workspace";
@@ -507,23 +492,28 @@ describe("the composer", () => {
       ["", null],
       ["moss", "Create a new thread to change the machine"],
     ]);
-    expect(document.querySelector(".lip .mono")?.textContent).toBe("main");
+    // Monospace is kept for code, so a branch is never a `code` element.
+    expect(document.querySelector(".lip code")).toBeNull();
     expect(document.querySelector(".lip .faint")).toBeNull();
   });
 
-  it("draws an ephemeral workspace in the lip once, by its branch in mono, with the branch it started from", async () => {
+  it("draws an ephemeral workspace in the lip once, by its branch in the UI face, with the branch it started from", async () => {
     await renderComposer(BUSY);
 
     expect(readLip().map(([text]) => text)).toEqual(["hercule/thread-3f1 from main", "", "moss"]);
-    expect(document.querySelector(".lip .mono")?.textContent).toBe("hercule/thread-3f1");
+    expect(document.querySelector(".lip code")).toBeNull();
     expect(document.querySelector(".lip .faint")?.textContent).toBe("from main");
   });
 
   it("says in the lip that a thread with no project has no workspace", async () => {
     await renderComposer(THREAD_FIXTURES.failed);
 
-    expect(readLip()[0]![0]).toBe("No workspace");
-    expect(document.querySelector(".lip .mono")).toBeNull();
+    // The spacer follows at once: there is no branch to draw.
+    expect(
+      readLip()
+        .map(([text]) => text)
+        .slice(0, 2),
+    ).toEqual(["No workspace", ""]);
   });
 
   it("stacks the queued inputs, then the Request, above the card, without taking the focus", async () => {

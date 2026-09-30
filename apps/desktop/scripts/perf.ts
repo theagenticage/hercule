@@ -61,9 +61,9 @@
  * no Playwright is attached to it (see `launchPlainApp`).
  *
  * Nothing stays attached to the app while memory, CPU and wakeups are read,
- * because an attached tool changes what it measures: with Playwright
- * attached, the renderer's memory read 7 MB higher on slice 1's app and 14 MB
- * higher on slice 2's. The age labels are read over the page's DevTools
+ * because an attached tool changes what it measures: in two earlier versions
+ * of the app, the renderer's memory read 7 MB and 14 MB higher with
+ * Playwright attached than without. The age labels are read over the page's DevTools
  * connection before the samples start, and the connection is closed again at
  * once. The age clock's fires are read after the samples, and the launch
  * times last.
@@ -142,10 +142,10 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { ProcessMetric } from "electron";
-import { chromium } from "playwright";
 // The extensions are spelled out because Node runs this script as it is, and
 // Node resolves no import without one.
 import {
+  assertExitedCleanly,
   connectInspector,
   evaluateInMain,
   formatTable,
@@ -153,11 +153,12 @@ import {
   launchTestPackage,
   quitApp,
   signInOnce,
-  stopApp,
+  stopPlainApp,
   writeSettings,
   type Inspector,
 } from "./packaged-app.ts";
 import { runWithThreadFixture, type LongThread, type ThreadFixture } from "./perf-fixture.ts";
+import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
 /** The limits of spec 17's budget table that one launch of the app can check. */
@@ -186,11 +187,12 @@ const LONG_THREAD_ROWS = 500;
 const STREAM_MS = 10_000;
 
 /**
- * When memory is read, in milliseconds after the page opens. Slices 1 and 2
- * were measured at this moment. It is soon after load, while memory is still
- * near its highest: in a trace of slice 2's app, V8 ran its first idle
- * garbage collection about 30 s after launch. A later reading would come out
- * lower, so this one is the conservative choice.
+ * When memory is read, in milliseconds after the page opens. Every earlier
+ * reading of the app's memory was taken at this moment too, so the readings
+ * compare. It is soon after load, while memory is still near its highest: in
+ * a trace of an earlier version of the app, V8 ran its first idle garbage
+ * collection about 30 s after launch. A later reading would come out lower,
+ * so this one is the conservative choice.
  */
 const MEMORY_READ_AT_MS = 13_000;
 
@@ -362,19 +364,6 @@ async function readProcessMemory(pid: number): Promise<ProcessMemory[]> {
 }
 
 /**
- * Creates a user data directory in the system's temporary folder, runs `use`
- * with it, and deletes it afterwards.
- */
-async function runInScratchUserDataDir<T>(use: (userDataDir: string) => Promise<T>): Promise<T> {
-  const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
-  try {
-    return await use(userDataDir);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-}
-
-/**
  * Starts the signed-in app on `userDataDir`, waits for the shell, quits, and
  * returns 3 s after the app has quit. Call it right before a measured launch,
  * so that the measured launch is warm, as the budget sets. It warms two
@@ -508,8 +497,7 @@ async function measurePlainLaunch(
   const { inspectorUrl, endpoint } = app;
   let measured: PlainLaunch;
   try {
-    const { port } = new URL(endpoint);
-    await waitForPageTarget(port);
+    const pageSocketUrl = await waitForPageSocketUrl(endpoint);
     const pageOpenedAt = Date.now();
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
@@ -520,7 +508,7 @@ async function measurePlainLaunch(
     if (rendererPid === undefined) throw new Error("the app has no renderer process");
 
     await sleepUntil(AGES_READ_AT_MS);
-    const agesOnScreen = (await evaluateInPage(port, READ_AGES_ON_SCREEN)) as string[];
+    const agesOnScreen = (await evaluateInPage(pageSocketUrl, READ_AGES_ON_SCREEN)) as string[];
 
     await sleepUntil(VISIBLE_SAMPLE_AT_MS);
     const visibleCountFrom = Date.now();
@@ -548,12 +536,12 @@ async function measurePlainLaunch(
     );
     await sleep(SHOW_SETTLE_MS);
     const fires = (await evaluateInPage(
-      port,
+      pageSocketUrl,
       `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
     )) as number[];
     const countFires = (from: number) =>
       fires.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
-    const nudges = await measureNudges(port, fixture, rendererPid);
+    const nudges = await measureNudges(pageSocketUrl, fixture, rendererPid);
 
     const mainSteps = (await evaluateInMain(inspectorUrl, READ_MAIN_LAUNCH_STEPS)) as {
       nodeReady: number;
@@ -570,115 +558,86 @@ async function measurePlainLaunch(
       );
     }
 
-    const browser = await chromium.connectOverCDP(endpoint);
-    try {
-      const page = browser.contexts()[0]?.pages()[0];
-      if (page === undefined) throw new Error("the app's page is not among the DevTools targets");
-      await page.waitForFunction(
-        () =>
-          performance.getEntriesByName("first-paint").length > 0 &&
-          performance.getEntriesByName("first-screen").length > 0,
+    const firstScreen = await pollUntil(
+      async () =>
+        ((await evaluateInPage(pageSocketUrl, READ_FIRST_SCREEN)) as FirstScreen | null) ??
         undefined,
-        // Polling on a timer rather than on animation frames, because a
-        // window that is not shown draws no animation frames.
-        { polling: 100, timeout: 10_000 },
-      );
-      const painted = await page.evaluate(() => {
-        const readEntry = (name: string): number =>
-          performance.timeOrigin + performance.getEntriesByName(name)[0]!.startTime;
-        return {
-          pageStart: performance.timeOrigin,
-          firstPaint: readEntry("first-paint"),
-          firstScreen: readEntry("first-screen"),
-        };
-      });
-      // Only the shell has a <main>; the connect and sign-in screens do not.
-      if ((await page.getByRole("main").count()) === 0) {
-        throw new Error("the app did not open on the shell, so it was not signed in");
-      }
-      if (opensThread && (await page.getByRole("region", { name: "Transcript" }).count()) === 0) {
-        throw new Error("the app did not open the last open thread");
-      }
-      measured = {
-        launch: {
-          nodeReadyMs: mainSteps.nodeReady - spawnedAt,
-          gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
-          rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
-          pageStartMs: painted.pageStart - spawnedAt,
-          firstPaintMs: painted.firstPaint - spawnedAt,
-          firstScreenMs: painted.firstScreen - spawnedAt,
-          windowShownMs: mainSteps.windowShown - spawnedAt,
-        },
-        memory,
-        agesOnScreen,
-        visible,
-        hidden,
-        firesVisible: countFires(visibleCountFrom),
-        firesHidden: countFires(hiddenCountFrom),
-        nudges,
-      };
-    } finally {
-      await browser.close();
+      {
+        timeoutMs: 10_000,
+        intervalMs: 100,
+        timeoutMessage: "the page did not mark first-paint and first-screen within 10 s",
+      },
+    );
+    if (!firstScreen.showsShell) {
+      throw new Error("the app did not open on the shell, so it was not signed in");
     }
+    if (opensThread && !firstScreen.showsTranscript) {
+      throw new Error("the app did not open the last open thread");
+    }
+    measured = {
+      launch: {
+        nodeReadyMs: mainSteps.nodeReady - spawnedAt,
+        gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
+        rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
+        pageStartMs: firstScreen.pageStart - spawnedAt,
+        firstPaintMs: firstScreen.firstPaint - spawnedAt,
+        firstScreenMs: firstScreen.firstScreen - spawnedAt,
+        windowShownMs: mainSteps.windowShown - spawnedAt,
+      },
+      memory,
+      agesOnScreen,
+      visible,
+      hidden,
+      firesVisible: countFires(visibleCountFrom),
+      firesHidden: countFires(hiddenCountFrom),
+      nudges,
+    };
   } finally {
-    // The PID of a process that has already exited may belong to another
-    // process by now, so only a running app is stopped.
-    if (app.process.exitCode === null && app.process.signalCode === null) {
-      await stopApp(app.process.pid!);
-    }
+    await stopPlainApp(app);
   }
-  // The process has ended, so its exit code is known. Anything but 0, such as
-  // a crash while quitting, fails the run: nothing else would notice it.
-  if (app.process.exitCode !== 0) {
-    const ending = app.process.signalCode ?? `code ${String(app.process.exitCode)}`;
-    throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
-  }
+  assertExitedCleanly(app.process);
   return measured;
 }
 
 /**
- * Waits until the app's DevTools endpoint on `port` lists a page, and fails
- * after 10 s. It asks the endpoint's HTTP list of targets, which attaches to
- * nothing, so asking does not slow the page down.
+ * Waits until Chromium's DevTools endpoint `endpoint` lists the app's page,
+ * and returns the WebSocket URL that connects to that page. Fails after 10 s.
+ *
+ * It asks the endpoint's HTTP list of targets, which attaches to nothing, so
+ * asking does not slow the page down. The URL stays the same while the page
+ * navigates, so one lookup serves the whole launch.
  */
-async function waitForPageTarget(port: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-    const targets = (await response.json()) as { type: string; url: string }[];
-    if (targets.some((target) => target.type === "page" && target.url === "app://hercule/")) return;
-    await sleep(20);
-  }
-  throw new Error("the app did not open app://hercule/ within 10 s");
-}
-
-/**
- * Returns the WebSocket URL of the app's page on the DevTools endpoint on
- * `port`. Fails when the endpoint lists no page of the app.
- */
-async function findPageSocketUrl(port: string): Promise<string> {
-  const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-  const targets = (await response.json()) as {
-    type: string;
-    url: string;
-    webSocketDebuggerUrl: string;
-  }[];
-  const page = targets.find(
-    (target) => target.type === "page" && target.url.startsWith("app://hercule/"),
+async function waitForPageSocketUrl(endpoint: string): Promise<string> {
+  const { port } = new URL(endpoint);
+  return pollUntil(
+    async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      const targets = (await response.json()) as {
+        type: string;
+        url: string;
+        webSocketDebuggerUrl: string;
+      }[];
+      return targets.find(
+        (target) => target.type === "page" && target.url.startsWith("app://hercule/"),
+      )?.webSocketDebuggerUrl;
+    },
+    {
+      timeoutMs: 10_000,
+      intervalMs: 20,
+      timeoutMessage: "the app did not open app://hercule/ within 10 s",
+    },
   );
-  if (page === undefined) throw new Error("the app's page is not among the DevTools targets");
-  return page.webSocketDebuggerUrl;
 }
 
 /**
- * Evaluates `expression` in the app's page, over the DevTools endpoint on
- * `port`, and returns the value it evaluates to. The connection lasts only for
- * the call. Fails when the expression throws.
+ * Evaluates `expression` in the app's page, over the DevTools connection at
+ * `pageSocketUrl`, and returns the value it evaluates to. The connection
+ * lasts only for the call. Fails when the expression throws.
  */
-async function evaluateInPage(port: string, expression: string): Promise<unknown> {
+async function evaluateInPage(pageSocketUrl: string, expression: string): Promise<unknown> {
   // The page speaks the same protocol as main's inspector, so the same
   // connection serves both.
-  const page = await connectInspector(await findPageSocketUrl(port));
+  const page = await connectInspector(pageSocketUrl);
   try {
     return await page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
   } finally {
@@ -700,6 +659,41 @@ const READ_AGES_ON_SCREEN = `(() => {
       return box.bottom > list.top && box.top < list.bottom;
     })
     .map((label) => label.textContent);
+})()`;
+
+/**
+ * When the page reached its first screen, in milliseconds since the epoch,
+ * and which screen that was.
+ */
+interface FirstScreen {
+  /** When the renderer started loading the page. */
+  readonly pageStart: number;
+  /** When the page first painted. */
+  readonly firstPaint: number;
+  /** When the frame that drew the first screen was presented. */
+  readonly firstScreen: number;
+  /** Whether the page shows the shell. Only the shell has a <main>; the connect and sign-in screens do not. */
+  readonly showsShell: boolean;
+  /** Whether the page shows a thread's transcript. */
+  readonly showsTranscript: boolean;
+}
+
+/**
+ * An expression that evaluates, in the page, to its `FirstScreen`, or to
+ * null while the page has not yet marked both `first-paint` and
+ * `first-screen`.
+ */
+const READ_FIRST_SCREEN = `(() => {
+  const [firstPaint] = performance.getEntriesByName("first-paint");
+  const [firstScreen] = performance.getEntriesByName("first-screen");
+  if (firstPaint === undefined || firstScreen === undefined) return null;
+  return {
+    pageStart: performance.timeOrigin,
+    firstPaint: performance.timeOrigin + firstPaint.startTime,
+    firstScreen: performance.timeOrigin + firstScreen.startTime,
+    showsShell: document.querySelector("main") !== null,
+    showsTranscript: document.querySelector('section[aria-label="Transcript"]') !== null,
+  };
 })()`;
 
 /**
@@ -762,12 +756,12 @@ async function readCpuMs(pid: number): Promise<number> {
  * from the page's resource timing entries.
  */
 async function measureNudges(
-  port: string,
+  pageSocketUrl: string,
   fixture: ThreadFixture,
   rendererPid: number,
 ): Promise<NudgeCost> {
-  const controllerPid = await fixture.readControllerPid();
-  const page = await connectInspector(await findPageSocketUrl(port));
+  const controllerPid = fixture.readControllerPid();
+  const page = await connectInspector(pageSocketUrl);
   try {
     await page.send("Performance.enable");
     const readMainThreadMs = async () => {
@@ -880,19 +874,20 @@ async function measureStreaming(
   const app = await launchPlainApp(userDataDir);
   let measured: StreamingCost;
   try {
-    const { port } = new URL(app.endpoint);
-    await waitForPageTarget(port);
-    const page = await connectInspector(await findPageSocketUrl(port));
+    const page = await connectInspector(await waitForPageSocketUrl(app.endpoint));
     try {
       const evaluate = (expression: string) =>
         page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
       // The first screen is marked once the thread's screen has committed, and
       // with it the tap's subscription, so the stream's deltas reach the page.
-      const deadline = Date.now() + 10_000;
-      while ((await evaluate(READ_TRANSCRIPT_SHOWN)) !== true) {
-        if (Date.now() > deadline) throw new Error("the app did not open the last open thread");
-        await sleep(100);
-      }
+      await pollUntil(
+        async () => ((await evaluate(READ_TRANSCRIPT_SHOWN)) === true ? true : undefined),
+        {
+          timeoutMs: 10_000,
+          intervalMs: 100,
+          timeoutMessage: "the app did not open the last open thread",
+        },
+      );
       await evaluate(RECORD_PARAGRAPH_WRITES);
       await page.send("Tracing.start", {
         transferMode: "ReturnAsStream",
@@ -922,14 +917,9 @@ async function measureStreaming(
       page.close();
     }
   } finally {
-    if (app.process.exitCode === null && app.process.signalCode === null) {
-      await stopApp(app.process.pid!);
-    }
+    await stopPlainApp(app);
   }
-  if (app.process.exitCode !== 0) {
-    const ending = app.process.signalCode ?? `code ${String(app.process.exitCode)}`;
-    throw new Error(`the app did not quit cleanly: its process ended with ${ending}`);
-  }
+  assertExitedCleanly(app.process);
   return measured;
 }
 
@@ -1265,8 +1255,9 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log();
 }
 
-const { launches, streaming, longThread } = await runWithThreadFixture((fixture) =>
-  runInScratchUserDataDir(async (userDataDir) => {
+const { launches, streaming, longThread } = await runWithThreadFixture(async (fixture) => {
+  const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
+  try {
     await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
@@ -1305,8 +1296,10 @@ const { launches, streaming, longThread } = await runWithThreadFixture((fixture)
       streaming: await measureStreaming(userDataDir, fixture, thread),
       longThread: thread,
     };
-  }),
-);
+  } finally {
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
 
 for (const launch of launches) reportLaunch(launch);
 reportStreaming(streaming, longThread);

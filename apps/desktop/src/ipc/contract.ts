@@ -201,6 +201,25 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   },
 } as const satisfies Record<`${string}.${string}`, RendererToMainIpcChannel>;
 
+/** The name of a renderer-to-main channel, such as `controllerUrl.read`. */
+export type RendererToMainIpcChannelName = keyof typeof RENDERER_TO_MAIN_IPC_CHANNELS;
+
+/** The request of the renderer-to-main channel `Name`, as main decodes it. */
+export type IpcRequest<Name extends RendererToMainIpcChannelName> =
+  (typeof RENDERER_TO_MAIN_IPC_CHANNELS)[Name]["request"]["Type"];
+
+/** The request of the renderer-to-main channel `Name`, in the form the renderer sends it. */
+export type EncodedIpcRequest<Name extends RendererToMainIpcChannelName> =
+  (typeof RENDERER_TO_MAIN_IPC_CHANNELS)[Name]["request"]["Encoded"];
+
+/** The response of the renderer-to-main channel `Name`, before main encodes it. */
+export type IpcResponse<Name extends RendererToMainIpcChannelName> =
+  (typeof RENDERER_TO_MAIN_IPC_CHANNELS)[Name]["response"]["Type"];
+
+/** The response of the renderer-to-main channel `Name`, in the form the renderer receives it. */
+export type EncodedIpcResponse<Name extends RendererToMainIpcChannelName> =
+  (typeof RENDERER_TO_MAIN_IPC_CHANNELS)[Name]["response"]["Encoded"];
+
 /**
  * An IPC channel main sends on and the renderer listens to. The renderer
  * sends nothing back.
@@ -230,6 +249,17 @@ export const MAIN_TO_RENDERER_IPC_CHANNELS = {
     payload: Schema.Struct({ sessionId: Schema.String }),
   },
 } as const satisfies Record<`${string}.${string}`, MainToRendererIpcChannel>;
+
+/** The name of a main-to-renderer channel, such as `menu.command`. */
+export type MainToRendererIpcChannelName = keyof typeof MAIN_TO_RENDERER_IPC_CHANNELS;
+
+/** The payload of the main-to-renderer channel `Name`, before main encodes it. */
+export type IpcPayload<Name extends MainToRendererIpcChannelName> =
+  (typeof MAIN_TO_RENDERER_IPC_CHANNELS)[Name]["payload"]["Type"];
+
+/** The payload of the main-to-renderer channel `Name`, in the form the renderer receives it. */
+export type EncodedIpcPayload<Name extends MainToRendererIpcChannelName> =
+  (typeof MAIN_TO_RENDERER_IPC_CHANNELS)[Name]["payload"]["Encoded"];
 
 /**
  * What main sends back for one message on a renderer-to-main channel: the

@@ -25,9 +25,7 @@ import {
   ChevronRightIcon,
   ClockIcon,
   ComposeIcon,
-  DiffIcon,
   EditorIcon,
-  ExternalIcon,
   IntakeIcon,
   LaptopIcon,
   MicIcon,
@@ -55,9 +53,7 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   "chevron-right": ChevronRightIcon,
   clock: ClockIcon,
   compose: ComposeIcon,
-  diff: DiffIcon,
   editor: EditorIcon,
-  external: ExternalIcon,
   intake: IntakeIcon,
   laptop: LaptopIcon,
   mic: MicIcon,
@@ -79,24 +75,10 @@ const animated = new URLSearchParams(location.search).get("animated") === "1";
 function Specimen({ piece }: { readonly piece: Piece }): JSX.Element {
   switch (piece.kind) {
     case "face":
-      return (
-        <Face
-          look={piece.look}
-          pose={piece.pose}
-          size={piece.size}
-          label="Specimen"
-          animated={animated}
-        />
-      );
+      return <Face look={piece.look} pose={piece.pose} size={piece.size} animated={animated} />;
     case "seeded-face":
       return (
-        <Face
-          look={buildLook(piece.seed)}
-          pose="idle"
-          size={piece.size}
-          label={piece.seed}
-          animated={animated}
-        />
+        <Face look={buildLook(piece.seed)} pose="idle" size={piece.size} animated={animated} />
       );
     case "avatar":
       // The Bureau book draws the avatar for "Rogier", and its letter is part of the picture.

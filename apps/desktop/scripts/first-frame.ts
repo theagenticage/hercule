@@ -12,7 +12,7 @@
  *
  * Run it after `pnpm build:desktop` and `pnpm build:binary`:
  *
- *     node apps/desktop/scripts/first-frame.ts [--repeat=<n>] [--at=<x>,<y>] [<case>...]
+ *     pnpm --filter @hercule/desktop first-frame [--repeat=<n>] [--at=<x>,<y>] [<case>...]
  *
  * The cases are `sign-in-light`, `sign-in-dark`, `shell-light` and
  * `shell-dark`: the screen the app opens on, and the app's theme. Without a
@@ -74,7 +74,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
-import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import type { App, NativeTheme } from "electron";
 // The extensions are spelled out because Node runs this script as it is, and
@@ -92,6 +91,7 @@ import {
   stopApp,
   writeSettings,
 } from "./packaged-app.ts";
+import { pollUntil } from "./poll.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
 import { DEFAULT_WINDOW_SIZE } from "../src/main/window-placement.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
@@ -359,33 +359,12 @@ const isIdleAndUnlocked = (): boolean => readIdleMs() >= IDLE_BEFORE_LAUNCH_MS &
 async function waitUntilIdle(): Promise<void> {
   if (isIdleAndUnlocked()) return;
   console.log("Waiting until no key or pointer has been used for 3 s, with the screen unlocked...");
-  const deadline = Date.now() + 5 * 60_000;
-  while (!isIdleAndUnlocked()) {
-    if (Date.now() > deadline) {
-      throw new Error(
-        "the keyboard and pointer were never idle for 3 s in 5 minutes, so no launch was started",
-      );
-    }
-    await sleep(500);
-  }
-}
-
-/**
- * Waits until `read` returns a value other than undefined, and returns it.
- * Fails with `message` after `timeoutMs`.
- */
-async function waitFor<T>(
-  read: () => T | undefined,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = read();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error(message);
-    await sleep(10);
-  }
+  await pollUntil(() => (isIdleAndUnlocked() ? true : undefined), {
+    timeoutMs: 5 * 60_000,
+    intervalMs: 500,
+    timeoutMessage:
+      "the keyboard and pointer were never idle for 3 s in 5 minutes, so no launch was started",
+  });
 }
 
 /**
@@ -417,10 +396,13 @@ async function recordLaunch(
     ...buildAppArgs(userDataDir),
     MOCK_KEYCHAIN_SWITCH,
   ]);
-  const inspectorUrl = await waitFor(
+  const inspectorUrl = await pollUntil(
     () => /Debugger listening on (ws:\/\/\S+)/.exec(readIfPresent(stderr))?.[1],
-    10_000,
-    "the app did not open its inspector within 10 s",
+    {
+      timeoutMs: 10_000,
+      intervalMs: 10,
+      timeoutMessage: "the app did not open its inspector within 10 s",
+    },
   );
 
   let pid: number | null = null;

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildSidebarSections,
-  buildThreadGroups,
-  decideThreadPose,
-  type DraftPlace,
-} from "@hercule/client-core";
+import type { DraftPlace } from "@hercule/client-core";
 import {
   buildProject,
   buildSession,
@@ -19,11 +14,11 @@ import {
 } from "@hercule/client-core/threads/testing";
 import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/contract";
 import {
-  buildExpandedSections,
-  buildSidebarItems,
+  buildSidebar,
   listGoMenuThreads,
   pickFocusFallback,
   type SectionKey,
+  type Sidebar,
   type SidebarItem,
 } from "./sidebar-items";
 
@@ -47,11 +42,10 @@ const waiting = (id: string, minutes: number, over: Partial<Session> = {}): Sess
   thread(id, minutes, { status: "busy", openRequest: APPROVAL, ...over });
 
 /**
- * Returns the sidebar's items for `threads`, built the way the sidebar builds
- * them: client-core's groups, poses and sections, then `buildSidebarItems`.
- * With a `draft`, its row's second line is "draft meta".
+ * Returns the sidebar for `threads`, in the fixture's projects, workspaces and
+ * resources. With a `draft`, its row's second line is "draft meta".
  */
-const buildItems = ({
+const buildFixtureSidebar = ({
   threads,
   runners = [MOSS],
   projects = [WEBSHOP_PROJECT, OPS_PROJECT],
@@ -67,40 +61,22 @@ const buildItems = ({
   readonly expanded?: ReadonlySet<SectionKey>;
   readonly selectedId?: string | null;
   readonly draft?: DraftPlace | null;
-}): readonly SidebarItem[] => {
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const groups = buildThreadGroups({
-    sessions: threads,
+}): Sidebar =>
+  buildSidebar({
+    threads,
     projects,
     workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
     runners,
-    mode: "meta",
-    draft,
-  });
-  const poses = new Map(
-    threads.map((session) => [
-      session.id,
-      decideThreadPose(
-        session,
-        session.runnerId === null ? undefined : runnersById.get(session.runnerId),
-      ),
-    ]),
-  );
-  const sections = buildSidebarSections({
-    groups,
-    poses,
-    expanded: buildExpandedSections(expanded, groups),
+    instances: [],
+    draft: draft === null ? null : { place: draft, rowMeta: "draft meta" },
+    expanded,
     selectedId,
   });
-  return buildSidebarItems({
-    sections,
-    sessions: new Map(threads.map((session) => [session.id, session])),
-    runners: runnersById,
-    projects,
-    draftMeta: draft === null ? null : "draft meta",
-  });
-};
+
+/** Returns the sidebar's items for `threads`, as `buildFixtureSidebar` builds them. */
+const buildItems = (sources: Parameters<typeof buildFixtureSidebar>[0]): readonly SidebarItem[] =>
+  buildFixtureSidebar(sources).items;
 
 /** Returns the keys of `items`, in order. */
 const listKeys = (items: readonly SidebarItem[]): readonly string[] =>
@@ -126,7 +102,7 @@ const WORLD_THREADS = [
   thread("s-price", 1),
 ];
 
-describe("buildSidebarItems", () => {
+describe("buildSidebar", () => {
   it("lays out Waiting on you, then each project with its workspace labels, then the threads in no project", () => {
     const items = buildItems({ threads: WORLD_THREADS });
 
@@ -365,8 +341,24 @@ describe("buildSidebarItems", () => {
     expect(listKeys(expanded)).not.toContain("more:project:p-ops");
   });
 
+  it("shows every thread in no project once that section is expanded", () => {
+    const threads = [1, 2, 3, 4, 5, 6, 7].map((minutes) => thread(`s-${String(minutes)}`, minutes));
+
+    const items = buildItems({ threads, expanded: new Set(["project:none"]) });
+    expect(items.filter((item) => item.kind === "thread-row")).toHaveLength(7);
+    expect(listKeys(items)).not.toContain("more:project:none");
+  });
+
   it("returns no items when there are no threads", () => {
     expect(buildItems({ threads: [] })).toEqual([]);
+  });
+
+  it("counts the threads working, waiting on the user and idle, from the poses their rows show", () => {
+    const { items, counts } = buildFixtureSidebar({ threads: WORLD_THREADS });
+
+    expect(counts).toEqual({ working: 1, waiting: 1, idle: 2 });
+    expect(findItem(items, "thread:s-flaky")).toMatchObject({ pose: "working" });
+    expect(findItem(items, "thread:s-keys")).toMatchObject({ pose: "asleep" });
   });
 });
 
@@ -411,32 +403,6 @@ describe("listGoMenuThreads", () => {
     });
     expect(items.some((item) => item.kind === "draft-row")).toBe(true);
     expect(listGoMenuThreads(items)).toEqual([]);
-  });
-});
-
-describe("buildExpandedSections", () => {
-  it("returns Waiting on you and the expanded projects, the threads in no project as null", () => {
-    const threads = [thread("s-a", 2, { projectId: OPS_PROJECT.id }), thread("s-b", 1)];
-    const groups = buildThreadGroups({
-      sessions: threads,
-      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-      workspaces: [],
-      resources: [],
-      runners: [MOSS],
-      mode: "meta",
-    });
-
-    expect(buildExpandedSections(new Set(), groups)).toEqual({
-      waiting: false,
-      projectIds: new Set(),
-    });
-    // webshop has no threads, so it has no group, and its key is dropped.
-    expect(
-      buildExpandedSections(
-        new Set(["waiting", "project:p-ops", "project:none", "project:p-webshop"]),
-        groups,
-      ),
-    ).toEqual({ waiting: true, projectIds: new Set([OPS_PROJECT.id, null]) });
   });
 });
 

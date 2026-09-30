@@ -1,6 +1,6 @@
 /**
  * Tests starting a thread in the packaged app, signed in to a real controller
- * (spec 17 §Slices, slice 7):
+ * (spec 17, §Design system, **A new thread**, and §The "local" runner):
  *
  * - File › New Thread opens the project picker, and ⌘1 opens a Draft Thread
  *   in the first project;
@@ -9,8 +9,7 @@
  * - a project with no repository says why the draft has no workspace;
  * - typing and ⏎ start the thread where the lip says, and open it.
  *
- * The controller starts a runner of its own on this machine, which may be
- * logged in to a real provider. The test retires it before the app opens, so
+ * The harness retires the controller's own runner (see `arrangeFleet`), so
  * the probe cannot pick it and no thread can land on it. The scripted runner
  * stands in for the runner on this machine: it reports the port of a server
  * the test runs, which answers the probe with the scripted runner's id.
@@ -18,7 +17,6 @@
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import { describe, expect, it } from "vitest";
-import type { HerculeClient } from "../../packages/client-core/src/index";
 import {
   arrangeFleet,
   chooseMenuItem,
@@ -27,23 +25,9 @@ import {
   startIdentityServerForTest,
 } from "./harness";
 
-/**
- * Waits until the controller's own runner is online, then retires it. Fails
- * if the retirement is refused.
- */
-async function retireControllerRunner(client: HerculeClient): Promise<void> {
-  const readRunners = async () => (await client.runner.query({ query: { limit: 10 } })).items;
-  await expect
-    .poll(async () => (await readRunners()).map((runner) => runner.connectivity))
-    .toEqual(["online"]);
-  const [own] = await readRunners();
-  await client.runner.retire({ params: { id: own!.id }, payload: {} });
-}
-
 describe("a new thread", () => {
   it("opens as a draft from the picker, runs on this machine, and starts with ⏎", async () => {
     const { url, fleet, client } = await arrangeFleet();
-    await retireControllerRunner(client);
     let localRunnerId = "";
     const identityPort = await startIdentityServerForTest(() => localRunnerId);
     const runner = await fleet.enlistRunner("studio", { identityPort });

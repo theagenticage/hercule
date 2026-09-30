@@ -8,14 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { BranchField, MachineRow, WorkspaceMenu, WorkspacePick } from "@hercule/client-core";
+import { readMenuLines } from "../thread/testing";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
-
-/** Returns each row's text and whether it is marked current, in order. */
-const readRows = (): readonly (readonly [string, boolean])[] =>
-  [...document.querySelectorAll(".line")].map((row) => [
-    row.textContent,
-    row.getAttribute("aria-current") === "true",
-  ]);
 
 describe("the workspace menu", () => {
   const NEW_WORKSPACE: WorkspacePick = {
@@ -52,7 +46,7 @@ describe("the workspace menu", () => {
     expect(document.querySelector(".pop-h")?.textContent).toBe(
       "Workspace" + "locks when the thread starts",
     );
-    expect(readRows()).toEqual([
+    expect(readMenuLines()).toEqual([
       ["Main workspace" + "shared with you" + "moss", true],
       ["New workspace" + "its own branch", false],
     ]);
@@ -90,7 +84,7 @@ describe("the branch menu", () => {
     expect(document.querySelector(".pop-h")?.textContent).toBe(
       "Branch" + "the checkout switches to it",
     );
-    expect(readRows()).toEqual([
+    expect(readMenuLines()).toEqual([
       ["main" + "current", true],
       ["fix/cart", false],
       ["feat/coupons" + "in workspace hercule/thread-3f1", false],
@@ -160,7 +154,7 @@ describe("the machine menu", () => {
   it("lists the machines with what kind they are, their state and their load, and draws an offline one as text", () => {
     render(<MachineMenuContent rows={ROWS} onPick={vi.fn()} />);
 
-    expect(readRows()).toEqual([
+    expect(readMenuLines()).toEqual([
       ["moss" + "this machine · default" + "online 1/4", true],
       ["fern" + "webshop is not cloned there · clones on first use" + "online 0/4", false],
       ["birch" + "offline" + "offline 0/4", false],

@@ -99,6 +99,11 @@ export const makeThreadNotificationsLayer = (
       const window = yield* MainWindow;
       const runFork = yield* FiberSet.makeRuntime();
       const shown = new Map<string, NativeNotification>();
+      // Signed out until the page's first token read signs the user in, even
+      // with a token stored: signing in is what asks macOS whether the app
+      // may notify, and the page sends no list before that read. The menu
+      // starts from the stored token instead, because its Sign Out shows
+      // before the page loads.
       let signedIn = false;
       // The last list of waiting threads since the user signed in, or null
       // before the first one.
@@ -117,7 +122,7 @@ export const makeThreadNotificationsLayer = (
           // a notification of its own, or the user signed out.
           if (shown.get(sessionId) !== notification) return;
           shown.delete(sessionId);
-          runFork(Effect.andThen(window.show, window.send("thread.open", { sessionId })));
+          runFork(window.showAndSend("thread.open", { sessionId }));
         });
         // A notification macOS refuses, because the user has not allowed the
         // app's notifications, fails with no sign on screen.

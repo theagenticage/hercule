@@ -81,7 +81,7 @@ const renderMenu = ({
       catalogs={buildCatalogs(instances)}
       config={config}
       kind={kind}
-      recent={recent}
+      readRecent={() => recent}
       onPick={onPick}
     />,
   );

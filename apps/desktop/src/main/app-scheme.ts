@@ -130,7 +130,3 @@ export const makeAppSchemeLayer = (
   devServerUrl: string | null,
 ): Layer.Layer<AppScheme, never, AppSettings | FileSystem.FileSystem> =>
   Layer.effect(AppScheme)(make(devServerUrl));
-
-/** Answers one request on the `app` scheme; see `AppScheme`. */
-export const answerAppRequest = (request: Request): Effect.Effect<Response, never, AppScheme> =>
-  AppScheme.use((scheme) => scheme.answer(request));

@@ -22,10 +22,9 @@
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { queryKeys, type Live } from "@hercule/client-core";
+import { invalidateWithoutCancelling, queryKeys, type Live } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
-import { invalidateWithoutCancelling } from "./live-invalidation";
 
 /** The topics the shell keeps subscribed. */
 const SHELL_TOPICS: readonly MutableLiveTopic[] = ["session", "runner", "provider", "task"];

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { readRecentModels, rememberRecentModel } from "./recent-models";
-// For its hooks, which give each test an empty `localStorage` of its own.
-import "./testing";
 
 const HOME = "http://127.0.0.1:4937";
 const WORK = "http://10.0.0.2:4937";

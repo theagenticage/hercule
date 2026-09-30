@@ -11,12 +11,8 @@
  *
  * It needs no build: the sheets are served from source.
  */
-import { runSheetCapture } from "./sheet-server.ts";
+import { runAndSetExitCode, runSheetCapture } from "./sheet-server.ts";
 
-let exitCode = 1;
-try {
-  exitCode = await runSheetCapture(new URL("sidebar-states-capture.ts", import.meta.url));
-} catch (error) {
-  process.stderr.write(`FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
-}
-process.exitCode = exitCode;
+await runAndSetExitCode(() =>
+  runSheetCapture(new URL("sidebar-states-capture.ts", import.meta.url)),
+);

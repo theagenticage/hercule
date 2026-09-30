@@ -17,7 +17,7 @@
  * caller has to read what the command printed.
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -71,6 +71,8 @@ export interface Controller {
   readonly url: string;
   /** The port it bound, so a restart can ask for the same one. */
   readonly port: number;
+  /** The process id, so a measurement can read the process's own figures. */
+  readonly pid: number;
   /** Everything the process has printed on stdout and stderr, in order. */
   output: () => string;
   /** Sends SIGTERM, then returns the exit code. */
@@ -187,6 +189,8 @@ async function startControllerOnPort(
   return {
     url,
     port,
+    // A child that spawned has a pid; the loop above has seen it respond.
+    pid: child.pid!,
     output: readOutput,
     stop: async () => {
       child.kill("SIGTERM");
@@ -201,6 +205,18 @@ async function startControllerOnPort(
       return code;
     },
   };
+}
+
+/**
+ * Returns the path of the compiled binary, `./hercule` at the repository
+ * root. Fails, saying how to build it, when it has not been built.
+ */
+export function findCompiledBinary(): string {
+  const binary = join(ROOT, "hercule");
+  if (!existsSync(binary)) {
+    throw new Error(`there is no compiled binary at ${binary}: run \`pnpm build:binary\` first.`);
+  }
+  return binary;
 }
 
 /**
@@ -222,7 +238,9 @@ export async function runCli(
     options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
   const child = spawn(executable, [...commandArgs, ...args], {
     cwd: ROOT,
-    env: { ...buildCleanEnv(), HERCULE_HOME: options.home, ...options.env },
+    // The home comes last, so a caller's environment cannot point the
+    // command at another home.
+    env: { ...buildCleanEnv(), ...options.env, HERCULE_HOME: options.home },
     stdio: "pipe",
   });
   let stdout = "";
@@ -280,4 +298,24 @@ export async function completeSetup(options: {
       stdin: PASSWORD,
     },
   );
+}
+
+/**
+ * Starts a controller from the compiled binary against `home`, completes
+ * first-run setup as `USERNAME`, and returns the controller once a client can
+ * sign in to it. Fails when there is no compiled binary, when the controller
+ * does not start, or when setup fails; a controller that started is stopped
+ * before a failed setup is reported.
+ */
+export async function startSetUpController(options: {
+  readonly home: string;
+}): Promise<Controller> {
+  const binary = findCompiledBinary();
+  const controller = await startController({ home: options.home, binary });
+  const setup = await completeSetup({ home: options.home, url: controller.url, binary });
+  if (setup.code !== 0) {
+    await controller.stop();
+    throw new Error(`setup failed with exit code ${String(setup.code)}:\n${setup.stderr}`);
+  }
+  return controller;
 }

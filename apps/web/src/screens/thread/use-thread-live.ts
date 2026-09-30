@@ -44,17 +44,17 @@ import {
 } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import {
+  buildStreamCursor,
   createTailBuffer,
-  findNewRows,
+  decideStreamDelivery,
+  decideTapDelivery,
   findOpenItem,
-  mergeTranscript,
   queryKeys,
   type Live,
 } from "@hercule/client-core";
 import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
-  type TapItem,
   type TranscriptRow,
 } from "@hercule/contract";
 
@@ -107,33 +107,16 @@ export const useThreadLive = (
   }, [rows]);
 
   useEffect(() => {
-    // Read the cursor from the cache when subscribing, not from the first
-    // render. When this effect re-runs, it then resumes from where the
-    // transcript actually is, instead of replaying every row since the page
-    // opened into the cache a second time.
-    const held = queryClient.getQueryData<readonly TranscriptRow[]>(
-      queryKeys.transcript(sessionId),
-    );
-    // With an empty cache, subscribe from the start of the log, not from the
-    // head. A just-spawned session is read before its first rows exist, and
-    // "no cursor" means "only what happens next". Every row written between
-    // that read and this subscription would then be missing from a cache that
-    // is never refetched.
-    //
-    // Cursor 0 asks for every row: positions start at 1 (`session_stream`
-    // uses `COALESCE(MAX(position), 0) + 1`) and the controller replays every
-    // row after the cursor. 0 is also never past the head, which is the only
-    // cursor the controller rejects.
-    const cursor = held?.at(-1)?.position ?? 0;
-
+    const key = queryKeys.transcript(sessionId);
+    const readHeldRows = (): readonly TranscriptRow[] =>
+      queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? [];
     const unsubscribe = live.subscribe(
       buildSessionStreamTopic(sessionId),
       (delta) => {
-        if (delta.gone) {
+        const delivery = decideStreamDelivery(readHeldRows(), delta);
+        if (delivery.kind === "gone") {
           unsubscribe();
-          return;
-        }
-        if (delta.reset) {
+        } else if (delivery.kind === "reset") {
           // `live.ts` re-subscribes from the head as soon as it reports a
           // reset, while the refetch below is still in progress. So a row
           // written between the two is neither in the refetched transcript nor
@@ -145,27 +128,19 @@ export const useThreadLive = (
           // The refetched rows are never applied to the tail, so the items
           // open in them are skipped.
           skipOpenItems();
-          void queryClient.invalidateQueries({ queryKey: queryKeys.transcript(sessionId) });
-          return;
+          void queryClient.invalidateQueries({ queryKey: key });
+        } else if (delivery.kind === "rows") {
+          tail.applyRows(delivery.fresh);
+          rowsLandingRef.current = true;
+          queryClient.setQueryData<readonly TranscriptRow[]>(key, delivery.transcript);
+          if (delivery.replay) skipOpenItems();
         }
-        // `:stream` only carries `TranscriptRow`s. The wire type is a union for
-        // the whole connection, not per topic, but this topic always has this shape.
-        const items = delta.items as ReadonlyArray<TranscriptRow>;
-        // Merge by `position` rather than appending after the last row. A row
-        // already in the cache is left alone, and a new row is placed in order
-        // however late it arrives. Two subscriptions started from the same
-        // empty cache both replay from the start of the log, so a later
-        // delivery can contain earlier rows.
-        const key = queryKeys.transcript(sessionId);
-        const current = queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? [];
-        const fresh = findNewRows(current, items);
-        if (fresh.length === 0) return;
-        tail.applyRows(fresh);
-        rowsLandingRef.current = true;
-        queryClient.setQueryData<readonly TranscriptRow[]>(key, mergeTranscript(current, fresh));
-        if (delta.replay) skipOpenItems();
       },
-      String(cursor),
+      // Read the cursor from the cache when subscribing, not from the first
+      // render. When this effect re-runs, it then resumes from where the
+      // transcript actually is, instead of replaying every row since the page
+      // opened into the cache a second time.
+      buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
   }, [live, queryClient, sessionId, tail]);
@@ -174,19 +149,18 @@ export const useThreadLive = (
     let frame: number | null = null;
     skipOpenItems();
     const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
-      if (delta.gone) {
+      const delivery = decideTapDelivery(delta);
+      if (delivery.kind === "gone") {
         unsubscribe();
-        return;
-      }
-      if (delta.reset) {
+      } else if (delivery.kind === "reset") {
         skipOpenItems();
-        return;
+      } else {
+        for (const tap of delivery.taps) tail.appendTap(tap);
+        frame ??= requestAnimationFrame(() => {
+          frame = null;
+          if (!rowsLandingRef.current) paintTail();
+        });
       }
-      for (const item of delta.items as ReadonlyArray<TapItem>) tail.appendTap(item);
-      frame ??= requestAnimationFrame(() => {
-        frame = null;
-        if (!rowsLandingRef.current) paintTail();
-      });
     });
     return () => {
       unsubscribe();

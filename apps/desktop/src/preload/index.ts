@@ -8,46 +8,45 @@
  * and main has encoded every payload it sends against the contract.
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import type { Bridge } from "../ipc/bridge";
 import type {
-  Bridge,
   EncodedIpcPayload,
   EncodedIpcRequest,
   EncodedIpcResponse,
+  IpcReply,
   MainToRendererIpcChannelName,
   RendererToMainIpcChannelName,
-} from "../ipc/bridge";
-import type { IpcReply } from "../ipc/contract";
+} from "../ipc/contract";
 
 /**
- * Sends one message to main on `channel` and returns main's response. Fails
- * with main's reason when main refuses the message.
+ * Sends one message to main on the channel `name` and returns main's
+ * response. Fails with main's reason when main refuses the message.
  */
 const invokeChannel = async <Name extends RendererToMainIpcChannelName>(
-  channel: Name,
+  name: Name,
   ...request: EncodedIpcRequest<Name> extends undefined ? [] : [EncodedIpcRequest<Name>]
 ): Promise<EncodedIpcResponse<Name>> => {
-  const reply = (await ipcRenderer.invoke(channel, ...request)) as IpcReply<
-    EncodedIpcResponse<Name>
-  >;
+  const reply = (await ipcRenderer.invoke(name, ...request)) as IpcReply<EncodedIpcResponse<Name>>;
   if ("refusal" in reply) throw new Error(reply.refusal);
   return reply.response;
 };
 
 /**
- * Calls `listener` with the payload of each message main sends on `channel`,
- * and returns a function that removes the listener. The listener never sees
- * Electron's event object, whose `sender` would let the page send anything.
+ * Calls `listener` with the payload of each message main sends on the
+ * channel `name`, and returns a function that removes the listener. The
+ * listener never sees Electron's event object, whose `sender` would let the
+ * page send anything.
  */
 const subscribeToChannel = <Name extends MainToRendererIpcChannelName>(
-  channel: Name,
+  name: Name,
   listener: (payload: EncodedIpcPayload<Name>) => void,
 ): (() => void) => {
   const forwardPayload = (_event: IpcRendererEvent, payload: EncodedIpcPayload<Name>) => {
     listener(payload);
   };
-  ipcRenderer.on(channel, forwardPayload);
+  ipcRenderer.on(name, forwardPayload);
   return () => {
-    ipcRenderer.removeListener(channel, forwardPayload);
+    ipcRenderer.removeListener(name, forwardPayload);
   };
 };
 

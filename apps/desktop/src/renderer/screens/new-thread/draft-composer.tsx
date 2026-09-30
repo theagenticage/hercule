@@ -1,6 +1,5 @@
 import type { JSX, ReactNode, Ref } from "react";
 import {
-  buildOptionsLabel,
   buildWorkspacePicks,
   formatAccessMode,
   withBranch,
@@ -15,13 +14,10 @@ import {
   PlusIcon,
   SendIcon,
   ShieldIcon,
-  SlidersIcon,
   WorkspaceIcon,
 } from "../../icons";
 import { ComposerMenu } from "../thread/composer-menu";
-import { ModelMenu } from "../thread/model-menu";
-import { OptionsMenu } from "../thread/options-menu";
-import { ProviderLogo } from "../thread/provider-logo";
+import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { isSendKey } from "../thread/send-key";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
@@ -106,7 +102,7 @@ export function DraftComposer({
   placeholder,
   canSend,
   error,
-  recent,
+  readRecent,
   fieldRef,
   onTextChange,
   onPick,
@@ -118,8 +114,8 @@ export function DraftComposer({
   readonly canSend: boolean;
   /** The failed start's message, shown under the row, or `null`. */
   readonly error: string | null;
-  /** The models the user picked lately, which the model menu offers first. */
-  readonly recent: readonly RecentModel[];
+  /** Returns the models the user picked lately, which the model menu offers first. */
+  readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLTextAreaElement>;
   readonly onTextChange: (text: string) => void;
   readonly onPick: (steps: readonly ComposerPick[]) => void;
@@ -178,60 +174,24 @@ export function DraftComposer({
             )}
           </DraftPick>
           {descriptors === null ? null : (
-            <ComposerMenu
-              label="Model options"
-              align="start"
+            <OptionsPick
+              descriptors={descriptors}
+              selected={config.options}
+              modelName={pill.name}
               disabled={false}
-              triggerClassName="pick"
-              trigger={
-                <>
-                  <SlidersIcon size={14} />
-                  {buildOptionsLabel(descriptors, config.options) ?? "Model options"}
-                </>
-              }
-            >
-              {() => (
-                <OptionsMenu
-                  descriptors={descriptors}
-                  selected={config.options}
-                  modelName={pill.name}
-                  onPick={(id, value) => {
-                    onPick([{ kind: "option", id, value }]);
-                  }}
-                />
-              )}
-            </ComposerMenu>
+              onPick={onPick}
+            />
           )}
           <span className="spacer" />
-          <ComposerMenu
-            label="Model"
-            align="end"
-            width="wide"
+          <ModelPick
+            pill={pill}
+            catalogs={catalogs}
+            config={config}
+            kind="draft"
             disabled={false}
-            triggerClassName="pick pick--pill"
-            trigger={
-              <>
-                {pill.providerId === null ? null : (
-                  <ProviderLogo providerId={pill.providerId} size={13} />
-                )}
-                {pill.account === null ? null : <span className="faint">{pill.account}</span>}
-                <span className="pick-name">{pill.name ?? "No model"}</span>
-              </>
-            }
-          >
-            {(close) => (
-              <ModelMenu
-                catalogs={catalogs}
-                config={config}
-                kind="draft"
-                recent={recent}
-                onPick={(picks) => {
-                  onPick(picks);
-                  close();
-                }}
-              />
-            )}
-          </ComposerMenu>
+            readRecent={readRecent}
+            onPick={onPick}
+          />
           <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
             <MicIcon />
           </button>

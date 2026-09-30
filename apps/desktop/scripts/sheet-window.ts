@@ -13,14 +13,17 @@
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
 import type { Bitmap } from "./compare-bitmaps.ts";
+import { pollUntil } from "./poll.ts";
+
+// The themes every sheet is captured in. The sheets check their theme against
+// the same list.
+export { THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 
 /** The window's content size in CSS pixels: the size of a Bureau page. */
 export const WIDTH = 1440;
 export const HEIGHT = 900;
 /** The device pixel ratio every supported Mac's built-in display shows, forced by a switch. */
 export const DPR = 2;
-/** The two themes every sheet is captured in: Whitehaven (light) and Orient Express (dark). */
-export const THEMES = ["whitehaven", "orient-express"];
 /** How long a sheet may take to draw and load its fonts. */
 const READY_TIMEOUT_MS = 30_000;
 
@@ -70,19 +73,19 @@ export async function openSheet(url: string, moduleUrl?: string): Promise<Browse
         `import(${JSON.stringify(moduleUrl)}).then(() => undefined)`,
       );
     }
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    while (
-      !(await window.webContents.executeJavaScript(
-        `document.documentElement.hasAttribute("data-ready")`,
-      ))
-    ) {
-      if (Date.now() > deadline) {
-        throw new Error(
-          `${url} did not set data-ready within ${String(READY_TIMEOUT_MS / 1000)} s.`,
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+    await pollUntil(
+      async () =>
+        (await window.webContents.executeJavaScript(
+          `document.documentElement.hasAttribute("data-ready")`,
+        ))
+          ? true
+          : undefined,
+      {
+        timeoutMs: READY_TIMEOUT_MS,
+        intervalMs: 50,
+        timeoutMessage: `${url} did not set data-ready within ${String(READY_TIMEOUT_MS / 1000)} s.`,
+      },
+    );
     return window;
   } catch (error) {
     window.destroy();

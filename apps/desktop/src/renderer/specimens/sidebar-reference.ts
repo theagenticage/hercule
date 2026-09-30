@@ -26,14 +26,8 @@
  * the comparison would no longer compare what it claims to.
  */
 import { SPECIMEN_COUNTS, SPECIMEN_THREADS } from "./sidebar-fixture";
+import { findElement } from "./book-page";
 import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
-
-/** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
-function findElement(scope: ParentNode, selector: string): Element {
-  const element = scope.querySelector(selector);
-  if (element === null) throw new Error(`The book's sidebar has no ${selector}.`);
-  return element;
-}
 
 /** Returns the text of the `.side-name` inside a sidebar row. Fails when the row has none. */
 function readRowName(row: Element): string {

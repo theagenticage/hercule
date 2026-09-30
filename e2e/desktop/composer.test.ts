@@ -1,7 +1,7 @@
 /**
  * Tests the thread's composer in the packaged app, signed in to a real
- * controller whose threads run on a scripted runner (spec 17 §Slices,
- * slice 6):
+ * controller whose threads run on a scripted runner (spec 17, §Design
+ * system, **The thread**):
  *
  * - a message sent to an idle thread opens a turn, and the field empties;
  * - while a turn runs, Stop stands where Send stands, ⏎ queues a message,

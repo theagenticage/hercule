@@ -1,16 +1,14 @@
 /**
- * Invalidating a query when the live connection says its data changed, without
- * cancelling a read that is already running.
+ * Invalidates a query when the live connection reports that its data changed,
+ * without cancelling a read that is already running.
  *
  * By default, `invalidateQueries` cancels a query's running read and starts a
  * new one. A burst of pushes, such as a thread that streams its output, would
  * then cancel read after read, and the list could go without an answer for as
- * long as the burst lasts. The web app keeps its lists current the same way
- * (`apps/web/src/app/live-invalidation.ts`), and the two copies stay alike:
- * only the apps depend on TanStack Query, so the code cannot live in
- * `@hercule/client-core`.
+ * long as the burst lasts. The web app and the desktop app both keep their
+ * lists current with this function.
  */
-import { CancelledError, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { CancelledError, type Query, type QueryClient, type QueryKey } from "@tanstack/query-core";
 
 /**
  * The queries whose running read is being watched, each with whether a push

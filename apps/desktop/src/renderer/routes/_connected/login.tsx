@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ApiError, ConnectionError } from "@hercule/client-core";
+import { ApiError, ConnectionError, isMutationRunning } from "@hercule/client-core";
 import { CONNECT_PATH, HOME_PATH } from "../../app/entry-guard";
 import { CenteredFooter, CenteredScreen } from "../../screens/centered-screen";
 
@@ -49,11 +49,8 @@ function SignIn(): JSX.Element {
         onSubmit={(event) => {
           event.preventDefault();
           // Sign in stays enabled while the controller checks the password,
-          // so that it keeps focus, and a second press must do nothing. The
-          // cache knows at once that a sign-in is running. `signIn.isPending`
-          // knows only after the next render, and two quick presses of Enter
-          // can both arrive before it.
-          if (queryClient.isMutating({ mutationKey: SIGN_IN_KEY }) > 0) return;
+          // so that it keeps focus, and a second press must do nothing.
+          if (isMutationRunning(queryClient, SIGN_IN_KEY)) return;
           signIn.mutate();
         }}
       >

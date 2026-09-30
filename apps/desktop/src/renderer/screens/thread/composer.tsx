@@ -10,13 +10,14 @@ import {
   applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
-  buildOptionsLabel,
   buildPendingModelNote,
+  buildRecentModel,
   buildSubmission,
   buildThreadWorkspaceLabel,
   computeEffectiveConfig,
   findResumeBlockedReason,
   formatAccessMode,
+  isMutationRunning,
   queryKeys,
   readErrorMessage,
   readThreadConfig,
@@ -42,15 +43,11 @@ import {
   PlusIcon,
   SendIcon,
   ShieldIcon,
-  SlidersIcon,
   StopIcon,
   WorkspaceIcon,
 } from "../../icons";
-import { ComposerMenu } from "./composer-menu";
+import { ModelPick, OptionsPick } from "./composer-picks";
 import { RequestDock } from "./dock";
-import { ModelMenu } from "./model-menu";
-import { OptionsMenu } from "./options-menu";
-import { ProviderLogo } from "./provider-logo";
 import { QueuedInputs } from "./queued-inputs";
 import { isSendKey, useSendOnMenuCommand } from "./send-key";
 import "./composer.css";
@@ -190,31 +187,16 @@ export function ThreadComposer({
       // The picks are cleared only once the session with the new model is in
       // the cache, so the pill never shows the old model in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      // What was typed or picked while the message was on its way belongs to
-      // the next message, so only what was sent is cleared. The thread had no
-      // failure since the send began.
-      const now = pendingSubmissions.read(sessionId);
-      pendingSubmissions.write(sessionId, {
-        message: now.message.text === sent.payload.text ? { text: "" } : now.message,
-        picks: now.picks === sent.picks ? {} : now.picks,
-      });
+      pendingSubmissions.clearSent(sessionId, { text: sent.payload.text, picks: sent.picks });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
-      // Recent holds the models the user picked, never a default.
-      if (sent.payload.model !== undefined && sent.instanceId !== null) {
-        rememberRecentModel(controller.url, {
-          instanceId: sent.instanceId,
-          model: sent.payload.model,
-        });
-      }
+      const recent = buildRecentModel(sent.picks, sent.instanceId);
+      if (recent !== null) rememberRecentModel(controller.url, recent);
     },
     // Kept in the pending submission rather than read from `input.error`: a
     // composer mounted again, after the user left and came back, has a
     // mutation of its own, which never saw this send fail.
     onError: (error) => {
-      pendingSubmissions.write(sessionId, {
-        ...pendingSubmissions.read(sessionId),
-        failure: readErrorMessage(error),
-      });
+      pendingSubmissions.recordFailure(sessionId, readErrorMessage(error));
     },
   });
   const interrupt = useMutation({
@@ -227,37 +209,16 @@ export function ThreadComposer({
     pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
   const canSend = readOnly === null && pending.message.text.trim() !== "" && !sending;
 
-  const clearFailure = (): void => {
-    const now = pendingSubmissions.read(sessionId);
-    if (now.failure !== undefined) {
-      pendingSubmissions.write(sessionId, { message: now.message, picks: now.picks });
-    }
-  };
-
-  const writeText = (text: string): void => {
-    pendingSubmissions.write(sessionId, {
-      ...pendingSubmissions.read(sessionId),
-      message: { text },
-    });
-  };
   // Each pick is compared with the thread's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.
   const pick = (steps: readonly ComposerPick[]): void => {
-    const now = pendingSubmissions.read(sessionId);
-    pendingSubmissions.write(sessionId, {
-      ...now,
-      picks: applyPicks(catalogs, base, now.picks, steps),
-    });
+    const { picks } = pendingSubmissions.read(sessionId);
+    pendingSubmissions.writePicks(sessionId, applyPicks(catalogs, base, picks, steps));
   };
   const submit = (): void => {
-    // The cache knows at once that a send is running. `sending` knows only
-    // after the next render, and two quick presses of ⏎ can both arrive
-    // before it.
-    if (!canSend || queryClient.isMutating({ mutationKey: sendKey }) > 0) return;
+    if (!canSend || isMutationRunning(queryClient, sendKey)) return;
     const submission = buildSubmission(thread, pending.picks, pending.message);
-    // A thread that has started always takes an input rather than a spawn.
-    if (submission.kind !== "input") return;
-    clearFailure();
+    pendingSubmissions.clearFailure(sessionId);
     if (interrupt.isError) interrupt.reset();
     input.mutate({
       payload: submission.payload,
@@ -269,7 +230,7 @@ export function ThreadComposer({
   useSendOnMenuCommand(submit);
   const stop = (): void => {
     if (interrupt.isPending) return;
-    clearFailure();
+    pendingSubmissions.clearFailure(sessionId);
     interrupt.mutate();
   };
 
@@ -325,7 +286,7 @@ export function ThreadComposer({
             placeholder={placeholder}
             value={pending.message.text}
             onChange={(event) => {
-              writeText(event.target.value);
+              pendingSubmissions.writeText(sessionId, event.target.value);
             }}
             onKeyDown={(event) => {
               if (!isSendKey(event)) return;
@@ -343,61 +304,25 @@ export function ThreadComposer({
                 {formatAccessMode(fields.accessMode.value)}
               </span>
               {descriptors === null ? null : (
-                <ComposerMenu
-                  label="Model options"
-                  align="start"
+                <OptionsPick
+                  descriptors={descriptors}
+                  selected={config.options}
+                  modelName={pill.name}
                   disabled={readOnly !== null}
-                  triggerClassName="pick"
-                  trigger={
-                    <>
-                      <SlidersIcon size={14} />
-                      {buildOptionsLabel(descriptors, config.options) ?? "Model options"}
-                    </>
-                  }
-                >
-                  {() => (
-                    <OptionsMenu
-                      descriptors={descriptors}
-                      selected={config.options}
-                      modelName={pill.name}
-                      onPick={(id, value) => {
-                        pick([{ kind: "option", id, value }]);
-                      }}
-                    />
-                  )}
-                </ComposerMenu>
+                  onPick={pick}
+                />
               )}
               {/* The note fills the spacer, so no control moves when it shows. */}
               <span className="spacer composer-note">{note}</span>
-              <ComposerMenu
-                label="Model"
-                align="end"
-                width="wide"
+              <ModelPick
+                pill={pill}
+                catalogs={catalogs}
+                config={config}
+                kind="active"
                 disabled={readOnly !== null}
-                triggerClassName="pick pick--pill"
-                trigger={
-                  <>
-                    {pill.providerId === null ? null : (
-                      <ProviderLogo providerId={pill.providerId} size={13} />
-                    )}
-                    {pill.account === null ? null : <span className="faint">{pill.account}</span>}
-                    <span className="pick-name">{pill.name ?? "No model"}</span>
-                  </>
-                }
-              >
-                {(close) => (
-                  <ModelMenu
-                    catalogs={catalogs}
-                    config={config}
-                    kind="active"
-                    recent={readRecentModels(controller.url)}
-                    onPick={(picks) => {
-                      pick(picks);
-                      close();
-                    }}
-                  />
-                )}
-              </ComposerMenu>
+                readRecent={() => readRecentModels(controller.url)}
+                onPick={pick}
+              />
               <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
                 <MicIcon />
               </button>
@@ -438,7 +363,7 @@ export function ThreadComposer({
                 {piece.kind === "branch" ? (
                   <>
                     <BranchIcon size={13} />
-                    <span className="mono">{piece.text}</span>
+                    <span>{piece.text}</span>
                     {piece.startedFrom === null ? null : (
                       <>
                         {" "}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { WaitingThread } from "../ipc/contract";
-import { MainWindow } from "./main-window";
+import { type FakeMainWindow, makeFakeMainWindow } from "./testing";
 import {
   makeThreadNotificationsLayer,
   type NativeNotification,
@@ -18,18 +18,16 @@ interface FakeNotification extends NativeNotification {
   click(): void;
 }
 
-/** What the fakes of the platform and the window saw, and whether the window has the focus. */
+/** What the fakes of the platform and the window saw. */
 interface Seen {
-  /** Whether the fake window has the focus; a test may change it. */
-  focused: boolean;
   /** Each notification created, in order. */
   readonly notifications: Array<FakeNotification>;
   /** Each count the badge was set to, in order. */
   readonly badgeCounts: Array<number>;
   /** How many times the service asked to notify. */
   asks: number;
-  /** Each thing the window was asked to do, in order. */
-  readonly window: Array<string>;
+  /** The fake window, with each call made to it; a test may change whether it has the focus. */
+  readonly window: FakeMainWindow;
 }
 
 /**
@@ -41,7 +39,9 @@ const runWithNotifications = async (
   focused: boolean,
   use: (notifications: ThreadNotifications["Service"], seen: Seen) => Effect.Effect<unknown>,
 ): Promise<Seen> => {
-  const seen: Seen = { focused, notifications: [], badgeCounts: [], asks: 0, window: [] };
+  const window = makeFakeMainWindow();
+  window.focused = focused;
+  const seen: Seen = { notifications: [], badgeCounts: [], asks: 0, window };
   class Notification implements FakeNotification {
     readonly title: string;
     readonly body: string;
@@ -69,27 +69,13 @@ const runWithNotifications = async (
       this.clickListener();
     }
   }
-  const window = Layer.succeed(MainWindow)({
-    load: Effect.void,
-    reload: Effect.void,
-    show: Effect.sync(() => {
-      seen.window.push("show");
-    }),
-    showFirstTime: Effect.void,
-    isFocused: Effect.sync(() => seen.focused),
-    send: (name, payload) =>
-      Effect.sync(() => {
-        seen.window.push(`${name} ${JSON.stringify(payload)}`);
-      }),
-    showWarning: () => Effect.void,
-  });
   const layer = makeThreadNotificationsLayer({
     Notification,
     setBadgeCount: (count) => seen.badgeCounts.push(count),
     askToNotify: () => {
       seen.asks += 1;
     },
-  }).pipe(Layer.provide(window));
+  }).pipe(Layer.provide(window.layer));
   await Effect.runPromise(
     Effect.provide(
       ThreadNotifications.use((notifications) => use(notifications, seen)),
@@ -175,7 +161,7 @@ describe("ThreadNotifications", () => {
         notifications.setWaitingThreads([]),
         notifications.setWaitingThreads([LOGIN]),
         Effect.sync(() => {
-          seen.focused = true;
+          seen.window.focused = true;
         }),
         notifications.setWaitingThreads([{ ...LOGIN, requestId: "request-3" }]),
       ]),
@@ -225,7 +211,7 @@ describe("ThreadNotifications", () => {
         Effect.sync(() => seen.notifications[0]?.click()),
       ]),
     );
-    expect(seen.window).toEqual(["show", 'thread.open {"sessionId":"session-1"}']);
+    expect(seen.window.calls).toEqual(['showAndSend thread.open {"sessionId":"session-1"}']);
   });
 
   it("does nothing when a notification it removed is clicked", async () => {
@@ -238,7 +224,7 @@ describe("ThreadNotifications", () => {
         Effect.sync(() => seen.notifications[0]?.click()),
       ]),
     );
-    expect(seen.window).toEqual([]);
+    expect(seen.window.calls).toEqual([]);
   });
 
   it("asks to notify on signing in, and asks no more while the user stays signed in", async () => {

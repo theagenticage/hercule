@@ -9,11 +9,10 @@ import { isOnRendererOrigin } from "./renderer-origin";
  * `requestUrl`, a URL on the `app` scheme, is forwarded to: the dev server's
  * origin with the request's path and query string.
  *
- * Returns null when the request is not on the renderer's origin, or when the
- * URL built would not be on the dev server's origin. Resolving the request's
- * path against the dev server's URL could leave it: `//elsewhere.example/x`
- * resolves to another host. Setting the path cannot, and the check makes sure
- * of it.
+ * Returns null when the request is not on the renderer's origin. The URL is
+ * built by setting the path on the dev server's origin, never by resolving
+ * the request's path against it: resolving `//elsewhere.example/x` would
+ * leave for another host, and setting a path never changes the host.
  */
 export const buildDevServerUrl = (devServerUrl: string, requestUrl: string): string | null => {
   if (!isOnRendererOrigin(requestUrl)) return null;
@@ -22,5 +21,5 @@ export const buildDevServerUrl = (devServerUrl: string, requestUrl: string): str
   const target = new URL(origin);
   target.pathname = pathname;
   target.search = search;
-  return target.origin === origin ? target.toString() : null;
+  return target.toString();
 };

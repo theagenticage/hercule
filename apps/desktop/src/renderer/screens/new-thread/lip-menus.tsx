@@ -7,7 +7,7 @@ import {
   type WorkspaceMenu,
   type WorkspacePick,
 } from "@hercule/client-core";
-import { MenuLine } from "./menu-line";
+import { MenuLine } from "../thread/menu-line";
 
 // The three menus of a Draft Thread's lip. Branch names and worktree names
 // are set in the UI face like every other name: the desktop keeps monospace

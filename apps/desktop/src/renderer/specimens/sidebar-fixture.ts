@@ -23,7 +23,7 @@ import type {
   Session,
 } from "@hercule/contract";
 import { buildProject, buildRunner, buildSession } from "@hercule/client-core/threads/testing";
-import type { SidebarRecords } from "./sidebar-page";
+import type { SidebarRecords } from "./shell-page";
 
 /**
  * The moment the specimen's clock stands still at: 2026-09-29 09:41 UTC, ten

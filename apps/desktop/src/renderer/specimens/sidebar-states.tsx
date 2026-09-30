@@ -12,7 +12,7 @@
 import "./fixed-clock";
 import { flushSync } from "react-dom";
 import { SIDEBAR_SCENES, type SidebarScene } from "./sidebar-states-fixture";
-import { mountSidebarSpecimen } from "./sidebar-page";
+import { mountSidebarSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
 /** Returns the scene the page's `?scene=` names. Fails when it names none of the scenes. */
