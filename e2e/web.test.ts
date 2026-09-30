@@ -14,9 +14,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ROOT, startController, createTemporaryHome, type Controller } from "./harness";
+import { ROOT, startController, type Controller } from "../scripts/controller-process";
+import { createTemporaryHome, type TemporaryHome } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome | undefined;
 
 let controller: Controller | undefined;
 let url: string;
@@ -28,15 +29,16 @@ beforeAll(async () => {
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
     );
   }
+  state = createTemporaryHome();
   controller = await startController({ home: state.home, binary });
   url = controller.url;
 }, 60_000);
 
 afterAll(async () => {
-  // The binary may have been missing, in which case nothing was started, but
-  // the temporary home still has to be removed.
+  // When the binary is missing, `beforeAll` fails before it creates the home
+  // or starts the controller, so neither may exist here.
   await controller?.stop().catch(() => -1);
-  state.remove();
+  state?.remove();
 });
 
 describe("the binary serving the web app", () => {

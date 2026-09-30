@@ -12,10 +12,9 @@
  *
  * The test drives everything else.
  *
- * It lives in the package source rather than beside one test because two
- * packages use it: this package's unit tests and the web app's integration
- * tests. It is imported as `@hercule/client-core/testing`, which no app code
- * imports.
+ * It lives in the package source rather than beside one test because this
+ * package's unit tests and both apps' integration tests use it. It is
+ * imported as `@hercule/client-core/testing`, which no app code imports.
  */
 
 /** The server version the stub replies to `hello` with, so a test can assert on it. */
@@ -36,6 +35,15 @@ export const stubWebSocketInto =
 
 /** One frame as sent over the socket: the RPC codec's JSON envelope. */
 export type Frame = Record<string, unknown>;
+
+/** A subscription the client holds open. */
+export interface StubSubscription {
+  readonly topic: string;
+  /** The id of the `subscribe` call, which every chunk and failure for it carries. */
+  readonly requestId: unknown;
+  /** The cursor the client subscribed from, or `undefined` when it subscribed from the head. */
+  readonly cursor: string | undefined;
+}
 
 interface Listener {
   readonly handler: (event: unknown) => void;
@@ -102,25 +110,33 @@ export class StubSocket {
    * Returns the subscriptions the client holds open, oldest first: every
    * `subscribe` call it has not interrupted since.
    */
-  subscriptions(): Array<{ readonly topic: string; readonly requestId: unknown }> {
+  subscriptions(): Array<StubSubscription> {
     const ended = new Set(this.frames("Interrupt").map((frame) => frame.requestId));
     return this.calls("subscribe")
       .filter((frame) => !ended.has(frame.id))
-      .map((frame) => ({
-        topic: (frame.payload as { readonly topic: string }).topic,
-        requestId: frame.id,
-      }));
+      .map((frame) => {
+        const payload = frame.payload as { readonly topic: string; readonly cursor?: string };
+        return { topic: payload.topic, requestId: frame.id, cursor: payload.cursor };
+      });
+  }
+
+  /**
+   * Returns the client's open subscription to `topic`. Throws when the client
+   * has no subscription to `topic`, because that is a mistake in the test,
+   * not a message that should silently go nowhere.
+   */
+  findSubscription(topic: string): StubSubscription {
+    const held = this.subscriptions().find((subscription) => subscription.topic === topic);
+    if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
+    return held;
   }
 
   /**
    * Sends a live message on the client's subscription to `topic`. Throws when
-   * the client has no subscription to `topic`, because that is a mistake in
-   * the test, not a push that should silently go nowhere.
+   * the client has no subscription to `topic`.
    */
   push(topic: string, message: unknown): void {
-    const held = this.subscriptions().find((subscription) => subscription.topic === topic);
-    if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
-    this.chunk(held.requestId, [message]);
+    this.chunk(this.findSubscription(topic).requestId, [message]);
   }
 
   /** Sends a stream chunk for a call the client has open. */

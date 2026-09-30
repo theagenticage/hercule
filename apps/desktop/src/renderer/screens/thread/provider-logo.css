@@ -1,0 +1,15 @@
+/* A provider's mark sits on the text line like a character, and never
+   shrinks in a flex row. As the Bureau book's .br and .pi. */
+.br {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
+.pi {
+  display: inline-grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  font-weight: 700;
+  line-height: 1;
+}

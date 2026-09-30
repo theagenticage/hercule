@@ -6,8 +6,8 @@ import {
   queryKeys,
   type HerculeClient,
   type SecretFieldOffer,
+  readErrorMessage,
 } from "@hercule/client-core";
-import { readErrorMessage } from "./save-status";
 
 /**
  * The Log in button for a provider, with the drawer that walks the user

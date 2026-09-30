@@ -74,6 +74,7 @@ describe("a checkout as the API returns it", () => {
       branch: null,
       branches: [],
       defaultBranch: null,
+      baseBranch: null,
     } as const;
     expect(Schema.encodeSync(Checkout)(checkout)).toMatchObject({ branch: null, branches: [] });
   });
@@ -93,6 +94,7 @@ describe("a checkout as the API returns it", () => {
         branch: ".hidden",
         branches: [".hidden"],
         defaultBranch: null,
+        baseBranch: null,
       }),
     ).toMatchObject({ branch: ".hidden" });
   });

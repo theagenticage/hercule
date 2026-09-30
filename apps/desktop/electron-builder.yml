@@ -1,0 +1,45 @@
+# Packages the desktop app as `Hercule.app`. The product name comes from
+# `productName` in package.json, which Electron also reads at run time, so the
+# app's name and its user data folder agree with the bundle's name.
+#
+# `pnpm package` runs electron-builder twice with this config:
+#
+# - the release package, into dist/release;
+# - the test package, into dist/test. It differs from the release package in
+#   one fuse, EnableNodeCliInspectArguments, which it leaves on because
+#   Playwright's Electron driver starts the app with `--inspect`. The end-to-end
+#   tests and the perf script run it; a test reads every fuse off the release
+#   package.
+
+# The macOS bundle identifier. It cannot change once the app is released.
+appId: sh.hercule.desktop
+
+directories:
+  output: dist/release
+
+# Main, the preload and the renderer are bundled into `out/`, so the app needs
+# nothing else: no node_modules, no source. The renderer's Vite manifest is
+# left out: only the bundle budget check reads it, at build time.
+files:
+  - out/**
+  - "!out/renderer/.vite/**"
+  - package.json
+asar: true
+npmRebuild: false
+
+mac:
+  target: dir
+
+# Spec 17, §Security baseline. Flipping a fuse changes the Electron binary and
+# so breaks its ad hoc signature; `resetAdHocDarwinSignature` signs it again,
+# without which an unsigned arm64 build does not start.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # Main serves the renderer on the `app` scheme and reads its files itself,
+  # so nothing is loaded over file:// and file:// pages need no privileges.
+  grantFileProtocolExtraPrivileges: false
+  resetAdHocDarwinSignature: true

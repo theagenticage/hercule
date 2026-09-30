@@ -1,5 +1,5 @@
 import { Fragment, type JSX } from "react";
-import { buildOptionsMenu } from "@hercule/client-core";
+import { buildOptionsMenu, parseOptionChoice } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
 import { SegmentedControl, SegmentedControlItem } from "@hercule/ui";
 import { MenuHeader } from "./menu";
@@ -57,7 +57,7 @@ export function ModelOptionsSelector({
               className="w-auto flex-wrap gap-px rounded-none border-0 bg-transparent p-0"
               value={row.value}
               onValueChange={(next) => {
-                onPick(row.id, row.boolean ? next === "on" : next);
+                onPick(row.id, parseOptionChoice(row, next));
               }}
             >
               {row.choices.map((choice) => (

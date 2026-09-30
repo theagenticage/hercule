@@ -9,10 +9,11 @@ import {
   buildPendingModelNote,
   listProjectRepos,
   queryKeys,
-  findRunnerForPick,
   withBranch,
   buildWorkspaceMenu,
+  buildWorkspacePicks,
   type Thread,
+  readErrorMessage,
 } from "@hercule/client-core";
 import {
   localRunnerQuery,
@@ -23,7 +24,6 @@ import {
   sessionsQuery,
   workspacesQuery,
 } from "../../app/queries";
-import { readErrorMessage } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
 import { ComposerCard } from "./composer-card";
 import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
@@ -93,10 +93,8 @@ export function Composer({
       ? buildModelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
       : null;
   const projectId = model.config.projectId ?? null;
-  const project = projects.find((each) => each.id === projectId);
   const pick = fields.workspace.value;
   const menu = buildWorkspaceMenu({
-    project,
     repos: listProjectRepos(resources, projectId),
     workspaces,
     sessions,
@@ -200,12 +198,7 @@ export function Composer({
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={handleOpenChange}
         onPickWorkspace={(picked) => {
-          // An existing workspace also fixes the machine. `findRunnerForPick`
-          // decides that, not this component.
-          const settled = findRunnerForPick(picked, workspaces);
-          if (settled === null) model.pick({ kind: "workspace", value: picked });
-          else
-            model.pick({ kind: "workspace", value: picked }, { kind: "runnerId", value: settled });
+          model.pick(...buildWorkspacePicks(picked, workspaces));
         }}
         onPickBranch={(picked) => {
           model.pick({ kind: "workspace", value: withBranch(pick, picked) });

@@ -1,10 +1,9 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import { ComposerCard } from "../composer/composer-card";
 import { SendButton } from "../composer/controls";
 import { MessageBox } from "../composer/message-box";
-import { readErrorMessage } from "../save-status";
 
 /**
  * The conversation's composer: text only, addressed to the assistant. Enter

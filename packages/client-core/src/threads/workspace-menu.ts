@@ -6,11 +6,11 @@
  * hidden, so the user learns why it is not available. Spec 14 §The composer
  * owns the Workspace selector.
  *
- * "None" is usually not offered: a project with a repo always works in one of
- * its workspaces. "None" is the only row when there is no repo, and then the
- * selector is locked.
+ * "No workspace" is usually not offered: a project with a repo always works
+ * in one of its workspaces. "No workspace" is the only row when there is no
+ * repo, and then the selector is locked.
  */
-import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
+import type { Resource, Runner, Session, Workspace } from "@hercule/contract";
 import {
   buildPickKey,
   listProjectWorkspaces,
@@ -45,6 +45,9 @@ export interface WorkspaceMenu {
 /** The pick for a thread that works without a checkout. */
 const NONE: WorkspacePick = { kind: "none" };
 
+/** The name of the pick for a thread that works without a checkout. */
+const NO_WORKSPACE = "No workspace";
+
 /**
  * Returns a summary of the workspace's threads, such as `2 threads · “Fix flaky
  * webhook tests”, “Write the retry runbook”`, or `null` when it has none.
@@ -61,7 +64,6 @@ const describeThreadsIn = (workspace: Workspace, sessions: readonly Session[]): 
 };
 
 export const buildWorkspaceMenu = ({
-  project,
   repos,
   workspaces,
   sessions,
@@ -69,8 +71,6 @@ export const buildWorkspaceMenu = ({
   runnerId,
   pick,
 }: {
-  /** The draft's project, or `undefined` when the draft has no project. */
-  readonly project: Project | undefined;
   readonly repos: readonly Resource[];
   readonly workspaces: readonly Workspace[];
   readonly sessions: readonly Session[];
@@ -142,14 +142,13 @@ export const buildWorkspaceMenu = ({
   }
 
   // A project with a repo always works in one of its workspaces. Only a
-  // project with no repo, or a draft with no project, offers "None", and then
-  // it is the only row.
-  const none = project === undefined ? "No workspace" : "None";
+  // project with no repo, or a draft with no project, offers "No workspace",
+  // and then it is the only row.
   if (repos.length === 0) {
     rows.push({
       key: buildPickKey(NONE),
       pick: NONE,
-      name: none,
+      name: NO_WORKSPACE,
       mono: false,
       note: null,
       sub: "the agent works without a checkout",
@@ -165,7 +164,7 @@ export const buildWorkspaceMenu = ({
   return {
     label:
       rows.find((row) => row.current)?.name ??
-      (joined === undefined ? none : formatWorkspaceLabel(joined, repos, runners)),
+      (joined === undefined ? NO_WORKSPACE : formatWorkspaceLabel(joined, repos, runners)),
     rows,
   };
 };

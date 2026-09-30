@@ -5,12 +5,13 @@ import {
   buildAssistantDraft,
   buildAssistantUpdate,
   type AssistantDraft,
+  readErrorMessage,
 } from "@hercule/client-core";
 import { Button, EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { assistantsQuery, profilesQuery, providersQuery } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 import {
   AssistantForm,
   ASSISTANT_MUTATION_KEY,

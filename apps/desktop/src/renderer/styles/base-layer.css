@@ -1,0 +1,17 @@
+/* The design tokens, the page base and the controls, in the cascade layer
+   `base`. Every component's stylesheet is unlayered, and an unlayered rule
+   beats a layered one whatever the order the stylesheets load in.
+
+   The Bureau book gets the same result from order alone: these rules come
+   first in its one stylesheet. The release build cannot promise that order.
+   A component stylesheet that the first screen and a later screen both
+   import goes into a shared file, and Vite links that file before the
+   entry's own stylesheet, which holds these. Without the layer,
+   `:focus-visible` in base.css would beat the message field's `outline: 0`,
+   which is just as specific, and draw a ring the book does not have.
+
+   Where a component's rule overrides one of these, it is at least as
+   specific, so the layer changes no result the book's order gives. */
+@import "./tokens.css" layer(base);
+@import "./base.css" layer(base);
+@import "./controls.css" layer(base);

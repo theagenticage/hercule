@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import type { MachineRow } from "@hercule/client-core";
+import { describeMachineRow, type MachineRow } from "@hercule/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
@@ -11,7 +11,6 @@ import { SelectorShell } from "./selector-shell";
 const STATE_HUE: Record<MachineRow["state"], string> = {
   online: "text-live",
   draining: "text-muted",
-  retired: "text-muted",
   unreachable: "text-fail",
   offline: "text-muted",
 };
@@ -29,23 +28,6 @@ const renderStateAndCapacity = (row: MachineRow): JSX.Element => (
     <span className="font-mono whitespace-pre text-faint tabular-nums">{` ${row.capacity}`}</span>
   </>
 );
-
-/**
- * Builds the line under a machine row. It lists what kind of machine this is
- * (this machine, the default, reserved) and every reason the row is dimmed,
- * joined with " · ". A machine that has not cloned the repo yet can still be
- * picked, because it clones the repo on first use.
- */
-const describeMachine = (row: MachineRow): string =>
-  [
-    row.isLocal ? "this machine" : null,
-    row.isDefault ? "default" : null,
-    row.reserved ? "reserved" : null,
-    row.dimmed,
-    row.notCloned,
-  ]
-    .filter((each): each is string => each !== null)
-    .join(" · ");
 
 /**
  * The lip's right-hand selector: the machine a new thread is placed on,
@@ -87,7 +69,7 @@ export function MachineSelector({
           key={row.runnerId}
           name={row.name}
           note={renderStateAndCapacity(row)}
-          sub={describeMachine(row)}
+          sub={describeMachineRow(row)}
           inert={row.dimmed !== null}
           current={row.current}
           onPick={() => {

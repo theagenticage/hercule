@@ -562,29 +562,127 @@ describe("createLive", () => {
     assert.isTrue(invalidations.length > 0, "the unrelated subscription stopped receiving pushes");
   });
 
-  it("invalidates everything for a subscriber that hit a cap, and waits before resubscribing", async () => {
+  it("waits before resubscribing a subscriber that hit a cap, and then invalidates everything", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
     const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
     started.subscribe("task", (keys) => invalidations.push(keys));
     await settleTimers();
+    const beforeCap = invalidations.length;
 
     const first = socket.calls("subscribe")[0];
     socket.fail(first?.id, capFailure);
     await settleTimers();
 
-    // There is no way to know what was dropped, so every key of the topic is
-    // invalidated, as after a reconnect.
-    assert.strictEqual(invalidations.length, 1);
-    assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
-
     // A subscriber that fell behind once will fall behind again, so
     // resubscribing as fast as the errors arrive would flood the controller.
     assert.strictEqual(socket.calls("subscribe").length, 1);
+    assert.strictEqual(invalidations.length, beforeCap);
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
     assert.strictEqual(socket.calls("subscribe").length, 2);
+
+    // There is no way to know what was dropped, so every key of the topic is
+    // invalidated, as after a reconnect. It happens after the wait, so the
+    // refetch also sees what changed during it.
+    assert.strictEqual(invalidations.length, beforeCap + 1);
+    assert.deepStrictEqual(
+      sortKeys(invalidations[beforeCap] ?? []),
+      sortKeys(buildQueryKeys("task", [])),
+    );
+  });
+
+  it("marks the first delta of each subscription made with a cursor as the replay", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    const deltas: Array<LiveDelta> = [];
+    started.subscribe("event", (delta) => deltas.push(delta), "41");
+    await settleTimers();
+
+    const call = socket.calls("subscribe")[0];
+    socket.chunk(call?.id, [{ _tag: "delta", cursor: "42", items: [buildEvent(42)] }]);
+    socket.chunk(call?.id, [{ _tag: "delta", cursor: "43", items: [buildEvent(43)] }]);
+    await settleTimers();
+    assert.deepStrictEqual(
+      deltas.map((delta) => delta.replay),
+      [true, false],
+    );
+
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+
+    // The subscription is made again from the last cursor, and its first
+    // delta is again the replay, even when nothing was written in between.
+    const reopened = readLastSocket();
+    const again = reopened.calls("subscribe")[0];
+    assert.deepStrictEqual(again?.payload, { topic: "event", cursor: "43" });
+    reopened.chunk(again?.id, [{ _tag: "delta", cursor: "43", items: [] }]);
+    await settleTimers();
+    assert.deepStrictEqual(deltas.at(-1), {
+      cursor: "43",
+      items: [],
+      reset: false,
+      replay: true,
+      gone: false,
+    });
+  });
+
+  it("tells a tap subscriber to reset each time its subscription starts again, and marks no tap as a replay", async () => {
+    // A tap is never stored, so the taps sent while it was not subscribed
+    // cannot be replayed. Its subscriber has to learn that it missed some.
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+    const deltas: Array<LiveDelta> = [];
+    started.subscribe("session:s1:tap", (delta) => deltas.push(delta));
+
+    // The first connection: the tap was not subscribed before it either.
+    started.start();
+    await settleTimers();
+    const socket = readLastSocket();
+    assert.deepStrictEqual(
+      deltas.map((delta) => delta.reset),
+      [true],
+    );
+
+    const tap = {
+      turnId: "t1",
+      itemId: "a1",
+      streamKind: "assistant_text" as const,
+      delta: "Hi",
+    };
+    const first = socket.calls("subscribe")[0];
+    socket.chunk(first?.id, [{ _tag: "delta", items: [tap] }]);
+    await settleTimers();
+    assert.deepStrictEqual(deltas.at(-1), {
+      cursor: null,
+      items: [tap],
+      reset: false,
+      replay: false,
+      gone: false,
+    });
+
+    // A subscription the controller ended is made again after a wait, and
+    // the subscriber is told just before that.
+    socket.fail(first?.id, capFailure);
+    await settleTimers();
+    assert.strictEqual(deltas.length, 2);
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 2);
+    assert.strictEqual(deltas.at(-1)?.reset, true);
+
+    // And after a reconnect.
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(readLastSocket().calls("subscribe").length, 1);
+    assert.deepStrictEqual(
+      deltas.map((delta) => delta.reset),
+      [true, false, true, true],
+    );
   });
 
   it("closes the socket and reconnects when a subscription fails with unauthenticated", async () => {
@@ -732,6 +830,15 @@ describe("buildQueryKeys", () => {
       queryKeys.session(),
       queryKeys.inputs(),
     ]);
+  });
+
+  it("keys the thread list under the prefix a session push invalidates", () => {
+    const threads = queryKeys.sessions({ thread: true });
+
+    assert.deepStrictEqual(threads, ["sessions", { thread: true }]);
+    // A query client matches an invalidated key as a prefix of a cached one.
+    const [listPrefix] = buildQueryKeys("session", ["s1"]);
+    assert.deepStrictEqual(threads.slice(0, listPrefix?.length), listPrefix);
   });
 
   it("maps an assistant push to the assistant list and the page of each assistant in it", () => {

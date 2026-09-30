@@ -46,3 +46,41 @@ export const buildSiblingTabs = ({
   if (draft) tabs.push({ sessionId: null, title: "New thread", mark: "draft", active: true });
   return tabs.length < 2 ? [] : tabs;
 };
+
+/**
+ * Returns the threads shown as tabs in `session`'s header: one per thread of
+ * `session`'s workspace, in the workspace's thread order, taken from
+ * `threads`. Returns `session` alone when it has no workspace, or when its
+ * workspace is not in `workspaces`.
+ *
+ * `session` always has a tab, and the tab shows `session` rather than its
+ * entry in `threads`, which may be an older read. A thread that has exited no
+ * longer works in its workspace, so the workspace does not list it; its tab
+ * is then the last.
+ */
+export const listThreadTabs = (
+  session: Session,
+  threads: readonly Session[],
+  workspaces: readonly Workspace[],
+): readonly Session[] => {
+  const workspace = workspaces.find((each) => each.id === session.workspaceId);
+  if (workspace === undefined) return [session];
+  const tabs = listWorkspaceThreads(workspace, [
+    session,
+    ...threads.filter((each) => each.id !== session.id),
+  ]);
+  return workspace.sessionIds.includes(session.id) ? tabs : [...tabs, session];
+};
+
+/**
+ * Returns the threads of `workspace`, in the workspace's thread order, taken
+ * from `threads`. Returns an empty list when `workspace` is undefined. A
+ * thread the workspace lists but `threads` does not hold is left out.
+ */
+export const listWorkspaceThreads = (
+  workspace: Workspace | undefined,
+  threads: readonly Session[],
+): readonly Session[] =>
+  workspace === undefined
+    ? []
+    : workspace.sessionIds.flatMap((id) => threads.filter((each) => each.id === id));

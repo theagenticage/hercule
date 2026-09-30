@@ -8,9 +8,10 @@ import {
   buildRunnerPatch,
   type HerculeClient,
   type RunnerDraft,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { RunnerDetail, RunnerUpdateInput } from "@hercule/contract";
-import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 const GIB = 1024 * 1024 * 1024;
 

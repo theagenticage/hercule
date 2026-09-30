@@ -6,6 +6,8 @@
  * - an active thread's fields are locked, with a sentence that says why, and
  *   the model is never locked;
  * - a draft that cannot start says why, and includes the login it needs;
+ * - a draft cannot join a workspace that is not ready, or run on a retired
+ *   runner;
  * - the model pill names the account only when the provider has more than
  *   one instance.
  */
@@ -20,7 +22,12 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
-import { buildComposerFields, buildPendingModelNote } from "./composer-fields";
+import {
+  buildComposerFields,
+  buildPendingModelNote,
+  describeMachineRow,
+  type MachineRow,
+} from "./composer-fields";
 import { joinPhraseText } from "./workspaces";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -123,7 +130,7 @@ describe("buildComposerFields", () => {
       "draft",
     );
 
-    expect(fields.blocked).toMatchObject({ reason: "no provider instance is set up" });
+    expect(fields.blocked).toMatchObject({ reason: "No provider instance is set up" });
   });
 
   it("blocks a draft when no runner is connected", () => {
@@ -133,7 +140,19 @@ describe("buildComposerFields", () => {
       "draft",
     );
 
-    expect(fields.blocked).toEqual({ reason: "no machine is connected", login: null });
+    expect(fields.blocked).toEqual({ reason: "No machine is connected", login: null });
+  });
+
+  it("blocks a draft whose only runner is retired, as if no runner were connected", () => {
+    const retired = buildRunner({ id: "r-gone", name: "atlas", lifecycle: "retired" });
+    const fields = buildComposerFields(
+      { instances: [CLAUDE], runners: [retired], localRunnerId: null },
+      buildConfig({ runnerId: null }),
+      "draft",
+    );
+
+    expect(fields.blocked).toEqual({ reason: "No machine is connected", login: null });
+    expect(fields.machine.label).toBe("no machine");
   });
 
   it("blocks a draft whose instance is not on the runner it would run on", () => {
@@ -246,6 +265,18 @@ describe("buildComposerFields: the runner", () => {
     );
 
     expect(fields.machine.label).toBe("moss · not logged in");
+  });
+
+  it("blocks a draft on a runner that was retired after the user picked it, and says so in its label", () => {
+    const retired = { ...LOCAL, lifecycle: "retired" as const, connectivity: "offline" as const };
+    const fields = buildComposerFields(
+      { instances: [CLAUDE], runners: [retired], localRunnerId: null },
+      buildConfig({ runnerId: retired.id }),
+      "draft",
+    );
+
+    expect(fields.blocked).toEqual({ reason: "moss is retired", login: null });
+    expect(fields.machine.label).toBe("moss · retired");
   });
 
   it("shows no machine when there are no runners", () => {
@@ -378,6 +409,7 @@ const PRIMARY: Workspace = {
       branch: "main",
       branches: ["main", "release/2.4"],
       defaultBranch: "main",
+      baseBranch: null,
     },
   ],
   designatedConnectionId: "conn-github",
@@ -404,6 +436,7 @@ const THREAD_3F1: Workspace = {
       branch: "hercule/thread-3f1",
       branches: ["hercule/thread-3f1"],
       defaultBranch: "main",
+      baseBranch: null,
     },
   ],
   sessionIds: ["s-flaky", "s-runbook"],
@@ -601,6 +634,24 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
     expect(fields.machine.locked).toBe("The workspace it joins decides the machine");
   });
 
+  it.each([
+    ["provisioning", "The workspace it joins is still being set up"],
+    ["failed", "The workspace it joins could not be set up"],
+    ["deleted", "The workspace it joins was deleted"],
+    ["lost", "The workspace it joins was lost when its machine was retired"],
+  ] as const)("blocks a draft that joins a workspace that is %s, saying why", (status, reason) => {
+    const fields = buildComposerFields(
+      withRepos(FULL.projects, FULL.resources, [PRIMARY, { ...THREAD_3F1, status }]),
+      buildDraftConfig({
+        projectId: WEBSHOP_PROJECT.id,
+        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
+      }),
+      "draft",
+    );
+
+    expect(fields.blocked).toEqual({ reason, login: null });
+  });
+
   it("names the runner on an active thread, locked because the thread started", () => {
     const fields = buildComposerFields(
       FULL,
@@ -739,5 +790,41 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe("It works without a checkout.");
+  });
+});
+
+describe("describeMachineRow", () => {
+  const ROW: MachineRow = {
+    runnerId: "r-local",
+    name: "moss",
+    state: "online",
+    isLocal: false,
+    reserved: false,
+    identity: null,
+    planLabel: null,
+    dimmed: null,
+    current: false,
+    isDefault: false,
+    capacity: "0/4",
+    notCloned: null,
+  };
+
+  it("says what kind of machine the row is, then why it is dimmed or slower", () => {
+    expect(
+      describeMachineRow({
+        ...ROW,
+        isLocal: true,
+        isDefault: true,
+        reserved: true,
+        dimmed: "not logged in",
+        notCloned: "webshop is not cloned there · clones on first use",
+      }),
+    ).toBe(
+      "this machine · default · reserved · not logged in · webshop is not cloned there · clones on first use",
+    );
+  });
+
+  it("returns an empty line for a plain machine", () => {
+    expect(describeMachineRow(ROW)).toBe("");
   });
 });

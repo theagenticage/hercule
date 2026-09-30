@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Office · Hercule</title>
+    <script>
+      // The Office opens on the Floor view; ?state=list opens the List view, the roster, instead.
+      // The event flow is off unless the address asks for it with ?flow=on.
+      document.documentElement.dataset.view = document.documentElement.dataset.state === "list" ? "list" : "floor";
+      document.documentElement.dataset.flow = new URLSearchParams(location.search).get("flow") === "on" ? "on" : "off";
+    </script>
+    <style>
+      /* ---------- the header pills ---------- */
+      .ptab[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+      }
+      .pill-title {
+        padding: 0 8px 0 10px;
+        font-weight: var(--w-bold);
+      }
+      .flow-btn {
+        gap: 9px;
+        padding-right: 5px;
+      }
+      html[data-view="list"] .flow-pill {
+        display: none;
+      }
+      .sum {
+        gap: 14px;
+        padding: 0 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .sum span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .sum b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+      }
+      .sum .sum-you,
+      .sum .sum-you b {
+        color: var(--you-ink);
+      }
+
+      /* ---------- the stage ---------- */
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      html[data-view="list"] .stage,
+      html[data-view="floor"] .roster {
+        display: none;
+      }
+      [data-office] {
+        position: absolute;
+        inset: 0;
+        /* the green glass of a lit banker's lamp */
+        --lamp-on: color-mix(in oklab, var(--room-lamp) 70%, oklch(0.86 0.13 150));
+      }
+      .floor {
+        position: absolute;
+        inset: 0;
+      }
+      html[data-flow="off"] .flow,
+      html[data-flow="off"] .tag--flow {
+        display: none;
+      }
+
+      /* Furniture: every box shades its sides toward the room's shade color. */
+      .bx .t {
+        fill: var(--c);
+      }
+      .bx .l {
+        fill: color-mix(in oklab, var(--c) 84%, var(--room-shade));
+      }
+      .bx .r {
+        fill: color-mix(in oklab, var(--c) 68%, var(--room-shade));
+      }
+      .bx polygon {
+        stroke: color-mix(in oklab, var(--c) 78%, var(--room-shade));
+        stroke-width: 0.5;
+        stroke-linejoin: round;
+      }
+      .brass .t {
+        fill: color-mix(in oklab, var(--c) 80%, white);
+      }
+      .shade .t {
+        fill: color-mix(in oklab, var(--c) 82%, white);
+      }
+      .slab polygon {
+        stroke: none;
+      }
+      .slab .l {
+        fill: color-mix(in oklab, var(--room-floor) 74%, var(--room-shade));
+      }
+      .slab .r {
+        fill: color-mix(in oklab, var(--room-floor) 60%, var(--room-shade));
+      }
+
+      /* the floor: a two-tone parquet, a field of inlay per runner, a sunburst in the lobby */
+      .floor > g > rect {
+        fill: var(--room-floor);
+      }
+      .pq {
+        fill: color-mix(in oklab, var(--room-floor) 93%, var(--room-inlay));
+      }
+      .field {
+        fill: color-mix(in oklab, var(--room-floor) 78%, var(--room-inlay));
+      }
+      .field-line {
+        fill: none;
+        stroke: var(--room-inlay-2);
+        stroke-opacity: 0.34;
+        stroke-width: 1.4;
+      }
+      .field-line--thin {
+        stroke-width: 0.8;
+        stroke-opacity: 0.24;
+      }
+      .field-corner {
+        fill: var(--room-inlay-2);
+        fill-opacity: 0.3;
+      }
+      .engrave {
+        font-family: var(--font-ui);
+        font-weight: var(--w-medium);
+        /* mixed from a text colour so the engraving reads on a pale floor and a dark one alike */
+        fill: color-mix(in oklab, var(--muted) 78%, var(--room-inlay-2));
+        white-space: pre;
+      }
+      .engrave-name {
+        font-weight: var(--w-bold);
+      }
+      .med {
+        fill: color-mix(in oklab, var(--room-floor) 70%, var(--room-inlay));
+      }
+      .med-line {
+        fill: none;
+        stroke: var(--brass);
+        stroke-width: 1.4;
+      }
+      .med-ray {
+        fill: var(--room-inlay-2);
+        fill-opacity: 0.32;
+      }
+      .med-core {
+        fill: var(--brass);
+      }
+      .shadow {
+        fill: var(--room-shade);
+        opacity: 0.13;
+      }
+      /* a free slot on a runner: the outline of a desk not yet placed */
+      .free {
+        fill: none;
+        stroke: var(--room-inlay-2);
+        stroke-opacity: 0.32;
+        stroke-width: 1;
+        stroke-dasharray: 3 3;
+      }
+      .ao {
+        fill: var(--room-shade);
+        opacity: 0.05;
+      }
+
+      /* the walls: plaster above a wood wainscot and a brass rail */
+      .wall-in--b {
+        fill: var(--room-wall);
+      }
+      .wall-in--s {
+        fill: color-mix(in oklab, var(--room-wall) 93%, var(--room-shade));
+      }
+      .wall-top {
+        fill: color-mix(in oklab, var(--room-wall) 72%, var(--room-shade));
+      }
+      .wall-end {
+        fill: color-mix(in oklab, var(--room-wall) 82%, var(--room-shade));
+      }
+      .wainscot {
+        fill: var(--room-panel);
+      }
+      .wainscot--s {
+        fill: color-mix(in oklab, var(--room-panel) 90%, var(--room-shade));
+      }
+      .rail {
+        fill: var(--brass);
+      }
+      .rail--s {
+        fill: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+      }
+      .seams {
+        stroke: color-mix(in oklab, var(--room-panel) 76%, var(--room-shade));
+        stroke-width: 1;
+      }
+      .window {
+        fill: color-mix(in oklab, var(--room-lamp) 14%, var(--room-sun));
+      }
+      .window-frame {
+        fill: none;
+        stroke: var(--brass);
+        stroke-width: 3;
+      }
+      .mullion {
+        fill: none;
+        stroke: var(--brass);
+        stroke-width: 1.6;
+      }
+      .sill {
+        fill: var(--room-panel);
+      }
+      .sun {
+        fill: var(--room-sun);
+        opacity: 0.5;
+      }
+      .wall-word {
+        font-family: var(--font-deco);
+        letter-spacing: 0.04em;
+        fill: color-mix(in oklab, var(--ink) 50%, var(--room-inlay-2));
+      }
+      .brass-rule {
+        stroke: var(--brass);
+        stroke-width: 1.4;
+      }
+      .clock {
+        fill: var(--room-paper);
+        stroke: var(--brass);
+        stroke-width: 2.5;
+      }
+      .clock-rays {
+        stroke: var(--brass);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+      }
+      .hand {
+        stroke: var(--room-inlay-2);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+      }
+      .hand--h {
+        stroke-width: 2.4;
+      }
+      .hand-dot {
+        fill: var(--brass);
+      }
+
+      /* the case board: cork in a wood frame, cards pinned, threads from sources to cases */
+      .board-frame {
+        fill: var(--room-wood);
+      }
+      .cork {
+        fill: var(--room-cork);
+      }
+      .bcard {
+        fill: var(--room-paper);
+        filter: drop-shadow(0 1px 0 oklch(0 0 0 / 0.12));
+      }
+      .bcard--case {
+        fill: color-mix(in oklab, var(--room-paper) 90%, var(--room-sun));
+      }
+      .bmark {
+        color: color-mix(in oklab, var(--room-inlay-2) 80%, transparent);
+      }
+      .bline {
+        stroke: color-mix(in oklab, var(--room-inlay-2) 30%, transparent);
+        stroke-width: 1.3;
+        stroke-linecap: round;
+      }
+      .bline--title {
+        stroke: color-mix(in oklab, var(--room-inlay-2) 60%, transparent);
+        stroke-width: 2;
+      }
+      .bthread {
+        fill: none;
+        stroke: oklch(0.55 0.15 25);
+        stroke-width: 0.9;
+        stroke-opacity: 0.8;
+      }
+      .bpin {
+        fill: var(--brass);
+        stroke: color-mix(in oklab, var(--brass) 60%, var(--room-shade));
+        stroke-width: 0.5;
+      }
+
+      /* the filing cabinets for Tasks */
+      .drawer {
+        fill: color-mix(in oklab, var(--room-wood) 90%, white);
+        stroke: color-mix(in oklab, var(--room-wood) 70%, var(--room-shade));
+        stroke-width: 0.6;
+      }
+      .drawer-label {
+        fill: var(--room-paper);
+      }
+      .drawer-pull {
+        fill: var(--brass);
+      }
+
+      /* desks, lamps and things on desks */
+      .desk-top {
+        fill: var(--room-wood);
+      }
+      .desk-top--you {
+        fill: var(--room-inlay-2);
+      }
+      .blotter {
+        fill: color-mix(in oklab, var(--room-desk) 70%, var(--room-inlay));
+      }
+      .lamp-foot {
+        fill: color-mix(in oklab, var(--brass) 80%, var(--room-shade));
+      }
+      .saucer {
+        fill: var(--room-paper);
+        stroke: color-mix(in oklab, var(--room-paper) 70%, var(--room-shade));
+        stroke-width: 0.5;
+      }
+      .cushion {
+        fill: var(--room-fabric);
+      }
+      .cushion--side {
+        fill: color-mix(in oklab, var(--room-fabric) 70%, var(--room-shade));
+      }
+      .leaf {
+        fill: var(--room-plant);
+      }
+      .leaf--1 {
+        fill: color-mix(in oklab, var(--room-plant) 80%, var(--room-shade));
+      }
+      .leaf--2 {
+        fill: color-mix(in oklab, var(--room-plant) 84%, white);
+      }
+      .hat {
+        fill: var(--room-inlay-2);
+      }
+      .hat--crown {
+        fill: color-mix(in oklab, var(--room-inlay-2) 86%, white);
+      }
+      .hat-band {
+        stroke: var(--brass);
+        stroke-width: 1.6;
+      }
+      .table-side {
+        fill: color-mix(in oklab, var(--brass) 70%, var(--room-shade));
+      }
+      .table-top {
+        fill: var(--room-inlay-2);
+      }
+
+      /* the event flow: thin brass tubes, small capsules, a mouth per Connection */
+      .plaque-rail {
+        fill: color-mix(in oklab, var(--room-wall) 80%, var(--room-panel));
+        stroke: var(--brass);
+        stroke-width: 1;
+      }
+      .mouth {
+        fill: var(--brass);
+      }
+      .mouth-in {
+        fill: color-mix(in oklab, var(--brass) 40%, var(--room-shade));
+      }
+      .plaque-mark {
+        color: color-mix(in oklab, var(--room-inlay-2) 76%, transparent);
+      }
+      .tube {
+        fill: none;
+        stroke: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-opacity: 0.85;
+      }
+      .tube--main {
+        stroke-width: 4;
+      }
+      .collar {
+        fill: var(--brass);
+      }
+      .capsule rect {
+        fill: var(--room-paper);
+        stroke: color-mix(in oklab, var(--brass) 60%, var(--room-shade));
+        stroke-width: 0.8;
+      }
+
+      /* ---------- labels over the floor ---------- */
+      .tags {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .tag {
+        position: absolute;
+        /* Off-centre to the right: the colleague up and to the left sits closer than the one
+           down and to the right, so a centred label would clip the neighbour's face. */
+        transform: translate(-38%, -100%);
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 2px 8px 3px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--raised) 90%, transparent);
+        box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-soft);
+        font-size: var(--t-11);
+        line-height: 1.35;
+        white-space: nowrap;
+        pointer-events: auto;
+      }
+      .tag b {
+        font-weight: var(--w-bold);
+      }
+      .tag span {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .tag--quiet {
+        background: color-mix(in oklab, var(--raised) 72%, transparent);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .tag--you {
+        background: var(--you-tint);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+      }
+      /* a queued colleague's question, speaking up and to the right so no bubble covers a face */
+      .tag--ask {
+        transform: translate(-18px, -100%);
+        margin-top: -6px;
+        padding: 5px 11px;
+        border-radius: 12px 12px 12px 4px;
+        background: var(--raised);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--you);
+      }
+      .tag--ask.is-first {
+        background: var(--you);
+        color: var(--face-ink);
+        box-shadow: var(--shadow-2);
+      }
+      .tag--wait {
+        min-width: 24px;
+        justify-content: center;
+        padding: 3px 7px;
+        color: var(--you-ink);
+      }
+      .tag--more {
+        background: var(--you-tint);
+        color: var(--you-ink);
+        font-weight: var(--w-bold);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+      }
+
+      /* ---------- the answer card for the head of the queue ---------- */
+      .next {
+        position: absolute;
+        left: 18px;
+        bottom: 18px;
+        width: 364px;
+        padding: 14px 14px 12px;
+        border-radius: var(--r-xl);
+      }
+      .next-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .next-h .who-text {
+        line-height: 1.3;
+      }
+      .next-h .who-name {
+        font-size: var(--t-13);
+      }
+      .next-h .who-state {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .next-q {
+        margin: 10px 0 12px;
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .next-a {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .next-of {
+        margin-left: auto;
+        align-self: flex-start;
+        font-size: var(--t-11);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+
+      /* ---------- the roster ---------- */
+      .roster {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 272px;
+        overflow: hidden;
+      }
+      .roster-main {
+        overflow: auto;
+        padding: 64px 32px 40px 36px;
+      }
+      .lane + .lane {
+        margin-top: 26px;
+      }
+      .lane-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 6px;
+        padding-left: 4px;
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+      }
+      .lane-h .faint {
+        font-weight: var(--w-regular);
+        font-size: var(--t-12);
+      }
+      .r-row {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr) 112px 150px 44px 172px;
+        align-items: center;
+        gap: 14px;
+        min-height: 56px;
+        padding: 6px 10px 6px 4px;
+        border-radius: var(--r-lg);
+      }
+      .r-row + .r-row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .r-row:hover {
+        background: var(--hover);
+      }
+      .r-main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.35;
+      }
+      .r-main b {
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .r-ask {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .r-kind {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .r-where {
+        display: flex;
+        flex-direction: column;
+        font-size: var(--t-12);
+        color: var(--muted);
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .r-where span:last-child {
+        color: var(--faint);
+      }
+      .r-time {
+        color: var(--faint);
+        font-size: var(--t-12);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .r-act {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      .r-fold {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 52px;
+        padding: 6px 10px 6px 6px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+      }
+      .r-fold b {
+        color: var(--ink);
+      }
+      .rail {
+        padding: 64px 22px 22px 20px;
+        box-shadow: inset 1px 0 0 var(--line-soft);
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+        overflow: hidden;
+      }
+      .rail-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .m-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 10px;
+        align-items: center;
+        font-size: var(--t-12);
+      }
+      .m-row b {
+        font-weight: var(--w-medium);
+        font-size: var(--t-13);
+      }
+      .m-row .meter {
+        grid-column: 1 / -1;
+      }
+      .m-row .meter i {
+        background: var(--ink);
+        opacity: 0.7;
+      }
+      .p-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: var(--t-12);
+        color: var(--muted);
+      }
+      .p-row .proj {
+        flex: 1;
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+      .p-row--plain b {
+        flex: 1;
+        color: var(--ink);
+        font-size: var(--t-13);
+        font-weight: var(--w-regular);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="office"></aside>
+      <main class="main">
+        <header class="top">
+          <nav class="pill" data-seg aria-label="View">
+            <span class="pill-title">Office</span>
+            <button class="ptab" data-view="list" aria-pressed="false"><i data-i="list" data-size="14"></i>List</button>
+            <button class="ptab" data-view="floor" aria-pressed="true"><i data-i="office" data-size="14"></i>Floor</button>
+          </nav>
+          <span class="pill flow-pill">
+            <button class="pill-btn flow-btn" role="switch" aria-checked="false" data-flow-toggle>Event flow<span class="toggle" aria-hidden="true"></span></button>
+          </span>
+          <span class="spacer"></span>
+          <span class="pill sum" aria-label="Who is doing what">
+            <span><i data-mark="working"></i><b data-swarm="78">8</b> working</span>
+            <span class="sum-you"><i data-mark="waiting"></i><b data-swarm="30">3</b> waiting on you</span>
+            <span><i data-mark="paused"></i><b data-swarm="4">1</b> paused</span>
+            <span><i data-mark="idle"></i><b data-swarm="28">4</b> idle</span>
+          </span>
+        </header>
+
+        <div class="stage">
+          <div data-office></div>
+          <div class="next glass" role="dialog" aria-label="First in your queue">
+            <div class="next-h">
+              <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="34"></i>
+              <span class="who-text"><span class="who-name">Fix 3&#8209;D Secure checkout for EU cards</span><span class="who-state"><span class="proj proj--webshop">webshop</span><span>waiting 10m</span></span></span>
+              <span class="next-of">1 of <span data-swarm="30">3</span></span>
+            </div>
+            <div class="next-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</div>
+            <div class="next-a">
+              <button class="btn btn--accent btn--sm">Allow once</button>
+              <button class="btn btn--quiet btn--sm">Deny</button>
+              <span class="spacer"></span>
+              <a class="btn btn--sm" href="session-active.html">Open thread<i data-i="chev-r" data-size="13"></i></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="roster">
+          <div class="roster-main">
+            <section class="lane">
+              <h2 class="lane-h">Waiting on you <b class="count count--you">3</b><span class="faint">oldest 10m</span></h2>
+              <div class="r-row">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Fix 3&#8209;D Secure checkout for EU cards</b><span class="r-line r-ask">Run <code>git push -u origin fix/3ds-eu-cards</code>?</span></div>
+                <span><span class="proj proj--webshop">webshop</span></span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>studio-mac</span></span>
+                <span class="r-time">10m</span>
+                <div class="r-act"><button class="btn btn--accent btn--sm">Allow once</button><button class="btn btn--quiet btn--sm">Deny</button></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Migrate ops dashboards</b><span class="r-line r-ask">Keep the old Grafana folder?</span></div>
+                <span><span class="proj proj--ops">ops</span></span>
+                <span class="r-where"><span>Thread · pi</span><span>studio-mac</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"><button class="btn btn--accent btn--sm">Keep</button><button class="btn btn--danger btn--sm">Delete</button></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ship release v2.15" data-pose="waiting" data-size="38"></i>
+                <div class="r-main"><b>Ship release v2.15</b><span class="r-line r-ask">Publish payments-api 2.15.0 to npm?</span></div>
+                <span><span class="proj proj--payments">payments-api</span></span>
+                <span class="r-where"><span>Run · Ship release</span><span>build-box-2</span></span>
+                <span class="r-time">2m</span>
+                <div class="r-act"><button class="btn btn--accent btn--sm">Allow once</button><button class="btn btn--quiet btn--sm">Deny</button></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Working <b class="count">8</b></h2>
+              <div class="r-row">
+                <i data-face="Refactor cart totals" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Refactor cart totals</b><span class="r-line">Running <code>pnpm test cart</code></span></div>
+                <span><span class="proj proj--webshop">webshop</span></span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">22m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Investigate backup timeouts" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Investigate backup timeouts</b><span class="r-line">Reading the backup job's logs from last night</span></div>
+                <span><span class="proj proj--ops">ops</span></span>
+                <span class="r-where"><span>Run · Investigate</span><span>build-box-1</span></span>
+                <span class="r-time">6m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Webhook retry backoff" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Webhook retry backoff</b><span class="r-line">Step 2 of 4 · Write the fix</span></div>
+                <span><span class="proj proj--payments">payments-api</span></span>
+                <span class="r-where"><span>Run · Fix bug</span><span>build-box-1</span></span>
+                <span class="r-time">3m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Ada" data-pose="working" data-size="38"></i>
+                <div class="r-main"><b>Ada</b><span class="r-line">Answering your backup question in Web chat</span></div>
+                <span class="r-kind">Assistant</span>
+                <span class="r-where"><span>Claude Code · Sonnet 5</span><span>studio-mac</span></span>
+                <span class="r-time">now</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-fold">
+                <span class="stack"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="30"></i><i data-face="Payout report for September" data-pose="working" data-size="30"></i><i data-face="Rotate staging secrets" data-pose="working" data-size="30"></i><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="30"></i></span>
+                <span><b>4 more</b> · cart rounding, September payouts, staging secrets, reply to Jonas</span>
+                <span class="spacer"></span>
+                <button class="btn btn--quiet btn--sm">Show all<i data-i="chev-d" data-size="13"></i></button>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Paused <b class="count">1</b></h2>
+              <div class="r-row">
+                <i data-face="Label new issues" data-pose="paused" data-size="38"></i>
+                <div class="r-main"><b>Label new issues</b><span class="r-line">Paused at 08:14: the Spawn Bound of 20 per hour tripped</span></div>
+                <span><span class="proj proj--webshop">webshop</span></span>
+                <span class="r-where"><span>Run · Label new issues</span><span>build-box-1</span></span>
+                <span class="r-time">1h 27m</span>
+                <div class="r-act"><a class="btn btn--sm" href="intake.html">See in Intake</a></div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <h2 class="lane-h">Idle <b class="count">4</b><span class="faint">and Juno, asleep</span></h2>
+              <div class="r-row">
+                <i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Read the Stripe v14 changelog</b><span class="r-line">Finished its turn: "Two breaking changes touch checkout."</span></div>
+                <span><span class="proj proj--webshop">webshop</span></span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>studio-mac</span></span>
+                <span class="r-time">20m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Add iDEAL research" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Add iDEAL research</b><span class="r-line">Finished its turn: "Three ways to add iDEAL, compared."</span></div>
+                <span><span class="proj proj--payments">payments-api</span></span>
+                <span class="r-where"><span>Thread · Codex</span><span>build-box-2</span></span>
+                <span class="r-time">1h</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Tidy checkout CSS" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Tidy checkout CSS</b><span class="r-line">Finished its turn: "Removed 212 unused rules."</span></div>
+                <span><span class="proj proj--webshop">webshop</span></span>
+                <span class="r-where"><span>Thread · Claude Code</span><span>build-box-1</span></span>
+                <span class="r-time">2h</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Milo" data-pose="idle" data-size="38"></i>
+                <div class="r-main"><b>Milo</b><span class="r-line">Listening in Slack #ops</span></div>
+                <span class="r-kind">Assistant</span>
+                <span class="r-where"><span>Codex · gpt-5.4</span><span>studio-mac</span></span>
+                <span class="r-time">14m</span>
+                <div class="r-act"></div>
+              </div>
+              <div class="r-row">
+                <i data-face="Juno" data-pose="asleep" data-size="38"></i>
+                <div class="r-main"><b>Juno</b><span class="r-line">Asleep until a message wakes her. Discord #support is reconnecting since 09:12</span></div>
+                <span class="r-kind">Assistant</span>
+                <span class="r-where"><span>Claude Code · Haiku 4.5</span><span>no session</span></span>
+                <span class="r-time"></span>
+                <div class="r-act"></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="rail">
+            <section>
+              <h2 class="section-h">Machines</h2>
+              <div class="rail-list">
+                <div class="m-row"><b>studio-mac</b><span class="muted">5 of 6</span><span class="meter"><i style="width: 83%"></i></span></div>
+                <div class="m-row"><b>build-box-1</b><span class="muted">8 of 8 · at cap</span><span class="meter"><i style="width: 100%"></i></span></div>
+                <div class="m-row"><b>build-box-2</b><span class="muted">3 of 8</span><span class="meter"><i style="width: 37.5%"></i></span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Projects</h2>
+              <div class="rail-list">
+                <div class="p-row"><span class="proj proj--webshop">webshop</span><span>6 live</span></div>
+                <div class="p-row"><span class="proj proj--payments">payments-api</span><span>5 live</span></div>
+                <div class="p-row"><span class="proj proj--ops">ops</span><span>3 live</span></div>
+                <div class="p-row p-row--plain"><b>Assistants</b><span>2 live</span></div>
+              </div>
+            </section>
+            <section>
+              <h2 class="section-h">Poses</h2>
+              <div class="rail-list">
+                <div class="p-row"><i data-face="Refactor cart totals" data-pose="working" data-size="24"></i>Working: eyes down, lamp lit</div>
+                <div class="p-row"><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i>Waiting on you: hand up, at your desk</div>
+                <div class="p-row"><i data-face="Label new issues" data-pose="paused" data-size="24"></i>Paused: held by a Bound</div>
+                <div class="p-row"><i data-face="Add iDEAL research" data-pose="idle" data-size="24"></i>Idle: looking up, a cup of tisane</div>
+                <div class="p-row"><i data-face="Juno" data-pose="asleep" data-size="24"></i>Asleep: unloaded until needed</div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+    <script src="../office.js"></script>
+    <script>
+      // The event-flow switch: it flips data-flow on <html>, and CSS shows or hides the tubes.
+      document.querySelectorAll("[data-flow-toggle]").forEach(function (button) {
+        var knob = button.querySelector(".toggle");
+        function show(on) {
+          document.documentElement.dataset.flow = on ? "on" : "off";
+          button.setAttribute("aria-checked", String(on));
+          knob.setAttribute("aria-checked", String(on));
+        }
+        show(document.documentElement.dataset.flow === "on");
+        button.addEventListener("click", function () {
+          show(document.documentElement.dataset.flow !== "on");
+        });
+      });
+    </script>
+  </body>
+</html>

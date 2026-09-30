@@ -3,13 +3,14 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import {
   describeTrigger,
   queryKeys,
+  readErrorMessage,
   resolveDisplayTimezone,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Trigger } from "@hercule/contract";
 import { Button, FailedMark, PausedMark, cn } from "@hercule/ui";
 import { settingsQuery, triggersQuery, workflowQuery } from "../../../app/queries";
-import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 /**
  * Renders the triggers of a saved workflow below its problems panel, one row

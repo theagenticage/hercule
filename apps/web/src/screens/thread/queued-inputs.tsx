@@ -1,10 +1,14 @@
 import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { canSteerOrCancelQueuedInputs, queryKeys, type HerculeClient } from "@hercule/client-core";
+import {
+  canSteerOrCancelQueuedInputs,
+  queryKeys,
+  type HerculeClient,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { Button } from "@hercule/ui";
 import { inputsQuery, sessionQuery } from "../../app/queries";
-import { readErrorMessage } from "../save-status";
 
 /**
  * The list of queued messages above the composer, each with Steer and Cancel.

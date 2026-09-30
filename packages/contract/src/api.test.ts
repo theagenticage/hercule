@@ -39,6 +39,19 @@ describe("the operation table", () => {
     }
   });
 
+  it("spells every method in capitals", () => {
+    // A browser puts a call's method in capitals when it is DELETE, GET, HEAD,
+    // OPTIONS, POST or PUT in any case, and sends any other method, PATCH
+    // included, as the client spells it. The controller's CORS answer and the
+    // desktop app's connect check both take the methods from this table, and a
+    // preflight's answer must list a method exactly as the browser sends it.
+    // With every method in capitals, the browser sends each one as the table
+    // spells it.
+    for (const operation of ALL_OPERATIONS) {
+      expect(operation.method, operation.id).toBe(operation.method.toUpperCase());
+    }
+  });
+
   it("gives no two operations the same method and path", () => {
     const seen = new Map<string, OperationId>();
     for (const operation of ALL_OPERATIONS) {

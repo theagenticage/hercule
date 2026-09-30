@@ -103,7 +103,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 - **Folder-resource workspaces.** No versioning story for non-git materials yet; v1 workspaces are git-only, mailboxes never produce workspaces. Ruled by ticket #8.
 - **Artifact storage** (sessions producing artifacts held by the controller). Not in v1. Constraint pinned by ticket #10 for when it lands: artifact and blob storage must live inside the controller Data Root and move with the promotion bundle; streaming or resumable transfer is the escape hatch if volume hurts.
 - **Multi-user / team support.** Single user in v1; the actor stamp is the kept seam.
-- **Desktop app.** High priority later; v1 only obliges the web app to be desktop-shell-ready (framework-agnostic `client-core` plus shared `ui` package, no domain logic in components).
+- **Desktop app.** High priority later; v1 only obliges the web app to be desktop-shell-ready (framework-agnostic `client-core`, no domain logic in components). *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Its first milestone, threads in the Crew Bureau design system, is specified in [./17-desktop-app.md](./17-desktop-app.md). It shares `contract` and `client-core` with the web app, not `ui` ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)).
 - **Non-coding work features.** The domain model stays work-type-agnostic, but no non-coding features are specified or built in v1.
 
 ### Plugins and extension points
@@ -194,7 +194,7 @@ The full ruled-out list is the "Out of scope" section above. The items that v1 k
 - Agent-tools extension point and Hercule MCP server: the session spec keeps per-session MCP passthrough.
 - Presence-aware routing: the sink contract grows additively.
 - Visual workflow authoring: the editor module is ringfenced.
-- Desktop app: `client-core` and `ui` packages carry no domain logic in components.
+- Desktop app: `client-core` holds every interpretation of domain data, so no component in either app holds domain logic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): the desktop app has its own components and does not share `ui`, [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)*
 
 ## Sources
 

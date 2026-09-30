@@ -45,3 +45,65 @@ jobs:
       # binary suite then runs what that build produced.
       - run: pnpm build:binary
       - run: pnpm test:binary
+
+  # The desktop app is macOS only (spec 17), so it is packaged and tested on a
+  # macOS runner.
+  desktop:
+    runs-on: macos-latest
+    # On a developer's Mac, with Electron already downloaded, the two builds
+    # take about 10 s together and the suite about 11 s. A fresh runner adds
+    # the install and Electron's 100 MB download, a few minutes at most. The
+    # bound stops an app that hangs, such as on a macOS alert, from holding
+    # the runner for GitHub's default of six hours.
+    timeout-minutes: 10
+    env:
+      # No signing identity exists in CI. Without this, electron-builder looks
+      # for one in the keychain; the packages are signed ad hoc instead.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Electron's zip, about 100 MB, is downloaded into this folder and read
+      # from it when the app is packaged. It changes only with Electron's
+      # version, so that version is the cache key.
+      - name: Read the Electron version
+        id: electron
+        run: echo "version=$(node -p 'require("./apps/desktop/package.json").devDependencies.electron')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the release package and the test package; the suite runs the
+      # test package and reads the release package's fuses and app.asar.
+      - run: pnpm build:desktop
+      # Compares the app with the Crew Bureau book in docs/design/crew-bureau,
+      # pixel for pixel: its faces, icons and marks; its sidebar; its thread
+      # screen, at rest and scrolled; and its draft screen.
+      - run: pnpm compare:bureau
+      # When the comparison fails, its captures show why, where the log
+      # cannot: the book's page, the app's screen, and the difference between
+      # them. They are kept for a week.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bureau-compare
+          path: apps/desktop/out/bureau-compare
+          retention-days: 7
+      # The suite connects the app to a real controller, started from the
+      # compiled binary in a scratch Hercule Home.
+      - run: pnpm build:binary
+      - run: pnpm test:desktop

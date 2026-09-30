@@ -6,6 +6,16 @@ Hercule v1 is a single-user system whose supported perimeter is a home LAN or a 
 
 - **Supported perimeter: LAN or tailnet.** The controller serves plain HTTP by default. A tailnet is already encrypted; a home LAN is a proportionate trust boundary for one user.
 - **Bind warning.** When the controller binds to an address that is neither loopback nor a tailnet address, it prints a warning at startup. It does not refuse.
+- **CORS allows one origin.** *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275), [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)* The controller answers CORS for exactly one origin: `app://hercule`, the desktop app's renderer ([./17-desktop-app.md](./17-desktop-app.md)).
+  - **A request from that origin** gets `access-control-allow-origin: app://hercule`.
+  - **A preflight from that origin** gets the methods the API uses, the request headers `authorization` and `content-type`, and `access-control-max-age: 7200`. Every request that carries the bearer token is preflighted, and Chromium caches a preflight for each URL for at most two hours, so the maximum saves a round trip on each repeat request.
+  - **Any other origin** gets no CORS header, so a page on that origin cannot read a response.
+  - **Every response other than a preflight's carries `vary: origin`,** because the answer now depends on the request's origin, and a cache must not hand one origin's answer to another. A preflight's answer needs no `vary`: HTTP caches do not store answers to `OPTIONS`, and the browser keeps its preflight answers per origin.
+  - **The preflight is answered before authentication,** and it runs no operation.
+  - **The desktop app's requests carry only the headers the preflight allows.** `client-core` turns off Effect's trace headers (`b3`, `traceparent`), which it would otherwise add to every request. The controller does not read them.
+  - **CORS is not authentication.** It decides only whether a page may read a response. Every operation except `setup.read` and `auth.login` still requires the bearer token.
+  - **Why allowing the origin is safe:** no web page can take the origin `app://hercule`. Only an app that registers the scheme itself can use it.
+  - **The WebSocket is not affected.** CORS does not apply to the upgrade, and the socket authenticates with its ticket (§4).
 - **Optional HTTPS, tailscale-managed.** *(Amended 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44); tickets #18/#32 pinned BYO cert/key paths, replaced here.)* HTTPS is a controller feature, not a config concern: v1's only HTTPS consumer is the Google OAuth redirect origin (§3.3), and the documented cert source was already `tailscale cert` - so the controller runs it itself. When the user enables HTTPS (a Settings toggle, or prompted as a step in the Google Connection's declarative setup flow, [./08-events-and-connections.md](./08-events-and-connections.md)), the controller shells out to `tailscale cert`, stores the material under `<home>/tls/`, opens an HTTPS listener on a second port (controller state, default 4938), and re-mints before expiry - renewal is automatic, which BYO paths never gave. Runner WS and LAN HTTP traffic stay on the plain listener, untouched. There are no cert-path keys anywhere; cert material is machine-owned and never travels (a cert is bound to this machine's tailnet node name; a promoted controller mints its own). BYO cert paths return post-v1 only with a real non-tailscale need. Tailscale Funnel is not needed for anything in this document: the user's browser already reaches the controller.
 - **No hostile-internet hardening in v1.** Rate limiting of login attempts, brute-force lockout, CSRF machinery, and similar public-exposure defences are out of scope. Revisited if multi-tenant hosting arrives.
 - **Disk theft is in scope.** Any copy of the database, a backup, or a promotion bundle is useless without the master key (§2).
@@ -174,7 +184,7 @@ A profile is a set of grants. Grants are coarse: one family per operation area, 
 | `project` | `project.*` | `read`, `write` |
 | `resource` | `resource.*` | `read`, `write` |
 | `secret` | `secret.*` (references only on read) | `read`, `write` |
-| `credential` | `apiKey.*`, `user.setPassword` | `read`, `write` |
+| `credential` | `apiKey.*`, `user.read` *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))*, `user.setPassword` | `read`, `write` |
 
 The operation-to-grant mapping is an explicit table in the contract package; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 names the grant beside every operation. `permission.request` is granted to every profile and is not itself a grant; `auth.login`, `auth.wsTicket` and `setup.*` are outside the grant model.
 

@@ -9,11 +9,13 @@
  * no edit.
  */
 import { api } from "@hercule/contract";
-import { Effect, Result } from "effect";
+import { Context, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { ApiError, toClientError } from "./errors";
 import type { TokenStore } from "./token-store";
 
@@ -51,6 +53,7 @@ export type HerculeClient = Operations & {
 /**
  * Only the call signature of `fetch`, which is all the transport uses. The
  * global `fetch` type has extra properties that a test stub would have to fake.
+ * The URL is always a string, so a stub can read it without converting it.
  */
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -68,6 +71,9 @@ export interface ClientOptions {
    * - login and setup store their new token;
    * - logout clears it;
    * - an `unauthenticated` error clears it too.
+   *
+   * Logout and the error clear only the token their request was sent with,
+   * so a login that finished in the meantime keeps its new token.
    */
   readonly tokenStore?: TokenStore;
 }
@@ -81,6 +87,28 @@ const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
   "auth.login": (result) => (result as { readonly token: string }).token,
   "auth.logout": () => null,
 };
+
+/** One operation of the derived client, before it is wrapped into a promise. */
+type Call = (request?: unknown) => Effect.Effect<unknown, unknown>;
+
+/**
+ * The client-side middleware that some operation of `Api` requires, or
+ * `never` when no operation requires any. A middleware requires a client-side
+ * part when it is declared with `requiredForClient: true`.
+ */
+export type RequiredClientMiddleware<Api> =
+  Api extends HttpApi.HttpApi<string, infer Groups> ? HttpApiGroup.MiddlewareClient<Groups> : never;
+
+/**
+ * The bearer token one call sends, or `null` for none. Each call provides the
+ * token that was current when the call started, so the client knows exactly
+ * which token each response belongs to. The request reads its token from
+ * here, not from the client's current token, because a login can replace
+ * that token while the call is still being built.
+ */
+const SentToken = Context.Reference<string | null>("@hercule/client-core/SentToken", {
+  defaultValue: () => null,
+});
 
 /** Creates a client for the controller at `options.baseUrl`. */
 export const createClient = (options: ClientOptions): HerculeClient => {
@@ -100,17 +128,65 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     store?.write(next);
   };
 
-  const derived = Effect.runSync(
-    HttpApiClient.make(api, {
-      baseUrl: options.baseUrl,
-      transformClient: HttpClient.mapRequest((request) =>
-        token === null ? request : HttpClientRequest.bearerToken(request, token),
+  /**
+   * Clears the token, but only while it is still `sentToken`, the token a
+   * call was sent with. A logout or an `unauthenticated` error can arrive
+   * after a newer login. Either one means that the old token no longer works,
+   * not the new one, so the new token stays.
+   */
+  const clearTokenIfCurrent = (sentToken: string | null): void => {
+    if (token === sentToken) setToken(null);
+  };
+
+  // The HTTP client every operation sends through. It adds the bearer token
+  // the call was started with.
+  const httpClient = Effect.runSync(
+    Effect.provide(HttpClient.HttpClient, FetchHttpClient.layer),
+  ).pipe(
+    HttpClient.mapRequestEffect((request) =>
+      Effect.map(SentToken, (sent) =>
+        sent === null ? request : HttpClientRequest.bearerToken(request, sent),
       ),
-    }).pipe(Effect.provide(FetchHttpClient.layer)),
-  ) as Record<string, Record<string, (request?: unknown) => Effect.Effect<unknown, unknown>>>;
+    ),
+  );
 
   /**
-   * Runs one call and converts its failure into a client error.
+   * Builds the derived call for one operation: the encoders for its request
+   * and the decoders for its responses, from the operation's schemas.
+   *
+   * The client builds each operation the first time it is called, not all of
+   * them when the client is created. Building all 126 operations up front
+   * (the count when this was measured) allocated about 70 MB of short-lived
+   * objects at startup. In the desktop app that cost about 6.5 MB of memory
+   * and 10 ms on the first screen. A screen calls only a few operations, and
+   * building one takes about 0.1 ms.
+   */
+  const buildCall = (group: string, name: string): Call => {
+    // The names are read from the contract at runtime, as plain strings, and
+    // the contract's type accepts only its literal names. The casts also hide
+    // which client-side middleware this operation requires, so `build` is
+    // typed with what any operation of the contract requires instead. The
+    // client provides no client-side middleware, and the derived client skips
+    // a missing one without an error. Typed this way, `runSync` refuses to
+    // compile as soon as any operation requires one.
+    const build = HttpApiClient.endpoint(api, {
+      group: group as never,
+      endpoint: name as never,
+      httpClient,
+      baseUrl: options.baseUrl,
+    }) as Effect.Effect<Call, never, RequiredClientMiddleware<typeof api>>;
+    return Effect.runSync(build);
+  };
+
+  /**
+   * Runs one call and converts its failure into a client error. When the call
+   * is one of `TOKEN_FROM`'s operations, `tokenFrom` reads the new token from
+   * its result.
+   *
+   * The call sends the token that is current when `run` starts. A result that
+   * sets a token (login, setup) always replaces the current one. A result that
+   * clears it (logout, an `unauthenticated` error) clears it only while it is
+   * still the token the call sent.
    *
    * The fetch client reads `fetch` from the fiber that runs the request, not
    * from the context the client was built in, so it is provided on each call.
@@ -118,25 +194,49 @@ export const createClient = (options: ClientOptions): HerculeClient => {
    * tell a request that could not be encoded from a response that could not
    * be decoded, because both fail with the same kind of error. The flag is
    * per call, so concurrent calls do not see each other's.
+   *
+   * Trace propagation is turned off on each call too. By default, Effect's
+   * HTTP client adds the tracing headers `b3` and `traceparent` to every
+   * request. The controller's CORS preflight allows only `authorization` and
+   * `content-type`, so the extra headers would make the browser refuse every
+   * request from the desktop app. Nothing is lost without them, because v1
+   * exports no spans.
    */
-  const run = (effect: Effect.Effect<unknown, unknown>): Promise<unknown> => {
+  const run = (
+    effect: Effect.Effect<unknown, unknown>,
+    tokenFrom: ((result: unknown) => string | null) | undefined,
+  ): Promise<unknown> => {
+    const sentToken = token;
     let sent = false;
-    // A `FetchLike`, like the one a caller may pass. The transport calls it
-    // with a URL string, which is why `FetchLike` takes a string.
-    const send: FetchLike = (url, init) => {
+    // The transport calls this with a `URL` object. A `FetchLike` takes the
+    // URL as a string, so the URL is converted here.
+    const send = (url: URL, init?: RequestInit): Promise<Response> => {
       sent = true;
-      return options.fetch === undefined ? globalThis.fetch(url, init) : options.fetch(url, init);
+      return options.fetch === undefined
+        ? globalThis.fetch(url.href, init)
+        : options.fetch(url.href, init);
     };
 
     return Effect.runPromise(
       Effect.result(
-        Effect.provideService(effect, FetchHttpClient.Fetch, send as typeof globalThis.fetch),
+        effect.pipe(
+          Effect.provideService(FetchHttpClient.Fetch, send as typeof globalThis.fetch),
+          Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+          Effect.provideService(SentToken, sentToken),
+        ),
       ),
     ).then((result) => {
       if (Result.isFailure(result)) {
         const error = toClientError(result.failure, options.baseUrl, sent);
-        if (error instanceof ApiError && error.code === "unauthenticated") setToken(null);
+        if (error instanceof ApiError && error.code === "unauthenticated") {
+          clearTokenIfCurrent(sentToken);
+        }
         throw error;
+      }
+      if (tokenFrom !== undefined) {
+        const next = tokenFrom(result.success);
+        if (next === null) clearTokenIfCurrent(sentToken);
+        else setToken(next);
       }
       return result.success;
     });
@@ -148,19 +248,17 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     getToken: () => token,
   };
 
-  for (const [group, endpoints] of Object.entries(derived)) {
-    client[group] = Object.fromEntries(
-      Object.entries(endpoints).map(([name, call]) => {
-        const tokenFrom = TOKEN_FROM[`${group}.${name}`];
+  for (const group of Object.values(api.groups)) {
+    client[group.identifier] = Object.fromEntries(
+      Object.keys(group.endpoints).map((name) => {
+        const tokenFrom = TOKEN_FROM[`${group.identifier}.${name}`];
+        let call: Call | undefined;
         return [
           name,
-          (request?: unknown) =>
-            tokenFrom === undefined
-              ? run(call(request))
-              : run(call(request)).then((result) => {
-                  setToken(tokenFrom(result));
-                  return result;
-                }),
+          (request?: unknown) => {
+            call ??= buildCall(group.identifier, name);
+            return run(call(request), tokenFrom);
+          },
         ];
       }),
     );

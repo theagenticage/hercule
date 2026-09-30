@@ -1,0 +1,88 @@
+/* The screens shown before the shell: connecting to a controller and signing
+   in. Built from Bureau's parts, since the book has no page for either. */
+
+/* The whole window drags, like the shell's top strips, except the column,
+   whose controls must take clicks.
+
+   The column hangs from a fixed height rather than sitting in the middle of
+   the window. Centred, it would move whenever its height changes: between
+   the two screens, and when an error line appears. At this height the taller
+   sign-in form sits near the middle. */
+.centered-screen {
+  display: flex;
+  justify-content: center;
+  height: 100vh;
+  padding-top: 34vh;
+  -webkit-app-region: drag;
+}
+.centered-column {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: max-content;
+  -webkit-app-region: no-drag;
+}
+
+/* The Deco face sets the wordmark and a few large headline numerals, never
+   words in the interface. As the book spells it. */
+.wordmark {
+  font-family: var(--font-deco);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+/* The book's lockup: the mark sits on the left of the wordmark, 40px tall
+   beside 32px type, with 12px between them. The wordmark is set solid like
+   the book's headline wordmark. */
+.centered-lockup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 24px;
+  font-size: 32px;
+  line-height: 1;
+}
+/* The logo mark, as the book spells it. The book fills the mark's parts
+   through SVG attributes; classes do the same here. */
+.logo {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+  overflow: visible;
+}
+.logo-head {
+  fill: oklch(var(--char-l) var(--char-c) var(--hue-lime));
+}
+.logo-face {
+  fill: var(--face-ink);
+}
+
+.centered-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.centered-error {
+  margin: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+/* The book's gap between the buttons of one answer row. The focus ring
+   reaches 4px outside a button, so a smaller gap would draw it over the
+   text beside the button. */
+.centered-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* A quiet button's side padding belongs to its hover and focus area, but it
+   draws no ink. Centred with that padding, the visible text of the row would
+   sit 6px left of the middle. Letting the right padding hang past the row
+   centres the text and leaves the button's area as it is. */
+.centered-footer > .btn--quiet {
+  margin-right: -12px;
+}

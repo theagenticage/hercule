@@ -16,17 +16,20 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  readApiKey,
-  listInstances,
   runCli,
   completeSetup,
-  parseJsonOutput,
   startController,
-  createTemporaryHome,
   type Controller,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
+  listInstances,
+  parseJsonOutput,
+  createTemporaryHome,
+  type TemporaryHome,
 } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -59,6 +62,7 @@ beforeAll(async () => {
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
     );
   }
+  state = createTemporaryHome();
   controller = await startController({ home: state.home, binary });
   url = controller.url;
 
@@ -73,8 +77,8 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-  await controller.stop().catch(() => -1);
-  state.remove();
+  await controller?.stop().catch(() => -1);
+  state?.remove();
 });
 
 describe("tasks, projects, the log and the plugins through the binary", () => {

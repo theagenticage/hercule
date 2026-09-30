@@ -38,6 +38,7 @@ import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import {
   CapExceeded,
+  DESKTOP_APP_ORIGIN,
   InvalidState,
   live,
   MUTABLE_LIVE_TOPICS,
@@ -95,11 +96,15 @@ import {
  * Checks whether the listener upgrades a plain connection to the socket at
  * all. A connection that neither opens nor errors returns "hung", so a handler
  * that stops responding shows up as a failed assertion rather than a timed-out
- * suite.
+ * suite. With `origin`, the upgrade request carries that `Origin` header, as a
+ * page's would.
  */
-const dial = (base: string): Promise<"open" | "refused" | "hung"> =>
+const dial = (base: string, origin?: string): Promise<"open" | "refused" | "hung"> =>
   new Promise((resolve) => {
-    const socket = new WebSocket(buildSocketUrl(base));
+    const socket = new WebSocket(
+      buildSocketUrl(base),
+      origin === undefined ? undefined : { headers: { origin } },
+    );
     socket.onopen = () => {
       socket.close();
       resolve("open");
@@ -190,6 +195,16 @@ describe("opening a live connection", () => {
       expect(await dial(base)).toBe("refused");
       await completeSetup(base);
       expect(await dial(base)).toBe("open");
+    });
+  });
+
+  it("accepts an upgrade from the desktop app's origin, which it does not check", async () => {
+    await withServer(async ({ base }) => {
+      await completeSetup(base);
+      // The socket checks no origin: the credential is the ticket, sent in
+      // the first frame, and a ticket needs the bearer token, which a page
+      // on another origin does not have.
+      expect(await dial(base, DESKTOP_APP_ORIGIN)).toBe("open");
     });
   });
 

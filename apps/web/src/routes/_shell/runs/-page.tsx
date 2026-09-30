@@ -9,6 +9,7 @@ import {
   type HerculeClient,
   type RunnerWait,
   type RunWorkspaceReading,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { Run, Runner } from "@hercule/contract";
 import {
@@ -30,7 +31,6 @@ import { RunOutputCard } from "../../../screens/runs/run-output-card";
 import { StepList } from "../../../screens/runs/step-list";
 import { StepTimeline } from "../../../screens/runs/step-timeline";
 import { TriggeringEventCard } from "../../../screens/runs/triggering-event-card";
-import { readErrorMessage } from "../../../screens/save-status";
 import { RerunQuestion, useRerun } from "./-rerun-question";
 
 /** How a run's steps are shown below its graph. */

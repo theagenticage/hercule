@@ -1,6 +1,6 @@
 /**
  * Tests `buildRunnerMenu(runners, localId, instance)`, which builds the
- * composer's runner selector: one row per runner, dimmed for connectivity,
+ * composer's runner selector: one row per runner that is not retired, dimmed for connectivity,
  * then lifecycle, then login, plus the default runner.
  */
 import { describe, expect, it } from "vitest";
@@ -38,7 +38,7 @@ describe("buildRunnerMenu", () => {
     });
   });
 
-  it("derives the state: the lifecycle when the runner is not active, else the connectivity", () => {
+  it("derives the state: draining when the runner is draining, else the connectivity", () => {
     const claude = buildInstance("claude-code", "Claude Code", []);
 
     expect(
@@ -51,19 +51,23 @@ describe("buildRunnerMenu", () => {
 
     expect(
       buildRunnerMenu(
-        [buildRunner({ id: "r-2", name: "b", connectivity: "online", lifecycle: "retired" })],
-        null,
-        claude,
-      ).rows[0],
-    ).toMatchObject({ state: "retired" });
-
-    expect(
-      buildRunnerMenu(
         [buildRunner({ id: "r-3", name: "c", connectivity: "offline", lifecycle: "draining" })],
         null,
         claude,
       ).rows[0],
     ).toMatchObject({ state: "draining" });
+  });
+
+  it("leaves retired runners out, so none can be the default", () => {
+    const retired = buildRunner({ id: "r-gone", name: "gone", lifecycle: "retired" });
+    const claude = buildInstance("claude-code", "Claude Code", [
+      buildSnapshot({ runnerId: "r-gone" }),
+    ]);
+
+    const menu = buildRunnerMenu([retired], "r-gone", claude);
+
+    expect(menu.rows).toEqual([]);
+    expect(menu.defaultRunnerId).toBeNull();
   });
 
   it("dims a draining online runner as draining, even with a valid login", () => {
@@ -186,6 +190,21 @@ describe("findReferenceRunner", () => {
 
     expect(findReferenceRunner([a, b], null, null)).toBe(a);
     expect(findReferenceRunner([a, b], "not-a-runner-id", "also-not-one")).toBe(a);
+  });
+
+  it("keeps a selected runner even when it is retired, since a started thread keeps its runner", () => {
+    const retired = buildRunner({ id: "r-gone", name: "gone", lifecycle: "retired" });
+    const b = buildRunner({ id: "r-b", name: "b" });
+
+    expect(findReferenceRunner([retired, b], "r-gone", null)).toBe(retired);
+  });
+
+  it("skips retired runners when it falls back", () => {
+    const retiredLocal = buildRunner({ id: "r-local", name: "local", lifecycle: "retired" });
+    const b = buildRunner({ id: "r-b", name: "b" });
+
+    expect(findReferenceRunner([retiredLocal, b], null, "r-local")).toBe(b);
+    expect(findReferenceRunner([retiredLocal], null, "r-local")).toBeUndefined();
   });
 
   it("returns undefined when there are no runners", () => {

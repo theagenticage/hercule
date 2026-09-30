@@ -4,11 +4,8 @@
  * which one wins.
  */
 import { describe, expect, it } from "vitest";
-import {
-  ApiError,
-  decideWorkflowHeaderStatus,
-  type WorkflowHeaderFacts,
-} from "@hercule/client-core";
+import { ApiError, decideWorkflowHeaderStatus } from "@hercule/client-core";
+import type { WorkflowHeaderFacts } from "./workflow-header-status";
 
 const STORED = "name: Stored\n";
 const TYPED = "name: Typed by the author\n";

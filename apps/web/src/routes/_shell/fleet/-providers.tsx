@@ -6,10 +6,10 @@ import {
   queryKeys,
   type HerculeClient,
   type ProviderRow,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
-import { readErrorMessage } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
 /**

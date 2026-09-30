@@ -15,7 +15,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard, formatDuration, formatStamp } from "@hercule/client-core";
+import { defaultScheduler, notifyManager } from "@tanstack/react-query";
+import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
 import type {
   Assistant,
   Input,
@@ -39,6 +40,7 @@ import {
   stubApi,
   type FakeScrollGeometry,
   type Handler,
+  type LiveStub,
 } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
@@ -761,7 +763,21 @@ describe("Thread: the live turn", () => {
     expect(divider.className).toContain("hercule-thread-shimmer");
   });
 
-  it("shows an unfinished last turn on a session that is no longer busy as finished, with no shimmer and no counting", async () => {
+  it("shows an unfinished last turn as running while the session still reads idle from before the turn started", async () => {
+    // The turn's rows arrive over the stream at once; the session's move to
+    // busy arrives in a read after them. The turn must not flash "Cut short".
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
+
+    const idle = buildSession({ status: "idle", lastActivityAt: "2026-09-08T10:59:00.000Z" });
+    await openApp(idle, buildLiveTurnRows());
+    await settle();
+
+    screen.getByRole("button", { name: /^Working for 3s$/ });
+    expect(screen.queryByRole("button", { name: /^Cut short$/ })).toBeNull();
+  });
+
+  it("shows an unfinished last turn on a session that runs no harness as finished, with no shimmer and no counting", async () => {
     // A runner that died mid-turn leaves no `turn.completed` row behind, so
     // the rows alone still look live. The session's status shows that the
     // turn is over.
@@ -838,14 +854,100 @@ describe("Thread: the live turn", () => {
 });
 
 describe("Thread: token tap", () => {
+  const TAP = buildSessionTapTopic(SESSION_ID);
+  const STREAM = buildSessionStreamTopic(SESSION_ID);
+
+  // The turn t4 has started and the user's message is in, but the assistant
+  // message a4 has not started yet. Most tests start it on the stream after
+  // the page subscribes to the tap (`startAssistantMessage`), so its tail
+  // holds every tap sent for it.
   const buildOpenTurnRows = (): TranscriptRow[] =>
     buildTranscript(
       buildTurnStart("t4", "2026-09-08T12:00:00.000Z"),
       buildUserMessage("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
-      // Only the assistant item's start, with no completion: it is the open
-      // item, and its text is still arriving on the tap.
-      buildAssistantStart("t4", "2026-09-08T12:00:00.200Z", "a4"),
     );
+
+  /** Builds the row that starts the assistant message a4 at `position`. */
+  const buildAssistantStartRow = (position: number): TranscriptRow =>
+    buildTranscriptRow(position, {
+      _tag: "item.started",
+      eventId: `e${position}`,
+      sessionId: SESSION_ID,
+      at: "2026-09-08T12:00:00.200Z",
+      turnId: "t4",
+      itemId: "a4",
+      kind: "assistant_message",
+    });
+
+  /** Builds a stored `assistant_text` row for a4 at `position`. */
+  const buildAssistantTextRow = (position: number, text: string): TranscriptRow =>
+    buildTranscriptRow(position, {
+      _tag: "content.delta",
+      eventId: `e${position}`,
+      sessionId: SESSION_ID,
+      at: "2026-09-08T12:00:01.000Z",
+      turnId: "t4",
+      itemId: "a4",
+      streamKind: "assistant_text",
+      delta: text,
+    });
+
+  /** Builds the row that completes a4 at `position`. */
+  const buildAssistantCompletionRow = (position: number): TranscriptRow =>
+    buildTranscriptRow(position, {
+      _tag: "item.completed",
+      eventId: `e${position}`,
+      sessionId: SESSION_ID,
+      at: "2026-09-08T12:00:01.100Z",
+      turnId: "t4",
+      itemId: "a4",
+      kind: "assistant_message",
+      status: "completed",
+    });
+
+  /** Sends one `assistant_text` tap delta for a4. */
+  const pushAssistantTap = (live: LiveStub, delta: string) => {
+    act(() => {
+      live.push(TAP, {
+        _tag: "delta",
+        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta }],
+      });
+    });
+  };
+
+  /** Delivers `rows` on the stream, with the last row's position as the cursor. */
+  const pushRows = (live: LiveStub, rows: readonly TranscriptRow[]) => {
+    act(() => {
+      live.push(STREAM, { _tag: "delta", items: rows, cursor: String(rows.at(-1)!.position) });
+    });
+  };
+
+  /**
+   * Waits until the page subscribes to the tap and the stream, then sends the
+   * stream's replay with no rows in it. The controller answers every stream
+   * subscription with the rows written after its cursor first, even when
+   * there are none, so the rows pushed after the replay are live rows.
+   */
+  const replayNothingOnceSubscribed = async (live: LiveStub) => {
+    await waitFor(() => {
+      expect(live.topics()).toEqual(expect.arrayContaining([TAP, STREAM]));
+    });
+    act(() => {
+      live.push(STREAM, { _tag: "delta", items: [], cursor: live.readCursor(STREAM) });
+    });
+    await settle();
+  };
+
+  /**
+   * Waits until the page subscribes to the tap and the stream, then delivers
+   * the row that starts a4 at `position`, after an empty replay. a4 starts
+   * while the tap is subscribed, so its tail is shown.
+   */
+  const startAssistantMessage = async (live: LiveStub, position = 3) => {
+    await replayNothingOnceSubscribed(live);
+    pushRows(live, [buildAssistantStartRow(position)]);
+    await settle();
+  };
 
   /**
    * Replaces `requestAnimationFrame` with a stub that records every request
@@ -878,24 +980,11 @@ describe("Thread: token tap", () => {
     const { raf, runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
+    await startAssistantMessage(live);
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
-
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hel" }],
-      });
-    });
+    pushAssistantTap(live, "Hel");
     await settle();
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "lo" }],
-      });
-    });
+    pushAssistantTap(live, "lo");
     await settle();
 
     // Two deltas, but only one frame request.
@@ -908,6 +997,24 @@ describe("Thread: token tap", () => {
     await screen.findByText("Hello");
   });
 
+  it("shows the taps that arrive before their item's row starts the item", async () => {
+    // A tap is sent straight to the socket, and a row only after it is
+    // stored, so an item's first taps can arrive before its `item.started`
+    // row. They are kept and shown once the row makes the item the open one.
+    const { runFrame } = stubFrames();
+    const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
+    await replayNothingOnceSubscribed(live);
+
+    pushAssistantTap(live, "Early");
+    await settle();
+    runFrame();
+    expect(screen.queryByText("Early")).toBeNull();
+
+    pushRows(live, [buildAssistantStartRow(3)]);
+
+    await screen.findByText("Early");
+  });
+
   it("renders the live tail next to the finished prose, not inside it", async () => {
     // A turn can hold any number of assistant messages (spec 06 section 6.2).
     // The saved text ends with a3, and the open item a4 is a new message. The
@@ -915,12 +1022,11 @@ describe("Thread: token tap", () => {
     // the layout makes the break between them. No separator is added to the
     // text.
     const { runFrame } = stubFrames();
-    const rows = buildOpenTurnRows();
     const withEarlier = [
-      ...rows.slice(0, 3),
+      ...buildOpenTurnRows(),
       buildTranscriptRow(3, {
         _tag: "content.delta",
-        eventId: "e3a",
+        eventId: "e3",
         sessionId: SESSION_ID,
         at: "2026-09-08T12:00:00.150Z",
         turnId: "t4",
@@ -930,7 +1036,7 @@ describe("Thread: token tap", () => {
       }),
       buildTranscriptRow(4, {
         _tag: "item.completed",
-        eventId: "e3b",
+        eventId: "e4",
         sessionId: SESSION_ID,
         at: "2026-09-08T12:00:00.160Z",
         turnId: "t4",
@@ -938,21 +1044,12 @@ describe("Thread: token tap", () => {
         kind: "assistant_message",
         status: "completed",
       }),
-      rows[3]!,
     ];
     const { live } = await openApp(buildSession({ status: "busy" }), withEarlier);
-
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
+    await startAssistantMessage(live, 5);
     const answer = findAnswerArea(await screen.findByText(/First answer\./));
 
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Second" }],
-      });
-    });
+    pushAssistantTap(live, "Second");
     await settle();
     runFrame();
 
@@ -962,12 +1059,7 @@ describe("Thread: token tap", () => {
     expect(answer.querySelector("span")?.textContent).toBe("Second");
 
     // A later flush for the same item keeps filling the same span.
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: " answer." }],
-      });
-    });
+    pushAssistantTap(live, " answer.");
     await settle();
     runFrame();
 
@@ -982,86 +1074,51 @@ describe("Thread: token tap", () => {
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
+    await startAssistantMessage(live);
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
     act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
+      live.push(TAP, {
         _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "reasoning_text", delta: "thinking…" }],
+        items: [
+          { turnId: "t4", itemId: "a4", streamKind: "reasoning_text", delta: "thinking…" },
+          { turnId: "t4", itemId: "a4", streamKind: "command_output", delta: "$ ls" },
+          { turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hi" },
+        ],
       });
     });
     await settle();
     runFrame();
 
+    // The answer's own text in the same delivery shows, so the tail is live.
+    expect(findAnswerArea(await screen.findByText("Hi")).textContent).toBe("Hi");
     expect(screen.queryByText(/thinking/)).toBeNull();
+    expect(screen.queryByText(/\$ ls/)).toBeNull();
   });
 
-  it("replaces the buffer with the coalesced :stream row, and ignores later taps for the completed item", async () => {
+  it("replaces the tail with the coalesced :stream row, and ignores later taps for the completed item", async () => {
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
+    await startAssistantMessage(live);
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
-
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello " }],
-      });
-    });
+    pushAssistantTap(live, "Hello ");
+    await settle();
+    pushAssistantTap(live, "world");
     await settle();
     runFrame();
-    await screen.findByText("Hello");
+    await screen.findByText("Hello world");
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
-    });
-    act(() => {
-      // Coalescing flushes a row when an item completes, so the row and the
-      // item's completion arrive together. The completion ends the item as
-      // the open one, so a later tap for it has no effect. Spec 04 §Streaming
-      // deltas are coalesced owns the rule.
-      live.push(buildSessionStreamTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [
-          buildTranscriptRow(4, {
-            _tag: "content.delta",
-            eventId: "e4",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.000Z",
-            turnId: "t4",
-            itemId: "a4",
-            streamKind: "assistant_text",
-            delta: "Hello world",
-          }),
-          buildTranscriptRow(5, {
-            _tag: "item.completed",
-            eventId: "e5",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.100Z",
-            turnId: "t4",
-            itemId: "a4",
-            kind: "assistant_message",
-            status: "completed",
-          }),
-        ],
-        cursor: "5",
-      });
-    });
+    // Coalescing flushes a row when an item completes, so the row and the
+    // item's completion arrive together. The row holds the text the tail
+    // held, so the text shows once, as prose. The completion ends the item as
+    // the open one, so a later tap for it has no effect. Spec 04 §Streaming
+    // deltas are coalesced owns the rule.
+    pushRows(live, [buildAssistantTextRow(4, "Hello world"), buildAssistantCompletionRow(5)]);
 
-    const answer = findAnswerArea(await screen.findByText("Hello world"));
-    expect(screen.queryByText("Hello ")).toBeNull();
+    const answer = findAnswerArea(await screen.findByText("Hello world", { selector: "p" }));
+    expect(answer.textContent).toBe("Hello world");
 
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "!!!" }],
-      });
-    });
+    pushAssistantTap(live, "!!!");
     await settle();
     runFrame();
 
@@ -1070,74 +1127,44 @@ describe("Thread: token tap", () => {
     expect(answer.textContent).toBe("Hello world");
   });
 
-  it("replaces the buffer with a coalesced :stream row for a still-open item, and keeps showing the taps after it", async () => {
+  it("removes a coalesced :stream row's text from a still-open item's tail, and keeps showing the taps after it", async () => {
     // The store also flushes a `content.delta` row once 4KB of deltas build
-    // up, while the item is still open. The row replaces what the tail held, and the item keeps
-    // streaming into the same tail. Any answer longer than 4KB goes through
+    // up, while the item is still open. Taps arrive before the row that holds
+    // their text, so when the row lands the tail holds the row's text and
+    // some text after it. The row's text leaves the tail and shows as prose;
+    // the rest stays in the tail. Any answer longer than 4KB goes through
     // this path. Spec 04 §Streaming deltas are coalesced owns the rule.
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
+    await startAssistantMessage(live);
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello " }],
-      });
-    });
+    pushAssistantTap(live, "Hello world, ag");
     await settle();
     runFrame();
-    await screen.findByText("Hello");
+    await screen.findByText("Hello world, ag");
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
-    });
-    act(() => {
-      // The flush row alone: no `item.completed`, so a4 is still the open item.
-      live.push(buildSessionStreamTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [
-          buildTranscriptRow(4, {
-            _tag: "content.delta",
-            eventId: "e4",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.000Z",
-            turnId: "t4",
-            itemId: "a4",
-            streamKind: "assistant_text",
-            delta: "Hello world",
-          }),
-        ],
-        cursor: "4",
-      });
-    });
-    await settle();
+    // The flush row alone: no `item.completed`, so a4 is still the open item.
+    pushRows(live, [buildAssistantTextRow(4, "Hello world")]);
 
-    const answer = findAnswerArea(await screen.findByText("Hello world"));
+    const answer = findAnswerArea(await screen.findByText("Hello world", { selector: "p" }));
+    expect(answer.querySelector("span")?.textContent).toBe(", ag");
 
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: ", again" }],
-      });
-    });
+    pushAssistantTap(live, "ain");
     await settle();
     runFrame();
 
-    // The row's text, then the taps that came after it. The buffer that the
-    // row replaced is not repeated.
+    // The row's text, then the taps that came after it. The text that the
+    // row took over from the tail is not repeated.
     expect(answer.textContent).toBe("Hello world, again");
   });
 
-  it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
+  it("leaves the open item's tail alone when a :stream row for a different item arrives", async () => {
     // A tool item started earlier and is still running when the assistant
     // item a4 starts streaming. a4 started later, so `findOpenItem` returns
     // a4 as the open item.
     const rowsWithEarlierTool: TranscriptRow[] = [
-      ...buildOpenTurnRows().slice(0, 3),
+      ...buildOpenTurnRows(),
       buildTranscriptRow(3, {
         _tag: "item.started",
         eventId: "e3",
@@ -1148,60 +1175,133 @@ describe("Thread: token tap", () => {
         kind: "command_execution",
         detail: { name: "Bash", input: { command: "pnpm test" } },
       }),
-      buildTranscriptRow(4, {
-        _tag: "item.started",
-        eventId: "e4",
-        sessionId: SESSION_ID,
-        at: "2026-09-08T12:00:00.200Z",
-        turnId: "t4",
-        itemId: "a4",
-        kind: "assistant_message",
-      }),
     ];
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, rowsWithEarlierTool);
+    await startAssistantMessage(live, 4);
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello" }],
-      });
-    });
+    pushAssistantTap(live, "Hello");
     await settle();
     runFrame();
     const answer = findAnswerArea(await screen.findByText("Hello"));
 
     // tool0's completion is a row for a different item, so a4 stays open.
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionStreamTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [
-          buildTranscriptRow(5, {
-            _tag: "item.completed",
-            eventId: "e5",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.000Z",
-            turnId: "t4",
-            itemId: "tool0",
-            kind: "command_execution",
-            status: "completed",
-            detail: { name: "Bash", input: { command: "pnpm test" } },
-          }),
-        ],
-        cursor: "5",
-      });
-    });
+    pushRows(live, [
+      buildTranscriptRow(5, {
+        _tag: "item.completed",
+        eventId: "e5",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T12:00:01.000Z",
+        turnId: "t4",
+        itemId: "tool0",
+        kind: "command_execution",
+        status: "completed",
+        detail: { name: "Bash", input: { command: "pnpm test" } },
+      }),
+    ]);
     await settle();
 
     // Unchanged, because the row was not about the open item's text.
     expect(answer.textContent).toBe("Hello");
+  });
+
+  it("paints no tail for an item already open at mount, and shows its text when its rows land", async () => {
+    // a4 started before the page subscribed to the tap, so the taps sent
+    // before then are lost and its tail could not be lined up with its rows.
+    // Its taps are ignored until it completes, and its text shows from the
+    // rows alone.
+    const { runFrame } = stubFrames();
+    const openAtMount = [...buildOpenTurnRows(), buildAssistantStartRow(3)];
+    const { live } = await openApp(buildSession({ status: "busy" }), openAtMount);
+    await replayNothingOnceSubscribed(live);
+    const column = findProseColumn(await screen.findByText("Say hi"));
+
+    pushAssistantTap(live, "lo world");
+    await settle();
+    runFrame();
+    expect(readPageText(column)).not.toContain("lo world");
+
+    pushRows(live, [buildAssistantTextRow(4, "Hello world")]);
+    const answer = findAnswerArea(await screen.findByText("Hello world", { selector: "p" }));
+
+    pushAssistantTap(live, ", again");
+    await settle();
+    runFrame();
+    expect(answer.textContent).toBe("Hello world");
+
+    pushRows(live, [buildAssistantTextRow(5, ", again"), buildAssistantCompletionRow(6)]);
+
+    await waitFor(() => {
+      expect(answer.textContent).toBe("Hello world, again");
+    });
+  });
+
+  it("paints no tail for an item that started in the stream's replay, and shows its text when its rows land", async () => {
+    // a4 started after the transcript was read and before the page
+    // subscribed, so its start row arrives in the replay and the taps sent
+    // before the tap was subscribed are lost. Its taps are ignored until it
+    // completes, and its text shows from the rows alone.
+    const { runFrame } = stubFrames();
+    const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
+    await waitFor(() => {
+      expect(live.topics()).toEqual(expect.arrayContaining([TAP, STREAM]));
+    });
+    const column = findProseColumn(await screen.findByText("Say hi"));
+
+    pushRows(live, [buildAssistantStartRow(3)]);
+    await settle();
+    pushAssistantTap(live, "lo world");
+    // The cache tells React about new rows in a zero-delay timer. Waiting for
+    // it lets the render that makes a4 the open item happen before the frame.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    runFrame();
+    expect(readPageText(column)).not.toContain("lo world");
+
+    pushRows(live, [buildAssistantTextRow(4, "Hello world"), buildAssistantCompletionRow(5)]);
+
+    const answer = findAnswerArea(await screen.findByText("Hello world", { selector: "p" }));
+    expect(answer.textContent).toBe("Hello world");
+  });
+
+  it("keeps a landed row's text in the tail until the render that shows the row", async () => {
+    const { runFrame } = stubFrames();
+    const { live, queryClient } = await openApp(
+      buildSession({ status: "busy" }),
+      buildOpenTurnRows(),
+    );
+    await startAssistantMessage(live);
+    const column = findProseColumn(await screen.findByText("Say hi"));
+    pushAssistantTap(live, "Hello world");
+    await settle();
+    runFrame();
+    expect(readPageText(column)).toContain("Hello world");
+
+    // Hold back the cache's notifications to React, so the row below is in
+    // the cache but not on the screen, as it is for the moment between the
+    // two. A tap's frame in that moment must not paint the tail without the
+    // row's text, which would make the text vanish for a frame.
+    const held: Array<() => void> = [];
+    notifyManager.setScheduler((callback) => {
+      held.push(callback);
+    });
+    try {
+      pushAssistantTap(live, ", again");
+      pushRows(live, [buildAssistantTextRow(4, "Hello world")]);
+      await settle();
+      const cached = queryClient.getQueryData<TranscriptRow[]>(queryKeys.transcript(SESSION_ID));
+      expect(cached?.at(-1)?.position).toBe(4);
+      runFrame();
+      expect(readPageText(column)).toContain("Hello world");
+    } finally {
+      notifyManager.setScheduler(defaultScheduler);
+    }
+
+    act(() => {
+      for (const callback of held.splice(0)) callback();
+    });
+    const answer = findAnswerArea(await screen.findByText("Hello world", { selector: "p" }));
+    expect(answer.textContent).toBe("Hello world, again");
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
@@ -1210,16 +1310,8 @@ describe("Thread: token tap", () => {
     let transcriptCalls = 0;
     const REFETCHED: TranscriptRow[] = [
       ...buildOpenTurnRows(),
-      buildTranscriptRow(4, {
-        _tag: "content.delta",
-        eventId: "e4",
-        sessionId: SESSION_ID,
-        at: "2026-09-08T12:00:02.000Z",
-        turnId: "t4",
-        itemId: "a4",
-        streamKind: "assistant_text",
-        delta: "Hi there, refetched.",
-      }),
+      buildAssistantStartRow(3),
+      buildAssistantTextRow(4, "Hi there, refetched."),
     ];
     const { live } = await openApp(busy, buildOpenTurnRows(), {
       [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: () => {
@@ -1227,37 +1319,17 @@ describe("Thread: token tap", () => {
         return { body: { items: transcriptCalls === 1 ? buildOpenTurnRows() : REFETCHED } };
       },
     });
+    await startAssistantMessage(live);
 
-    // A tap delta is in the buffer when the reset arrives, to prove that it
-    // is dropped and does not survive into the refetched transcript.
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [
-          { turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "stale buffer" },
-        ],
-      });
-    });
+    // A tap delta is in the tail when the reset arrives, to prove that it is
+    // dropped and does not survive into the refetched transcript.
+    pushAssistantTap(live, "stale tail");
     await settle();
     runFrame();
-    await screen.findByText("stale buffer");
-
-    // The subscription must have a cursor before the failure, because
-    // `live.ts` fires `reset` only then: a new subscription's `undefined`
-    // cursor cannot be "past the end of the log".
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionStreamTopic(SESSION_ID), { _tag: "delta", items: [], cursor: "0" });
-    });
-    await settle();
+    await screen.findByText("stale tail");
 
     act(() => {
-      live.fail(buildSessionStreamTopic(SESSION_ID), {
+      live.fail(STREAM, {
         error: {
           code: "validation",
           message: "cursor is past the end of the log",
@@ -1270,7 +1342,7 @@ describe("Thread: token tap", () => {
       expect(transcriptCalls).toBeGreaterThanOrEqual(2);
     });
     await screen.findByText("Hi there, refetched.");
-    expect(screen.queryByText(/stale buffer/)).toBeNull();
+    expect(screen.queryByText(/stale tail/)).toBeNull();
   });
 
   // Markdown stays out of the streaming path. A tap delta is written into the
@@ -1279,25 +1351,12 @@ describe("Thread: token tap", () => {
   it("shows a live tap as plain text in the tail, and the row as markdown when it arrives", async () => {
     const { raf, runFrame } = stubFrames();
     const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
-
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
-    });
+    await startAssistantMessage(live);
     const column = findProseColumn(await screen.findByText("Say hi"));
 
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "**bo" }],
-      });
-    });
+    pushAssistantTap(live, "**bo");
     await settle();
-    act(() => {
-      live.push(buildSessionTapTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "ld**" }],
-      });
-    });
+    pushAssistantTap(live, "ld**");
     await settle();
 
     expect(raf).toHaveBeenCalledTimes(1);
@@ -1307,37 +1366,7 @@ describe("Thread: token tap", () => {
     expect(readPageText(column)).toContain("**bold**");
     expect(column.querySelector("strong")).toBeNull();
 
-    await waitFor(() => {
-      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
-    });
-    act(() => {
-      live.push(buildSessionStreamTopic(SESSION_ID), {
-        _tag: "delta",
-        items: [
-          buildTranscriptRow(4, {
-            _tag: "content.delta",
-            eventId: "e4",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.000Z",
-            turnId: "t4",
-            itemId: "a4",
-            streamKind: "assistant_text",
-            delta: "**bold**",
-          }),
-          buildTranscriptRow(5, {
-            _tag: "item.completed",
-            eventId: "e5",
-            sessionId: SESSION_ID,
-            at: "2026-09-08T12:00:01.100Z",
-            turnId: "t4",
-            itemId: "a4",
-            kind: "assistant_message",
-            status: "completed",
-          }),
-        ],
-        cursor: "5",
-      });
-    });
+    pushRows(live, [buildAssistantTextRow(4, "**bold**"), buildAssistantCompletionRow(5)]);
 
     await waitFor(() => {
       expect(within(column).getByText("bold").tagName).toBe("STRONG");
@@ -1590,7 +1619,7 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
-    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("0");
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("0");
 
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
@@ -1663,7 +1692,7 @@ describe("Thread: live subscriptions", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     // This thread has rows, so its cursor is its last position.
-    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("15");
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("15");
 
     await act(async () => {
       await router.navigate({ to: "/threads/$sessionId", params: { sessionId: OTHER_ID } });
@@ -1675,7 +1704,7 @@ describe("Thread: live subscriptions", () => {
     // The second thread's transcript is empty, so its cursor must start at
     // the beginning of its log. Any other value means the previous thread's
     // cursor leaked.
-    expect(live.cursorOf(buildSessionStreamTopic(OTHER_ID))).toBe("0");
+    expect(live.readCursor(buildSessionStreamTopic(OTHER_ID))).toBe("0");
   });
 });
 
@@ -1858,7 +1887,7 @@ describe("Thread: composer read-only fields and model switch", () => {
 
     expect(readPageText()).toContain("No workspace");
     expect(readPageText()).toContain(RUNNER_STARTED.name);
-    expect(readPageText()).toContain("approval-required");
+    expect(readPageText()).toContain("Approval required");
 
     // Clicking any of these values never shows another option; that is the
     // "no menu" part of the criterion. A read-only value could still be a
@@ -1870,8 +1899,8 @@ describe("Thread: composer read-only fields and model switch", () => {
     await user.click(screen.getByText("No workspace"));
     expect(screen.queryByText("Adopt a folder on this machine…")).toBeNull();
 
-    await user.click(screen.getByText("approval-required"));
-    expect(screen.queryByText("full-access")).toBeNull();
+    await user.click(screen.getByText("Approval required"));
+    expect(screen.queryByText("Full access")).toBeNull();
   });
 
   it("dims the model menu's other accounts with the note account fixed", async () => {
@@ -2203,7 +2232,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
 
     // The pick itself writes nothing: neither the input route nor the update
@@ -2240,7 +2269,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
@@ -2278,7 +2307,7 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "medium" }));
+    await user.click(await screen.findByRole("button", { name: "Medium" }));
 
     // The stored `high` belongs to the other model, and the server drops it
     // when the model changes, so the options show the descriptor's default.
@@ -2308,7 +2337,7 @@ describe("Thread: model options are sent with the submission", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2317,7 +2346,7 @@ describe("Thread: model options are sent with the submission", () => {
     // The selector still shows high after the picks are cleared. It can only
     // do that by reading the session again after the input changed it.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
 
     // The next submission shows that the picks were cleared: it carries none.
@@ -2364,7 +2393,7 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "medium" }));
+    await user.click(await screen.findByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2381,7 +2410,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
     await act(async () => {
       release();
@@ -2392,7 +2421,7 @@ describe("Thread: model options are sent with the submission", () => {
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     });
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
     // The picks are cleared, and the next send uses the session the server
     // stored, not the one the cache held while the read was pending.
@@ -2424,9 +2453,9 @@ describe("Thread: model options are sent with the submission", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
 
-    await user.click(screen.getByRole("button", { name: "high" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
 
     const high = await screen.findByRole<HTMLButtonElement>("radio", { name: "High" });
     expect(high.getAttribute("aria-checked")).toBe("true");
@@ -2578,7 +2607,7 @@ describe("Composer: fields that locked when the thread started explain why", () 
     }
 
     // None of the three is a menu trigger under another accessible name either.
-    expect(screen.queryByRole("button", { name: /approval-required/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /approval required/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /no workspace/i })).toBeNull();
     expect(screen.queryByRole("button", { name: RUNNER_STARTED.name })).toBeNull();
   });
@@ -2912,6 +2941,7 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
       branch: "hercule/thread-3f1",
       branches: ["hercule/thread-3f1"],
       defaultBranch: "main",
+      baseBranch: null,
     },
   ],
   designatedConnectionId: null,
@@ -2937,6 +2967,7 @@ const buildPrimaryWorkspace = (sessionIds: readonly string[]): Workspace => ({
       branch: "main",
       branches: ["main"],
       defaultBranch: "main",
+      baseBranch: null,
     },
   ],
 });

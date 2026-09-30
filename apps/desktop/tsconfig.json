@@ -1,0 +1,9 @@
+{
+  // Lists the package's two TypeScript programs and compiles nothing itself.
+  // The renderer runs in a browser window (DOM lib, JSX); main, the preload,
+  // the build scripts and the Vite configs run on Node. Editors and ESLint look
+  // for the nearest tsconfig.json and follow these references to the program
+  // that includes each file.
+  "files": [],
+  "references": [{ "path": "./tsconfig.renderer.json" }, { "path": "./tsconfig.node.json" }]
+}

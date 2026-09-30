@@ -12,18 +12,18 @@ import * as PubSub from "effect/PubSub";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import {
-  type AccessMode,
-  type ApprovalDecision,
-  type ExitReason,
-  type ModelSelection,
-  type OpenRequest,
-  type ProbeResult,
-  type ProviderEvent,
-  type SendResult,
-  type SessionBinding,
-  type SessionSpec,
-  type TurnInput,
+import type {
+  AccessMode,
+  ApprovalDecision,
+  ExitReason,
+  ModelSelection,
+  OpenRequest,
+  ProbeResult,
+  ProviderEvent,
+  SendResult,
+  SessionBinding,
+  SessionSpec,
+  TurnInput,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";

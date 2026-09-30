@@ -1,6 +1,6 @@
 /**
  * Builds the label of the model options selector: a short summary of the
- * picked options, such as `high ⚡`. It uses each choice's label rather than
+ * picked options, such as `High ⚡`. It uses each choice's label rather than
  * its value, because a label is display text and a value is a slug.
  *
  * Returns `null` when there is no reasoning option to show (the model has
@@ -11,7 +11,7 @@ import type { ModelOption } from "@hercule/contract";
 import { buildOptionsMenu, type ModelOptionRow } from "./options-menu";
 
 const readChoiceLabel = (row: ModelOptionRow): string =>
-  (row.choices.find((choice) => choice.value === row.value)?.label ?? row.value).toLowerCase();
+  row.choices.find((choice) => choice.value === row.value)?.label ?? row.value;
 
 export const buildOptionsLabel = (
   descriptors: readonly ModelOption[],
@@ -26,7 +26,7 @@ export const buildOptionsLabel = (
     effort !== undefined
       ? readChoiceLabel(effort)
       : thinking !== undefined && thinking.value === "on"
-        ? "thinking on"
+        ? "Thinking on"
         : null;
   if (reasoning === null) return null;
 

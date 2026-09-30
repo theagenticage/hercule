@@ -15,16 +15,15 @@ import {
   PASSWORD,
   USERNAME,
   runCli,
-  parseJsonOutput,
   startController,
-  createTemporaryHome,
   type Controller,
-} from "./harness";
+} from "../scripts/controller-process";
+import { parseJsonOutput, createTemporaryHome, type TemporaryHome } from "./harness";
 
 /** The home the controller and the CLI share; the CLI writes its credential here. */
-const state = createTemporaryHome();
+let state: TemporaryHome;
 /** A home with no credential file, for the environment-variable cases. */
-const bare = createTemporaryHome();
+let bare: TemporaryHome;
 
 let controller: Controller;
 let port: number;
@@ -34,8 +33,8 @@ let setupBearer: string;
 /** The API key `hercule login` created and stored. */
 let apiKey: string;
 
-const credentialsFile = join(state.home, "credentials.json");
-const setupUrlFile = join(state.home, "setup-url");
+let credentialsFile: string;
+let setupUrlFile: string;
 
 /** Runs the CLI with the credential file in the shared home. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
@@ -54,15 +53,19 @@ const runCliWithToken = (token: string, args: ReadonlyArray<string>, stdin?: str
   runCli(args, { home: bare.home, env: { HERCULE_TOKEN: token, HERCULE_API_URL: url }, stdin });
 
 beforeAll(async () => {
+  state = createTemporaryHome();
+  bare = createTemporaryHome();
+  credentialsFile = join(state.home, "credentials.json");
+  setupUrlFile = join(state.home, "setup-url");
   controller = await startController({ home: state.home });
   port = controller.port;
   url = controller.url;
 }, 30_000);
 
 afterAll(async () => {
-  await controller.stop().catch(() => -1);
-  state.remove();
-  bare.remove();
+  await controller?.stop().catch(() => -1);
+  state?.remove();
+  bare?.remove();
 });
 
 describe("the first run and everything after it", () => {

@@ -12,6 +12,7 @@
  * Switching runners rebuilds the whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
+import { describeModelCount } from "../provider-rows";
 import {
   findAccountName,
   buildInstanceLabel,
@@ -63,7 +64,8 @@ export interface ModelMenuInstanceRow {
   readonly name: string;
   readonly identity: string | null;
   readonly planLabel: string | null;
-  readonly modelCount: number;
+  /** How many models the account has, in words: "3 models". */
+  readonly models: string;
   readonly dimmed: string | null;
   readonly login: LoginTarget | null;
   /**
@@ -189,7 +191,7 @@ export const buildModelMenu = (
             name: buildInstanceLabel(catalogs.instances, each),
             identity: snapshot?.auth.identity ?? null,
             planLabel: snapshot?.auth.planLabel ?? null,
-            modelCount: models.length,
+            models: describeModelCount(models.length),
             dimmed,
             // Do not offer a login for an account the thread cannot switch to:
             // the login would change nothing for this thread.

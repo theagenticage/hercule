@@ -37,12 +37,12 @@ describe("buildOptionsLabel", () => {
     expect(buildOptionsLabel([], {})).toBeNull();
   });
 
-  it("uses the selected effort choice's label, in lower case", () => {
-    expect(buildOptionsLabel([EFFORT], { effort: "high" })).toBe("high");
+  it("uses the selected effort choice's label", () => {
+    expect(buildOptionsLabel([EFFORT], { effort: "high" })).toBe("High");
   });
 
-  it("says thinking on for a boolean thinking option that is set", () => {
-    expect(buildOptionsLabel([THINKING], { thinking: true })).toBe("thinking on");
+  it("says Thinking on for a boolean thinking option that is set", () => {
+    expect(buildOptionsLabel([THINKING], { thinking: true })).toBe("Thinking on");
   });
 
   it("returns null while thinking is off", () => {
@@ -55,16 +55,16 @@ describe("buildOptionsLabel", () => {
 
   it("appends the bolt while fast mode is on", () => {
     expect(buildOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: true })).toBe(
-      "high ⚡",
+      "High ⚡",
     );
     expect(buildOptionsLabel([THINKING, FAST_MODE], { thinking: true, fastMode: true })).toBe(
-      "thinking on ⚡",
+      "Thinking on ⚡",
     );
   });
 
   it("leaves the bolt off while fast mode is off", () => {
     expect(buildOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: false })).toBe(
-      "high",
+      "High",
     );
   });
 });

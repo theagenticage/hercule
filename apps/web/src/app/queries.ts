@@ -15,8 +15,8 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   isNotFound,
-  listLoopbackEndpoints,
   queryKeys,
+  readEveryPage,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
   type HerculeClient,
@@ -27,7 +27,6 @@ import {
   type RunFilter,
   type Runner,
   type TaskFilter,
-  type TranscriptRow,
 } from "@hercule/contract";
 
 /** Reads whether first run has been completed. Works without a token. */
@@ -183,21 +182,8 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
 export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
     queryKey: queryKeys.transcript(sessionId),
-    queryFn: async () => {
-      const rows: TranscriptRow[] = [];
-      let cursor: string | undefined;
-      for (;;) {
-        const page = await client.transcript.read({
-          params: { id: sessionId },
-          query:
-            cursor === undefined ? { limit: MAX_PAGE_LIMIT } : { limit: MAX_PAGE_LIMIT, cursor },
-        });
-        rows.push(...page.items);
-        cursor = page.nextCursor;
-        if (cursor === undefined) break;
-      }
-      return rows;
-    },
+    queryFn: () =>
+      readEveryPage((page) => client.transcript.read({ params: { id: sessionId }, query: page })),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
@@ -333,9 +319,7 @@ export const localRunnerQuery = (
   runners: ReadonlyArray<Runner>,
 ) =>
   queryOptions({
-    queryKey: queryKeys.localRunner(
-      listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
-    ),
+    queryKey: queryKeys.localRunner(runners),
     queryFn: () => detect(runners),
     retry: false,
   });

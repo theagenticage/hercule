@@ -22,10 +22,19 @@ export const showsTurnDivider = (turn: ThreadTurn, live: boolean): boolean =>
   live || turn.items.length > 0 || turn.endState !== "completed";
 
 /**
- * Returns the words on a turn's divider:
+ * Returns the words on a turn's divider: "Working for 22s" while the turn is
+ * `live`, counted from its start to `now` (milliseconds since the epoch), and
+ * otherwise the words `describeTurnEnding` returns for how it ended.
+ */
+export const describeTurnDivider = (turn: ThreadTurn, live: boolean, now: number): string =>
+  live
+    ? `Working for ${formatDuration(now - Date.parse(turn.startedAt))}`
+    : describeTurnEnding(turn);
+
+/**
+ * Returns the words for how a turn ended, from its end state and duration.
+ * It takes a whole turn, or an `EndingBlock` from `buildThreadBlocks`:
  *
- * - "Working for 22s" while the turn is `live`, counted from its start to
- *   `now` (milliseconds since the epoch);
  * - "Worked for 22s" for a turn that completed;
  * - "Stopped after 22s" for a turn that was interrupted;
  * - "Failed after 22s" for a turn that failed;
@@ -33,8 +42,7 @@ export const showsTurnDivider = (turn: ThreadTurn, live: boolean): boolean =>
  *   while the turn ran, so there is no end time, and "0s" would wrongly
  *   suggest the turn finished at once.
  */
-export const describeTurnDivider = (turn: ThreadTurn, live: boolean, now: number): string => {
-  if (live) return `Working for ${formatDuration(now - Date.parse(turn.startedAt))}`;
+export const describeTurnEnding = (turn: Pick<ThreadTurn, "endState" | "duration">): string => {
   if (turn.endState === null || turn.duration === null) return "Cut short";
   const time = formatDuration(turn.duration);
   switch (turn.endState) {

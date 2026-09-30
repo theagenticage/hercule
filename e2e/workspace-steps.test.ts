@@ -31,19 +31,22 @@ import {
   USERNAME,
   runCli,
   completeSetup,
+  startController,
+  type Controller,
+  type Ran,
+} from "../scripts/controller-process";
+import {
   buildGitEnv,
   parseJsonOutputOrFail,
   findReleaseBinary,
-  startController,
   createTemporaryHome,
   waitForEnrolledRunner,
-  type Controller,
-  type Ran,
+  type TemporaryHome,
 } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 /** Holds the bare remote. */
-const world = createTemporaryHome();
+let world: TemporaryHome;
 const binary = findReleaseBinary();
 
 /** The identity the machine's git commits as when a step frame carries none. */
@@ -54,11 +57,9 @@ const MACHINE_EMAIL = "machine@hercule.test";
  * The `HOME` both the machine's git and the test's own git read, and nothing
  * else: the default branch, and the identity the machine commits as.
  */
-const gitHome = createTemporaryHome(
-  `[init]\n\tdefaultBranch = main\n[user]\n\tname = ${MACHINE_NAME}\n\temail = ${MACHINE_EMAIL}\n`,
-);
+let gitHome: TemporaryHome;
 
-const bare = join(world.home, "remote.git");
+let bare: string;
 
 /** How long a clone, a setup command and a commit may take on a cold machine. */
 const RUN_DEADLINE_MS = 90_000;
@@ -196,6 +197,13 @@ const readStorageDir = (): string => {
 };
 
 beforeAll(async () => {
+  state = createTemporaryHome();
+  world = createTemporaryHome();
+  gitHome = createTemporaryHome(
+    `[init]\n\tdefaultBranch = main\n[user]\n\tname = ${MACHINE_NAME}\n\temail = ${MACHINE_EMAIL}\n`,
+  );
+  bare = join(world.home, "remote.git");
+
   // A bare repository with one commit on `main`.
   runGit(["init", "--bare", "--initial-branch=main", bare], world.home);
   const seed = join(world.home, "seed");
@@ -234,9 +242,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
-  world.remove();
-  gitHome.remove();
+  state?.remove();
+  world?.remove();
+  gitHome?.remove();
 });
 
 describe("a run with git.commit and git.push steps in its own workspace", () => {

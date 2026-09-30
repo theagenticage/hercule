@@ -1,0 +1,474 @@
+/**
+ * The blocks of a thread's transcript as the desktop draws it: one flat list
+ * in reading order, one block per item of the virtualized list. The web draws
+ * one divider per turn (`buildTurns`); the desktop keeps the order of talk and
+ * work inside a turn, so each run of tool calls between two messages gets its
+ * own divider, and each agent message stands on its own.
+ *
+ * Rows are not in the order things happened. The controller holds a
+ * message's text until the message completes (or 4 KB of it), so a message's
+ * text row can sit after a message the user steered in while it was written.
+ * So each message is placed by its `item.started` row, and its text is
+ * gathered from its rows wherever they sit.
+ */
+import type { Session, TranscriptRow } from "@hercule/contract";
+import { readJsonObject, readStringList } from "../json-shape";
+import { findOpenItem } from "./open-item";
+import { buildThreadItem, mayBeRunningTurn, type ThreadItem } from "./turns";
+
+type ProviderEvent = TranscriptRow["event"];
+type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
+type ItemKind = ItemStarted["kind"];
+type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+
+/** A tool item in a work stretch, with what its summary counts. */
+export interface WorkItem extends ThreadItem {
+  readonly kind: ItemKind;
+  /** The files a file change touched, as its detail names them. Empty for any other item. */
+  readonly paths: readonly string[];
+}
+
+/** A message the user sent: the opening one, or one steered into the running turn. */
+export interface UserBlock {
+  readonly kind: "user";
+  readonly key: string;
+  readonly itemId: string;
+  readonly text: string;
+  readonly at: string;
+}
+
+/** The items of one turn between two messages. */
+export interface WorkBlock {
+  readonly kind: "work";
+  readonly key: string;
+  readonly turnId: string;
+  /** Never empty, and always holds an item other than reasoning. */
+  readonly items: readonly WorkItem[];
+  /** The turn's start, or the end of the message before the stretch. */
+  readonly startedAt: string;
+  /**
+   * The start of the message after the stretch, or the end of its turn. While
+   * a Request is open, the time it opened. `null` while the stretch still runs.
+   */
+  readonly endedAt: string | null;
+}
+
+/** A message the agent wrote. */
+export interface AgentBlock {
+  readonly kind: "agent";
+  readonly key: string;
+  readonly itemId: string;
+  readonly turnId: string;
+  /** The text the stream rows hold. The text still streaming is in the tail, not here. */
+  readonly text: string;
+  readonly startedAt: string;
+  /** The model the turn ran on, or the session's model when the harness did not say. */
+  readonly model: string;
+  /**
+   * Whether the agent is still writing it: it is the transcript's open item
+   * (`findOpenItem`), in a turn that still runs. Only the open item's text
+   * streams in the tail, so at most one message is open. An earlier message
+   * whose end never arrived is not open, and shows the text its rows hold.
+   */
+  readonly open: boolean;
+  /** Whether the thread's working face is on this message instead of on a live row. */
+  readonly live: boolean;
+}
+
+/** The end of a turn that did not complete. */
+export interface EndingBlock {
+  readonly kind: "ending";
+  readonly key: string;
+  readonly turnId: string;
+  /** `interrupted` when it was stopped, `failed`, or `null` when it was cut short. */
+  readonly endState: Exclude<TurnEndState, "completed"> | null;
+  /** From the turn's start to its end, in milliseconds. `null` when it was cut short. */
+  readonly duration: number | null;
+}
+
+/** The working face at the bottom of a running turn, while no message holds it. */
+export interface LiveBlock {
+  readonly kind: "live";
+  readonly key: string;
+  /** The model the running turn runs on, or the session's model. */
+  readonly model: string;
+}
+
+/** The note that the thread waits on the user's answer to a Request. */
+export interface WaitingBlock {
+  readonly kind: "waiting";
+  readonly key: string;
+  readonly requestId: string;
+  /** The time the Request opened. */
+  readonly openedAt: string;
+}
+
+export type ThreadBlock =
+  UserBlock | WorkBlock | AgentBlock | EndingBlock | LiveBlock | WaitingBlock;
+
+interface BuildingTurn {
+  readonly turnId: string;
+  startedAt: string;
+  model: string | undefined;
+  /** The time of the last row that names the turn. A turn cut short without an exit row ends here. */
+  lastAt: string;
+  finished: boolean;
+  /** Whether an item started in this turn. A turn with none draws nothing, not even its ending. */
+  drawn: boolean;
+  /** Where the next stretch starts: the turn's start, or the end of the last message. */
+  boundary: string;
+  stretch: BuildingStretch | null;
+  /** The item that started last in this turn, of any kind. */
+  lastStartedItemId: string | null;
+}
+
+interface BuildingStretch {
+  readonly kind: "work";
+  readonly turn: BuildingTurn;
+  readonly items: WorkItem[];
+  readonly startedAt: string;
+  endedAt: string | null;
+  frozenAt: string | null;
+}
+
+interface BuildingAgent {
+  readonly kind: "agent";
+  readonly turn: BuildingTurn;
+  readonly itemId: string;
+  readonly startedAt: string;
+  text: string;
+  completed: boolean;
+}
+
+interface BuildingEnding {
+  readonly kind: "ending";
+  readonly turn: BuildingTurn;
+  readonly block: EndingBlock;
+}
+
+type Slot = UserBlock | BuildingStretch | BuildingAgent | BuildingEnding | WaitingBlock;
+
+/**
+ * Returns the files a file change item touched, as its detail names them:
+ * the `paths` list, else one path from the tool's input or the detail. The
+ * adapters spell it in their own ways (Claude Code's `input.file_path`,
+ * Codex's `paths`, pi's `path`), and any of them may be absent.
+ */
+const readChangedPaths = (event: ItemStarted): readonly string[] => {
+  if (event.kind !== "file_change") return [];
+  const detail = readJsonObject(event.detail);
+  const listed = readStringList(detail?.paths);
+  if (listed !== undefined) return listed;
+  const input = readJsonObject(detail?.input);
+  const path = input?.file_path ?? input?.notebook_path ?? input?.path ?? detail?.path;
+  return typeof path === "string" ? [path] : [];
+};
+
+/** Checks whether a session status means its harness is working or about to. */
+const isWorking = (status: Session["status"]): boolean =>
+  status === "starting" || status === "busy";
+
+/**
+ * Returns the transcript's blocks in reading order. `session` decides what
+ * the rows cannot: whether the last turn still runs, the Request it waits on,
+ * and the model when a turn does not name one.
+ *
+ * - A `user` block per user message, and an `agent` block per assistant
+ *   message, placed where the message started.
+ * - A `work` block per stretch of items between two messages of a turn, once
+ *   it holds an item other than reasoning.
+ * - An `ending` block after a turn that was stopped, failed, or cut short. A
+ *   turn is cut short when, before its `turn.completed`, its session exited,
+ *   its session started again, another turn started, or the session reads
+ *   `exited` or `queued` (`mayBeRunningTurn`).
+ * - A `waiting` block where the session's open Request opened, once its
+ *   `request.opened` row has landed.
+ * - A `live` block at the end while no Request is open, no agent message
+ *   holds the working face, and either the last turn has not finished or,
+ *   before any turn, the session is starting or busy.
+ *
+ * The working face is on one block at most: the agent message the agent is
+ * writing; else the running turn's last agent message, when nothing started
+ * after it (its turn's end is about to land); else the `live` block.
+ *
+ * Each block's key is built from an item id, a turn id or a request id, so it
+ * stays the same as rows are appended.
+ */
+export const buildThreadBlocks = (
+  rows: readonly TranscriptRow[],
+  session: Session,
+): readonly ThreadBlock[] => {
+  const slots: Slot[] = [];
+  const turns = new Map<string, BuildingTurn>();
+  const agents = new Map<string, BuildingAgent>();
+  const workItems = new Map<
+    string,
+    { readonly stretch: BuildingStretch; readonly index: number }
+  >();
+  // An object rather than a `let`, because the helpers below reassign it and
+  // TypeScript does not see an assignment made inside a closure.
+  const state: { current: BuildingTurn | null } = { current: null };
+
+  const finishTurn = (turn: BuildingTurn, at: string, endState: TurnEndState | null): void => {
+    closeStretch(turn, at);
+    turn.finished = true;
+    if (endState === "completed") return;
+    slots.push({
+      kind: "ending",
+      turn,
+      block: {
+        kind: "ending",
+        key: `ending:${turn.turnId}`,
+        turnId: turn.turnId,
+        endState,
+        duration: endState === null ? null : Date.parse(at) - Date.parse(turn.startedAt),
+      },
+    });
+  };
+
+  const closeStretch = (turn: BuildingTurn, at: string): void => {
+    if (turn.stretch !== null) turn.stretch.endedAt = at;
+    turn.stretch = null;
+  };
+
+  /** Returns the turn a row names, starting it when this is the first row to name it. */
+  const enterTurn = (turnId: string, at: string): BuildingTurn => {
+    const known = turns.get(turnId);
+    if (known !== undefined) {
+      known.lastAt = at;
+      return known;
+    }
+    // Only one turn runs at a time, so a new turn means the one before it
+    // ended, even when no row said so.
+    const previous = state.current;
+    if (previous !== null && !previous.finished) finishTurn(previous, previous.lastAt, null);
+    const started: BuildingTurn = {
+      turnId,
+      startedAt: at,
+      model: undefined,
+      lastAt: at,
+      finished: false,
+      drawn: false,
+      boundary: at,
+      stretch: null,
+      lastStartedItemId: null,
+    };
+    turns.set(turnId, started);
+    state.current = started;
+    return started;
+  };
+
+  const startAgent = (turn: BuildingTurn, itemId: string, at: string): BuildingAgent => {
+    closeStretch(turn, at);
+    const agent: BuildingAgent = {
+      kind: "agent",
+      turn,
+      itemId,
+      startedAt: at,
+      text: "",
+      completed: false,
+    };
+    agents.set(itemId, agent);
+    slots.push(agent);
+    turn.drawn = true;
+    turn.lastStartedItemId = itemId;
+    turn.boundary = at;
+    return agent;
+  };
+
+  for (const row of rows) {
+    const event = row.event;
+    switch (event._tag) {
+      case "turn.started": {
+        const turn = enterTurn(event.turnId, event.at);
+        turn.startedAt = event.at;
+        turn.model = event.model;
+        break;
+      }
+      case "turn.completed": {
+        const turn = enterTurn(event.turnId, event.at);
+        if (!turn.finished) finishTurn(turn, event.at, event.state);
+        break;
+      }
+      case "item.started": {
+        // A message whose text row came first is already placed.
+        if (agents.has(event.itemId)) break;
+        const turn = enterTurn(event.turnId, event.at);
+        turn.drawn = true;
+        turn.lastStartedItemId = event.itemId;
+        if (event.kind === "user_message") {
+          closeStretch(turn, event.at);
+          const detail = readJsonObject(event.detail);
+          const text = typeof detail?.text === "string" ? detail.text : "";
+          slots.push({
+            kind: "user",
+            key: `user:${event.itemId}`,
+            itemId: event.itemId,
+            text,
+            at: event.at,
+          });
+          turn.boundary = event.at;
+        } else if (event.kind === "assistant_message") {
+          startAgent(turn, event.itemId, event.at);
+        } else {
+          if (turn.stretch === null) {
+            turn.stretch = {
+              kind: "work",
+              turn,
+              items: [],
+              startedAt: turn.boundary,
+              endedAt: null,
+              frozenAt: null,
+            };
+            slots.push(turn.stretch);
+          }
+          const stretch = turn.stretch;
+          workItems.set(event.itemId, { stretch, index: stretch.items.length });
+          stretch.items.push({
+            ...buildThreadItem(event),
+            kind: event.kind,
+            paths: readChangedPaths(event),
+          });
+        }
+        break;
+      }
+      case "item.completed": {
+        // Looked up by id rather than by turn: a harness can complete an item
+        // after its turn was interrupted, under a turn of its own.
+        const agent = agents.get(event.itemId);
+        if (agent !== undefined) {
+          agent.completed = true;
+          agent.turn.boundary = event.at;
+          break;
+        }
+        const work = workItems.get(event.itemId);
+        if (work !== undefined) {
+          work.stretch.items[work.index] = {
+            ...work.stretch.items[work.index]!,
+            result: event.status,
+          };
+        }
+        break;
+      }
+      case "content.delta": {
+        if (event.streamKind !== "assistant_text") break;
+        // The adapters start an item before its text, but nothing in the
+        // protocol requires it. A message is placed at its first text row
+        // rather than its text left out.
+        const agent =
+          agents.get(event.itemId) ??
+          startAgent(enterTurn(event.turnId, event.at), event.itemId, event.at);
+        agent.text += event.delta;
+        break;
+      }
+      // A harness that exited, or a new one that started, runs no turn of
+      // the one before.
+      case "session.exited":
+      case "session.started": {
+        const turn = state.current;
+        if (turn !== null && !turn.finished) finishTurn(turn, event.at, null);
+        break;
+      }
+      case "request.opened": {
+        // The row names no turn, so it belongs to the turn it sits in.
+        if (event.request.requestId !== session.openRequest?.requestId) break;
+        slots.push({
+          kind: "waiting",
+          key: `waiting:${event.request.requestId}`,
+          requestId: event.request.requestId,
+          openedAt: event.at,
+        });
+        const stretch = state.current?.stretch ?? null;
+        if (stretch !== null) stretch.frozenAt = event.at;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // A session that runs no harness runs no turn. Any other status may be
+  // older than the rows, so the rows decide.
+  const last = state.current;
+  if (last !== null && !last.finished && !mayBeRunningTurn(session.status)) {
+    finishTurn(last, last.lastAt, null);
+  }
+  const running = last !== null && !last.finished ? last : null;
+  const hasFace =
+    session.openRequest === null &&
+    (running !== null || (last === null && isWorking(session.status)));
+  const openItemId = findOpenItem(rows);
+  const faceAgent =
+    hasFace && running !== null ? findFaceAgent(running, agents, openItemId) : undefined;
+  const model = (turn: BuildingTurn | null): string => turn?.model ?? session.modelSelection.model;
+  const awaitingItemId = session.openRequest?.itemId;
+
+  const blocks: ThreadBlock[] = [];
+  for (const slot of slots) {
+    switch (slot.kind) {
+      case "user":
+      case "waiting":
+        blocks.push(slot);
+        break;
+      case "agent":
+        blocks.push({
+          kind: "agent",
+          key: `agent:${slot.itemId}`,
+          itemId: slot.itemId,
+          turnId: slot.turn.turnId,
+          text: slot.text,
+          startedAt: slot.startedAt,
+          model: model(slot.turn),
+          open: slot.itemId === openItemId && !slot.turn.finished,
+          live: slot === faceAgent,
+        });
+        break;
+      case "work":
+        if (slot.items.every((item) => item.kind === "reasoning")) break;
+        blocks.push({
+          kind: "work",
+          key: `work:${slot.items[0]!.itemId}`,
+          turnId: slot.turn.turnId,
+          // Only a running item can wait on the open Request. An item the
+          // harness already finished keeps its result.
+          items: slot.items.map((item) =>
+            item.itemId === awaitingItemId && item.result === "running"
+              ? { ...item, result: "awaiting approval" as const }
+              : item,
+          ),
+          startedAt: slot.startedAt,
+          endedAt: slot.endedAt ?? slot.frozenAt,
+        });
+        break;
+      case "ending":
+        if (slot.turn.drawn) blocks.push(slot.block);
+        break;
+    }
+  }
+  if (hasFace && faceAgent === undefined)
+    blocks.push({ kind: "live", key: "live", model: model(running) });
+  return blocks;
+};
+
+/**
+ * Returns the agent message of the running turn that holds the working face,
+ * or `undefined` when the face belongs on a live block:
+ *
+ * - the open item (`openItemId`, from `findOpenItem`), when it is an agent
+ *   message: the agent is writing it, even if the user steered a message in
+ *   below it;
+ * - else the turn's last started item, when it is an agent message that has
+ *   completed. The turn's end usually lands a moment later, and moving the
+ *   face to a live block in between would flash a second face.
+ */
+const findFaceAgent = (
+  running: BuildingTurn,
+  agents: ReadonlyMap<string, BuildingAgent>,
+  openItemId: string | null,
+): BuildingAgent | undefined => {
+  const writing = openItemId === null ? undefined : agents.get(openItemId);
+  if (writing !== undefined && writing.turn === running) return writing;
+  const lastStarted =
+    running.lastStartedItemId === null ? undefined : agents.get(running.lastStartedItemId);
+  return lastStarted?.completed === true ? lastStarted : undefined;
+};

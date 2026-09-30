@@ -2,14 +2,16 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  applyPick,
+  addWorkspacePicks,
+  applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
+  buildRecentModel,
   computeEffectiveConfig,
+  parseRecentModels,
   pushRecent,
   queryKeys,
   findResumeBlockedReason,
-  findRunnerForPick,
   buildSubmission,
   readThreadConfig,
   type ComposerFields,
@@ -34,8 +36,7 @@ const RECENT_KEY = "hercule.recentModels";
  */
 const readRecent = (): readonly RecentModel[] => {
   try {
-    const held: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]");
-    return Array.isArray(held) ? (held as readonly RecentModel[]) : [];
+    return parseRecentModels(window.localStorage.getItem(RECENT_KEY));
   } catch {
     return [];
   }
@@ -94,12 +95,11 @@ export function useComposerModel(
   const base = readThreadConfig(thread);
   const config = computeEffectiveConfig(base, picks);
   const fields = buildComposerFields(catalogs, config, thread.kind);
-  // Recent is updated only after a successful send, and records only a model
-  // the user picked, not a default.
+  // Recent is updated only after a successful send.
   const rememberRecentModel = (): void => {
-    const model = picks.model ?? null;
-    if (model === null || config.instanceId === null) return;
-    const next = pushRecent(recent, { instanceId: config.instanceId, model });
+    const pair = buildRecentModel(picks, config.instanceId);
+    if (pair === null) return;
+    const next = pushRecent(recent, pair);
     setRecent(next);
     writeRecent(next);
   };
@@ -167,21 +167,16 @@ export function useComposerModel(
     // Each pick is compared with the thread's own configuration, not with
     // earlier picks, so picking the configured value again clears the pick.
     pick: (...steps) => {
-      setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
+      setPicks((held) => applyPicks(catalogs, base, held, steps));
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so
       // one message is never sent twice.
       if (sendingRef.current || spawn.isPending || input.isPending) return;
-      // A draft is spawned with the workspace the composer resolved, even when
-      // it is the default the user never touched. An existing workspace also
-      // fixes the machine.
-      const workspace = fields.workspace.value;
-      const settled = findRunnerForPick(workspace, catalogs.workspaces ?? []);
       const sent = buildSubmission(
         thread,
         thread.kind === "draft"
-          ? { ...picks, workspace, ...(settled === null ? {} : { runnerId: settled }) }
+          ? addWorkspacePicks(picks, fields.workspace.value, catalogs.workspaces ?? [])
           : picks,
         { text: message },
       );

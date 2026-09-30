@@ -292,8 +292,8 @@ describe("Settings > Assistants: the list and the form", () => {
       within(access)
         .getAllByRole("radio")
         .map((item) => item.textContent),
-    ).toEqual(["approval-required", "auto-accept-edits", "auto", "full-access"]);
-    expect(readCheckedSegment("Access mode")).toBe("auto");
+    ).toEqual(["Approval required", "Auto-accept edits", "Auto", "Full access"]);
+    expect(readCheckedSegment("Access mode")).toBe("Auto");
 
     const reply = screen.getByRole("radiogroup", { name: "Reply" });
     expect(
@@ -356,7 +356,7 @@ describe("Settings > Assistants: the list and the form", () => {
     );
     await user.click(
       within(screen.getByRole("radiogroup", { name: "Access mode" })).getByRole("radio", {
-        name: "full-access",
+        name: "Full access",
       }),
     );
     await user.click(screen.getByRole("button", { name: "Save" }));

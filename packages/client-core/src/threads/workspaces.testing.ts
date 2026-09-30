@@ -74,6 +74,9 @@ export const buildCheckout = (
   branch,
   branches,
   defaultBranch,
+  // Started from the repo's default branch, as a checkout is when the caller
+  // names no base. A main workspace's clone has no base either.
+  baseBranch: null,
 });
 
 export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Workspace => ({

@@ -1,9 +1,9 @@
+import { readErrorMessage } from "@hercule/client-core";
 import { useEffect, useEffectEvent, useState } from "react";
 import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Live, WorkflowValidation } from "@hercule/client-core";
 import type { Issue } from "@hercule/contract";
 import { workflowValidationQuery } from "../../../app/queries";
-import { readErrorMessage } from "../../../screens/save-status";
 
 /** How long the source must stay unchanged before the page asks the controller to validate it. */
 const VALIDATION_DELAY_MS = 400;

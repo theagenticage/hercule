@@ -1,0 +1,163 @@
+/* The composer's menus, and the project picker: glass popovers. The look is
+   the Bureau book's `.pop`, `.pop-h`, `.pop-sec`, `.q-h` and `.line`, from
+   its glance page. The book draws no composer menu, so the widths are spec
+   14's: 320px, 360px for the model menu, and 420px for the workspace and
+   machine menus. Each departure from the book says why. */
+.pop {
+  /* The browser draws a popover or a dialog with a border, padding and the
+     system's colours. The menu takes the page's type, not that of the part
+     it sits in: a Draft Thread's lip menus sit inside the lip, whose text is
+     smaller and fainter. */
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  border-radius: var(--r-lg);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+/* A composer menu opens 6px above its trigger rather than centred in the
+   window, and scrolls when the space above is short. */
+.menu {
+  inset: auto;
+  margin: 0 0 6px;
+  position-area: block-start span-inline-end;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+}
+.menu--end {
+  position-area: block-start span-inline-start;
+}
+.menu--narrow {
+  width: 320px;
+}
+.menu--wide {
+  width: 360px;
+}
+.menu--widest {
+  width: 420px;
+}
+.pop-h {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px 10px;
+}
+.pop-h b {
+  font-weight: var(--w-bold);
+}
+.pop-h span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pop-sec {
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line-soft);
+}
+/* Not in the book, whose popover always opens with its `.pop-h`. The model
+   menu has no header, so its first section needs no rule above it. */
+.pop-sec:first-child {
+  border-top: 0;
+}
+.q-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border-radius: var(--r-md);
+  font-size: var(--t-12);
+  text-align: left;
+}
+.line .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.line .grow b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* Not in the book, whose rows are all links. A row that cannot be picked is
+   not a button: it has no hover, and it is dimmed, with its reason at the
+   right. */
+button.line:hover {
+  background: var(--hover);
+}
+.line--dimmed {
+  opacity: 0.5;
+}
+/* Not in the book. The filter spans its section. The section's top padding
+   matches its sides, so the focus ring, 4px outside the field, keeps an even
+   gap to the menu's edge. */
+.menu-filter {
+  width: 100%;
+}
+.pop-sec:has(> .menu-filter) {
+  padding-top: 8px;
+}
+/* Not in the book, which has no model options. Each option is its label
+   above a segmented control of its choices. */
+.menu-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-bottom: 6px;
+}
+.menu-option .seg {
+  margin-left: 6px;
+}
+/* Not in the book, whose rows have one line. A row with more to say, in a
+   Draft Thread's menus, says it on a line under the name, smaller and
+   fainter, as the book's glance page does under a Request. */
+.line .grow small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+}
+.line .grow .line-warning {
+  color: var(--you-ink);
+}
+/* Not in the book. What a row says about itself at the right: a machine's
+   state, a branch's badge, or why the row cannot be picked. */
+.line-note {
+  flex: none;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.machine-state[data-state="online"] {
+  color: var(--live);
+}
+.machine-state[data-state="unreachable"] {
+  color: var(--fail-ink);
+}
+/* The book's glance page: the fine print under a menu's last section. */
+.pop-foot {
+  margin: 0;
+  padding: 9px 14px 11px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}

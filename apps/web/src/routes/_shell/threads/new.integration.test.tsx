@@ -13,7 +13,7 @@
  *   menu rows.
  * - The send button's accessible name contains "send".
  * - The model options selector is labelled with the chosen effort choice's
- *   `label` in lower case (e.g. "Medium" shows as "medium").
+ *   `label` as the descriptor writes it ("Medium").
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -262,13 +262,13 @@ describe("Composer: draft defaults", () => {
     expect(voice.disabled).toBe(true);
 
     // The model pill shows the default model. Its options are in the selector
-    // next to it, labelled with the effort choice "Medium" in lower case.
+    // next to it, labelled with the effort choice "Medium".
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Claude Sonnet 5" })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "medium" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Medium" })).toBeDefined();
 
-    expect(screen.getByRole("button", { name: /approval-required/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /approval required/i })).toBeDefined();
 
     expect(screen.getByText("No workspace")).toBeDefined();
     expect(screen.getByText(RUNNER.name)).toBeDefined();
@@ -291,7 +291,7 @@ describe("Composer: draft defaults", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDefined();
   });
 });
 
@@ -357,7 +357,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(readPageText()).toContain("no provider instance is set up");
+    expect(readPageText()).toContain("No provider instance is set up");
   });
 });
 
@@ -450,8 +450,8 @@ describe("Composer: model menu", () => {
     expect(within(menu).getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
-    // The other instance (B) is collapsed to one row: "<n> models".
-    expect(readPageText()).toContain("1 models");
+    // The other instance (B) is collapsed to one row that counts its models.
+    expect(readPageText()).toContain("1 model ›");
 
     expect(screen.queryByText(/custom model/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/model/i)).toBeNull();
@@ -461,7 +461,7 @@ describe("Composer: model menu", () => {
     const user = userEvent.setup();
     await openApp();
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
 
     // `SegmentedControl` is built on Radix's `ToggleGroup` with
     // `type="single"`, which gives each item `role="radio"` (see the
@@ -484,7 +484,7 @@ describe("Composer: model menu", () => {
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     // Instance B is collapsed to a one-row summary. Clicking that row switches
     // the pill to instance B's default model.
-    await user.click(screen.getByRole("button", { name: /work.*1 models/i }));
+    await user.click(screen.getByRole("button", { name: /work.*1 model\b/i }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
@@ -495,13 +495,13 @@ describe("Composer: model menu", () => {
     const user = userEvent.setup();
     await openApp();
 
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     // As in the "renders a select option..." test above, `SegmentedControl`
     // gives each choice `role="radio"`, not `role="button"`.
     await user.click(screen.getByRole("radio", { name: "High" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
   });
 });
@@ -558,7 +558,7 @@ describe("Composer: sending", () => {
 
     // The picks are made in the model options popover: the `effort` row, and
     // the `thinking` row, which is on by default and is turned off here.
-    await user.click(screen.getByRole("button", { name: "medium" }));
+    await user.click(screen.getByRole("button", { name: "Medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.click(screen.getByRole("radio", { name: "off" }));
     await user.keyboard("{Escape}");
@@ -580,6 +580,53 @@ describe("Composer: sending", () => {
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
       options: { effort: "high", thinking: false },
+    });
+  });
+
+  it("keeps the picked machine when another model of the same account is picked after it", async () => {
+    const user = userEvent.setup();
+    const cove: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
+    // The second account, with two models, logged in on both machines.
+    const work = buildProviderInstance(
+      INSTANCE_B.id,
+      "work",
+      "Claude Code",
+      [RUNNER.id, cove.id].map((runnerId) =>
+        buildSnapshot(runnerId, "work@example.com", "Claude Pro", [
+          { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+          { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+        ]),
+      ),
+    );
+    const { api } = await openApp(
+      [INSTANCE_A, work],
+      {},
+      {
+        "GET /api/v1/runners": { body: { items: [RUNNER, cove] } },
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    );
+
+    // Switch to the second account, pick the other machine, then another
+    // model of the same account.
+    await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /work.*2 models\b/i);
+    await user.click(screen.getByRole("button", { name: /^machine moss/ }));
+    await pickRow(user, /^cove/);
+    await user.click(screen.getByRole("button", { name: /claude haiku 5/i }));
+    await pickRow(user, /claude opus 5/i);
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      const spawn = api.calls.find(
+        (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+      );
+      expect(spawn?.body).toMatchObject({
+        instanceId: work.id,
+        model: "claude-opus-5",
+        runnerId: cove.id,
+      });
     });
   });
 
@@ -677,7 +724,7 @@ describe("Routing: /threads/new is the static route", () => {
  * - The model pill is the button whose accessible name contains the model's
  *   *display* name ("Claude Sonnet 5").
  * - The model options selector is the button whose accessible name is its
- *   label text ("medium", "high", "high ⚡").
+ *   label text ("Medium", "High", "High ⚡").
  * - A boolean descriptor is a segmented `off · on` row, like every other
  *   descriptor.
  * - The older-models fold and every menu row are buttons with their text.
@@ -1087,12 +1134,12 @@ const WITH_OPTIONS = buildProviderInstance(
 );
 
 describe("Composer: the model options selector's label", () => {
-  it("shows the effort choice in lower case, updates on a pick, and adds a bolt when fast mode is on", async () => {
+  it("shows the effort choice's label, updates on a pick, and adds a bolt when fast mode is on", async () => {
     const user = userEvent.setup();
     await openApp([WITH_OPTIONS]);
 
-    // `medium` is the descriptor's default, from its label "Medium" in lower case.
-    const selector = await screen.findByRole("button", { name: "medium" });
+    // "Medium" is the label of the descriptor's default, `medium`.
+    const selector = await screen.findByRole("button", { name: "Medium" });
 
     await user.click(selector);
     const menu = await screen.findByRole("dialog");
@@ -1102,12 +1149,12 @@ describe("Composer: the model options selector's label", () => {
 
     await user.click(within(menu).getByRole("radio", { name: "High" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High" })).toBeDefined();
     });
 
     await user.click(within(menu).getByRole("radio", { name: "on" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "high ⚡" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "High ⚡" })).toBeDefined();
     });
   });
 });
@@ -1129,13 +1176,13 @@ describe("Composer: the access mode menu", () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
-    await user.click(screen.getByRole("button", { name: /approval-required/i }));
+    await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
 
     // The rows are found by their text, not by their accessible name. The
-    // name joins the mode and its meaning, so "auto" would also match
-    // "auto-accept-edits".
-    for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"]) {
+    // name joins the mode and its meaning, so "Auto" would also match
+    // "Auto-accept edits".
+    for (const mode of ["Approval required", "Auto-accept edits", "Auto", "Full access"]) {
       expect(within(menu).getByText(mode, { exact: true })).toBeDefined();
     }
     // The four modes need no introduction, so this menu has no header.
@@ -1143,26 +1190,26 @@ describe("Composer: the access mode menu", () => {
 
     // The unsupported mode keeps its row and can still be picked. The row
     // shows which mode it will actually run as.
-    expect(readPageText(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
-    await user.click(within(menu).getByText("auto", { exact: true }));
+    expect(readPageText(menu)).toContain("runs as Auto-accept edits on Claude Code Work");
+    await user.click(within(menu).getByText("Auto", { exact: true }));
     await user.keyboard("{Escape}");
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    expect(screen.getByRole("button", { name: /^auto$/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDefined();
   });
 
   /**
    * The fallback annotation names the provider instance that caused the
-   * fallback, as in `runs as auto-accept-edits on pi`. It is shown in the
+   * fallback, as in "runs as Auto-accept edits on pi". It is shown in the
    * attention color below the mode's meaning, which every row keeps.
    */
   it("shows each mode's meaning and names the provider in the fallback annotation, in the attention color", async () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
-    await user.click(screen.getByRole("button", { name: /approval-required/i }));
+    await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
 
     const MEANINGS = [
@@ -1177,7 +1224,7 @@ describe("Composer: the access mode menu", () => {
       expect(readPageText(menu)).toContain(meaning);
     }
 
-    const annotation = within(menu).getByText("runs as auto-accept-edits on Claude Code Work");
+    const annotation = within(menu).getByText("runs as Auto-accept edits on Claude Code Work");
     expect(annotation.className).toContain("text-attn");
     // The annotation names the provider, not a vague "this provider".
     expect(readPageText(menu)).not.toContain("on this provider");
@@ -1296,7 +1343,16 @@ const buildCheckout = (
   branch: string,
   branches: readonly string[],
   defaultBranch: string,
-) => ({ checkoutId: id, resourceId, form, subdirectory: null, branch, branches, defaultBranch });
+) => ({
+  checkoutId: id,
+  resourceId,
+  form,
+  subdirectory: null,
+  branch,
+  branches,
+  defaultBranch,
+  baseBranch: null,
+});
 
 const buildWorkspace = (
   id: string,
@@ -1682,7 +1738,7 @@ describe("Composer: the workspace selector", () => {
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
     expect(text).toContain("hercule/thread-8a0");
-    expect(text).not.toContain("None");
+    expect(text).not.toContain("No workspace");
   });
 
   it("shows the repo on each row and lists New workspace first in a multi-repo project", async () => {
@@ -1727,14 +1783,14 @@ describe("Composer: the workspace selector", () => {
     expect(readPageText(menu)).toContain("not cloned on moss · clones on first use");
   });
 
-  // A project with no source works in None, and the tooltip explains how to
-  // change that.
-  it("shows None as locked text in a project with no repo", async () => {
+  // A project with no source works in no workspace, and the tooltip explains
+  // how to change that.
+  it("shows No workspace as locked text in a project with no repo", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
     const locked = await screen.findByTitle("Add a repository to the project to work in one");
-    expect(readPageText(locked)).toContain("None");
+    expect(readPageText(locked)).toContain("No workspace");
     expect(locked.closest("button")).toBeNull();
 
     await user.click(locked);

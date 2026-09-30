@@ -1,7 +1,8 @@
 /**
  * Tests `computeThreadDefaults`, the rule the composer and Settings > Threads
- * both use to prefill a new thread, and `computeInstanceDefaults`, which
- * resolves the runner first and then the model. The tests check that:
+ * both use to prefill a new thread, `computeInstanceDefaults`, which resolves
+ * the runner first and then the model, and `buildDraftConfig`, which places
+ * those defaults in a Draft Thread's project. The tests check that:
  *
  * - a stored setting always wins;
  * - a stale instance id falls back to the default instance;
@@ -11,7 +12,11 @@
 import { describe, expect, it } from "vitest";
 import type { Profile, ProviderInstance, Runner, SettingsState } from "@hercule/contract";
 import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
-import { computeInstanceDefaults, computeThreadDefaults } from "./thread-defaults";
+import {
+  buildDraftConfig,
+  computeInstanceDefaults,
+  computeThreadDefaults,
+} from "./thread-defaults";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...BARE,
@@ -165,6 +170,52 @@ describe("computeThreadDefaults", () => {
       accessMode: "approval-required",
       runnerId: null,
       profileId: null,
+    });
+  });
+});
+
+describe("buildDraftConfig", () => {
+  const claude = buildInstance("claude-code", "Claude Code", [buildSnapshotOn(LOCAL.id, [SONNET])]);
+  const reads = {
+    instances: [claude],
+    runners: [LOCAL],
+    profiles: [UNRESTRICTED],
+    localRunnerId: LOCAL.id,
+  };
+
+  it("starts a draft in its project from the defaults, joining no workspace, with the stored workspace setting", () => {
+    expect(
+      buildDraftConfig({
+        ...reads,
+        settingsUser: { "thread.workspace": "ephemeral" },
+        projectId: "p-webshop",
+        workspaceId: null,
+      }),
+    ).toEqual({
+      instanceId: claude.id,
+      model: "claude-sonnet-5",
+      accessMode: "approval-required",
+      runnerId: LOCAL.id,
+      profileId: UNRESTRICTED.id,
+      options: {},
+      projectId: "p-webshop",
+      workspace: null,
+      preferredWorkspace: "ephemeral",
+    });
+  });
+
+  it("joins the workspace the draft was opened for, and has no stored workspace setting when none is set", () => {
+    expect(
+      buildDraftConfig({
+        ...reads,
+        settingsUser: NO_SETTINGS,
+        projectId: null,
+        workspaceId: "w-shared",
+      }),
+    ).toMatchObject({
+      projectId: null,
+      workspace: { kind: "existing", workspaceId: "w-shared" },
+      preferredWorkspace: null,
     });
   });
 });

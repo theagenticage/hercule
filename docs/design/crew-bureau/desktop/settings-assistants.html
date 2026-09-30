@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Ada · Assistants · Settings · Hercule</title>
+    <style>
+      .set-body {
+        padding-top: 22px;
+      }
+      .rec {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 296px;
+        gap: 22px 44px;
+        width: min(940px, 100%);
+        margin: 0 auto;
+      }
+      .rec-main,
+      .rec-side {
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
+        min-width: 0;
+      }
+      /* Assistants as tabs: pick a colleague by face. */
+      .people {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .person {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 38px;
+        padding: 0 14px 0 6px;
+        border-radius: var(--r-pill);
+        color: var(--muted);
+        font-weight: var(--w-medium);
+      }
+      .person:hover {
+        background: var(--hover);
+      }
+      .person.is-on {
+        background: var(--who-tint);
+        color: var(--ink);
+      }
+      .person small {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .head h2 {
+        margin: 0;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .head p {
+        margin: 2px 0 0;
+        color: var(--muted);
+      }
+      .head .who-ink {
+        font-weight: var(--w-medium);
+      }
+      .set-row {
+        min-height: 50px;
+      }
+      .set-sec h2 .toggle {
+        margin-left: auto;
+      }
+      .tools {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .chip .ic {
+        margin-right: -3px;
+        opacity: 0.6;
+      }
+      .inline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 0 14px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+      }
+      .inline .field {
+        height: 30px;
+        padding: 0 10px;
+        font-variant-numeric: tabular-nums;
+      }
+      /* The heartbeat window drawn on a 24-hour day. */
+      .day {
+        position: relative;
+        height: 30px;
+        margin-top: 2px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+      }
+      .day-window {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: calc(7 / 24 * 100%);
+        width: calc(16 / 24 * 100%);
+        border-radius: var(--r-sm);
+        background: var(--who-tint);
+        background-image: repeating-linear-gradient(90deg, var(--who) 0 2px, transparent 2px calc(100% / 16));
+        background-size: 100% 10px;
+        background-position: 0 50%;
+        background-repeat: no-repeat;
+      }
+      .day-now {
+        position: absolute;
+        top: -4px;
+        bottom: -4px;
+        left: calc(9.68 / 24 * 100%);
+        width: 2px;
+        border-radius: 1px;
+        background: var(--ink);
+      }
+      .day-axis {
+        position: relative;
+        height: 16px;
+        margin-top: 5px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-variant-numeric: tabular-nums;
+      }
+      .day-axis span {
+        position: absolute;
+        transform: translateX(-50%);
+      }
+      .ctx {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 6px 20px;
+        padding: 12px 0 2px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .ctx-top {
+        display: flex;
+        justify-content: space-between;
+        font-size: var(--t-12);
+        color: var(--muted);
+      }
+      .ctx-top b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .ctx .meter {
+        overflow: visible;
+      }
+      .ctx .meter::after {
+        content: "";
+        position: absolute;
+        left: 70%;
+        top: -4px;
+        bottom: -4px;
+        width: 2px;
+        border-radius: 1px;
+        background: var(--faint);
+      }
+      .bind {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .bind-ic {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+      }
+      .bind .set-label span {
+        font-size: var(--t-12);
+      }
+      .bind-add {
+        align-self: flex-start;
+        margin-top: 6px;
+      }
+      /* Side column: what Ada keeps. */
+      .side-sec h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px;
+        font-size: var(--t-14);
+        font-weight: var(--w-bold);
+      }
+      .side-sec h3 a {
+        margin-left: auto;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .core-top {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 7px;
+        font-size: var(--t-12);
+      }
+      .core-top span {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .core-note {
+        margin: 10px 0 14px;
+        padding-left: 11px;
+        border-left: 2px solid var(--who);
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .topic {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 1px 8px;
+        padding: 7px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: var(--t-12);
+      }
+      .topic b {
+        font-weight: var(--w-medium);
+      }
+      .topic small {
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-variant-numeric: tabular-nums;
+      }
+      .topic span {
+        grid-column: 1 / -1;
+        overflow: hidden;
+        color: var(--muted);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .topics-foot {
+        padding-top: 8px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .rem {
+        display: grid;
+        grid-template-columns: 108px 1fr;
+        gap: 10px;
+        padding: 7px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: var(--t-12);
+      }
+      .rem time {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .rem b {
+        font-weight: var(--w-medium);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="settings"></aside>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings /</span>
+          <h1 class="title" style="margin-left: -6px">Assistants</h1>
+          <span class="spacer"></span>
+          <button class="btn btn--sm"><i data-i="plus" data-size="14"></i>New assistant</button>
+        </header>
+
+        <div class="settings">
+          <nav data-setnav="assistants"></nav>
+          <div class="set-body">
+            <div class="rec">
+              <nav class="people">
+                <a class="person is-on" href="#" style="--hue: var(--hue-iris)"><i data-face="Ada" data-pose="working" data-size="28"></i>Ada <small>personal</small></a>
+                <a class="person" href="#"><i data-face="Milo" data-pose="idle" data-size="28"></i>Milo <small>ops</small></a>
+                <a class="person" href="#"><i data-face="Juno" data-pose="asleep" data-size="28"></i>Juno <small>support</small></a>
+              </nav>
+
+              <div class="rec-main" style="--hue: var(--hue-iris)">
+                <div class="head">
+                  <i data-face="Ada" data-pose="working" data-size="64"></i>
+                  <div>
+                    <h2>Ada</h2>
+                    <p>personal assistant · <span class="who-ink">working</span> in Web chat</p>
+                  </div>
+                  <span class="spacer"></span>
+                  <a class="btn" href="assistant.html"><i data-i="chat" data-size="14"></i>Open Conversation</a>
+                </div>
+
+                <section class="set-sec">
+                  <h2>How Ada works</h2>
+                  <div class="set-row" style="margin-top: 10px">
+                    <div class="set-label"><b>Provider</b><span>rogier@personal</span></div>
+                    <span class="field field--select" style="min-width: 214px"><i data-brand="claude" data-size="13"></i>Claude Code · Sonnet 5</span>
+                  </div>
+                  <div class="set-row">
+                    <div class="set-label"><b>Access mode</b><span>Runs tools without asking, except the ones below.</span></div>
+                    <span class="field field--select" style="min-width: 214px"><i data-i="shield" data-size="14"></i>Full access</span>
+                  </div>
+                  <div class="set-row">
+                    <div class="set-label"><b>Disallowed tools</b><span>Ada can read your code but never edits it.</span></div>
+                    <div class="tools">
+                      <span class="chip"><i data-i="file" data-size="12"></i> edit<i data-i="close" data-size="12"></i></span>
+                      <button class="btn btn--quiet btn--sm"><i data-i="plus" data-size="13"></i>Add</button>
+                    </div>
+                  </div>
+                  <div class="set-row">
+                    <div class="set-label"><b>Reply mode</b><span>One message when her turn ends, or each part as she writes it.</span></div>
+                    <div class="seg" data-seg><button aria-pressed="true">Turn end</button><button aria-pressed="false">Segments</button></div>
+                  </div>
+                </section>
+
+                <section class="set-sec">
+                  <h2><i data-i="heart" data-size="15"></i>Heartbeat<button class="toggle" role="switch" aria-checked="true" aria-label="Heartbeat"></button></h2>
+                  <p>Ada checks in on her own and only writes when something matters.</p>
+                  <div class="inline">
+                    Every <span class="field field--select">1 h</span> from <span class="field">07:00</span> to <span class="field">23:00</span> in <span class="field field--select"><i data-i="chat" data-size="13"></i>Web chat</span>
+                  </div>
+                  <div class="day" aria-label="Heartbeat window from 07:00 to 23:00, now 09:41">
+                    <div class="day-window"></div>
+                    <div class="day-now"></div>
+                  </div>
+                  <div class="day-axis">
+                    <span style="left: 0; transform: none">00</span><span style="left: calc(7 / 24 * 100%)">07</span><span style="left: calc(9.68 / 24 * 100%)"><b style="color: var(--ink)">now</b></span><span style="left: calc(12 / 24 * 100%)">12</span><span style="left: calc(18 / 24 * 100%)">18</span><span style="left: calc(23 / 24 * 100%)">23</span>
+                  </div>
+                </section>
+
+                <section class="set-sec">
+                  <h2><i data-i="undo" data-size="15"></i>Rotation</h2>
+                  <p>Ada starts a fresh context before hers gets too full. Memory and reminders carry over.</p>
+                  <div class="inline">
+                    At <span class="field field--select">70%</span> of the context or <span class="field field--select">200k</span> tokens, and daily at <span class="field">04:00</span>
+                  </div>
+                  <div class="ctx">
+                    <div>
+                      <div class="ctx-top"><span><b>41%</b> of the context · 82k tokens</span><span>rotates at 70%</span></div>
+                      <div class="meter" style="margin-top: 7px"><i style="width: 41%"></i></div>
+                    </div>
+                    <button class="btn btn--sm">Start fresh</button>
+                  </div>
+                </section>
+
+                <section class="set-sec">
+                  <h2>Where Ada listens</h2>
+                  <p>Every binding reaches the same Conversation.</p>
+                  <div class="bind">
+                    <span class="bind-ic"><i data-i="chat" data-size="15"></i></span>
+                    <div class="set-label"><b>Web chat</b><span>built in · always on</span></div>
+                  </div>
+                  <div class="bind">
+                    <span class="bind-ic"><i data-brand="slack" data-size="14"></i></span>
+                    <div class="set-label"><b>Slack · acme-hq</b><span>DM with Rogier</span></div>
+                    <button class="btn btn--quiet btn--sm">Unbind</button>
+                  </div>
+                  <button class="btn btn--sm bind-add"><i data-i="plus" data-size="13"></i>Bind a channel</button>
+                </section>
+              </div>
+
+              <aside class="rec-side" style="--hue: var(--hue-iris)">
+                <section class="side-sec">
+                  <h3><i data-i="memory" data-size="15"></i>Memory<a href="#">Edit</a></h3>
+                  <div class="core-top"><b>Core note</b><span>1,284 of 4,000</span></div>
+                  <div class="meter"><i style="width: 32.1%"></i></div>
+                  <p class="core-note">Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German…</p>
+                  <div class="topic"><b>work-style</b><small>1.2k</small><span>Prefers short answers; decides fast; hates long preambles</span></div>
+                  <div class="topic"><b>webshop</b><small>3.4k</small><span>Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only</span></div>
+                  <div class="topic"><b>payments-api</b><small>2.1k</small><span>Owns webhooks + payouts; v2.x; publish via npm</span></div>
+                  <div class="topic"><b>ops</b><small>1.8k</small><span>Backups nightly 04:00 to B2; certs on status.acme.dev</span></div>
+                  <div class="topic"><b>customers</b><small>2.7k</small><span>Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)</span></div>
+                  <div class="topic"><b>family</b><small>0.6k</small><span>School run Tue/Thu; no meetings before 09:30</span></div>
+                  <div class="topic"><b>reading</b><small>0.9k</small><span>Wants summaries of the weekly Rust + Postgres newsletters</span></div>
+                  <div class="topics-foot">7 of 24 topics · up to 12,000 characters each</div>
+                </section>
+
+                <section class="side-sec">
+                  <h3><i data-i="alarm" data-size="15"></i>Reminders <b class="count">3</b></h3>
+                  <div class="rem"><time>Thu 1 Oct 16:00</time><b>Call the accountant</b></div>
+                  <div class="rem"><time>Fri 2 Oct 09:00</time><b>Renew the SSL cert for ops</b></div>
+                  <div class="rem"><time>Mondays 08:30</time><b>Weekly revenue summary</b></div>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

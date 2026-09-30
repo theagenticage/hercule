@@ -309,6 +309,24 @@ describe("buildTurns", () => {
     expect(turns[0]!.items[0]!.target).toBe("ls -la");
   });
 
+  it("summarizes a web search's target as what it searched for, not the tool's name", () => {
+    // The Claude adapter's shape for Claude Code's WebSearch tool.
+    const turns = buildTurns([
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t-search",
+        itemId: "t-search",
+        kind: "web_search",
+        detail: { name: "WebSearch", input: { query: "3-D Secure challenge timeout" } },
+      }),
+    ]);
+
+    expect(turns[0]!.items[0]!.target).toBe("3-D Secure challenge timeout");
+  });
+
   it("falls back from file_path to description, then name, then raw JSON", () => {
     const fileChange = buildTurns([
       buildRow({

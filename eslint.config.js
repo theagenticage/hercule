@@ -23,10 +23,13 @@ const bannedEverywhere = [
 /**
  * `fork()` is broken under `bun build --compile` (spec 15 section 11), and no
  * import form of it can be banned reliably: a default import reaches it as
- * `cp.fork`. So the module itself is banned, and one file is allowed to use it.
+ * `cp.fork`. So the module itself is banned. Role code starts another process
+ * only through `packages/hercule/src/spawn.ts`, the one role file allowed to
+ * import it. Tooling and test harnesses that never ship inside the binary are
+ * exempt; the exemption block below lists them.
  */
 const childProcessMessage =
-  "Use spawnHercule() from @hercule/hercule; fork() is broken under `bun build --compile` (spec 15 section 11).";
+  "Use spawnOwnBinary() from @hercule/hercule; fork() is broken under `bun build --compile` (spec 15 section 11).";
 
 const bannedChildProcess = ["child_process", "node:child_process"].map((name) => ({
   name,
@@ -65,14 +68,14 @@ const effectPattern = { group: ["effect/*"], message: noEffectMessage };
 const routeLocalPattern = {
   group: ["../**/-*", "./*/**/-*", "**/routes/-*", "**/routes/**/-*"],
   message:
-    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in apps/web/src/screens/, generic presentation in @hercule/ui.",
+    "A `-` route file is local to its own folder and is imported only as `./-name`. Shared presentation goes in the app's screens/ folder, generic presentation in @hercule/ui.",
 };
 
 /** The shell is the frame; a screen imports presentation, not the frame. */
 const shellPattern = {
   group: ["**/shell", "**/shell/*"],
   message:
-    "Screens import presentation from @hercule/ui or apps/web/src/screens/, never from the shell.",
+    "Screens import presentation from @hercule/ui or the app's screens/ folder, never from the shell. Only a layout route mounts the shell.",
 };
 
 /** The folder of the workflow editor, the one module that holds its libraries. */
@@ -159,14 +162,70 @@ const browserImports = ({ allowed, more = [] } = {}) => [
   },
 ];
 
-/** The dynamic imports and calls a browser file may not make, beside `browserImports`. */
-const browserSyntax = ({ allowed } = {}) => [
+/**
+ * The dynamic imports and calls a browser file may not make, beside
+ * `browserImports`. `allowed` and `more` work as they do there.
+ */
+const browserSyntax = ({ allowed, more = [] } = {}) => [
   "error",
   ...bannedChildProcessCalls,
   ...workflowEditorFenceCalls,
   ...yamlCalls,
   ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
+  ...more,
 ];
+
+/**
+ * Vite turns these two forms into imports while it builds, so the imports
+ * appear in no file's text, and neither eslint nor dep-lint can check what
+ * they reach. The desktop app, whose layers dep-lint holds to a list of what
+ * each may link, uses neither.
+ */
+const viteGlobSyntax = {
+  selector: "MemberExpression[object.type='MetaProperty'][property.name=/^glob/]",
+  message:
+    "Vite turns `import.meta.glob` into one import per matching file, which neither eslint nor dep-lint can see, so the desktop app does not use it. Import each file by name.",
+};
+const viteAssetUrlSyntax = {
+  selector:
+    "NewExpression[callee.name='URL'][arguments.1.object.type='MetaProperty'][arguments.1.property.name='url']",
+  message:
+    "Vite turns `new URL(path, import.meta.url)` into an import of that file, which neither eslint nor dep-lint can see, so the desktop renderer does not use it. Import the file with a `?url` suffix instead.",
+};
+
+/**
+ * The desktop renderer's specimen sheets are a development tool for
+ * `pnpm compare:bureau`, served by the dev server alone. A renderer file
+ * outside them that imported them would put them in the release app.
+ */
+const specimensMessage =
+  "The specimen sheets are a development tool that never ships, so no renderer file outside specimens/ imports them. Import the component the sheet draws instead.";
+const specimensPattern = { group: ["**/specimens", "**/specimens/*"], message: specimensMessage };
+const specimensCalls = buildImportCalls("/(^|\\x2F)specimens(\\x2F|$)/", specimensMessage);
+
+/**
+ * The desktop renderer draws with React elements only, never with a string
+ * of markup, so no text can reach the page as HTML. The selectors refuse
+ * every way the DOM offers to parse a string as HTML into the page:
+ * - React's `dangerouslySetInnerHTML`;
+ * - assigning `innerHTML` or `outerHTML`, by name or as `["innerHTML"]`;
+ * - calling `insertAdjacentHTML`, `setHTMLUnsafe` or
+ *   `createContextualFragment`, by name or as `["insertAdjacentHTML"]`;
+ * - `document.write` and `document.writeln`.
+ */
+const markupMessage =
+  "The desktop renderer never sets markup from a string, so no text can reach the page as HTML. Build the element with JSX.";
+const markupProperties = "/^(innerHTML|outerHTML)$/";
+const markupMethods = "/^(insertAdjacentHTML|setHTMLUnsafe|createContextualFragment)$/";
+const markupSyntax = [
+  "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+  `AssignmentExpression[left.computed=false][left.property.name=${markupProperties}]`,
+  `AssignmentExpression[left.computed=true][left.property.value=${markupProperties}]`,
+  `CallExpression[callee.computed=false][callee.property.name=${markupMethods}]`,
+  `CallExpression[callee.computed=true][callee.property.value=${markupMethods}]`,
+  "CallExpression[callee.object.name='document'][callee.property.name=/^(write|writeln)$/]",
+].map((selector) => ({ selector, message: markupMessage }));
+const desktopRendererSyntax = [viteGlobSyntax, viteAssetUrlSyntax, ...specimensCalls];
 
 export default tseslint.config(
   {
@@ -178,9 +237,15 @@ export default tseslint.config(
       ".claude/**",
       // A plan folder is one ticket's local working state, never part of the tree.
       "docs/plans/**",
+      // The Crew Bureau design book and the two folders its pages link to,
+      // copied byte for byte from the design prototype (spec 17). Their
+      // scripts are the book's and are never edited here.
+      "docs/design/**",
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
+      "apps/desktop/src/renderer/routeTree.gen.ts",
+      "apps/desktop/out/**",
       "apps/runner/src/providers/codex/generated/**",
       "/hercule",
     ],
@@ -205,18 +270,26 @@ export default tseslint.config(
         { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
       ],
       "no-restricted-syntax": ["error", ...bannedChildProcessCalls, ...editorLibraryCalls],
+      // `import { type X } from "./x"` keeps an import of `./x` after the types
+      // are removed, because the repository compiles with verbatimModuleSyntax.
+      // `import type { X }` removes the import with them.
+      "@typescript-eslint/no-import-type-side-effects": "error",
     },
   },
   {
-    // The pre-paint theme script is plain browser JavaScript that no build
-    // touches, so it is linted as what it is rather than ignored.
-    files: ["apps/web/public/**/*.js"],
+    // The pre-paint theme scripts are plain browser JavaScript that no build
+    // touches, so they are linted as what they are rather than ignored.
+    files: ["apps/web/public/**/*.js", "apps/desktop/src/renderer/public/**/*.js"],
     languageOptions: {
       globals: globals.browser,
     },
   },
   {
-    files: ["apps/web/**/*.{ts,tsx}", "packages/ui/**/*.{ts,tsx}"],
+    files: [
+      "apps/web/**/*.{ts,tsx}",
+      "packages/ui/**/*.{ts,tsx}",
+      "apps/desktop/src/renderer/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       globals: globals.browser,
     },
@@ -231,17 +304,59 @@ export default tseslint.config(
     },
   },
   {
+    files: ["apps/desktop/src/renderer/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [specimensPattern] }),
+      "no-restricted-syntax": browserSyntax({ more: [...desktopRendererSyntax, ...markupSyntax] }),
+    },
+  },
+  {
+    // The reference sheet draws the Bureau book's pieces, which the book's
+    // crew.js returns as strings of markup.
+    files: ["apps/desktop/src/renderer/specimens/reference.ts"],
+    rules: {
+      "no-restricted-syntax": browserSyntax({ more: desktopRendererSyntax }),
+    },
+  },
+  {
+    // The drag-region test reads every stylesheet the window loads, and a
+    // glob keeps that list complete as stylesheets are added. No build of
+    // the app includes a test, so the glob hides nothing from dep-lint.
+    files: ["apps/desktop/src/renderer/app/router.integration.test.tsx"],
+    rules: {
+      "no-restricted-syntax": browserSyntax({
+        more: [viteAssetUrlSyntax, ...specimensCalls, ...markupSyntax],
+      }),
+    },
+  },
+  {
     // A screen composes presentation; it does not reach into the frame around
-    // it. Only the two layout routes below mount the shell.
+    // it. Only the layout routes below mount the shell.
     files: ["apps/web/src/routes/**/*.tsx"],
     rules: {
       "no-restricted-imports": browserImports({ more: [shellPattern] }),
     },
   },
   {
+    // The desktop app's screens keep the specimen ban beside the shell's,
+    // because a rule's options here replace the ones above.
+    files: ["apps/desktop/src/renderer/routes/**/*.tsx"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [shellPattern, specimensPattern] }),
+    },
+  },
+  {
     files: ["apps/web/src/routes/_shell.tsx", "apps/web/src/routes/_shell/settings.tsx"],
     rules: {
       "no-restricted-imports": browserImports(),
+    },
+  },
+  {
+    // The desktop app's layout route mounts the shell, so it may import it,
+    // but it keeps the specimen ban.
+    files: ["apps/desktop/src/renderer/routes/_connected/_shell.tsx"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [specimensPattern] }),
     },
   },
   {
@@ -266,9 +381,68 @@ export default tseslint.config(
     },
   },
   {
+    // The desktop app's Node code: main, and the build tooling around it.
+    files: [
+      "apps/desktop/src/main/**/*.ts",
+      "apps/desktop/scripts/**/*.ts",
+      "apps/desktop/vite.*.config.ts",
+    ],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    // The desktop app's code outside the renderer. It keeps the rules every
+    // file follows, because a rule's options here replace the ones above.
+    files: ["apps/desktop/src/{main,preload,ipc}/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...bannedChildProcessCalls,
+        ...editorLibraryCalls,
+        viteGlobSyntax,
+      ],
+    },
+  },
+  {
+    // The preload is only the bridge between the window and main: one function
+    // per IPC channel, and nothing else (spec 17). It needs `electron` for that,
+    // and the IPC contract's types to type each function. Anything more is
+    // logic that belongs in main or the renderer.
+    files: ["apps/desktop/src/preload/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: "^(?!electron$|\\.\\./ipc(/|$))",
+              message:
+                "The preload imports only `electron` and types from ../ipc, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
+            },
+            {
+              regex: "^\\.\\./ipc(/|$)",
+              allowTypeImports: true,
+              message:
+                "The preload uses only the IPC contract's types (spec 17). Write `import type`.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // `spawn()` is the sanctioned way to start another role, and build scripts
-    // are tooling that never ships inside the binary.
-    files: ["packages/hercule/src/spawn.ts", "scripts/**/*.ts"],
+    // are tooling that never ships inside the binary. The desktop end-to-end
+    // suite runs on Node, never inside the binary, and starts a second copy of
+    // the packaged app itself, because Playwright cannot start one that exits
+    // at once.
+    files: [
+      "packages/hercule/src/spawn.ts",
+      "scripts/**/*.ts",
+      "apps/desktop/scripts/**/*.ts",
+      "e2e/desktop/**/*.ts",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",

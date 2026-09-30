@@ -1,0 +1,318 @@
+/**
+ * Every read the app makes, as query options.
+ *
+ * The query keys come from `client-core`, so the desktop app and the web app
+ * key the same reads the same way, and a live push lists the keys the cache
+ * uses.
+ */
+import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  ApiError,
+  detectLocalRunner,
+  queryKeys,
+  readEveryPage,
+  type HerculeClient,
+} from "@hercule/client-core";
+import { MAX_PAGE_LIMIT, type Input, type Runner, type Task } from "@hercule/contract";
+import type { Bridge } from "../../ipc/bridge";
+
+/**
+ * Reads whether the controller's first run has been completed. Works without
+ * a token. It is read once and then kept, because setup happens only once.
+ * It never retries: an unreachable controller must lead to the connect screen
+ * at once, not after several seconds of retries.
+ */
+export const setupQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.setup(),
+    queryFn: () => client.setup.read(),
+    staleTime: Infinity,
+    retry: false,
+  });
+
+/**
+ * The options of every read the live connection keeps current: the sidebar's
+ * and the open thread's. Such a read is never fetched again because time
+ * passed, the window got focus or the network came back. It is fetched again
+ * only when a live push, a live reconnect, or a change in the thread list (see
+ * `useRelatedReads`) marks it out of date. An app that is idle then makes no
+ * requests at all.
+ */
+const LIVE_KEPT_READ_OPTIONS = {
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+// The sidebar's list reads below follow the cursor to the last page, because
+// the sidebar needs every record a label can come from. A list cut off after
+// its first page would leave threads without their workspace's label and
+// nothing would say so, and the workspace list grows with every thread that
+// gets a worktree of its own.
+
+/**
+ * Reads every thread: every session no Agent spawned. The sidebar lists all
+ * of them, so the read follows the cursor to the last page. Its key sits
+ * under the `sessions` prefix, so a push on the `session` topic invalidates
+ * it.
+ */
+export const threadsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.sessions({ thread: true }),
+    queryFn: () =>
+      readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every project, for the sidebar's project headers. */
+export const projectsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.projects(),
+    queryFn: () => readEveryPage((page) => client.project.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every workspace, disposed ones included, because a thread that ended
+ * in one is still labelled with it.
+ */
+export const workspacesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workspaces(),
+    queryFn: () => readEveryPage((page) => client.workspace.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every resource. A main workspace is labelled with its repo's name. */
+export const resourcesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.resources(),
+    queryFn: () => readEveryPage((page) => client.resource.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every runner. A thread on a runner that is offline is drawn as away. */
+export const runnersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.runners(),
+    queryFn: () => readEveryPage((page) => client.runner.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every provider instance, whose catalogs name the model a thread runs. */
+export const providersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.providers(),
+    queryFn: () => client.provider.query(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * The options of a read that no live topic covers and that only a Draft
+ * Thread uses: the settings and the permission profiles. Such a read is
+ * fetched again each time the new-thread screen opens, so a change made
+ * elsewhere, such as a default model set in the web app, reaches the next
+ * Draft Thread. The screen's loader decides that, see `readOnOpen`.
+ *
+ * Nothing else fetches it: it never goes stale on its own, so a component
+ * that starts reading it, such as the sidebar's draft row, finds it fresh.
+ * Like every other read, it is not fetched again when the window gets focus
+ * or the network comes back.
+ */
+const READ_ON_OPEN_OPTIONS = {
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+/** Reads the controller's settings, whose user part holds the defaults of a new thread. */
+export const settingsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.settings(),
+    queryFn: () => client.settings.read(),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/** Reads every permission profile, one of which a new thread runs under. */
+export const profilesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.profiles(),
+    queryFn: () => readEveryPage((page) => client.profile.query({ query: page })),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Finds which of `runners` runs on this Mac, and returns its id, or `null`
+ * when none does. Main asks each identity port for the page: the page's
+ * Content Security Policy lets it reach only the controller, and a runner
+ * lets only the controller's origin read its identity.
+ *
+ * The key holds each online runner's identity port, so the probe runs again
+ * only when those change: a runner comes online, goes away or moves port.
+ * The runners read, which the live connection keeps current, decides that.
+ * A probe that finds nothing is an answer, not a failure, so it never
+ * retries.
+ *
+ * While a new probe runs, the query keeps the previous answer. Otherwise a
+ * runner coming online would blank the draft's machine until the probe
+ * returns, and a screen that suspends on the read would flash its fallback.
+ */
+export const localRunnerQuery = (bridge: Bridge, runners: ReadonlyArray<Runner>) =>
+  queryOptions({
+    queryKey: queryKeys.localRunner(runners),
+    queryFn: () => detectLocalRunner(runners, (port) => bridge.runnerIdentity.read({ port })),
+    retry: false,
+    placeholderData: keepPreviousData,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** How many open tasks a Draft Thread offers to start from. */
+const START_TASK_COUNT = 3;
+
+/**
+ * Reads the open tasks of `projectId` a Draft Thread offers to start from:
+ * the three most urgent. The key sits under the `tasks` prefix, so a push on
+ * the `task` topic reads them again while a Draft Thread shows them.
+ */
+export const startTasksQuery = (client: HerculeClient, projectId: string) =>
+  queryOptions({
+    queryKey: [
+      ...queryKeys.tasks({ projectId, status: ["open"] }),
+      { sort: "priority", limit: START_TASK_COUNT },
+    ],
+    queryFn: async (): Promise<readonly Task[]> => {
+      const page = await client.task.query({
+        query: {
+          projectId,
+          status: ["open"],
+          sort: { field: "priority", direction: "asc" },
+          limit: START_TASK_COUNT,
+        },
+      });
+      return page.items;
+    },
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads the signed-in user's name, for the sidebar's foot. */
+export const userQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.user(),
+    queryFn: () => client.user.read(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Checks whether a failed read of one thread's records is worth trying again.
+ * Returns `true` for the first three failures that got no answer from the
+ * controller, such as a dropped connection, and `false` for an `ApiError`.
+ *
+ * An `ApiError` is the controller's answer, and asking again gets the same
+ * answer: a thread that does not exist keeps not existing, and a read that is
+ * forbidden stays forbidden. The not-found screen and the render failure then
+ * show at once, rather than after several seconds of retries.
+ */
+const isWorthRetrying = (failureCount: number, error: Error): boolean =>
+  !(error instanceof ApiError) && failureCount < 3;
+
+/**
+ * Reads one thread's session, for the thread screen. A push on the `session`
+ * topic that names the thread reads it again. Fails with a `not_found`
+ * `ApiError` when no such session exists.
+ */
+export const sessionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.session(id),
+    queryFn: () => client.session.read({ params: { id } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads a thread's whole transcript, oldest first, page by page until the
+ * last one, because the thread screen draws every row.
+ *
+ * After this read, only the live connection changes the cached transcript:
+ * `useThreadLive` merges each row `session:<id>:stream` delivers, and reads
+ * the transcript again when the stream reports a reset. The `session` topic
+ * never invalidates it, and it is never read again in the background: a read
+ * that raced a merge could replace the cache with rows older than the ones
+ * the merge had just added.
+ */
+export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.transcript(sessionId),
+    queryFn: () =>
+      readEveryPage((page) => client.transcript.read({ params: { id: sessionId }, query: page })),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads a thread's queued inputs, oldest first: the inputs the controller
+ * still holds for delivery when the running turn ends. A push on the
+ * `session` topic that names the thread reads them again.
+ *
+ * `input.query` lists the session's whole input history and cannot filter by
+ * status, so this reads one page of the newest inputs and keeps the queued
+ * ones. A queue drains oldest first, so the queued inputs are always among
+ * the newest; reading from the oldest end, as the web app does, would lose
+ * them once a thread has had more inputs than fit on a page.
+ */
+export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.inputs(sessionId),
+    queryFn: async (): Promise<readonly Input[]> => {
+      const page = await client.input.query({
+        params: { id: sessionId },
+        query: { limit: MAX_PAGE_LIMIT, sort: { field: "createdAt", direction: "desc" } },
+      });
+      return page.items.filter((input) => input.status === "queued").reverse();
+    },
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads everything the shell shows into `queryClient`: the sidebar's records
+ * and the signed-in user. Resolves once every read is cached, and fails with
+ * the first read that fails.
+ *
+ * The shell's loader calls it, and so does a test that renders one part of a
+ * screen alone, so the part finds the same records cached as in the app.
+ */
+export const ensureShellData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(projectsQuery(client)),
+    queryClient.ensureQueryData(workspacesQuery(client)),
+    queryClient.ensureQueryData(resourcesQuery(client)),
+    queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(userQuery(client)),
+  ]);
+};
+
+/**
+ * Reads everything the thread screen shows of the thread `sessionId` into
+ * `queryClient`: its session, its whole transcript and its queued inputs.
+ * Resolves once every read is cached, and fails with the first read that
+ * fails, such as a `not_found` `ApiError` when no such session exists.
+ *
+ * The thread's loader calls it, and so does a test that renders one part of
+ * the thread screen alone.
+ */
+export const ensureThreadData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionId: string,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(sessionQuery(client, sessionId)),
+    queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
+    queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
+  ]);
+};

@@ -6,6 +6,7 @@ import {
   createClient,
   createLive,
   createTokenStore,
+  buildFetchIdentityProbe,
   detectLocalRunner,
 } from "@hercule/client-core";
 import { createAppRouter } from "./app/router";
@@ -18,14 +19,24 @@ const baseUrl = window.location.origin;
 
 const client = createClient({ baseUrl, tokenStore: createTokenStore(baseUrl) });
 const live = createLive({ client, baseUrl });
-const queryClient = new QueryClient();
+// Reads and writes are sent even when the browser reports no network. The
+// controller often runs on this machine, where it is still reachable then, and
+// by default TanStack Query would hold every request until the browser is
+// back online. A controller that is really out of reach fails the request,
+// and the screen shows that failure.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { networkMode: "always" }, mutations: { networkMode: "always" } },
+});
 const router = createAppRouter(
   {
     client,
     queryClient,
     live,
     detectLocalRunner: (runners) =>
-      detectLocalRunner(runners, (url, init) => globalThis.fetch(url, init)),
+      detectLocalRunner(
+        runners,
+        buildFetchIdentityProbe((url, init) => globalThis.fetch(url, init)),
+      ),
   },
   createBrowserHistory(),
 );

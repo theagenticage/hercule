@@ -21,25 +21,28 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  readApiKey,
   runCli,
   completeSetup,
+  startController,
+  type Controller,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   listInstances,
   parseJsonOutputOrFail,
   isLiveSessionTestEnabled,
   readSession,
-  startController,
   createTemporaryHome,
   waitForTranscriptTag,
-  type Controller,
   type Instance,
   type Session,
+  type TemporaryHome,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -75,6 +78,7 @@ const waitForTag = (id: string, tag: string) =>
 
 beforeAll(async () => {
   if (!wanted) return;
+  state = createTemporaryHome();
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
@@ -96,7 +100,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
+  state?.remove();
 });
 
 describe.skipIf(!wanted)("a real Claude Code session through the binary", () => {

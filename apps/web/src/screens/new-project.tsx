@@ -7,11 +7,11 @@ import {
   queryKeys,
   REMOTE_REFUSAL,
   type HerculeClient,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { ResourceCreateInput } from "@hercule/contract";
 import { connectionsQuery } from "../app/queries";
 import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
-import { readErrorMessage } from "./save-status";
 
 /**
  * Creates a project and its sources. It creates the project first, then one

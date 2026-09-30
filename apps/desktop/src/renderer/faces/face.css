@@ -1,0 +1,59 @@
+/* A face and the user's avatar, as the Bureau book's system.css styles them. */
+.cr,
+.cr-you {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+  overflow: visible;
+}
+.cr--asleep {
+  filter: saturate(0.5);
+}
+.cr--away {
+  opacity: 0.55;
+  filter: saturate(0.3);
+}
+
+/*
+ * A face whose paws tap is a span holding three svgs of the face's size, one
+ * over the other: the face without its paws, then each paw alone in a span of
+ * its own. See the comment in Face, in face.tsx, for why.
+ */
+.cr--animated {
+  position: relative;
+}
+.cr--animated svg {
+  display: block;
+  overflow: visible;
+}
+.cr--animated .cr-tap {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * The one animation in the app: the working pose's paws tap on the
+ * typewriter. They tap only when the caller asks for it with `animated`, and
+ * never with Reduce motion on. The media query is live, so turning Reduce
+ * motion on stops a running animation.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .cr--working.cr--animated .cr-tap {
+    animation: cr-tap 0.52s ease-in-out infinite alternate;
+  }
+  .cr--working.cr--animated .cr-tap--2 {
+    animation-delay: 0.26s;
+  }
+}
+@keyframes cr-tap {
+  from {
+    transform: translateY(0);
+  }
+  /*
+   * The book moves the paw up 1.3 units of the face's 45-unit viewBox. The
+   * span is as tall as the face, so that is 1.3/45 of the span's height.
+   */
+  to {
+    transform: translateY(calc(-1.3 / 45 * 100%));
+  }
+}

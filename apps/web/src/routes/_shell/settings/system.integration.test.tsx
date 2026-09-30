@@ -32,8 +32,11 @@ const openApp = async () => {
   return { ...app, api };
 };
 
-/** Matches the chain of access modes, least permissive first, with any whitespace between the parts. */
-const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-access/;
+/**
+ * Matches the chain of access modes, least permissive first, by the names the
+ * user reads, with any whitespace between the parts.
+ */
+const CHAIN = /Approval required\s*<\s*Auto-accept edits\s*<\s*Auto\s*<\s*Full access/;
 
 describe("Settings > System: the access-mode fallback policy", () => {
   it("describes the ordered chain, the downward substitution, and that it is fixed", async () => {
@@ -75,7 +78,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
     for (const control of controls) {
       const name = `${readPageText(control)} ${control.getAttribute("aria-label") ?? ""}`;
       expect(name, "a control offers to change the fallback policy").not.toMatch(
-        /fallback|access mode|approval-required|auto-accept-edits|full-access/i,
+        /fallback|access mode|approval required|auto-accept edits|full access/i,
       );
     }
   });

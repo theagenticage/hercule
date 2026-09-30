@@ -19,15 +19,18 @@ import {
   USERNAME,
   runCli,
   completeSetup,
-  parseJsonOutputOrFail,
-  findReleaseBinary,
   startController,
-  createTemporaryHome,
   type Controller,
   type Ran,
+} from "../scripts/controller-process";
+import {
+  parseJsonOutputOrFail,
+  findReleaseBinary,
+  createTemporaryHome,
+  type TemporaryHome,
 } from "./harness";
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = findReleaseBinary();
 
 let controller: Controller;
@@ -68,6 +71,7 @@ const WORKFLOW_FILE = [
 ].join("\n");
 
 beforeAll(async () => {
+  state = createTemporaryHome();
   controller = await startController({ home: state.home, binary });
   const completed = await completeSetup({ home: state.home, url: controller.url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
@@ -87,8 +91,8 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-  await controller.stop().catch(() => -1);
-  state.remove();
+  await controller?.stop().catch(() => -1);
+  state?.remove();
 });
 
 describe("a workflow created from stdin and read back", () => {

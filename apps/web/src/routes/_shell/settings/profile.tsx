@@ -1,13 +1,18 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { buildIdOptions, FALLBACK_TIMEZONE, filterGitHubConnections } from "@hercule/client-core";
+import {
+  buildIdOptions,
+  FALLBACK_TIMEZONE,
+  filterGitHubConnections,
+  readErrorMessage,
+} from "@hercule/client-core";
 import { Button, FormCard, Row, Select } from "@hercule/ui";
 import { LOGIN_PATH } from "../../../app/entry-guard";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, settingsQuery } from "../../../app/queries";
 import { TimezoneField } from "../../../screens/timezone-field";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 import { useSaveSettings } from "./-form";
 
 export const Route = createFileRoute("/_shell/settings/profile")({

@@ -30,23 +30,26 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "../packages/protocol/src/output-schema.testing";
 import {
-  readApiKey,
   runCli,
   completeSetup,
+  PASSWORD,
+  ROOT,
+  startController,
+  USERNAME,
+  type Controller,
+  type Ran,
+} from "../scripts/controller-process";
+import {
+  readApiKey,
   parseJsonOutputOrFail,
   isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
   isLoginAvailable,
-  PASSWORD,
   prepareLoggedInInstance,
-  ROOT,
-  startController,
   createTemporaryHome,
   waitForTranscriptTag,
-  USERNAME,
-  type Controller,
   type Page,
-  type Ran,
+  type TemporaryHome,
   type Row,
   type Session,
 } from "./harness";
@@ -54,7 +57,7 @@ import {
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const state = createTemporaryHome();
+let state: TemporaryHome;
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -162,6 +165,7 @@ const runSessionUnderSchema = async (
 
 beforeAll(async () => {
   if (!wanted) return;
+  state = createTemporaryHome();
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
@@ -186,7 +190,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  state.remove();
+  state?.remove();
 });
 
 describe.skipIf(!wanted)("a session spawned from an Agent under an output schema", () => {

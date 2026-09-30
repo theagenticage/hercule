@@ -12,7 +12,7 @@
  * - the assistant's text is the turn's `assistant_text` deltas joined in
  *   transcript order.
  */
-import type { TranscriptRow } from "@hercule/contract";
+import type { SessionStatus, TranscriptRow } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 
 type ProviderEvent = TranscriptRow["event"];
@@ -67,10 +67,11 @@ const MAX_TARGET_LENGTH = 200;
 
 /**
  * Returns the field of an item's `detail` that is worth showing in a row: the
- * command a shell item ran, the path a file item changed, or a tool call's
- * description. Returns `undefined` when none of these is present, and the
- * caller then shows the raw JSON. Each provider adapter shapes `detail` its
- * own way, so every field is optional (spec 06 §6.3).
+ * command a shell item ran, the path a file item changed, what a web search
+ * searched for, or a tool call's description. Returns `undefined` when none
+ * of these is present, and the caller then shows the raw JSON. Each provider
+ * adapter shapes `detail` its own way, so every field is optional (spec 06
+ * §6.3).
  */
 const findDetailText = (detail: Record<string, unknown>): string | undefined => {
   const input = readJsonObject(detail.input);
@@ -79,6 +80,7 @@ const findDetailText = (detail: Record<string, unknown>): string | undefined => 
     detail.command ??
     input?.file_path ??
     detail.path ??
+    input?.query ??
     input?.description ??
     detail.description ??
     detail.name;
@@ -100,6 +102,18 @@ const summarizeDetail = (detail: unknown): string => {
   return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };
 
+/**
+ * Returns the row the transcript shows for an item that has just started: its
+ * verb, a one-line summary of its detail as the target, and `running` as its
+ * result until its `item.completed` row lands.
+ */
+export const buildThreadItem = (event: ItemStarted): ThreadItem => ({
+  itemId: event.itemId,
+  verb: readItemVerb(event.kind),
+  target: summarizeDetail(event.detail),
+  result: "running",
+});
+
 interface Building {
   turnId: string;
   startedAt: string;
@@ -115,6 +129,21 @@ interface Building {
    */
   lastAssistantItemId: string | null;
 }
+
+/**
+ * Checks whether a session in `status` may still be running the last turn of
+ * its transcript, when no row ends that turn.
+ *
+ * Returns `false` for `exited` and `queued`, because no harness process runs
+ * then. Returns `true` for any other status, because the status may be older
+ * than the rows: a turn's rows reach the client over the stream as they are
+ * written, and the session's new status only in a read after them. A session
+ * becomes `idle` only through a row, `turn.completed` or `session.started`,
+ * so one that reads `idle` or `starting` while its last turn has no end has
+ * not been read again since that turn started.
+ */
+export const mayBeRunningTurn = (status: SessionStatus): boolean =>
+  status !== "exited" && status !== "queued";
 
 /** Returns the transcript's turns, in the order they first appear. */
 export const buildTurns = (
@@ -165,12 +194,7 @@ export const buildTurns = (
           turn.user = turn.user === "" ? text : `${turn.user}\n\n${text}`;
         } else if (event.kind !== "assistant_message") {
           turn.itemIndex.set(event.itemId, turn.items.length);
-          turn.items.push({
-            itemId: event.itemId,
-            verb: readItemVerb(event.kind),
-            target: summarizeDetail(event.detail),
-            result: "running",
-          });
+          turn.items.push(buildThreadItem(event));
         }
         break;
       }

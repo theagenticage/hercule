@@ -43,7 +43,7 @@ describe("the setup screen", () => {
       expect(api.calls.some((call) => call.path === "/api/v1/setup/complete")).toBe(true);
     });
     const complete = api.calls.find((call) => call.path === "/api/v1/setup/complete")!;
-    expect(complete.token).toBe("one-time");
+    expect(complete.authorization).toBe("Bearer one-time");
     expect(complete.body).toEqual({
       username: "rogier",
       password: "hunter2hunter2",

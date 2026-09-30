@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Appearance · Settings · Hercule</title>
+    <style>
+      /* Theme previews: each tile is a tiny app drawn in its own theme. */
+      .themes {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+      }
+      .tp {
+        display: grid;
+        gap: 8px;
+        text-align: left;
+      }
+      .tp-art {
+        position: relative;
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        height: 96px;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+        transition: box-shadow var(--dur-2), transform var(--dur-2) var(--ease-out);
+      }
+      .tp:hover .tp-art {
+        transform: translateY(-1px);
+      }
+      .tp[aria-pressed="true"] .tp-art {
+        box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
+      }
+      .tp-side {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 12px 6px;
+        background: color-mix(in oklab, var(--bg) 80%, transparent);
+      }
+      .tp-side i {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .tp-side i:first-child {
+        background: var(--faint);
+      }
+      .tp-main {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 10px 10px 0;
+        background: var(--surface);
+        box-shadow: -1px 0 0 var(--line-soft);
+      }
+      .tp-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .tp-line {
+        flex: 1;
+        height: 5px;
+        border-radius: 3px;
+        background: var(--line);
+      }
+      .tp-line--you {
+        flex: none;
+        width: 12px;
+        background: var(--you);
+      }
+      .tp-comp {
+        margin-top: auto;
+        height: 16px;
+        border-radius: 7px 7px 0 0;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .tp-name {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding-left: 2px;
+        white-space: nowrap;
+      }
+      .tp-name b {
+        font-weight: var(--w-medium);
+      }
+      .tp-name span {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .pair {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .pair .field {
+        height: 30px;
+        min-width: 116px;
+        font-size: var(--t-13);
+      }
+      .sizes button {
+        min-width: 40px;
+        justify-content: center;
+      }
+      .sizes button:nth-child(1) {
+        font-size: 12px;
+      }
+      .sizes button:nth-child(2) {
+        font-size: 13px;
+      }
+      .sizes button:nth-child(3) {
+        font-size: 14px;
+      }
+      .sizes button:nth-child(4) {
+        font-size: 15px;
+      }
+      /* The Marks preview shows the same Intake line with and without source marks. */
+      .marks-demo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .marks-demo .srcs {
+        display: inline-flex;
+        gap: 5px;
+        color: var(--ink);
+      }
+      .set-row .seg {
+        flex: none;
+      }
+      /* A slice of a session under a header pill and the composer, so the slider shows what it does. */
+      .glass-demo {
+        position: relative;
+        height: 188px;
+        margin: 0 0 12px;
+        overflow: hidden;
+        border-radius: var(--r-lg);
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      /* The first and last lines sit wholly under the pill and the composer, so they show through
+         the glass and never poke out at an edge. */
+      .gd-page {
+        padding: 20px 44px 0;
+        font-size: var(--t-13);
+        line-height: 1.55;
+      }
+      .gd-page p {
+        margin: 0 0 8px;
+      }
+      .gd-page pre {
+        margin: 0 0 8px;
+      }
+      .gd-pill {
+        position: absolute;
+        top: 12px;
+        left: 14px;
+      }
+      .gd-comp {
+        position: absolute;
+        right: 40px;
+        bottom: 12px;
+        left: 40px;
+        display: flex;
+        align-items: center;
+        height: 44px;
+        padding: 0 16px;
+        border-radius: var(--r-xl);
+        background: var(--glass-fill-raised);
+        backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+        color: var(--faint);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="settings"></aside>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings /</span>
+          <h1 class="title" style="margin-left: -6px">Appearance</h1>
+          <span class="spacer"></span>
+          <span class="time">Saved on this Mac</span>
+        </header>
+
+        <div class="settings">
+          <nav data-setnav="appearance"></nav>
+          <div class="set-body">
+            <div class="set-col">
+              <section class="set-sec">
+                <h2>Theme</h2>
+                <p>Five rooms from the casebook, one crew. Every colleague keeps its colors in every theme.</p>
+                <div class="themes">
+                  <button class="tp" aria-pressed="true">
+                    <span class="tp-art" data-theme="whitehaven">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Whitehaven</b><span>light</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="styles">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Styles</b><span>light</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="orient-express">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Orient Express</b><span>dark</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="nile">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>Nile</b><span>dark</span></span>
+                  </button>
+                  <button class="tp" aria-pressed="false">
+                    <span class="tp-art" data-theme="end-house">
+                      <span class="tp-side"><i></i><i></i><i></i><i></i></span>
+                      <span class="tp-main">
+                        <span class="tp-row"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="20"></i><span class="tp-line"></span><span class="tp-line tp-line--you"></span></span>
+                        <span class="tp-row"><i data-face="Ada" data-pose="working" data-size="20"></i><span class="tp-line"></span></span>
+                        <span class="tp-comp"></span>
+                      </span>
+                    </span>
+                    <span class="tp-name"><b>End House</b><span>dark</span></span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="set-sec">
+                <div class="set-row">
+                  <div class="set-label"><b>Follow the system</b><span>Switches with macOS: Whitehaven by day, Orient Express by night.</span></div>
+                  <div class="pair">
+                    <span class="field field--select"><i data-i="sun" data-size="14"></i>Whitehaven</span>
+                    <span class="field field--select"><i data-i="moon" data-size="14"></i>Orient Express</span>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="true" aria-label="Follow the system"></button>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Density</b><span>Compact fits 30% more rows in Intake and the roster.</span></div>
+                  <div class="seg" data-seg><button aria-pressed="true">Comfortable</button><button aria-pressed="false">Compact</button></div>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Text size</b><span>Transcripts follow; titles stay modest.</span></div>
+                  <div class="seg sizes" data-seg><button aria-pressed="false">Aa</button><button aria-pressed="true">Aa</button><button aria-pressed="false">Aa</button><button aria-pressed="false">Aa</button></div>
+                </div>
+              </section>
+
+              <section class="set-sec">
+                <h2>Glass</h2>
+                <p>The header, the composer, menus and sheets float over the page. Glass sets how much of the page shows through them.</p>
+                <div class="glass-demo" aria-hidden="true">
+                  <div class="gd-page">
+                    <p>Found it. Stripe now returns <code>requires_action</code>.</p>
+                    <pre class="codeblock"><span class="k">if</span> (result.status === <span class="s">"requires_action"</span>) {
+  <span class="k">return</span> <span class="f">openThreeDSModal</span>(result.clientSecret);
+}</pre>
+                    <p>Tests pass. Ready to push the branch and open a pull request.</p>
+                  </div>
+                  <span class="pill gd-pill"><span class="pill-crumb"><span class="proj proj--webshop">webshop</span></span><span class="ptab is-on"><i data-mark="waiting"></i>Fix 3&#8209;D Secure checkout for EU cards</span></span>
+                  <span class="gd-comp">Reply or steer…</span>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Glass</b><span>0% is fully solid. Text on glass always stays readable.</span></div>
+                  <input class="range" type="range" min="0" max="100" value="40" aria-label="Glass" data-appearance-glass />
+                  <output class="range-out" data-appearance-glass-value>40%</output>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Reduce transparency</b><span>Makes every floating layer solid, whatever the Glass level. Follows the macOS setting.</span></div>
+                  <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce transparency"></button>
+                </div>
+              </section>
+
+              <section class="set-sec">
+                <h2>Start and motion</h2>
+                <p>Where Hercule opens, and how much the crew moves.</p>
+                <div class="set-row">
+                  <div class="set-label"><b>Open on</b><span>Threads lists your work by project. The office shows the same sessions as colleagues at their desks.</span></div>
+                  <div class="seg" data-seg><button aria-pressed="true"><i data-i="threads" data-size="14"></i>Threads</button><button aria-pressed="false"><i data-i="office" data-size="14"></i>The office</button></div>
+                </div>
+                <div class="set-row">
+                  <div class="set-label"><b>Reduce motion</b><span>Colleagues hold still. Poses and marks stay, so every state still reads.</span></div>
+                  <button class="toggle" role="switch" aria-checked="false" aria-label="Reduce motion"></button>
+                </div>
+                <div class="set-row">
+                  <div class="set-label">
+                    <b>Marks</b>
+                    <span class="marks-demo">Shows where things came from on rows <span class="srcs"><i data-brand="sentry" data-size="13"></i><i data-brand="gmail" data-size="13"></i><i data-brand="posthog" data-size="13"></i><i data-brand="github" data-size="13"></i></span></span>
+                  </div>
+                  <button class="toggle" role="switch" aria-checked="true" aria-label="Marks"></button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // The selected theme follows the page's own theme, so a frame shown in Nile has Nile selected.
+      (function () {
+        var t = document.documentElement.dataset.theme;
+        t = t === "light" ? "whitehaven" : t === "dark" ? "orient-express" : t;
+        document.querySelectorAll(".tp").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.querySelector(".tp-art").dataset.theme === t));
+        });
+      })();
+
+      // The Glass slider moves the whole page live. It starts at the level the page is shown at
+      // (the design default, or ?glass=), and follows a book slider that posts a new level.
+      (function () {
+        var input = document.querySelector("[data-appearance-glass]");
+        var output = document.querySelector("[data-appearance-glass-value]");
+        function showLevel(level) {
+          input.value = String(Math.round(level * 100));
+          output.textContent = input.value + "%";
+        }
+        showLevel(Number(getComputedStyle(document.documentElement).getPropertyValue("--glass-level")));
+        input.addEventListener("input", function () {
+          HerculePage.setGlassLevel(Number(input.value) / 100);
+        });
+        document.addEventListener("glasschange", function (e) {
+          showLevel(e.detail);
+        });
+      })();
+    </script>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

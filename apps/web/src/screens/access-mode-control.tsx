@@ -1,19 +1,13 @@
 import type { JSX } from "react";
-import type { AccessMode } from "@hercule/contract";
+import { formatAccessMode } from "@hercule/client-core";
+import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
 import { SegmentedControl, SegmentedControlItem } from "@hercule/ui";
-
-/** The four access modes, from the most asking to the least. */
-const ACCESS_MODES: readonly AccessMode[] = [
-  "approval-required",
-  "auto-accept-edits",
-  "auto",
-  "full-access",
-];
 
 /**
  * Renders a segmented control named "Access mode" that picks one of the four
  * access modes, in the compact style for the value column of a settings
- * `Row`. `onChange` receives the picked mode.
+ * `Row`. Each segment shows the mode's name, and `onChange` receives the
+ * picked mode's value.
  */
 export function AccessModeControl({
   value,
@@ -31,9 +25,9 @@ export function AccessModeControl({
         onChange(next as AccessMode);
       }}
     >
-      {ACCESS_MODES.map((mode) => (
+      {ACCESS_MODE_CHAIN.map((mode) => (
         <SegmentedControlItem key={mode} value={mode}>
-          {mode}
+          {formatAccessMode(mode)}
         </SegmentedControlItem>
       ))}
     </SegmentedControl>

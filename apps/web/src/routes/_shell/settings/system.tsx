@@ -1,5 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { formatAccessMode } from "@hercule/client-core";
+import { ACCESS_MODE_CHAIN } from "@hercule/contract";
 import { EmptyState, FormCard } from "@hercule/ui";
 
 export const Route = createFileRoute("/_shell/settings/system")({
@@ -27,8 +29,8 @@ function System(): JSX.Element {
         </p>
         {/* On its own line and never wrapped: a break between a mode and its
             `<` would make the order read differently. */}
-        <span className="block overflow-x-auto font-mono text-row whitespace-nowrap text-ink">
-          approval-required &lt; auto-accept-edits &lt; auto &lt; full-access
+        <span className="block overflow-x-auto text-row whitespace-nowrap text-ink">
+          {ACCESS_MODE_CHAIN.map(formatAccessMode).join(" < ")}
         </span>
         <p className="text-row text-muted">
           A thread asking for a mode its provider does not support runs at the nearest less

@@ -1,12 +1,11 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-import { addCompletedStep } from "@hercule/client-core";
+import { addCompletedStep, isMutationRunning, readErrorMessage } from "@hercule/client-core";
 import { Button, Field, Input } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { assistantsQuery, settingsQuery } from "../../app/queries";
 import { CenteredScreen } from "../../screens/centered-screen";
-import { readErrorMessage } from "../../screens/save-status";
 
 /** The key of this step's save, so a second submit can see that one is running. */
 const SAVE_KEY = ["onboarding-assistant"];
@@ -69,10 +68,7 @@ function AssistantStep(): JSX.Element {
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    // `save.isPending` reaches the render a tick after `mutate`, so a second
-    // Enter in the same tick would still see it false; the mutation cache
-    // knows at once.
-    if (queryClient.isMutating({ mutationKey: SAVE_KEY }) > 0) return;
+    if (isMutationRunning(queryClient, SAVE_KEY)) return;
     save.mutate(name.trim());
   };
 

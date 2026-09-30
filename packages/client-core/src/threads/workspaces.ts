@@ -102,6 +102,15 @@ export const formatWorkspaceLabel = (
   runners: readonly Runner[],
 ): string => joinLabelText(buildWorkspaceLabelParts(workspace, resources, runners));
 
+/**
+ * Checks whether a new thread can join the workspace. Only a ready workspace
+ * takes threads: the controller refuses to start a thread in a workspace that
+ * is still being set up, failed, was deleted or was lost. Returns `false` for
+ * `undefined`, a workspace the list does not hold.
+ */
+export const isJoinable = (workspace: Workspace | undefined): boolean =>
+  workspace?.status === "ready";
+
 /** Returns the repo's ready main workspace on a runner, or `undefined` when the runner has none. */
 export const findReadyPrimary = (
   workspaces: readonly Workspace[],
@@ -166,8 +175,8 @@ export const findBaseBranch = (
  * - a project with no repo has nowhere to work;
  * - a draft with no project has no project to add a repo to.
  *
- * In both, "None" is the only option, and the selector's reason tells the
- * user what would give them another option.
+ * In both, "No workspace" is the only option, and the selector's reason
+ * tells the user what would give them another option.
  */
 export const NO_WORKSPACE_REASON = "Add a repository to the project to work in one";
 

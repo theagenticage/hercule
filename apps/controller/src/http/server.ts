@@ -4,24 +4,26 @@
  * The routes are derived from the contract's HttpApi declaration and nothing
  * else. This module sets the order a request passes through:
  *
- * 1. the error envelope, which handles every failure the routes did not;
- * 2. the web bundle, which serves requests the router matched no route for
+ * 1. CORS, which answers the desktop app's preflights and lets the desktop
+ *    app read every other response (`./cors.ts`);
+ * 2. the error envelope, which handles every failure the routes did not;
+ * 3. the web bundle, which serves requests the router matched no route for
  *    (`./static.ts`);
- * 3. routing;
- * 4. the pre-setup gate and the per-request span, both keyed on the operation
+ * 4. routing;
+ * 5. the pre-setup gate and the per-request span, both keyed on the operation
  *    the router matched (`./gate.ts`);
- * 5. the credential middleware and the static grant check (`./middleware.ts`);
- * 6. the derived route's decoding, then the one-line handler.
+ * 6. the credential middleware and the static grant check (`./middleware.ts`);
+ * 7. the derived route's decoding, then the one-line handler.
  *
  * Four routes are not derived from the contract's HttpApi declaration:
  *
- * - The live socket at `GET /ws` stops after step 4. It passes the pre-setup
+ * - The live socket at `GET /ws` stops after step 5. It passes the pre-setup
  *   gate, then authenticates in its own first frame, because a browser cannot
  *   put a credential on a WebSocket handshake.
- * - The join at `POST /api/v1/runners/join` stops before step 4. The caller is
+ * - The join at `POST /api/v1/runners/join` stops before step 5. The caller is
  *   a runner with a single-use join token, not a user, and the controller's
  *   own local runner joins before anyone has set Hercule up.
- * - The runner socket at `GET /api/v1/runners/socket` also stops before step 4,
+ * - The runner socket at `GET /api/v1/runners/socket` also stops before step 5,
  *   for the same reason: it presents a runner's durable credential, which no
  *   operation accepts and no grant applies to.
  * - The OAuth callback at `GET /oauth/callback` also stops before the
@@ -48,6 +50,7 @@ import * as HttpServer from "effect/unstable/http/HttpServer";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { ALL_OPERATIONS, api, createValidationError } from "@hercule/contract";
+import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
@@ -193,7 +196,7 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         OAuthCallbackRouteLayer,
       ),
     ),
-    (routes) => withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+    (routes) => withCors(withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes)))),
   );
 
 /**

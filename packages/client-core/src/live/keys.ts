@@ -13,8 +13,10 @@ import type {
   MutableLiveTopic,
   NotificationFilter,
   RunFilter,
+  Runner,
   TaskFilter,
 } from "@hercule/contract";
+import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
@@ -27,6 +29,8 @@ export type LiveQueryKey = ReadonlyArray<unknown>;
 export const queryKeys = {
   setup: (): LiveQueryKey => ["setup"],
   settings: (): LiveQueryKey => ["settings"],
+  /** Not a live topic: the signed-in user's name never changes, since no operation renames a user. */
+  user: (): LiveQueryKey => ["user"],
   tasks: (filter?: TaskFilter): LiveQueryKey =>
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
@@ -45,11 +49,21 @@ export const queryKeys = {
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**
-   * A filtered listing is keyed on its filter: one runner's sessions for its
-   * page, or one conversation's sessions for its activity row.
+   * A filtered listing is keyed on its filter:
+   *
+   * - one runner's sessions, for its page;
+   * - one conversation's sessions, for its activity row;
+   * - `{ thread: true }`, every Thread and no Agent's session, for the
+   *   desktop app's sidebar.
+   *
+   * Every variant keeps the `sessions` prefix, so a `session` push
+   * invalidates them all.
    */
   sessions: (
-    filter?: { readonly runnerId: string } | { readonly conversationId: string },
+    filter?:
+      | { readonly runnerId: string }
+      | { readonly conversationId: string }
+      | { readonly thread: true },
   ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
@@ -119,8 +133,15 @@ export const queryKeys = {
     "unseen",
     since ?? null,
   ],
-  /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
-  localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
+  /**
+   * Keyed on the loopback endpoints detection asks among `runners`, because
+   * the result depends on them. The same runners read again, with the same
+   * endpoints, gives the same key, so detection does not run again.
+   */
+  localRunner: (runners: ReadonlyArray<Runner>): LiveQueryKey => [
+    "local-runner",
+    listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
+  ],
 } as const;
 
 /**

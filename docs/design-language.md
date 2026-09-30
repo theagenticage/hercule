@@ -2,6 +2,7 @@
 
 Pinned by [ticket #33](https://github.com/theagenticage/hercule/issues/33) (2026-08-26).
 **All later UI prototypes and the v1 web app must be built in this language.**
+*(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* The desktop app is the exception: it is drawn in the Crew Bureau design system ([spec 17](./spec/17-desktop-app.md) §Design system).
 The living reference is the playground prototype
 ([`prototype/design-language.html` on branch `prototype/design-language`](https://github.com/theagenticage/hercule/blob/prototype/design-language/prototype/design-language.html)),
 whose defaults are the pinned settings: `face=Onest th=Midnight cs=6 ll=94.5 dl=20 w=500`.

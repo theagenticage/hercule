@@ -17,11 +17,18 @@ import type {
   ModelOption,
   ProviderInstance,
   Runner,
+  Workspace,
+  WorkspaceStatus,
 } from "@hercule/contract";
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import { findAccountName, buildLoginTarget, findSnapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
-import { findReferenceRunner, buildRunnerMenu, type RunnerMenuRow } from "./runner-menu";
+import {
+  buildRunnerMenu,
+  findDimmedReason,
+  findReferenceRunner,
+  type RunnerMenuRow,
+} from "./runner-menu";
 import {
   decideDefaultWorkspacePick,
   NO_PROJECT_REASON,
@@ -48,6 +55,10 @@ export interface ModelPill {
 }
 
 export interface ComposerBlocked {
+  /**
+   * Why the thread cannot start, as a sentence without its full stop, such
+   * as "Claude Code is not on moss". Screens show it after "Can't start yet."
+   */
   readonly reason: string;
   /** The login that would fix the problem, when a missing login is the problem. */
   readonly login: LoginTarget | null;
@@ -67,6 +78,24 @@ export interface MachineRow extends RunnerMenuRow {
    */
   readonly notCloned: string | null;
 }
+
+/**
+ * Returns the line under a machine row in the machine menu. It lists what kind
+ * of machine this is (this machine, the default, reserved) and every reason
+ * the row is dimmed, joined with " · ", or "" when there is nothing to say. A
+ * machine that has not cloned the repo yet can still be picked, because it
+ * clones the repo on first use.
+ */
+export const describeMachineRow = (row: MachineRow): string =>
+  [
+    row.isLocal ? "this machine" : null,
+    row.isDefault ? "default" : null,
+    row.reserved ? "reserved" : null,
+    row.dimmed,
+    row.notCloned,
+  ]
+    .filter((each) => each !== null)
+    .join(" · ");
 
 export interface ComposerFields {
   /** The current access mode, and the four modes the menu offers. */
@@ -100,22 +129,39 @@ export interface ComposerFields {
 }
 
 /**
+ * Why a draft cannot join a workspace, for each status but `ready`. The
+ * controller refuses to start a thread in a workspace that is not ready, so
+ * the draft says why before the user tries.
+ */
+const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready">, string>> = {
+  provisioning: "The workspace it joins is still being set up",
+  failed: "The workspace it joins could not be set up",
+  deleted: "The workspace it joins was deleted",
+  lost: "The workspace it joins was lost when its machine was retired",
+};
+
+/**
  * Returns why a draft cannot start, or `null` when it can. Checks, in the
  * order the user can fix them:
  *
+ * - the workspace it joins, if it joins one, which must be ready;
  * - a provider instance to run it with;
- * - a runner to run it on;
+ * - a runner to run it on, which must not be retired;
  * - a login for the instance on that runner.
  *
  * Only the last one can be fixed with a button from here.
  */
 const findBlocker = (
+  joined: Workspace | undefined,
   instance: ProviderInstance | undefined,
   runner: Runner | undefined,
   snapshot: CapabilitySnapshot | undefined,
 ): ComposerBlocked | null => {
-  if (instance === undefined) return { reason: "no provider instance is set up", login: null };
-  if (runner === undefined) return { reason: "no machine is connected", login: null };
+  if (joined !== undefined && joined.status !== "ready")
+    return { reason: UNREADY_WORKSPACE_REASONS[joined.status], login: null };
+  if (instance === undefined) return { reason: "No provider instance is set up", login: null };
+  if (runner === undefined) return { reason: "No machine is connected", login: null };
+  if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, login: null };
   if (snapshot === undefined)
     return { reason: `${instance.displayName} is not on ${runner.name}`, login: null };
   if (snapshot.auth.status !== "ok")
@@ -187,7 +233,10 @@ export const buildComposerFields = (
           ? `${formatRepoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
           : null,
     })) ?? [];
-  const dimmed = rows.find((row) => row.current)?.dimmed ?? null;
+  // Read from the runner rather than from its row, because the menu has no
+  // row for a retired runner, and a draft can still refer to one.
+  const dimmed =
+    instance === undefined || runner === undefined ? null : findDimmedReason(runner, snapshot);
   const name = runner?.name ?? "no machine";
 
   return {
@@ -246,7 +295,7 @@ export const buildComposerFields = (
             machine: name,
             runnerId: runner?.id ?? null,
           }),
-    blocked: kind === "active" ? null : findBlocker(instance, runner, snapshot),
+    blocked: kind === "active" ? null : findBlocker(joined, instance, runner, snapshot),
   };
 };
 

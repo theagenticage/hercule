@@ -25,6 +25,8 @@ export {
 
 export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily } from "./grants";
 
+export { DESKTOP_APP_ORIGIN } from "./desktop-app";
+
 export {
   decodeBindableOperation,
   dispatchBindableOperation,
@@ -112,6 +114,7 @@ export { Authenticated, SetupToken } from "./security";
 export { SetupPayload, SetupResult, SetupState } from "./groups/setup";
 export { LoginPayload, LoginResult, WsTicket } from "./groups/auth";
 export { ApiKey, MintedApiKey } from "./groups/api-key";
+export { SignedInUser } from "./groups/user";
 export {
   AccessMode,
   ControllerSettings,
@@ -229,6 +232,8 @@ export {
 } from "./groups/connection";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {
+  IDENTITY_PORT,
+  IDENTITY_PORT_COUNT,
   JoinTokenRef,
   MAX_RUNNER_LABELS,
   MAX_RUNNER_LABEL_LENGTH,

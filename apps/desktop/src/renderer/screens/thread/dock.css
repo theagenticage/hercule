@@ -1,0 +1,156 @@
+/* The dock: a Request waiting on you, as a lip on top of the composer, in
+   the marigold tint, never a fill. Its lower 14px, `--dock-tuck`, sit under
+   the composer's card. The rules are the Bureau book's `.dock` and
+   `.dock-q`; the answers are the ledger in controls.css. Each departure from
+   the book says why. */
+.dock {
+  --dock-tuck: 14px;
+  position: relative;
+  z-index: 1;
+  padding: 12px 12px 24px 14px;
+  margin-bottom: calc(-1 * var(--dock-tuck));
+  border-radius: 18px 18px 0 0;
+  background: color-mix(
+    in oklab,
+    var(--you-tint) calc(100% - 18% * var(--glass-level)),
+    transparent
+  );
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 45%, transparent),
+    inset 0 1px 0 var(--glass-edge);
+}
+.dock-q {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-weight: var(--w-medium);
+}
+/* The command is text a reader may copy, unlike the rest of the card. */
+.dock-q code {
+  font-size: 12.5px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  user-select: text;
+  background: color-mix(in oklab, var(--raised) 70%, transparent);
+}
+.dock .ledger {
+  gap: 2px;
+}
+.dock .ans {
+  min-height: 34px;
+}
+/* While the composer is shrunk, the dock is one line: the face, the
+   question and two answers. */
+.dock-mini {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+  font-size: var(--t-12);
+}
+.composer.is-scrolled .dock-mini {
+  display: flex;
+}
+.composer.is-scrolled .dock {
+  padding: 6px 8px 20px 10px;
+}
+/* Not in the book, whose question is short. A long one ellipsizes, and the
+   answers keep their size. */
+.dock-mini-q {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dock-mini .btn {
+  flex: none;
+}
+
+/* Not in the book, whose dock is never focused. The dock takes the focus
+   so that ↩ can allow. Its ring goes round the part of the dock in view,
+   just inside its rim: a ring round the whole dock would run under the card
+   and lose its bottom edge there. So the ring is drawn by a box that ends
+   where the card begins. */
+.dock:focus-visible {
+  outline: none;
+}
+.dock:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 var(--dock-tuck);
+  border-radius: inherit;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+/* Not in the book, whose question is one short command. A command of
+   thousands of characters, or forty paths, wraps anywhere and scrolls
+   within eight lines, rather than pushing the composer off the screen.
+   A scrolling box clips at its padding's edge, and a command's background
+   reaches 2px above and below its line, so the box has 2px of padding
+   there, which its negative margin takes back out of the layout. */
+.dock-text {
+  min-width: 0;
+  max-height: calc(8lh + 4px);
+  margin-block: -2px;
+  padding-block: 2px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+/* Not in the book, which draws no `question` request. The questions sit
+   on the ledger's grid: the option labels in the buttons' column and what
+   they mean in the descriptions' column, so options and answers line up.
+   Each question's header is a label, in the sidebar headings' type. */
+.dock-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 192px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+  overflow-y: auto;
+}
+.dock-question {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dock-question-header {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.dock-options {
+  display: grid;
+  grid-template-columns: 156px 1fr;
+  align-items: baseline;
+  gap: 2px 16px;
+}
+.dock-option-label {
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.dock-question .faint {
+  font-size: var(--t-12);
+}
+/* Not in the book. An instruction rather than an answer, in the ledger's
+   description type, on the ledger's left edge. */
+.dock-note {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Not in the book, which draws no failed answer. The error sits under the
+   answers, in the app's error type. */
+.dock-error {
+  margin: 6px 0 0;
+  padding: 0 4px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}

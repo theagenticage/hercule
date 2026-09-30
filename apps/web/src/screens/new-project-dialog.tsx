@@ -1,4 +1,4 @@
-import { type JSX } from "react";
+import type { JSX } from "react";
 import { Field, Input, Select } from "@hercule/ui";
 
 /**

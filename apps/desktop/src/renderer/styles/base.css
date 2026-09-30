@@ -1,0 +1,176 @@
+/* The page under the app: rules for the whole document, not for one
+   component. The window is a Mac app, not a web page (spec 17 §Native
+   behaviour), so the page never shows the signs of one. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* In the two themes the app shows, `--bg` is the exact 8-bit sRGB colour
+   that main gives the native window (src/main/window-background.ts), not the
+   book's oklch value. tokens.css is the book's file and stays unchanged.
+
+   On macOS, Chromium splits the page into tiles, and each tile reaches the
+   screen by one of two paths:
+   - A tile with content in it is drawn by Chromium, which converts its
+     colours to the display's colours itself.
+   - A tile of one flat colour is handed to macOS, which converts that colour,
+     as it converts the native window's background.
+   The two paths round colours differently. An oklch colour falls between two
+   8-bit values, so on a wide-gamut display the band of tiles holding the
+   content showed a step off from the rest of the page. From an exact 8-bit
+   colour, the flat tiles match the native window, and the tiles with content
+   match them too, or at times sit one step off in a single channel. No CSS
+   value removes that last step: macOS's own conversion varies over time.
+
+   Only these two themes, because public/theme-init.js sets no other. A rule
+   on :root would also replace `--bg` in the book's other themes. */
+[data-theme="whitehaven"] {
+  --bg: #f4f3f0;
+}
+
+[data-theme="orient-express"] {
+  --bg: #1a1310;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Painted before React mounts too, so the first frame is already --bg,
+     the colour main gives the window. */
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  line-height: 1.45;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Controls take the page's type and ink, not the browser's own. */
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/* Three of the book's element rules, copied from its system.css with their
+   selectors. An element rule reaches every screen, whichever file holds it,
+   so they sit here rather than with the first screen that uses them.
+   - A link takes the text around it: the book draws rows and buttons as
+     links, not as underlined text.
+   - Monospace is for code only: code, commands and diffs. Branches and
+     workspace labels are set in the UI face.
+   - A key cap names a shortcut in the UI face, never in monospace. */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.92em;
+}
+kbd {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: var(--t-11);
+  line-height: 1.6;
+}
+
+/* Two of the book's helper classes, which any screen may use:
+   - `.faint` draws secondary text in faint ink;
+   - `.spacer` takes the free space of a flex row, pushing what follows it to
+     the row's far end. */
+.faint {
+  color: var(--faint);
+}
+.spacer {
+  flex: 1;
+}
+
+html {
+  /* The window never bounces as a whole. Scroll areas inside it keep macOS's
+     elastic scrolling. */
+  overscroll-behavior: none;
+  /* The chrome is not text: it cannot be selected, and the pointer is an
+     arrow over it, as over native controls. Links are the one exception to
+     the arrow, handled below. Text a reader may copy, such as the transcript
+     and code, opts back in to selection where it is drawn. */
+  user-select: none;
+  cursor: default;
+}
+
+/* Chromium gives every link the pointing hand, whatever cursor its parent
+   has. The book draws rows and tabs as links, and a native row shows the
+   arrow. */
+:any-link {
+  cursor: default;
+}
+
+/* A focus ring shows only for keyboard focus. Chromium already keeps its own
+   ring to :focus-visible; this draws Bureau's ring in its place. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* A theme change snaps, as the native window around the page does. The theme
+   script (public/theme-init.js) sets the attribute only while it switches the
+   theme. */
+html[data-theme-changing] *,
+html[data-theme-changing] *::before,
+html[data-theme-changing] *::after {
+  transition: none !important;
+}
+
+/* With Reduce motion on, no transition runs: a hovered button, for one, takes
+   its new colours at once.
+   - Every transition lasts one of the three duration tokens;
+     styles/motion.test.ts refuses any other duration.
+   - Setting the tokens to 0s therefore stops every transition, and Chromium
+     starts none, so no transition event fires. No renderer code waits for
+     `transitionend`.
+   - This file loads after tokens.css, so these values replace the tokens'.
+   A rule that set a duration on every element would be wrong: an element
+   transitions every property by default, layout included, so each change
+   would start a transition of its own.
+   The one animation, the working pose's paws, is declared only for
+   no-preference, so it stops without a rule here. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+  }
+}
+
+/* With Reduce transparency on, glass has no blur at all. tokens.css sets the
+   glass level to 0 then, and its filter to `blur(0px) saturate(1)`, which
+   changes no pixel. Chromium still draws a backdrop filter for it, though: it
+   composites every frame itself, and holds about 400 MB more GPU memory while
+   a caret blinks. `none` draws no filter. The selectors are the ones
+   tokens.css derives the filter on, so a nested [data-theme] preview gets it
+   too; this file loads later, so its value wins. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme] {
+    --glass-filter: none;
+  }
+}

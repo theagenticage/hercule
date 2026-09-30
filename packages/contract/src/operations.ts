@@ -51,6 +51,10 @@ const TABLE = {
     path: "/api/v1/api-keys/:id",
   },
 
+  // The username is half of what a person signs in with, so reading it is a
+  // credential read, like listing API keys. The service lets only the user
+  // call it, so a session is refused even when its profile holds the grant.
+  "user.read": { requires: "credential.read", method: "GET", path: "/api/v1/user" },
   "user.setPassword": {
     requires: "credential.write",
     method: "POST",

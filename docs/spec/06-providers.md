@@ -448,7 +448,7 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 - The definition declares support per mode; the controller resolves any unsupported mode to a supported one **before session start**. `SessionSpec.accessMode` therefore always names a natively supported mode and adapters carry no fallback logic.
 - The fallback chain is **hardcoded in v1**, not configurable, and **strictly downward** on `approval-required < auto-accept-edits < auto < full-access`: the substitute is the nearest less-permissive supported mode. Shipped result: `auto -> auto-accept-edits` (auto always allows edits, so ask-everything was overly punitive). If no equal-or-less-permissive supported mode exists, session start fails with a clear error. Guardrail owned by [./13-security.md](./13-security.md).
-- The UI keeps every mode selectable and annotates the substitution from declaration plus policy ("runs as auto-accept-edits on this provider"). The Session record stores both `requestedAccessMode` and the effective `accessMode` ([./02-domain-model.md](./02-domain-model.md)); the fallback chain is stated in ADR 0007 and the glossary ([../../CONTEXT.md](../../CONTEXT.md)) as amended.
+- The UI keeps every mode selectable and annotates the substitution from declaration plus policy ("runs as Auto-accept edits on this provider", by the mode's name, [./14-web-app.md](./14-web-app.md), amended 2026-09-30). The Session record stores both `requestedAccessMode` and the effective `accessMode` ([./02-domain-model.md](./02-domain-model.md)); the fallback chain is stated in ADR 0007 and the glossary ([../../CONTEXT.md](../../CONTEXT.md)) as amended.
 
 ## 9. Provider-home isolation and compaction control
 

@@ -1,0 +1,360 @@
+/* The controls every screen shares: the buttons, the answer ledger, the
+   pills, the segmented controls, the navigation rows, the counts, the text
+   field, the priority bars and the section headings. The rules and
+   class names are the Bureau book's, as its system.css spells them. Each
+   departure from the book says why. */
+
+/* ---------- Buttons ---------- */
+/* One doctrine for every button:
+   - .btn          a neutral tablet. The default for an answer that does something.
+   - .btn--accent  the one suggested answer of a group. The only filled button anywhere.
+   - .btn--quiet   declines and dismissals: text until hovered. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-btn);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--btn-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.btn:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--btn-fill));
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn--accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: var(--w-bold);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 80%, black),
+    inset 0 1px 0 color-mix(in oklab, white calc(30% * var(--glass-level)), transparent);
+}
+.btn--accent:hover {
+  background: color-mix(in oklab, var(--accent) 90%, var(--accent-fg));
+}
+.btn--quiet {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.btn--quiet:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* A smaller button, for answers inside a row or a card, such as a queued
+   message's Steer and Cancel. */
+.btn--sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+  gap: 5px;
+}
+/* A suggested answer that cannot act yet, such as Sign in before both fields
+   hold text. The book draws no disabled control, so this follows macOS: a
+   default button that cannot act loses its accent and becomes a plain
+   button, with its label in faint ink. The fill, the rim and the shadow are
+   the neutral tablet's, as .btn draws them. The label stays bold, so it keeps
+   its width when the button turns on. Without pointer events, the hover and
+   press rules above cannot fire, so the button neither brightens nor sinks. */
+.btn--accent:disabled {
+  background: var(--btn-fill);
+  color: var(--faint);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
+  pointer-events: none;
+}
+/* A button whose action is already running. It keeps its full colour and its
+   focus, and its label says what is happening. It neither brightens nor
+   sinks, because pressing it again does nothing. */
+.btn[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+/* An icon alone as a button: 28px square, or 22px as --sm, muted until
+   hovered. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.icon-btn--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-xs);
+}
+
+/* ---------- Answers ---------- */
+/* The ledger: each answer on its own line with what the click does. Buttons
+   share one width, so their left and right edges line up down the ledger.
+   A row is one button: the `.btn` inside it is drawn as a span. */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ans {
+  display: grid;
+  grid-template-columns: 156px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 38px;
+  padding: 4px 12px 4px 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.ans:hover {
+  background: var(--hover);
+}
+.ans > .btn {
+  width: 100%;
+}
+.ans-desc {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ans kbd {
+  justify-self: end;
+}
+/* An answer that was already given. As with a button whose action is
+   running, the row keeps its colour and its focus, and neither it nor its
+   button reacts to the pointer. */
+.ans[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+/* ---------- Pills ---------- */
+/* A floating glass layer holding a few controls, such as the thread header's
+   tabs. Only content shows through it: no gradient and no glow behind. Every
+   value comes from --glass-level, so at 0 this is a solid, flat surface. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+}
+
+/* ---------- Segmented controls ---------- */
+/* A row of buttons that picks one of a few values, such as a model option's
+   choices. The pressed button is the value in use. */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2);
+}
+.seg button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+}
+
+/* ---------- Navigation rows ---------- */
+/* Icon, label, and whatever sits at the right end, such as a key cap. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.nav-row > span {
+  flex: 1;
+}
+.nav-row:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.nav-row.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---------- Counts ---------- */
+/* A number in a pill, such as the count of threads waiting on you. */
+.count {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  display: inline-grid;
+  place-items: center;
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+/* A count of things waiting on you: marigold, the one colour that means "you". */
+.count--you {
+  color: var(--face-ink);
+  background: var(--you);
+}
+
+/* ---------- Inputs ---------- */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+}
+/* The book draws a field as a box around text. Here it is also a real text
+   input, which comes with the browser's own border; .field draws the edge
+   instead. */
+input.field {
+  border: 0;
+}
+/* The book's placeholder colour, from its composer. */
+.field::placeholder {
+  color: var(--faint);
+}
+
+/* Chromium draws each character of a password as a bullet (U+2022) in the
+   field's font. Bricolage's bullet is 2.5px across at 13px, less than half
+   the bullet of a macOS secure text field. Enlarging it with size-adjust does
+   not help: a glyph grows away from the baseline, so at the right size the
+   bullet floats above the x-height.
+
+   So this face takes only that one character from Geneva, which macOS
+   installs in /System/Library/Fonts. Measured at 13px against an
+   NSSecureTextField in the 13pt system font:
+   - Geneva's bullet is 5.5px across, as the native bullet is.
+   - Its centre is 5.1px above the baseline; the native one is 5px.
+   The app runs only on macOS. Another platform would need its own local()
+   source. Without Geneva, the bullet falls back to Bricolage's small one.
+
+   Bricolage stays the field's first font, so the line height, the placeholder
+   and the caret follow it. The ascent and descent below are Bricolage's.
+   With Geneva's own, a line of bullets sits 0.5px lower than an empty line,
+   and the caret jumps down at the first character. */
+@font-face {
+  font-family: "Password bullet";
+  src: local("Geneva");
+  unicode-range: U+2022;
+  ascent-override: 93%;
+  descent-override: 27%;
+}
+input.field[type="password"] {
+  font-family: "Password bullet", var(--font-ui);
+}
+/* Geneva's bullet advances 0.667em; the native one advances 0.622em (8.1px at
+   13px). The placeholder, shown only while the field is empty, keeps its
+   normal spacing. */
+input.field[type="password"]:not(:placeholder-shown) {
+  letter-spacing: -0.045em;
+}
+
+/* ---------- Priority bars ---------- */
+/* Four bars rising left to right, filled up to the priority: one for low,
+   four for urgent. Urgent fills all four in the failure colour. */
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.bars i:nth-child(1) {
+  height: 5px;
+}
+.bars i:nth-child(2) {
+  height: 7.5px;
+}
+.bars i:nth-child(3) {
+  height: 10px;
+}
+.bars i:nth-child(4) {
+  height: 12px;
+}
+.bars[data-p="1"] i:nth-child(-n + 1),
+.bars[data-p="2"] i:nth-child(-n + 2),
+.bars[data-p="3"] i:nth-child(-n + 3) {
+  background: var(--ink);
+}
+/* The book also lists urgent among the ink bars above, and overrides it
+   here with `!important`. Here urgent is left out above, so this rule has
+   nothing to override. */
+.bars[data-p="4"] i {
+  background: var(--fail);
+}
+
+/* ---------- Section headings ---------- */
+/* A small bold heading over a group, with an icon before it. */
+.section-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.005em;
+}

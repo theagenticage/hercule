@@ -13,24 +13,42 @@ import type { FetchLike } from "./client";
 
 export const IDENTITY_TIMEOUT_MS = 1000;
 
-const buildIdentityUrl = (port: number): string => `http://127.0.0.1:${String(port)}/identity`;
+/**
+ * Asks the identity endpoint on 127.0.0.1 at `port` which runner is listening
+ * there, and resolves with the runner id it answers. A rejection, or any
+ * value but the id the caller expects, means "not that runner". `signal`
+ * aborts the request once detection stops waiting for it.
+ *
+ * The web app asks with `fetch`, see `buildFetchIdentityProbe`. The desktop
+ * app asks through its main process, because its page may reach only the
+ * controller.
+ */
+export type IdentityProbe = (port: number, signal: AbortSignal) => Promise<unknown>;
 
 /**
- * Reads the runner id from an identity response. Nothing else in the response
- * is checked, because the caller compares the id with the one it expects, and
- * any other value fails that comparison.
+ * Returns an `IdentityProbe` that sends `GET http://127.0.0.1:<port>/identity`
+ * with `fetch` and resolves with the `runnerId` of the JSON body. Nothing else
+ * in the body is checked, because the caller compares the id with the one it
+ * expects, and any other value fails that comparison.
  */
-const readRunnerId = async (response: Response): Promise<unknown> => {
-  return ((await response.json()) as { readonly runnerId?: unknown }).runnerId;
-};
+export const buildFetchIdentityProbe =
+  (fetch: FetchLike): IdentityProbe =>
+  async (port, signal) => {
+    const response = await fetch(`http://127.0.0.1:${String(port)}/identity`, { signal });
+    return ((await response.json()) as { readonly runnerId?: unknown }).runnerId;
+  };
 
 /**
- * Asks the identity port which runner is listening, and resolves with its id,
- * or with `undefined` on an error or a timeout. The timeout is set here rather
- * than left to the browser: a port that accepts a connection and never
- * responds would otherwise keep detection pending for the life of the page.
+ * Asks `port` which runner is listening, and resolves with its id, or with
+ * `undefined` on an error or a timeout. The timeout is set here rather than
+ * left to the probe: a port that accepts a connection and never responds
+ * would otherwise keep detection pending for the life of the page.
  */
-const fetchRunnerIdOnPort = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unknown> =>
+const probeWithTimeout = (
+  port: number,
+  probe: IdentityProbe,
+  timeoutMs: number,
+): Promise<unknown> =>
   new Promise((resolve) => {
     const control = new AbortController();
     const expiry = setTimeout(() => {
@@ -41,9 +59,7 @@ const fetchRunnerIdOnPort = (port: number, fetch: FetchLike, timeoutMs: number):
       clearTimeout(expiry);
       resolve(id);
     };
-    void fetch(buildIdentityUrl(port), { signal: control.signal })
-      .then(readRunnerId)
-      .then(settle, () => settle(undefined));
+    probe(port, control.signal).then(settle, () => settle(undefined));
   });
 
 export interface LoopbackEndpoint {
@@ -70,20 +86,24 @@ export const listLoopbackEndpoints = (
  * counts only when it responds with the id of the runner that reported that
  * port. Accepting any fleet id from any port could mistake a runner on another
  * machine for the local one, and the local runner decides where the user's
- * next session runs.
+ * next session runs. When two runners both answer on their own ports, both
+ * are on this machine and either could be meant, so neither is picked.
+ *
+ * Each port is asked once, however many runners report it: runners on
+ * different machines usually all listen on the default port.
  *
  * The caller passes the whole runner list, so it cannot forget to filter it.
  */
 export const detectLocalRunner = async (
   runners: ReadonlyArray<Runner>,
-  fetch: FetchLike,
+  probe: IdentityProbe,
   timeoutMs: number = IDENTITY_TIMEOUT_MS,
 ): Promise<string | null> => {
-  const answers = await Promise.all(
-    listLoopbackEndpoints(runners).map(async ({ id, port }) => ({
-      id,
-      answered: await fetchRunnerIdOnPort(port, fetch, timeoutMs),
-    })),
+  const endpoints = listLoopbackEndpoints(runners);
+  const ports = [...new Set(endpoints.map(({ port }) => port))];
+  const answers = await Promise.all(ports.map((port) => probeWithTimeout(port, probe, timeoutMs)));
+  const [found, alsoFound] = endpoints.filter(
+    ({ id, port }) => answers[ports.indexOf(port)] === id,
   );
-  return answers.find(({ id, answered }) => answered === id)?.id ?? null;
+  return alsoFound === undefined ? (found?.id ?? null) : null;
 };

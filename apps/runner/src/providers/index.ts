@@ -4,15 +4,15 @@
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
-import {
-  type ApprovalDecision,
-  type ExitReason,
-  type ProbeResult,
-  type ProviderEvent,
-  type SendResult,
-  type SessionBinding,
-  type SessionSpec,
-  type TurnInput,
+import type {
+  ApprovalDecision,
+  ExitReason,
+  ProbeResult,
+  ProviderEvent,
+  SendResult,
+  SessionBinding,
+  SessionSpec,
+  TurnInput,
 } from "@hercule/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";

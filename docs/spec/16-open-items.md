@@ -1,6 +1,6 @@
 # Open items
 
-The register of everything the spec assembly (2026-08-28) could not settle from the closed tickets and ADRs. Every `**Open:**`, `**Conflict:**`, `**Verify at build time:**` and `**Risk:**` line in documents 01-15 is indexed here, in one of four classes:
+The register of everything the spec assembly (2026-08-28) could not settle from the closed tickets and ADRs. Every `**Open:**`, `**Conflict:**`, `**Verify at build time:**` and `**Risk:**` line in documents 01-15 and 17 is indexed here, in one of four classes:
 
 - **A. Decisions handed to tickets.** Real design questions. Each is on the [wayfinder map](https://github.com/theagenticage/hercule/issues/1) as a child ticket; its resolution amends the owning document in place and removes the line. Grouped by ticket below.
 - **B. Implementer's choices.** Details the spec deliberately leaves to build time. They are not design questions: any reasonable choice is fine, the constraint (if any) is stated, and the choice gets recorded in the owning document when made.
@@ -57,6 +57,12 @@ Not design questions. The constraint is stated where one exists.
 - ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/theagenticage/hercule/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
 - ~~13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.~~ **Resolved 2026-09-16 ([#72](https://github.com/theagenticage/hercule/issues/72)):** a Unix socket under the runner's storage directory, mode 0600, and the session's own token verified by the controller, which answers only for that session's workspace; recorded in 13 §9.1.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.
+- 17 §Reaching the controller: a controller on another machine, on the LAN or a tailnet, is reachable from `app://hercule` under Chromium's Local Network Access checks. Measured so far only against this machine's own LAN address. *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)*
+- 17 §Reaching the controller: the `codeCache` scheme privilege caches the renderer's scripts in Electron 44, and how much it shortens a warm launch.
+- 17 §Development: Vite's HMR socket accepts a client whose origin is `app://hercule`. The fallback is a Vite proxy.
+- 17 §Auth and the token: whether `safeStorage` prompts for Keychain access in an unsigned development build. A signed build must not prompt.
+- 17 §Performance: a macOS window fully covered by other windows stops animation frames, as a minimized one does.
+- 17 §Performance: the cost of glass on the slowest Mac the app supports, measured before the first release.
 - ~~15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.~~ **Resolved 2026-09-04 ([#58](https://github.com/theagenticage/hercule/issues/58)):** measured both; Bun's HTML route ignores `vite.config.ts` and so loses the React Compiler and code splitting. `vite build`'s output is embedded per file with `with { type: "file" }` and served through the Effect HTTP server; recorded in 15 §11.
 
 ## D. Standing risks

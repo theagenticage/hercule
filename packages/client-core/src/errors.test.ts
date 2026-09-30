@@ -3,6 +3,7 @@ import {
   ApiError,
   ConnectionError,
   isNotFound,
+  readErrorMessage,
   readValidationIssues,
   RequestError,
 } from "@hercule/client-core";
@@ -43,5 +44,13 @@ describe("isNotFound", () => {
       false,
     );
     expect(isNotFound(null)).toBe(false);
+  });
+});
+
+describe("readErrorMessage", () => {
+  it("returns an error's message, and any other rejected value as a string", () => {
+    expect(readErrorMessage(new ApiError("forbidden", "No."))).toBe("No.");
+    expect(readErrorMessage("refused")).toBe("refused");
+    expect(readErrorMessage(undefined)).toBe("undefined");
   });
 });

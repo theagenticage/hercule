@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { AccessModeMenuItem } from "@hercule/client-core";
+import { formatAccessMode, type AccessModeMenuItem } from "@hercule/client-core";
 import type { AccessMode } from "@hercule/contract";
 import { MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
@@ -29,11 +29,16 @@ export function AccessModeSelector({
   readonly onPick: (mode: AccessMode) => void;
 }): JSX.Element {
   return (
-    <SelectorShell label={mode} locked={locked} open={open} onOpenChange={onOpenChange}>
+    <SelectorShell
+      label={formatAccessMode(mode)}
+      locked={locked}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
       {items.map((item) => (
         <MenuRow
           key={item.mode}
-          name={item.mode}
+          name={item.label}
           current={item.mode === mode}
           sub={
             <>

@@ -21,6 +21,7 @@ import type {
   Runner,
   SettingsState,
 } from "@hercule/contract";
+import type { ThreadConfig } from "./config";
 import { findDefaultInstanceId } from "./default-instance";
 import { buildThreadModelField } from "./model-field";
 import { buildRunnerMenu } from "./runner-menu";
@@ -89,3 +90,38 @@ export const computeThreadDefaults = (
       null,
   };
 };
+
+/**
+ * Returns what a Draft Thread runs with before the user picks anything: the
+ * defaults of `computeThreadDefaults`, no model options, the draft's project,
+ * and the workspace it joins. `workspaceId` is `null` for a draft that joins
+ * no workspace; the composer then opens it where the stored `thread.workspace`
+ * setting says, which the config carries along.
+ *
+ * Call it on every render rather than keeping the result, so a catalog that
+ * changes while the draft is open, such as after a provider login, fills in
+ * whatever the user has not picked.
+ */
+export const buildDraftConfig = ({
+  settingsUser,
+  instances,
+  runners,
+  profiles,
+  localRunnerId,
+  projectId,
+  workspaceId,
+}: {
+  readonly settingsUser: SettingsState["user"];
+  readonly instances: readonly ProviderInstance[];
+  readonly runners: readonly Runner[];
+  readonly profiles: readonly Profile[];
+  readonly localRunnerId: string | null;
+  readonly projectId: string | null;
+  readonly workspaceId: string | null;
+}): ThreadConfig => ({
+  ...computeThreadDefaults(settingsUser, instances, runners, profiles, localRunnerId),
+  options: {},
+  projectId,
+  workspace: workspaceId === null ? null : { kind: "existing", workspaceId },
+  preferredWorkspace: settingsUser["thread.workspace"] ?? null,
+});

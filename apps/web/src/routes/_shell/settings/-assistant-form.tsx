@@ -8,6 +8,7 @@ import {
   mergeAssistantEdits,
   type AssistantDraft,
   type HerculeClient,
+  readErrorMessage,
 } from "@hercule/client-core";
 import type { Assistant, AssistantReply, AssistantUpdateInput } from "@hercule/contract";
 import {
@@ -28,7 +29,7 @@ import {
 } from "../../../app/queries";
 import { AccessModeControl } from "../../../screens/access-mode-control";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
-import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
+import { SaveStatus } from "../../../screens/save-status";
 
 /**
  * The mutation key prefix of every assistant create, save and delete on the
