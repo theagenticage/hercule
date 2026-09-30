@@ -1,6 +1,6 @@
 import { useEffect, useRef, type JSX, type KeyboardEvent } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useRouteContext } from "@tanstack/react-router";
 import { buildProjectPickerRows } from "@hercule/client-core";
 import { projectsQuery, resourcesQuery, threadsQuery, workspacesQuery } from "../../app/queries";
 import { pickProjectTint, ProjectTile } from "../project-tile";
@@ -34,21 +34,26 @@ const findNextRow = (list: HTMLElement, step: 1 | -1): HTMLButtonElement | undef
  * - ⌘1 to ⌘9 pick the first nine projects directly.
  * - Esc, or a click on the scrim, closes the picker.
  *
- * Picking a project closes the picker and opens a Draft Thread in it. The
- * web app's picker also has a New project row; the desktop app cannot create
- * a project, so it has none, and it is not opened when there is no project.
+ * Picking a project closes the picker, then calls `onPick` with the project,
+ * where the caller opens a Draft Thread in it. The web app's picker also has
+ * a New project row; the desktop app cannot create a project, so it has none,
+ * and it is not opened when there is no project.
  *
  * `onClose` is called when the picker closes, whether a project was picked
  * or not. The caller then unmounts the picker.
  *
- * The picker closes before the draft opens, so the browser gives the focus
- * back to where it was when the picker opened, and a draft that mounts then
- * can take it. An open modal dialog would keep it.
+ * The picker closes before `onPick` is called because an open modal dialog
+ * keeps the focus inside it, so the draft could not take it.
  */
-export function ProjectPicker({ onClose }: { readonly onClose: () => void }): JSX.Element {
+export function ProjectPicker({
+  onPick,
+  onClose,
+}: {
+  readonly onPick: (projectId: string) => void;
+  readonly onClose: () => void;
+}): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const navigate = useNavigate();
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
@@ -70,7 +75,7 @@ export function ProjectPicker({ onClose }: { readonly onClose: () => void }): JS
 
   const openProject = (projectId: string): void => {
     dialogRef.current?.close();
-    void navigate({ to: "/", search: { project: projectId } });
+    onPick(projectId);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {

@@ -12,6 +12,7 @@ import {
   userQuery,
   workspacesQuery,
 } from "../../app/queries";
+import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { ProjectPicker } from "../../screens/new-thread/project-picker";
 import { Shell } from "../../shell";
 
@@ -65,10 +66,25 @@ function ShellLayout(): JSX.Element {
   const hasProjects = useSuspenseQuery(projectsQuery(controller.client)).data.length > 0;
   const [picking, setPicking] = useState(false);
 
+  // Opens the Draft Thread in `projectId`, or in no project when it is
+  // `undefined`, with the focus in its message field. A draft that mounts
+  // takes the focus itself, but the draft that is already open does not mount
+  // again, and the focus would stay on the New thread button the user
+  // pressed.
+  const openDraft = useCallback(
+    (projectId: string | undefined) => {
+      const search = projectId === undefined ? {} : { project: projectId };
+      void navigate({ to: "/", search }).then(() => {
+        document.getElementById(DRAFT_MESSAGE_ID)?.focus();
+      });
+    },
+    [navigate],
+  );
+
   const openNewThread = useCallback(() => {
     if (hasProjects) setPicking(true);
-    else void navigate({ to: "/" });
-  }, [hasProjects, navigate]);
+    else openDraft(undefined);
+  }, [hasProjects, openDraft]);
 
   // Only a signed-in user can start a thread, so only the shell listens for
   // File > New Thread.
@@ -87,6 +103,7 @@ function ShellLayout(): JSX.Element {
       </Shell>
       {picking ? (
         <ProjectPicker
+          onPick={openDraft}
           onClose={() => {
             setPicking(false);
           }}

@@ -27,6 +27,12 @@ import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
 /**
+ * The id of the draft's message field. The shell focuses the field by this
+ * id when the user opens the draft that is already open, see `ShellLayout`.
+ */
+export const DRAFT_MESSAGE_ID = "draft-message";
+
+/**
  * Renders one pick of the draft: its glyph and its label, as a trigger that
  * opens `children` as a menu above it, `width` wide (see `ComposerMenu`).
  * `className` is `pick` for a pick in the composer's row and `lip-pick` for
@@ -129,6 +135,7 @@ export function DraftComposer({
       <div className="composer-card">
         <textarea
           ref={fieldRef}
+          id={DRAFT_MESSAGE_ID}
           className="composer-input"
           rows={2}
           aria-label="Message"

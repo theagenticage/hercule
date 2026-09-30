@@ -83,6 +83,26 @@ describe("the project picker", () => {
     expect(screen.queryByRole("dialog", { name: "New thread in" })).toBeNull();
   });
 
+  it("gives the focus back to the message field when the project picked is the open draft's", async () => {
+    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: `/?project=${WEBSHOP!.id}` },
+    );
+    const field = await screen.findByRole("textbox", { name: "Message" });
+    await userEvent.type(field, "Look at checkout");
+    await userEvent.click(screen.getByRole("button", { name: "New thread ⌘N" }));
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    await userEvent.keyboard("{Meta>}1{/Meta}");
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(field);
+    });
+    expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
+    expect((field as HTMLTextAreaElement).value).toBe("Look at checkout");
+  });
+
   it("opens a Draft Thread in the project that is clicked", async () => {
     const { rows, router } = await openPicker();
 
