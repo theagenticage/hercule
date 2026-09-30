@@ -266,10 +266,11 @@ export interface ScriptedRunner {
    *
    * Resolves once the last step has been played, or as soon as the turn ends
    * some other way: a cancel, an interrupt, `completeTurn`, or the session's
-   * exit. An interrupt leaves a message that was streaming unfinished, as
-   * Claude Code does. Fails if the session is already playing a script, if an
-   * `end` step is not the last step, or if the connection closes before the
-   * script is done.
+   * exit. It also resolves when the runner closes its connection itself, with
+   * `goOffline` or `goUnreachable`. An interrupt leaves a message that was
+   * streaming unfinished, as Claude Code does. Fails if the session is already
+   * playing a script, if an `end` step is not the last step, or if the
+   * controller closes the connection before the script is done.
    */
   readonly playScript: (sessionId: string, script: ReadonlyArray<ScriptStep>) => Promise<void>;
   /**
@@ -293,11 +294,13 @@ export interface ScriptedRunner {
   /**
    * Shuts down the way a runner does when it is stopped: it says goodbye and
    * closes its connection, so the controller shows the runner `offline`.
+   * Every script playing on this runner stops first.
    */
   readonly goOffline: () => Promise<void>;
   /**
    * Closes the connection without a goodbye, like a machine that lost its
-   * network, so the controller shows the runner `unreachable`.
+   * network, so the controller shows the runner `unreachable`. Every script
+   * playing on this runner stops first.
    */
   readonly goUnreachable: () => Promise<void>;
   /**
@@ -340,7 +343,8 @@ export async function enlistScriptedRunner(
 
   const send = (frame: RunnerToController): void => {
     if (socket.readyState !== WebSocket.OPEN) {
-      throw new Error(`runner ${runnerId} is not connected; it closed with ${lastClose}`);
+      const why = lastClose === undefined ? "it is closing" : `it closed with ${lastClose}`;
+      throw new Error(`runner ${runnerId} is not connected; ${why}`);
     }
     socket.send(JSON.stringify(frame));
   };
@@ -793,6 +797,8 @@ export async function enlistScriptedRunner(
         greeted = true;
         clearTimeout(timer);
         socket = opened;
+        // The close of an earlier connection says nothing about this one.
+        lastClose = undefined;
         resolve();
       };
       opened.onclose = (event) => {
@@ -802,8 +808,17 @@ export async function enlistScriptedRunner(
       };
     });
 
-  /** Closes the connection and waits until it is closed, so the controller has seen it go. */
+  /**
+   * Stops every script, then closes the connection and waits until it is
+   * closed, so the controller has seen it go.
+   *
+   * The scripts stop first because this runner leaves on purpose. A script
+   * left playing would fail on its next send, and often nothing waits for it
+   * any more: a test that ends while a turn still streams disconnects its
+   * runners, and the failure would be reported as an unhandled rejection.
+   */
   const closeSocket = async (): Promise<void> => {
+    for (const session of sessions.values()) stopScript(session);
     if (socket.readyState === WebSocket.CLOSED) return;
     const closed = new Promise((resolve) => socket.addEventListener("close", resolve));
     socket.close();

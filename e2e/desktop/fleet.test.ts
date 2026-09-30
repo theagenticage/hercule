@@ -188,6 +188,21 @@ describe("the scripted fleet", () => {
     await expectThreadsKept();
   });
 
+  it("stops a script that is still streaming when its runner goes offline, rather than failing it", async () => {
+    const { fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("scripted-1");
+    const { thread, played } = await fleet.spawnScriptedThread({ runner }, [
+      { kind: "stream", forMs: 60_000 },
+    ]);
+    await fleet.waitForTurn(thread.id, 1, "running");
+    // Long enough for the script to be between two deltas of its stream.
+    await sleep(200);
+
+    await runner.goOffline();
+
+    await expect(played).resolves.toBeUndefined();
+  });
+
   it("opens threads in a primary and an ephemeral workspace, filed under a project", async () => {
     const { fleet, client } = await arrangeFleet();
     const readSession = (id: string) => client.session.read({ params: { id } });
