@@ -1,9 +1,10 @@
 /**
  * Tests `pushRecent(recent, pair)`, which keeps the last three (instance,
- * model) pairs the user picked, newest first.
+ * model) pairs the user picked, newest first, and `parseRecentModels`, which
+ * reads that list back from the JSON text a client stored.
  */
 import { describe, expect, it } from "vitest";
-import { pushRecent } from "./recent";
+import { parseRecentModels, pushRecent } from "./recent";
 
 const WORK = "instance-claude-work";
 const PERSONAL = "instance-claude-personal";
@@ -65,6 +66,47 @@ describe("pushRecent", () => {
       { instanceId: PERSONAL, model: SONNET },
       { instanceId: WORK, model: SONNET },
       { instanceId: WORK, model: OPUS },
+    ]);
+  });
+});
+
+describe("parseRecentModels", () => {
+  it("reads the stored pairs in their order", () => {
+    const stored = JSON.stringify([
+      { instanceId: WORK, model: OPUS },
+      { instanceId: PERSONAL, model: SONNET },
+    ]);
+    expect(parseRecentModels(stored)).toEqual([
+      { instanceId: WORK, model: OPUS },
+      { instanceId: PERSONAL, model: SONNET },
+    ]);
+  });
+
+  it("reads nothing stored as an empty list", () => {
+    expect(parseRecentModels(null)).toEqual([]);
+  });
+
+  it("reads text that is not JSON as an empty list", () => {
+    expect(parseRecentModels("[{instanceId")).toEqual([]);
+  });
+
+  it("reads JSON that is not a list of pairs as an empty list", () => {
+    expect(parseRecentModels(JSON.stringify({ instanceId: WORK, model: OPUS }))).toEqual([]);
+    expect(parseRecentModels(JSON.stringify([{ instanceId: WORK }]))).toEqual([]);
+    expect(parseRecentModels(JSON.stringify([{ instanceId: WORK, model: 3 }]))).toEqual([]);
+  });
+
+  it("keeps only the three newest pairs of a longer stored list", () => {
+    const stored = JSON.stringify([
+      { instanceId: WORK, model: OPUS },
+      { instanceId: WORK, model: SONNET },
+      { instanceId: WORK, model: HAIKU },
+      { instanceId: PERSONAL, model: OPUS },
+    ]);
+    expect(parseRecentModels(stored)).toEqual([
+      { instanceId: WORK, model: OPUS },
+      { instanceId: WORK, model: SONNET },
+      { instanceId: WORK, model: HAIKU },
     ]);
   });
 });

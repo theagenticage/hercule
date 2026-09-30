@@ -59,6 +59,7 @@ import {
   userQuery,
   workspacesQuery,
 } from "../app/queries";
+import { createPendingSubmissions } from "../app/pending-submissions";
 import { createQueryClient } from "../app/query-client";
 import { ThreadScreen } from "../screens/thread/thread-screen";
 import { Shell } from "../shell";
@@ -149,7 +150,14 @@ const buildRouter = (client: HerculeClient, path: string, openThreadId: string |
     getParentRoute: () => rootRoute,
     id: "_connected",
     // `live` is null: the sidebar never touches the live connection.
-    beforeLoad: () => ({ controller: { url: CONTROLLER_URL, client, live: null } }),
+    beforeLoad: () => ({
+      controller: {
+        url: CONTROLLER_URL,
+        client,
+        live: null,
+        pendingSubmissions: createPendingSubmissions(),
+      },
+    }),
   });
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,

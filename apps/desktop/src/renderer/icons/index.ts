@@ -1,6 +1,8 @@
 export { IconFrame, type IconProps } from "./icon-frame";
 export {
   BranchIcon,
+  CheckIcon,
+  ChevronRightIcon,
   ClockIcon,
   ComposeIcon,
   DiffIcon,
@@ -16,6 +18,7 @@ export {
   ShieldIcon,
   SidebarIcon,
   SlidersIcon,
+  StopIcon,
   TasksIcon,
   WorkspaceIcon,
 } from "./icons";

@@ -162,7 +162,9 @@ describe("the dock", () => {
       card.questions[0]!.note!,
       card.note!,
     ]) {
-      expect(within(dock).getByText(text)).toBeTruthy();
+      // `dock-mini` repeats the question on one line, and shows only while
+      // the composer is shrunk.
+      expect(within(dock).getByText(text, { ignore: ".dock-mini *" })).toBeTruthy();
     }
     expect(
       within(dock)

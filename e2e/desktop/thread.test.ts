@@ -14,10 +14,8 @@
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import type { ElectronApplication, Page } from "playwright";
+import type { Page } from "playwright";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { createClient, type HerculeClient } from "../../packages/client-core/src/index";
-import type { Session } from "../../packages/contract/src/index";
 import {
   evaluateInMain,
   launchPlainApp,
@@ -25,83 +23,15 @@ import {
   stopApp,
   writeSettings,
 } from "../../apps/desktop/scripts/packaged-app";
-import type { ScriptedRunner } from "../../scripts/scripted-runner";
-import { connectFleet, type Fleet } from "./fleet";
 import {
+  arrangeFleet,
   createUserDataDirForTest,
+  keepWindowOnTop,
   launchForTest,
-  launchWithSavedController,
+  openSignedIn,
+  openThread,
   signInAndReadToken,
-  startControllerForTest,
-  type LaunchedApp,
 } from "./harness";
-
-/** A scratch controller, a fleet with one runner on it, and a client for reading it back. */
-interface Arranged {
-  readonly url: string;
-  readonly fleet: Fleet;
-  readonly runner: ScriptedRunner;
-  readonly client: HerculeClient;
-  /** Waits until the thread's status is `status`, read through the API. */
-  readonly waitForStatus: (sessionId: string, status: Session["status"]) => Promise<void>;
-}
-
-/**
- * Starts a scratch controller that is set up, and enlists one scripted runner
- * on it. The controller is stopped and the runner disconnected when the test
- * ends.
- */
-async function arrangeFleet(): Promise<Arranged> {
-  const controller = await startControllerForTest({ setUp: true });
-  const fleet = await connectFleet(controller.url);
-  onTestFinished(fleet.disconnectRunners);
-  const runner = await fleet.enlistRunner("studio");
-  const client = createClient({ baseUrl: controller.url, token: fleet.token });
-  return {
-    url: controller.url,
-    fleet,
-    runner,
-    client,
-    waitForStatus: async (sessionId, status) => {
-      await expect
-        .poll(async () => (await client.session.read({ params: { id: sessionId } })).status)
-        .toBe(status);
-    },
-  };
-}
-
-/**
- * Starts the app with the controller at `url` saved, signs in, and returns
- * the app once the sidebar's thread list is on screen.
- */
-async function openSignedIn(url: string): Promise<LaunchedApp> {
-  const launched = await launchWithSavedController(url);
-  await signInAndReadToken(launched.page, url);
-  await launched.page.getByRole("navigation", { name: "Threads" }).waitFor();
-  return launched;
-}
-
-/**
- * Keeps the app's window above the windows of the tests that run in other
- * files at the same time. macOS draws no frames for a window that another
- * window covers, and the page writes the tail only when a frame is drawn, so
- * a covered window would stop streaming.
- */
-async function keepWindowOnTop(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setAlwaysOnTop(true);
-  });
-}
-
-/** Clicks the sidebar row of the thread titled `title`, and waits for its transcript. */
-async function openThread(page: Page, title: string): Promise<void> {
-  await page
-    .getByRole("navigation", { name: "Threads" })
-    .locator("a.side-row", { hasText: title })
-    .first()
-    .click();
-  await page.locator('section[aria-label="Transcript"]').waitFor();
-}
 
 /** Returns the title of the thread the header shows as open. */
 function readOpenTab(page: Page): Promise<string | null> {
@@ -250,7 +180,8 @@ const RENDERED_ANSWER = `${FIRST_PARAGRAPH.rendered}${SECOND_PARAGRAPH.rendered}
 
 describe("the thread view", () => {
   it("opens a thread from the sidebar and shows its transcript", async () => {
-    const { url, fleet, runner } = await arrangeFleet();
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     const { thread, played } = await fleet.spawnScriptedThread(
       { runner, prompt: "Why does the checkout test fail?" },
       [
@@ -283,7 +214,8 @@ describe("the thread view", () => {
   });
 
   it("streams a message, drawing each paragraph as markdown once it is finished", async () => {
-    const { url, fleet, runner, client } = await arrangeFleet();
+    const { url, fleet, client } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     // The script waits on a Request until the thread is open, so the whole
     // message streams while the page listens.
     const { thread, played } = await fleet.spawnScriptedThread(
@@ -344,7 +276,8 @@ describe("the thread view", () => {
   });
 
   it("shows the dock and the waiting note while a Request is open, and Allow resolves it", async () => {
-    const { url, fleet, runner, client, waitForStatus } = await arrangeFleet();
+    const { url, fleet, client, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     const [thread] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(thread!.id, "busy");
     const { page } = await openSignedIn(url);
@@ -369,7 +302,8 @@ describe("the thread view", () => {
   });
 
   it("shows a queued input above the composer, and Cancel removes it", async () => {
-    const { url, fleet, runner, client, waitForStatus } = await arrangeFleet();
+    const { url, fleet, client, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     const [thread] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(thread!.id, "busy");
     const { page } = await openSignedIn(url);
@@ -392,7 +326,8 @@ describe("the thread view", () => {
   });
 
   it("ends with the whole message, no word doubled or skipped, when the window is hidden and shown while it streams", async () => {
-    const { url, fleet, runner, client } = await arrangeFleet();
+    const { url, fleet, client } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     // 3,000 numbered words make about 17 KiB, which the controller writes as
     // four rows of 4 KiB and a last one. At 2 ms a word the message streams
     // for about 7 s, long enough to hide the window, see a row land while it
@@ -487,7 +422,8 @@ describe("the thread view", () => {
   });
 
   it("opens the last open thread again at launch", async () => {
-    const { url, fleet, runner } = await arrangeFleet();
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
     const { thread, played } = await fleet.spawnScriptedThread(
       { runner, prompt: "Why does the checkout test fail?" },
       [

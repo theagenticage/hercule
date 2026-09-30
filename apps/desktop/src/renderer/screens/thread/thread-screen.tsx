@@ -2,14 +2,14 @@
  * The thread screen, as the Bureau book's session page draws it: the header
  * floating over the transcript, and the composer floating over its bottom.
  */
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildThreadBlocks, decideThreadPose, describeAgent } from "@hercule/client-core";
 import { providersQuery, runnersQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
-import { Transcript } from "./transcript";
+import { Transcript, type TranscriptHandle } from "./transcript";
 import { useThreadLive } from "./use-thread-live";
 import "./thread.css";
 
@@ -37,6 +37,12 @@ export function ThreadScreen({ sessionId }: { readonly sessionId: string }): JSX
   // transcript: its element exists only once the transcript's effects ran,
   // and the state change runs them again with it.
   const [composerStack, setComposerStack] = useState<HTMLDivElement | null>(null);
+  const transcriptRef = useRef<TranscriptHandle>(null);
+  // The composer shrinks while the reader is away from the bottom of the
+  // transcript, unless the focus is in the composer.
+  const [atBottom, setAtBottom] = useState(true);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const shrunk = !atBottom && !composerFocused;
 
   const blocks = buildThreadBlocks(rows, session);
   const runner =
@@ -52,9 +58,19 @@ export function ThreadScreen({ sessionId }: { readonly sessionId: string }): JSX
         pose={decideThreadPose(session, runner)}
         describeAgent={(model) => describeAgent(instance, model)}
         attachOpenParagraph={attachOpenParagraph}
-        composerStack={composerStack}
+        composerStack={shrunk ? null : composerStack}
+        onBottomChange={setAtBottom}
+        ref={transcriptRef}
       />
-      <ThreadComposer sessionId={sessionId} ref={setComposerStack} />
+      <ThreadComposer
+        sessionId={sessionId}
+        shrunk={shrunk}
+        onFocusChange={setComposerFocused}
+        scrollTranscriptToBottom={() => {
+          transcriptRef.current?.scrollToBottom();
+        }}
+        ref={setComposerStack}
+      />
     </>
   );
 }

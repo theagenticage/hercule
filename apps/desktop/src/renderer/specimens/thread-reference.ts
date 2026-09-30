@@ -5,7 +5,7 @@
  * compares the main pane with the app's thread screen (thread.tsx).
  *
  * First it stops every animation, so the waiting faces show the frame the
- * app draws. Then it makes exactly eleven edits, each where the app draws
+ * app draws. Then it makes exactly thirteen edits, each where the app draws
  * something else than the book, for the reason given:
  *
  * 1. removes the provenance line, "Started 09:02 from ...": v1 does not
@@ -37,10 +37,21 @@
  *     shows the name the provider's catalog gives the model, and shows the
  *     provider by its logo, as the web app's composer does;
  * 11. removes the syntax colours from the code block: the book's colours are
- *     sample highlighting, and the app loads no highlighter.
+ *     sample highlighting, and the app loads no highlighter;
+ * 12. replaces Send with Stop: the fixture's turn is running, and while a
+ *     turn runs the app draws Stop where Send stands, as the book's
+ *     assistant.html draws it. The app's Stop keeps Send's 4px left margin,
+ *     which the book's lacks, so that the controls beside it do not move
+ *     when a turn starts or ends (spec 17 §Design system, The thread);
+ * 13. sets the question in `dock-mini`, the dock's one line while the
+ *     composer is shrunk, to client-core's short question in plain text,
+ *     and its two answers' labels to the card's: the app asks a Request in
+ *     the same line as the sidebar's Waiting on you row (spec 17 §Design
+ *     system, The thread).
  *
- * Last, it scrolls the transcript to its bottom again, where crew.js put it
- * before the edits changed its height.
+ * Last, it scrolls the transcript back to where crew.js put it before the
+ * edits changed its height: to its bottom, or on the page's
+ * `?state=scrolled`, 42% of the way down, where the composer stays shrunk.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
@@ -50,13 +61,14 @@ import {
   buildThreadBlocks,
   describeAgent,
   formatMessageTime,
+  formatRequestQuestion,
   resolveBrowserTimezone,
   summarizeWork,
   type AgentBlock,
   type WorkBlock,
 } from "@hercule/client-core";
 import { CLAUDE_OPUS, SPECIMEN_INSTANCES, SPECIMEN_NOW } from "./sidebar-fixture";
-import { markSheetReady, stillBookPage } from "./sheet-page";
+import { computeScrolledTop, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 import { FIX_THREAD, PUSH_REQUEST } from "./thread-fixture";
 
 /** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
@@ -195,6 +207,28 @@ for (const span of findElement(transcript, ".codeblock").querySelectorAll("span"
   span.replaceWith(span.textContent);
 }
 
-transcript.scrollTop = transcript.scrollHeight;
+// 12. Send, as assistant.html's Stop. crew.js draws the stop icon in place of its placeholder.
+const stop = buildElement("button", "stop", "");
+stop.title = "Stop";
+stop.style.marginLeft = "4px";
+const stopIcon = document.createElement("i");
+stopIcon.dataset.i = "stop";
+stopIcon.dataset.size = "14";
+stop.append(stopIcon);
+findElement(composer, ".send").replaceWith(stop);
+readCrew().drawPlaceholders(stop);
+
+// 13. dock-mini's question and answers.
+const mini = findElement(composer, ".dock-mini");
+findElement(mini, ".dock-mini-q").textContent = formatRequestQuestion(PUSH_REQUEST);
+const miniRows = card.rows.filter((row) => row.decision === "allow" || row.decision === "deny");
+findElements(mini, ".btn", miniRows.length).forEach((button, index) => {
+  button.textContent = miniRows[index]!.label;
+});
+
+transcript.scrollTop =
+  document.documentElement.dataset.state === "scrolled"
+    ? computeScrolledTop(transcript)
+    : transcript.scrollHeight;
 
 await markSheetReady();

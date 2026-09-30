@@ -20,8 +20,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ConsoleMessage, Page } from "playwright";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { createClient, type HerculeClient } from "../../packages/client-core/src/index";
-import type { Session } from "../../packages/contract/src/index";
+import type { HerculeClient } from "../../packages/client-core/src/index";
 import {
   evaluateInMain,
   launchPlainApp,
@@ -29,58 +28,16 @@ import {
   stopApp,
   writeSettings,
 } from "../../apps/desktop/scripts/packaged-app";
-import { connectFleet, type Fleet } from "./fleet";
 import {
+  arrangeFleet,
   createUserDataDirForTest,
   launchWithSavedController,
+  openSignedIn,
   signInAndReadToken,
-  startControllerForTest,
-  type LaunchedApp,
 } from "./harness";
 
 /** Whether the tests that take minutes run. */
 const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
-
-/** A scratch controller, a fleet signed in to it, and a client for reading it back. */
-interface Arranged {
-  readonly url: string;
-  readonly fleet: Fleet;
-  readonly client: HerculeClient;
-  /** Waits until the thread's status is `status`, read through the API. */
-  readonly waitForStatus: (sessionId: string, status: Session["status"]) => Promise<void>;
-}
-
-/**
- * Starts a scratch controller that is set up, and connects a fleet to it.
- * The controller is stopped and the runners disconnected when the test ends.
- */
-async function arrangeFleet(): Promise<Arranged> {
-  const controller = await startControllerForTest({ setUp: true });
-  const fleet = await connectFleet(controller.url);
-  onTestFinished(fleet.disconnectRunners);
-  const client = createClient({ baseUrl: controller.url, token: fleet.token });
-  return {
-    url: controller.url,
-    fleet,
-    client,
-    waitForStatus: async (sessionId, status) => {
-      await expect
-        .poll(async () => (await client.session.read({ params: { id: sessionId } })).status)
-        .toBe(status);
-    },
-  };
-}
-
-/**
- * Starts the app with the controller at `url` saved, signs in, and returns
- * once the sidebar's thread list is on screen.
- */
-async function openSignedIn(url: string): Promise<LaunchedApp> {
-  const launched = await launchWithSavedController(url);
-  await signInAndReadToken(launched.page, url);
-  await launched.page.getByRole("navigation", { name: "Threads" }).waitFor();
-  return launched;
-}
 
 /**
  * Returns every item the thread list has mounted, top to bottom, each as one

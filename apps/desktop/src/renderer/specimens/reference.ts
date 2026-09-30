@@ -9,36 +9,16 @@
  * from the copy in docs/design/crew-bureau that is kept unedited.
  */
 import "./sheet.css";
-import { SHEET, type Piece } from "./cells";
-import { applySheetTheme, markSheetReady } from "./sheet-page";
-
-/** The part of the book's crew.js that the sheet draws with. Each function returns SVG markup. */
-interface Crew {
-  face(
-    name: string,
-    opts: { pose: string; size: number; look?: { hue: string; shape: string; acc: string } },
-  ): string;
-  you(size: number): string;
-  mark(state: string, size: number): string;
-  icon(name: string, size: number): string;
-}
-
-/**
- * Returns the `Crew` object that the book's crew.js sets on `window`. crew.js
- * is a classic script, which reference.html loads before this module. Fails
- * when it has not run.
- */
-function readCrew(): Crew {
-  const { Crew: crew } = window as Window & { readonly Crew?: Crew };
-  if (crew === undefined) {
-    throw new Error(
-      "The Bureau book's crew.js did not load: reference.html must load /design/crew-bureau/crew.js before this module.",
-    );
-  }
-  return crew;
-}
+import { SHEET, type IconName, type Piece } from "./cells";
+import { applySheetTheme, markSheetReady, readCrew } from "./sheet-page";
 
 const crew = readCrew();
+
+// The icons the book names differently from the app. Every other icon has the same name in both.
+const BOOK_ICON_NAMES: Partial<Record<IconName, string>> = {
+  "chevron-right": "chev-r",
+  workspace: "worktree",
+};
 
 /** Returns the book's markup for one cell's piece. */
 function drawPiece(piece: Piece): string {
@@ -57,8 +37,7 @@ function drawPiece(piece: Piece): string {
     case "mark":
       return crew.mark(piece.state, 14);
     case "icon":
-      // The book names the workspace icon `worktree`.
-      return crew.icon(piece.icon === "workspace" ? "worktree" : piece.icon, piece.size);
+      return crew.icon(BOOK_ICON_NAMES[piece.icon] ?? piece.icon, piece.size);
   }
 }
 

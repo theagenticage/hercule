@@ -22,6 +22,8 @@ import { createRoot } from "react-dom/client";
 import { buildLook, Face, UserAvatar } from "../faces";
 import {
   BranchIcon,
+  CheckIcon,
+  ChevronRightIcon,
   ClockIcon,
   ComposeIcon,
   DiffIcon,
@@ -37,6 +39,7 @@ import {
   ShieldIcon,
   SidebarIcon,
   SlidersIcon,
+  StopIcon,
   TasksIcon,
   WorkspaceIcon,
   type IconProps,
@@ -49,6 +52,8 @@ import { applySheetTheme, markSheetReady } from "./sheet-page";
 // icons it uses. The sheet draws every icon, so it may look them up by name.
 const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } = {
   branch: BranchIcon,
+  check: CheckIcon,
+  "chevron-right": ChevronRightIcon,
   clock: ClockIcon,
   compose: ComposeIcon,
   diff: DiffIcon,
@@ -64,6 +69,7 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   shield: ShieldIcon,
   sidebar: SidebarIcon,
   sliders: SlidersIcon,
+  stop: StopIcon,
   tasks: TasksIcon,
   workspace: WorkspaceIcon,
 };

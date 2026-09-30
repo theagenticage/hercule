@@ -6,6 +6,7 @@ import {
   buildComposerFields,
   buildComposerPlaceholder,
   computeEffectiveConfig,
+  parseRecentModels,
   pushRecent,
   queryKeys,
   findResumeBlockedReason,
@@ -34,8 +35,7 @@ const RECENT_KEY = "hercule.recentModels";
  */
 const readRecent = (): readonly RecentModel[] => {
   try {
-    const held: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]");
-    return Array.isArray(held) ? (held as readonly RecentModel[]) : [];
+    return parseRecentModels(window.localStorage.getItem(RECENT_KEY));
   } catch {
     return [];
   }

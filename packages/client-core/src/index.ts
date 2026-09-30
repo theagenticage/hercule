@@ -180,6 +180,7 @@ export {
 export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
 export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
 export type {
+  MessageDraft,
   Thread,
   ThreadCatalogs,
   ThreadConfig,
@@ -209,7 +210,7 @@ export { splitStreamingText, type StreamingText } from "./threads/streaming-text
 export { findNewRows, mergeTranscript } from "./threads/transcript";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
-export { pushRecent, type RecentModel } from "./threads/recent";
+export { parseRecentModels, pushRecent, type RecentModel } from "./threads/recent";
 export { decideRelatedReads, type RelatedReads } from "./threads/related-reads";
 export { formatRequestQuestion } from "./threads/request-question";
 export { findResumeBlockedReason } from "./threads/resume-blocked";

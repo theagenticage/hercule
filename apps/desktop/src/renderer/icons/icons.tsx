@@ -23,6 +23,24 @@ export function BranchIcon(props: IconProps): JSX.Element {
   );
 }
 
+/** Renders the check icon: a check mark. */
+export function CheckIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M3.4 8.4l3 3 6.2-6.6" />
+    </IconFrame>
+  );
+}
+
+/** Renders the chevron-right icon: an angle pointing right. */
+export function ChevronRightIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M6.2 3.8L10.4 8l-4.2 4.2" />
+    </IconFrame>
+  );
+}
+
 /** Renders the clock icon: a dial with its two hands. */
 export function ClockIcon(props: IconProps): JSX.Element {
   return (
@@ -166,6 +184,15 @@ export function SlidersIcon(props: IconProps): JSX.Element {
       <path d="M3 5h5.4M11.6 5H13M3 11h1.4M7.6 11H13" />
       <circle cx="10" cy="5" r="1.6" />
       <circle cx="6" cy="11" r="1.6" />
+    </IconFrame>
+  );
+}
+
+/** Renders the stop icon: a filled square with rounded corners. */
+export function StopIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <rect x="4.4" y="4.4" width="7.2" height="7.2" rx="1.6" fill="currentColor" stroke="none" />
     </IconFrame>
   );
 }

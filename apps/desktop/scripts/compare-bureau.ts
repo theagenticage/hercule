@@ -4,8 +4,9 @@
  * docs/design/crew-bureau, which is kept byte for byte as the design
  * prototype made it (spec 17).
  *
- * It also compares two regions of the book's session-active.html with the
- * app's: the sidebar, and the main pane with the thread screen.
+ * It also compares regions of the book's session-active.html with the app's:
+ * the sidebar, and the main pane with the thread screen, once as it rests
+ * and once scrolled, with the composer shrunk.
  *
  * It runs in two processes. This script, on Node:
  * - checks that the book's tokens.css and font files are byte-identical to

@@ -4,16 +4,17 @@
  * connection, and the work dividers that expand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
-import type { ProviderInstance, TapItem } from "@hercule/contract";
+import type { TapItem } from "@hercule/contract";
 import {
   buildNextRows,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_INSTANCE,
   renderApp,
   RUNNING_ITEM_ID,
   SIDEBAR_FIXTURE,
@@ -25,46 +26,6 @@ import {
 
 /** The time the tests run at: 25 minutes after the finished thread started. */
 const NOW = new Date("2026-09-10T09:25:00.000Z");
-
-/**
- * The provider instance every fixture thread names, with a catalog that gives
- * the fixture turns' model its name.
- */
-const INSTANCE: ProviderInstance = {
-  id: THREAD_FIXTURES.finished.session.instanceId,
-  providerId: "claude-code",
-  name: "claude-code",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
-  snapshots: [
-    {
-      runnerId: THREAD_FIXTURES.finished.session.runnerId,
-      probedAt: NOW.toISOString(),
-      harnessVersion: null,
-      versionVerdict: "unknown",
-      auth: { status: "ok" },
-      models: [{ slug: "claude-sonnet-5", name: "Claude Sonnet 5", options: [] }],
-    },
-  ],
-  createdAt: NOW.toISOString(),
-  updatedAt: NOW.toISOString(),
-};
 
 /** The animation frames requested and not run yet. The paragraph being written is painted in one. */
 let frames: Array<() => void> = [];
@@ -108,7 +69,7 @@ const openThread = async (
   handlers: Readonly<Record<string, Handler>> = {},
 ) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
     ...buildThreadHandlers(thread),
     ...handlers,
   });
@@ -385,5 +346,56 @@ describe("the thread screen", () => {
     });
     runFrames();
     expect(findOpenParagraph().textContent).toBe("It is a race ");
+  });
+
+  it("shrinks the composer while the transcript is away from its bottom and the composer has no focus", async () => {
+    const user = userEvent.setup();
+    // jsdom reports no focus in the document while an element loses it,
+    // where a browser reports whether the window has it.
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    await openThread(THREAD_FIXTURES.finished);
+    // jsdom lays nothing out, so the transcript is given a size: 2000px of
+    // content in 800px, whose bottom is at 1200.
+    const transcript = findTranscript();
+    let scrollTop = 1200;
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, get: () => 2000 },
+      clientHeight: { configurable: true, get: () => 800 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.min(value, 1200);
+        },
+      },
+    });
+    const composer = document.querySelector(".composer")!;
+    const field = screen.getByRole("textbox", { name: "Message" });
+    /** Scrolls the transcript to `top`, as the user would. */
+    const scrollTo = (top: number): void => {
+      scrollTop = top;
+      fireEvent.scroll(transcript);
+    };
+
+    scrollTo(1190);
+    expect(composer.className).toBe("composer");
+    scrollTo(1100);
+    expect(composer.className).toBe("composer is-scrolled");
+    act(() => {
+      field.focus();
+    });
+    expect(composer.className).toBe("composer");
+    act(() => {
+      field.blur();
+    });
+    expect(composer.className).toBe("composer is-scrolled");
+
+    // A click on the shrunk composer brings the reader back to the bottom.
+    await user.click(field);
+    expect(scrollTop).toBe(1200);
+    act(() => {
+      field.blur();
+    });
+    expect(composer.className).toBe("composer");
   });
 });

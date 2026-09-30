@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares three pairs of
+ * For each theme, Whitehaven and Orient Express, it compares four pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -20,14 +20,17 @@
  * - the sidebar (x 0-272): the book's page edited by
  *   specimens/sidebar-reference.ts, and the sidebar specimen (sidebar.html);
  * - the thread (x 272-1440, the main pane): the book's page edited by
- *   specimens/thread-reference.ts, and the thread specimen (thread.html).
+ *   specimens/thread-reference.ts, and the thread specimen (thread.html);
+ * - the scrolled thread: the same main pane with the transcript scrolled
+ *   away from its bottom and the composer shrunk. Both pages are opened with
+ *   `?state=scrolled`.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
  * - captures the region of both windows, the full height, and writes
  *   <region>-reference.png, <region>-app.png and <region>-diff.png;
- * - checks that both pages draw the same items in the same boxes, and only
- *   then compares the regions pixel for pixel.
+ * - checks that both pages draw the same visible items in the same boxes,
+ *   and only then compares the regions pixel for pixel.
  *
  * Then it prints the report and exits with 0 when every pixel matches, and 1
  * when one does not or anything fails on the way.
@@ -89,6 +92,8 @@ interface RegionPair {
   readonly referenceModule: string;
   /** The app's specimen page, under /specimens/. */
   readonly specimenPage: string;
+  /** The book's `?state=`, which the specimen page is opened with too, or none. */
+  readonly state?: string;
   readonly region: Rect;
   /** The element both pages' items are looked for in. */
   readonly scope: string;
@@ -165,15 +170,19 @@ const SIDEBAR_PARTS = [
 ];
 
 // Every part of the thread screen whose box is compared, as a selector
-// inside `main.main`. The book wraps some of the composer's rows in folds,
-// which the app does not draw yet, so the composer's parts are found at any
-// depth. Two parts are left out, and the pixel comparison checks them:
+// inside `main.main`. The book wraps some of the composer's rows in one more
+// element inside each fold than the app does, so the composer's parts are
+// found at any depth. Three parts are left out, and the pixel comparison
+// checks them:
 // - the transcript's column: the app's holds the virtualizer's items, and its
 //   height depends on what the book leaves out below the composer;
 // - the phrases of a divider's summary, such as "ran 1 command". The book
 //   lays them out as flex items, each as tall as the line, and the app writes
 //   them as one line of text, so that the line can end in an ellipsis, and
-//   each phrase is as tall as its font. Both draw the same pixels.
+//   each phrase is as tall as its font. Both draw the same pixels;
+// - the composer's field. The book's fills the card, and the app's sits 8px
+//   inside it with 8px less padding, so that its scroll bar stays inside the
+//   card's rounded corner. The text lands on the same pixels.
 const THREAD_PARTS = [
   ".top",
   ".top > .pill",
@@ -216,8 +225,11 @@ const THREAD_PARTS = [
   ".dock .ans > .btn",
   ".dock .ans-desc",
   ".dock .ans > kbd",
+  ".dock-mini",
+  ".dock-mini > svg",
+  ".dock-mini-q",
+  ".dock-mini > .btn",
   ".composer-card",
-  ".composer-input",
   ".composer-row",
   ".composer-row > *",
   ".composer-row svg",
@@ -246,13 +258,26 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: THREAD_PARTS,
   },
+  {
+    name: "scrolled-thread",
+    referenceModule: "thread-reference.ts",
+    specimenPage: "thread.html",
+    state: "scrolled",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: THREAD_PARTS,
+  },
 ];
 
 /**
- * Returns the script that reads a page's items: every drawn element each of
- * `parts` finds inside `scope`, in document order, then `scope` itself. An
- * element that is not drawn, such as one in the book's hidden Hercule tab,
- * has no box and is left out.
+ * Returns the script that reads a page's items: every visible element each
+ * of `parts` finds inside `scope`, in document order, then `scope` itself.
+ * An element that is not visible is left out:
+ * - one that is not drawn, such as one in the book's hidden Hercule tab,
+ *   which has no box;
+ * - one inside an element with an opacity of 0, such as a fold of the
+ *   book's shrunk composer, which keeps its box where the app's fold has
+ *   none.
  */
 function buildReadItemsScript(scope: string, parts: ReadonlyArray<string>): string {
   return `(() => {
@@ -264,7 +289,7 @@ function buildReadItemsScript(scope: string, parts: ReadonlyArray<string>): stri
   const describe = (element) => element.textContent.replace(/\\s+/g, " ").trim().slice(0, 40);
   const items = ${JSON.stringify(parts)}.flatMap((selector) =>
     [...scope.querySelectorAll(selector)]
-      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => element.checkVisibility({ opacityProperty: true }))
       .map((element, index) => ({ name: selector + " #" + index, text: describe(element), box: measure(element) })),
   );
   return [...items, { name: ${JSON.stringify(scope)}, text: "", box: measure(scope) }];
@@ -397,13 +422,14 @@ async function compareRegion(
   themeDir: string,
   pair: RegionPair,
 ): Promise<RegionResult> {
-  const { name, referenceModule, specimenPage, region, scope, parts } = pair;
+  const { name, referenceModule, specimenPage, state, region, scope, parts } = pair;
+  const query = `?theme=${theme}${state === undefined ? "" : `&state=${state}`}`;
   const [reference, specimen] = await Promise.all([
     openSheet(
-      new URL(`/design/crew-bureau/desktop/session-active.html?theme=${theme}`, sheetsUrl).href,
+      new URL(`/design/crew-bureau/desktop/session-active.html${query}`, sheetsUrl).href,
       new URL(referenceModule, sheetsUrl).href,
     ),
-    openSheet(`${sheetsUrl}${specimenPage}?theme=${theme}`),
+    openSheet(`${sheetsUrl}${specimenPage}${query}`),
   ]);
   try {
     const readItems = buildReadItemsScript(scope, parts);
@@ -535,10 +561,12 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
     if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
   }
-  REGION_PAIRS.forEach(({ name, region }, index) => {
+  REGION_PAIRS.forEach(({ name, state, region }, index) => {
+    const words = name.replaceAll("-", " ");
     lines.push(
-      `${name.slice(0, 1).toUpperCase()}${name.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
-        `x ${String(region.x)}-${String(region.x + region.width)} of session-active.html`,
+      `${words.slice(0, 1).toUpperCase()}${words.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
+        `x ${String(region.x)}-${String(region.x + region.width)} of session-active.html` +
+        (state === undefined ? "" : `?state=${state}`),
     );
     for (const { theme, regions } of results) {
       const { differences } = regions[index]!;
@@ -568,7 +596,9 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
       regions.flatMap(({ name, differences }) => differences.map(({ cell }) => `${name} ${cell}`)),
     ),
   ).size;
-  const regionNames = REGION_PAIRS.map(({ name }) => `the ${name}`).join(" and ");
+  const regionNames = new Intl.ListFormat("en").format(
+    REGION_PAIRS.map(({ name }) => `the ${name.replaceAll("-", " ")}`),
+  );
   lines.push(
     failing.length === 0
       ? `PASSED: every cell, ${regionNames} match the Bureau book.`

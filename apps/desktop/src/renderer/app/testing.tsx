@@ -18,6 +18,7 @@ import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
   type Input,
+  type ModelOption,
   type MutableLiveTopic,
   type OpenRequest,
   type Project,
@@ -321,6 +322,72 @@ export const SIDEBAR_FIXTURE: SidebarRecords = {
   runners: [WORLD.MOSS],
   providers: [],
   username: "rogier",
+};
+
+/** The reasoning effort the fixture models offer, as their one model option. */
+export const EFFORT_OPTION: ModelOption = {
+  id: "effort",
+  label: "Reasoning effort",
+  kind: "select",
+  choices: [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ],
+  default: "medium",
+};
+
+/**
+ * The provider instance every fixture thread names, as moss probed it: Claude
+ * Code, signed in, with the fixture turns' model as its default, a second
+ * model, and an older one. Both current models offer `EFFORT_OPTION`.
+ *
+ * `SIDEBAR_FIXTURE` leaves it out, so its threads show their model's slug. A
+ * test that needs model names adds it to the providers.
+ */
+export const FIXTURE_INSTANCE: ProviderInstance = {
+  id: INSTANCE_ID,
+  providerId: "claude-code",
+  name: "personal",
+  config: {},
+  displayName: "Claude Code",
+  binaryName: "claude",
+  declared: {
+    steering: "native",
+    fork: "native",
+    modelSwitch: "in-session",
+    accessModes: {
+      "approval-required": "native",
+      "auto-accept-edits": "native",
+      auto: "native",
+      "full-access": "native",
+    },
+    mcpPassthrough: "native",
+    disallowedTools: "native",
+    structuredOutput: "supported",
+  },
+  secretFields: [],
+  snapshots: [
+    {
+      runnerId: WORLD.MOSS.id,
+      probedAt: "2026-09-10T08:00:00.000Z",
+      harnessVersion: "2.1.263",
+      versionVerdict: "ok",
+      auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
+      models: [
+        {
+          slug: "claude-sonnet-5",
+          name: "Claude Sonnet 5",
+          isDefault: true,
+          options: [EFFORT_OPTION],
+        },
+        { slug: "claude-opus-5", name: "Claude Opus 5", options: [EFFORT_OPTION] },
+        { slug: "claude-sonnet-4", name: "Claude Sonnet 4", isLegacy: true, options: [] },
+      ],
+    },
+  ],
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
 };
 
 /** A thread as the stubbed controller holds it: its session, its transcript and its inputs. */

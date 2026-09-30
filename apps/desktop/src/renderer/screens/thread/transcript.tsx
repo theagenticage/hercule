@@ -21,11 +21,13 @@
  */
 import {
   useCallback,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type JSX,
+  type Ref,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
@@ -126,6 +128,12 @@ const subscribeToDayChange = (onChange: () => void): (() => void) =>
 const useStartOfToday = (): number =>
   useSyncExternalStore(subscribeToDayChange, () => findStartOfDay(ageClock.readNow()));
 
+/** What the thread screen can ask of the transcript. */
+export interface TranscriptHandle {
+  /** Scrolls to the bottom at once, and follows new content from there. */
+  readonly scrollToBottom: () => void;
+}
+
 /**
  * Renders the transcript of the thread `sessionId`.
  *
@@ -137,7 +145,12 @@ const useStartOfToday = (): number =>
  *   being written is painted into.
  * - `composerStack` is the composer's stack, whose height sets the space
  *   below the last block, so the last line always clears the composer. It is
- *   `null` until the composer is mounted.
+ *   `null` until the composer is mounted, and while the composer is shrunk:
+ *   the space then stays as the expanded composer needs it, so shrinking
+ *   changes nothing the reader can scroll to.
+ * - `onBottomChange` is told when the reader reaches the bottom, or leaves
+ *   it. The transcript opens at the bottom.
+ * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
   sessionId,
@@ -146,6 +159,8 @@ export function Transcript({
   describeAgent,
   attachOpenParagraph,
   composerStack,
+  onBottomChange,
+  ref,
 }: {
   readonly sessionId: string;
   readonly blocks: readonly ThreadBlock[];
@@ -153,6 +168,8 @@ export function Transcript({
   readonly describeAgent: (model: string) => string;
   readonly attachOpenParagraph: AttachOpenParagraph;
   readonly composerStack: HTMLElement | null;
+  readonly onBottomChange: (atBottom: boolean) => void;
+  readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
@@ -245,9 +262,22 @@ export function Transcript({
 
   const noteScroll = (): void => {
     const scroller = scrollRef.current!;
-    followingRef.current =
+    const following =
       scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOLLOW_THRESHOLD;
+    if (following === followingRef.current) return;
+    followingRef.current = following;
+    onBottomChange(following);
   };
+
+  useImperativeHandle(ref, () => ({
+    scrollToBottom: () => {
+      const scroller = scrollRef.current!;
+      scroller.scrollTop = scroller.scrollHeight;
+      // Noted at once rather than on the scroll event, so the composer
+      // expands in the same frame.
+      noteScroll();
+    },
+  }));
 
   /** Returns the element that draws `block`. */
   const renderBlock = (block: ThreadBlock, onScreen: boolean): JSX.Element => {

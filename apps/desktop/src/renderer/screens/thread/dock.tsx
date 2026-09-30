@@ -1,7 +1,7 @@
 import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { buildApprovalCard, readErrorMessage } from "@hercule/client-core";
+import { buildApprovalCard, formatRequestQuestion, readErrorMessage } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import "./dock.css";
@@ -69,6 +69,12 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  * All the text comes from `buildApprovalCard`, so an answer is described in
  * the same words on every screen.
  *
+ * While the composer is shrunk, all of that gives way to `dock-mini`: the
+ * face, the question in the one line the sidebar's Waiting on you row
+ * shows, and the Allow once and Deny answers, when the request offers
+ * them. These answer the request as the ledger's do, without expanding the
+ * composer.
+ *
  * The dock is a group named by its title, and it can take focus. While the
  * focus is inside it, the keys `findDecisionForKey` lists send their answer.
  * The keys are read here rather than on the window, so nothing outside the
@@ -125,66 +131,88 @@ export function RequestDock({
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      <div className="dock-q">
-        <Face look={buildLook(sessionId)} pose="waiting" size={30} decorative />
-        <span className="dock-text">
-          <span id={titleId}>{card.title}</span>
-          {card.subject.map((line, index) => (
-            <Fragment key={index}> {card.code ? <code>{line}</code> : line}</Fragment>
-          ))}
-        </span>
-      </div>
-      {card.questions.length === 0 ? null : (
-        <div className="dock-questions">
-          {card.questions.map((question, index) => (
-            <div key={index} className="dock-question">
-              <span className="dock-question-header">{question.header}</span>
-              <span>{question.question}</span>
-              <div className="dock-options">
-                {question.options.map((option, optionIndex) => (
-                  <Fragment key={optionIndex}>
-                    <span className="dock-option-label">{option.label}</span>
-                    <span className="ans-desc">{option.description}</span>
-                  </Fragment>
-                ))}
-              </div>
-              {question.note === null ? null : <span className="faint">{question.note}</span>}
-            </div>
-          ))}
+      <div className="fold">
+        <div className="dock-q">
+          <Face look={buildLook(sessionId)} pose="waiting" size={30} decorative />
+          <span className="dock-text">
+            <span id={titleId}>{card.title}</span>
+            {card.subject.map((line, index) => (
+              <Fragment key={index}> {card.code ? <code>{line}</code> : line}</Fragment>
+            ))}
+          </span>
         </div>
-      )}
-      {card.note === null ? null : <p className="dock-note">{card.note}</p>}
-      <div className="ledger">
-        {card.rows.map((row) => {
-          const key = DECISION_KEYS[row.decision];
-          const describeId = `${titleId}-${row.decision}`;
-          return (
+        {card.questions.length === 0 ? null : (
+          <div className="dock-questions">
+            {card.questions.map((question, index) => (
+              <div key={index} className="dock-question">
+                <span className="dock-question-header">{question.header}</span>
+                <span>{question.question}</span>
+                <div className="dock-options">
+                  {question.options.map((option, optionIndex) => (
+                    <Fragment key={optionIndex}>
+                      <span className="dock-option-label">{option.label}</span>
+                      <span className="ans-desc">{option.description}</span>
+                    </Fragment>
+                  ))}
+                </div>
+                {question.note === null ? null : <span className="faint">{question.note}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        {card.note === null ? null : <p className="dock-note">{card.note}</p>}
+        <div className="ledger">
+          {card.rows.map((row) => {
+            const key = DECISION_KEYS[row.decision];
+            const describeId = `${titleId}-${row.decision}`;
+            return (
+              <button
+                key={row.decision}
+                type="button"
+                className="ans"
+                aria-label={row.label}
+                aria-describedby={describeId}
+                aria-keyshortcuts={key?.shortcut}
+                aria-disabled={answered || undefined}
+                onClick={() => {
+                  if (!answered) respond.mutate(row.decision);
+                }}
+              >
+                <span className={DECISION_BUTTON_CLASSES[row.decision]}>{row.label}</span>
+                <span className="ans-desc" id={describeId}>
+                  {row.describe}
+                </span>
+                {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
+              </button>
+            );
+          })}
+        </div>
+        {respond.error === null ? null : (
+          <p className="dock-error" role="alert">
+            {readErrorMessage(respond.error)}
+          </p>
+        )}
+      </div>
+      <div className="dock-mini">
+        <Face look={buildLook(sessionId)} pose="waiting" size={24} decorative />
+        <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
+        <span className="spacer" />
+        {card.rows
+          .filter((row) => row.decision === "allow" || row.decision === "deny")
+          .map((row) => (
             <button
               key={row.decision}
               type="button"
-              className="ans"
-              aria-label={row.label}
-              aria-describedby={describeId}
-              aria-keyshortcuts={key?.shortcut}
+              className={DECISION_BUTTON_CLASSES[row.decision]}
               aria-disabled={answered || undefined}
               onClick={() => {
                 if (!answered) respond.mutate(row.decision);
               }}
             >
-              <span className={DECISION_BUTTON_CLASSES[row.decision]}>{row.label}</span>
-              <span className="ans-desc" id={describeId}>
-                {row.describe}
-              </span>
-              {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
+              {row.label}
             </button>
-          );
-        })}
+          ))}
       </div>
-      {respond.error === null ? null : (
-        <p className="dock-error" role="alert">
-          {readErrorMessage(respond.error)}
-        </p>
-      )}
     </div>
   );
 }

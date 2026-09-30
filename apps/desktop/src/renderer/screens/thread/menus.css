@@ -1,0 +1,117 @@
+/* The composer's menus: glass popovers that open above their trigger. The
+   look is the Bureau book's `.pop`, `.pop-h`, `.pop-sec`, `.q-h` and
+   `.line`, from its glance page. The book draws no composer menu, so the
+   widths are spec 14's: 320px, and 360px for the model menu. Each departure
+   from the book says why. */
+.menu {
+  /* The browser draws a popover centred in the window, with a border,
+     padding and the system's colours. A menu sits 6px above its trigger
+     instead, and it scrolls when the space above is short. */
+  inset: auto;
+  margin: 0 0 6px;
+  border: 0;
+  padding: 0;
+  position-area: block-start span-inline-end;
+  width: 320px;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+  color: inherit;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+.menu--end {
+  position-area: block-start span-inline-start;
+}
+.menu--wide {
+  width: 360px;
+}
+.pop-h {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px 10px;
+}
+.pop-h b {
+  font-weight: var(--w-bold);
+}
+.pop-h span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pop-sec {
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line-soft);
+}
+/* Not in the book, whose popover always opens with its `.pop-h`. The model
+   menu has no header, so its first section needs no rule above it. */
+.pop-sec:first-child {
+  border-top: 0;
+}
+.q-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border-radius: var(--r-md);
+  font-size: var(--t-12);
+  text-align: left;
+}
+.line .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.line .grow b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* Not in the book, whose rows are all links. A row that cannot be picked is
+   not a button: it has no hover, and it is dimmed, with its reason at the
+   right. */
+button.line:hover {
+  background: var(--hover);
+}
+.line--dimmed {
+  opacity: 0.5;
+}
+/* Not in the book. The filter spans its section. The section's top padding
+   matches its sides, so the focus ring, 4px outside the field, keeps an even
+   gap to the menu's edge. */
+.menu-filter {
+  width: 100%;
+}
+.pop-sec:has(> .menu-filter) {
+  padding-top: 8px;
+}
+/* Not in the book, which has no model options. Each option is its label
+   above a segmented control of its choices. */
+.menu-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-bottom: 6px;
+}
+.menu-option .seg {
+  margin-left: 6px;
+}

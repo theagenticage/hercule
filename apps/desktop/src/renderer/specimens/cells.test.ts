@@ -8,7 +8,11 @@ it("draws every icon the app exports at 16", () => {
   const drawn = new Set(SHEET.flat().map(({ name }) => name));
   const undrawn = Object.keys(icons)
     .filter((name) => name !== "IconFrame")
-    .map((name) => `icon/${name.slice(0, -"Icon".length).toLowerCase()}/16`)
+    // `ChevronRightIcon` is the cell `icon/chevron-right/16`.
+    .map((name) => {
+      const words = name.slice(0, -"Icon".length).replace(/(?<=.)(?=[A-Z])/g, "-");
+      return `icon/${words.toLowerCase()}/16`;
+    })
     .filter((cell) => !drawn.has(cell));
   expect(undrawn).toEqual([]);
 });

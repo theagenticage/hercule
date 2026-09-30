@@ -17,10 +17,12 @@ import type { MarkState } from "../marks";
 /**
  * An icon, by the name of its component: `plus` is `PlusIcon`. The Bureau
  * book's crew.js uses the same names, except that it calls `workspace`
- * `worktree`.
+ * `worktree` and `chevron-right` `chev-r`.
  */
 export type IconName =
   | "branch"
+  | "check"
+  | "chevron-right"
   | "clock"
   | "compose"
   | "diff"
@@ -36,6 +38,7 @@ export type IconName =
   | "shield"
   | "sidebar"
   | "sliders"
+  | "stop"
   | "tasks"
   | "workspace";
 
@@ -71,6 +74,8 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 // at. The sheet draws every icon at 16, and again at each of these sizes.
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["branch", [13]],
+  ["check", [14]],
+  ["chevron-right", [13]],
   ["clock", [14]],
   ["compose", [14]],
   ["diff", []],
@@ -86,6 +91,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["shield", [14]],
   ["sidebar", []],
   ["sliders", [14]],
+  ["stop", [14]],
   ["tasks", [14]],
   ["workspace", [13]],
 ];

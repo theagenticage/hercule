@@ -18,6 +18,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { buildRouterContext } from "../../app/context";
+import type { PendingSubmissions } from "../../app/pending-submissions";
 import {
   projectsQuery,
   providersQuery,
@@ -49,12 +50,14 @@ export interface RenderedThreadPart {
   readonly calls: readonly Call[];
   /** The app's query cache, for a test that waits until no write is running. */
   readonly queryClient: QueryClient;
+  /** What each thread's composer holds and has not sent. */
+  readonly pendingSubmissions: PendingSubmissions;
 }
 
 /**
  * Renders `Part` for the thread in `thread`, as the thread screen will, and
  * returns the requests the app sends the stubbed controller, with the app's
- * query cache.
+ * query cache and pending submissions.
  *
  * The controller holds the sidebar fixture's records, with `thread.session`
  * in place of the fixture's thread of the same id, and answers the thread's
@@ -126,5 +129,5 @@ export const renderThreadPart = async (
   });
   await router.load();
   render(<RouterProvider router={router} />);
-  return { calls, queryClient };
+  return { calls, queryClient, pendingSubmissions: controller.pendingSubmissions };
 };

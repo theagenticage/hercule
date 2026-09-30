@@ -42,6 +42,32 @@
 .dock .ans {
   min-height: 34px;
 }
+/* While the composer is shrunk, the dock is one line: the face, the
+   question and two answers. */
+.dock-mini {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+  font-size: var(--t-12);
+}
+.composer.is-scrolled .dock-mini {
+  display: flex;
+}
+.composer.is-scrolled .dock {
+  padding: 6px 8px 20px 10px;
+}
+/* Not in the book, whose question is short. A long one ellipsizes, and the
+   answers keep their size. */
+.dock-mini-q {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dock-mini .btn {
+  flex: none;
+}
 
 /* Not in the book, whose dock is never focused. The dock takes the focus
    so that ↩ can allow. Its ring goes round the part of the dock in view,

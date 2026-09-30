@@ -1,10 +1,13 @@
 /* The composer: the card and the lip under it, with the dock and the queued
    inputs stacked above. It floats over the bottom of the transcript, as
-   glass. The rules are the Bureau book's `.composer-wrap` through `.lip`.
-   Each departure from the book says why.
+   glass, and shrinks while the transcript is scrolled away from its bottom.
+   The rules are the Bureau book's `.composer-wrap` through `.lip`, `.fold`
+   and `.composer.is-scrolled`. Each departure from the book says why.
 
-   Left out of the book: the scrolled shrink, its folds and the transitions
-   that animate them, because the composer does not shrink yet. */
+   The book animates the shrink: the composer's width, the field's height
+   and the folds' heights. Spec 17 allows transitions of paint properties
+   only, so here the layout snaps in one frame, and only the composer's 4px
+   drop and the card's glass fade. */
 .composer-wrap {
   position: absolute;
   left: 0;
@@ -20,6 +23,7 @@
   width: min(760px, 100%);
   display: flex;
   flex-direction: column;
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .composer-card {
   position: relative;
@@ -32,12 +36,27 @@
     inset 0 0 0 1px var(--glass-rim),
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
+  transition:
+    background var(--dur-3),
+    box-shadow var(--dur-3);
 }
+/* The book's field is one line and grows with a script. This one grows with
+   its text, up to eight lines, and scrolls past that: 6px of padding above,
+   eight lines of 21px, and 4px below.
+
+   The book's field fills the card to its edges, with 14px and 16px of
+   padding. Here it sits 8px inside the card, with 8px less padding, so the
+   text lands where the book puts it. The inset keeps the scroll bar, which
+   the browser draws at the field's right edge from its top, inside the
+   card's rounded corner. */
 .composer-input {
   display: block;
-  width: 100%;
-  min-height: 52px;
-  padding: 14px 16px 4px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 0;
+  min-height: 44px;
+  max-height: 178px;
+  field-sizing: content;
+  padding: 6px 8px 4px;
   border: 0;
   outline: 0;
   resize: none;
@@ -67,7 +86,11 @@
   font-weight: var(--w-medium);
   white-space: nowrap;
 }
-.pick:hover {
+/* The book's picks are all buttons. Here a fixed one is plain text, and a
+   disabled one does not react, so only a pick that opens a menu lights up,
+   and stays lit while its menu is open. */
+button.pick:not([aria-disabled="true"]):hover,
+.pick[aria-expanded="true"] {
   background: var(--hover);
   color: var(--ink);
 }
@@ -92,6 +115,19 @@
   background: color-mix(in oklab, var(--ink) 8%, transparent);
   color: var(--faint);
 }
+/* The book has no margin here. Stop takes Send's place while a turn runs,
+   and keeps Send's 4px, so the controls beside it do not move when a turn
+   starts or ends. */
+.stop {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+  margin-left: 4px;
+}
 .lip {
   display: flex;
   align-items: center;
@@ -111,8 +147,53 @@
   flex: 1;
 }
 
-/* Not in the book, whose field always takes text. The field takes no text
-   yet, so the pointer stays an arrow over it rather than an I-beam. */
+/* Shrunk while the transcript is scrolled away from its bottom. Only the
+   field, and the Request's `dock-mini`, stay. */
+.composer.is-scrolled {
+  width: min(560px, 100%);
+  transform: translateY(4px);
+}
+.composer.is-scrolled .composer-card {
+  background: var(--glass-fill-thin);
+}
+.composer.is-scrolled .composer-input {
+  field-sizing: fixed;
+  min-height: 0;
+  height: 32px;
+  padding-top: 2px;
+  padding-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* The book folds these parts to no height, to animate them. With nothing to
+   animate, they leave the layout, which also takes their controls out of
+   the tab order and hides them from assistive technology. */
+.composer.is-scrolled .fold {
+  display: none;
+}
+
+/* Not in the book, which shows no unsent pick. The note that a model pick
+   applies on send fills the spacer, on one line. */
+.composer-note {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 5px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Not in the book, which draws no failed send. The error sits under the
+   row, on the field's left edge, in the app's error type. */
+.composer-error {
+  margin: 0;
+  padding: 0 16px 10px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+/* Not in the book, whose field always takes text. A thread that cannot be
+   resumed takes none, so the pointer stays an arrow over it rather than an
+   I-beam. */
 .composer-input[aria-disabled="true"] {
   cursor: default;
 }

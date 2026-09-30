@@ -69,6 +69,7 @@ describe("Transcript", () => {
         describeAgent={() => "Claude Code · Claude Sonnet 5"}
         attachOpenParagraph={() => undefined}
         composerStack={null}
+        onBottomChange={() => {}}
       />,
     );
     const divider = screen.getByRole("button", { name: /^Working for/ });
@@ -104,6 +105,7 @@ describe("Transcript", () => {
         describeAgent={() => "Claude Code · Claude Sonnet 5"}
         attachOpenParagraph={() => undefined}
         composerStack={null}
+        onBottomChange={() => {}}
       />
     );
     const { container, rerender } = render(renderTranscript("working"));

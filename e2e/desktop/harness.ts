@@ -26,6 +26,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { ElectronApplication, Page } from "playwright";
 import { expect, onTestFinished } from "vitest";
 import type { Bridge } from "../../apps/desktop/src/ipc/bridge";
+import { createClient, type HerculeClient } from "../../packages/client-core/src/index";
+import type { Session } from "../../packages/contract/src/index";
 import {
   buildAppArgs,
   findExecutable,
@@ -46,6 +48,7 @@ import {
   type Controller,
 } from "../../scripts/controller-process";
 import { createTemporaryHome } from "../harness";
+import { connectFleet, type Fleet } from "./fleet";
 
 /**
  * The page's global object, with the bridge the preload exposes on it as
@@ -210,6 +213,71 @@ export async function startControllerForTest(options: {
       throw new Error(`setup failed with code ${String(ran.code)}:\n${ran.stderr}`);
   }
   return controller;
+}
+
+/** A scratch controller that is set up, a fleet signed in to it, and a client for reading it back. */
+export interface ArrangedFleet {
+  readonly url: string;
+  readonly fleet: Fleet;
+  readonly client: HerculeClient;
+  /** Waits until the thread's status is `status`, read through the API. */
+  readonly waitForStatus: (sessionId: string, status: Session["status"]) => Promise<void>;
+}
+
+/**
+ * Starts a controller for the current test that is set up, and connects a
+ * fleet to it, with no runners yet. The controller is stopped and the
+ * runners disconnected when the test finishes.
+ */
+export async function arrangeFleet(): Promise<ArrangedFleet> {
+  const controller = await startControllerForTest({ setUp: true });
+  const fleet = await connectFleet(controller.url);
+  onTestFinished(fleet.disconnectRunners);
+  const client = createClient({ baseUrl: controller.url, token: fleet.token });
+  return {
+    url: controller.url,
+    fleet,
+    client,
+    waitForStatus: async (sessionId, status) => {
+      await expect
+        .poll(async () => (await client.session.read({ params: { id: sessionId } })).status)
+        .toBe(status);
+    },
+  };
+}
+
+/**
+ * Starts the app with the controller at `url` saved, signs in, and returns
+ * the app once the sidebar's thread list is on screen.
+ */
+export async function openSignedIn(url: string): Promise<LaunchedApp> {
+  const launched = await launchWithSavedController(url);
+  await signInAndReadToken(launched.page, url);
+  await launched.page.getByRole("navigation", { name: "Threads" }).waitFor();
+  return launched;
+}
+
+/**
+ * Keeps the app's window above the windows of the tests that run in other
+ * files at the same time. macOS draws no frames for a window that another
+ * window covers, and the page does some work only when a frame is drawn: it
+ * writes the streaming tail, handles scrolls and measures sizes. A test that
+ * depends on that work keeps its window on top.
+ */
+export async function keepWindowOnTop(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setAlwaysOnTop(true);
+  });
+}
+
+/** Clicks the sidebar row of the thread titled `title`, and waits for its transcript. */
+export async function openThread(page: Page, title: string): Promise<void> {
+  await page
+    .getByRole("navigation", { name: "Threads" })
+    .locator("a.side-row", { hasText: title })
+    .first()
+    .click();
+  await page.locator('section[aria-label="Transcript"]').waitFor();
 }
 
 /**

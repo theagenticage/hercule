@@ -9,7 +9,8 @@
  * It answers the controller on its own, the way a healthy runner does:
  *
  * - a ping with a pong;
- * - a probe with a logged-in report that offers one model;
+ * - a probe with a logged-in report that offers two models, each with a
+ *   reasoning effort and a fast mode;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
  * - a session start with `session.started`, unless starts are held;
  * - an input by starting a turn and reporting the user's message in it, or,
@@ -43,6 +44,7 @@ import type {
   ExitReason,
   ItemKind,
   JoinAnswer,
+  ModelOption,
   OpenRequest,
   ProbeResult,
   ProviderEvent,
@@ -75,10 +77,36 @@ const FACTS: RunnerFacts = {
   identityPort: 4939,
 };
 
+/**
+ * The options each scripted model offers, shaped like the Claude Code
+ * adapter's: a reasoning effort to pick from, and a fast mode to switch on.
+ */
+const MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
+  {
+    id: "effort",
+    label: "Reasoning effort",
+    kind: "select",
+    choices: [
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+    ],
+    default: "medium",
+  },
+  { id: "fastMode", label: "Fast mode", kind: "boolean", default: false },
+];
+
+/**
+ * A logged-in report with two models, so a test can pick a model other than
+ * the default, and options on both, so it can pick an option.
+ */
 const PROBE_RESULT: ProbeResult = {
   harnessVersion: "1.0.0",
   auth: { status: "ok" },
-  models: [{ slug: "scripted", name: "Scripted", isDefault: true, options: [] }],
+  models: [
+    { slug: "scripted", name: "Scripted", isDefault: true, options: MODEL_OPTIONS },
+    { slug: "scripted-large", name: "Scripted Large", options: MODEL_OPTIONS },
+  ],
 };
 
 const APPROVAL_DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;

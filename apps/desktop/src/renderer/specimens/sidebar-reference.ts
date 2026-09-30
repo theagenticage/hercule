@@ -26,25 +26,7 @@
  * the comparison would no longer compare what it claims to.
  */
 import { SPECIMEN_COUNTS, SPECIMEN_THREADS } from "./sidebar-fixture";
-import { markSheetReady, stillBookPage } from "./sheet-page";
-
-/** A row of the book's Waiting on you: the item's full name, and the shorter name the row shows. */
-interface WaitingItem {
-  readonly name: string;
-  readonly short: string;
-}
-
-/**
- * Returns the book's list of what waits on the user, which crew.js sets on
- * `window.Crew`. Fails when crew.js has not run.
- */
-function readWaitingItems(): ReadonlyArray<WaitingItem> {
-  const { Crew: crew } = window as Window & {
-    readonly Crew?: { readonly WAITING: ReadonlyArray<WaitingItem> };
-  };
-  if (crew === undefined) throw new Error("The Bureau book's crew.js has not run on this page.");
-  return crew.WAITING;
-}
+import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 
 /** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
 function findElement(scope: ParentNode, selector: string): Element {
@@ -97,7 +79,7 @@ findElement(side, ".side-sum").replaceChildren(
 );
 
 // 4. The full titles in Waiting on you.
-const waitingItems = readWaitingItems();
+const waitingItems = readCrew().WAITING;
 for (const row of waiting.querySelectorAll(".side-row--wait")) {
   const name = findElement(row, ".side-name");
   const item = waitingItems.find(({ short }) => short === name.textContent);
