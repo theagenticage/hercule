@@ -17,7 +17,7 @@ import {
 
 const PROJECT = {
   id: "01a06d02-beca-760b-a6b2-83af536c3c20",
-  name: "hydra",
+  name: "hercule",
   createdAt: "2026-09-04T15:21:31.594Z",
   updatedAt: "2026-09-04T15:21:31.594Z",
 };
@@ -52,7 +52,7 @@ const RUNNER: Fixture = {
   projectId: PROJECT.id,
   provenance: [
     {
-      ref: "github:issue:rogierpennink/hydra#61",
+      ref: "github:issue:theagenticage/hercule#61",
       at: "2026-09-04T15:21:31.646Z",
       actor: "user",
     },
@@ -290,7 +290,7 @@ describe("Tasks > the drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     const first = await screen.findByRole("dialog");
-    expect(first.textContent).toContain("github:issue:rogierpennink/hydra#61");
+    expect(first.textContent).toContain("github:issue:theagenticage/hercule#61");
     expect(first.textContent).toContain("you");
     // The time may be shown in the user's zone or in UTC; either has the minute.
     expect(first.textContent).toMatch(/17:21|15:21/);
