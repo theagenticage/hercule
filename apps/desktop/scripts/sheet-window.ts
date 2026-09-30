@@ -42,8 +42,9 @@ export const SIDEBAR_REGION: Rect = { x: 0, y: 0, width: 272, height: HEIGHT };
 export const MAIN_PANE_REGION: Rect = { x: 272, y: 0, width: WIDTH - 272, height: HEIGHT };
 
 /**
- * Opens `url` in a hidden window with a 1440 × 900 content area and waits
- * until the page sets `data-ready` on `<html>`. When `moduleUrl` is given,
+ * Opens `url` in a hidden window with a 1440 × 900 content area, which
+ * reports neither Reduce motion nor Reduce transparency, and waits until the
+ * page sets `data-ready` on `<html>`. When `moduleUrl` is given,
  * the page imports that module once it has loaded; the module must set
  * `data-ready` itself. Returns the window. Fails when the page does not load,
  * the module fails, or the page does not become ready in time; the window is
@@ -65,6 +66,28 @@ export async function openSheet(url: string, moduleUrl?: string): Promise<Browse
     if (level === "error") errors.push(message);
   });
   try {
+    // CI's virtual Macs turn on Reduce motion and Reduce transparency, and
+    // both change how the pages draw:
+    // - Reduce motion gives every element of the book a 0.01 ms transition,
+    //   so a style that a script changes takes effect a frame later. The
+    //   thread's page measured its height before a removed margin was gone,
+    //   and scrolled 5 px too far.
+    // - Reduce transparency turns the glass off, and the app and the book
+    //   turn it off differently: the app drops the backdrop filter, the book
+    //   keeps a filter that blurs by 0 px. The glass's shadows then differ by
+    //   a few levels.
+    // The comparison is of the pages as most Macs show them, so each window
+    // reports neither preference, whatever the machine's settings. The
+    // debugger answers no command until the window has loaded a page, so the
+    // window loads an empty one first; the setting then holds for the sheet.
+    await window.loadURL("about:blank");
+    window.webContents.debugger.attach();
+    await window.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", {
+      features: [
+        { name: "prefers-reduced-motion", value: "no-preference" },
+        { name: "prefers-reduced-transparency", value: "no-preference" },
+      ],
+    });
     await window.loadURL(url);
     if (moduleUrl !== undefined) {
       // A module namespace cannot be sent back to this process, so the

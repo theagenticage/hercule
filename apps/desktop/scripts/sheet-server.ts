@@ -91,13 +91,6 @@ async function runElectron(
       // draws its scroll bars all the time, and the book styles its own, so
       // no capture draws any.
       "--hide-scrollbars",
-      // CI's virtual Macs report Reduce motion as on. Under it, the book's
-      // stylesheet gives every element a 0.01 ms transition, so a style that
-      // a script changes takes effect a frame later: the thread's page
-      // measured its height before a removed margin was gone, and scrolled
-      // 5 px too far.
-      // One preference makes the pages lay out the same on every machine.
-      "--force-prefers-no-reduced-motion",
       `--user-data-dir=${userDataDir}`,
     ],
     // The pages draw times in the system time zone, as the app does. UTC
