@@ -160,3 +160,17 @@ html[data-theme-changing] *::after {
     --dur-3: 0s;
   }
 }
+
+/* With Reduce transparency on, glass has no blur at all. tokens.css sets the
+   glass level to 0 then, and its filter to `blur(0px) saturate(1)`, which
+   changes no pixel. Chromium still draws a backdrop filter for it, though: it
+   composites every frame itself, and holds about 400 MB more GPU memory while
+   a caret blinks. `none` draws no filter. The selectors are the ones
+   tokens.css derives the filter on, so a nested [data-theme] preview gets it
+   too; this file loads later, so its value wins. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme] {
+    --glass-filter: none;
+  }
+}
