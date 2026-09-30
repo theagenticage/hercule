@@ -12,6 +12,22 @@
   gap: 8px;
   pointer-events: none;
 }
+/* Not in the book, which is drawn with overlay scroll bars. While the view
+   under the header shows a classic scroll bar, as macOS draws with a mouse
+   attached, the scroll bar takes room at the right edge, and the book's
+   `right: 14px` would put the rightmost pill against it. The header then
+   keeps its 14px from the scroll bar instead. The screen marks the view with
+   `has-scrollbar`, see `useShowsClassicScrollbar`. */
+.top:has(~ .has-scrollbar) {
+  right: calc(14px + var(--classic-scrollbar-width));
+}
+/* The width of a classic scroll bar on macOS. An overlay scroll bar is drawn
+   inside the same strip. */
+.top,
+.top ~ .transcript,
+.top ~ .hello {
+  --classic-scrollbar-width: 15px;
+}
 /* What scrolls under the header is hidden across the whole header row and
    fades in below it: text left there, even faint, would show between the
    pills, cut in half at their edges. Text is fully visible again at
@@ -26,21 +42,35 @@
    at the clearance (new-thread.css). It fades the same way, but only while
    it is scrolled away from its top: a mask also changes how the edges of
    the text and the face are smoothed, so the column the book draws takes
-   none. */
+   none.
+
+   Not in the book: the mask would also hide the top of the scroll bar, and
+   the thumb with it while the view is scrolled to its top. So a strip at the
+   right edge, as wide as a classic scroll bar, stays unmasked. The mask
+   cannot be told where the scroll bar is, so the width is the constant
+   above. No text reaches that strip, because `.column` keeps at least 24px
+   from either edge. */
 .top ~ .transcript,
 .top ~ .hello {
   --header-clearance: 108px;
 }
 .top ~ .transcript,
 .top ~ .hello.is-scrolled {
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 50px,
-    rgb(0 0 0 / 0.15) 64px,
-    rgb(0 0 0 / 0.5) 79px,
-    rgb(0 0 0 / 0.85) 94px,
-    #000 var(--header-clearance)
-  );
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 50px,
+      rgb(0 0 0 / 0.15) 64px,
+      rgb(0 0 0 / 0.5) 79px,
+      rgb(0 0 0 / 0.85) 94px,
+      #000 var(--header-clearance)
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    var(--classic-scrollbar-width) 100%;
+  mask-position: right;
+  mask-repeat: no-repeat;
 }
 /* The book takes clicks on every child of the header (`.top > *`), the
    spacer included. Here only the pills take them, so the wheel and the

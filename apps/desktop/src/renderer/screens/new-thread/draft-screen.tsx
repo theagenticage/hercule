@@ -27,6 +27,7 @@ import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
 import { pickProjectTint } from "../project-tile";
+import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
@@ -143,6 +144,8 @@ export function DraftScreen({
   // Whether the column is scrolled away from its top, so part of it is under
   // the header. Only then does it fade under the header (thread-header.css).
   const [scrolled, setScrolled] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const canSend = fields.blocked === null && pending.message.text.trim() !== "" && !starting;
 
   const writeText = (text: string): void => {
@@ -199,7 +202,8 @@ export function DraftScreen({
         runners={catalogs.runners}
       />
       <div
-        className={scrolled ? "hello is-scrolled" : "hello"}
+        ref={scrollRef}
+        className={`hello${scrolled ? " is-scrolled" : ""}${showsScrollbar ? " has-scrollbar" : ""}`}
         onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}
       >
         <div className="column">

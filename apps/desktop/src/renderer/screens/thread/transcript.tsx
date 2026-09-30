@@ -33,6 +33,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
 import { ageClock } from "../../app/age-clock";
 import { AgentMessage, LiveRow, TurnEnding, UserMessage, WaitingNote, WorkDivider } from "./blocks";
+import { useShowsClassicScrollbar } from "./classic-scrollbar";
 import type { AttachOpenParagraph } from "./use-thread-live";
 
 /**
@@ -173,6 +174,7 @@ export function Transcript({
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
+  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   // True while the reader is at the bottom. The transcript opens there.
   const followingRef = useRef(true);
   const [timezone] = useState(() => resolveBrowserTimezone());
@@ -333,7 +335,12 @@ export function Transcript({
   const end = HEADER_CLEARANCE + virtualizer.getTotalSize();
 
   return (
-    <section ref={scrollRef} className="transcript" aria-label="Transcript" onScroll={noteScroll}>
+    <section
+      ref={scrollRef}
+      className={showsScrollbar ? "transcript has-scrollbar" : "transcript"}
+      aria-label="Transcript"
+      onScroll={noteScroll}
+    >
       <div ref={columnRef} className="column tx">
         {first === undefined || first.start <= HEADER_CLEARANCE ? null : (
           <div style={{ height: first.start - HEADER_CLEARANCE }} />
