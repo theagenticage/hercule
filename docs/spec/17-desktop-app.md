@@ -650,8 +650,9 @@ These rules keep the budgets:
 
   - The blur is the glass `backdrop-filter` on the composer, the Requests dock, the queued inputs and the header's pills. The fade is the transcript's `mask-image`, which fades it in below the header.
   - Together they cost about 108 MB with the long thread open, and about 63 MB with a thread of 2 rows. A thread of 2 rows already reads about 293 MB summed.
-  - **Open:** give up the fade, give up the blur, or raise the budget. Until then the thread is drawn as the book draws it.
-- **The first screen's JavaScript is 32 kB over its guide.** The chunks loaded at first paint are 219 kB, 10 kB more than slice 4's first screen. The thread's route adds 63 kB, and about 54 kB of that is the markdown parser: `react-markdown`, `remark-gfm` and `remark-breaks`. The shared chunk that holds React DOM is named after the thread's route, `_sessionId-*.js`, because the thread's route is one of the modules that use it; it is not the thread's code.
+  - **Accepted for the first prototype** (decided 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275)): the thread is drawn as the book draws it, blur and fade included, and the summed footprint stays over its budget. The budget is not raised. A later performance pass brings the footprint under it.
+- **The first screen's JavaScript is 32 kB over its guide.** The chunks loaded at first paint are 219 kB, 10 kB more than slice 4's first screen. The thread's route adds 63 kB, and about 48 kB of that is the markdown parser: `react-markdown`, `remark-gfm` and `remark-breaks`, measured alone in a production build. The shared chunk that holds React DOM is named after the thread's route, `_sessionId-*.js`, because the thread's route is one of the modules that use it; it is not the thread's code.
+  - **Handed to [#295](https://github.com/theagenticage/hercule/issues/295)** (decided 2026-09-30): both apps parse markdown with marked's lexer, about 34 kB smaller, and draw it as React elements. Until then, the overrun is accepted for the first prototype, like the footprint's.
 
 ## Slices
 
