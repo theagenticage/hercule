@@ -6,9 +6,19 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* The virtualizer keeps the view still when a block above it changes
-     height. The browser's own scroll anchoring would move it a second time. */
-  overflow-anchor: none;
+}
+/* Not in the book, whose transcript does not stream. The one scroll anchor
+   is the end of the transcript, so the view follows new text while the
+   reader is at the bottom without a script scrolling it: a script's scroll
+   shows macOS's overlay scroll bar, and a streaming turn would keep it on
+   screen. The end is a line 1px high, because a box with no height is never
+   chosen as an anchor, and its negative margin takes that 1px back out of
+   the layout. Away from the bottom the end is out of view, so nothing is
+   anchored, and the virtualizer alone keeps the view still when a block
+   above it changes height. */
+.transcript-end {
+  height: 1px;
+  margin-top: -1px;
 }
 /* The transcript is hidden across the whole header row and fades in below
    it: text left there, even faint, would show between the pills, cut in half
@@ -37,6 +47,8 @@
    transcript.tsx sets it from the composer's height. */
 .tx {
   padding: var(--header-clearance) 0 360px;
+  /* The blocks are never the scroll anchor: see `.transcript-end`. */
+  overflow-anchor: none;
 }
 .tx-item {
   display: flex;

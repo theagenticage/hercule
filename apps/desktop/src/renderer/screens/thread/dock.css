@@ -1,12 +1,14 @@
 /* The dock: a Request waiting on you, as a lip on top of the composer, in
-   the marigold tint, never a fill. Its lower 14px sit under the composer's
-   card. The rules are the Bureau book's `.dock` and `.dock-q`; the answers
-   are the ledger in controls.css. Each departure from the book says why. */
+   the marigold tint, never a fill. Its lower 14px, `--dock-tuck`, sit under
+   the composer's card. The rules are the Bureau book's `.dock` and
+   `.dock-q`; the answers are the ledger in controls.css. Each departure from
+   the book says why. */
 .dock {
+  --dock-tuck: 14px;
   position: relative;
   z-index: 1;
   padding: 12px 12px 24px 14px;
-  margin-bottom: -14px;
+  margin-bottom: calc(-1 * var(--dock-tuck));
   border-radius: 18px 18px 0 0;
   background: color-mix(
     in oklab,
@@ -42,11 +44,21 @@
 }
 
 /* Not in the book, whose dock is never focused. The dock takes the focus
-   so that ↩ can allow, and its ring is drawn just inside its rim, where the
-   card does not cover it, rather than 2px outside, where the ring would run
-   under the card. */
+   so that ↩ can allow. Its ring goes round the part of the dock in view,
+   just inside its rim: a ring round the whole dock would run under the card
+   and lose its bottom edge there. So the ring is drawn by a box that ends
+   where the card begins. */
 .dock:focus-visible {
+  outline: none;
+}
+.dock:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 var(--dock-tuck);
+  border-radius: inherit;
+  outline: 2px solid var(--focus);
   outline-offset: -2px;
+  pointer-events: none;
 }
 /* Not in the book, whose question is one short command. A command of
    thousands of characters, or forty paths, wraps anywhere and scrolls

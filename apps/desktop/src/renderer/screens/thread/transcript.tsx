@@ -11,6 +11,11 @@
  * the same layout, so the transcript follows in the frame that drew the text,
  * without waiting for React to render.
  *
+ * While the reader is at the bottom, the browser's scroll anchoring keeps the
+ * view there, on `.transcript-end` below the column (see thread.css). A
+ * scroll made by a script would show macOS's overlay scroll bar, and a
+ * streaming turn would keep it on screen; a scroll made by anchoring does not.
+ *
  * The transcript is not a live region: the agent's streaming text would flood
  * a screen reader.
  */
@@ -210,6 +215,10 @@ export function Transcript({
   // - the transcript itself, which changes height with the window.
   // The callback runs after layout and before paint, so the new space and
   // the scroll to the bottom show in the same frame as the change.
+  // Anchoring has usually kept the view at the bottom already, and then the
+  // scroll below changes nothing. It is needed where anchoring does not act:
+  // the first render, and a reader a few pixels above the bottom, where the
+  // end is out of view.
   useLayoutEffect(() => {
     const scroller = scrollRef.current!;
     const column = columnRef.current!;
@@ -220,7 +229,11 @@ export function Transcript({
         const stackHeight = entry.borderBoxSize[0]?.blockSize ?? 0;
         column.style.paddingBottom = `${Math.round(stackHeight + COMPOSER_BOTTOM_OFFSET + LAST_LINE_CLEARANCE)}px`;
       }
-      if (followingRef.current) scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+      // The browser clamps this to the bottom, which can be a fraction of a
+      // pixel below `scrollHeight - clientHeight`, a whole number. Setting
+      // that number would move the view by the fraction, and show the scroll
+      // bar, after every change anchoring has already followed.
+      if (followingRef.current) scroller.scrollTop = scroller.scrollHeight;
     });
     observer.observe(scroller);
     observer.observe(column);
@@ -305,6 +318,7 @@ export function Transcript({
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}
       </div>
+      <div className="transcript-end" />
     </section>
   );
 }
