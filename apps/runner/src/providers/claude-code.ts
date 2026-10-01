@@ -56,7 +56,7 @@ import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { truncateFact, truncateMessage } from "./text";
 import { buildUserMessage } from "./events";
-import { buildQuestionRequest } from "./questions";
+import { buildQuestionRequest, keyAnswersForVendor } from "./questions";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
@@ -369,22 +369,22 @@ const readInputPaths = (input: Record<string, unknown>): ReadonlyArray<string> =
     return typeof found === "string" && found !== "" ? [truncateFact(found)] : [];
   });
 
+/** The SDK's tool for asking the user questions; it gets a `question` request. */
+const ASK_USER_QUESTION = "AskUserQuestion";
+
 /**
- * Builds the request the user answers for one tool call. Every field is
- * truncated to what the protocol accepts: a command or path that is too long
- * would make a frame nobody can decode, which loses the event and leaves the
- * park waiting for ever.
+ * Builds the approval the user answers for one tool call other than a
+ * question. Every field is truncated to what the protocol accepts: a command
+ * or path that is too long would make a frame nobody can decode, which loses
+ * the event and leaves the park waiting for ever.
  */
-const buildOpenRequest = (
+const buildApprovalRequest = (
   requestId: string,
   itemId: string,
   toolName: string,
   input: Record<string, unknown>,
   canPersist: boolean,
 ): OpenRequest => {
-  if (toolName === "AskUserQuestion") {
-    return buildQuestionRequest({ requestId, itemId }, toolName, input["questions"]);
-  }
   // "Allow always" is offered only when the harness suggested rules to save.
   // Without them the button would have to invent a rule, which could allow
   // more than the user meant, and an empty set has nothing to save anyway.
@@ -451,6 +451,25 @@ const buildPermissionResult = (
       };
   }
 };
+
+/**
+ * Converts the user's answers to an `AskUserQuestion` call into the SDK's
+ * permission result: an allow whose input is the tool's own input with the
+ * answers added, keyed by each question's full text. The SDK takes one string
+ * per question, so several picks are joined with ", ", the separator the SDK
+ * itself uses for a multi-select answer.
+ */
+const buildAnsweredResult = (
+  input: Record<string, unknown>,
+  answers: ReadonlyMap<string, ReadonlyArray<string>>,
+): PermissionResult => ({
+  behavior: "allow",
+  updatedInput: {
+    ...input,
+    answers: Object.fromEntries([...answers].map(([key, picks]) => [key, picks.join(", ")])),
+  },
+  decisionClassification: "user_temporary",
+});
 
 const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
 
@@ -580,13 +599,18 @@ const resolveNativeSession = (
 /**
  * An open request the harness is waiting on for an answer. The promise the
  * harness awaits is hidden in the closures; everything else only needs the
- * request id, the allowed decisions, and a way to end the wait.
+ * request id, which responses the request takes, and a way to end the wait.
  */
 interface Park {
   readonly requestId: string;
   readonly decisions: ReadonlyArray<ApprovalDecision>;
-  /** Sends the decision to the harness in the SDK's terms, and the harness continues. */
-  readonly answer: (decision: ApprovalDecision) => void;
+  /** Whether the request is a question, the only kind that takes answers. */
+  readonly asksQuestions: boolean;
+  /**
+   * Sends the decision or the answers to the harness in the SDK's terms, and
+   * the harness continues.
+   */
+  readonly answer: (response: RequestResponse) => void;
   /**
    * Ends the request without an answer from the user. This happens when:
    *
@@ -707,16 +731,15 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // been read from its stream, so open the turn here if none is open yet.
         const { events } = openTurn(held.state);
         for (const event of events) emit(event);
-        const request = buildOpenRequest(
-          requestId,
-          // An id the protocol does not accept would make a frame nobody can
-          // decode, which loses the event and leaves a park no client can see.
-          options.toolUseID === "" ? held.state.mint() : truncateFact(options.toolUseID),
-          toolName,
-          input,
-          persists.length > 0,
-        );
-        const endPark = (decision: ApprovalDecision, told: PermissionResult): void => {
+        // An id the protocol does not accept would make a frame nobody can
+        // decode, which loses the event and leaves a park no client can see.
+        const itemId =
+          options.toolUseID === "" ? held.state.mint() : truncateFact(options.toolUseID);
+        const request =
+          toolName === ASK_USER_QUESTION
+            ? buildQuestionRequest({ requestId, itemId }, toolName, input["questions"], "question")
+            : buildApprovalRequest(requestId, itemId, toolName, input, persists.length > 0);
+        const endPark = (response: RequestResponse, told: PermissionResult): void => {
           // End the park only if it is still this request's park, so a
           // second answer does nothing.
           if (held.park?.requestId !== requestId) return;
@@ -728,19 +751,30 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             sessionId,
             at: held.state.now(),
             requestId,
-            decision,
+            ...response,
           });
           settle(told);
         };
         // Handles every way the request can end without an answer: the harness
         // withdraws it, the turn is interrupted, the session stops, or the
         // harness's stream ends.
-        const withdraw = (): void => endPark("cancel", buildPermissionResult("deny", []));
+        const withdraw = (): void =>
+          endPark({ decision: "cancel" }, buildPermissionResult("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
         held.park = {
           requestId,
           decisions: request.decisions,
-          answer: (decision) => endPark(decision, buildPermissionResult(decision, persists)),
+          asksQuestions: request.kind === "question",
+          answer: (response) =>
+            endPark(
+              response,
+              "decision" in response
+                ? buildPermissionResult(response.decision, persists)
+                : buildAnsweredResult(
+                    input,
+                    keyAnswersForVendor(response.answers, input["questions"], "question"),
+                  ),
+            ),
           withdraw,
         };
         emit({
@@ -990,11 +1024,12 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       Effect.sync(() => {
         const park = live.get(sessionId)?.park;
         if (park === undefined || park.requestId !== requestId) return;
-        if (!("decision" in response)) return;
-        // Ignore a decision the request did not offer: the harness would have
-        // to replace it with something else.
-        if (!park.decisions.includes(response.decision)) return;
-        park.answer(response.decision);
+        // Ignore a decision the request did not offer, and answers to a
+        // request that is not a question: the harness would have to replace
+        // them with something else.
+        const fits =
+          "decision" in response ? park.decisions.includes(response.decision) : park.asksQuestions;
+        if (fits) park.answer(response);
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

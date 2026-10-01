@@ -13,6 +13,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
+  ANSWERS_CAPABILITY,
   PROTOCOL_VERSION,
   RunnerToController,
   encodeChallengeBytes,
@@ -514,6 +515,29 @@ describe("which controller a runner accepts", () => {
     // However the connection ended, it was not because the controller was
     // the wrong one.
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("the capabilities a runner offers in its hello", () => {
+  /**
+   * The controller sends a question's answers only to a runner that lists
+   * this capability, because a runner that cannot decode the frame drops its
+   * connection.
+   */
+  it("lists that it can resolve a question with answers", async () => {
+    const stub = await stubController();
+
+    const pending = runConnection(buildPin(stub));
+
+    await stub.connected();
+    await waitUntil(() => stub.received.length > 0);
+    expect(stub.received[0]).toMatchObject({
+      _tag: "runnerHello",
+      capabilities: expect.arrayContaining([ANSWERS_CAPABILITY]) as unknown,
+    });
+
+    stub.hangUp();
+    await pending;
   });
 });
 

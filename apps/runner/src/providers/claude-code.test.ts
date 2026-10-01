@@ -22,6 +22,7 @@ import {
   type OutputSchema,
   type ProbeResult,
   type ProviderEvent,
+  type QuestionAnswers,
   type SessionSpec,
 } from "@hercule/protocol";
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
@@ -1134,13 +1135,14 @@ const respond = (run: Driving, requestId: string, decision: ApprovalDecision): P
 const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<OpenRequest> =>
   seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
 
-const listResolutions = (
-  seen: ReadonlyArray<ProviderEvent>,
-): ReadonlyArray<{ readonly requestId: string; readonly decision: ApprovalDecision }> =>
-  seen.flatMap((event) =>
-    event._tag === "request.resolved" && "decision" in event
-      ? [{ requestId: event.requestId, decision: event.decision }]
-      : [],
+/** Returns how each request was resolved: its decision or its answers. */
+const listResolutions = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<unknown> =>
+  seen.flatMap((event): ReadonlyArray<unknown> =>
+    event._tag !== "request.resolved"
+      ? []
+      : "decision" in event
+        ? [{ requestId: event.requestId, decision: event.decision }]
+        : [{ requestId: event.requestId, answers: event.answers }],
   );
 
 /** Returns the rules an allow saved, or an empty list for any other result. */
@@ -1353,8 +1355,8 @@ describe("a tool call that needs approval", () => {
       questions: [{ question: "Which one?", header: "One", options: [], multiSelect: false }],
     });
 
-    // An allow cannot carry the user's answer to the question, so it must not
-    // reach the harness, however it got this far.
+    // An allow carries no answer to the question, so it must not reach the
+    // harness, however it got this far. A question is answered with answers.
     await respond(run, request.requestId, "allow");
 
     expect(park.settled()).toBeUndefined();
@@ -1466,8 +1468,9 @@ describe("the request kind for each tool", () => {
   }
 
   /**
-   * A response to a request holds only a decision, not the user's answer to
-   * the question, so an allow would give the tool nothing to run with.
+   * A question is answered with the user's answers, not with an allow, which
+   * would give the tool nothing to run with. So the only decisions it offers
+   * are deny and cancel.
    */
   it("reports AskUserQuestion as a question, offering only deny and cancel", async () => {
     const run = await startApprovalSession();
@@ -1578,6 +1581,167 @@ describe("the request kind for each tool", () => {
     expect(JSON.stringify(started.detail)).toContain("read it");
     expect(request.kind).toBe("tool_approval");
     expect(request.itemId).toBe(started.itemId);
+  });
+});
+
+/**
+ * Tests for answering a question. The harness asks through `canUseTool` with
+ * the `AskUserQuestion` tool, and the user's answers come back keyed by each
+ * question's header. The SDK wants them keyed by each question's full text,
+ * with the labels of a multi-select answer joined by ", ".
+ */
+const STORAGE_QUESTION = {
+  question: "Which storage should drafts use?",
+  header: "Storage",
+  options: [
+    { label: "localStorage", description: "simple, synchronous" },
+    { label: "IndexedDB", description: "larger, asynchronous" },
+  ],
+  multiSelect: false,
+};
+
+const FEATURES_QUESTION = {
+  question: "Which features should ship first?",
+  header: "Features",
+  options: [
+    { label: "Sync", description: "across devices" },
+    { label: "Search", description: "full text" },
+    { label: "Export", description: "to Markdown" },
+  ],
+  multiSelect: true,
+};
+
+/** Sends the user's answers to a request to the adapter. */
+const respondWithAnswers = (
+  run: Driving,
+  requestId: string,
+  answers: QuestionAnswers,
+): Promise<void> =>
+  Effect.runPromise(run.adapter.respondToRequest(SESSION, requestId, { answers }));
+
+/** Returns the input an allow handed back to the harness, or `undefined` for any other result. */
+const readUpdatedInput = (settled: PermissionResult | null | undefined): unknown =>
+  settled !== null && settled !== undefined && settled.behavior === "allow"
+    ? settled.updatedInput
+    : undefined;
+
+/** Returns the questions of a `question` request, or an empty list for any other kind. */
+const readQuestions = (request: OpenRequest): ReadonlyArray<unknown> =>
+  request.kind === "question" ? request.detail.questions : [];
+
+describe("answering a question the harness asks", () => {
+  it("allows the call with the answers keyed by question text, joining a list with commas", async () => {
+    const run = await startApprovalSession();
+    const input = { questions: [STORAGE_QUESTION, FEATURES_QUESTION] };
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", input);
+    const answers: QuestionAnswers = { Storage: "localStorage", Features: ["Sync", "Search"] };
+
+    await respondWithAnswers(run, request.requestId, answers);
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "allow" });
+    expect(readUpdatedInput(park.settled())).toEqual({
+      ...input,
+      answers: {
+        "Which storage should drafts use?": "localStorage",
+        "Which features should ship first?": "Sync, Search",
+      },
+    });
+    // The stream records what the user said, not an allow standing in for it.
+    expect(listResolutions(run.seen)).toEqual([{ requestId: request.requestId, answers }]);
+  });
+
+  it("keys the answer by the full question text, even when the request showed it truncated", async () => {
+    const run = await startApprovalSession();
+    const long = `Which storage should drafts use? ${"x".repeat(MAX_MESSAGE_LENGTH + 100)}`;
+    const input = { questions: [{ ...STORAGE_QUESTION, question: long }] };
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", input);
+    const shown = readQuestions(request)[0] as { readonly question: string };
+    expect(shown.question).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(shown.question.endsWith("…")).toBe(true);
+
+    await respondWithAnswers(run, request.requestId, { Storage: "IndexedDB" });
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    // The SDK matches an answer to its question by the exact text, so a
+    // truncated key would answer nothing.
+    expect(readUpdatedInput(park.settled())).toEqual({
+      ...input,
+      answers: { [long]: "IndexedDB" },
+    });
+  });
+
+  it("ignores answers to an approval request", async () => {
+    const run = await startApprovalSession();
+    const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
+
+    await respondWithAnswers(run, request.requestId, { Storage: "localStorage" });
+
+    expect(park.settled()).toBeUndefined();
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("ignores answers to a request id that is not the open one", async () => {
+    const run = await startApprovalSession();
+    const { park } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [STORAGE_QUESTION],
+    });
+
+    await respondWithAnswers(run, "r-nobody-asked", { Storage: "localStorage" });
+
+    expect(park.settled()).toBeUndefined();
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("blocks the call on a deny, with the turn left running", async () => {
+    const run = await startApprovalSession();
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [STORAGE_QUESTION],
+    });
+
+    await respond(run, request.requestId, "deny");
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(readDenial(park.settled()).interrupt).toBe(false);
+    expect(listResolutions(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
+  });
+
+  it("blocks the call and ends the turn on a cancel", async () => {
+    const run = await startApprovalSession();
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [STORAGE_QUESTION],
+    });
+
+    await respond(run, request.requestId, "cancel");
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny", interrupt: true });
+    expect(listResolutions(run.seen)).toEqual([
+      { requestId: request.requestId, decision: "cancel" },
+    ]);
+  });
+
+  /**
+   * Answers are keyed by header, so two questions with one header could not
+   * both be answered. The later one is dropped rather than renamed, because a
+   * renamed header would show words the agent never wrote.
+   */
+  it("drops a question whose header repeats an earlier question's header", async () => {
+    const run = await startApprovalSession();
+
+    const { request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [
+        STORAGE_QUESTION,
+        { ...FEATURES_QUESTION, header: "Storage" },
+        { ...FEATURES_QUESTION, question: "Which features after that?", header: "Later" },
+      ],
+    });
+
+    expect(readQuestions(request)).toEqual([
+      STORAGE_QUESTION,
+      { ...FEATURES_QUESTION, question: "Which features after that?", header: "Later" },
+    ]);
   });
 });
 

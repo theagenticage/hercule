@@ -19,7 +19,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ApprovalDecision, ProviderEvent } from "@hercule/protocol";
+import type { ApprovalDecision, ProviderEvent, QuestionAnswers } from "@hercule/protocol";
 import {
   type Answered,
   startBusySession,
@@ -345,7 +345,8 @@ describe("a question the agent asks the user", () => {
         },
       ],
     });
-    // Sending answers is not supported yet, so a surface can only decline.
+    // The question is answered with answers; the only decisions it takes
+    // are the two that decline it.
     expect(opened.request.decisions).toEqual(["deny", "cancel"]);
   });
 
@@ -372,6 +373,204 @@ describe("a question the agent asks the user", () => {
       { threadId: THREAD, turnId: TURN },
     ]);
     expect(listResolutions(run)).toEqual(["cancel"]);
+  });
+});
+
+/** Sends a question, resolves it with `answers`, and returns the run and the adapter's reply. */
+const openAndAnswerQuestion = async (
+  params: unknown,
+  answers: QuestionAnswers,
+): Promise<{ readonly run: Run; readonly answered: Answered }> => {
+  const run = await pushServerRequest(USER_INPUT, params);
+  const opened = await awaitOpenedRequest(run);
+  await Effect.runPromise(
+    run.adapter.respondToRequest(SESSION, opened.request.requestId, { answers }),
+  );
+  return { run, answered: await awaitAnswer(run) };
+};
+
+/** Two questions, so a test can tell which answer went to which question id. */
+const TWO_QUESTIONS_PARAMS = {
+  ...USER_INPUT_PARAMS,
+  questions: [
+    USER_INPUT_PARAMS.questions[0],
+    {
+      id: "q2",
+      header: "Reason",
+      question: "Why deploy now?",
+      isOther: true,
+      isSecret: false,
+      options: null,
+    },
+  ],
+};
+
+describe("answering a question the agent asks", () => {
+  it("replies with each answer as a list under its question id, and reports the answers", async () => {
+    const answers: QuestionAnswers = { "Deploy target": ["staging"], Reason: "the fix is urgent" };
+
+    const { run, answered } = await openAndAnswerQuestion(TWO_QUESTIONS_PARAMS, answers);
+
+    // A single answer is sent as a list of one, because that is the only
+    // shape the reply has.
+    expect(answered.result).toEqual({
+      answers: {
+        q1: { answers: ["staging"] },
+        q2: { answers: ["the fix is urgent"] },
+      },
+    });
+    expect(answered.error).toBeUndefined();
+    // The stream records what the user said, not a decision standing in for it.
+    expect(listResolutions(run)).toEqual([answers]);
+  });
+
+  it("does not interrupt the turn after the answers", async () => {
+    const { run } = await openAndAnswerQuestion(USER_INPUT_PARAMS, { "Deploy target": "staging" });
+
+    await settle();
+    // The agent goes on with the answer in the same turn.
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
+  });
+
+  it("opens the next waiting request once the question is answered", async () => {
+    const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
+    run.server.push({ id: SECOND_ID, method: COMMAND, params: COMMAND_PARAMS });
+    await settle();
+    const question = await awaitOpenedRequest(run);
+
+    await Effect.runPromise(
+      run.adapter.respondToRequest(SESSION, question.request.requestId, {
+        answers: { "Deploy target": "production" },
+      }),
+    );
+
+    expect((await awaitAnswer(run, ID)).result).toEqual({
+      answers: { q1: { answers: ["production"] } },
+    });
+    await waitUntil(
+      "opened the second",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    expect(filterByTag(run.seen, "request.opened")[1]?.request.kind).toBe("command_approval");
+  });
+
+  it("ignores answers to an approval request", async () => {
+    const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
+    const opened = await awaitOpenedRequest(run);
+
+    await Effect.runPromise(
+      run.adapter.respondToRequest(SESSION, opened.request.requestId, {
+        answers: { "Deploy target": "staging" },
+      }),
+    );
+
+    await settle();
+    expect(run.answered).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+
+  it("ignores answers to a question shown as a tool approval", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
+    });
+    const opened = await awaitOpenedRequest(run);
+
+    await Effect.runPromise(
+      run.adapter.respondToRequest(SESSION, opened.request.requestId, {
+        answers: { "Deploy target": "staging" },
+      }),
+    );
+
+    await settle();
+    expect(run.answered).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+});
+
+describe("the question request built from a Codex question", () => {
+  it("drops a secret question, because its answer would be shown and stored in plain text", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...TWO_QUESTIONS_PARAMS,
+      questions: [
+        { ...USER_INPUT_PARAMS.questions[0], id: "q0", header: "Token", isSecret: true },
+        ...TWO_QUESTIONS_PARAMS.questions,
+      ],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("question");
+    expect(
+      opened.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.header)
+        : [],
+    ).toEqual(["Deploy target", "Reason"]);
+  });
+
+  it("shows a question with no options as a question with an empty option list", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [TWO_QUESTIONS_PARAMS.questions[1]],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({
+      questions: [
+        { header: "Reason", question: "Why deploy now?", multiSelect: false, options: [] },
+      ],
+    });
+  });
+
+  it("drops a question whose header repeats an earlier question's header", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [
+        USER_INPUT_PARAMS.questions[0],
+        { ...TWO_QUESTIONS_PARAMS.questions[1], header: "Deploy target" },
+      ],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(
+      opened.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.question)
+        : [],
+    ).toEqual(["Which environment should this go to?"]);
+  });
+
+  it("drops a question whose id repeats an earlier question's id, so no answer is sent under another's id", async () => {
+    const answers: QuestionAnswers = { "Deploy target": "staging" };
+    const { run, answered } = await openAndAnswerQuestion(
+      {
+        ...USER_INPUT_PARAMS,
+        questions: [
+          USER_INPUT_PARAMS.questions[0],
+          { ...TWO_QUESTIONS_PARAMS.questions[1], id: "q1" },
+        ],
+      },
+      answers,
+    );
+
+    const opened = filterByTag(run.seen, "request.opened")[0];
+    expect(
+      opened?.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.header)
+        : [],
+    ).toEqual(["Deploy target"]);
+    expect(answered.result).toEqual({ answers: { q1: { answers: ["staging"] } } });
+  });
+
+  it("falls back to a tool approval that can be denied when every question is secret", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "requestUserInput" });
+    expect(opened.request.decisions).toEqual(["deny", "cancel"]);
   });
 });
 

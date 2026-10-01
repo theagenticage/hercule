@@ -37,6 +37,7 @@ import {
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
+  ANSWERS_CAPABILITY,
   MAX_FACT_LENGTH,
   type InstallRequest,
   type LoginStart,
@@ -71,13 +72,18 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 const NONCE_BYTES = 16;
 
 /**
- * The capabilities this runner offers at hello: one for each workspace action
- * its build implements. The controller pins a run only to a runner that lists
- * every workspace action in the run's plan.
+ * The capabilities this runner offers at hello:
+ *
+ * - one for each workspace action its build implements. The controller pins a
+ *   run only to a runner that lists every workspace action in the run's plan.
+ * - answers to a question. The controller sends answers only to a runner that
+ *   lists it, because an older runner cannot decode them and would drop its
+ *   connection.
  */
-const CAPABILITIES: ReadonlyArray<string> = WORKSPACE_ACTION_IDS.map(
-  buildWorkspaceActionCapability,
-);
+const CAPABILITIES: ReadonlyArray<string> = [
+  ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
+  ANSWERS_CAPABILITY,
+];
 
 const ED25519 = { name: "Ed25519" } as const;
 

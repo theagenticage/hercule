@@ -1,7 +1,7 @@
 /**
  * The requests the app-server sends to this client during a turn, mapped to
  * Hercule's requests: what the user is shown, and what each of the four
- * decisions sends back to Codex. The mapping is one table because getting it
+ * decisions, or the answers to a question, send back to Codex. The mapping is one table because getting it
  * right is the whole job here: a reply in a shape Codex does not accept leaves
  * the turn hanging forever, with no error anywhere.
  *
@@ -14,9 +14,9 @@
  * - A question has no way to decline in its reply, so a decline is a
  *   JSON-RPC error reply.
  */
-import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
+import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/protocol";
 import { ensureId } from "../events";
-import { buildQuestionRequest } from "../questions";
+import { buildQuestionRequest, keyAnswersForVendor } from "../questions";
 import { truncateFact, truncateMessage } from "../text";
 import type { RpcReply } from "./rpc";
 import type {
@@ -32,6 +32,7 @@ import type {
   PermissionsRequestApprovalResponse,
   RequestPermissionProfile,
   ToolRequestUserInputParams,
+  ToolRequestUserInputResponse,
 } from "./types";
 
 /** What the adapter knows about an arriving request that is not in the request's params. */
@@ -53,6 +54,11 @@ export interface Asked {
    * that cancel as it does to a deny.
    */
   readonly replies: (decision: ApprovalDecision, params: unknown) => RpcReply;
+  /**
+   * Builds the reply sent to Codex for the user's answers to a question. Only
+   * the row whose requests can be questions has it.
+   */
+  readonly answers?: (answers: QuestionAnswers, params: unknown) => RpcReply;
   /** The decisions Codex's reply cannot express, so the adapter interrupts the turn instead. */
   readonly endsTurn: ReadonlyArray<ApprovalDecision>;
 }
@@ -65,6 +71,7 @@ export interface Asked {
 const buildAsked = <P>(row: {
   readonly opens: (params: P, arrival: Arrival) => OpenRequest;
   readonly replies: (decision: ApprovalDecision, params: P) => RpcReply;
+  readonly answers?: (answers: QuestionAnswers, params: P) => RpcReply;
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
 }): Asked => ({ endsTurn: [], ...row }) as Asked;
 
@@ -201,10 +208,21 @@ export const ASKED: Readonly<Record<string, Asked>> = {
         { requestId, itemId: ensureId(params.itemId) },
         USER_INPUT_TOOL,
         params.questions,
+        "id",
       ),
-    // Sending answers is not supported yet, and the reply has no way to
-    // decline, so the only possible reply is an error.
+    // The reply has no way to decline, so a decision is replied to with an
+    // error, and a cancel also interrupts the turn.
     replies: () => DECLINED,
+    answers: (answers, params) => ({
+      result: {
+        answers: Object.fromEntries(
+          [...keyAnswersForVendor(answers, params.questions, "id")].map(([id, picks]) => [
+            id,
+            { answers: [...picks] },
+          ]),
+        ),
+      } satisfies ToolRequestUserInputResponse,
+    }),
     endsTurn: ["cancel"],
   }),
 };

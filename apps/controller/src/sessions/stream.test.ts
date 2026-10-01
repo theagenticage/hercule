@@ -224,6 +224,13 @@ describe("the open request", () => {
 
   it("is cleared by its answer, by the turn completing and by the harness exiting", () => {
     expect(computeOpenRequestAfter(resolved, request)).toBeNull();
+    const answered: RequestEvent = {
+      ...base,
+      _tag: "request.resolved",
+      requestId: "r1",
+      answers: { Storage: "localStorage" },
+    };
+    expect(computeOpenRequestAfter(answered, request)).toBeNull();
     // The question ends with the turn it was asked in, answered or not.
     expect(computeOpenRequestAfter(turnCompleted, request)).toBeNull();
     expect(computeOpenRequestAfter(exited, request)).toBeNull();

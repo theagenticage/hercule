@@ -42,5 +42,6 @@ export type { RequestPermissionProfile } from "./generated/v2/RequestPermissionP
 export type { McpServerElicitationRequestParams } from "./generated/v2/McpServerElicitationRequestParams";
 export type { McpServerElicitationRequestResponse } from "./generated/v2/McpServerElicitationRequestResponse";
 export type { ToolRequestUserInputParams } from "./generated/v2/ToolRequestUserInputParams";
+export type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse";
 export type { DynamicToolCallResponse } from "./generated/v2/DynamicToolCallResponse";
 export type { JsonValue } from "./generated/serde_json/JsonValue";

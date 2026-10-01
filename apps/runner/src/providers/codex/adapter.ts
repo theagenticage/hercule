@@ -14,7 +14,6 @@ import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import type {
   AccessMode,
-  ApprovalDecision,
   ExitReason,
   ModelSelection,
   OpenRequest,
@@ -48,6 +47,7 @@ import {
   type AppServerSpawn,
   type NotificationFrame,
   type RpcError,
+  type RpcReply,
   type ServerRequestFrame,
 } from "./rpc";
 import type {
@@ -537,22 +537,45 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Resolves the open request: replies to Codex with the decision, emits
-   * `request.resolved`, and opens the next waiting request, if any.
+   * Resolves the open request: sends `reply` to Codex, emits
+   * `request.resolved` with the user's decision or answers, and opens the
+   * next waiting request, if any.
    */
-  const resolvePark = (held: Held, park: Park, decision: ApprovalDecision): void => {
+  const resolvePark = (
+    held: Held,
+    park: Park,
+    reply: RpcReply,
+    response: RequestResponse,
+  ): void => {
     held.open = undefined;
-    held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
+    held.host.rpc.answer(park.id, reply);
     emit({
       _tag: "request.resolved",
       eventId: crypto.randomUUID(),
       sessionId: held.binding.sessionId,
       at: now(),
       requestId: park.request.requestId,
-      decision,
+      ...response,
     });
     const next = held.waiting.shift();
     if (next !== undefined) announce(held, next);
+  };
+
+  /**
+   * Builds the reply to Codex for the user's response to `park`, or returns
+   * `undefined` when the request does not take that response: a decision it
+   * did not offer, or answers to a request that is not a question. Codex
+   * would have to replace either with something else, so it is ignored.
+   */
+  const buildReply = (park: Park, response: RequestResponse): RpcReply | undefined => {
+    if ("decision" in response) {
+      return park.request.decisions.includes(response.decision)
+        ? park.asked.replies(response.decision, park.params)
+        : undefined;
+    }
+    return park.request.kind === "question"
+      ? park.asked.answers?.(response.answers, park.params)
+      : undefined;
   };
 
   /**
@@ -869,7 +892,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const open = held.open;
         // The open request is reported as resolved with `cancel`, because
         // the interrupt is what ended it.
-        if (open !== undefined) resolvePark(held, open, "cancel");
+        if (open !== undefined) {
+          resolvePark(held, open, open.asked.replies("cancel", open.params), {
+            decision: "cancel",
+          });
+        }
         return interruptTurn(held);
       }),
 
@@ -881,24 +908,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
         const park = held?.open;
-        // Ignore a decision for a request that is not the open one, and a
-        // decision the request did not offer: Codex would have to replace it
-        // with something else.
-        if (
-          held === undefined ||
-          park === undefined ||
-          park.request.requestId !== requestId ||
-          !("decision" in response) ||
-          !park.request.decisions.includes(response.decision)
-        ) {
+        if (held === undefined || park === undefined || park.request.requestId !== requestId) {
           return Effect.void;
         }
-        const { decision } = response;
+        const reply = buildReply(park, response);
+        if (reply === undefined) return Effect.void;
         // A decision that ends the turn cancels every waiting request with it,
         // so none of them is shown to the user only to be cancelled at once.
-        const ending = park.asked.endsTurn.includes(decision);
+        const ending = "decision" in response && park.asked.endsTurn.includes(response.decision);
         if (ending) cancelWaiting(held);
-        resolvePark(held, park, decision);
+        resolvePark(held, park, reply, response);
         // Interrupt only when the reply cannot express the decision itself;
         // every other row tells Codex to stop through its own reply.
         return ending ? interruptTurn(held) : Effect.void;
