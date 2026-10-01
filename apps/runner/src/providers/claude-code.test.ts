@@ -595,7 +595,7 @@ describe("a Claude Code session", () => {
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
   });
 
-  it("runs in the session's cwd, with the instance's home and none of the machine's settings", async () => {
+  it("runs a workspace-less session in its scratch cwd, with the instance's home and no setting source", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -611,6 +611,23 @@ describe("a Claude Code session", () => {
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
+  });
+
+  it("loads the workspace's own CLAUDE.md and .claude/ when the session has a workspace", async () => {
+    const run = createDriving();
+    const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...CONTEXT, cwd: "/home/me/repo" }),
+    );
+
+    const [options] = run.options;
+    expect(options?.cwd).toBe("/home/me/repo");
+    // Only the project source: the user's own `~/.claude` stays out, because
+    // the config directory is still the instance's home (spec 06 section 9.1).
+    expect(options?.settingSources).toEqual(["project"]);
+    expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(CONTEXT.home);
+    expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
+    expect(options?.strictMcpConfig).toBe(true);
   });
 
   it("loads hercule-as-a-tool as a local plugin, and none of the machine's settings", async () => {

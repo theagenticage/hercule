@@ -9,7 +9,7 @@
  * the session tests use the developer's own login, spend a few tokens, and
  * run only when opted in.
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -470,6 +470,77 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
 
       await Effect.runPromise(claudeCode.stopSession(SKILLED, "stopped"));
       await waitForEvent(seen, "session.exited");
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
+
+/**
+ * Checks that the real CLI reads the `CLAUDE.md` in a session's cwd when the
+ * session has a workspace, and ignores it when the session has none. Each
+ * session runs in a fresh directory whose `CLAUDE.md` holds a random marker
+ * the model can only know by reading that file.
+ */
+const IN_WORKSPACE = "0199e0e7-0000-7000-8000-00000000ff07";
+const WITHOUT_WORKSPACE = "0199e0e7-0000-7000-8000-00000000ff08";
+
+describe.skipIf(!authed)("a real Claude Code session and the CLAUDE.md in its cwd", () => {
+  /**
+   * Starts a session in a directory holding a `CLAUDE.md` with a marker, asks
+   * for the marker, and stops the session. Returns the marker and the reply.
+   */
+  const askForMarker = async (
+    sessionId: string,
+    workspaceId: SessionSpec["workspaceId"],
+  ): Promise<{ readonly marker: string; readonly reply: string }> => {
+    const marker = `hercule-project-${crypto.randomUUID().slice(0, 8)}`;
+    const cwd = createTemporaryHome();
+    writeFileSync(join(cwd, "CLAUDE.md"), `# Project\n\nThe project's code word is ${marker}.\n`);
+
+    const seen = collectEvents();
+    await Effect.runPromise(
+      claudeCode.startSession(sessionId, { ...SPEC, workspaceId }, buildContext(cwd)),
+    );
+    await Effect.runPromise(
+      claudeCode.sendInput(sessionId, {
+        text:
+          "Use no tools. If your instructions name the project's code word, reply with it. " +
+          "Otherwise reply with the single word none.",
+      }),
+    );
+    await waitForEvent(seen, "turn.completed");
+    await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
+    await waitForEvent(seen, "session.exited");
+
+    const reply = seen
+      .flatMap((event) =>
+        event._tag === "content.delta" && event.streamKind === "assistant_text"
+          ? [event.delta]
+          : [],
+      )
+      .join("");
+    return { marker, reply };
+  };
+
+  it(
+    "follows the workspace's CLAUDE.md",
+    async () => {
+      const { marker, reply } = await askForMarker(
+        IN_WORKSPACE,
+        "0199e0e7-0000-7000-8000-00000000000b",
+      );
+      expect(reply, `the session never read the workspace's CLAUDE.md: ${reply}`).toContain(marker);
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+
+  it(
+    "ignores a CLAUDE.md in its cwd when it has no workspace",
+    async () => {
+      const { marker, reply } = await askForMarker(WITHOUT_WORKSPACE, null);
+      expect(reply, `a workspace-less session read a stray CLAUDE.md: ${reply}`).not.toContain(
+        marker,
+      );
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
   );

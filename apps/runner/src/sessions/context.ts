@@ -125,7 +125,7 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
  * A session without a workspace gets an empty scratch directory, not the
  * runner's own cwd, because every harness reads instruction files out of its
  * cwd. The adapter does the rest of keeping stray context out of the session:
- * empty setting sources, auto memory off, and a strict MCP config
+ * no context-file discovery, auto memory off, and a strict MCP config
  * (spec 06 section 9.1).
  */
 const placeSession = (
