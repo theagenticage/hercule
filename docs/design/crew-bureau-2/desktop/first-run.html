@@ -1270,8 +1270,8 @@
           if (st === "not-running") {
             return (
               '<h1 class="st-h">Hercule isn’t running on this Mac</h1>' +
-              '<p class="st-sub">The app talks to Hercule running in the background. The installer starts it when you log in; if you have just installed it, start it now in Terminal:</p>' +
-              '<div class="cmd"><span>hercule serve</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="copy">' + icon("file", 14) + "Copy</button></div>" +
+              '<p class="st-sub">The app talks to Hercule running in the background. It starts when you log in; to start it now, run this in Terminal:</p>' +
+              '<div class="cmd"><span>hercule service start</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></div>' +
               '<p class="reach reach--off"><span class="dot-ok"></span><span>Nothing answers at <span class="mono">' + ME.address + "</span></span></p>" +
               '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="retry">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>'
             );
