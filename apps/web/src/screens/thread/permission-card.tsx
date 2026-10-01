@@ -192,7 +192,10 @@ function QuestionForm({
               )}
             >
               {/* The label, not the choice, gives this column its baseline, so
-                the label sits on the same line as its description. */}
+                the label sits on the same line as its description. The
+                choice is one line of the label's text tall and centred in
+                it, so it stays beside the first line when a long label
+                wraps. */}
               <span className="flex min-w-0 items-baseline gap-2">
                 <ChoiceInput
                   type={question.multiSelect ? "checkbox" : "radio"}
@@ -200,7 +203,7 @@ function QuestionForm({
                   checked={answer.picks.includes(option.label)}
                   disabled={locked}
                   onChange={() => setDraft(pickQuestionOption(draft, question, option.label))}
-                  className="self-center"
+                  className="h-[1lh] self-start text-meta"
                 />
                 <span className="text-meta font-emph text-ink wrap-anywhere">{option.label}</span>
               </span>
