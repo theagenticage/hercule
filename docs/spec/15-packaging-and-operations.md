@@ -15,10 +15,14 @@ The installer places the binary at **`~/.local/bin/hercule`** (resolved 2026-09-
 *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until stable releases ([#191](https://github.com/theagenticage/hercule/issues/191)) and their installer ([#102](https://github.com/theagenticage/hercule/issues/102)) land, the install path is the **`edge` prerelease**: a rolling build of `main`. The rules:
 
 - **What it holds.** Three assets: `hercule-darwin-arm64` (the binary, ad hoc signed), `Hercule-darwin-arm64.zip` (the desktop app, zipped with `ditto -c -k --keepParent` so its signature and symlinks survive) and `SHA256SUMS`. macOS on Apple silicon only; Linux comes with #191.
-- **How it is replaced.** Two jobs in `.github/workflows/ci.yml` run on every push to `main` once the other jobs pass. `edge-build`, on macOS, builds and signs the assets, runs the packaging test on the app and installs them with `install.sh`. `edge-publish`, on Linux, deletes the release and its tag, and creates them again on the commit, with its CI run named in the release's notes. The tag is not moved because GitHub refuses to let a job's token move a tag to a commit whose workflow files differ from those of the commit the tag points at now; for about a minute there is no release, and the installer refuses. Runs on `main` are queued, never cancelled, so `edge` is published in push order, and a publish is never stopped between deleting the release and creating it again.
+- **How it is replaced.** Two jobs in `.github/workflows/ci.yml` run on every push to `main` once the other jobs pass. `edge-build`, on macOS, builds and signs the assets, runs the packaging test on the app and installs them with `install.sh`, then runs the controller as a service with the installed binary's `hercule service install`, checks `hercule service status` and uninstalls the unit again *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*. `edge-publish`, on Linux, deletes the release and its tag, and creates them again on the commit, with its CI run named in the release's notes. The tag is not moved because GitHub refuses to let a job's token move a tag to a commit whose workflow files differ from those of the commit the tag points at now; for about a minute there is no release, and the installer refuses. Runs on `main` are queued, never cancelled, so `edge` is published in push order, and a publish is never stopped between deleting the release and creating it again.
 - **What it relies on.** The release is deleted and created again under the same tag, which GitHub's immutable releases forbid; that repository setting must stay off for `edge`. #191's stable releases may turn it on only for their own tags.
 - **How it is trusted.** The installer checks the binary and the app against `SHA256SUMS`, which catches a broken download. Nothing is signed with minisign yet, so the trust anchor is GitHub's HTTPS, as for any first install over `curl | sh`. #191 adds the signature.
-- **The installer** is `install.sh` at the repository root: `curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh`. It is read from the `edge` tag, so the script and the assets come from the same commit, except for up to five minutes after a publish, while raw.githubusercontent.com may still serve the previous script. Running it again is the update (section 9): it replaces the binary and the desktop app together, so the controller and the app never disagree on a protocol version ([#289](https://github.com/theagenticage/hercule/issues/289)). It never touches the Hercule Home's contents beyond creating `logs/` (section 5); the controller migrates the database itself at boot (section 8). `HERCULE_RELEASE_URL` points it at another location than the `edge` release; only the installer reads it, so it is not a config key (section 6). `HERCULE_HOME` chooses the Hercule Home, as for any role; the installer writes it into the unit (section 4), and an update keeps the Home the installed unit names. It isolates only the Home: the binary, the app and the unit are the user's one install whatever it is.
+- **The installer** is `install.sh` at the repository root: `curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh`. It is read from the `edge` tag, so the script and the assets come from the same commit, except for up to five minutes after a publish, while raw.githubusercontent.com may still serve the previous script. Running it again is the update (section 9): it replaces the binary and the desktop app together, so the controller and the app never disagree on a protocol version ([#289](https://github.com/theagenticage/hercule/issues/289)). ~~It never touches the Hercule Home's contents beyond creating `logs/` (section 5);~~ It never touches the Hercule Home's contents *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*; the controller migrates the database itself at boot (section 8). `HERCULE_RELEASE_URL` points it at another location than the `edge` release; only the installer reads it, so it is not a config key (section 6). `HERCULE_HOME` chooses the Hercule Home, as for any role; ~~the installer writes it into the unit (section 4), and an update keeps the Home the installed unit names~~ a first install puts it in the `hercule service install` command it prints, and an update keeps the Home the installed unit names and passes it to `hercule service install` *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*. It isolates only the Home: the binary, the app and the unit are the user's one install whatever it is.
+- **First install and update** *(added 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*. The installer tells the two apart by the unit file, `~/Library/LaunchAgents/sh.hercule.service.plist` (section 4).
+  - A **first install** (no unit) puts the binary and the app in place, writes no unit and starts nothing. It prints the next steps: `hercule service install` and then `hercule setup-url` to run the controller on this Mac, or the join command from the Fleet's "Add machine" to make this Mac a runner (section 13), which installs the unit itself. Whether a Mac runs a controller or a runner is the user's choice, which the installer cannot make.
+  - An **update** (the unit exists) replaces the app and the binary, then runs the new binary's `hercule service install` with the installed unit's `HERCULE_HOME`. That command rewrites the unit, restarts it and waits until it stays up (section 4); when it fails, the installer fails, and the command's own output says why. An update never adds a unit where there is none.
+  - `HERCULE_APPLICATIONS_DIR` puts the app in another folder than `/Applications`. It exists for the installer's own tests, which must not replace or quit the app of the person running them; like `HERCULE_RELEASE_URL`, it is not a config key.
 - **One recorded deviation:** when `~/.local/bin` is not on `PATH`, `install.sh` prints the export line instead of appending it to the shell profile. #102's installer follows the paragraph above.
 
 ## 2. One binary, three roles: the subcommand tree
@@ -30,9 +34,9 @@ A thin dispatcher reads `argv` and hands off to one of three entrypoints: contro
 | `hercule serve` | controller | Foreground run is the dev mode; under a service unit it is the production mode. Auto-initializes an empty home (section 7). |
 | `hercule runner` | runner daemon | Dials the controller, holds one WebSocket. Runner protocol in [./03](./03-controller-and-runners.md). |
 | `hercule runner --local` | runner daemon | The controller's local runner. Self-spawned by `hercule serve`, never started by the user (section 4). |
-| `hercule runner join <url> --token <t>` | runner enrolment | Single-use token exchange for a durable per-runner credential; fully programmatic, no prompts. Installs provider CLIs and the service unit by default (`--no-service` skips, `--reserved` flags the runner reserved) (section 13, [./03](./03-controller-and-runners.md)). |
+| `hercule runner join <url> --token <t>` | runner enrolment | Single-use token exchange for a durable per-runner credential; fully programmatic, no prompts. Installs ~~provider CLIs and~~ the service unit by default, with the role `hercule runner` (`--no-service` skips, `--reserved` flags the runner reserved) (section 13, [./03](./03-controller-and-runners.md)). *(Amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100): join installs no provider CLI since [#64](https://github.com/theagenticage/hercule/issues/64), [./03](./03-controller-and-runners.md) §3.1.)* |
 | `hercule runner set-controller <url>` | runner ops | Re-points this runner at the controller's new address after a promotion it missed; keeps the existing credential, verifies the controller's logical identity at hello ([./03](./03-controller-and-runners.md) §8.3). |
-| `hercule service install` / `uninstall` / `start` / `stop` / `restart` / `status` | ops | The full verb set (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): thin, idempotent wrappers over `systemctl --user` / `launchctl` for the unit `service install` generates (section 4). |
+| `hercule service install` / `uninstall` / `start` / `stop` / `restart` / `status` | ops | The full verb set (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): thin, idempotent wrappers over `systemctl --user` / `launchctl` for the unit `service install` generates (section 4). *(Amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* Each verb takes `--json`, which prints the resulting status. `install` chooses between `hercule serve` and `hercule runner` by the rule in section 4 and prints its choice with the reason. |
 | `hercule setup-url` | ops | Prints the one-time setup URL while setup is incomplete (section 7). Reads a file in Hercule Home; needs no credential. |
 | `hercule runner join-token create` | ops | *(Respelled 2026-09-15, [#126](https://github.com/theagenticage/hercule/issues/126); was `create-join-token`.)* Mints a single-use runner join token (the CLI form of `runner.createJoinToken`, [./11](./11-public-api-and-agent-surface.md)) and prints the complete paste-ready join command, mirroring the web app's "Add machine" spot (section 13). |
 | `hercule upgrade` | ops | Self-update: fetch, verify signature and checksum, atomic swap, supervisor restart (section 9). |
@@ -67,14 +71,54 @@ The compiled artifact still contains all three graphs. Isolation is a property o
 - One unit per machine. On the controller machine the unit runs `hercule serve`; on a runner-only machine it runs `hercule runner`.
 - Foreground `hercule serve` (no unit) is the development mode.
 
-*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule service install` lands ([#100](https://github.com/theagenticage/hercule/issues/100)), the `edge` installer (section 1) writes the controller machine's LaunchAgent itself. The unit:
+~~*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule service install` lands ([#100](https://github.com/theagenticage/hercule/issues/100)), the `edge` installer (section 1) writes the controller machine's LaunchAgent itself.~~ *(Amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* `hercule service install` has landed, and the `edge` installer no longer writes a unit: an update runs `hercule service install` (section 1). The unit the installer wrote has the label and the path below, `ProgramArguments` of `[<binary>, "serve"]` and `HERCULE_HOME` in its environment, so the service reads it as its own and replaces it.
 
-- is `~/Library/LaunchAgents/sh.hercule.service.plist`, with the label `sh.hercule.service`;
-- runs `~/.local/bin/hercule serve`, with `RunAtLoad` and `KeepAlive`;
-- carries the installing shell's `PATH` with `~/.local/bin` first and relative or missing folders left out, and `HERCULE_HOME`, always as an absolute path;
-- appends stdout and stderr to `<home>/logs/controller.log` (section 5).
+### The service unit
 
-The installer loads the unit with `launchctl bootstrap` the first time, restarts it with `launchctl kickstart -k` after, and boots it out and in again when the plist changed. It reports the controller as running once launchd shows it under a new process ID that is still there three seconds later. `hercule service install` must use the same label and path, so it replaces this unit instead of adding a second one.
+*(Added 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* `hercule service` manages the one **Service Unit** of a machine: the unit the OS supervisor keeps running, whether it runs the controller or a runner.
+
+**The verbs.** Each prints the resulting status with `--json`: `{ installed, running, pid, role, home, unitFile }`, where `role` is `"serve"`, `"runner"` or null, and `pid` and `home` may be null.
+
+| Verb | What it does |
+|---|---|
+| `install` | Writes the unit, registers it, and always starts or restarts it, so afterwards the running process is this binary under this unit. Then it waits: a process ID different from the one before must appear within 30 seconds and still be the same 3 seconds later. Otherwise it fails and names the log files. |
+| `uninstall` | Stops the unit and deletes its file. Succeeds when nothing is installed. Leaves the logs, and leaves linger on (Linux), and says so. |
+| `start` | Starts an installed unit that is not running, then waits as `install` does. Never installs. |
+| `stop` | Stops the unit. On macOS the plist stays, so launchd loads it again at the next login, like `systemctl stop` on an enabled unit. |
+| `restart` | Restarts the unit, starting it if it was not loaded, then waits as `install` does. |
+| `status` | Reports whether a unit is installed and running, its process ID, its role and its Home. |
+
+`start`, `stop` and `restart` with no unit installed fail with "No Hercule service is installed on this machine. Run `hercule service install`." Every failure exits 1 with one line that says what to do, because the desktop app runs these commands and shows their output; a usage error exits 2.
+
+**One unit per machine.** `install` refuses when the installed unit names another Home, and says what to run to move it. It also refuses:
+
+- when it runs from a checkout rather than a compiled binary, because the unit would point at a Bun binary and a source file;
+- when `-c key=value` is given, or a `HERCULE_<key>` variable for a bootstrap key is set (section 6). The unit reads only `config.toml`, so an override would hold for this command and not for the service; the message names the key and the config file to put it in. `HERCULE_HOME` is not a bootstrap key, and is honoured;
+- on macOS, when the user is not logged in to the Mac's desktop (`launchctl print gui/<uid>` fails), because launchd then has nowhere to run Hercule;
+- on Linux, when `loginctl enable-linger` fails. Nothing is written, and the message gives the command to run (`sudo loginctl enable-linger <user>`).
+
+Any other platform is refused with a clear error.
+
+**The unit on each platform.**
+
+- macOS: a launchd LaunchAgent with the label `sh.hercule.service`, in the file `~/Library/LaunchAgents/sh.hercule.service.plist`, in the domain `gui/<uid>`. It sets `RunAtLoad` and `KeepAlive`. When the job is loaded and the plist is unchanged, `install` restarts it with `launchctl kickstart -k`; otherwise it boots the job out, waits up to 30 seconds for it to unload, writes the plist and loads it with `launchctl bootstrap`. The status comes from `launchctl print gui/<uid>/sh.hercule.service`.
+- Linux: a systemd user unit, `hercule.service`, in `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`, with `Restart=always`, `RestartSec=10` and `WantedBy=default.target`. `install` turns linger on first when it is off (`loginctl enable-linger`), so the unit runs without a login session, then writes the unit and runs `systemctl --user daemon-reload`, `enable` and `restart`. Values in the unit are quoted and escaped for systemd.
+
+**What the unit runs.** Both platforms write the same content:
+
+- the command `<binary> serve` or `<binary> runner`, where `<binary>` is the absolute path of the binary that ran `install`;
+- `HERCULE_HOME`, always as an absolute path;
+- a `PATH` of the binary's folder first, then the absolute folders on the caller's `PATH` that exist, without duplicates. A supervisor starts a job with only the system folders on its `PATH`, so the caller's is passed on, and the controller and its local runner find the same harnesses, `git` and `gh` as the user does. Relative entries are dropped: the runner starts programs inside workspace checkouts, where `.` on the `PATH` would let a repository supply its own `git`;
+- standard output discarded, and standard error appended to `<home>/logs/controller.stderr.log` or `<home>/logs/runner.stderr.log`. That file catches only what is written before the process log starts (section 5) and the output of a crash. Standard output is discarded so the setup URL the controller prints at first boot (section 7) never lands in a file; under a unit, `hercule setup-url` reads it.
+
+`install` creates `<home>/logs/` (mode 0700) before it writes the unit, because launchd does not create the folder of a log file.
+
+**Which role the unit runs.** The caller that knows decides. `hercule runner join` installs the unit for `hercule runner` itself (section 13). A bare `hercule service install` reads the Home:
+
+- `<home>/runner/runner.json` exists and there is no controller database: `hercule runner`;
+- anything else: `hercule serve`.
+
+The database is looked for at the `data.dir` that `config.toml` alone gives, with no `-c` and no environment override, because that is all the unit sees. `install` always prints its choice and the reason, for example: "Installing the unit for `hercule runner`: this Home holds a runner.json and no controller database." The controller URL in `runner.json` never decides the role, and there is no `--runner` flag. The controller's local runner (below) is a child of the controller and never installs a unit.
 
 ### The local runner
 
@@ -123,7 +167,19 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
 
-*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Under the `edge` installer's LaunchAgent (section 4), launchd appends the controller's output to `logs/controller.log`, and nothing rotates it yet; rotation comes with `hercule service install` ([#100](https://github.com/theagenticage/hercule/issues/100)). launchd does not create the folder of a log file, so the installer creates `logs/`.
+~~*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Under the `edge` installer's LaunchAgent (section 4), launchd appends the controller's output to `logs/controller.log`, and nothing rotates it yet; rotation comes with `hercule service install` ([#100](https://github.com/theagenticage/hercule/issues/100)). launchd does not create the folder of a log file, so the installer creates `logs/`.~~
+
+*(Amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* **Each process writes its own log file**, whether a unit started it or a terminal did:
+
+- The controller writes `logs/controller.log`. A runner writes `logs/runner.log`, both a remote runner and the controller's local runner child, which shares its Home with the controller.
+- One entry per line, in Effect's logfmt format.
+- The level is `log.level` from the bootstrap config (section 6). Entries below it are not written.
+- The process rotates its own file by size: at 10 MiB, `<name>.log` becomes `<name>.log.1`, the older copies each move up one number, the copy that was `<name>.log.5` is deleted, and a new file is opened. So a role keeps at most six files.
+- The process creates `logs/` (mode 0700) when it is missing, and every log file with mode 0600.
+- On a terminal, the process also prints its entries, formatted for reading, to standard error. Under a unit standard error is not a terminal, so nothing is printed twice. Nothing is logged to standard output: the local runner's standard output carries its first line to the controller (section 4), and the controller's carries the first-run lines (section 7).
+- No entry holds a secret value ([./13](./13-security.md) section 2).
+
+Beside them, a unit appends standard error to `logs/controller.stderr.log` or `logs/runner.stderr.log` (section 4). Those catch only what is written before the log file is opened, and crashes; nothing rotates them, because they stay small.
 
 The CLI credential file is **`~/.hercule/credentials.json`** (mode 0600; resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): `{ "url": ..., "apiKey": ... }` - the CLI needs the controller URL as well as the key, and `hercule login` learns both. The plain-file master key fallback on headless Linux is **`~/.hercule/master.key`** (mode 0600, same resolution): at the home root, outside `data/` and `backups/`, so promotion bundles and offsite backups stay inert. Neither is a `config.toml` key.
 
@@ -189,7 +245,7 @@ The pre-migration copy is a **`VACUUM INTO`** to `backups/<timestamp>-premigrati
 
 `hercule upgrade` fetches the release for this platform, verifies its checksum and signature, swaps the binary atomically, and asks the supervisor to restart the unit. Migrations then run on the next boot (section 8). There is no unattended auto-install in v1; that convention arrives with the desktop app.
 
-*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule upgrade` lands ([#102](https://github.com/theagenticage/hercule/issues/102)), running the `edge` installer again is the update (section 1). It restarts the controller at once, with no wait for turns to finish, so it is run when no agent is working.
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule upgrade` lands ([#102](https://github.com/theagenticage/hercule/issues/102)), running the `edge` installer again is the update (section 1). It restarts ~~the controller~~ the service unit, through `hercule service install` *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*, at once, with no wait for turns to finish, so it is run when no agent is working.
 
 ### Update discovery
 
@@ -283,7 +339,7 @@ Delivery and version policy are pinned by [ADR 0028](../adr/0028-provider-harnes
 The join exchange is owned by [./03](./03-controller-and-runners.md); the operational shape is:
 
 1. The user mints a single-use join token (1-hour lifetime, [./03](./03-controller-and-runners.md) §3.1) in the web app's Fleet "Add machine" spot or with the ops CLI. The UI shows the complete command with the token filled in, plus a "Personal machine" checkbox that adds `--reserved` ([./03](./03-controller-and-runners.md) §5.5).
-2. On the new machine: install the binary (one line), then `hercule runner join <url> --token <t>`. The exchange is fully programmatic (no prompts) and upgrades the token to a durable per-runner credential (`runner.json`, section 5); the runner creates its random storage directory, installs the provider CLIs (section 12; a failed install never fails the join), and registers and starts the service unit - one paste, and the machine is online when the command returns. `--no-service` skips the unit for hand-started runners; `hercule service install` stays available and idempotent.
+2. On the new machine: install the binary (one line), then `hercule runner join <url> --token <t>`. The exchange is fully programmatic (no prompts) and upgrades the token to a durable per-runner credential (`runner.json`, section 5); the runner creates its random storage directory, ~~installs the provider CLIs (section 12; a failed install never fails the join),~~ and registers and starts the service unit - one paste, and the machine is online when the command returns. `--no-service` skips the unit for hand-started runners; `hercule service install` stays available and idempotent. *(Amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* Join installs no provider CLI since [#64](https://github.com/theagenticage/hercule/issues/64) ([./03](./03-controller-and-runners.md) §3.1). It installs the unit for `hercule runner` without looking at the Home (section 4) and prints the unit's status. When the join succeeds and the unit install fails, the command exits 1 and says so: "The service was not installed. <reason> This machine has joined, so once that is fixed, run `hercule service install` rather than joining again." The join is not undone; the runner is enrolled, and starts once the unit is installed.
 3. Per-runner provider login is a post-join step driven from the fleet UI (section 12, [./03](./03-controller-and-runners.md) §3.3).
 
 The join command must stay prompt-free so a future auto-installer can drive it end to end (see Post-v1). Login relays a URL or device code to the user's browser rather than prompting in the terminal, so it does not break this rule. (Resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43).)

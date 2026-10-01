@@ -216,12 +216,31 @@ jobs:
           cat SHA256SUMS
 
       # Installs what is about to be published, the way a user would, with a
-      # scratch Hercule Home: the download and checksum check, the app, the
-      # LaunchAgent, and a controller that starts and stays up.
+      # scratch Hercule Home: the download and checksum check, the binary and
+      # the app. This runner has no Hercule service yet, so it is a first
+      # install, which starts nothing.
       - name: Install the assets with install.sh
         env:
           HERCULE_HOME: ${{ runner.temp }}/hercule-home
         run: HERCULE_RELEASE_URL="file://$PWD/edge-assets" sh install.sh
+
+      # The next step install.sh prints: the installed binary installs the
+      # service unit for the same scratch Home, and returns once the
+      # controller has started and stays up. The unit is removed again
+      # afterwards, though the runner is thrown away after the job anyway.
+      - name: Run Hercule as a service with the installed binary
+        env:
+          HERCULE_HOME: ${{ runner.temp }}/hercule-home
+        run: |
+          hercule="$HOME/.local/bin/hercule"
+          "$hercule" service install
+          status=$("$hercule" service status --json)
+          echo "$status"
+          if ! echo "$status" | jq -e '.running == true and .role == "serve"' > /dev/null; then
+            echo "::error::hercule service install returned, but the service is not running the controller. See $HERCULE_HOME/logs/controller.log and controller.stderr.log."
+            exit 1
+          fi
+          "$hercule" service uninstall
 
       - uses: actions/upload-artifact@v7
         with:

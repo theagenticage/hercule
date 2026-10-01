@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,17 +29,30 @@ interface InstallSetup {
   readonly launchAgent?: string;
 }
 
+/** What one run of install.sh did. */
+interface InstallResult {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  /** The throwaway home folder the run used as `HOME`. */
+  readonly home: string;
+  /** The throwaway folder the run installed the app in. */
+  readonly applicationsDir: string;
+}
+
 /**
- * Runs install.sh with a throwaway home folder and the release read from
- * `releaseDir`. Returns its exit code, its error output, and the path of the
- * home folder, which is deleted when the test finishes.
+ * Runs install.sh with a throwaway home folder, a throwaway folder in place of
+ * /Applications, and the release read from `releaseDir`. Both folders are
+ * deleted when the test finishes. The app folder is never /Applications, so a
+ * run never quits or replaces the app of the person running the tests.
  */
-function runInstall(
-  releaseDir: string,
-  setup: InstallSetup = {},
-): { status: number | null; stderr: string; home: string } {
+function runInstall(releaseDir: string, setup: InstallSetup = {}): InstallResult {
   const home = mkdtempSync(join(tmpdir(), "hercule-install-home-"));
-  onTestFinished(() => rmSync(home, { recursive: true, force: true }));
+  const applicationsDir = mkdtempSync(join(tmpdir(), "hercule-install-applications-"));
+  onTestFinished(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(applicationsDir, { recursive: true, force: true });
+  });
   if (setup.launchAgent !== undefined) {
     mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
     writeFileSync(join(home, launchAgentPath), setup.launchAgent);
@@ -43,9 +65,16 @@ function runInstall(
       HOME: home,
       ...(herculeHome === undefined ? {} : { HERCULE_HOME: herculeHome }),
       HERCULE_RELEASE_URL: pathToFileURL(releaseDir).href,
+      HERCULE_APPLICATIONS_DIR: applicationsDir,
     },
   });
-  return { status: result.status, stderr: result.stderr, home };
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    home,
+    applicationsDir,
+  };
 }
 
 /**
@@ -65,6 +94,13 @@ function buildLaunchAgent(environment: Readonly<Record<string, string>>): string
 `;
 }
 
+/** Creates a temporary folder that is deleted when the test finishes. */
+function makeTemporaryDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
 /**
  * Writes a release folder holding fake assets and a SHA256SUMS whose content is
  * `sha256sums`, and returns its path. `assets` names the files written beside
@@ -74,16 +110,145 @@ function writeRelease(
   sha256sums: string,
   assets: ReadonlyArray<string> = ["hercule-darwin-arm64", "Hercule-darwin-arm64.zip"],
 ): string {
-  const dir = mkdtempSync(join(tmpdir(), "hercule-install-release-"));
-  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  const dir = makeTemporaryDir("hercule-install-release-");
   for (const asset of assets) writeFileSync(join(dir, asset), `not ${asset}`);
   writeFileSync(join(dir, "SHA256SUMS"), sha256sums);
   return dir;
 }
 
+/** One time the fake binary ran: its HERCULE_HOME and its arguments. */
+interface BinaryCall {
+  readonly herculeHome: string;
+  readonly args: string;
+}
+
+/**
+ * Writes a release that install.sh accepts and installs: a zipped app, a
+ * SHA256SUMS that matches, and in place of the binary a shell script that
+ * records every call. `hercule --version` prints a version, and `hercule
+ * service ...` prints a line and exits with `serviceExitCode`.
+ *
+ * Returns the release folder, and a function that reads the calls recorded so
+ * far, in order.
+ */
+function writeInstallableRelease(serviceExitCode = 0): {
+  readonly dir: string;
+  readonly readBinaryCalls: () => ReadonlyArray<BinaryCall>;
+} {
+  const dir = makeTemporaryDir("hercule-install-release-");
+  const callsFile = join(makeTemporaryDir("hercule-install-calls-"), "calls");
+
+  // Each call is one line: the HERCULE_HOME, a tab, then the arguments.
+  writeFileSync(
+    join(dir, "hercule-darwin-arm64"),
+    `#!/bin/sh
+printf '%s\\t%s\\n' "\${HERCULE_HOME-}" "$*" >> '${callsFile}'
+case $1 in
+  --version) echo 0.0.0-test ;;
+  service) echo "fake hercule service output"; exit ${serviceExitCode} ;;
+esac
+`,
+  );
+
+  const appStage = makeTemporaryDir("hercule-install-app-");
+  const macOSDir = join(appStage, "Hercule.app", "Contents", "MacOS");
+  mkdirSync(macOSDir, { recursive: true });
+  writeFileSync(join(macOSDir, "Hercule"), "#!/bin/sh\n");
+  // The same command the `edge-build` job zips the app with.
+  const zip = spawnSync("ditto", [
+    "-c",
+    "-k",
+    "--keepParent",
+    join(appStage, "Hercule.app"),
+    join(dir, "Hercule-darwin-arm64.zip"),
+  ]);
+  expect(zip.status).toBe(0);
+
+  const sha256sums = ["hercule-darwin-arm64", "Hercule-darwin-arm64.zip"]
+    .map((asset) => {
+      const hash = createHash("sha256")
+        .update(readFileSync(join(dir, asset)))
+        .digest("hex");
+      return `${hash}  ${asset}\n`;
+    })
+    .join("");
+  writeFileSync(join(dir, "SHA256SUMS"), sha256sums);
+
+  const readBinaryCalls = (): ReadonlyArray<BinaryCall> =>
+    existsSync(callsFile)
+      ? readFileSync(callsFile, "utf8")
+          .trimEnd()
+          .split("\n")
+          .map((line) => {
+            const [herculeHome = "", args = ""] = line.split("\t");
+            return { herculeHome, args };
+          })
+      : [];
+  return { dir, readBinaryCalls };
+}
+
 const isAppleSilicon = process.platform === "darwin" && process.arch === "arm64";
 
 describe("install.sh", () => {
+  it.runIf(isAppleSilicon)(
+    "installs the binary and the app on a first install, and starts nothing",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout, home, applicationsDir } = runInstall(release.dir, {
+        buildHerculeHome: (home) => join(home, "scratch-home"),
+      });
+
+      expect(status).toBe(0);
+      expect(existsSync(join(home, ".local", "bin", "hercule"))).toBe(true);
+      expect(existsSync(join(applicationsDir, "Hercule.app", "Contents", "MacOS", "Hercule"))).toBe(
+        true,
+      );
+      // No unit is written and none is installed: the binary only printed
+      // its version.
+      expect(release.readBinaryCalls().map((call) => call.args)).toEqual(["--version"]);
+      expect(existsSync(join(home, "Library"))).toBe(false);
+      // The next steps carry the Home this run was given.
+      expect(stdout).toContain("Nothing is running yet");
+      expect(stdout).toContain(`HERCULE_HOME=${join(home, "scratch-home")} `);
+      expect(stdout).toMatch(/hercule service install\n/);
+      expect(stdout).toContain('"Add machine"');
+    },
+  );
+
+  it.runIf(isAppleSilicon)(
+    "updates the installed service with `hercule service install` and the Home it names",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        launchAgent: buildLaunchAgent({ HERCULE_HOME: "/Users/someone/other-home" }),
+      });
+
+      expect(status).toBe(0);
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: "/Users/someone/other-home", args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+      expect(stdout).toContain("fake hercule service output");
+      expect(stdout).not.toContain("Nothing is running yet");
+    },
+  );
+
+  it.runIf(isAppleSilicon)("fails when `hercule service install` fails on an update", () => {
+    const release = writeInstallableRelease(1);
+
+    const { status, stdout, stderr } = runInstall(release.dir, {
+      launchAgent: buildLaunchAgent({ PATH: "/usr/bin:/bin" }),
+    });
+
+    expect(status).toBe(1);
+    // The service's own output stays visible: it says what went wrong.
+    expect(stdout).toContain("fake hercule service output");
+    expect(stderr).toContain("the binary and the app are updated, but the service was not");
+  });
+
   it.runIf(isAppleSilicon)(
     "refuses a download that does not match SHA256SUMS, and installs nothing",
     () => {
@@ -92,13 +257,14 @@ describe("install.sh", () => {
         `${wrongSha256}  hercule-darwin-arm64\n${wrongSha256}  Hercule-darwin-arm64.zip\n`,
       );
 
-      const { status, stderr, home } = runInstall(release);
+      const { status, stderr, home, applicationsDir } = runInstall(release);
 
       expect(status).toBe(1);
       expect(stderr).toContain("does not match SHA256SUMS, so nothing was installed");
-      // The throwaway home is left as it was created: no binary, no
-      // LaunchAgent, no Hercule Home.
+      // The throwaway folders are left as they were created: no binary, no
+      // app, no LaunchAgent, no Hercule Home.
       expect(readdirSync(home)).toEqual([]);
+      expect(readdirSync(applicationsDir)).toEqual([]);
     },
   );
 
@@ -126,45 +292,29 @@ describe("install.sh", () => {
   );
 
   it.runIf(isAppleSilicon)(
-    "refuses a HERCULE_HOME other than the one the installed controller uses",
+    "refuses a HERCULE_HOME other than the one the installed service uses",
     () => {
       const { status, stderr } = runInstall(writeRelease(""), {
         launchAgent: buildLaunchAgent({ HERCULE_HOME: "/Users/someone/other-home" }),
       });
 
       expect(status).toBe(1);
-      expect(stderr).toContain("the controller uses the Hercule Home /Users/someone/other-home");
+      expect(stderr).toContain(
+        "the installed service uses the Hercule Home /Users/someone/other-home",
+      );
     },
   );
 
-  it.runIf(isAppleSilicon)(
-    "accepts any HERCULE_HOME when the installed controller names none",
-    () => {
-      const { status, stderr } = runInstall(writeRelease("", []), {
-        launchAgent: buildLaunchAgent({ PATH: "/usr/bin:/bin" }),
-      });
+  it.runIf(isAppleSilicon)("accepts any HERCULE_HOME when the installed service names none", () => {
+    const { status, stderr } = runInstall(writeRelease("", []), {
+      launchAgent: buildLaunchAgent({ PATH: "/usr/bin:/bin" }),
+    });
 
-      // The run gets past the Hercule Home checks to the download, which
-      // fails because the release is empty.
-      expect(status).toBe(1);
-      expect(stderr).toContain("could not download hercule-darwin-arm64");
-    },
-  );
-
-  it.runIf(isAppleSilicon)(
-    "accepts an unset HERCULE_HOME when the installed controller names a Hercule Home",
-    () => {
-      const { status, stderr } = runInstall(writeRelease("", []), {
-        buildHerculeHome: () => undefined,
-        launchAgent: buildLaunchAgent({ HERCULE_HOME: "/Users/someone/other-home" }),
-      });
-
-      // The run gets past the Hercule Home checks to the download, which
-      // fails because the release is empty.
-      expect(status).toBe(1);
-      expect(stderr).toContain("could not download hercule-darwin-arm64");
-    },
-  );
+    // The run gets past the Hercule Home checks to the download, which
+    // fails because the release is empty.
+    expect(status).toBe(1);
+    expect(stderr).toContain("could not download hercule-darwin-arm64");
+  });
 
   it.runIf(isAppleSilicon)("refuses a relative HERCULE_HOME", () => {
     const { status, stderr, home } = runInstall(writeRelease(""), {

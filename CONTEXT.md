@@ -269,6 +269,10 @@ The single directory holding everything the controller durably owns (database, p
 The one directory holding everything Hercule keeps on a machine: the Data Root, runner material state, logs, backups, and bootstrap config. `~/.hercule` by default. The Data Root moves with promotion; the rest of the home is machine-bound.
 _Avoid_: install dir, config dir
 
+**Service Unit**:
+The one unit per machine that the OS supervisor keeps running: a launchd LaunchAgent on macOS, a systemd user unit on Linux. It runs `hercule serve` on the controller's machine and `hercule runner` on a runner-only machine, with the machine's Hercule Home. `hercule service` installs and manages it; `hercule runner join` installs it for a runner. The controller's local runner is the controller's child process and has no Service Unit of its own.
+_Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the general term, service file, supervisor (that is launchd or systemd)
+
 **Provider**:
 An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
 _Avoid_: harness (for the adapter itself), integration
