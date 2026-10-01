@@ -342,12 +342,13 @@ const buildArgv = (
   return [
     "--mode",
     "rpc",
-    // A session with a workspace reads the workspace's own `AGENTS.md` or
-    // `CLAUDE.md`, because the repository's instructions are part of the work.
-    // A session without one runs in an empty scratch directory and reads no
-    // context file, so no stray file on this runner can reach it. Either way
-    // the agent directory pi also reads is the instance's home, never the
-    // user's own (spec 06 section 9.1).
+    // A session with a workspace reads context files, because the
+    // repository's instructions are part of the work. pi then reads the
+    // `AGENTS.md` or `CLAUDE.md` in the workspace and in every directory above
+    // it, which is accepted. A session without one runs in an empty scratch
+    // directory and reads no context file, so no stray file on this runner can
+    // reach it. Either way the agent directory pi also reads is the instance's
+    // home, never the user's own (spec 06 section 9.1).
     ...(spec.workspaceId === null ? ["--no-context-files"] : []),
     // Load nothing else of the user's own: a Hercule session runs only on what
     // the controller configured for it, not on whatever this machine has

@@ -492,12 +492,20 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 /**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory and the
- * instance's home as its config directory, so the user's own `~/.claude`
- * never loads. A session with a workspace loads the workspace's own
- * `CLAUDE.md` and `.claude/`, because the repository's instructions are part of
- * the work. A session without a workspace runs in an empty scratch directory
- * and loads no setting source at all, so no stray file on this runner can
- * reach it. Auto memory is off in both cases (spec 06 section 9.1).
+ * instance's home as its config directory, so the user's own settings,
+ * skills and MCP servers never load.
+ *
+ * - A session with a workspace loads the project setting source, because the
+ *   repository's instructions are part of the work. The CLI then reads
+ *   `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules/` in the workspace
+ *   and in every directory above it. Workspaces sit under the Hercule Home,
+ *   usually in the user's home directory, so this includes
+ *   `~/.claude/CLAUDE.md`. That is accepted.
+ * - A session without a workspace runs in an empty scratch directory and
+ *   loads no setting source at all, so no stray file on this runner can reach
+ *   it.
+ *
+ * Auto memory is off in both cases (spec 06 section 9.1).
  */
 const buildSessionOptions = (
   ctx: ProviderRunnerContext,
