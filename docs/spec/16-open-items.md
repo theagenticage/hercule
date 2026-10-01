@@ -13,12 +13,11 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 
 ## A. Decisions handed to tickets
 
-~~None open - every handed decision is resolved (the register above says where each landed).~~ *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* Bound actions left four questions open. Each is written where it applies, and each needs a decision before the operation can be bound:
+~~None open - every handed decision is resolved (the register above says where each landed).~~ *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* Bound actions left ~~four~~ three *(amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* questions open. Each is written where it applies, and each needs a decision before the operation can be bound:
 
 - 10 §7.4: **binding plugin actions.** No plugin action is on the list of operations an answer may run, so an Offer such as "Merge dev bumps" (`github/pr.merge`) cannot be bound yet. Open: which plugin actions may join the list, how a plugin action declares its describe line, and whether taking one needs the Connection it acts through to be named in the input. First needed by [#89](https://github.com/theagenticage/hercule/issues/89), the GitHub plugin's workflow actions.
 - 10 §5, §7.4: **binding `trigger.resume`.** The breaker's Resume answers need it on the list. [#87](https://github.com/theagenticage/hercule/issues/87) builds the operation and adds it, with its describe line.
 - 10 §7.4, §7.6: **binding `permission.decide`.** [#86](https://github.com/theagenticage/hercule/issues/86) builds the operation. Its "add to profile" answer edits a permission profile, and the test that guards the list refuses any operation in the `permission` family, for every producer. #86 decides how the core's Permission Request binds it: a narrower rule for core producers, or a list entry the test allows on purpose.
-- 06 §6.5, 10 §7.6: **answering a harness `question` from a notification.** A `question` request raises no notification, because `session.respond` sends a decision, not answers. The answer shape is pinned in 06 §6.5 and not built; no ticket owns it yet.
 
 ## B. Implementer's choices
 
