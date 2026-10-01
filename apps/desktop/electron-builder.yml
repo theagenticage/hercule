@@ -7,9 +7,10 @@
 # - the release package, into dist/release;
 # - the test package, into dist/test. It differs from the release package in
 #   one fuse, EnableNodeCliInspectArguments, which it leaves on because
-#   Playwright's Electron driver starts the app with `--inspect`. The end-to-end
-#   tests and the perf script run it; a test reads every fuse off the release
-#   package.
+#   Playwright's Electron driver starts the app with `--inspect`, and in being
+#   signed ad hoc, so it never carries a real signature with that fuse on. The
+#   end-to-end tests and the perf script run it; a test reads every fuse off
+#   the release package.
 
 # The macOS bundle identifier. It cannot change once the app is released.
 appId: sh.hercule.desktop
@@ -27,8 +28,29 @@ files:
 asar: true
 npmRebuild: false
 
+# The `edge-build` job in CI signs the release package with one self-signed
+# certificate, which it names in `CSC_NAME`, so every edge build has the same
+# designated requirement and the Keychain keeps trusting it after an update
+# (spec 17). Elsewhere electron-builder signs with the first code-signing
+# identity it finds in the keychain, which on a developer's Mac may be their
+# own, and a build that finds none is signed ad hoc. The test package is always
+# signed ad hoc (see `package` in package.json).
 mac:
   target: dir
+  # The hardened runtime applies only to a build signed with an identity; an
+  # ad hoc build runs without it. Among other things, it stops a library named
+  # in DYLD_INSERT_LIBRARIES from being loaded into the app. The entitlements
+  # list the two exceptions Electron needs. The file replaces electron-builder's
+  # default one, which also allows allow-unsigned-executable-memory, an
+  # exception Electron does not need:
+  #
+  # - allow-jit, for V8's compiler;
+  # - disable-library-validation, because a self-signed certificate has no
+  #   Team ID, and with library validation on macOS refuses to load Electron's
+  #   frameworks into a process whose signature names no Team ID.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 
 # Spec 17, §Security baseline. Flipping a fuse changes the Electron binary and
 # so breaks its ad hoc signature; `resetAdHocDarwinSignature` signs it again,

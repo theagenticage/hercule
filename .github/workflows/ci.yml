@@ -5,9 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+# Every job's token can only read the repository, unless the job asks for more.
+permissions:
+  contents: read
+
+# On a pull request, a newer push cancels the run of an older one. On `main` a
+# run is never cancelled, because cancelling it halfway through publishing
+# would leave no `edge` release until the next run. Runs on `main` wait their
+# turn instead: one runs at a time, and a newer push replaces a run still
+# waiting. So `edge` is published in push order and never goes back in time. This ordering is why the `edge` jobs live in this workflow: they
+# publish the very commit that passed the checks, in the same queue.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -24,6 +34,10 @@ jobs:
       # Mode isolation: the runner entrypoint links no controller package
       # (spec 15 section 3, ADR 0018).
       - run: pnpm dep-lint
+
+      # install.sh is the one shell script users run. The runner image ships
+      # shellcheck.
+      - run: shellcheck install.sh
 
       # The Vite config, the React Compiler Babel pass, the bundle budget and
       # the embedded file list are only exercised by an actual build; the
@@ -54,6 +68,12 @@ jobs:
       - uses: ./.github/actions/cache-electron
       - uses: ./.github/actions/setup
 
+      # install.sh runs on macOS only, so its tests that run it past the
+      # platform check are skipped in the check job, on Linux. The file name
+      # also matches the runner's tests of the harness installers, which run
+      # here too.
+      - run: pnpm exec vitest run --project node install.test.ts
+
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
       - run: pnpm build:desktop
@@ -70,3 +90,198 @@ jobs:
           name: bureau-compare
           path: apps/desktop/out/bureau-compare
           retention-days: 7
+
+  # Builds the rolling `edge` prerelease: the binary and the desktop app for
+  # macOS on Apple silicon, from the commit that just passed the jobs above
+  # (spec 15 section 1). `edge-publish` then publishes what it built.
+  #
+  # The asset names and the format of SHA256SUMS are what `install.sh` reads;
+  # change them together.
+  edge-build:
+    needs: [check, desktop]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    # The signing certificate's secrets live in this environment, which only
+    # `main` may use. docs/signing-certificate.md describes it.
+    environment: desktop-signing
+    env:
+      APP: apps/desktop/dist/release/mac-arm64/Hercule.app
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cache-electron
+      - uses: ./.github/actions/setup
+
+      - run: pnpm build:binary
+      - uses: ./.github/actions/codesign-binary
+        with:
+          path: hercule
+      - run: ./hercule --version
+
+      # The certificate goes into a keychain made for this job. macOS does not
+      # trust a self-signed certificate until told to, and electron-builder
+      # only signs with an identity that `security find-identity -v` lists as
+      # valid, so this runner trusts it. The runner is thrown away after the
+      # job, with its keychain and trust settings. Users' Macs never need to
+      # trust the certificate: the Keychain compares the app's designated
+      # requirement, which names the certificate by its hash.
+      #
+      # electron-builder can import a certificate itself, from CSC_LINK, but
+      # version 26 then passes the certificate's password to
+      # `security set-key-partition-list`, which needs the keychain's, and
+      # fails.
+      - name: Install the signing certificate on this runner
+        id: signing
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          # Without the certificate electron-builder signs the app ad hoc and
+          # carries on. Every build would then be a different app to the
+          # Keychain, and each update would sign the user out (spec 17).
+          if [ -z "$SIGNING_CERTIFICATE" ] || [ -z "$SIGNING_CERTIFICATE_PASSWORD" ]; then
+            echo "::error::The secrets SIGNING_CERTIFICATE and SIGNING_CERTIFICATE_PASSWORD are not set in the desktop-signing environment. They hold the desktop app's signing certificate; docs/signing-certificate.md describes how to make it."
+            exit 1
+          fi
+          p12="$RUNNER_TEMP/signing.p12"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 32)
+          echo "$SIGNING_CERTIFICATE" | base64 --decode > "$p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          # With no options, the keychain never locks itself during the build.
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          # `-x` makes the private key impossible to export, so the build
+          # steps after this one, which run third-party code, can sign with
+          # the key but cannot copy it.
+          security import "$p12" -k "$keychain" -P "$SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
+          # Lets codesign use the private key without a password dialog.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          # codesign looks for identities in the keychains on this list.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | xargs)
+          # macOS's own LibreSSL, not Homebrew's OpenSSL 3 that comes first on
+          # the PATH: OpenSSL 3 cannot read a .p12 encrypted with the legacy
+          # ciphers an export from Keychain Access can use.
+          /usr/bin/openssl pkcs12 -in "$p12" -nokeys -clcerts \
+            -passin env:SIGNING_CERTIFICATE_PASSWORD -out "$RUNNER_TEMP/signing.pem"
+          rm "$p12"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/signing.pem"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk '$1 == "1)" { print $2 }')
+          if [ -z "$identity" ]; then
+            echo "::error::The certificate in SIGNING_CERTIFICATE is not a valid code-signing identity. It may have expired; docs/signing-certificate.md describes how to replace it."
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      # electron-builder signs the release package with the identity whose
+      # hash CSC_NAME holds. The test package is signed ad hoc.
+      - run: pnpm build:desktop
+        env:
+          CSC_NAME: ${{ steps.signing.outputs.identity }}
+
+      # A designated requirement that names the certificate is what keeps the
+      # Keychain trusting the app across updates; the hardened runtime is what
+      # keeps other code from being loaded into it (spec 17).
+      - name: Check that the app is signed with the certificate, under the hardened runtime
+        run: |
+          signature=$(codesign --display --verbose=2 --requirements - "$APP" 2>&1)
+          echo "$signature"
+          if ! echo "$signature" | grep -q "^designated => .*certificate leaf"; then
+            echo "::error::$APP is not signed with the certificate in SIGNING_CERTIFICATE: its designated requirement names no certificate."
+            exit 1
+          fi
+          if ! echo "$signature" | grep -q "^CodeDirectory .*flags=.*runtime"; then
+            echo "::error::$APP is signed without the hardened runtime."
+            exit 1
+          fi
+
+      # The release package's fuses, its app.asar, its signature, and that it
+      # starts and quits. The rest of the desktop suite checks pixels and
+      # timing, which a CI runner cannot match (see the desktop job).
+      - run: pnpm exec vitest run --project desktop e2e/desktop/package.test.ts
+
+      # `ditto --keepParent` keeps the bundle's symlinks and signature intact,
+      # which a plain `zip` does not. SHA256SUMS lists bare file names, so
+      # `shasum -c` can check it from the folder the assets are downloaded to.
+      - name: Assemble the assets
+        run: |
+          mkdir edge-assets
+          cp hercule edge-assets/hercule-darwin-arm64
+          ditto -c -k --keepParent "$APP" edge-assets/Hercule-darwin-arm64.zip
+          cd edge-assets
+          shasum -a 256 hercule-darwin-arm64 Hercule-darwin-arm64.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      # Installs what is about to be published, the way a user would, with a
+      # scratch Hercule Home: the download and checksum check, the app, the
+      # LaunchAgent, and a controller that starts and stays up.
+      - name: Install the assets with install.sh
+        env:
+          HERCULE_HOME: ${{ runner.temp }}/hercule-home
+        run: HERCULE_RELEASE_URL="file://$PWD/edge-assets" sh install.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-assets
+          path: edge-assets
+          retention-days: 1
+
+  # Publishes what `edge-build` built as the `edge` prerelease. It runs apart
+  # from the build, on Linux, so the one job that can write to the repository
+  # runs no build tools and never sees the signing certificate.
+  edge-publish:
+    needs: [edge-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Deletes the `edge` release and its tag, and creates them again.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: edge
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: edge-assets
+          path: edge-assets
+
+      # The tag cannot be moved: GitHub refuses to let this job's token point
+      # a tag at a commit whose workflow files differ from those of the commit
+      # the tag points at now. So each publish deletes the release and its
+      # tag, and creates both again. An install in the minute between finds no
+      # release and refuses.
+      - name: Publish the edge prerelease
+        run: |
+          title="$TAG (${GITHUB_SHA::7})"
+          notes="$RUNNER_TEMP/notes.md"
+          cat > "$notes" <<EOF
+          The rolling build of \`main\` at [\`${GITHUB_SHA::7}\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA), published by [CI run $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Every push to \`main\` that passes CI replaces it.
+
+          Install or update on macOS on Apple silicon:
+
+          \`\`\`
+          curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/install.sh | sh
+          \`\`\`
+          EOF
+          # The release or the tag may be gone already, after a run that
+          # stopped halfway. A tag that is still there is caught below.
+          gh release delete "$TAG" --yes > /dev/null 2>&1 || true
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" > /dev/null 2>&1 || true
+          # `--target` is ignored when the tag still exists, and the new
+          # release would then point at an older commit than its assets.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::Deleting the $TAG tag failed, so nothing was published. Delete the $TAG release and tag, then run this job again."
+            exit 1
+          fi
+          gh release create "$TAG" edge-assets/* --target "$GITHUB_SHA" --prerelease \
+            --title "$title" --notes-file "$notes"
+          # Checks the result itself, whatever went wrong on the way.
+          tagged_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)
+          if [ "$tagged_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::The $TAG tag points at $tagged_sha instead of $GITHUB_SHA. Delete the $TAG release and tag, then run this job again."
+            exit 1
+          fi
