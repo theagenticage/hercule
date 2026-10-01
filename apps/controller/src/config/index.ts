@@ -1,18 +1,21 @@
 import { Effect, Layer } from "effect";
 import {
+  BootstrapConfig,
   locateConfigFile,
   buildHomePaths,
   InvalidOptionError,
+  loadBootstrapConfig,
   parseGlobalOptions,
   resolveHomePath,
+  writeDefaultConfigFile,
 } from "@hercule/home";
-import { BootstrapConfig, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
 import { createDirectory, createLayout, HerculeHome } from "./home";
 
-// The pure home functions live in `@hercule/home`, which the CLI and the runner
-// link too; a controller module imports them from here.
+// The home functions and the bootstrap config live in `@hercule/home`, which
+// the CLI and the runner link too; a controller module imports them from here.
 export {
+  BootstrapConfig,
   locateConfigFile,
   DATABASE_FILE_NAME,
   DEFAULT_HOME_NAME,
@@ -24,10 +27,8 @@ export {
   type GlobalOptions,
   type HomePaths,
 } from "@hercule/home";
-export * from "./bootstrap";
 export * from "./errors";
 export * from "./home";
-export { formatToml, parseToml } from "./toml";
 
 /** The usage line of `hercule serve`, which takes no arguments of its own. */
 const USAGE = "usage: hercule serve [--home <dir>] [-c key=value]";
@@ -67,13 +68,8 @@ export const layer = (
       // rest of the layout waits until `data.dir` is known, so a configured
       // Data Root elsewhere leaves no stray `<home>/data` behind.
       yield* createDirectory(home);
-      const file = yield* loadConfigFile(configFile);
-      const config = yield* resolveConfig({
-        overrides: options.overrides,
-        env,
-        file,
-        configFile,
-      });
+      yield* writeDefaultConfigFile(configFile);
+      const config = yield* loadBootstrapConfig({ home, overrides: options.overrides, env });
 
       const paths = buildHomePaths(home, config.dataDir);
       yield* createLayout(paths);

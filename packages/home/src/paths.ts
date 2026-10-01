@@ -8,6 +8,7 @@
  * - the dispatcher routes on `--home`;
  * - the CLI reads `<home>/setup-url`;
  * - the runner reads `<home>/runner/`;
+ * - the controller and the runner write their logs into `<home>/logs/`;
  * - the controller opens the database.
  */
 import { homedir } from "node:os";
@@ -69,6 +70,11 @@ export function locateRunnerDir(home: string): string {
   return join(home, "runner");
 }
 
+/** Returns the directory where the controller and the runner write their rotated process logs. */
+export function locateLogsDir(home: string): string {
+  return join(home, "logs");
+}
+
 /** Returns the path of `setup-url`, which is known without reading any config. */
 export function locateSetupUrlFile(home: string): string {
   return join(home, "setup-url");
@@ -84,7 +90,7 @@ export function buildHomePaths(home: string, dataDir: string): HomePaths {
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
     runnerDir: locateRunnerDir(home),
-    logsDir: join(home, "logs"),
+    logsDir: locateLogsDir(home),
     backupsDir: join(home, "backups"),
     tlsDir: join(home, "tls"),
     setupUrlFile: locateSetupUrlFile(home),

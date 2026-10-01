@@ -1,7 +1,24 @@
+/**
+ * The bootstrap config in `config.toml`: the four keys every role may need
+ * before anything else starts (spec 15 section 6). The controller reads all
+ * four, the runner reads `log.level`, and `hercule service` reads `data.dir`
+ * to find the controller database.
+ */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Context, Effect, Schema } from "effect";
-import { ConfigFileError, ConfigValueError } from "./errors";
+import { locateConfigFile } from "./paths";
 import { formatToml, parseToml, type TomlScalar } from "./toml";
+
+/** `config.toml` could not be read, or is not the TOML subset Hercule writes. */
+export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {
+  path: Schema.String,
+  message: Schema.String,
+}) {}
+
+/** A bootstrap key holds a value Hercule cannot use (spec 15 section 6). */
+export class ConfigValueError extends Schema.TaggedError<ConfigValueError>()("ConfigValueError", {
+  message: Schema.String,
+}) {}
 
 /** The log levels `log.level` accepts, ordered most to least severe. */
 export const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
@@ -24,7 +41,7 @@ export class BootstrapConfig extends Context.Service<
     readonly bindPort: number;
     readonly logLevel: LogLevel;
   }
->()("hercule/controller/config/BootstrapConfig") {}
+>()("hercule/home/BootstrapConfig") {}
 
 /** The four bootstrap keys, in dotted TOML form. Nothing else may be added (spec 15 section 6). */
 export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"] as const;
@@ -104,22 +121,34 @@ const isBootstrapKey = (key: string): key is BootstrapKey =>
 const keyList = BOOTSTRAP_KEYS.join(", ");
 
 /**
- * Reads `config.toml`, first writing it with the four keys at their defaults
- * when it is absent, so a first run leaves behind the file it would have read
- * (spec 15 sections 6 and 7). Returns the keys the file sets, as strings.
- * Fails with `ConfigFileError` when the file cannot be written, read or parsed,
- * or holds an unknown key.
+ * Writes `config.toml` with the four keys at their defaults when it is absent,
+ * so a controller's first run leaves behind the file it would have read (spec
+ * 15 sections 6 and 7). Does nothing when the file exists. Fails with
+ * `ConfigFileError` when the file cannot be written.
+ *
+ * Only the controller calls this. A runner or a `hercule service` command
+ * reads the file when it is there and uses the defaults when it is not.
  */
-export const loadConfigFile = Effect.fn("loadConfigFile")(function* (configFile: string) {
+export const writeDefaultConfigFile = Effect.fn("writeDefaultConfigFile")(function* (
+  configFile: string,
+) {
+  if (existsSync(configFile)) return;
+  yield* Effect.try({
+    try: () => writeFileSync(configFile, formatToml(DEFAULTS)),
+    catch: () => new ConfigFileError({ path: configFile, message: "could not be written" }),
+  });
+});
+
+/**
+ * Reads `config.toml` and returns the keys it sets, as strings. Returns no keys
+ * when the file is absent. Fails with `ConfigFileError` when the file cannot be
+ * read or parsed, or holds an unknown key.
+ */
+export const readConfigFile = Effect.fn("readConfigFile")(function* (configFile: string) {
   const createConfigFileError = (message: string) =>
     new ConfigFileError({ path: configFile, message });
 
-  if (!existsSync(configFile)) {
-    yield* Effect.try({
-      try: () => writeFileSync(configFile, formatToml(DEFAULTS)),
-      catch: () => createConfigFileError("could not be written"),
-    });
-  }
+  if (!existsSync(configFile)) return {};
 
   const text = yield* Effect.try({
     try: () => readFileSync(configFile, "utf8"),
@@ -199,5 +228,26 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
     bindHost: yield* decode("bind.host"),
     bindPort: yield* decode("bind.port"),
     logLevel: yield* decode("log.level"),
+  });
+});
+
+/**
+ * Reads the bootstrap config of a Hercule Home: `config.toml` when it exists,
+ * then the `-c` overrides and the `HERCULE_*` environment variables on top.
+ * Returns the `BootstrapConfig`. Fails with `ConfigFileError` or
+ * `ConfigValueError`, as `readConfigFile` and `resolveConfig` do.
+ */
+export const loadBootstrapConfig = Effect.fn("loadBootstrapConfig")(function* (options: {
+  readonly home: string;
+  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}) {
+  const configFile = locateConfigFile(options.home);
+  const file = yield* readConfigFile(configFile);
+  return yield* resolveConfig({
+    overrides: options.overrides,
+    env: options.env,
+    file,
+    configFile,
   });
 });

@@ -1,16 +1,5 @@
 import { Schema } from "effect";
-import type { InvalidOptionError } from "@hercule/home";
-
-/** `config.toml` could not be read, or is not the TOML subset Hercule writes. */
-export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {
-  path: Schema.String,
-  message: Schema.String,
-}) {}
-
-/** A bootstrap key holds a value Hercule cannot use (spec 15 section 6). */
-export class ConfigValueError extends Schema.TaggedError<ConfigValueError>()("ConfigValueError", {
-  message: Schema.String,
-}) {}
+import type { ConfigFileError, ConfigValueError, InvalidOptionError } from "@hercule/home";
 
 /**
  * A file or directory in the Hercule Home could not be created, secured,
