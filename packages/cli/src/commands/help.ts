@@ -303,7 +303,7 @@ const DAEMON_FORMS = [
   "daemon forms (this machine's own runner, not the fleet):",
   "  hercule runner",
   "  hercule runner --local",
-  "  hercule runner join <controller-url> --token <token> [--reserved]",
+  "  hercule runner join <controller-url> --token <token> [--reserved] [--no-service]",
   "  hercule runner set-controller <controller-url>",
 ];
 
@@ -363,6 +363,35 @@ const listRootNouns = (): ReadonlyArray<{
   });
 };
 
+/**
+ * Returns the help of `hercule service`, one line per entry. The verbs are
+ * not operations and have no CLI rows, so the text is written here.
+ */
+export const buildServiceHelp = (): ReadonlyArray<string> => [
+  "usage: hercule service <verb> [--json]",
+  "",
+  ...wrapParagraph(
+    "Installs and controls the one OS service unit that keeps Hercule running on this machine across logins and reboots: a launchd LaunchAgent on macOS, a systemd user unit on Linux. The unit runs the compiled hercule binary for this Hercule Home, and reads its settings only from <home>/config.toml, so install refuses -c flags and HERCULE_* settings in the environment.",
+    "",
+  ),
+  "",
+  "verbs:",
+  "  install    write the unit and (re)start it; says whether it runs serve or runner, and why",
+  "  uninstall  stop the unit and delete it; the logs stay",
+  "  start      start the installed unit when it is not running",
+  "  stop       stop the unit's process; the unit stays installed and starts at the next login",
+  "  restart    stop the unit's process and start it again",
+  "  status     say whether a unit is installed, what it runs, and its pid",
+  "",
+  "flags:",
+  "  --json  print { installed, running, pid, role, home, unitFile } once the verb is done",
+  "",
+  ...wrapParagraph(
+    "The process logs to <home>/logs/controller.log or runner.log; what it prints before its log opens goes to the .stderr.log beside it. A failure exits 1 with one line that says what to do; a wrong command line exits 2.",
+    "",
+  ),
+];
+
 /** Builds the root help: `hercule --help`. */
 export const buildRootHelp = (): ReadonlyArray<string> => {
   const nouns = listRootNouns();
@@ -387,7 +416,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
   lines.push(
     "",
     "other commands:",
-    "  hercule login <url>, hercule setup-url, hercule serve, and the daemon forms of hercule runner.",
+    "  hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, and the",
+    "  daemon forms of hercule runner.",
     "",
     "conventions:",
     "  ids       An id in full, or its last eight or more characters where a command's help",

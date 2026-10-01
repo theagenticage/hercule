@@ -318,8 +318,49 @@ describe("hercule runner --help", () => {
     ).toBe(true);
     expect(text).toContain("hercule runner --local");
     expect(text).toContain("hercule runner join");
+    expect(text).toContain("--no-service");
     expect(text).toContain("hercule runner set-controller");
     expect(text).toContain("list");
+  });
+});
+
+// `hercule service` is hand-written: its verbs are not operations. These tests
+// stop at the help and the command line, so nothing reaches launchd or systemd.
+describe("hercule service", () => {
+  it("prints its help with one line per verb", async () => {
+    const out = await runHelp("service");
+    expect(out[0]).toBe("usage: hercule service <verb> [--json]");
+    for (const verb of ["install", "uninstall", "start", "stop", "restart", "status"]) {
+      expect(
+        out.filter((line) => new RegExp(`^  ${verb}\\s`).test(line)),
+        `${verb} has one line`,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("prints the same help after a verb", async () => {
+    expect(await runHelp("service", "install")).toEqual(await runHelp("service"));
+  });
+
+  it("is named in the root help", async () => {
+    expect((await runHelp()).join("\n")).toContain("hercule service <verb>");
+  });
+
+  it("exits 2 without a verb", async () => {
+    const { io, run } = createStubCli();
+    expect(await run("service")).toBe(2);
+    expect(io.stderr).toEqual([
+      "hercule: service needs a verb: install, uninstall, start, stop, restart, status",
+      "run `hercule service --help`",
+    ]);
+  });
+
+  it("exits 2 on an unknown verb or flag", async () => {
+    const { io, run } = createStubCli();
+    expect(await run("service", "reload")).toBe(2);
+    expect(await run("service", "status", "--all")).toBe(2);
+    expect(io.stderr[0]).toContain("unknown command `reload`");
+    expect(io.stderr[2]).toBe("hercule: service status takes no `--all`");
   });
 });
 

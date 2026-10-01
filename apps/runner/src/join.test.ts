@@ -191,6 +191,7 @@ describe("hercule runner join --reserved", () => {
         "--token",
         "a-join-token",
         "--reserved",
+        "--no-service",
       ]),
     ).toEqual({ reserved: true });
   });
@@ -205,6 +206,7 @@ describe("hercule runner join --reserved", () => {
         "http://127.0.0.1:4937",
         "--token",
         "a-join-token",
+        "--no-service",
       ]),
     ).toEqual({ reserved: false });
   });
