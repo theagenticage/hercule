@@ -1878,7 +1878,12 @@
             <tr class="bk-tg"><th colspan="3">Second edition: the first run (#313)</th></tr>
             <tr>
               <td>"A first run that needs no browser and no terminal."</td>
-              <td>Four steps in the desktop app, from finding Hercule on this Mac to your first thread: account, providers, GitHub, project.</td>
+              <td>Four steps in the desktop app, from starting Hercule on this Mac to your first thread: account, providers, GitHub, project.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"A laptop on its own, or a window on Hercule elsewhere?"</td>
+              <td>The welcome decides. Open the office runs Hercule on this Mac; Connect to it points the app at another machine, and this Mac runs nothing.</td>
               <td class="bk-see"><a href="#first-run">First run</a></td>
             </tr>
             <tr>
@@ -2565,8 +2570,8 @@
           <span class="bk-kick"><i data-face="Hercule" data-pose="idle" data-size="22"></i>The first run</span>
           <h2>Four steps, and the office opens around you.</h2>
           <p class="bk-lede">
-            The first time the desktop app opens after Hercule is installed, it finds Hercule on this Mac and sets it up in four steps: your account, a provider login, GitHub, and a first project. No browser, no terminal, no pasted address. Each finished step furnishes the room, and the run
-            ends on your first thread. It is prototyped in three variants; the book recommends B.
+            The first time the desktop app opens after Hercule is installed, it starts Hercule on this Mac and sets it up in four steps: your account, a provider login, GitHub, and a first project. No browser, no terminal, no pasted address. Each finished step furnishes the room, and the run
+            ends on your first thread. One link connects to Hercule on another machine instead. It is prototyped in three variants; the book recommends B.
           </p>
         </header>
         <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done" data-caption="All set, in variant B" data-note="The camera pulls back on the furnished room: your desk, the six desks of studio-mac with the first thread at one, Triage wired to GitHub, and Hercule asleep in the lobby."></figure>
@@ -2580,7 +2585,7 @@
         <ul class="bk-points">
           <li><span class="icon"><i data-i="office" data-size="18"></i></span><span><b>The room is the promise</b>Before you type anything you see where your agents will work. Progress is furniture, not a counter.</span></li>
           <li><span class="icon"><i data-i="crew" data-size="18"></i></span><span><b>Every step pays off on screen</b>Account: your desk, and Hercule asleep in the lobby. Providers: six free desks. GitHub: Triage and its tube. Project: your first thread.</span></li>
-          <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>The app reads the address and the setup token from the Hercule Home on this Mac. You never see either.</span></li>
+          <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>Open the office starts Hercule on this Mac, and the app reads its address and setup token from the Hercule Home. You never see either.</span></li>
           <li><span class="icon"><i data-i="pause" data-size="18"></i></span><span><b>Skipping is said, not hidden</b>A step you put off keeps its number in the ladder instead of a tick, and the last screen says where to finish it.</span></li>
           <li><span class="icon"><i data-i="branch" data-size="18"></i></span><span><b>Your folder stays as it is</b>Picking <code>~/Dev/webshop</code> reads its origin remote. Threads clone from the remote into worktrees of their own.</span></li>
           <li><span class="icon"><i data-i="eye" data-size="18"></i></span><span><b>Why B over A</b>The same room and the same cost. B shows it at full size, and the close shot of what you just added is the reward for the step.</span></li>
@@ -2588,7 +2593,7 @@
 
         <h3 class="bk-group"><i data-i="list" data-size="18"></i>Variant B, step by step <small>1440 by 900, frozen at each step</small></h3>
         <div class="bk-grid bk-grid--2">
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=found" data-caption="Welcome" data-note="Hercule answers at 127.0.0.1:4937, so the lights are on. Three lines say what it is for."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=fresh" data-caption="Welcome" data-note="Nothing runs yet, so the office is dark. Three lines say what Hercule is for, and one says it will run on this Mac from login."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=account" data-caption="1 · Account" data-note="One form. The timezone comes from the Mac, and setup creates Hercule, your assistant, asleep in the lobby."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=codex-device" data-caption="2 · Providers" data-note="Claude Code and Codex were found on this Mac. Claude Code takes a pasted code; Codex shows a device code."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github" data-caption="3 · GitHub" data-note="The link opens GitHub with the scopes already ticked. Skip for now is one click."></figure>
@@ -2596,15 +2601,35 @@
           <figure data-frame="desktop" data-src="desktop/session-empty.html" data-state="first" data-caption="Your first thread" data-note="Intake is empty until Triage first runs, so three starter threads stand in for it, and one line says when it fills."></figure>
         </div>
 
+        <h3 class="bk-group"><i data-i="laptop" data-size="18"></i>This Mac or another machine <small>the welcome decides what this Mac runs</small></h3>
+        <div class="bk-grid bk-grid--3">
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=starting" data-caption="Starting Hercule" data-note="Open the office installs Hercule's background service on this Mac and waits for it to answer. The lights come on with it."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote" data-caption="Hercule runs on another machine" data-note="One address field. A plain address signs in to a Hercule that is set up; a setup address runs the four steps there."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote-set-up" data-caption="Set up there already" data-note="The room is build-box-1's. This Mac runs nothing; it only opens the office."></figure>
+        </div>
+
         <h3 class="bk-group"><i data-i="question" data-size="18"></i>When something is off <small>every state is in the prototype's state menu</small></h3>
         <div class="bk-grid bk-grid--3">
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=not-running" data-caption="Hercule isn't running" data-note="The room stays dark. One command to start it, and Try again. The app never starts Hercule itself."></figure>
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote" data-caption="Hercule runs on another machine" data-note="Paste its setup address, which hercule setup-url prints there."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=start-failed" data-caption="Hercule didn't start" data-note="Nothing answered within 30 seconds. The room stays dark, the log's path is one Copy away, and Try again runs the start again."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote-not-set-up" data-caption="Not set up there yet" data-note="A plain address of a Hercule without an account. The field says which command prints the setup address."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=none-found" data-caption="No coding tool on this Mac" data-note="Install one from here, or do it later."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=refused" data-caption="GitHub refused the token" data-note="GitHub's own reason, and what to do about it."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=private&amp;github=skipped" data-caption="A private repository, GitHub skipped" data-note="Runners need the Connection you skipped to clone it."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done&amp;github=skipped&amp;harness=later" data-caption="All set, with steps put off" data-note="No desks without a provider. The screen says what is missing and where to finish it."></figure>
         </div>
+
+        <div class="bk-sub"><h3>What this Mac runs</h3><p>The welcome decides it once. A machine that only runs agents never comes through here.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th style="width: 300px">What you do</th><th style="width: 500px">What the app does</th><th>What runs on this Mac</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Open the office, the default</td><td>Runs <code>hercule service install</code>, waits for Hercule to answer, then reads the setup address from the Hercule Home.</td><td>Hercule and its local runner, from login</td></tr>
+            <tr><td>Connect to it, with a plain address</td><td>Checks Hercule there. If it is set up, the app keeps the address and you sign in.</td><td>Only the app</td></tr>
+            <tr><td>Connect to it, with a setup address</td><td>Checks Hercule there, keeps the address, and runs the four steps on that machine.</td><td>Only the app</td></tr>
+            <tr><td>Add machine, in Fleet</td><td>Not the desktop app: <code>hercule runner join</code> on the new machine makes it a runner of an existing Hercule.</td><td>A runner</td></tr>
+          </tbody>
+        </table>
 
         <div class="bk-sub"><h3>What the room shows, and why</h3><p>Every piece stands for something the step created. Nothing is decoration.</p></div>
         <table class="bk-table">
@@ -2612,7 +2637,7 @@
             <tr><th style="width: 300px">In the room</th><th>Why</th></tr>
           </thead>
           <tbody>
-            <tr><td>The lights come on</td><td>The app found Hercule. Before that the room shows, dimmed: the office is closed.</td></tr>
+            <tr><td>The lights come on</td><td>Hercule answers: the app started it on this Mac, or found it on another machine. Before that the room shows, dimmed: the office is closed.</td></tr>
             <tr><td>Your desk and a hat stand</td><td>Your account exists. Your desk is where colleagues will queue when they wait on you.</td></tr>
             <tr><td>Hercule, asleep in the lobby chair</td><td>Setup creates the assistant. It has no chat channel yet, so it sleeps where the office keeps assistants.</td></tr>
             <tr><td>Six free desks, lamps dark</td><td>A runner hosts one session per desk. Empty desks say "room for six" before any session exists.</td></tr>
@@ -2628,6 +2653,7 @@
             <tr><th style="width: 300px">When</th><th style="width: 380px">What moves</th><th>How</th></tr>
           </thead>
           <tbody>
+            <tr><td>You open the office</td><td>One spinner in the button, "Starting Hercule…"</td><td>Only until Hercule answers, 30 seconds at most</td></tr>
             <tr><td>Hercule answers</td><td>The room's lights come on</td><td>A veil's opacity, <code>--dur-3</code></td></tr>
             <tr><td>A step finishes, in B</td><td>The camera moves to the next step's shot</td><td>One layer's transform, <code>--dur-3</code></td></tr>
             <tr><td>Then</td><td>The new pieces settle from 14 px above, characters with a spring</td><td>Transform and opacity, <code>--dur-3</code>, after the camera stops</td></tr>
@@ -2645,7 +2671,7 @@
           <tbody>
             <tr><td><b>Scope</b></td><td>A and B draw a still subset of the office in v1: the room, one wing, free desks, your desk, the lobby chair, Triage's desk and tube, a plaque. Spec 17 keeps the office post-v1. C draws none of it.</td><td>The variant decides it</td></tr>
             <tr><td>Bundle bytes</td><td>The first run and its room load only on a first run, as a chunk of their own.</td><td>The bundle budget check lists the chunk on its own line</td></tr>
-            <tr><td>Processes</td><td>None added. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run</td></tr>
+            <tr><td>Processes</td><td>None that stays. Main runs your login shell once to read your <code>PATH</code>, then <code>hercule service install</code>; launchd runs Hercule, not the app. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run: the app's own count is back to its baseline once the command exits</td></tr>
             <tr><td>Work while idle</td><td>None. No animation repeats while a step waits for you.</td><td>The perf script's idle CPU, on each step</td></tr>
             <tr><td>After the first run</td><td>Nothing: the chunk is never loaded again, and no timer is left.</td><td>A warm launch after the first run matches the baseline</td></tr>
           </tbody>
@@ -2848,15 +2874,16 @@
           <li><span class="bk-qn">7</span><span><b>Answered anywhere clears everywhere</b>ADR 0027 already resolves a decision wherever it is answered. The desktop app's notifications and dock badge must be withdrawn the same moment.</span></li>
           <li><span class="bk-qn">8</span><span><b>No monospace outside code, and six marks</b>The design language keeps monospace for code, commands and diffs. Queued, cancelled and skipped lose their marks and become words.</span></li>
         </ul>
-        <div class="bk-sub"><h3>Second edition: the first run</h3><p>What #313 changes. It is not the installer: #308 installs Hercule and starts it at login.</p></div>
+        <div class="bk-sub"><h3>Second edition: the first run</h3><p>What #313 changes. The installer (#308) still puts the binary and the app on this Mac; the app decides what this Mac runs.</p></div>
         <ul class="bk-asks">
           <li><span class="bk-qn">9</span><span><b>The desktop app sets Hercule up</b>Spec 17 leaves onboarding to the browser and opens <code>&lt;url&gt;/setup</code> when setup is not complete. The first run replaces both. Spec 14 and spec 15 §7 expected the desktop to reuse the web's setup views; it draws its own, as spec 17 requires.</span></li>
-          <li><span class="bk-qn">10</span><span><b>Main reads two files in the Hercule Home</b>The address and the token from <code>setup-url</code>, or the address from <code>config.toml</code> once setup is done, and nothing else. The token crosses the bridge once, is never stored, and is read again on Try again, because each start of Hercule mints a new one.</span></li>
-          <li><span class="bk-qn">11</span><span><b>On the desktop, the first run is a sequence</b>Spec 14 has no "get started" checklist and derives every step. The desktop runs four steps in order, with Skip. The app keeps its place in its own settings file, so the controller stores nothing new.</span></li>
-          <li><span class="bk-qn">12</span><span><b>The web's onboarding steps are marked done</b>After setup, the desktop records <code>"timezone"</code> and <code>"assistant"</code>, so the web app does not ask again. The assistant keeps the name Hercule: there is no rename step, and Settings renames it later.</span></li>
-          <li><span class="bk-qn">13</span><span><b>Log in and New project come into v1</b>Spec 17 draws no Log in button and no New project row. The first run builds both, and the draft's Log in and the project picker reuse them.</span></li>
-          <li><span class="bk-qn">14</span><span><b>A still office comes into v1</b>Spec 17 keeps the office post-v1. Variants A and B draw a still subset of it on the first run; the live office stays post-v1. Variant C needs no change here.</span></li>
-          <li><span class="bk-qn">15</span><span><b>Starter threads on an empty Intake</b>New: three prompts on the first New thread, until Intake has something. Keep them, or drop them and show only the line about Triage.</span></li>
+          <li><span class="bk-qn">10</span><span><b>The app starts Hercule on this Mac</b>Open the office runs <code>hercule service install</code>, and Hercule then starts at login. The installer starts nothing (#100), and a Mac that connects to another machine runs nothing. Spec 15 §7 and its Post-v1 list leave starting Hercule to the CLI until the desktop app becomes the installer; installing the binary stays post-v1.</span></li>
+          <li><span class="bk-qn">11</span><span><b>Main reads two files in the Hercule Home</b>The address and the token from <code>setup-url</code>, or the address from <code>config.toml</code> once setup is done, and nothing else. The token crosses the bridge once, is never stored, and is read again on Try again, because each start of Hercule mints a new one.</span></li>
+          <li><span class="bk-qn">12</span><span><b>On the desktop, the first run is a sequence</b>Spec 14 has no "get started" checklist and derives every step. The desktop runs four steps in order, with Skip. The app keeps its place in its own settings file, so the controller stores nothing new.</span></li>
+          <li><span class="bk-qn">13</span><span><b>The web's onboarding steps are marked done</b>After setup, the desktop records <code>"timezone"</code> and <code>"assistant"</code>, so the web app does not ask again. The assistant keeps the name Hercule: there is no rename step, and Settings renames it later.</span></li>
+          <li><span class="bk-qn">14</span><span><b>Log in and New project come into v1</b>Spec 17 draws no Log in button and no New project row. The first run builds both, and the draft's Log in and the project picker reuse them.</span></li>
+          <li><span class="bk-qn">15</span><span><b>A still office comes into v1</b>Spec 17 keeps the office post-v1. Variants A and B draw a still subset of it on the first run; the live office stays post-v1. Variant C needs no change here.</span></li>
+          <li><span class="bk-qn">16</span><span><b>Starter threads on an empty Intake</b>New: three prompts on the first New thread, until Intake has something. Keep them, or drop them and show only the line about Triage.</span></li>
         </ul>
         <footer class="bk-foot"><i data-logo="20"></i>Crew Bureau, second edition · Hercule · prototype, not product code</footer>
       </section>

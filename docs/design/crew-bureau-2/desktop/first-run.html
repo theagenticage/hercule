@@ -9,7 +9,8 @@
     <title>Welcome · Hercule</title>
     <!--
       PROTOTYPE - the first run (#313): what the desktop app shows the first time it opens on a Mac
-      where Hercule was just installed. Four steps open the office: your account, a provider login,
+      where Hercule was just installed. The welcome starts Hercule on this Mac, unless the user says
+      it runs on another machine. Four steps then open the office: your account, a provider login,
       GitHub, and a first project. Each finished step furnishes the room, and the run ends on your
       first thread.
 
@@ -397,8 +398,6 @@
         line-height: 1.45;
       }
       .fl-err {
-        display: flex;
-        gap: 6px;
         color: var(--fail-ink);
         font-size: var(--t-12);
         line-height: 1.45;
@@ -428,8 +427,11 @@
         box-shadow: inset 0 0 0 1.5px var(--fail);
         outline-color: var(--fail);
       }
+      /* An input sets font: inherit, which would undo the .mono font, so it is set again here. */
       .field .mono,
       .field input.mono {
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
         font-size: var(--t-12);
       }
       .field-pre {
@@ -551,6 +553,7 @@
         border-radius: var(--r-md);
         background: var(--sunken);
         font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
         font-size: var(--t-12);
       }
       .cmd .spacer {
@@ -639,7 +642,7 @@
         color: var(--faint);
         font-variant-numeric: tabular-nums;
       }
-      .hx-step .btn {
+      .hx-step > span > .btn {
         margin-top: 6px;
       }
       .code {
@@ -655,6 +658,7 @@
       .code b {
         flex: 1;
         font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
         font-size: var(--t-18);
         font-weight: 600;
         letter-spacing: 0.14em;
@@ -976,6 +980,9 @@
         /* ------------------------------------------------------------ the fixture world */
 
         var ME = { user: "rogier", tz: "Europe/Amsterdam", machine: "studio-mac", address: "127.0.0.1:4937" };
+        // The other machine a user can connect to instead of this Mac. In free play, Hercule there is
+        // not set up yet; the remote-set-up state shows it after setup.
+        var REMOTE = { machine: "build-box-1", address: "build-box-1:4937" };
         var REPO = { folder: "~/Dev/webshop", name: "webshop", slug: "rogier/webshop", remote: "git@github.com:rogier/webshop.git", branch: "main" };
         var TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow,notifications&description=Hercule";
 
@@ -983,7 +990,7 @@
         var LADDER = ["Account", "Providers", "GitHub", "Project"];
         // The states each step can be shown in. The first is where a frame opens without ?state.
         var STATES = {
-          welcome: ["found", "searching", "not-running", "remote", "already-set-up"],
+          welcome: ["fresh", "searching", "starting", "start-failed", "found", "already-set-up", "remote", "remote-not-set-up", "remote-set-up"],
           account: ["default", "error", "submitting"],
           harness: ["idle", "claude-paste", "claude-error", "codex-device", "ready", "none-found"],
           github: ["empty", "checking", "connected", "refused"],
@@ -1001,8 +1008,9 @@
           harness: q.get("harness") === "later" ? "later" : "ready",
           claude: "idle",
           codex: "idle",
+          // The machine whose Hercule the app talks to: this Mac, or REMOTE once the user connects there.
+          host: ME,
           form: { remote: "", user: ME.user, pass: "", code: "", token: "", topic: "github", name: REPO.name, setup: "", url: "" },
-          busy: false,
         };
         S.state = STATES[S.step].indexOf(q.get("state")) !== -1 ? q.get("state") : frozen ? STATES[S.step][0] : "searching";
         applyState();
@@ -1016,9 +1024,15 @@
           S.codex = { "codex-device": "device", ready: "ready" }[harness] || "idle";
           S.form.code = S.step === "harness" && st === "claude-error" ? "4f9a" : "";
           S.form.pass = S.step === "account" && st !== "default" ? (st === "error" ? "hunter2" : "correct horse") : "";
+          if (S.step === "welcome") S.host = st === "remote-set-up" ? REMOTE : ME;
+          S.form.remote = S.step === "welcome" && st === "remote-not-set-up" ? "http://" + REMOTE.address : "";
           S.form.token = S.step === "github" && st !== "empty" ? (st === "refused" ? "ghp_2c41d9e0a7f3…" : "github_pat_11ABX3Q…") : "";
         }
 
+        /** Returns how the copy names the machine that runs Hercule: "this Mac", or the other machine's name. */
+        function describeHost() {
+          return S.host === ME ? "this Mac" : S.host.machine;
+        }
         function at(step) {
           return STEPS.indexOf(step);
         }
@@ -1035,7 +1049,8 @@
         // state the controller already holds, so the room could be drawn again on any later visit.
         function world() {
           var i = at(S.step);
-          var closed = i === 0 && ["searching", "not-running", "remote"].indexOf(S.state) !== -1;
+          // The lights come on once a Hercule answers that the user can sign in to or set up.
+          var closed = i === 0 && ["found", "already-set-up", "remote-set-up"].indexOf(S.state) === -1;
           return {
             lights: !closed,
             runner: !closed,
@@ -1085,7 +1100,7 @@
           piece("palm-r", 38.7, O.palm(23.1, 15.4, true));
           piece("palm-l", 18.2, O.palm(0.25, 17.7, false));
           if (w.runner) {
-            piece("wing", -100, O.wingField({ runner: ME.machine, note: w.desks ? "this Mac · 6 desks" : "this Mac", x: WING.x, y: WING.y, w: WING.w, d: WING.d, label: WING.label }));
+            piece("wing", -100, O.wingField({ runner: S.host.machine, note: [S.host === ME ? "this Mac" : "", w.desks ? "6 desks" : ""].filter(Boolean).join(" · "), x: WING.x, y: WING.y, w: WING.w, d: WING.d, label: WING.label }));
           }
           if (w.you) {
             piece("you", 3.0 + 15.8, O.yourDesk(1.4, 15.8, 0) + O.hatStand(0.6, 14.8), [{ x: 2.9, y: 16.4, z: 1.62, html: "<b>Your desk</b>", cls: "tag--you" }]);
@@ -1255,8 +1270,11 @@
 
         function viewWelcome() {
           var st = S.state;
+          var off = '<p class="reach reach--off"><span class="dot-ok"></span><span><b>Hercule will run on this Mac</b></span><span class="spacer"></span><span>starts at login</span></p>';
           var status = {
+            fresh: off,
             searching: '<p class="reach"><span class="spin"></span>Looking for Hercule on this Mac…</p>',
+            starting: off,
             found: '<p class="reach"><span class="dot-ok"></span><span><b>Hercule is running on this Mac</b></span><span class="spacer"></span><span class="mono">' + ME.address + "</span></p>",
             "already-set-up": '<p class="reach"><span class="dot-ok"></span><span><b>Hercule on this Mac is already set up.</b> Sign in with the account you created.</span></p>',
           }[st];
@@ -1267,23 +1285,41 @@
             '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
             "</ul>";
           var lead = '<p class="lead">Hand off the work.<br />Keep the decisions.</p>' + '<p class="st-sub">Hercule gives coding agents desks of their own on this Mac. They work through the night, and come to you when a decision is yours.</p>';
-          if (st === "not-running") {
+          if (st === "start-failed") {
             return (
-              '<h1 class="st-h">Hercule isn’t running on this Mac</h1>' +
-              '<p class="st-sub">The app talks to Hercule running in the background. It starts when you log in; to start it now, run this in Terminal:</p>' +
-              '<div class="cmd"><span>hercule service start</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></div>' +
+              '<h1 class="st-h">Hercule didn’t start</h1>' +
+              '<p class="st-sub">The app started Hercule in the background, but it didn’t answer within 30 seconds. Its log may say why:</p>' +
+              '<div class="cmd"><span>~/.hercule/logs/controller.log</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></div>' +
               '<p class="reach reach--off"><span class="dot-ok"></span><span>Nothing answers at <span class="mono">' + ME.address + "</span></span></p>" +
-              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="retry">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>'
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="start">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>'
             );
           }
-          if (st === "remote") {
+          if (st === "remote" || st === "remote-not-set-up") {
+            var notSetUp = st === "remote-not-set-up";
             return (
-              '<h1 class="st-h">Set up Hercule on another machine</h1>' +
-              '<p class="st-sub">Paste the setup address of the machine that runs Hercule. It opens the setup there, once.</p>' +
+              '<h1 class="st-h">Connect to Hercule on another machine</h1>' +
+              '<p class="st-sub">Paste the address of the machine that runs Hercule. If Hercule isn’t set up there yet, paste its setup address instead.</p>' +
               '<div class="st-form">' +
-              field({ key: "remote", label: "Setup address", placeholder: "http://build-box-1:4937/setup?token=…", mono: true, focus: true, hint: "On that machine, run <span class=\"mono\">hercule setup-url</span> to print it." }) +
+              field({
+                key: "remote",
+                label: "Address",
+                placeholder: "http://" + REMOTE.address,
+                mono: true,
+                focus: true,
+                bad: notSetUp,
+                error: notSetUp ? "Hercule on " + REMOTE.machine + " isn’t set up yet. On that machine, run <span class=\"mono\">hercule setup-url</span> and paste the address it prints." : "",
+                hint: "On that machine, <span class=\"mono\">hercule setup-url</span> prints the setup address.",
+              }) +
               "</div>" +
-              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="start">Continue</button><button class="btn btn--quiet" data-act="retry">Use this Mac</button></div>'
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="connect">Continue</button><button class="btn btn--quiet" data-act="this-mac">Use this Mac</button></div>'
+            );
+          }
+          if (st === "remote-set-up") {
+            return (
+              '<h1 class="st-h">Hercule on ' + REMOTE.machine + " is already set up</h1>" +
+              '<p class="st-sub">Sign in with the account you created there. The office lives on ' + REMOTE.machine + "; this Mac only opens it.</p>" +
+              '<p class="reach"><span class="dot-ok"></span><span><b>Hercule is running on ' + REMOTE.machine + '</b></span><span class="spacer"></span><span class="mono">' + REMOTE.address + "</span></p>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="noop">Sign in</button><button class="btn btn--quiet" data-act="remote">Use another address</button></div>'
             );
           }
           if (st === "already-set-up") {
@@ -1293,8 +1329,10 @@
             lead +
             perks +
             status +
-            '<div class="st-actions">' + '<button class="btn btn--accent btn--lg" data-act="start"' + (st === "searching" ? " disabled" : "") + ">Open the office</button>" + '<span class="fine">Four steps, about three minutes</span></div>' +
-            '<p class="st-note">' + icon("server", 14) + '<span>Hercule runs somewhere else? <a class="link" data-act="remote">Use its setup address</a></span></p>'
+            '<div class="st-actions">' +
+            (st === "starting" ? busyButton("Open the office", "Starting Hercule…", "start", true) : '<button class="btn btn--accent btn--lg" data-act="start"' + (st === "searching" ? " disabled" : "") + ">Open the office</button>") +
+            '<span class="fine">Four steps, about three minutes</span></div>' +
+            '<p class="st-note">' + icon("server", 14) + '<span>Hercule already runs on another machine? <a class="link" data-act="remote">Connect to it</a></span></p>'
           );
         }
 
@@ -1354,7 +1392,7 @@
             return (
               kicker("harness") +
               '<h1 class="st-h">Your agents need a coding tool</h1>' +
-              '<p class="st-sub">Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and log in to it; Hercule can install it for you.</p>' +
+              '<p class="st-sub">Hercule drives Claude Code, Codex or pi, and found none of them on ' + describeHost() + '. Install one and log in to it; Hercule can install it for you.</p>' +
               '<div class="hx">' +
               providerRow("claude", "Claude Code", "Anthropic’s coding agent", "install") +
               providerRow("codex", "Codex", "OpenAI’s coding agent", "install") +
@@ -1366,8 +1404,8 @@
           var ready = S.claude === "ready" || S.codex === "ready";
           return (
             kicker("harness") +
-            '<h1 class="st-h">Claude Code and Codex are on this Mac</h1>' +
-            '<p class="st-sub">Log in to the ones you want your agents to use. The login runs on this Mac and its credential stays here.</p>' +
+            '<h1 class="st-h">Claude Code and Codex are on ' + describeHost() + "</h1>" +
+            '<p class="st-sub">Log in to the ones you want your agents to use. The login runs on ' + describeHost() + " and its credential stays " + (S.host === ME ? "here" : "there") + ".</p>" +
             '<div class="hx">' + providerRow("claude", "Claude Code", "/opt/homebrew/bin/claude", S.claude) + providerRow("codex", "Codex", "/opt/homebrew/bin/codex", S.codex) + "</div>" +
             '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="harness-continue"' + (ready ? "" : " disabled") + ">Continue</button>" + (ready ? "" : '<button class="btn btn--quiet" data-act="harness-later">Do this later</button>') + "</div>"
           );
@@ -1544,7 +1582,7 @@
               brand(S.step === "welcome") +
               '<span class="rule"></span>' +
               letter() +
-              (S.step === "welcome" ? "" : '<p class="lt-foot"><span class="lt-dot"></span><span>Hercule is running on ' + ME.machine + '</span><span class="mono">' + ME.address + "</span></p>");
+              (S.step === "welcome" ? "" : '<p class="lt-foot"><span class="lt-dot"></span><span>Hercule is running on ' + S.host.machine + '</span><span class="mono">' + S.host.address + "</span></p>");
             ladderEl.hidden = true;
           }
           var focus = panel.querySelector("[data-autofocus]");
@@ -1567,17 +1605,30 @@
               el.innerHTML = keep;
             }, 1200);
           },
+          // A Hercule that already answers opens straight away. Otherwise the app installs Hercule's
+          // background service on this Mac and waits for it to answer; the lights come on with it.
           start: function () {
-            go("account", "default");
+            if (S.state === "found") return go("account", "default");
+            go("welcome", "starting");
+            later(1800, function () {
+              if (S.state === "starting") go("account", "default");
+            });
           },
           remote: function () {
             go("welcome", "remote");
           },
-          retry: function () {
-            go("welcome", "searching");
-            later(1100, function () {
-              go("welcome", "found");
-            });
+          // A setup address opens the four steps on that machine. The fixture's other machine is not
+          // set up yet, so a plain address shows what the user is asked for instead.
+          connect: function () {
+            var address = S.form.remote.trim();
+            if (!address) return;
+            if (address.indexOf("/setup?token=") === -1) return go("welcome", "remote-not-set-up");
+            S.host = REMOTE;
+            go("account", "default");
+          },
+          "this-mac": function () {
+            S.host = ME;
+            go("welcome", "fresh");
           },
           "create-account": function () {
             if (S.form.pass.length < 8) return go("account", "error");
@@ -1732,7 +1783,7 @@
         }).observe(stage);
         if (!frozen) {
           later(1300, function () {
-            go("welcome", "found");
+            go("welcome", "fresh");
           });
         }
       })();
