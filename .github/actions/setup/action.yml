@@ -1,0 +1,25 @@
+name: Set up the toolchain
+description: >-
+  Installs the pinned Bun, pnpm and Node, then the workspace's dependencies
+  from the lockfile. Runs after the checkout, which this action is read from.
+
+runs:
+  using: composite
+  steps:
+    # Bun is pinned exactly, in `.bun-version` and nowhere else: the compiled
+    # binary is built with it, and versions at or below 1.3.12 carry the
+    # codesign signature regression (spec 15 section 11).
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .bun-version
+
+    # pnpm is pinned once, by `packageManager` in package.json.
+    - uses: pnpm/action-setup@v6
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+        cache: pnpm
+
+    - run: pnpm install --frozen-lockfile
+      shell: bash

@@ -432,14 +432,15 @@ export default tseslint.config(
     },
   },
   {
-    // `spawn()` is the sanctioned way to start another role, and build scripts
-    // are tooling that never ships inside the binary. The desktop end-to-end
-    // suite runs on Node, never inside the binary, and starts a second copy of
-    // the packaged app itself, because Playwright cannot start one that exits
-    // at once.
+    // `spawn()` is the sanctioned way to start another role. Build scripts,
+    // and the test that runs install.sh, are tooling that never ships inside
+    // the binary. The desktop end-to-end suite runs on Node, never inside the
+    // binary, and starts a second copy of the packaged app itself, because
+    // Playwright cannot start one that exits at once.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
+      "install.test.ts",
       "apps/desktop/scripts/**/*.ts",
       "e2e/desktop/**/*.ts",
     ],

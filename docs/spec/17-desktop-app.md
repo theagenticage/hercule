@@ -185,7 +185,12 @@ Only the storage differs:
 - **Sign Out never waits on the controller.** The app forgets the token, empties its caches and shows the sign-in screen at once. It then asks the controller to revoke the token it just forgot, and ignores the answer. A controller that hangs must not keep a user signed in who asked to be signed out, and a quit in that moment must not leave the token on disk.
 - **While the app runs, the token is in the renderer's memory,** as it is in a browser tab. The CSP above is what protects it.
 
-**Verify at build time:** whether an unsigned development build prompts for Keychain access when `safeStorage` is first used. A signed build must not prompt.
+~~**Verify at build time:** whether an unsigned development build prompts for Keychain access when `safeStorage` is first used. A signed build must not prompt.~~ *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* **After an update, the Keychain gives the new build the old build's key only when both builds have the same designated requirement.** `codesign` writes the requirement into the signature, and the Keychain item that holds `safeStorage`'s key trusts the app that meets it. Measured on 2026-10-01 with a small probe program, built twice, that stores a Keychain item and reads it with user interaction turned off:
+
+- **Ad hoc signed,** each build gets the requirement `cdhash H"..."`, the hash of that one build. The second build failed to read the first build's item, with `errSecAuthFailed` (-25293). The app then deletes the token, and the user signs in again ([When the Keychain fails](#auth-and-the-token), above).
+- **Signed with the same self-signed certificate,** both builds get `identifier "..." and certificate leaf = H"..."`: the bundle identifier and the hash of the certificate. The second build read the item without a prompt.
+
+So the released app is signed with one certificate for every build ([Security baseline](#security-baseline)), and an update keeps the sign-in. The user signs in once more in two cases: on the first update from an ad hoc build to a certificate-signed one, and on the first update after the certificate changes, including the switch to a Developer ID.
 
 ## Security baseline
 
@@ -218,6 +223,15 @@ Only the storage differs:
   - `--user-data-dir=<folder>` gives each test its own folder. It exposes nothing: a program that can write a folder it names can write the app's own.
   - `-ApplePersistenceIgnoreState` followed by `YES` keeps macOS from offering to reopen windows after a test stops the app. The app does not use window restoration.
 - **The refusal applies only while the Node inspector is closed.** An open inspector already gives full control of main, so refusing arguments would add nothing. The release package's fuse keeps the inspector closed, so there the refusal always applies. The test package runs with the inspector open, which lets Playwright pass `--remote-debugging-port` and the tests pass `--use-mock-keychain`.
+
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* **The released app is signed with one self-signed code-signing certificate,** the same for every build, until an Apple Developer ID replaces it together with notarization. The certificate keeps the app's designated requirement the same from build to build, so the Keychain keeps trusting the app after an update ([Auth and the token](#auth-and-the-token)). How the certificate is made and stored is in [docs/signing-certificate.md](../signing-certificate.md).
+
+- The `edge-build` job in CI signs the release package with it ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1). A build without the certificate, such as a pull request's, is signed ad hoc.
+- **The hardened runtime is on for a build signed with the certificate.** Among other things, it stops macOS from loading a library named in `DYLD_INSERT_LIBRARIES` into the app, which would otherwise run inside a process the Keychain trusts with the token's key. Its entitlements, in `apps/desktop/build/entitlements.mac.plist`, allow two exceptions and nothing else:
+  - `allow-jit`, which V8's compiler needs;
+  - `disable-library-validation`, because the self-signed certificate has no Team ID, and with library validation on macOS refuses to load Electron's frameworks into the app. So the libraries the app itself loads are not checked against its signature; a Developer ID, which has a Team ID, removes this exception.
+- An ad hoc build, such as a pull request's or the test package, runs without the hardened runtime. CI runs the packaging test on the signed `edge` build too, so a build under the runtime is checked to start.
+- **Gatekeeper does not trust the certificate.** The app still opens, because the installer downloads it with `curl`, which sets no quarantine flag.
 
 ## The IPC contract
 
@@ -793,6 +807,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - that a face's seed always gives the same face
 - **Renderer component tests** work as they do in `apps/web`.
 - **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the test package (see [Security baseline](#security-baseline)) against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. ~~CI runs them on macOS, the target platform.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* They run on a developer's Mac, before a pull request that changes the desktop app, and not in CI. They check windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three: a 1024 × 768 screen at 1x with the Dock showing, Reduce motion and Reduce transparency on, and a slow machine. There, 5 of the 98 tests that pass on a developer's Mac failed. In one, macOS shrank a saved 1000 × 700 window to fit a work area 679 points high, as it should, and the test expected the window to keep its size.
+  - *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* One file does run in CI: the `edge-build` job runs `e2e/desktop/package.test.ts` on the certificate-signed release package, which only that job builds, under the hardened runtime. The test checks the fuses, `app.asar`, the signature, and that the app starts and quits; none of that depends on the screen or the machine's speed.
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.

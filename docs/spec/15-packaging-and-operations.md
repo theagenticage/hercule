@@ -12,6 +12,15 @@ Hercule ships as one Bun-compiled, self-contained executable per platform. The s
 
 The installer places the binary at **`~/.local/bin/hercule`** (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): the same convention the Claude Code and Codex installers use, so on most runner machines the directory is already on `PATH`. The path is user-writable, which `hercule upgrade`'s in-place swap requires (section 9). The installer checks whether `~/.local/bin` is on `PATH`; if not, it appends one export line to the detected shell profile (zsh, bash, or fish) and prints exactly what it changed. No sudo, ever.
 
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until stable releases ([#191](https://github.com/theagenticage/hercule/issues/191)) and their installer ([#102](https://github.com/theagenticage/hercule/issues/102)) land, the install path is the **`edge` prerelease**: a rolling build of `main`. The rules:
+
+- **What it holds.** Three assets: `hercule-darwin-arm64` (the binary, ad hoc signed), `Hercule-darwin-arm64.zip` (the desktop app, zipped with `ditto -c -k --keepParent` so its signature and symlinks survive) and `SHA256SUMS`. macOS on Apple silicon only; Linux comes with #191.
+- **How it is replaced.** Two jobs in `.github/workflows/ci.yml` run on every push to `main` once the other jobs pass. `edge-build`, on macOS, builds and signs the assets, runs the packaging test on the app and installs them with `install.sh`. `edge-publish`, on Linux, deletes the release and its tag, and creates them again on the commit, with its CI run named in the release's notes. The tag is not moved because GitHub refuses to let a job's token move a tag to a commit whose workflow files differ from those of the commit the tag points at now; for about a minute there is no release, and the installer refuses. Runs on `main` are queued, never cancelled, so `edge` is published in push order, and a publish is never stopped between deleting the release and creating it again.
+- **What it relies on.** The release is deleted and created again under the same tag, which GitHub's immutable releases forbid; that repository setting must stay off for `edge`. #191's stable releases may turn it on only for their own tags.
+- **How it is trusted.** The installer checks the binary and the app against `SHA256SUMS`, which catches a broken download. Nothing is signed with minisign yet, so the trust anchor is GitHub's HTTPS, as for any first install over `curl | sh`. #191 adds the signature.
+- **The installer** is `install.sh` at the repository root: `curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh`. It is read from the `edge` tag, so the script and the assets come from the same commit, except for up to five minutes after a publish, while raw.githubusercontent.com may still serve the previous script. Running it again is the update (section 9): it replaces the binary and the desktop app together, so the controller and the app never disagree on a protocol version ([#289](https://github.com/theagenticage/hercule/issues/289)). It never touches the Hercule Home's contents beyond creating `logs/` (section 5); the controller migrates the database itself at boot (section 8). `HERCULE_RELEASE_URL` points it at another location than the `edge` release; only the installer reads it, so it is not a config key (section 6). `HERCULE_HOME` chooses the Hercule Home, as for any role; the installer writes it into the unit (section 4), and an update keeps the Home the installed unit names. It isolates only the Home: the binary, the app and the unit are the user's one install whatever it is.
+- **One recorded deviation:** when `~/.local/bin` is not on `PATH`, `install.sh` prints the export line instead of appending it to the shell profile. #102's installer follows the paragraph above.
+
 ## 2. One binary, three roles: the subcommand tree
 
 A thin dispatcher reads `argv` and hands off to one of three entrypoints: controller, runner, or CLI. Every role is the same file on disk.
@@ -57,6 +66,15 @@ The compiled artifact still contains all three graphs. Isolation is a property o
 - User-level, not system-level, because the master key lives in the user's login keychain, which a macOS system daemon cannot reach ([ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)).
 - One unit per machine. On the controller machine the unit runs `hercule serve`; on a runner-only machine it runs `hercule runner`.
 - Foreground `hercule serve` (no unit) is the development mode.
+
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule service install` lands ([#100](https://github.com/theagenticage/hercule/issues/100)), the `edge` installer (section 1) writes the controller machine's LaunchAgent itself. The unit:
+
+- is `~/Library/LaunchAgents/sh.hercule.service.plist`, with the label `sh.hercule.service`;
+- runs `~/.local/bin/hercule serve`, with `RunAtLoad` and `KeepAlive`;
+- carries the installing shell's `PATH` with `~/.local/bin` first and relative or missing folders left out, and `HERCULE_HOME`, always as an absolute path;
+- appends stdout and stderr to `<home>/logs/controller.log` (section 5).
+
+The installer loads the unit with `launchctl bootstrap` the first time, restarts it with `launchctl kickstart -k` after, and boots it out and in again when the plist changed. It reports the controller as running once launchd shows it under a new process ID that is still there three seconds later. `hercule service install` must use the same label and path, so it replaces this unit instead of adding a second one.
 
 ### The local runner
 
@@ -104,6 +122,8 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 `runner/` holds what [./03](./03-controller-and-runners.md) calls material state: the random per-enrolment storage directory with per-resource bare caches and ephemeral workspaces, and the disk-backed event outbox. This document also places the isolated provider homes (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`; one per provider instance on the runner, [./06](./06-providers.md)) under `runner/` - the spec's choice, since they are runner-owned material state; no ticket names their location. Primary workspaces live wherever the user's checkout is, outside the home.
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
+
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Under the `edge` installer's LaunchAgent (section 4), launchd appends the controller's output to `logs/controller.log`, and nothing rotates it yet; rotation comes with `hercule service install` ([#100](https://github.com/theagenticage/hercule/issues/100)). launchd does not create the folder of a log file, so the installer creates `logs/`.
 
 The CLI credential file is **`~/.hercule/credentials.json`** (mode 0600; resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): `{ "url": ..., "apiKey": ... }` - the CLI needs the controller URL as well as the key, and `hercule login` learns both. The plain-file master key fallback on headless Linux is **`~/.hercule/master.key`** (mode 0600, same resolution): at the home root, outside `data/` and `backups/`, so promotion bundles and offsite backups stay inert. Neither is a `config.toml` key.
 
@@ -168,6 +188,8 @@ The pre-migration copy is a **`VACUUM INTO`** to `backups/<timestamp>-premigrati
 ### Self-update
 
 `hercule upgrade` fetches the release for this platform, verifies its checksum and signature, swaps the binary atomically, and asks the supervisor to restart the unit. Migrations then run on the next boot (section 8). There is no unattended auto-install in v1; that convention arrives with the desktop app.
+
+*(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* Until `hercule upgrade` lands ([#102](https://github.com/theagenticage/hercule/issues/102)), running the `edge` installer again is the update (section 1). It restarts the controller at once, with no wait for turns to finish, so it is run when no agent is working.
 
 ### Update discovery
 

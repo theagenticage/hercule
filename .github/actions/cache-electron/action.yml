@@ -1,0 +1,19 @@
+name: Cache Electron
+description: >-
+  Restores and saves Electron's zip, about 100 MB, which the install downloads
+  into ~/Library/Caches/electron and electron-builder reads when it packages
+  the app. Runs before the setup action, whose install would download it.
+
+runs:
+  using: composite
+  steps:
+    # The zip changes only with Electron's version, so that version is the
+    # cache key.
+    - name: Read the Electron version
+      id: electron
+      shell: bash
+      run: echo "version=$(node -p 'require("./apps/desktop/package.json").devDependencies.electron')" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v6
+      with:
+        path: ~/Library/Caches/electron
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
