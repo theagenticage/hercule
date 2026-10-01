@@ -359,6 +359,7 @@ Stated explicitly by the tickets:
 - **Prompt injection beyond taint marking.** Wrapping and prompt hardening reduce, not eliminate, the chance an assistant follows third-party text. The provenance line makes the outcome auditable.
 - **A stolen master key.** Anyone with the machine's keychain (or the headless key file) and the database has every secret.
 - **Vendor-side credential races** when a user copies a provider credential to two runners despite the guidance.
+- **A stolen desktop signing certificate.** *(Added 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* The Keychain gives the desktop app's token key to any app signed with the same certificate and bundle identifier (spec 17, §Auth and the token). Whoever holds the certificate's private key, or can push to `main` and so have CI sign a build, can make an app the Keychain trusts with that key. The key lives only in the `desktop-signing` environment's secrets, which only `main` can use ([docs/signing-certificate.md](../signing-certificate.md)). And while the certificate is self-signed, the app's entitlements turn library validation off, so the libraries the app itself loads are not checked against its signature.
 
 ## Post-v1
 

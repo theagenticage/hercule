@@ -16,7 +16,29 @@ Hercule is the successor to agentick (Python), built from scratch in TypeScript.
 
 ## Status
 
-**Spec complete, implementation starting.** The v1 spec was assembled 2026-08-28 from the decisions worked as child issues of the [wayfinder map](https://github.com/theagenticage/hercule/issues/1); remaining open items are indexed in [docs/spec/16-open-items.md](docs/spec/16-open-items.md), each tied to a follow-up ticket or marked as an implementer's choice.
+**Implementing v1.** The v1 spec was assembled 2026-08-28 from the decisions worked as child issues of the [wayfinder map](https://github.com/theagenticage/hercule/issues/1); remaining open items are indexed in [docs/spec/16-open-items.md](docs/spec/16-open-items.md), each tied to a follow-up ticket or marked as an implementer's choice.
+
+## Install
+
+On a Mac with Apple silicon:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh
+```
+
+This installs a build of `main`, from the rolling `edge` prerelease that every push to `main` replaces once CI passes. It is a dev build, not a stable release: stable releases come with [#191](https://github.com/theagenticage/hercule/issues/191) and [#102](https://github.com/theagenticage/hercule/issues/102). macOS on Apple silicon is the only platform for now.
+
+The script installs:
+
+- the `hercule` binary at `~/.local/bin/hercule`. When `~/.local/bin` is not on your `PATH`, it prints the line to add to your shell profile.
+- the desktop app at `/Applications/Hercule.app`.
+- a LaunchAgent that runs the controller, `hercule serve`, at login and restarts it when it stops. Its log is `logs/controller.log` in the Hercule Home, which is `~/.hercule` unless `HERCULE_HOME` is set.
+
+After a first install, run `hercule setup-url` and open the URL it prints to set up the controller.
+
+**To update, run the same line again.** It replaces the binary and the app together, so the two always agree, and restarts the controller. The restart ends any turn in progress, so update when no agent is working. The controller migrates its database itself when it starts, and keeps a copy from before the migration in the Hercule Home's `backups/`.
+
+If your desktop app was installed before the app was signed with a certificate, the first update asks you to sign in once more, because the Keychain sees a different app ([docs/signing-certificate.md](docs/signing-certificate.md)). Later updates keep the sign-in.
 
 ## Documentation
 
