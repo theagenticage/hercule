@@ -14,6 +14,7 @@ import {
   Fact,
   InstanceId,
   InstanceSecrets,
+  MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   Sequenced,
   SessionId,
@@ -297,7 +298,7 @@ const Question = Schema.Struct({
   question: Message,
   header: Fact,
   options: Schema.Array(Schema.Struct({ label: Fact, description: Message })),
-  /** Whether more than one option may be chosen, once answering is built. */
+  /** Whether more than one option may be chosen. */
   multiSelect: Schema.Boolean,
 });
 
@@ -305,6 +306,72 @@ const Question = Schema.Struct({
 const QuestionRequest = defineOpenRequest("question", {
   questions: Schema.NonEmptyArray(Question),
 });
+
+/**
+ * One answer to a question: an option's label or text the user typed. Text
+ * that is empty or only spaces would answer nothing, so it is refused.
+ */
+const AnswerText = Message.check(
+  Schema.isPattern(/\S/, { title: "answer", description: "text that is not only spaces" }),
+);
+
+/**
+ * The most characters all the answers to one request may hold together,
+ * headers included. The
+ * answers travel to the runner and come back in `request.resolved`, and a
+ * frame over the socket's 2 MiB limit closes the runner's connection, ending
+ * the stream of every session on it. JSON can write one character as six
+ * bytes, so the limit stays far below 2 MiB divided by six. Four full messages
+ * is still more than anyone types in answer to a question.
+ */
+export const MAX_ANSWERS_LENGTH = 4 * MAX_MESSAGE_LENGTH;
+
+/** Counts the characters in a set of answers: every header, value and list item. */
+const countAnswerCharacters = (answers: {
+  readonly [header: string]: string | ReadonlyArray<string>;
+}): number =>
+  Object.entries(answers)
+    .flat(2)
+    .reduce((total, text) => total + text.length, 0);
+
+/**
+ * The answers to a `question` request, keyed by each question's header. A
+ * question is answered with one text, or with a list when it allows several
+ * options; a list of one is also accepted for a question that takes one
+ * answer. Which headers are required, and whether more than one answer is
+ * allowed, depends on the request, so the controller checks that against the
+ * open request.
+ *
+ * A header is any string, not a `Fact`: a record drops a key that fails its
+ * key schema instead of failing, so an empty or overlong header would vanish
+ * without a word. Kept, it reaches the controller, which refuses it as a
+ * header the request does not have. The limit on all characters together
+ * still bounds its length.
+ */
+export const QuestionAnswers = Schema.Record(
+  Schema.String,
+  Schema.Union([
+    AnswerText,
+    Schema.NonEmptyArray(AnswerText).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ]),
+).check(
+  Schema.isPropertiesLengthBetween(1, MAX_FACT_ITEMS),
+  Schema.makeFilter((answers) =>
+    countAnswerCharacters(answers) <= MAX_ANSWERS_LENGTH
+      ? true
+      : `the answers and their headers together hold more than ${String(MAX_ANSWERS_LENGTH)} characters`,
+  ),
+);
+
+export type QuestionAnswers = Schema.Schema.Type<typeof QuestionAnswers>;
+
+/**
+ * What resolves a request: a decision for an approval, or the answers for a
+ * question. A question also accepts the decisions it offers, deny and
+ * cancel.
+ */
+export type RequestResponse =
+  { readonly decision: ApprovalDecision } | { readonly answers: QuestionAnswers };
 
 /**
  * The request a session is parked on, as the database row and the API hold it.
@@ -469,12 +536,22 @@ const RuntimeError = defineEvent("runtime.error", {
 const RequestOpened = defineEvent("request.opened", { request: OpenRequest });
 
 /**
- * The session is no longer parked, whatever ended it: the user's answer, an
+ * The session is no longer parked, whatever ended it: the user's decision, an
  * interrupted turn, or the harness withdrawing the question.
  */
 const RequestResolved = defineEvent("request.resolved", {
   requestId: Fact,
   decision: ApprovalDecision,
+});
+
+/**
+ * The session is no longer parked because the user answered its question. It
+ * carries the answers rather than a decision, so the stream holds what the
+ * user said.
+ */
+const RequestResolvedWithAnswers = defineEvent("request.resolved", {
+  requestId: Fact,
+  answers: QuestionAnswers,
 });
 
 export const ProviderEvent = Schema.Union([
@@ -490,6 +567,7 @@ export const ProviderEvent = Schema.Union([
   RuntimeError,
   RequestOpened,
   RequestResolved,
+  RequestResolvedWithAnswers,
 ]);
 
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
@@ -576,20 +654,33 @@ export const SessionInterrupt = Schema.Struct({
 
 export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
 
-/**
- * Answers the request the session is parked on. `requestId` is the adapter's
- * own id, sent back: the controller does not create ids for requests it did
- * not open. Like `SessionInterrupt`, there is no reply frame: the result
- * arrives in the session's own stream as `request.resolved`.
- */
-export const SessionRespond = Schema.Struct({
+const SessionRespondTarget = {
   _tag: Schema.Literal("sessionRespond"),
   sessionId: SessionId,
   requestId: Fact,
-  decision: ApprovalDecision,
-});
+};
+
+/**
+ * Answers the request the session is parked on, with a decision or, for a
+ * question, with the answers. `requestId` is the adapter's own id, sent back:
+ * the controller does not create ids for requests it did not open. Like
+ * `SessionInterrupt`, there is no reply frame: the result arrives in the
+ * session's own stream as `request.resolved`.
+ */
+export const SessionRespond = Schema.Union([
+  Schema.Struct({ ...SessionRespondTarget, decision: ApprovalDecision }),
+  Schema.Struct({ ...SessionRespondTarget, answers: QuestionAnswers }),
+]);
 
 export type SessionRespond = Schema.Schema.Type<typeof SessionRespond>;
+
+/**
+ * The hello capability of a runner that can resolve a question with answers.
+ * A runner without it cannot decode a `sessionRespond` frame that carries
+ * answers, and a frame it cannot decode closes its connection. So the
+ * controller sends answers only to a runner that lists this capability.
+ */
+export const ANSWERS_CAPABILITY = "answers";
 
 /**
  * What happened to one input, with the row id it was sent with. It has no turn

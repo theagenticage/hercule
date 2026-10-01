@@ -238,6 +238,12 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     decision: "allow_always",
   },
   {
+    _tag: "sessionRespond",
+    sessionId: SESSION_ID,
+    requestId: "0199e0e7-0000-7000-8000-00000000000f",
+    answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
+  },
+  {
     _tag: "workspaceProvision",
     workspaceId: WORKSPACE_ID,
     kind: "ephemeral",

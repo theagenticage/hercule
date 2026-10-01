@@ -4052,6 +4052,290 @@ describe("session.respond", () => {
 });
 
 /**
+ * Answering a `question` request: the user answers each question by its
+ * header, with an offered option, several options when the question allows
+ * it, or their own text. The answers reach the runner as they were given, and
+ * every malformed answer is refused before anything is sent.
+ */
+const QUESTIONS = [
+  {
+    question: "Which storage should drafts use?",
+    header: "Storage",
+    options: [
+      { label: "localStorage", description: "simple, and enough for a few drafts" },
+      { label: "IndexedDB", description: "more work, and room for many drafts" },
+    ],
+    multiSelect: false,
+  },
+  {
+    question: "Which features should drafts have?",
+    header: "Features",
+    options: [
+      { label: "Sync", description: "drafts follow the user to another device" },
+      { label: "Search", description: "drafts can be searched by their text" },
+      { label: "Offline", description: "drafts can be written without a connection" },
+    ],
+    multiSelect: true,
+  },
+] as const;
+
+/** A complete, valid answer to `QUESTIONS`. */
+const ANSWERS = { Storage: "localStorage", Features: ["Sync", "Search"] } as const;
+
+/**
+ * Reports, as the third event on `wire`, that a session in a running turn is
+ * waiting on one open `question` request that asks `QUESTIONS`. Returns the
+ * session once it shows the request.
+ */
+const openQuestion = async (
+  arranged: Arranged,
+  wire: Wire,
+  sessionId: string,
+): Promise<Session> => {
+  reportEvent(wire, 3, {
+    eventId: crypto.randomUUID(),
+    sessionId,
+    at,
+    _tag: "request.opened",
+    request: {
+      requestId: REQUEST_ID,
+      itemId: "i1",
+      kind: "question",
+      decisions: ["deny", "cancel"],
+      detail: { questions: [...QUESTIONS] },
+    },
+  });
+  return await waitForSession(
+    arranged,
+    sessionId,
+    (one) => one.openRequest?.requestId === REQUEST_ID,
+  );
+};
+
+/**
+ * Starts a session in a running turn, waiting on one open `question` request
+ * that asks `QUESTIONS`. Returns the session once it shows the request.
+ */
+const startQuestionSession = async (arranged: Arranged): Promise<Session> => {
+  const session = await startSession(arranged, "hello");
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "turn.started",
+    turnId: "t1",
+  });
+  return await openQuestion(arranged, arranged.wire, session.id);
+};
+
+describe("session.respond to a question", () => {
+  it("sends the answers to the runner as given, and records them in the audit log", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(((await response.json()) as Session).id).toBe(session.id);
+
+      const sent = await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        sessionId: session.id,
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+      // An answered question is never turned into a decision on its way to the runner.
+      expect(Object.keys(sent[0]!)).not.toContain("decision");
+
+      const entries = await arranged.harness.audit("session.responded");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+      expect(entries[0]?.payload).toMatchObject({ requestId: REQUEST_ID, answers: ANSWERS });
+    });
+  });
+
+  it("accepts the user's own text in place of an offered option", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+      const answers = { Storage: "a sqlite file", Features: ["Sync"] };
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+      expect(sent[0]).toMatchObject({ sessionId: session.id, requestId: REQUEST_ID, answers });
+    });
+  });
+
+  it("accepts a single-select answer given as a list of one", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: { Storage: ["localStorage"], Features: ["Sync"] },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+      expect(sent).toHaveLength(1);
+      // Whether the runner gets the one answer as a string or as a list of
+      // one, it is the answer the user chose.
+      const frame = sent[0]!;
+      expect(["answers" in frame ? frame.answers["Storage"] : undefined].flat()).toEqual([
+        "localStorage",
+      ]);
+    });
+  });
+
+  it.each(["deny", "cancel"] as const)(
+    "still accepts %s as a decision, and sends it as one",
+    async (decision) => {
+      await withFleet(async (arranged) => {
+        const session = await startQuestionSession(arranged);
+
+        const response = await respondToRequest(arranged, session.id, {
+          requestId: REQUEST_ID,
+          decision,
+        });
+
+        expect(response.status, await response.clone().text()).toBe(200);
+        const sent = await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({ sessionId: session.id, requestId: REQUEST_ID, decision });
+        expect(Object.keys(sent[0]!)).not.toContain("answers");
+      });
+    },
+  );
+
+  /**
+   * Each case has exactly one thing wrong with it, so the refusal names only
+   * that one field.
+   */
+  it.each([
+    {
+      title: "both a decision and answers",
+      parked: "question",
+      body: { requestId: REQUEST_ID, decision: "deny", answers: ANSWERS },
+      path: ["decision"],
+    },
+    {
+      title: "neither a decision nor answers",
+      parked: "question",
+      body: { requestId: REQUEST_ID },
+      path: ["decision"],
+    },
+    {
+      title: "answers to an approval",
+      parked: "approval",
+      body: { requestId: REQUEST_ID, answers: ANSWERS },
+      path: ["answers"],
+    },
+    {
+      title: "allow to a question",
+      parked: "question",
+      body: { requestId: REQUEST_ID, decision: "allow" },
+      path: ["decision"],
+    },
+    {
+      title: "an answer to a header the request does not have",
+      parked: "question",
+      body: { requestId: REQUEST_ID, answers: { ...ANSWERS, Colour: "red" } },
+      path: ["answers", "Colour"],
+    },
+    {
+      title: "a question left unanswered",
+      parked: "question",
+      body: { requestId: REQUEST_ID, answers: { Storage: "localStorage" } },
+      path: ["answers", "Features"],
+    },
+    {
+      title: "two answers to a question that takes one",
+      parked: "question",
+      body: {
+        requestId: REQUEST_ID,
+        answers: { Storage: ["localStorage", "IndexedDB"], Features: ["Sync"] },
+      },
+      path: ["answers", "Storage"],
+    },
+  ] as const)("refuses $title, naming the field, and sends nothing", async (refused) => {
+    await withFleet(async (arranged) => {
+      const session =
+        refused.parked === "question"
+          ? await startQuestionSession(arranged)
+          : await startParkedSession(arranged);
+
+      const response = await respondToRequest(arranged, session.id, refused.body);
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refusal = await parseRefusal(response);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.paths).toEqual([refused.path]);
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+    });
+  });
+
+  it.each([
+    { title: "an empty string", answers: { Storage: "", Features: ["Sync"] } },
+    { title: "an empty list", answers: { Storage: "localStorage", Features: [] } },
+  ])("refuses $title as an answer, under answers, and sends nothing", async ({ answers }) => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refusal = await parseRefusal(response);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.paths.length).toBeGreaterThan(0);
+      for (const path of refusal.paths) expect(path[0]).toBe("answers");
+      await delay(250);
+      expect(listRespondFrames(arranged.wire)).toEqual([]);
+    });
+  });
+
+  it("refuses answers for a session on a runner too old to take them, and sends nothing", async () => {
+    await withFleet(async (arranged) => {
+      // An older runner fails to read a frame with answers and drops its
+      // connection, so the controller must never send it one.
+      const older = await arranged.enlist({ capabilities: [] });
+      const busy = await startBusySessionOn(arranged, older, "hello");
+      const session = await openQuestion(arranged, older.wire, busy.id);
+
+      const response = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await readErrorBody(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(listRespondFrames(older.wire)).toEqual([]);
+
+      // A decision still reaches it, so the user can deny or cancel the question.
+      const denied = await respondToRequest(arranged, session.id, {
+        requestId: REQUEST_ID,
+        decision: "deny",
+      });
+      expect(denied.status, await denied.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionRespondFrame>(older.wire, "sessionRespond", 1);
+      expect(sent).toMatchObject([{ decision: "deny" }]);
+    });
+  });
+});
+
+/**
  * The approval notification a request raises in the notification center. It
  * follows the request: raised when the session parks on it, resolved as
  * `decided` when the request is answered through the controller, and
@@ -4150,7 +4434,7 @@ describe("session approval notifications", () => {
           "read the session again to see whether it is waiting on a request now",
       });
       await delay(250);
-      expect(listRespondFrames(arranged.wire).map((frame) => frame.decision)).toEqual(["allow"]);
+      expect(listRespondFrames(arranged.wire)).toMatchObject([{ decision: "allow" }]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(1);
     });
   });

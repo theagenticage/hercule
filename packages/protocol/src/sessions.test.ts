@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import {
+  MAX_ANSWERS_LENGTH,
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
   SessionBinding,
+  SessionRespond,
   SessionSpec,
   SessionStart,
   SessionStop,
@@ -110,6 +112,12 @@ const events: ReadonlyArray<Event> = [
     },
   },
   { _tag: "request.resolved", ...baseFields, requestId: "r1", decision: "allow" },
+  {
+    _tag: "request.resolved",
+    ...baseFields,
+    requestId: "r1",
+    answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
+  },
 ];
 
 /** One detail per request kind: five closed structs in one vocabulary. */
@@ -403,5 +411,75 @@ describe("what the controller sends for a session", () => {
         instanceId: "../../etc",
       })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("the answer the controller sends to a parked session", () => {
+  it("decodes a frame that answers a question with answers keyed by header", () => {
+    // A single-select question is answered with one string, a multi-select
+    // question with a list.
+    const frame = {
+      _tag: "sessionRespond",
+      sessionId: SESSION_ID,
+      requestId: "r1",
+      answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
+  });
+
+  it("still decodes a frame that answers with a decision", () => {
+    const frame = {
+      _tag: "sessionRespond",
+      sessionId: SESSION_ID,
+      requestId: "r1",
+      decision: "deny",
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
+  });
+
+  it("refuses an answer that is only spaces", () => {
+    const frame = {
+      _tag: "sessionRespond",
+      sessionId: SESSION_ID,
+      requestId: "r1",
+      answers: { Storage: "  " },
+    };
+    expect(Effect.runSyncExit(Schema.decodeUnknownEffect(SessionRespond)(frame))._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it("refuses answers that together hold more characters than the limit, though each fits", () => {
+    // Each answer is at most a full message, so only the limit on all of them
+    // together, headers included, keeps the frame within what the socket carries.
+    const full = "x".repeat(MAX_MESSAGE_LENGTH);
+    const buildFrame = (lastLength: number) => ({
+      _tag: "sessionRespond",
+      sessionId: SESSION_ID,
+      requestId: "r1",
+      answers: {
+        F: [
+          ...Array.from({ length: MAX_ANSWERS_LENGTH / MAX_MESSAGE_LENGTH - 1 }, () => full),
+          "x".repeat(lastLength),
+        ],
+      },
+    });
+    const decodeFrame = (lastLength: number) =>
+      Effect.runSyncExit(Schema.decodeUnknownEffect(SessionRespond)(buildFrame(lastLength)))._tag;
+    // The one-character header and the answers fill the limit exactly.
+    expect(decodeFrame(MAX_MESSAGE_LENGTH - 1)).toBe("Success");
+    expect(decodeFrame(MAX_MESSAGE_LENGTH)).toBe("Failure");
+  });
+
+  it("keeps a header no question could have, so the controller can refuse it by name", () => {
+    // A header that is empty or too long can match no question. Dropping it
+    // here would accept the rest of the answers as if it had never been sent.
+    const frame = {
+      _tag: "sessionRespond",
+      sessionId: SESSION_ID,
+      requestId: "r1",
+      answers: { "": "x", ["h".repeat(600)]: "y", Storage: "localStorage" },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
   });
 });

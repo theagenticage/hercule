@@ -626,16 +626,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
 
       /**
-       * Passes the user's decision on an open request to the adapter.
-       * Idempotent: the adapter ignores a request it does not hold, because it
-       * was already answered or never opened here. The outcome arrives as an
-       * event on the session's stream, not as a reply to this frame.
+       * Passes the user's decision or answers on an open request to the
+       * adapter. Idempotent: the adapter ignores a request it does not hold,
+       * because it was already answered or never opened here. The outcome
+       * arrives as an event on the session's stream, not as a reply to this
+       * frame.
        */
       respond: (frame: SessionRespond): Effect.Effect<void> =>
         live
           .get(frame.sessionId)
-          ?.adapter.respondToRequest(frame.sessionId, frame.requestId, frame.decision) ??
-        Effect.void,
+          ?.adapter.respondToRequest(
+            frame.sessionId,
+            frame.requestId,
+            "decision" in frame ? { decision: frame.decision } : { answers: frame.answers },
+          ) ?? Effect.void,
 
       /** Idempotent: a session this runner does not hold is already stopped. */
       stop: (frame: SessionStop): Effect.Effect<void> => {

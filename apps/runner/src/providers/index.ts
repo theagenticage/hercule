@@ -5,11 +5,11 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import type {
-  ApprovalDecision,
   ExitReason,
   ProbeResult,
   ProviderEvent,
   SendResult,
+  RequestResponse,
   SessionBinding,
   SessionSpec,
   TurnInput,
@@ -123,15 +123,15 @@ export interface ProviderAdapter {
 
   /**
    * Answers the request the session is parked on, by the id the adapter gave
-   * it. The harness resumes, and `request.resolved` follows on `events` as the
-   * only report. Does nothing when the adapter is not holding that request:
-   * it was never opened here, it was already answered, or it does not accept
-   * this decision.
+   * it, with a decision or with a question's answers. The harness resumes,
+   * and `request.resolved` follows on `events` as the only report. Does
+   * nothing when the adapter is not holding that request: it was never opened
+   * here, it was already answered, or it does not accept this response.
    */
   readonly respondToRequest: (
     sessionId: string,
     requestId: string,
-    decision: ApprovalDecision,
+    response: RequestResponse,
   ) => Effect.Effect<void>;
 
   /**

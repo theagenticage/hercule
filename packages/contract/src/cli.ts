@@ -2543,8 +2543,19 @@ export const CLI = {
   },
   "session.respond": {
     command: "session respond",
-    help: "Answers the Request a session is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open request first with `hercule session read`.",
-    examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
+    help: "Answers the Request a session is parked on. An approval takes one of the four decisions with --decision; free text never resolves it. A question takes --answers, or deny or cancel with --decision. Give exactly one of the two. Read the open request first with `hercule session read`.",
+    examples: [
+      { args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] },
+      {
+        args: [
+          "1f3a9c2e",
+          "--request",
+          "req_4b7d1a06",
+          "--answers",
+          '{"Storage":"localStorage","Features":["Sync","Search"]}',
+        ],
+      },
+    ],
     fields: {
       id: {
         positional: true,
@@ -2557,12 +2568,18 @@ export const CLI = {
       },
       decision: {
         flag: "decision",
-        help: "The answer to the Request: allow_always keeps a rule for the rest of the session, and cancel denies the request and ends the turn.",
+        help: "The decision on the Request: allow_always keeps a rule for the rest of the session, and cancel denies the request and ends the turn. A question accepts only deny and cancel.",
+      },
+      answers: {
+        flag: "answers",
+        help: "The answers to a question, as a JSON object keyed by each question's header. Every question needs an answer: an option's label or your own text, or a list of them when the question allows several.",
       },
     },
     errors: {
       invalid_state:
-        "the session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now; read it again with `hercule session read`",
+        "the session is not waiting on a request, or the harness has moved on and this is not the request it is waiting on now (read it again with `hercule session read`); or the session's runner could not take answers when it last connected (update it, or deny or cancel the question)",
+      validation:
+        "the answer does not fit the open request: both or neither of --decision and --answers, a decision it does not offer, answers to an approval, or answers that name an unknown header, leave a question out, give several to a question that takes one, hold an empty answer, or are too long together",
     },
   },
   "session.stop": {

@@ -221,6 +221,14 @@ describe("hercule task list --help", () => {
   });
 });
 
+describe("hercule session respond --help", () => {
+  it("lists --answers beside --decision among the flags", async () => {
+    const block = readBetweenSections(await runHelp("session", "respond"), "flags:", "returns:");
+    expect(block).toContain("--answers");
+    expect(block).toContain("--decision");
+  });
+});
+
 describe("hercule session --help", () => {
   const VERBS = [
     "list",

@@ -154,7 +154,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
       expect(hasFinishedTurn(live), "the turn ended without an answer").toBe(false);
 
       await Effect.runPromise(
-        pi.respondToRequest(live.sessionId, request.request.requestId, "allow"),
+        pi.respondToRequest(live.sessionId, request.request.requestId, { decision: "allow" }),
       );
       await waitReportingEvents(live, "the allowed command never ran", () =>
         hasFinishedCommand(live, request.request.itemId),
@@ -184,7 +184,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
       const request = findOpenedRequest(live)!;
 
       await Effect.runPromise(
-        pi.respondToRequest(live.sessionId, request.request.requestId, "deny"),
+        pi.respondToRequest(live.sessionId, request.request.requestId, { decision: "deny" }),
       );
 
       await waitReportingEvents(live, "the denied command never ended", () =>
@@ -219,7 +219,9 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
       // One card is docked at a time; the call behind it has not run yet.
       expect(listOpenedRequests(live)).toHaveLength(1);
 
-      await Effect.runPromise(pi.respondToRequest(live.sessionId, first.requestId, "allow"));
+      await Effect.runPromise(
+        pi.respondToRequest(live.sessionId, first.requestId, { decision: "allow" }),
+      );
       await waitReportingEvents(
         live,
         "the second call of the batch was never asked about",
@@ -231,7 +233,9 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
       expect(second.itemId).not.toBe(first.itemId);
       expect(second.kind).toBe("command_approval");
       expect(second.detail).toEqual({ command: PARKED_COMMAND });
-      await Effect.runPromise(pi.respondToRequest(live.sessionId, second.requestId, "allow"));
+      await Effect.runPromise(
+        pi.respondToRequest(live.sessionId, second.requestId, { decision: "allow" }),
+      );
       await waitReportingEvents(live, "the allowed command never ran", () =>
         hasFinishedCommand(live, second.itemId),
       );
@@ -266,7 +270,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
       expect(listOpenedRequests(live)).toHaveLength(1);
       expect(request.request.kind).toBe("command_approval");
       await Effect.runPromise(
-        pi.respondToRequest(live.sessionId, request.request.requestId, "allow"),
+        pi.respondToRequest(live.sessionId, request.request.requestId, { decision: "allow" }),
       );
       await waitReportingEvents(live, "the file change never landed", () => existsSync(file));
       expect(listOpenedRequests(live)).toHaveLength(1);
@@ -293,6 +297,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
           (event) =>
             event._tag === "request.resolved" &&
             event.requestId === request.request.requestId &&
+            "decision" in event &&
             event.decision === "cancel",
         ),
       );

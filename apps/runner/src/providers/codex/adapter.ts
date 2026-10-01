@@ -20,6 +20,7 @@ import type {
   OpenRequest,
   ProbeResult,
   ProviderEvent,
+  RequestResponse,
   SendResult,
   SessionBinding,
   SessionSpec,
@@ -875,7 +876,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     respondToRequest: (
       sessionId: string,
       requestId: string,
-      decision: ApprovalDecision,
+      response: RequestResponse,
     ): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
@@ -887,10 +888,12 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           held === undefined ||
           park === undefined ||
           park.request.requestId !== requestId ||
-          !park.request.decisions.includes(decision)
+          !("decision" in response) ||
+          !park.request.decisions.includes(response.decision)
         ) {
           return Effect.void;
         }
+        const { decision } = response;
         // A decision that ends the turn cancels every waiting request with it,
         // so none of them is shown to the user only to be cancelled at once.
         const ending = park.asked.endsTurn.includes(decision);

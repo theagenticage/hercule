@@ -75,6 +75,12 @@ const awaitAnswer = async (run: Run, id: string | number = ID): Promise<Answered
   return run.answered.find((written) => written.id === id)!;
 };
 
+/** Returns how each resolved request was resolved: its decision, or its answers. */
+const listResolutions = (run: Run): ReadonlyArray<unknown> =>
+  filterByTag(run.seen, "request.resolved").map((event) =>
+    "decision" in event ? event.decision : event.answers,
+  );
+
 /** Sends a request, resolves it with `decision`, and returns the run and the adapter's reply. */
 const openAndAnswer = async (
   method: string,
@@ -84,7 +90,7 @@ const openAndAnswer = async (
   const run = await pushServerRequest(method, params);
   const opened = await awaitOpenedRequest(run);
   await Effect.runPromise(
-    run.adapter.respondToRequest(SESSION, opened.request.requestId, decision),
+    run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision }),
   );
   return { run, answered: await awaitAnswer(run) };
 };
@@ -130,7 +136,7 @@ describe("a command Codex wants to run", () => {
       expect(answered.error).toBeUndefined();
       const resolved = filterByTag(run.seen, "request.resolved");
       expect(resolved).toHaveLength(1);
-      expect(resolved[0]?.decision).toBe(decision);
+      expect(resolved[0]).toMatchObject({ decision });
       expect(resolved[0]?.requestId).toBe(
         filterByTag(run.seen, "request.opened")[0]?.request.requestId,
       );
@@ -196,9 +202,7 @@ describe("a file change Codex wants to write", () => {
       const { run, answered } = await openAndAnswer(FILE_CHANGE, FILE_CHANGE_PARAMS, decision);
 
       expect(answered.result).toEqual({ decision: mapped });
-      expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-        decision,
-      ]);
+      expect(listResolutions(run)).toEqual([decision]);
     });
   }
 });
@@ -252,9 +256,7 @@ describe("the permissions Codex asks to be granted", () => {
     // Codex ends the turn itself after a denied permission, so a
     // `turn/interrupt` from here would race it.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "deny",
-    ]);
+    expect(listResolutions(run)).toEqual(["deny"]);
   });
 });
 
@@ -293,9 +295,7 @@ describe("an MCP server asking its own question", () => {
       const { run, answered } = await openAndAnswer(ELICITATION, ELICITATION_PARAMS, decision);
 
       expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
-      expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-        decision,
-      ]);
+      expect(listResolutions(run)).toEqual([decision]);
     });
   }
 });
@@ -357,9 +357,7 @@ describe("a question the agent asks the user", () => {
     await settle();
     // A deny declines this question only; the turn goes on.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "deny",
-    ]);
+    expect(listResolutions(run)).toEqual(["deny"]);
   });
 
   it("replies with an error and then interrupts the turn on cancel", async () => {
@@ -373,9 +371,7 @@ describe("a question the agent asks the user", () => {
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
       { threadId: THREAD, turnId: TURN },
     ]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "cancel",
-    ]);
+    expect(listResolutions(run)).toEqual(["cancel"]);
   });
 });
 
@@ -476,13 +472,11 @@ describe("an approval resolved while the turn is still running", () => {
     ]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
+      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "allow" }),
     );
 
     expect((await awaitAnswer(run)).result).toEqual({ decision: "accept" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "allow",
-    ]);
+    expect(listResolutions(run)).toEqual(["allow"]);
     // The turn is still running: an input now steers it rather than starting
     // a second turn beside it.
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
@@ -507,7 +501,7 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect(run.answered).toEqual([]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, first.request.requestId, "allow"),
+      run.adapter.respondToRequest(SESSION, first.request.requestId, { decision: "allow" }),
     );
 
     await waitUntil(
@@ -519,14 +513,11 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "accept" });
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, second.request.requestId, "deny"),
+      run.adapter.respondToRequest(SESSION, second.request.requestId, { decision: "deny" }),
     );
 
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "decline" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "allow",
-      "deny",
-    ]);
+    expect(listResolutions(run)).toEqual(["allow", "deny"]);
   });
 
   it("cancels the waiting request too when the session is interrupted", async () => {
@@ -588,9 +579,7 @@ describe("interrupting a session that is parked on a request", () => {
     // A permissions reply has no `cancel`, so a cancel sends the deny reply;
     // the request is still reported as cancelled.
     expect((await awaitAnswer(run)).result).toEqual({ permissions: {}, scope: "turn" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "cancel",
-    ]);
+    expect(listResolutions(run)).toEqual(["cancel"]);
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
       { threadId: THREAD, turnId: TURN },
     ]);
@@ -654,7 +643,7 @@ describe("a request whose turn ends before it is resolved", () => {
     await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
+      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "allow" }),
     );
 
     await settle();

@@ -15,6 +15,7 @@ import {
   Fact,
   InstanceId,
   InstanceSecrets,
+  MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   Seq,
   Sequenced,
@@ -50,7 +51,7 @@ export * from "./remote";
 export * from "./sessions";
 export * from "./workspace-steps";
 export * from "./workspaces";
-export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
+export { Fact, InstanceId, MAX_FACT_ITEMS, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
 
 export const PROTOCOL_VERSION = 1;
 
@@ -79,8 +80,6 @@ export const GOING_AWAY_CLOSE_CODE = 1001;
  * the controller only stores it.
  */
 const ProtocolVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
-
-export const MAX_FACT_ITEMS = 64;
 
 /** The extension point: a feature is used only when both hellos list it. */
 export const Capabilities = Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS));

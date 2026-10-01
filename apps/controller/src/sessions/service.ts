@@ -29,6 +29,7 @@ import {
   type ModelSelection,
   type OpenRequest,
   type ProviderEvent,
+  type RequestResponse,
   type SessionBinding,
   type SessionInput,
   type SessionInputResult,
@@ -938,15 +939,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Builds the frame that answers the request a session's harness is
-     * waiting on. The result arrives in the session's stream as
-     * `request.resolved`, so the daemon sends this frame without waiting for a
-     * reply.
+     * waiting on, with a decision or with a question's answers. The result
+     * arrives in the session's stream as `request.resolved`, so the daemon
+     * sends this frame without waiting for a reply.
      */
     responding: (
       sessionId: string,
       requestId: string,
-      decision: ApprovalDecision,
-    ): SessionRespond => ({ _tag: "sessionRespond", sessionId, requestId, decision }),
+      response: RequestResponse,
+    ): SessionRespond => ({ _tag: "sessionRespond", sessionId, requestId, ...response }),
 
     /**
      * Resolves the approval notification about a session's request as

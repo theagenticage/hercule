@@ -262,6 +262,22 @@ describe("a command's fields against the schema", () => {
   });
 });
 
+// A session parked on a question is answered with answers, an approval with a
+// decision, so the one command takes both.
+describe("session respond", () => {
+  it("takes --answers beside --decision", () => {
+    const respond = findCommandByWords(["session", "respond"])!;
+    const flags = respond.payload.map((field) => field.spelling);
+    expect(flags).toContain("answers");
+    expect(flags).toContain("decision");
+  });
+
+  it("has an example that answers with --answers", () => {
+    const examples = readRow("session.respond").examples ?? [];
+    expect(examples.some((example) => example.args.includes("--answers"))).toBe(true);
+  });
+});
+
 describe("the placeholders a usage line shows", () => {
   const buildUsageShape = (spelled: string): string =>
     findCommandByWords(spelled.split(" "))!

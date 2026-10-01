@@ -692,7 +692,7 @@ describe("the frame builders on SessionService", () => {
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.responding(sessionId, requestId, "allow_always");
+        return sessions.responding(sessionId, requestId, { decision: "allow_always" });
       }),
     );
     expect(frame).toStrictEqual({

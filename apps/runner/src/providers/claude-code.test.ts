@@ -1129,7 +1129,7 @@ const parkToolCall = (
 
 /** Sends the user's decision on a request to the adapter. */
 const respond = (run: Driving, requestId: string, decision: ApprovalDecision): Promise<void> =>
-  Effect.runPromise(run.adapter.respondToRequest(SESSION, requestId, decision));
+  Effect.runPromise(run.adapter.respondToRequest(SESSION, requestId, { decision }));
 
 const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<OpenRequest> =>
   seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
@@ -1138,7 +1138,7 @@ const listResolutions = (
   seen: ReadonlyArray<ProviderEvent>,
 ): ReadonlyArray<{ readonly requestId: string; readonly decision: ApprovalDecision }> =>
   seen.flatMap((event) =>
-    event._tag === "request.resolved"
+    event._tag === "request.resolved" && "decision" in event
       ? [{ requestId: event.requestId, decision: event.decision }]
       : [],
   );

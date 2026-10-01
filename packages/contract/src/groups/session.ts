@@ -14,6 +14,7 @@ import {
   ModelSelection,
   OpenRequest,
   OutputSchema,
+  QuestionAnswers,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -34,7 +35,7 @@ import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 
 /** The request vocabulary comes from the runner protocol; the API returns it unchanged. */
-export { ApprovalDecision, OpenRequest };
+export { ApprovalDecision, OpenRequest, QuestionAnswers };
 
 /** The longest prompt or turn input the API accepts: it is sent to the runner in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
@@ -274,13 +275,18 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
- * The answer to the request a session is parked on. `requestId` is the open
- * request's own id, so an answer that arrives after the harness moved on is
- * rejected rather than applied to whatever request is open now.
+ * The answer to the request a session is parked on: a decision, or, for a
+ * question, the answers keyed by each question's header. Exactly one of the
+ * two is given; the operation refuses both or neither. They are two optional
+ * keys of one struct rather than a union, because the CLI builds its flags
+ * from the struct's keys. `requestId` is the open request's own id, so an
+ * answer that arrives after the harness moved on is rejected rather than
+ * applied to whatever request is open now.
  */
 export const SESSION_RESPOND_FIELDS = {
   requestId: Fact,
-  decision: ApprovalDecision,
+  decision: Schema.optionalKey(ApprovalDecision),
+  answers: Schema.optionalKey(QuestionAnswers),
 } as const;
 
 export const SessionRespondInput = closedStruct(SESSION_RESPOND_FIELDS);
@@ -289,10 +295,15 @@ export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>
 
 /**
  * One call of `session.respond` as a single object: the session's id, which
- * an HTTP request sends in its path, and the answer. The core binds it to the
- * answers of the `core.approval` decision it raises for each approval.
+ * an HTTP request sends in its path, and the decision. The core binds it to
+ * the answers of the `core.approval` decision it raises for each approval. It
+ * takes a decision only, because a question raises no such notification.
  */
-export const SessionRespondCall = closedStruct({ sessionId: Id, ...SESSION_RESPOND_FIELDS });
+export const SessionRespondCall = closedStruct({
+  sessionId: Id,
+  requestId: Fact,
+  decision: ApprovalDecision,
+});
 
 export type SessionRespondCall = Schema.Schema.Type<typeof SessionRespondCall>;
 

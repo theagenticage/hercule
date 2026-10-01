@@ -36,6 +36,7 @@ import {
   type OpenRequest,
   type ProbeResult,
   type ProviderEvent,
+  type RequestResponse,
   type SendResult,
   type SessionBinding,
   type SessionSpec,
@@ -984,15 +985,16 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     respondToRequest: (
       sessionId: string,
       requestId: string,
-      decision: ApprovalDecision,
+      response: RequestResponse,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
         const park = live.get(sessionId)?.park;
         if (park === undefined || park.requestId !== requestId) return;
+        if (!("decision" in response)) return;
         // Ignore a decision the request did not offer: the harness would have
         // to replace it with something else.
-        if (!park.decisions.includes(decision)) return;
-        park.answer(decision);
+        if (!park.decisions.includes(response.decision)) return;
+        park.answer(response.decision);
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

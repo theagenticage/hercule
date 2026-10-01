@@ -29,6 +29,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
+  ANSWERS_CAPABILITY,
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
   PeerVersion,
@@ -82,14 +83,17 @@ const UNKNOWN_CREDENTIAL = "unknown credential";
 const RETIRED = "this runner was retired; run `hercule runner join` to join the fleet again";
 
 /**
- * The capabilities this controller offers at hello: one for each workspace
- * action in its catalog, derived from the catalog so the two never disagree.
- * The negotiated list then holds the workspace actions the runner implements
- * and this controller knows, which is what run pinning checks.
+ * The capabilities this controller offers at hello:
+ *
+ * - one for each workspace action in its catalog, derived from the catalog so
+ *   the two never disagree. Run pinning checks these;
+ * - answering a question, which `session.respond` checks before it sends
+ *   answers to a runner.
  */
-const CAPABILITIES: ReadonlyArray<string> = [...WORKSPACE_ACTION_IDS].map(
-  buildWorkspaceActionCapability,
-);
+const CAPABILITIES: ReadonlyArray<string> = [
+  ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
+  ANSWERS_CAPABILITY,
+];
 
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION =
