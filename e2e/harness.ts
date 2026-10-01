@@ -22,7 +22,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { ROOT, runCli, type Ran } from "../scripts/controller-process";
+import { ROOT, deleteMasterKeyItem, runCli, type Ran } from "../scripts/controller-process";
 
 /**
  * Returns the path of the release binary if one has been built, or `undefined`
@@ -141,6 +141,7 @@ export function createTemporaryHome(gitconfig?: string): TemporaryHome {
     // again removes the late file too.
     remove: () => {
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      deleteMasterKeyItem(home);
     },
   };
 }

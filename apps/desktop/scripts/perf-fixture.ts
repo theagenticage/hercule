@@ -31,6 +31,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Project, Runner, Session } from "../../../packages/contract/src/index";
 import {
+  deleteMasterKeyItem,
   findCompiledBinary,
   startController,
   startSetUpController,
@@ -386,6 +387,7 @@ export async function runWithThreadFixture<T>(
     }
   } finally {
     rmSync(home, { recursive: true, force: true });
+    deleteMasterKeyItem(home);
   }
 }
 

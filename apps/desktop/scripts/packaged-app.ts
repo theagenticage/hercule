@@ -21,7 +21,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { _electron, type ElectronApplication, type Page } from "playwright";
-import { PASSWORD, startSetUpController, USERNAME } from "../../../scripts/controller-process.ts";
+import {
+  deleteMasterKeyItem,
+  PASSWORD,
+  startSetUpController,
+  USERNAME,
+} from "../../../scripts/controller-process.ts";
 import { pollUntil } from "./poll.ts";
 import { buildAppEnv } from "./processes.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
@@ -342,6 +347,7 @@ export async function runWithScratchController<T>(use: (url: string) => Promise<
     }
   } finally {
     rmSync(home, { recursive: true, force: true });
+    deleteMasterKeyItem(home);
   }
 }
 

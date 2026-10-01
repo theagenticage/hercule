@@ -16,7 +16,7 @@
  * `node:child_process` rather than `spawnOwnBinary`, which inherits stdio: a
  * caller has to read what the command printed.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -47,6 +47,20 @@ function buildCleanEnv(): Record<string, string> {
         entry[1] !== undefined && !entry[0].startsWith("HERCULE_"),
     ),
   );
+}
+
+/**
+ * Deletes the login keychain item a controller stored its master key in when
+ * it booted in `home` on macOS. Without this, every controller a test or a
+ * measurement starts leaves one more item in the developer's keychain. Does
+ * nothing on other platforms, and nothing when no controller booted in `home`:
+ * the `security` exit code is ignored.
+ */
+export function deleteMasterKeyItem(home: string): void {
+  if (process.platform !== "darwin") return;
+  spawnSync("security", ["delete-generic-password", "-s", "Hercule", "-a", home], {
+    stdio: "ignore",
+  });
 }
 
 /** The result of a finished command. */
