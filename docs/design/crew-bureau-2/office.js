@@ -152,6 +152,8 @@
    * - away: the colleague is queued at your desk; the lamp stays lit and a marigold note waits
    * The blotter carries the project's tint, so projects read without a label.
    * A vacant slot on the runner is only an inlaid outline in the floor: room for one more.
+   * An empty desk is set out with its lamp dark and nobody at it: the first run's wing before
+   * anyone has started a thread.
    * extra - markup drawn on the desk in place of the lamp (the Triage desk's tube receiver).
    */
   function desk(s, extra) {
@@ -168,6 +170,7 @@
     out += patch(x0 + 0.02, y0 + 0.02, 0.92, 1.16, "desk-top", "", TOP);
     out += patch(x0 + 0.3, y0 + 0.2, 0.56, 0.8, "blotter", s.proj ? "fill:var(--proj-" + s.proj + ")" : "", TOP);
     out += extra || lamp(x0 + 0.2, y0 + 0.28, TOP, lit);
+    if (s.empty) return out + stool(x, y);
     if (s.away) out += box(x0 + 0.44, y0 + 0.5, TOP, 0.3, 0.24, 0.02, "var(--you)", "note");
     else if (s.pose === "idle") out += cup(x0 + 0.6, y0 + 0.9, TOP);
     else out += box(x0 + 0.42, y0 + 0.62, TOP, 0.34, 0.26, 0.05, "var(--room-paper)", "paper");
@@ -405,12 +408,13 @@
    * for each one. In the flow layer, a tube drops from every mouth into a manifold along the wall,
    * and capsules run down the tubes and along the manifold to where it turns toward the desk.
    * sources - the Connections to draw, SOURCES by default.
-   * slots   - how many plaques the rail has room for; the rail spaces them as if this many hung.
+   * slots   - how many plaques the rail has room for, as many as there are sources by default. A
+   *           rail with fewer sources than slots hangs them from the left and leaves the rest bare.
    */
   function tubeWall(sources, slots) {
     sources = sources || SOURCES;
     var span = (PLAQUES_Y[1] - PLAQUES_Y[0]) * U;
-    var pitch = span / (slots || sources.length);
+    var pitch = span / (slots || sources.length || SOURCES.length);
     var mouthY = 0.52 * U;
     var pipeY = (PLAQUES_Z - MANIFOLD_Z) * U;
     var joinX = (PLAQUES_Y[1] - TUBE_Y) * U;
@@ -429,7 +433,8 @@
       var dur = 1.6 + (Math.abs(mx - joinX) + pipeY - mouthY) / (U * 1.1);
       for (var k = 0; k < s[1]; k++) capsules += capsule(path, dur, -((k / s[1]) * dur + i * 0.37));
     });
-    tubes += "M" + n1(pitch * 0.5) + " " + n1(pipeY) + "H" + n1(pitch * (sources.length - 0.5));
+    // the manifold runs from the first mouth to where the tube leaves the wall
+    if (sources.length) tubes += "M" + n1(Math.min(pitch * 0.5, joinX)) + " " + n1(pipeY) + "H" + n1(Math.max(pitch * (sources.length - 0.5), joinX));
     return onSideWall(
       0.01,
       PLAQUES_Y[1],
@@ -816,6 +821,8 @@
     sideboard: sideboard,
     clubChair: clubChair,
     sideTable: sideTable,
+    wingField: wingField,
+    tubeToDesk: tubeToDesk,
     tileSize: function () {
       return U;
     },

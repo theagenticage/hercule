@@ -20,6 +20,8 @@
     Ada: ["iris", "egg", "cloche"],
     Milo: ["teal", "round", "headset"],
     Juno: ["orchid", "tall", "beret"],
+    // the assistant every new install starts with
+    Hercule: ["sky", "round", "tache+homburg"],
     Triage: ["lime", "egg", "tache+bowtie"],
     // workflows
     "Fix bug": ["iris", "wide", "glasses"],
@@ -474,6 +476,15 @@
     return document.documentElement.dataset.state === "swarm";
   }
 
+  /** Checks for the fresh install (?state=first): one project, no threads, nothing waiting. */
+  function isFirst() {
+    return document.documentElement.dataset.state === "first";
+  }
+
+  // What a fresh install has: the project the first run added, and the assistant setup creates.
+  var FIRST_PROJECTS = [["webshop", "webshop", []]];
+  var FIRST_ASSISTANTS = [{ name: "Hercule", pose: "asleep", key: "hercule" }];
+
   /* ------------------------------------------------------------------ shells */
 
   /** Returns the "Waiting on you" section: one row per waiting item, its question on one line. */
@@ -497,7 +508,7 @@
   /** Returns the Threads, grouped by project: a header with the project's name, mark and a + for a new thread there. */
   function threadSections(selected) {
     var swarm = isSwarm();
-    return PROJECTS.map(function (p) {
+    return (isFirst() ? FIRST_PROJECTS : PROJECTS).map(function (p) {
       var draft =
         selected === "new" && p[0] === "webshop"
           ? '<a class="side-row is-on" href="session-empty.html"><span class="side-text"><span class="side-name">New thread</span><span class="side-meta">new worktree · studio-mac</span></span><span class="side-end">draft</span></a>'
@@ -544,6 +555,7 @@
   function sidebar(el) {
     var selected = el.dataset.side;
     var swarm = isSwarm();
+    var first = isFirst();
     var tab = HERCULE_TAB[selected] ? "hercule" : "threads";
     el.classList.add("side");
     el.dataset.tab = tab;
@@ -557,11 +569,11 @@
       '<a class="nav-row" href="session-empty.html">' + icon("compose") + "<span>New thread</span><kbd>⌘N</kbd></a>" +
       '<button class="nav-row">' + icon("search") + "<span>Search</span><kbd>⌘K</kbd></button></div>" +
       '<div class="side-scroll">' +
-      waitingSection(waitingName) +
+      (first ? "" : waitingSection(waitingName)) +
       '<div class="side-pane" data-pane="threads">' +
       threadSections(selected) +
       '<section class="side-sec"><h3 class="side-h"><span>Assistants</span></h3>' +
-      ASSISTANTS.map(function (a) {
+      (first ? FIRST_ASSISTANTS : ASSISTANTS).map(function (a) {
         return (
           '<a class="side-row side-row--who' + (selected === a.key ? " is-on" : "") + '" href="assistant.html">' + face(a.name, { pose: a.pose, size: 22 }) +
           '<span class="side-name">' + a.name + '</span><span class="side-end side-presence">' + poseWord(a.pose) + "</span></a>"
@@ -570,21 +582,23 @@
       "</section></div>" +
       '<div class="side-pane" data-pane="hercule">' +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
-      navRow("office", "The office", "office", selected, swarm ? "140" : "16") +
-      navRow("intake", "Intake", "intake", selected, swarm ? "90" : "9") +
+      navRow("office", "The office", "office", selected, first ? "" : swarm ? "140" : "16") +
+      navRow("intake", "Intake", "intake", selected, first ? "" : swarm ? "90" : "9") +
       navRow("checkin", "Check-in", "checkin", selected) +
-      navRow("tasks", "Tasks", "tasks", selected, swarm ? "118" : "14") +
-      navRow("runs", "Runs", "runs", selected, swarm ? "64" : "6") +
-      navRow("workflows", "Workflows", "workflows", selected, swarm ? "14" : "6") +
+      navRow("tasks", "Tasks", "tasks", selected, first ? "" : swarm ? "118" : "14") +
+      navRow("runs", "Runs", "runs", selected, first ? "" : swarm ? "64" : "6") +
+      navRow("workflows", "Workflows", "workflows", selected, first ? "1" : swarm ? "14" : "6") +
       "</section>" +
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3>' +
-      navRow("fleet", "Fleet", "fleet", selected, swarm ? "9" : "3") +
-      navRow("connections", "Connections", "connections", selected, "", '<i class="dot dot--fail" title="Discord is reconnecting"></i>') +
+      navRow("fleet", "Fleet", "fleet", selected, first ? "1" : swarm ? "9" : "3") +
+      navRow("connections", "Connections", "connections", selected, "", first ? "" : '<i class="dot dot--fail" title="Discord is reconnecting"></i>') +
       navRow("notifications", "Notifications", "bell", selected) +
       navRow("settings", "Settings", "settings", selected) +
       "</section></div></div>" +
       '<div class="side-foot"><div class="side-sum">' +
-      (swarm
+      (first
+        ? "Nothing running yet"
+        : swarm
         ? "<b>78</b> working · <b class=\"you-ink\">30</b> waiting · <b>4</b> paused · <b>28</b> idle"
         : "<b>8</b> working · <b class=\"you-ink\">3</b> waiting · <b>1</b> paused · <b>4</b> idle") +
       '</div><div class="side-me">' + you(24) + '<span class="side-name">Rogier</span>' +

@@ -99,6 +99,20 @@
         gap: 8px;
         margin: 0 0 10px 2px;
       }
+      /* A fresh install (?state=first) has nothing in Intake yet: it offers starter threads instead,
+         and says when Intake fills. */
+      html:not([data-state="first"]) .when-first,
+      html[data-state="first"] .when-busy {
+        display: none;
+      }
+      .intake-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 16px 0 0 2px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
     </style>
   </head>
   <body>
@@ -143,8 +157,25 @@
               </div>
             </div>
 
-            <div class="starts-h section-h"><i data-i="intake" data-size="14"></i>Start from Intake</div>
-            <div class="starts">
+            <div class="starts-h section-h when-first"><i data-i="sparkle" data-size="14"></i>Or start from one of these</div>
+            <div class="starts when-first">
+              <button class="start">
+                <span class="start-top"><i data-i="eye" data-size="14"></i><span>Get to know it</span></span>
+                <b>Walk me through how webshop is put together</b>
+              </button>
+              <button class="start">
+                <span class="start-top"><i data-i="check" data-size="14"></i><span>A first fix</span></span>
+                <b>Find a failing or flaky test and fix it</b>
+              </button>
+              <button class="start">
+                <span class="start-top"><i data-i="file" data-size="14"></i><span>A small chore</span></span>
+                <b>Bring the README up to date with how webshop runs today</b>
+              </button>
+            </div>
+            <p class="intake-note when-first"><i data-i="intake" data-size="14"></i>Intake is empty for now. Triage first reads GitHub at 11:00 and brings what needs work here.</p>
+
+            <div class="starts-h section-h when-busy"><i data-i="intake" data-size="14"></i>Start from Intake</div>
+            <div class="starts when-busy">
               <button class="start">
                 <span class="start-top"><i data-brand="sentry" data-size="14"></i><span>Proposal</span><span class="spacer"></span><span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span></span>
                 <b>Fix: Checkout fails for EU cards with 3&#8209;D Secure</b>
