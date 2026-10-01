@@ -83,6 +83,7 @@ const binaryTests = [
   "e2e/github-push.test.ts",
   "e2e/workflows.test.ts",
   "e2e/binary-size.test.ts",
+  "e2e/logs.test.ts",
 ];
 
 export default defineConfig({

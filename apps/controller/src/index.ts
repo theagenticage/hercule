@@ -2,8 +2,10 @@
  * The controller role: the always-on brain behind `hercule serve`.
  *
  * Boots (`./bootstrap.ts`), prints where things are, starts listening, and
- * stays up until the service is stopped. SIGINT and SIGTERM both mean the same
- * thing:
+ * stays up until the service is stopped. What it prints goes to stdout; what it
+ * logs goes to `<home>/logs/controller.log` (`@hercule/process-log`).
+ *
+ * SIGINT and SIGTERM both mean the same thing:
  *
  * - stop accepting connections;
  * - let the requests already in flight finish;
@@ -149,11 +151,16 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     const warning = buildPerimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
     if (warning !== undefined) console.warn(`hercule: ${warning}`);
-    console.log(`Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`);
+    const listening = `Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`;
+    console.log(listening);
+    // The process log gets the same line, but not the report: the setup URL
+    // in it carries the setup token.
+    yield* Effect.logInfo(listening);
     report(outcome, bundle !== undefined);
 
     yield* stopped;
     console.log("Stopping Hercule.");
+    yield* Effect.logInfo("Stopping Hercule.");
     // Before the listener stops: the local runner says goodbye over its socket
     // to this controller, and a controller that had already stopped listening
     // would treat that as a machine that disappeared.

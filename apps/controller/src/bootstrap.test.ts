@@ -77,6 +77,11 @@ describe("the first run", () => {
     expect(outcome.paths.databaseFile).toBe(join(home, "data", "hercule.db"));
   });
 
+  it("writes its process log into <home>/logs/controller.log, owner-only", async () => {
+    await serve();
+    expect(readFileMode(join(home, "logs", "controller.log"))).toBe(0o600);
+  });
+
   it("opens the database in WAL and applies the migrations", async () => {
     await serve();
     const database = new Database(join(home, "data", "hercule.db"));
