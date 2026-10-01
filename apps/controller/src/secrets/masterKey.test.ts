@@ -112,15 +112,19 @@ describe("the master key file", () => {
 });
 
 describe("the keychain store", () => {
-  /** Creates a fake `security` that records each call and returns the results the test gives it. */
+  /**
+   * Creates a fake `security` that records each call and returns the results
+   * the test gives it. A result with no `stderr` printed nothing there.
+   */
   const createFakeSecurityRunner = (
-    answers: ReadonlyArray<{ exitCode: number; stdout: string }>,
+    answers: ReadonlyArray<{ exitCode: number; stdout: string; stderr?: string }>,
   ) => {
     const calls: Array<ReadonlyArray<string>> = [];
     let next = 0;
     const run: SecurityRunner = (argv) => {
       calls.push(argv);
-      return Promise.resolve(answers[next++]!);
+      const answer = answers[next++]!;
+      return Promise.resolve({ stderr: "", ...answer });
     };
     return { run, calls };
   };
@@ -156,6 +160,25 @@ describe("the keychain store", () => {
     const exit = await Effect.runPromiseExit(createKeychainStore("/Users/x/.hercule", run).read);
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("exited 1");
+  });
+
+  it("puts what security printed on stderr into the failure, on one line", async () => {
+    const { run } = createFakeSecurityRunner([
+      {
+        exitCode: 36,
+        stdout: "",
+        stderr:
+          "security: SecKeychainSearchCopyNext: User interaction is not allowed.\n" +
+          "  (the keychain is locked)\n",
+      },
+    ]);
+    const exit = await Effect.runPromiseExit(createKeychainStore("/Users/x/.hercule", run).read);
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain(
+      `exited 36 for the ${KEYCHAIN_SERVICE} keychain item for account /Users/x/.hercule. It printed: ` +
+        "security: SecKeychainSearchCopyNext: User interaction is not allowed. " +
+        "(the keychain is locked)",
+    );
   });
 
   it("fails when the item does not hold 32 bytes", async () => {
@@ -197,7 +220,7 @@ describe("the keychain store", () => {
 
   it("fails when security cannot store the item and there is none to read", async () => {
     const { run } = createFakeSecurityRunner([
-      { exitCode: 45, stdout: "" },
+      { exitCode: 45, stdout: "", stderr: "security: The specified item already exists.\n" },
       { exitCode: 44, stdout: "" },
     ]);
     const exit = await Effect.runPromiseExit(
@@ -205,6 +228,7 @@ describe("the keychain store", () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("exited 45");
+    expect(String(exit)).toContain("It printed: security: The specified item already exists.");
     expect(String(exit)).not.toContain(Buffer.from(key).toString("base64"));
   });
 });

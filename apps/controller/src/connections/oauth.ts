@@ -150,10 +150,42 @@ const failTokenUnreachable = (message: string): Effect.Effect<never, TokenUnreac
 export const buildRedirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
 
 /**
- * Parses a stored token set. Only this module writes token sets, so one that
- * does not parse means the database is broken.
+ * The `oauth.tokens` secret of a connection does not hold a token set in the
+ * shape `serializeTokens` writes. The message is fixed and never quotes the
+ * stored value, because the stored value holds the tokens.
  */
-export const parseTokens = (stored: string): TokenSet => JSON.parse(stored) as TokenSet;
+export class StoredTokensUnreadable extends Schema.TaggedError<StoredTokensUnreadable>()(
+  "StoredTokensUnreadable",
+  { message: Schema.String },
+) {}
+
+/** A token set as `serializeTokens` writes it: a JSON object in the shape of `TokenSet`. */
+const StoredTokenSet = Schema.fromJsonString(
+  Schema.Struct({
+    accessToken: Schema.String,
+    refreshToken: Schema.optionalKey(Schema.String),
+    expiresAt: Schema.optionalKey(Schema.String),
+  }),
+);
+
+const decodeStoredTokenSet = Schema.decodeUnknownEffect(StoredTokenSet);
+
+/**
+ * Parses a stored token set. Fails with `StoredTokensUnreadable` when the
+ * value is not JSON, or not in the shape of a token set.
+ *
+ * Only this module writes token sets, so a value that does not parse means the
+ * database is broken. The parse error is dropped rather than wrapped: both a
+ * JSON syntax error and a schema error quote the text they failed on, which
+ * here is a token.
+ */
+export const parseTokens = (stored: string): Effect.Effect<TokenSet, StoredTokensUnreadable> =>
+  decodeStoredTokenSet(stored).pipe(
+    Effect.mapError(
+      () =>
+        new StoredTokensUnreadable({ message: "this connection's stored tokens cannot be read" }),
+    ),
+  );
 
 export const serializeTokens = (tokens: TokenSet): string => JSON.stringify(tokens);
 

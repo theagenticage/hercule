@@ -189,7 +189,13 @@ const make = Effect.gen(function* () {
         Effect.orDie(secrets.get({ kind: "connection", id: connectionId }, OAUTH_TOKENS)),
         Option.match({
           onNone: () => needsReauth(connectionId, "this connection holds no tokens"),
-          onSome: (stored) => Effect.succeed(parseTokens(Redacted.value(stored))),
+          onSome: (stored) =>
+            parseTokens(Redacted.value(stored)).pipe(
+              // New tokens replace the unreadable ones when the user reconnects.
+              Effect.catchTag("StoredTokensUnreadable", (error) =>
+                needsReauth(connectionId, error.message),
+              ),
+            ),
         }),
       );
 
