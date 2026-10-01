@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { Context, Effect, Fiber, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
 import { AfterCommit, mintUuid, uuidToString, withTransaction } from "../db";
@@ -45,15 +46,42 @@ interface Recorded {
   readonly callsInTransaction: Array<string>;
 }
 
+/** Effects a test runs inside the run engine, at a moment a race needs. */
+interface Hooks {
+  /**
+   * Runs once, inside the run engine, the next time it looks up which
+   * runners hold a repo's main workspace ready. The engine looks that up
+   * while it places a workspace step: after it has read the runners, and
+   * before it decides whether the step waits for one.
+   */
+  beforeNextReadyPrimaryLookup?: Effect.Effect<void, SqlError>;
+}
+
 type Deps = RunService | WorkspaceService | WorkflowService | SqlClient.SqlClient;
 
 /**
  * Runs `body` against a fresh controller: a `:memory:` database with the
  * built-in actions registered, and a fake Workspace Steps whose calls
- * `body` reads from `recorded`.
+ * `body` reads from `recorded`. `body` sets `hooks` to run effects inside
+ * the run engine.
  */
-const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>): Promise<A> => {
+const runTest = <A, E>(
+  body: (recorded: Recorded, hooks: Hooks) => Effect.Effect<A, E, Deps>,
+): Promise<A> => {
   const recorded: Recorded = { starts: [], settles: [], callsInTransaction: [] };
+  const hooks: Hooks = {};
+  // The real workspaces service, with the hook run before one of its lookups.
+  const hookedWorkspaces = Layer.effect(WorkspaceService)(
+    Effect.map(WorkspaceService, (workspaces) => ({
+      ...workspaces,
+      listRunnersWithReadyPrimary: (resourceId: string) =>
+        Effect.suspend(() => {
+          const hook = hooks.beforeNextReadyPrimaryLookup ?? Effect.void;
+          delete hooks.beforeNextReadyPrimaryLookup;
+          return Effect.andThen(hook, workspaces.listRunnersWithReadyPrimary(resourceId));
+        }),
+    })),
+  );
   const workspaceSteps = Layer.effect(WorkspaceSteps)(
     Effect.map(SqlClient.SqlClient, (sql) => {
       // `settle` is synchronous, so the transaction is looked up in the
@@ -91,9 +119,13 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
     ),
     Layer.provideMerge(TaskServiceLayer),
     Layer.provideMerge(
-      WorkspaceServiceLayer.pipe(
-        Layer.provide(SessionTokensLayer),
-        Layer.provide(RunWorkspaceStepActivityLayer),
+      hookedWorkspaces.pipe(
+        Layer.provide(
+          WorkspaceServiceLayer.pipe(
+            Layer.provide(SessionTokensLayer),
+            Layer.provide(RunWorkspaceStepActivityLayer),
+          ),
+        ),
       ),
     ),
     Layer.provideMerge(SettingsLayer),
@@ -106,7 +138,7 @@ const runTest = <A, E>(body: (recorded: Recorded) => Effect.Effect<A, E, Deps>):
   return Effect.runPromise(
     Effect.andThen(
       Effect.flatMap(PluginHost, (host) => host.boot([])),
-      Effect.tap(body(recorded), () =>
+      Effect.tap(body(recorded, hooks), () =>
         Effect.sync(() => expect(recorded.callsInTransaction).toEqual([])),
       ),
     ).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)) as Effect.Effect<A, E>,
@@ -504,6 +536,34 @@ describe("a workspace step", () => {
         yield* runs.wakeRunsWaitingForRunner();
         const [start] = yield* waitForStarts(recorded, 1);
         expect(start).toMatchObject({ runId, runnerId, stepId: "commit" });
+      }),
+    );
+  });
+
+  it("starts once a runner arrives and wakes it while the step is still looking for one", async () => {
+    await runTest((recorded, hooks) =>
+      Effect.gen(function* () {
+        yield* insertRunner("offline");
+        const repoId = yield* insertRepo;
+        const runs = yield* RunService;
+        const sql = yield* SqlClient.SqlClient;
+        // The runner arrives and wakes the run after the run has read the
+        // runners, and before it has decided that the step waits. The run
+        // works in the repo's main workspace only because looking up who
+        // holds that workspace falls in between, so the hook can run there.
+        let arrivedId: string | undefined;
+        hooks.beforeNextReadyPrimaryLookup = Effect.gen(function* () {
+          arrivedId = yield* Effect.provideService(insertRunner(), SqlClient.SqlClient, sql);
+          yield* runs.wakeRunsWaitingForRunner();
+        });
+        const { runId } = yield* runs.start({
+          definition: {
+            ...buildCommitDefinition(repoId),
+            workspace: { kind: "primary", resourceId: repoId },
+          },
+        });
+        const [start] = yield* waitForStarts(recorded, 1);
+        expect(start).toMatchObject({ runId, runnerId: arrivedId, stepId: "commit" });
       }),
     );
   });
