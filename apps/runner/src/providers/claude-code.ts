@@ -469,8 +469,8 @@ const readEffort = (options: SessionSpec["modelSelection"]["options"]): EffortLe
  * into a directory at startup, and it is loaded from there by path. This is all
  * this adapter knows about the skill.
  *
- * The plugin is loaded by path, independently of `settingSources`, which stays
- * empty, so no other settings on this runner are picked up.
+ * The plugin is loaded by path, independently of `settingSources`, so it
+ * loads the same way whether or not the session has a workspace.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
@@ -492,10 +492,20 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 /**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory and the
- * instance's home as its config directory. Auto memory is off and
- * `settingSources` is empty because Hercule decides what context a session
- * gets, not whatever files happen to be on this runner (spec 06 sections 4.2
- * and 10.1).
+ * instance's home as its config directory, so the user's own settings,
+ * skills and MCP servers never load.
+ *
+ * - A session with a workspace loads the project setting source, because the
+ *   repository's instructions are part of the work. The CLI then reads
+ *   `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules/` in the workspace
+ *   and in every directory above it. Workspaces sit under the Hercule Home,
+ *   usually in the user's home directory, so this includes
+ *   `~/.claude/CLAUDE.md`. That is accepted.
+ * - A session without a workspace runs in an empty scratch directory and
+ *   loads no setting source at all, so no stray file on this runner can reach
+ *   it.
+ *
+ * Auto memory is off in both cases (spec 06 section 9.1).
  */
 const buildSessionOptions = (
   ctx: ProviderRunnerContext,
@@ -522,7 +532,7 @@ const buildSessionOptions = (
       ? {}
       : { outputFormat: { type: "json_schema", schema: spec.outputSchema } }),
     ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
-    settingSources: [],
+    settingSources: spec.workspaceId === null ? [] : ["project"],
     strictMcpConfig: true,
     includePartialMessages: true,
     model: spec.modelSelection.model,

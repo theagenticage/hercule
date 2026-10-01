@@ -12,7 +12,7 @@
  *
  * Skips without `pi` on PATH, like the other integration tests here.
  */
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
@@ -23,6 +23,7 @@ import { createScratchHome } from "../testing";
 import {
   PARKED_COMMAND,
   PARKED_OUTPUT,
+  pointAtFakeModel,
   startFakeModelServer,
   type FakeModelFirstTurn,
   type FakeModelServer,
@@ -43,37 +44,6 @@ const BUDGET_MS = 120_000;
 
 /** Long enough that a tool call that was going to run anyway would have run. */
 const UNANSWERED_MS = 2_000;
-
-/**
- * Writes a `models.json` that points the `zai` provider at the fake model
- * server, so the adapter's `--model zai/<slug>` reaches it. The built-in
- * models stay; `fake-model` is added beside them.
- */
-const pointAtFakeModel = (home: string, baseUrl: string): void => {
-  writeFileSync(
-    join(home, "models.json"),
-    JSON.stringify({
-      providers: {
-        zai: {
-          baseUrl,
-          api: "openai-completions",
-          apiKey: "not-a-real-key",
-          models: [
-            {
-              id: "fake-model",
-              name: "Fake model",
-              reasoning: true,
-              input: ["text"],
-              contextWindow: 100_000,
-              maxTokens: 4_096,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            },
-          ],
-        },
-      },
-    }),
-  );
-};
 
 /** Builds the session spec under test: the fake model, with the given access mode. */
 const buildSpec = (accessMode: AccessMode): SessionSpec => ({

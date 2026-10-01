@@ -11,6 +11,8 @@
  * Every run gets a throwaway agent directory: the developer's own `~/.pi` is
  * never touched.
  */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
@@ -25,6 +27,7 @@ import { pi } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 import { buildContext, SPEC } from "./testing";
 import { cleanupHomes, createScratchHome, filterByTag, waitUntil } from "../testing";
+import { pointAtFakeModel, startFakeModelServer, type FakeModelServer } from "./upstream";
 
 const binary = Bun.which("pi") ?? undefined;
 
@@ -255,4 +258,69 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
     expect(probed.auth.status).toBe("unauthenticated");
     expect(probed.models).toEqual([]);
   }, 60_000);
+});
+
+/**
+ * Checks that the real pi reads the `AGENTS.md` in a session's cwd when the
+ * session has a workspace, and ignores it when the session has none. The
+ * model is the fake server, so no key is needed: the test reads the request
+ * pi sends it, where pi puts its context files into the system prompt.
+ */
+describe.skipIf(binary === undefined)("a real pi and the AGENTS.md in its cwd", () => {
+  const upstreams: Array<FakeModelServer> = [];
+  afterAll(() => {
+    for (const upstream of upstreams.splice(0)) upstream.stop();
+  });
+
+  /**
+   * Starts a session in a directory holding an `AGENTS.md` with a marker,
+   * sends one input, and stops the session once pi has asked the model.
+   * Returns the marker and the body of that first request.
+   */
+  const sendFirstRequest = async (
+    workspaceId: SessionSpec["workspaceId"],
+  ): Promise<{ readonly marker: string; readonly request: string }> => {
+    const upstream = startFakeModelServer();
+    upstreams.push(upstream);
+    const home = createScratchDir();
+    pointAtFakeModel(home, upstream.baseUrl);
+    const cwd = createScratchDir();
+    const marker = `hercule-project-${crypto.randomUUID().slice(0, 8)}`;
+    writeFileSync(join(cwd, "AGENTS.md"), `# Project\n\nThe project's code word is ${marker}.\n`);
+
+    const sessionId = crypto.randomUUID();
+    await Effect.runPromise(
+      pi.startSession(
+        sessionId,
+        {
+          ...SPEC,
+          workspaceId,
+          modelSelection: { model: "fake-model", options: { thinking: "low" } },
+        },
+        { ...buildContext(home, cwd), binary: binary!, env: { PATH: process.env["PATH"] ?? "" } },
+      ),
+    );
+    await Effect.runPromise(pi.sendInput(sessionId, { text: "What is the code word?" }));
+    await waitUntil("pi asked the model", () => upstream.asked() >= 1, PATIENCE_MS);
+    await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+    return { marker, request: upstream.requests()[0]! };
+  };
+
+  it(
+    "puts the workspace's AGENTS.md into the system prompt",
+    async () => {
+      const { marker, request } = await sendFirstRequest("0199e0e7-0000-7000-8000-00000000000b");
+      expect(request).toContain(marker);
+    },
+    BUDGET_MS,
+  );
+
+  it(
+    "leaves an AGENTS.md in its cwd out when it has no workspace",
+    async () => {
+      const { marker, request } = await sendFirstRequest(null);
+      expect(request).not.toContain(marker);
+    },
+    BUDGET_MS,
+  );
 });
