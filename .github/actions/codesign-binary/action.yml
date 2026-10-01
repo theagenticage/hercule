@@ -1,0 +1,26 @@
+name: Codesign the hercule binary
+description: >-
+  Signs a compiled macOS hercule binary ad hoc with the JIT entitlements
+  beside this file, then verifies the signature. Must run on a macOS runner
+  (spec 15 section 11).
+
+inputs:
+  path:
+    description: The binary to sign, in place.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Ad hoc is enough for the binary: the controller reads its master key
+    # through Apple's `security` tool, so the Keychain never trusts the binary
+    # itself and a new build changes nothing there. Notarization is a separate
+    # piece of work.
+    - shell: bash
+      env:
+        BINARY: ${{ inputs.path }}
+        ENTITLEMENTS: ${{ github.action_path }}/hercule.entitlements
+      run: |
+        chmod +x "$BINARY"
+        codesign --sign - --force --timestamp=none --entitlements "$ENTITLEMENTS" "$BINARY"
+        codesign --verify --verbose "$BINARY"

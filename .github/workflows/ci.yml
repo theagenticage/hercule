@@ -15,22 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Bun is pinned exactly, in `.bun-version` and nowhere else: the compiled
-      # binary is built with it, and versions at or below 1.3.12 carry the
-      # codesign signature regression (spec 15 section 11).
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-
-      # pnpm is pinned once, by `packageManager` in package.json.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
 
       - run: pnpm typecheck
       - run: pnpm lint
@@ -61,35 +46,13 @@ jobs:
     # macOS alert, from holding the runner for GitHub's default of six hours.
     timeout-minutes: 10
     env:
-      # No signing identity exists in CI. Without this, electron-builder looks
-      # for one in the keychain; the packages are signed ad hoc instead.
+      # No signing identity exists in this job. Without this, electron-builder
+      # looks for one in the keychain; the packages are signed ad hoc instead.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v7
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      # Electron's zip, about 100 MB, is downloaded into this folder and read
-      # from it when the app is packaged. It changes only with Electron's
-      # version, so that version is the cache key.
-      - name: Read the Electron version
-        id: electron
-        run: echo "version=$(node -p 'require("./apps/desktop/package.json").devDependencies.electron')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
-        with:
-          path: ~/Library/Caches/electron
-          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
-
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/cache-electron
+      - uses: ./.github/actions/setup
 
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.

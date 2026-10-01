@@ -17,19 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-
-      # pnpm is pinned once, by `packageManager` in package.json.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
 
       - name: Compile
         run: |
@@ -85,8 +73,7 @@ jobs:
           path: dist-binary/hercule-darwin-arm64
           if-no-files-found: error
 
-  # codesign must run on a macOS runner (spec 15 section 11). Ad-hoc signing
-  # only; notarization is a separate piece of work.
+  # codesign must run on a macOS runner (spec 15 section 11).
   sign-macos:
     needs: compile
     runs-on: macos-latest
@@ -98,13 +85,9 @@ jobs:
           name: hercule-darwin-arm64-unsigned
           path: dist-binary
 
-      - name: Codesign with JIT entitlements
-        run: |
-          chmod +x dist-binary/hercule-darwin-arm64
-          codesign --sign - --force --timestamp=none \
-            --entitlements .github/hercule.entitlements \
-            dist-binary/hercule-darwin-arm64
-          codesign --verify --verbose dist-binary/hercule-darwin-arm64
+      - uses: ./.github/actions/codesign-binary
+        with:
+          path: dist-binary/hercule-darwin-arm64
 
       - name: Run hercule --version (darwin-arm64, native)
         run: ./dist-binary/hercule-darwin-arm64 --version
