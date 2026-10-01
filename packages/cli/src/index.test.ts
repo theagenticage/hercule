@@ -221,6 +221,30 @@ describe("hercule task list --help", () => {
   });
 });
 
+describe("hercule session respond-to-approval-request --help", () => {
+  it("lists --decision and no --answers among the flags", async () => {
+    const block = readBetweenSections(
+      await runHelp("session", "respond-to-approval-request"),
+      "flags:",
+      "returns:",
+    );
+    expect(block).toContain("--decision");
+    expect(block).not.toContain("--answers");
+  });
+});
+
+describe("hercule session respond-to-question --help", () => {
+  it("lists --answers and no --decision among the flags", async () => {
+    const block = readBetweenSections(
+      await runHelp("session", "respond-to-question"),
+      "flags:",
+      "returns:",
+    );
+    expect(block).toContain("--answers");
+    expect(block).not.toContain("--decision");
+  });
+});
+
 describe("hercule session --help", () => {
   const VERBS = [
     "list",
@@ -229,12 +253,13 @@ describe("hercule session --help", () => {
     "update",
     "input",
     "interrupt",
-    "respond",
+    "respond-to-approval-request",
+    "respond-to-question",
     "stop",
     "continue",
   ];
 
-  it("lists the nine verbs, each with the grant it needs", async () => {
+  it("lists the ten verbs, each with the grant it needs", async () => {
     const out = await runHelp("session");
     for (const verb of VERBS) {
       const line = out.find((each) => startsWithWord(each, verb));

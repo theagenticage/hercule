@@ -879,7 +879,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return held.state.turnId === undefined ? Effect.void : abortTurn(held, "interrupt");
       }),
 
-    respondToRequest: (
+    respondToApprovalRequest: (
       sessionId: string,
       requestId: string,
       decision: ApprovalDecision,
@@ -898,6 +898,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // the rest of its plan.
         return decision === "cancel" ? abortTurn(held, "interrupt") : Effect.void;
       }),
+
+    // pi parks only on a confirm dialog, never on a question, so there is
+    // never a question here to answer.
+    respondToQuestion: (): Effect.Effect<void> => Effect.void,
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.gen(function* () {

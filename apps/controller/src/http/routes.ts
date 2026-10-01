@@ -495,8 +495,11 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
         withApiErrors(live.input({ id: params.id, ...payload })),
       )
       .handle("interrupt", ({ params }) => withApiErrors(live.interrupt(params.id)))
-      .handle("respond", ({ params, payload }) =>
-        withApiErrors(live.respond({ id: params.id, ...payload })),
+      .handle("respondToApprovalRequest", ({ params, payload }) =>
+        withApiErrors(live.respondToApprovalRequest({ id: params.id, ...payload })),
+      )
+      .handle("respondToQuestion", ({ params, payload }) =>
+        withApiErrors(live.respondToQuestion({ id: params.id, ...payload })),
       )
       .handle("stop", ({ params }) => withApiErrors(live.stop(params.id)))
       .handle("continue", ({ params, payload }) =>

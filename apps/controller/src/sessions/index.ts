@@ -19,6 +19,7 @@ export {
   validateOptions,
 } from "./options";
 export { sessionRecordComposer } from "./records";
+export { validateAnswers, validateDecision } from "./responses";
 export { isResumeHeld } from "./resume-hold";
 export {
   LIVE_SESSION_STATUSES,

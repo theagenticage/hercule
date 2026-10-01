@@ -4,7 +4,7 @@
  * the session view and the `core.approval` decision in the notification
  * center both use them, so an answer reads the same wherever it is given.
  */
-import type { ApprovalDecision, OpenRequest } from "./groups/session";
+import type { ApprovalDecision, ApprovalRequest } from "./groups/session";
 
 /** The label of each approval answer. */
 export const APPROVAL_ANSWER_LABELS: Readonly<Record<ApprovalDecision, string>> = {
@@ -18,22 +18,21 @@ export const APPROVAL_ANSWER_LABELS: Readonly<Record<ApprovalDecision, string>> 
  * The words the answer sentences use for what each request kind asks about,
  * such as "the command".
  */
-const REQUEST_SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
+const REQUEST_SUBJECTS: Readonly<Record<ApprovalRequest["kind"], string>> = {
   command_approval: "the command",
   file_change_approval: "the change",
   file_read_approval: "the read",
   tool_approval: "the tool call",
-  question: "the question",
 };
 
 /**
- * Returns a sentence describing what answering a request of `requestKind`
+ * Returns a sentence describing what answering an approval of `requestKind`
  * with `decision` does, such as "Runs the command this once; the agent asks
  * again next time."
  */
 export const describeApprovalAnswer = (
   decision: ApprovalDecision,
-  requestKind: OpenRequest["kind"],
+  requestKind: ApprovalRequest["kind"],
 ): string => {
   const subject = REQUEST_SUBJECTS[requestKind];
   switch (decision) {

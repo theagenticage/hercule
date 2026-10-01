@@ -10,10 +10,12 @@ import { Schema } from "effect";
 import {
   AccessMode,
   ApprovalDecision,
+  type ApprovalRequest,
   Fact,
   ModelSelection,
   OpenRequest,
   OutputSchema,
+  QuestionAnswers,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -34,7 +36,8 @@ import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 
 /** The request vocabulary comes from the runner protocol; the API returns it unchanged. */
-export { ApprovalDecision, OpenRequest };
+export { ApprovalDecision, OpenRequest, QuestionAnswers };
+export type { ApprovalRequest };
 
 /** The longest prompt or turn input the API accepts: it is sent to the runner in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
@@ -274,27 +277,53 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
- * The answer to the request a session is parked on. `requestId` is the open
- * request's own id, so an answer that arrives after the harness moved on is
- * rejected rather than applied to whatever request is open now.
+ * The decision on the approval a session is parked on. `requestId` is the
+ * open request's own id, so a decision that arrives after the harness moved on
+ * is rejected rather than applied to whatever request is open now.
  */
-export const SESSION_RESPOND_FIELDS = {
+export const SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS = {
   requestId: Fact,
   decision: ApprovalDecision,
 } as const;
 
-export const SessionRespondInput = closedStruct(SESSION_RESPOND_FIELDS);
+export const SessionRespondToApprovalRequestInput = closedStruct(
+  SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
+);
 
-export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>;
+export type SessionRespondToApprovalRequestInput = Schema.Schema.Type<
+  typeof SessionRespondToApprovalRequestInput
+>;
 
 /**
- * One call of `session.respond` as a single object: the session's id, which
- * an HTTP request sends in its path, and the answer. The core binds it to the
- * answers of the `core.approval` decision it raises for each approval.
+ * One call of `session.respondToApprovalRequest` as a single object: the
+ * session's id, which an HTTP request sends in its path, and the decision.
+ * The core binds it to the answers of the `core.approval` decision it raises
+ * for each approval.
  */
-export const SessionRespondCall = closedStruct({ sessionId: Id, ...SESSION_RESPOND_FIELDS });
+export const SessionRespondToApprovalRequestCall = closedStruct({
+  sessionId: Id,
+  ...SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
+});
 
-export type SessionRespondCall = Schema.Schema.Type<typeof SessionRespondCall>;
+export type SessionRespondToApprovalRequestCall = Schema.Schema.Type<
+  typeof SessionRespondToApprovalRequestCall
+>;
+
+/**
+ * The answers to the questions a session is parked on, keyed by each
+ * question's header. `requestId` is the open request's own id, for the same
+ * reason as a decision's.
+ */
+export const SESSION_RESPOND_TO_QUESTION_FIELDS = {
+  requestId: Fact,
+  answers: QuestionAnswers,
+} as const;
+
+export const SessionRespondToQuestionInput = closedStruct(SESSION_RESPOND_TO_QUESTION_FIELDS);
+
+export type SessionRespondToQuestionInput = Schema.Schema.Type<
+  typeof SessionRespondToQuestionInput
+>;
 
 /**
  * Branching a session: `fork` opens a second provider-native session from the
@@ -375,9 +404,15 @@ export const session = HttpApiGroup.make("session")
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
-    HttpApiEndpoint.post("respond", "/sessions/:id/respond", {
+    HttpApiEndpoint.post("respondToApprovalRequest", "/sessions/:id/respond-to-approval-request", {
       params: { id: Id },
-      payload: SessionRespondInput,
+      payload: SessionRespondToApprovalRequestInput,
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("respondToQuestion", "/sessions/:id/respond-to-question", {
+      params: { id: Id },
+      payload: SessionRespondToQuestionInput,
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

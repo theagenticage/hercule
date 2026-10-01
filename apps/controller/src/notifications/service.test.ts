@@ -900,11 +900,11 @@ describe("notification.create with answers only the producer may bind", () => {
     ["a session", PLAIN_SESSION],
     ["a run", WORKFLOW_RUN],
   ] as const)(
-    "refuses session.respond from %s, because only the core binds it",
+    "refuses session.respondToApprovalRequest from %s, because only the core binds it",
     async (_, actor) => {
       const error = await run(
         refuseAnswer(actor, {
-          op: "session.respond",
+          op: "session.respondToApprovalRequest",
           input: { sessionId: PLAIN_SESSION_ID, requestId: "req-1", decision: "allow" },
         }),
       );
@@ -1067,7 +1067,7 @@ describe("describe lines", () => {
     expect(notification.actions[0]!.describeLine).toEqual([
       {
         kind: "text",
-        text: "Cannot be taken: An answer cannot run task.delete. An answer can run one of: task.update, run.start, session.input, session.respond.",
+        text: "Cannot be taken: An answer cannot run task.delete. An answer can run one of: task.update, run.start, session.input, session.respondToApprovalRequest.",
       },
     ]);
   });
@@ -1198,7 +1198,7 @@ describe("notification.act", () => {
   });
 
   it("accepts an operation that resolves the decision itself with the same answer", async () => {
-    // `session.respond` does this: it resolves the approval decision about
+    // `session.respondToApprovalRequest` does this: it resolves the approval decision about
     // the request it answers, with the answer the user took.
     const stored = await Effect.runPromise(
       Effect.gen(function* () {

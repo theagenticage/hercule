@@ -222,10 +222,16 @@ const NEW_OPERATIONS = [
     path: "/api/v1/plugins/:id/config",
   },
   {
-    id: "session.respond",
+    id: "session.respondToApprovalRequest",
     requires: "session.steer",
     method: "POST",
-    path: "/api/v1/sessions/:id/respond",
+    path: "/api/v1/sessions/:id/respond-to-approval-request",
+  },
+  {
+    id: "session.respondToQuestion",
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/respond-to-question",
   },
   {
     id: "controller.update",

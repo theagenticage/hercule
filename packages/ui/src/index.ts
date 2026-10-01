@@ -2,7 +2,7 @@ export { useMinuteClock, useTickingClock } from "./primitives/clock";
 export { useElementWidth } from "./primitives/element-width";
 export { cn } from "./primitives/cn";
 export { Button, buildButtonClassName, type ButtonVariant } from "./primitives/button";
-export { Checkbox } from "./primitives/checkbox";
+export { Checkbox, ChoiceInput } from "./primitives/checkbox";
 export { Drawer } from "./primitives/drawer";
 export { Input } from "./primitives/input";
 export { Label } from "./primitives/label";

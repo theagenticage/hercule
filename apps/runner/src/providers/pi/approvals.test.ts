@@ -91,9 +91,13 @@ const awaitAnswer = async (run: DrivenAdapter, id: string): Promise<Record<strin
 
 const awaitResolvedRequest = async (
   run: DrivenAdapter,
-): Promise<Extract<ProviderEvent, { _tag: "request.resolved" }>> => {
+): Promise<Extract<ProviderEvent, { _tag: "request.resolved"; decision: unknown }>> => {
   await waitUntil("ended the park", () => filterByTag(run.seen, "request.resolved").length === 1);
-  return filterByTag(run.seen, "request.resolved")[0]!;
+  const [resolved] = filterByTag(run.seen, "request.resolved");
+  // pi parks only on approvals, so a request it resolves always carries a decision.
+  if (resolved === undefined || !("decision" in resolved))
+    throw new Error("the request was resolved without a decision");
+  return resolved;
 };
 
 /**
@@ -136,7 +140,7 @@ describe("the request for a parked shell command", () => {
     expect(opened.request.requestId).not.toBe("");
     // The card is shown on the command it is about, so it carries that item's id.
     expect(opened.request.itemId).toBe(item?.itemId);
-    expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
     expect(opened.request.detail).toEqual({ command: COMMAND });
   });
 
@@ -158,7 +162,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     const written = await awaitAnswer(run, UI);
@@ -175,7 +179,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "deny"),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "deny"),
     );
     const written = await awaitAnswer(run, UI);
     run.child.push({
@@ -206,7 +210,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "cancel"),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "cancel"),
     );
 
     const written = await awaitAnswer(run, UI);

@@ -569,8 +569,10 @@ export const connect = (
             return yield* supervisor.input(message);
           case "sessionInterrupt":
             return yield* supervisor.interrupt(message);
-          case "sessionRespond":
-            return yield* supervisor.respond(message);
+          case "sessionRespondToApprovalRequest":
+            return yield* supervisor.respondToApprovalRequest(message);
+          case "sessionRespondToQuestion":
+            return yield* supervisor.respondToQuestion(message);
           case "sessionStop":
             return yield* supervisor.stop(message);
           case "ack":

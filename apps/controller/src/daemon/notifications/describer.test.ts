@@ -364,7 +364,7 @@ describe("session.input", () => {
   });
 });
 
-describe("session.respond", () => {
+describe("session.respondToApprovalRequest", () => {
   it("says what each answer does to the request the session waits on", async () => {
     const lines = await run(
       Effect.gen(function* () {
@@ -374,7 +374,7 @@ describe("session.respond", () => {
         );
         const answer = (decision: "allow" | "allow_always" | "deny" | "cancel") =>
           describeOperation({
-            op: "session.respond",
+            op: "session.respondToApprovalRequest",
             input: { sessionId, requestId: "req-1", decision },
           });
         return {
@@ -427,15 +427,15 @@ describe("session.respond", () => {
         );
         return {
           files: yield* describeOperation({
-            op: "session.respond",
+            op: "session.respondToApprovalRequest",
             input: { sessionId: changing, requestId: "req-1", decision: "allow" },
           }),
           otherRequest: yield* describeOperation({
-            op: "session.respond",
+            op: "session.respondToApprovalRequest",
             input: { sessionId: answeredElsewhere, requestId: "req-1", decision: "allow" },
           }),
           missing: yield* describeOperation({
-            op: "session.respond",
+            op: "session.respondToApprovalRequest",
             input: { sessionId: MISSING_ID, requestId: "req-1", decision: "deny" },
           }),
         };

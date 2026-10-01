@@ -316,7 +316,6 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
       requestId: "rq-ideal-research",
       itemId: "it-ideal-research",
       kind: "question",
-      decisions: ["allow", "cancel"],
       detail: {
         questions: [
           {

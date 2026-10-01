@@ -18,7 +18,7 @@ const COMMAND: OpenRequest = {
 };
 
 describe("buildApprovalNotification", () => {
-  it("offers every decision the request accepts, each bound to session.respond", () => {
+  it("offers every decision the request accepts, each bound to session.respondToApprovalRequest", () => {
     const notification = buildApprovalNotification(SESSION, COMMAND);
 
     expect(notification).toEqual({
@@ -44,7 +44,7 @@ describe("buildApprovalNotification", () => {
         label,
         description,
         operation: {
-          op: "session.respond",
+          op: "session.respondToApprovalRequest",
           input: { sessionId: SESSION.id, requestId: "req-1", decision: sent },
         },
       })),
@@ -65,7 +65,6 @@ describe("buildApprovalNotification", () => {
       requestId: "req-2",
       itemId: "i2",
       kind: "question",
-      decisions: ["cancel"],
       detail: {
         questions: [{ question: "Which one?", header: "Pick", options: [], multiSelect: false }],
       },

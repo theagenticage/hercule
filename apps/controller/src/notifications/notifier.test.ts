@@ -471,9 +471,9 @@ describe("answerDecisionsAbout", () => {
     requestId: "req-1",
   };
 
-  /** Builds the `session.respond` answer to the request `REQUEST` with one decision. */
+  /** Builds the `session.respondToApprovalRequest` answer to the request `REQUEST` with one decision. */
   const buildRespond = (decision: "allow" | "deny") => ({
-    op: "session.respond" as const,
+    op: "session.respondToApprovalRequest" as const,
     input: { sessionId: PLAIN_SESSION_ID, requestId: "req-1", decision },
   });
 
@@ -533,7 +533,7 @@ describe("answerDecisionsAbout", () => {
       {
         notificationId: decided.id,
         actionId: "deny",
-        op: "session.respond",
+        op: "session.respondToApprovalRequest",
         producer: { type: "core" },
       },
     ]);

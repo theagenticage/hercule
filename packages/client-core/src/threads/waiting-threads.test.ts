@@ -41,4 +41,44 @@ describe("listWaitingThreads", () => {
       },
     ]);
   });
+
+  it("lists a thread parked on a question, with its first question as its line", () => {
+    const question: OpenRequest = {
+      requestId: "r-1",
+      itemId: "tool-1",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which storage should drafts use?",
+            header: "Storage",
+            options: [
+              { label: "localStorage", description: "" },
+              { label: "IndexedDB", description: "" },
+            ],
+            multiSelect: false,
+          },
+          {
+            question: "Which features should ship?",
+            header: "Features",
+            options: [{ label: "Sync", description: "" }],
+            multiSelect: true,
+          },
+        ],
+      },
+    };
+
+    expect(
+      listWaitingThreads([
+        buildSession({ id: "s-1", title: "Save drafts", openRequest: question }),
+      ]),
+    ).toEqual([
+      {
+        sessionId: "s-1",
+        requestId: "r-1",
+        title: "Save drafts",
+        question: "Which storage should drafts use?",
+      },
+    ]);
+  });
 });

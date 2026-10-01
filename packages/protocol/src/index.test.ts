@@ -232,10 +232,16 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   },
   { _tag: "sessionInterrupt", sessionId: SESSION_ID },
   {
-    _tag: "sessionRespond",
+    _tag: "sessionRespondToApprovalRequest",
     sessionId: SESSION_ID,
     requestId: "0199e0e7-0000-7000-8000-00000000000f",
     decision: "allow_always",
+  },
+  {
+    _tag: "sessionRespondToQuestion",
+    sessionId: SESSION_ID,
+    requestId: "0199e0e7-0000-7000-8000-00000000000f",
+    answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
   },
   {
     _tag: "workspaceProvision",

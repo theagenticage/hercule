@@ -161,7 +161,6 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
       requestId: "rq-migrate",
       itemId: "it-migrate",
       kind: "question",
-      decisions: ["allow", "cancel"],
       detail: {
         questions: [
           {

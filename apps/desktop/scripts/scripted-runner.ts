@@ -20,7 +20,8 @@
  * - a stop with `session.exited` for the reason `stopped`;
  * - an interrupt by withdrawing the open Request, if any, and ending the
  *   running turn as `interrupted`;
- * - a response to the open Request with `request.resolved`.
+ * - a decision on the open approval, or answers to the open question, with
+ *   `request.resolved`.
  *
  * Nothing else happens until the caller calls a method. The simple methods
  * each report one change: a turn starts, a Request opens, the session exits.
@@ -41,7 +42,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
 import type {
-  ApprovalDecision,
   ControllerToRunner,
   ExitReason,
   ItemKind,
@@ -51,6 +51,7 @@ import type {
   PROTOCOL_VERSION,
   ProbeResult,
   ProviderEvent,
+  RequestResolution,
   RunnerFacts,
   RunnerToController,
   SessionBinding,
@@ -208,8 +209,8 @@ interface HostedSession {
   requestId: string | undefined;
   /** Stops the script playing into the running turn, if any. */
   script: AbortController | undefined;
-  /** Resumes the script that opened the open Request, with the decision that resolved it. */
-  resumeScript: ((decision: ApprovalDecision) => void) | undefined;
+  /** Resumes the script that opened the open Request, with the decision or answers that resolved it. */
+  resumeScript: ((response: RequestResolution) => void) | undefined;
 }
 
 /** A scripted runner, joined to a controller and connected to it. */
@@ -393,12 +394,12 @@ export async function enlistScriptedRunner(
 
   /**
    * Reports that the open Request is resolved, and resumes the script parked
-   * on it with the decision.
+   * on it with the decision or the answers.
    */
   const reportRequestResolved = (
     sessionId: string,
     requestId: string,
-    decision: ApprovalDecision,
+    response: RequestResolution,
   ): void => {
     const session = findSession(sessionId);
     const resumeScript = session.resumeScript;
@@ -408,9 +409,9 @@ export async function enlistScriptedRunner(
       _tag: "request.resolved",
       ...stampEvent(sessionId),
       requestId,
-      decision,
+      ...response,
     });
-    resumeScript?.(decision);
+    resumeScript?.(response);
   };
 
   /**
@@ -421,7 +422,8 @@ export async function enlistScriptedRunner(
    */
   const withdrawRequest = (sessionId: string): void => {
     const requestId = findSession(sessionId).requestId;
-    if (requestId !== undefined) reportRequestResolved(sessionId, requestId, "cancel");
+    if (requestId !== undefined)
+      reportRequestResolved(sessionId, requestId, { decision: "cancel" });
   };
 
   const endSession = (sessionId: string, reason: ExitReason): void => {
@@ -515,16 +517,19 @@ export async function enlistScriptedRunner(
     });
     if (options.ask === true) {
       const request: OpenRequest = { ...call.approval, requestId: randomUUID(), itemId };
-      const answered = new Promise<ApprovalDecision>((resolve, reject) => {
+      const answered = new Promise<RequestResolution>((resolve, reject) => {
         session.resumeScript = resolve;
         signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
       });
       session.requestId = request.requestId;
       reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
-      const decision = await answered;
-      if (decision !== "allow" && decision !== "allow_always") {
+      const response = await answered;
+      if (
+        !("decision" in response) ||
+        (response.decision !== "allow" && response.decision !== "allow_always")
+      ) {
         throw new Error(
-          `the user answered the Request of session ${sessionId} with ${decision}; ` +
+          `the user answered the Request of session ${sessionId} with ${JSON.stringify(response)}; ` +
             "a scripted tool call plays only a call the user allows",
         );
       }
@@ -665,10 +670,17 @@ export async function enlistScriptedRunner(
       case "sessionStop":
         if (!sessions.has(frame.sessionId)) return;
         return endSession(frame.sessionId, "stopped");
-      case "sessionRespond":
-        // A late answer to an earlier Request must not resolve the one open now.
+      // A late response to an earlier Request must not resolve the one open now.
+      case "sessionRespondToApprovalRequest":
         if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
-        return reportRequestResolved(frame.sessionId, frame.requestId, frame.decision);
+        return reportRequestResolved(frame.sessionId, frame.requestId, {
+          decision: frame.decision,
+        });
+      case "sessionRespondToQuestion":
+        if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
+        return reportRequestResolved(frame.sessionId, frame.requestId, {
+          answers: frame.answers,
+        });
       case "sessionInterrupt": {
         const session = sessions.get(frame.sessionId);
         if (session?.turnId === undefined) return;
@@ -787,8 +799,8 @@ export async function enlistScriptedRunner(
 
 /**
  * Builds a Request of the given kind, with the details a harness would send.
- * A question offers only deny and cancel, like the real adapters, which cannot
- * send an answer back yet.
+ * A question offers no decision, like the real adapters: it is answered with
+ * answers, or turned down by interrupting the turn.
  */
 function buildOpenRequest(kind: RequestKind): OpenRequest {
   const identity = { requestId: randomUUID(), itemId: randomUUID() };
@@ -810,7 +822,6 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
       return {
         ...identity,
         kind,
-        decisions: ["deny", "cancel"],
         detail: {
           questions: [
             {
@@ -821,6 +832,16 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
                 { label: "Postgres", description: "A server, for many writers at once." },
               ],
               multiSelect: false,
+            },
+            {
+              question: "Which checks should run before each commit?",
+              header: "Checks",
+              options: [
+                { label: "Typecheck", description: "Catches type errors in seconds." },
+                { label: "Lint", description: "Keeps the style consistent." },
+                { label: "Tests", description: "Slower, but proves behaviour." },
+              ],
+              multiSelect: true,
             },
           ],
         },

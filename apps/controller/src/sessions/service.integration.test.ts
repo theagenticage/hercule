@@ -686,20 +686,37 @@ describe("the frame builders on SessionService", () => {
     expect(frame).toStrictEqual({ _tag: "sessionInterrupt", sessionId });
   });
 
-  it("responding returns exactly the sessionRespond frame with the three fields", async () => {
+  it("respondingToApprovalRequest returns exactly the sessionRespondToApprovalRequest frame with the three fields", async () => {
     const sessionId = mintId();
     const requestId = mintId();
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.responding(sessionId, requestId, "allow_always");
+        return sessions.respondingToApprovalRequest(sessionId, requestId, "allow_always");
       }),
     );
     expect(frame).toStrictEqual({
-      _tag: "sessionRespond",
+      _tag: "sessionRespondToApprovalRequest",
       sessionId,
       requestId,
       decision: "allow_always",
+    });
+  });
+
+  it("respondingToQuestion returns exactly the sessionRespondToQuestion frame with the three fields", async () => {
+    const sessionId = mintId();
+    const requestId = mintId();
+    const frame = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        return sessions.respondingToQuestion(sessionId, requestId, { Storage: "SQLite" });
+      }),
+    );
+    expect(frame).toStrictEqual({
+      _tag: "sessionRespondToQuestion",
+      sessionId,
+      requestId,
+      answers: { Storage: "SQLite" },
     });
   });
 });

@@ -185,3 +185,33 @@ describe("a field whose row does not resolve tails", () => {
     expect(fetch.calls[0]?.path).toBe("/api/v1/plugins/github/enable");
   });
 });
+
+/**
+ * A session parked on a question is answered with `--answers`, a JSON object
+ * from each question's header to the answer.
+ */
+describe("session respond-to-question", () => {
+  const row = buildSession("ddddddd4");
+
+  it("sends --answers as an answers object", async () => {
+    const { fetch, client } = stubClient(() => row);
+    const command = lookUpCommand("session", "respond-to-question");
+    const args = await parseArguments(
+      command,
+      [row.id, "--request", "req-1", "--answers", '{"Storage":"localStorage"}'],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/sessions/${row.id}/respond-to-question`,
+    });
+    expect(fetch.calls[0]?.body).toEqual({
+      requestId: "req-1",
+      answers: { Storage: "localStorage" },
+    });
+  });
+});

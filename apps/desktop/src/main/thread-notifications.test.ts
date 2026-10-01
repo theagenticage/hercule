@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { listWaitingThreads } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
 import type { WaitingThread } from "../ipc/contract";
 import { type FakeMainWindow, makeFakeMainWindow } from "./testing";
 import {
@@ -100,6 +102,50 @@ const CHECKOUT: WaitingThread = {
   requestId: "request-2",
   title: "Speed up checkout",
   question: "Run pnpm test?",
+};
+
+/** A session parked on a `question` request, as the controller lists it. */
+const PARKED_ON_QUESTION: Session = {
+  id: "session-3",
+  title: "Save drafts",
+  status: "busy",
+  resumable: false,
+  resumeHeld: false,
+  permissionProfileId: "profile-1",
+  agentId: null,
+  conversationId: null,
+  instanceId: "instance-1",
+  runnerId: "runner-1",
+  workspaceId: null,
+  projectId: null,
+  requestedAccessMode: "approval-required",
+  accessMode: "approval-required",
+  nativeSessionId: null,
+  modelSelection: { model: "claude-sonnet-5", options: {} },
+  parentSessionId: null,
+  openRequest: {
+    requestId: "request-4",
+    itemId: "tool-1",
+    kind: "question",
+    detail: {
+      questions: [
+        {
+          question: "Which storage should drafts use?",
+          header: "Storage",
+          options: [
+            { label: "localStorage", description: "" },
+            { label: "IndexedDB", description: "" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    },
+  },
+  createdAt: "2026-10-01T09:00:00.000Z",
+  startedAt: "2026-10-01T09:00:01.000Z",
+  exitedAt: null,
+  lastActivityAt: "2026-10-01T09:01:00.000Z",
+  unenforced: [],
 };
 
 describe("ThreadNotifications", () => {
@@ -261,5 +307,19 @@ describe("ThreadNotifications", () => {
     );
     expect(seen.badgeCounts).toEqual([0, 2, 0, 2]);
     expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["closed", "closed"]);
+  });
+
+  it("shows a notification with the first question for a thread that starts waiting on a question", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads(listWaitingThreads([PARKED_ON_QUESTION])),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([0, 1]);
+    expect(describeNotifications(seen)).toEqual([
+      { title: "Save drafts", body: "Which storage should drafts use?", state: "shown" },
+    ]);
   });
 });

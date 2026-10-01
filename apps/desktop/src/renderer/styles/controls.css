@@ -69,8 +69,11 @@
    button, with its label in faint ink. The fill, the rim and the shadow are
    the neutral tablet's, as .btn draws them. The label stays bold, so it keeps
    its width when the button turns on. Without pointer events, the hover and
-   press rules above cannot fire, so the button neither brightens nor sinks. */
-.btn--accent:disabled {
+   press rules above cannot fire, so the button neither brightens nor sinks.
+   A button that must keep the focus while it cannot act is `aria-disabled`
+   rather than `disabled`, and marks the same state with `data-unready`. */
+.btn--accent:disabled,
+.btn--accent[data-unready] {
   background: var(--btn-fill);
   color: var(--faint);
   box-shadow:

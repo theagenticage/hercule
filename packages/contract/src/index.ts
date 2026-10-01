@@ -180,14 +180,17 @@ export {
   ConversationSendInput,
   MESSAGE_SORT_FIELDS,
 } from "./groups/conversation";
+export type { ApprovalRequest } from "./groups/session";
 export {
   ApprovalDecision,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,
+  QuestionAnswers,
   SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,
-  SESSION_RESPOND_FIELDS,
+  SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
+  SESSION_RESPOND_TO_QUESTION_FIELDS,
   SESSION_SELECTION_FIELDS,
   SESSION_SORT_FIELDS,
   SESSION_STATUSES,
@@ -197,7 +200,8 @@ export {
   SessionFilter,
   SessionInputOutcome,
   SessionInputPayload,
-  SessionRespondInput,
+  SessionRespondToApprovalRequestInput,
+  SessionRespondToQuestionInput,
   SessionSelection,
   SessionSpawnInput,
   SessionStatus,

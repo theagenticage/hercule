@@ -2381,7 +2381,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hercule session respond`.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2541,9 +2541,9 @@ export const CLI = {
     },
     errors: { invalid_state: "that session has exited, or its runner is no longer connected" },
   },
-  "session.respond": {
-    command: "session respond",
-    help: "Answers the Request a session is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open request first with `hercule session read`.",
+  "session.respondToApprovalRequest": {
+    command: "session respond-to-approval-request",
+    help: "Decides the approval a session is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open request first with `hercule session read`. A question is answered with `hercule session respond-to-question` instead.",
     examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
     fields: {
       id: {
@@ -2557,12 +2557,50 @@ export const CLI = {
       },
       decision: {
         flag: "decision",
-        help: "The answer to the Request: allow_always keeps a rule for the rest of the session, and cancel denies the request and ends the turn.",
+        help: "The decision on the approval: allow_always keeps a rule for the rest of the session, and cancel denies the request and ends the turn.",
       },
     },
     errors: {
       invalid_state:
-        "the session is not waiting on a decision, or the harness has moved on and this is not the request it is waiting on now; read it again with `hercule session read`",
+        "the session has exited, its runner is no longer connected, or it is not waiting on an approval; or the harness has moved on and this is not the request it is waiting on now (read it again with `hercule session read`)",
+      validation:
+        "the request does not offer that decision, or it is a question, which is answered with `hercule session respond-to-question` or turned down by stopping the turn with `hercule session interrupt`",
+    },
+  },
+  "session.respondToQuestion": {
+    command: "session respond-to-question",
+    help: "Answers the questions a session is parked on, all of them at once. Read the questions first with `hercule session read`. A question cannot be declined: to turn it down, stop the turn with `hercule session interrupt`, or answer in your own words.",
+    examples: [
+      {
+        args: [
+          "1f3a9c2e",
+          "--request",
+          "req_4b7d1a06",
+          "--answers",
+          '{"Storage":"localStorage","Features":["Sync","Search"]}',
+        ],
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The session's id, or a tail of eight or more characters.",
+        resolves: "session.query",
+      },
+      requestId: {
+        flag: "request",
+        help: "The open request's own id, as `hercule session read` reports it.",
+      },
+      answers: {
+        flag: "answers",
+        help: "The answers as a JSON object keyed by each question's header. Every question needs an answer: an option's label or your own text, or a list of them when the question allows several.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the session has exited, its runner is no longer connected, or it is not waiting on a question; or the harness has moved on and this is not the request it is waiting on now (read it again with `hercule session read`)",
+      validation:
+        "the answers do not fit the questions: they name an unknown header, leave a question out, give several to a question that takes one, hold an empty answer, or are too long together; or the request is an approval, which is decided with `hercule session respond-to-approval-request`",
     },
   },
   "session.stop": {
@@ -2824,7 +2862,7 @@ export const NOUNS = {
   },
   session: {
     summary: "Sessions: provider-backed agents at work, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",

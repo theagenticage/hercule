@@ -1,9 +1,10 @@
 /**
  * The requests the app-server sends to this client during a turn, mapped to
  * Hercule's requests: what the user is shown, and what each of the four
- * decisions sends back to Codex. The mapping is one table because getting it
- * right is the whole job here: a reply in a shape Codex does not accept leaves
- * the turn hanging forever, with no error anywhere.
+ * decisions, or the answers to a question, send back to Codex. The mapping is
+ * one table because getting it right is the whole job here: a reply in a shape
+ * Codex does not accept leaves the turn hanging forever, with no error
+ * anywhere.
  *
  * Three mappings are approximate, because Codex cannot express everything
  * Hercule offers:
@@ -11,12 +12,17 @@
  * - A permissions request has no decision enum, so a deny is an empty grant.
  * - An MCP elicitation has no "accept for this session", so `allow_always` is
  *   not offered.
- * - A question has no way to decline in its reply, so a decline is a
- *   JSON-RPC error reply.
+ * - A question's reply has no way to decline, so the cancel an interrupt
+ *   sends is a JSON-RPC error reply.
  */
-import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  OpenRequest,
+  QuestionAnswers,
+} from "@hercule/protocol";
 import { ensureId } from "../events";
-import { buildQuestionRequest } from "../questions";
+import { buildQuestionRequest, keyAnswersForVendor } from "../questions";
 import { truncateFact, truncateMessage } from "../text";
 import type { RpcReply } from "./rpc";
 import type {
@@ -32,6 +38,7 @@ import type {
   PermissionsRequestApprovalResponse,
   RequestPermissionProfile,
   ToolRequestUserInputParams,
+  ToolRequestUserInputResponse,
 } from "./types";
 
 /** What the adapter knows about an arriving request that is not in the request's params. */
@@ -53,6 +60,11 @@ export interface Asked {
    * that cancel as it does to a deny.
    */
   readonly replies: (decision: ApprovalDecision, params: unknown) => RpcReply;
+  /**
+   * Builds the reply sent to Codex for the user's answers to a question. Only
+   * the row whose requests can be questions has it.
+   */
+  readonly answers?: (answers: QuestionAnswers, params: unknown) => RpcReply;
   /** The decisions Codex's reply cannot express, so the adapter interrupts the turn instead. */
   readonly endsTurn: ReadonlyArray<ApprovalDecision>;
 }
@@ -65,10 +77,11 @@ export interface Asked {
 const buildAsked = <P>(row: {
   readonly opens: (params: P, arrival: Arrival) => OpenRequest;
   readonly replies: (decision: ApprovalDecision, params: P) => RpcReply;
+  readonly answers?: (answers: QuestionAnswers, params: P) => RpcReply;
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
 }): Asked => ({ endsTurn: [], ...row }) as Asked;
 
-type Decisions = OpenRequest["decisions"];
+type Decisions = ApprovalRequest["decisions"];
 
 const EVERY_ANSWER: Decisions = ["allow", "allow_always", "deny", "cancel"];
 
@@ -201,10 +214,23 @@ export const ASKED: Readonly<Record<string, Asked>> = {
         { requestId, itemId: ensureId(params.itemId) },
         USER_INPUT_TOOL,
         params.questions,
+        "id",
       ),
-    // Sending answers is not supported yet, and the reply has no way to
-    // decline, so the only possible reply is an error.
+    // A question takes no decision, so only two decisions reach this: the
+    // cancel an interrupt sends, and a deny or cancel of the tool approval
+    // shown when no question could be parsed. The reply has no way to
+    // decline, so each is an error, and a cancel also interrupts the turn.
     replies: () => DECLINED,
+    answers: (answers, params) => ({
+      result: {
+        answers: Object.fromEntries(
+          [...keyAnswersForVendor(answers, params.questions, "id")].map(([id, picks]) => [
+            id,
+            { answers: [...picks] },
+          ]),
+        ),
+      } satisfies ToolRequestUserInputResponse,
+    }),
     endsTurn: ["cancel"],
   }),
 };

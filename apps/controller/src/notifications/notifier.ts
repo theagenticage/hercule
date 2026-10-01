@@ -137,12 +137,12 @@ const USER_CANNOT_CREATE =
   "a notification is a message to you, so you cannot create one; a session or a workflow step creates it";
 
 /**
- * The refusal for a producer that binds `session.respond` to an answer. The
- * core raises the decision about each approval request itself, with the
- * request's own answers.
+ * The refusal for a producer that binds `session.respondToApprovalRequest`
+ * to an answer. The core raises the decision about each approval request
+ * itself, with the request's own answers.
  */
 const PRODUCER_CANNOT_RESPOND =
-  "An answer cannot run session.respond: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.";
+  "An answer cannot run session.respondToApprovalRequest: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.";
 
 /**
  * The refusal for a session that binds `session.input` to another session.
@@ -214,7 +214,8 @@ const replaceOwnSessionAlias = (
  * Checks the rules that depend on who produces an answer, after the answer's
  * operation was decoded. Fails with `Validation` when:
  *
- * - the answer runs `session.respond`, which only the core binds;
+ * - the answer runs `session.respondToApprovalRequest`, which only the core
+ *   binds;
  * - a session binds `session.input` to a session other than itself;
  * - a session in an assistant's conversation binds `session.input` to
  *   itself, which it cannot take.
@@ -228,7 +229,8 @@ const checkProducerMayBind = (
 ): Effect.Effect<void, Validation> => {
   const refuse = (field: string, message: string) =>
     Effect.fail(createValidationError([{ path: [...path, field], message }]));
-  if (operation.op === "session.respond") return refuse("op", PRODUCER_CANNOT_RESPOND);
+  if (operation.op === "session.respondToApprovalRequest")
+    return refuse("op", PRODUCER_CANNOT_RESPOND);
   if (operation.op !== "session.input" || caller._tag === "run") return Effect.void;
   if (operation.input.sessionId !== caller.sessionId) {
     return refuse("input", SESSION_INPUT_ONLY_TO_ITSELF);

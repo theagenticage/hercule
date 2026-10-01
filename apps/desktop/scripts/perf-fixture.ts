@@ -264,7 +264,10 @@ export async function runWithThreadFixture<T>(
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
         for (const [id, requestId] of openRequests) {
-          await call("POST", `/sessions/${id}/respond`, { requestId, decision: "allow" });
+          await call("POST", `/sessions/${id}/respond-to-approval-request`, {
+            requestId,
+            decision: "allow",
+          });
         }
         openRequests.clear();
         await waitForThreads(

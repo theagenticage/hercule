@@ -88,6 +88,7 @@ export const AUDIT_KINDS = [
   "session.spawned",
   "session.interrupted",
   "session.responded",
+  "session.answered",
   "session.stopped",
   "session.continued",
   "session.reconciled",

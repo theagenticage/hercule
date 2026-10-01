@@ -120,8 +120,8 @@ describe("dispatchBindableOperation", () => {
     "task.update": ({ taskId }) => `task.update of ${taskId}`,
     "run.start": ({ workflowId }) => `run.start of ${workflowId}`,
     "session.input": ({ sessionId, text }) => `session.input of "${text}" to ${sessionId}`,
-    "session.respond": ({ requestId, decision }) =>
-      `session.respond of ${decision} to ${requestId}`,
+    "session.respondToApprovalRequest": ({ requestId, decision }) =>
+      `session.respondToApprovalRequest of ${decision} to ${requestId}`,
   };
 
   it("calls the handler for the operation with the operation's input", () => {
@@ -133,10 +133,10 @@ describe("dispatchBindableOperation", () => {
     ).toBe(`session.input of "hi" to ${SESSION_ID}`);
     expect(
       dispatchBindableOperation(handlers, {
-        op: "session.respond",
+        op: "session.respondToApprovalRequest",
         input: { sessionId: SESSION_ID, requestId: "req-1", decision: "deny" },
       }),
-    ).toBe("session.respond of deny to req-1");
+    ).toBe("session.respondToApprovalRequest of deny to req-1");
   });
 });
 

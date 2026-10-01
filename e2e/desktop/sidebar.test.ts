@@ -221,7 +221,7 @@ describe("the sidebar", () => {
       "New thread | draft",
     ]);
 
-    await client.session.respond({
+    await client.session.respondToApprovalRequest({
       params: { id: thread!.id },
       payload: { requestId, decision: "allow" },
     });

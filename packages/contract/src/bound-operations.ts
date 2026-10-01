@@ -24,7 +24,7 @@
 import { Effect, Schema } from "effect";
 import { createValidationError, listSchemaIssues, type Validation } from "./errors";
 import { RunStartCall } from "./groups/run";
-import { SessionInputCall, SessionRespondCall } from "./groups/session";
+import { SessionInputCall, SessionRespondToApprovalRequestCall } from "./groups/session";
 import { TaskUpdateCall } from "./groups/task";
 import type { OperationId } from "./operations";
 
@@ -33,7 +33,7 @@ export const BINDABLE_OPERATIONS = {
   "task.update": TaskUpdateCall,
   "run.start": RunStartCall,
   "session.input": SessionInputCall,
-  "session.respond": SessionRespondCall,
+  "session.respondToApprovalRequest": SessionRespondToApprovalRequestCall,
 } as const satisfies Partial<Record<OperationId, Schema.Top>>;
 
 /** The id of an operation an answer may run. */

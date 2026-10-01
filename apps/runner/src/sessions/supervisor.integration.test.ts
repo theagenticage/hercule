@@ -11,9 +11,9 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
-  ApprovalDecision,
   ExitReason,
   ProviderEvent,
+  RequestResolution,
   RunnerToController,
   SendResult,
   SessionInputResult,
@@ -91,8 +91,8 @@ interface Fake {
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly interrupted: Array<string>;
-  /** The arguments of every `respondToRequest` call. */
-  readonly answered: Array<readonly [string, string, ApprovalDecision]>;
+  /** The arguments of every `respondToApprovalRequest` and `respondToQuestion` call. */
+  readonly answered: Array<readonly [string, string, RequestResolution]>;
   /** Every `stopSession` call, with the reason its caller gave. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
@@ -113,7 +113,7 @@ const createFake = (): Fake => {
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<string> = [];
-  const answered: Array<readonly [string, string, ApprovalDecision]> = [];
+  const answered: Array<readonly [string, string, RequestResolution]> = [];
   const stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }> = [];
   const held = new Map<string, SessionBinding>();
   const fake: Fake = {
@@ -174,8 +174,10 @@ const createFake = (): Fake => {
        * recorded, because passing the frame's three fields to the adapter in
        * the right order is the runner's own job.
        */
-      respondToRequest: (sessionId, requestId, decision) =>
-        Effect.sync(() => void answered.push([sessionId, requestId, decision])),
+      respondToApprovalRequest: (sessionId, requestId, decision) =>
+        Effect.sync(() => void answered.push([sessionId, requestId, { decision }])),
+      respondToQuestion: (sessionId, requestId, answers) =>
+        Effect.sync(() => void answered.push([sessionId, requestId, { answers }])),
       /**
        * The exit reason comes from the caller, not from this adapter: the
        * supervisor knows why it stopped a session, and the exit event is the
@@ -748,7 +750,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     expect(fake.interrupted).toEqual([SESSION]);
   });
 
-  it("passes an answer to the adapter for a session it holds, and ignores one it does not", async () => {
+  it("passes a decision to the adapter for a session it holds, and ignores one it does not", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -757,14 +759,14 @@ describe("what the runner sends back for input, interrupts and answers", () => {
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
-        yield* supervisor.respond({
-          _tag: "sessionRespond",
+        yield* supervisor.respondToApprovalRequest({
+          _tag: "sessionRespondToApprovalRequest",
           sessionId: SESSION,
           requestId: PARK,
           decision: "allow_always",
         });
-        yield* supervisor.respond({
-          _tag: "sessionRespond",
+        yield* supervisor.respondToApprovalRequest({
+          _tag: "sessionRespondToApprovalRequest",
           sessionId: "0199e0e7-0000-7000-8000-0000000000aa",
           requestId: PARK,
           decision: "deny",
@@ -772,7 +774,29 @@ describe("what the runner sends back for input, interrupts and answers", () => {
       }),
     );
 
-    expect(fake.answered).toEqual([[SESSION, PARK, "allow_always"]]);
+    expect(fake.answered).toEqual([[SESSION, PARK, { decision: "allow_always" }]]);
+  });
+
+  it("passes answers to a question to the adapter as answers", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+    const answers = { Storage: "localStorage", Features: ["Sync", "Search"] } as const;
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.respondToQuestion({
+          _tag: "sessionRespondToQuestion",
+          sessionId: SESSION,
+          requestId: PARK,
+          answers,
+        });
+      }),
+    );
+
+    expect(fake.answered).toEqual([[SESSION, PARK, { answers }]]);
   });
 });
 

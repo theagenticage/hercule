@@ -14,6 +14,9 @@ import { Schema } from "effect";
  */
 export const MAX_FACT_LENGTH = 512;
 
+/** The most facts one list may hold, so a peer cannot send a list without end. */
+export const MAX_FACT_ITEMS = 64;
+
 /** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 

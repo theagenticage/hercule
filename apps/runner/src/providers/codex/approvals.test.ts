@@ -9,8 +9,8 @@
  *
  * - `item/permissions/requestApproval` has no decision enum, so a deny is an
  *   empty grant and nothing else: no `turn/interrupt`.
- * - `item/tool/requestUserInput` has no way to decline in its reply, so a
- *   decline is a JSON-RPC error reply.
+ * - `item/tool/requestUserInput` has no way to decline in its reply, so the
+ *   cancel an interrupt sends is a JSON-RPC error reply.
  *
  * An `interrupt` on a session parked on a permissions request replies with
  * that row's deny mapping, because the row offers no `cancel`. The spec does
@@ -19,7 +19,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ApprovalDecision, ProviderEvent } from "@hercule/protocol";
+import type { ApprovalDecision, ProviderEvent, QuestionAnswers } from "@hercule/protocol";
 import {
   type Answered,
   startBusySession,
@@ -75,6 +75,12 @@ const awaitAnswer = async (run: Run, id: string | number = ID): Promise<Answered
   return run.answered.find((written) => written.id === id)!;
 };
 
+/** Returns how each resolved request was resolved: its decision, or its answers. */
+const listResolutions = (run: Run): ReadonlyArray<unknown> =>
+  filterByTag(run.seen, "request.resolved").map((event) =>
+    "decision" in event ? event.decision : event.answers,
+  );
+
 /** Sends a request, resolves it with `decision`, and returns the run and the adapter's reply. */
 const openAndAnswer = async (
   method: string,
@@ -84,7 +90,7 @@ const openAndAnswer = async (
   const run = await pushServerRequest(method, params);
   const opened = await awaitOpenedRequest(run);
   await Effect.runPromise(
-    run.adapter.respondToRequest(SESSION, opened.request.requestId, decision),
+    run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, decision),
   );
   return { run, answered: await awaitAnswer(run) };
 };
@@ -119,7 +125,9 @@ describe("a command Codex wants to run", () => {
     expect(opened.request.kind).toBe("command_approval");
     expect(opened.request.itemId).toBe(ITEM);
     expect(opened.request.detail).toEqual({ command: "rm -rf build" });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+    });
   });
 
   for (const [decision, mapped] of COMMAND_ANSWERS) {
@@ -130,7 +138,7 @@ describe("a command Codex wants to run", () => {
       expect(answered.error).toBeUndefined();
       const resolved = filterByTag(run.seen, "request.resolved");
       expect(resolved).toHaveLength(1);
-      expect(resolved[0]?.decision).toBe(decision);
+      expect(resolved[0]).toMatchObject({ decision });
       expect(resolved[0]?.requestId).toBe(
         filterByTag(run.seen, "request.opened")[0]?.request.requestId,
       );
@@ -188,7 +196,9 @@ describe("a file change Codex wants to write", () => {
     expect(opened.request.kind).toBe("file_change_approval");
     expect(opened.request.itemId).toBe(FILE_ITEM);
     expect(opened.request.detail).toEqual({ paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"] });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+    });
   });
 
   for (const [decision, mapped] of FILE_ANSWERS) {
@@ -196,9 +206,7 @@ describe("a file change Codex wants to write", () => {
       const { run, answered } = await openAndAnswer(FILE_CHANGE, FILE_CHANGE_PARAMS, decision);
 
       expect(answered.result).toEqual({ decision: mapped });
-      expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-        decision,
-      ]);
+      expect(listResolutions(run)).toEqual([decision]);
     });
   }
 });
@@ -229,7 +237,7 @@ describe("the permissions Codex asks to be granted", () => {
     const opened = await awaitOpenedRequest(run);
     expect(opened.request.kind).toBe("tool_approval");
     expect(opened.request.detail).toEqual({ toolName: "permissions" });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "allow_always", "deny"] });
   });
 
   it("grants the profile that was asked for, for this turn only", async () => {
@@ -252,9 +260,7 @@ describe("the permissions Codex asks to be granted", () => {
     // Codex ends the turn itself after a denied permission, so a
     // `turn/interrupt` from here would race it.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "deny",
-    ]);
+    expect(listResolutions(run)).toEqual(["deny"]);
   });
 });
 
@@ -285,7 +291,7 @@ describe("an MCP server asking its own question", () => {
     expect(opened.request.detail).toEqual({ toolName: "linear" });
     // The elicitation reply has no "accept for this session", so offering
     // allow_always would mean replacing it with something else.
-    expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
   for (const [decision, mapped] of ELICITATION_ANSWERS) {
@@ -293,9 +299,7 @@ describe("an MCP server asking its own question", () => {
       const { run, answered } = await openAndAnswer(ELICITATION, ELICITATION_PARAMS, decision);
 
       expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
-      expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-        decision,
-      ]);
+      expect(listResolutions(run)).toEqual([decision]);
     });
   }
 });
@@ -326,7 +330,7 @@ const USER_INPUT_PARAMS = {
 const DECLINED = { code: -32603, message: "declined by the user" };
 
 describe("a question the agent asks the user", () => {
-  it("shows it as a question, offering only the two decisions Hercule can send", async () => {
+  it("shows it as a question, which takes answers and no decision", async () => {
     const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
@@ -345,37 +349,247 @@ describe("a question the agent asks the user", () => {
         },
       ],
     });
-    // Sending answers is not supported yet, so a surface can only decline.
-    expect(opened.request.decisions).toEqual(["deny", "cancel"]);
+    expect(opened.request).not.toHaveProperty("decisions");
   });
 
-  it("replies with an error on deny, because the reply has no way to decline", async () => {
-    const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "deny");
+  for (const decision of ["deny", "cancel"] as const) {
+    it(`ignores a ${decision}, because a question is turned down by stopping the turn`, async () => {
+      const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
+      const opened = await awaitOpenedRequest(run);
 
-    expect(answered.error).toEqual(DECLINED);
-    expect(answered.result).toBeUndefined();
+      await Effect.runPromise(
+        run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, decision),
+      );
+
+      await settle();
+      expect(run.answered).toEqual([]);
+      expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+      expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    });
+  }
+});
+
+/** Sends a question, resolves it with `answers`, and returns the run and the adapter's reply. */
+const openAndAnswerQuestion = async (
+  params: unknown,
+  answers: QuestionAnswers,
+): Promise<{ readonly run: Run; readonly answered: Answered }> => {
+  const run = await pushServerRequest(USER_INPUT, params);
+  const opened = await awaitOpenedRequest(run);
+  await Effect.runPromise(
+    run.adapter.respondToQuestion(SESSION, opened.request.requestId, answers),
+  );
+  return { run, answered: await awaitAnswer(run) };
+};
+
+/** Two questions, so a test can tell which answer went to which question id. */
+const TWO_QUESTIONS_PARAMS = {
+  ...USER_INPUT_PARAMS,
+  questions: [
+    USER_INPUT_PARAMS.questions[0],
+    {
+      id: "q2",
+      header: "Reason",
+      question: "Why deploy now?",
+      isOther: true,
+      isSecret: false,
+      options: null,
+    },
+  ],
+};
+
+describe("answering a question the agent asks", () => {
+  it("replies with each answer as a list under its question id, and reports the answers", async () => {
+    const answers: QuestionAnswers = { "Deploy target": ["staging"], Reason: "the fix is urgent" };
+
+    const { run, answered } = await openAndAnswerQuestion(TWO_QUESTIONS_PARAMS, answers);
+
+    // A single answer is sent as a list of one, because that is the only
+    // shape the reply has.
+    expect(answered.result).toEqual({
+      answers: {
+        q1: { answers: ["staging"] },
+        q2: { answers: ["the fix is urgent"] },
+      },
+    });
+    expect(answered.error).toBeUndefined();
+    // The stream records what the user said, not a decision standing in for it.
+    expect(listResolutions(run)).toEqual([answers]);
+  });
+
+  it("does not interrupt the turn after the answers", async () => {
+    const { run } = await openAndAnswerQuestion(USER_INPUT_PARAMS, { "Deploy target": "staging" });
+
     await settle();
-    // A deny declines this question only; the turn goes on.
+    // The agent goes on with the answer in the same turn.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "deny",
-    ]);
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
   });
 
-  it("replies with an error and then interrupts the turn on cancel", async () => {
-    const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "cancel");
+  it("opens the next waiting request once the question is answered", async () => {
+    const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
+    run.server.push({ id: SECOND_ID, method: COMMAND, params: COMMAND_PARAMS });
+    await settle();
+    const question = await awaitOpenedRequest(run);
 
-    expect(answered.error).toEqual(DECLINED);
-    await waitUntil(
-      "ended the turn",
-      () => listSentParams(run.requests, "turn/interrupt").length === 1,
+    await Effect.runPromise(
+      run.adapter.respondToQuestion(SESSION, question.request.requestId, {
+        "Deploy target": "production",
+      }),
     );
-    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
-      { threadId: THREAD, turnId: TURN },
-    ]);
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "cancel",
-    ]);
+
+    expect((await awaitAnswer(run, ID)).result).toEqual({
+      answers: { q1: { answers: ["production"] } },
+    });
+    await waitUntil(
+      "opened the second",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    expect(filterByTag(run.seen, "request.opened")[1]?.request.kind).toBe("command_approval");
+  });
+
+  it("ignores answers to an approval request", async () => {
+    const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
+    const opened = await awaitOpenedRequest(run);
+
+    await Effect.runPromise(
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+        "Deploy target": "staging",
+      }),
+    );
+
+    await settle();
+    expect(run.answered).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+
+  it("ignores answers to a question shown as a tool approval", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }],
+    });
+    const opened = await awaitOpenedRequest(run);
+
+    await Effect.runPromise(
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+        "Deploy target": "staging",
+      }),
+    );
+
+    await settle();
+    expect(run.answered).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+});
+
+describe("the question request built from a Codex question", () => {
+  it("keeps a secret question and marks it secret, so the user is warned before answering", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({
+      questions: [
+        {
+          header: "Deploy target",
+          question: "Which environment should this go to?",
+          multiSelect: false,
+          options: [
+            { label: "staging", description: "the shared one" },
+            { label: "production", description: "the real one" },
+          ],
+          secret: true,
+        },
+      ],
+    });
+  });
+
+  it("shows a question with no options as a question with an empty option list", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [TWO_QUESTIONS_PARAMS.questions[1]],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({
+      questions: [
+        { header: "Reason", question: "Why deploy now?", multiSelect: false, options: [] },
+      ],
+    });
+  });
+
+  it("numbers a header that repeats an earlier question's, and sends each answer to its own question", async () => {
+    const answers: QuestionAnswers = { "Deploy target": "staging", "Deploy target (2)": "now" };
+    const { run, answered } = await openAndAnswerQuestion(
+      {
+        ...USER_INPUT_PARAMS,
+        questions: [
+          USER_INPUT_PARAMS.questions[0],
+          { ...TWO_QUESTIONS_PARAMS.questions[1], header: "Deploy target" },
+        ],
+      },
+      answers,
+    );
+
+    const opened = filterByTag(run.seen, "request.opened")[0];
+    expect(
+      opened?.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.header)
+        : [],
+    ).toEqual(["Deploy target", "Deploy target (2)"]);
+    expect(answered.result).toEqual({
+      answers: { q1: { answers: ["staging"] }, q2: { answers: ["now"] } },
+    });
+  });
+
+  it("drops a question whose id repeats an earlier question's id, so no answer is sent under another's id", async () => {
+    const answers: QuestionAnswers = { "Deploy target": "staging" };
+    const { run, answered } = await openAndAnswerQuestion(
+      {
+        ...USER_INPUT_PARAMS,
+        questions: [
+          USER_INPUT_PARAMS.questions[0],
+          { ...TWO_QUESTIONS_PARAMS.questions[1], id: "q1" },
+        ],
+      },
+      answers,
+    );
+
+    const opened = filterByTag(run.seen, "request.opened")[0];
+    expect(
+      opened?.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.header)
+        : [],
+    ).toEqual(["Deploy target"]);
+    expect(answered.result).toEqual({ answers: { q1: { answers: ["staging"] } } });
+  });
+
+  it("falls back to a tool approval that can be denied when no question can be read", async () => {
+    const run = await pushServerRequest(USER_INPUT, {
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }],
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "requestUserInput" });
+    expect(opened.request).toMatchObject({ decisions: ["deny", "cancel"] });
+  });
+
+  it("replies with an error when that tool approval is denied, and lets the turn go on", async () => {
+    const { run, answered } = await openAndAnswer(
+      USER_INPUT,
+      { ...USER_INPUT_PARAMS, questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }] },
+      "deny",
+    );
+
+    // The reply has no way to decline, so the deny is an error reply.
+    expect(answered.error).toEqual(DECLINED);
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    expect(listResolutions(run)).toEqual(["deny"]);
   });
 });
 
@@ -476,13 +690,11 @@ describe("an approval resolved while the turn is still running", () => {
     ]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     expect((await awaitAnswer(run)).result).toEqual({ decision: "accept" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "allow",
-    ]);
+    expect(listResolutions(run)).toEqual(["allow"]);
     // The turn is still running: an input now steers it rather than starting
     // a second turn beside it.
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
@@ -507,7 +719,7 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect(run.answered).toEqual([]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, first.request.requestId, "allow"),
+      run.adapter.respondToApprovalRequest(SESSION, first.request.requestId, "allow"),
     );
 
     await waitUntil(
@@ -519,14 +731,11 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "accept" });
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, second.request.requestId, "deny"),
+      run.adapter.respondToApprovalRequest(SESSION, second.request.requestId, "deny"),
     );
 
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "decline" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "allow",
-      "deny",
-    ]);
+    expect(listResolutions(run)).toEqual(["allow", "deny"]);
   });
 
   it("cancels the waiting request too when the session is interrupted", async () => {
@@ -588,9 +797,7 @@ describe("interrupting a session that is parked on a request", () => {
     // A permissions reply has no `cancel`, so a cancel sends the deny reply;
     // the request is still reported as cancelled.
     expect((await awaitAnswer(run)).result).toEqual({ permissions: {}, scope: "turn" });
-    expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
-      "cancel",
-    ]);
+    expect(listResolutions(run)).toEqual(["cancel"]);
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
       { threadId: THREAD, turnId: TURN },
     ]);
@@ -654,7 +861,7 @@ describe("a request whose turn ends before it is resolved", () => {
     await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     await settle();

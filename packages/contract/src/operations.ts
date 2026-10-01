@@ -409,10 +409,15 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/interrupt",
   },
-  "session.respond": {
+  "session.respondToApprovalRequest": {
     requires: "session.steer",
     method: "POST",
-    path: "/api/v1/sessions/:id/respond",
+    path: "/api/v1/sessions/:id/respond-to-approval-request",
+  },
+  "session.respondToQuestion": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/respond-to-question",
   },
   "session.stop": {
     requires: "session.steer",

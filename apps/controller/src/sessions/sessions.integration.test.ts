@@ -35,8 +35,9 @@ import type {
   SessionStart,
   SessionStop as SessionStopFrame,
   SessionInput,
-  OpenRequest,
-  SessionRespond as SessionRespondFrame,
+  ApprovalRequest,
+  SessionRespondToApprovalRequest,
+  SessionRespondToQuestion,
 } from "@hercule/protocol";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
@@ -3819,8 +3820,8 @@ describe("session.continue: the modes it takes", () => {
 /**
  * Approvals from the user's side: a runner reports a request the session is
  * waiting on, the request is stored on the session row the client already
- * refetches, and the user's answer is sent to the runner as one frame.
- * `session.respond` rejects every answer it cannot deliver:
+ * refetches, and the user's decision is sent to the runner as one frame.
+ * `session.respondToApprovalRequest` rejects every decision it cannot deliver:
  *
  * - an old request id;
  * - no open request at all;
@@ -3832,11 +3833,28 @@ const REQUEST_ID = "req-1";
 
 const DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
 
-const respondToRequest = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
-  post(arranged.harness.base, `/api/v1/sessions/${id}/respond`, body, arranged.token);
+const respondToApprovalRequest = (
+  arranged: Arranged,
+  id: string,
+  body: unknown,
+): Promise<Response> =>
+  post(
+    arranged.harness.base,
+    `/api/v1/sessions/${id}/respond-to-approval-request`,
+    body,
+    arranged.token,
+  );
 
-const listRespondFrames = (wire: Wire): ReadonlyArray<SessionRespondFrame> =>
-  listFrames<SessionRespondFrame>(wire, "sessionRespond");
+const respondToQuestion = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
+  post(arranged.harness.base, `/api/v1/sessions/${id}/respond-to-question`, body, arranged.token);
+
+/** Returns every frame sent to `wire` that decides an approval or answers a question. */
+const listResponseFrames = (
+  wire: Wire,
+): ReadonlyArray<SessionRespondToApprovalRequest | SessionRespondToQuestion> => [
+  ...listFrames<SessionRespondToApprovalRequest>(wire, "sessionRespondToApprovalRequest"),
+  ...listFrames<SessionRespondToQuestion>(wire, "sessionRespondToQuestion"),
+];
 
 /**
  * Starts a session in a running turn, waiting on one open command approval.
@@ -3845,7 +3863,7 @@ const listRespondFrames = (wire: Wire): ReadonlyArray<SessionRespondFrame> =>
  */
 const startParkedSession = async (
   arranged: Arranged,
-  decisions: OpenRequest["decisions"] = DECISIONS,
+  decisions: ApprovalRequest["decisions"] = DECISIONS,
 ): Promise<Session> => {
   const session = await startSession(arranged, "hello");
   reportEvent(arranged.wire, 2, {
@@ -3875,14 +3893,14 @@ const startParkedSession = async (
   );
 };
 
-describe("session.respond", () => {
+describe("session.respondToApprovalRequest", () => {
   it.each(DECISIONS)(
     "sends %s to the runner once, and leaves the request open until the runner resolves it",
     async (decision) => {
       await withFleet(async (arranged) => {
         const session = await startParkedSession(arranged);
 
-        const response = await respondToRequest(arranged, session.id, {
+        const response = await respondToApprovalRequest(arranged, session.id, {
           requestId: REQUEST_ID,
           decision,
         });
@@ -3892,7 +3910,11 @@ describe("session.respond", () => {
         expect(answered.id).toBe(session.id);
         expect(answered.openRequest).toMatchObject({ requestId: REQUEST_ID });
 
-        const sent = await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+        const sent = await waitForFrames<SessionRespondToApprovalRequest>(
+          arranged.wire,
+          "sessionRespondToApprovalRequest",
+          1,
+        );
         expect(sent).toHaveLength(1);
         expect(sent[0]).toMatchObject({
           sessionId: session.id,
@@ -3910,12 +3932,16 @@ describe("session.respond", () => {
   it("clears the open request when the runner reports it resolved", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
       expect(response.status, await response.clone().text()).toBe(200);
-      await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+      await waitForFrames<SessionRespondToApprovalRequest>(
+        arranged.wire,
+        "sessionRespondToApprovalRequest",
+        1,
+      );
 
       reportEvent(arranged.wire, 4, {
         eventId: crypto.randomUUID(),
@@ -3952,7 +3978,7 @@ describe("session.respond", () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: "req-somebody-else",
         decision: "allow",
       });
@@ -3960,7 +3986,7 @@ describe("session.respond", () => {
       expect(response.status, await response.clone().text()).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       // The request the session is really waiting on is untouched.
       expect((await readSession(arranged, session.id)).openRequest).toMatchObject({
         requestId: REQUEST_ID,
@@ -3974,7 +4000,7 @@ describe("session.respond", () => {
       const session = await startSession(arranged, "hello");
       expect(session.openRequest).toBeNull();
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
@@ -3982,7 +4008,7 @@ describe("session.respond", () => {
       expect(response.status, await response.clone().text()).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
     });
   });
@@ -3993,7 +4019,7 @@ describe("session.respond", () => {
       // `allow_always` answer must not be silently turned into a plain allow.
       const session = await startParkedSession(arranged, ["allow", "deny", "cancel"]);
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow_always",
       });
@@ -4001,7 +4027,7 @@ describe("session.respond", () => {
       expect(response.status, await response.clone().text()).toBe(400);
       expect((await parseRefusal(response)).code).toBe("validation");
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
       // The request stays open with its offered decisions, so the user can
       // still answer it properly.
@@ -4017,7 +4043,7 @@ describe("session.respond", () => {
       reportExited(arranged.wire, session.id, 4);
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "deny",
       });
@@ -4025,7 +4051,7 @@ describe("session.respond", () => {
       expect(response.status, await response.clone().text()).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
     });
   });
@@ -4036,17 +4062,301 @@ describe("session.respond", () => {
       arranged.wire.close();
       await waitForRunnerGone(arranged);
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
-      // The answer was never delivered, so the question is still open.
+      // The decision was never delivered, so the approval is still open.
       expect((await readApprovalNotifications(arranged, session.id))[0]?.status).toBe("open");
+    });
+  });
+});
+
+/**
+ * Answering a `question` request: the user answers each question by its
+ * header, with an offered option, several options when the question allows
+ * it, or their own text. The answers reach the runner as they were given, and
+ * every malformed answer is refused before anything is sent.
+ */
+const QUESTIONS = [
+  {
+    question: "Which storage should drafts use?",
+    header: "Storage",
+    options: [
+      { label: "localStorage", description: "simple, and enough for a few drafts" },
+      { label: "IndexedDB", description: "more work, and room for many drafts" },
+    ],
+    multiSelect: false,
+  },
+  {
+    question: "Which features should drafts have?",
+    header: "Features",
+    options: [
+      { label: "Sync", description: "drafts follow the user to another device" },
+      { label: "Search", description: "drafts can be searched by their text" },
+      { label: "Offline", description: "drafts can be written without a connection" },
+    ],
+    multiSelect: true,
+  },
+] as const;
+
+/** A complete, valid answer to `QUESTIONS`. */
+const ANSWERS = { Storage: "localStorage", Features: ["Sync", "Search"] } as const;
+
+/**
+ * Starts a session in a running turn, waiting on one open `question` request
+ * that asks `QUESTIONS`. Returns the session once it shows the request.
+ */
+const startQuestionSession = async (arranged: Arranged): Promise<Session> => {
+  const session = await startSession(arranged, "hello");
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "turn.started",
+    turnId: "t1",
+  });
+  reportEvent(arranged.wire, 3, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "request.opened",
+    request: {
+      requestId: REQUEST_ID,
+      itemId: "i1",
+      kind: "question",
+      detail: { questions: [...QUESTIONS] },
+    },
+  });
+  return await waitForSession(
+    arranged,
+    session.id,
+    (one) => one.openRequest?.requestId === REQUEST_ID,
+  );
+};
+
+describe("session.respondToQuestion", () => {
+  it("sends the answers to the runner as given, and records the request in the audit log", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(((await response.json()) as Session).id).toBe(session.id);
+
+      const sent = await waitForFrames<SessionRespondToQuestion>(
+        arranged.wire,
+        "sessionRespondToQuestion",
+        1,
+      );
+      expect(sent).toStrictEqual([
+        {
+          _tag: "sessionRespondToQuestion",
+          sessionId: session.id,
+          requestId: REQUEST_ID,
+          answers: ANSWERS,
+        },
+      ]);
+
+      // The audit entry names the request but not the answers: `event.read`
+      // reaches the audit log without `session.read`, and an answer can be
+      // one the agent asked to keep secret. The transcript holds the answers.
+      const entries = await arranged.harness.audit("session.answered");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.actor).toBe("user");
+      expect(entries[0]?.payload).toStrictEqual({
+        sessionId: session.id,
+        runnerId: expect.any(String) as unknown,
+        requestId: REQUEST_ID,
+      });
+      expect(await arranged.harness.audit("session.responded")).toEqual([]);
+    });
+  });
+
+  it.each([
+    {
+      title: "a request id that is not the open one",
+      arrange: (arranged: Arranged) => startQuestionSession(arranged),
+      requestId: "req-somebody-else",
+    },
+    {
+      title: "a session with no open request",
+      arrange: (arranged: Arranged) => startSession(arranged, "hello"),
+      requestId: REQUEST_ID,
+    },
+    {
+      title: "a session that has exited",
+      arrange: async (arranged: Arranged) => {
+        const session = await startQuestionSession(arranged);
+        reportExited(arranged.wire, session.id, 4);
+        return await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      },
+      requestId: REQUEST_ID,
+    },
+  ])("rejects answers for $title, and sends the runner nothing", async ({ arrange, requestId }) => {
+    await withFleet(async (arranged) => {
+      const session = await arrange(arranged);
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId,
+        answers: ANSWERS,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.answered")).toHaveLength(0);
+    });
+  });
+
+  it("accepts the user's own text in place of an offered option", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+      const answers = { Storage: "a sqlite file", Features: ["Sync"] };
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionRespondToQuestion>(
+        arranged.wire,
+        "sessionRespondToQuestion",
+        1,
+      );
+      expect(sent[0]).toMatchObject({ sessionId: session.id, requestId: REQUEST_ID, answers });
+    });
+  });
+
+  it("accepts a single-select answer given as a list of one", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: { Storage: ["localStorage"], Features: ["Sync"] },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionRespondToQuestion>(
+        arranged.wire,
+        "sessionRespondToQuestion",
+        1,
+      );
+      expect(sent).toHaveLength(1);
+      // Whether the runner gets the one answer as a string or as a list of
+      // one, it is the answer the user chose.
+      expect([sent[0]!.answers["Storage"]].flat()).toEqual(["localStorage"]);
+    });
+  });
+
+  /**
+   * Each case has exactly one thing wrong with it, so the refusal names only
+   * that one field.
+   */
+  it.each([
+    {
+      title: "a decision to a question",
+      parked: "question",
+      respond: respondToApprovalRequest,
+      body: { requestId: REQUEST_ID, decision: "deny" },
+      path: ["decision"],
+      message:
+        "that request is a question, which takes answers and no decision; answer it with " +
+        "session.respondToQuestion, or stop the turn with session.interrupt",
+    },
+    {
+      title: "answers to an approval",
+      parked: "approval",
+      respond: respondToQuestion,
+      body: { requestId: REQUEST_ID, answers: ANSWERS },
+      path: ["answers"],
+      message:
+        "that request is an approval, which takes a decision and no answers; decide it with " +
+        "session.respondToApprovalRequest",
+    },
+    {
+      title: "no answers",
+      parked: "question",
+      respond: respondToQuestion,
+      body: { requestId: REQUEST_ID },
+      path: ["answers"],
+    },
+    {
+      title: "an answer to a header the request does not have",
+      parked: "question",
+      respond: respondToQuestion,
+      body: { requestId: REQUEST_ID, answers: { ...ANSWERS, Colour: "red" } },
+      path: ["answers", "Colour"],
+    },
+    {
+      title: "a question left unanswered",
+      parked: "question",
+      respond: respondToQuestion,
+      body: { requestId: REQUEST_ID, answers: { Storage: "localStorage" } },
+      path: ["answers", "Features"],
+    },
+    {
+      title: "two answers to a question that takes one",
+      parked: "question",
+      respond: respondToQuestion,
+      body: {
+        requestId: REQUEST_ID,
+        answers: { Storage: ["localStorage", "IndexedDB"], Features: ["Sync"] },
+      },
+      path: ["answers", "Storage"],
+    },
+  ])("refuses $title, naming the field, and sends nothing", async (refused) => {
+    await withFleet(async (arranged) => {
+      const session =
+        refused.parked === "question"
+          ? await startQuestionSession(arranged)
+          : await startParkedSession(arranged);
+
+      const response = await refused.respond(arranged, session.id, refused.body);
+
+      const text = await response.clone().text();
+      expect(response.status, text).toBe(400);
+      const refusal = await parseRefusal(response);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.paths).toEqual([refused.path]);
+      // A request sent to the wrong operation is told which one to use.
+      if ("message" in refused) expect(text).toContain(refused.message);
+      await delay(250);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
+    });
+  });
+
+  it.each([
+    { title: "an empty string", answers: { Storage: "", Features: ["Sync"] } },
+    { title: "an empty list", answers: { Storage: "localStorage", Features: [] } },
+  ])("refuses $title as an answer, under answers, and sends nothing", async ({ answers }) => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refusal = await parseRefusal(response);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.paths.length).toBeGreaterThan(0);
+      for (const path of refusal.paths) expect(path[0]).toBe("answers");
+      await delay(250);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
     });
   });
 });
@@ -4086,7 +4396,7 @@ describe("session approval notifications", () => {
           id,
           label,
           {
-            op: "session.respond",
+            op: "session.respondToApprovalRequest",
             input: { sessionId: session.id, requestId: REQUEST_ID, decision },
           },
         ]),
@@ -4098,7 +4408,7 @@ describe("session approval notifications", () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
 
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow_always",
       });
@@ -4129,7 +4439,7 @@ describe("session approval notifications", () => {
   it("refuses a second answer to a request, and sends the runner only the first", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
-      const first = await respondToRequest(arranged, session.id, {
+      const first = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
@@ -4137,7 +4447,7 @@ describe("session approval notifications", () => {
 
       // The runner has not reported the request resolved yet, so the session
       // still shows it open.
-      const second = await respondToRequest(arranged, session.id, {
+      const second = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "deny",
       });
@@ -4150,7 +4460,7 @@ describe("session approval notifications", () => {
           "read the session again to see whether it is waiting on a request now",
       });
       await delay(250);
-      expect(listRespondFrames(arranged.wire).map((frame) => frame.decision)).toEqual(["allow"]);
+      expect(listResponseFrames(arranged.wire)).toMatchObject([{ decision: "allow" }]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(1);
     });
   });
@@ -4163,7 +4473,7 @@ describe("session approval notifications", () => {
 
       // The runner has not reported the turn's end yet, so the session still
       // shows the request open.
-      const response = await respondToRequest(arranged, session.id, {
+      const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
@@ -4177,7 +4487,7 @@ describe("session approval notifications", () => {
           "read the session again to see whether it is waiting on a request now",
       });
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toEqual([]);
     });
   });
@@ -4271,7 +4581,6 @@ describe("session approval notifications", () => {
           requestId: REQUEST_ID,
           itemId: "i1",
           kind: "question",
-          decisions: ["cancel"],
           detail: {
             questions: [
               { question: "Which one?", header: "Pick", options: [], multiSelect: false },
@@ -4370,7 +4679,7 @@ const reportWorkspaceReady = (arranged: Arranged, workspace: WorkspaceRow): void
   } as never);
 
 /**
- * `session.respond`, `session.interrupt` and `session.stop` send their frame
+ * `session.respondToApprovalRequest`, `session.interrupt` and `session.stop` send their frame
  * once their transaction commits. `notification.act` runs them inside its own
  * transaction, so the frame has to wait for that commit, and must never be
  * sent when it rolls back.
@@ -4400,22 +4709,26 @@ describe("a frame whose caller's transaction rolls back", () => {
       const session = await startParkedSession(arranged);
 
       const exit = await runThenRollBack(arranged, (live) =>
-        live.respond({ id: session.id, requestId: REQUEST_ID, decision: "allow" }),
+        live.respondToApprovalRequest({ id: session.id, requestId: REQUEST_ID, decision: "allow" }),
       );
 
       expect(Exit.isFailure(exit)).toBe(true);
       await delay(250);
-      expect(listRespondFrames(arranged.wire)).toEqual([]);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
       expect(await arranged.harness.audit("session.responded")).toEqual([]);
       const [notification] = await readApprovalNotifications(arranged, session.id);
       expect(notification?.status).toBe("open");
 
-      const retried = await respondToRequest(arranged, session.id, {
+      const retried = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
         decision: "allow",
       });
       expect(retried.status, await retried.clone().text()).toBe(200);
-      await waitForFrames<SessionRespondFrame>(arranged.wire, "sessionRespond", 1);
+      await waitForFrames<SessionRespondToApprovalRequest>(
+        arranged.wire,
+        "sessionRespondToApprovalRequest",
+        1,
+      );
     });
   });
 
