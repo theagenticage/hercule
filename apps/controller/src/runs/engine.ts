@@ -832,10 +832,11 @@ export const makeRunEngine = Effect.gen(function* () {
    * that arrives while children are still executing makes the execution
    * read the run again at once, so a step routed to by a workspace step's
    * result starts without waiting for a long `wait` on another branch. A
-   * workspace step that waits for a runner is tried again only after
-   * another child has made progress, or after a wake. When no child fiber
-   * is left and the run still has such records, the execution returns and
-   * the run is asleep.
+   * workspace step that finds no runner waits until another child has made
+   * progress or a wake arrives. If either happened while the step was still
+   * looking, the step is tried again at once, because it may have read the
+   * runners before the change. When no child fiber is left and the run
+   * still has such records, the execution returns and the run is asleep.
    *
    * When the run has ended, the execution returns, and closing its scope
    * interrupts the child fibers still executing: a `wait` stops, and a
@@ -849,13 +850,21 @@ export const makeRunEngine = Effect.gen(function* () {
           readonly record: UnfinishedStepRecord;
           readonly exit: Exit.Exit<RecordProgress, SqlError>;
         }>();
-        // The steps whose record a child fiber is executing. Only this loop
-        // changes the set, so it is never stale.
-        const busySteps = new Set<string>();
+        // How many times a runner may have become free during this
+        // execution: once per wake, and once per child that made progress.
+        let runnerChanges = 0;
+        // The steps whose record a child fiber is executing, each with the
+        // value of `runnerChanges` when its child started. Only this loop
+        // changes the map, so it is never stale.
+        const busySteps = new Map<string, number>();
         // The steps whose next record is a workspace step that found no
-        // runner. They are not tried again until another child has made
-        // progress, or the loop would try them over and over.
+        // runner. They are not tried again until a runner may have become
+        // free, or the loop would try them over and over.
         const stepsWaitingForRunner = new Set<string>();
+        const retryStepsWaitingForRunner = (): void => {
+          stepsWaitingForRunner.clear();
+          runnerChanges += 1;
+        };
         for (;;) {
           const found = yield* runs.read(runId);
           if (Option.isNone(found)) return;
@@ -891,7 +900,7 @@ export const makeRunEngine = Effect.gen(function* () {
             continue;
           }
           for (const record of ready) {
-            busySteps.add(record.stepId);
+            busySteps.set(record.stepId, runnerChanges);
             yield* Effect.forkScoped(
               Effect.onExit(executeRecord(run, record), (exit) =>
                 Queue.offer(endedChildren, { record, exit }),
@@ -924,19 +933,27 @@ export const makeRunEngine = Effect.gen(function* () {
             // run starts the records that are now ready, and a runner may
             // have become free for the steps that found none.
             yield* Queue.clear(wakes);
-            stepsWaitingForRunner.clear();
+            retryStepsWaitingForRunner();
           }
           const polled = yield* Queue.poll(endedChildren);
           if (Option.isNone(polled)) continue;
           const ended = polled.value;
+          const runnerChangesAtStart = busySteps.get(ended.record.stepId);
           busySteps.delete(ended.record.stepId);
           if (Exit.isSuccess(ended.exit)) {
             if (ended.exit.value === "waitsForRunner") {
-              stepsWaitingForRunner.add(ended.record.stepId);
+              // When the count moved while the child was looking, a runner
+              // may have become free after the child read the runners. The
+              // wake or the progress that said so has already been handled,
+              // so nothing would ever try the step again. The step is left
+              // out of the waiting steps instead, and tried again at once.
+              if (runnerChangesAtStart === runnerChanges) {
+                stepsWaitingForRunner.add(ended.record.stepId);
+              }
             } else {
               // Progress may have freed a runner, so the steps that found
               // none are tried again.
-              stepsWaitingForRunner.clear();
+              retryStepsWaitingForRunner();
             }
             continue;
           }
