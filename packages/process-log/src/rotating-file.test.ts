@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openRotatingFile } from "./rotating-file";
+import { LogRotationError, openRotatingFile } from "./rotating-file";
 
 let dir: string;
 let path: string;
@@ -77,7 +77,7 @@ describe("openRotatingFile", () => {
     expect(statSync(`${path}.1`).mode & 0o777).toBe(0o600);
   });
 
-  it("keeps appending past the limit when a rotation fails, and throws the rotation error", () => {
+  it("keeps appending past the limit when a rotation fails, and throws once per run of failures", () => {
     // A folder that is not empty cannot be renamed over, so shifting `.4` to
     // `.5` fails.
     writeFileSync(`${path}.4`, "old\n");
@@ -85,12 +85,20 @@ describe("openRotatingFile", () => {
     const file = openRotatingFile(path, 7);
     file.append("line 1\n");
 
-    expect(() => file.append("line 2\n")).toThrow();
-    expect(() => file.append("line 3\n")).toThrow();
-    file.close();
-
+    expect(() => file.append("line 2\n")).toThrow(LogRotationError);
+    expect(() => file.append("line 3\n")).not.toThrow();
     expect(read(path)).toBe("line 1\nline 2\nline 3\n");
     expect(read(`${path}.4`)).toBe("old\n");
+
+    // Once a rotation succeeds, the next failure is reported again.
+    rmSync(`${path}.5`, { recursive: true });
+    file.append("line 4\n");
+    expect(read(path)).toBe("line 4\n");
+    rmSync(`${path}.5`);
+    writeFileSync(`${path}.4`, "old\n");
+    mkdirSync(join(`${path}.5`, "blocker"), { recursive: true });
+    expect(() => file.append("line 5\n")).toThrow(LogRotationError);
+    file.close();
   });
 
   it("starts a new file at the next rotation when the file was deleted", () => {

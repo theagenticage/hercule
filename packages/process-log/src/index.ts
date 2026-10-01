@@ -20,7 +20,7 @@ import * as Logger from "effect/Logger";
 import type * as EffectLogLevel from "effect/LogLevel";
 import * as References from "effect/References";
 import { locateLogsDir, locateProcessLogFile, type DaemonRole, type LogLevel } from "@hercule/home";
-import { openRotatingFile } from "./rotating-file";
+import { LogRotationError, openRotatingFile } from "./rotating-file";
 
 /** The size at which a log file is rotated: 10 MiB. */
 const MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
@@ -81,7 +81,11 @@ export function makeProcessLogLayer(options: {
           // disk would break requests that have nothing to do with logging.
           // The error goes to stderr instead, which a service unit keeps in
           // `<role>.stderr.log`.
-          process.stderr.write(`hercule: cannot write to ${path}: ${String(error)}\n`);
+          const reason =
+            error instanceof LogRotationError
+              ? error.message
+              : `cannot write to ${path}: ${String(error)}`;
+          process.stderr.write(`hercule: ${reason}\n`);
         }
       }),
     ),
@@ -96,7 +100,7 @@ export function makeProcessLogLayer(options: {
 
   return Layer.mergeAll(
     Logger.layer(loggers),
-    // Only the echo writes to the console, and this sends it to stderr.
+    // Only the echo writes to the console, and `LogToStderr` sends it to stderr.
     Layer.succeed(Logger.LogToStderr, true),
     Layer.succeed(References.MinimumLogLevel, EFFECT_LOG_LEVELS[options.level]),
   );

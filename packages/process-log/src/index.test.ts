@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
@@ -95,5 +103,30 @@ describe("makeProcessLogLayer", () => {
     expect(error.mock.calls.flat().join(" ")).toContain("echoed");
     expect(error.mock.calls.flat().join(" ")).toContain("r1");
     expect(readFileSync(logFile(), "utf8")).toContain("echoed");
+  });
+
+  it("reports a failing rotation on stderr once, and keeps logging", async () => {
+    setStderrIsTTY(false);
+    const written: Array<string> = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+    // A log file already at the 10 MiB limit makes the first entry rotate it,
+    // and a folder that is not empty at `.5` makes every rotation fail.
+    mkdirSync(join(home, "logs"));
+    writeFileSync(logFile(), Buffer.alloc(10 * 1024 * 1024, "x"));
+    writeFileSync(`${logFile()}.4`, "old\n");
+    mkdirSync(join(`${logFile()}.5`, "blocker"), { recursive: true });
+
+    await runLogged(Effect.andThen(Effect.logInfo("first"), Effect.logInfo("second")));
+
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatch(
+      new RegExp(`^hercule: cannot rotate ${logFile()}, so it grows past its size limit`),
+    );
+    const tail = readFileSync(logFile(), "utf8").slice(10 * 1024 * 1024);
+    expect(tail).toContain("message=first");
+    expect(tail).toContain("message=second");
   });
 });
