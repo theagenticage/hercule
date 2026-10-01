@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   SessionInput,
   SessionInterrupt,
-  SessionRespond,
+  SessionRespondToApprovalRequest,
   SessionStop,
 } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
@@ -254,13 +254,17 @@ describe("the operations a conversation's session allows, as for a Thread", () =
 
       const response = await post(
         arranged.harness.base,
-        `/api/v1/sessions/${session.id}/respond`,
+        `/api/v1/sessions/${session.id}/respond-to-approval-request`,
         { requestId: REQUEST_ID, decision: "allow" },
         arranged.token,
       );
 
       expect(response.status, await response.clone().text()).toBe(200);
-      const [frame] = await waitForFrames<SessionRespond>(arranged.wire, "sessionRespond", 1);
+      const [frame] = await waitForFrames<SessionRespondToApprovalRequest>(
+        arranged.wire,
+        "sessionRespondToApprovalRequest",
+        1,
+      );
       expect(frame).toMatchObject({
         sessionId: session.id,
         requestId: REQUEST_ID,

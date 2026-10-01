@@ -14,12 +14,14 @@ import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import type {
   AccessMode,
+  ApprovalDecision,
   ExitReason,
   ModelSelection,
   OpenRequest,
   ProbeResult,
   ProviderEvent,
-  RequestResponse,
+  QuestionAnswers,
+  RequestResolution,
   SendResult,
   SessionBinding,
   SessionSpec,
@@ -545,7 +547,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     held: Held,
     park: Park,
     reply: RpcReply,
-    response: RequestResponse,
+    resolution: RequestResolution,
   ): void => {
     held.open = undefined;
     held.host.rpc.answer(park.id, reply);
@@ -555,27 +557,20 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       sessionId: held.binding.sessionId,
       at: now(),
       requestId: park.request.requestId,
-      ...response,
+      ...resolution,
     });
     const next = held.waiting.shift();
     if (next !== undefined) announce(held, next);
   };
 
-  /**
-   * Builds the reply to Codex for the user's response to `park`, or returns
-   * `undefined` when the request does not take that response: a decision it
-   * did not offer, or answers to a request that is not a question. Codex
-   * would have to replace either with something else, so it is ignored.
-   */
-  const buildReply = (park: Park, response: RequestResponse): RpcReply | undefined => {
-    if ("decision" in response) {
-      return park.request.decisions.includes(response.decision)
-        ? park.asked.replies(response.decision, park.params)
-        : undefined;
-    }
-    return park.request.kind === "question"
-      ? park.asked.answers?.(response.answers, park.params)
-      : undefined;
+  /** Returns the session's open request when its id is `requestId`, or `undefined`. */
+  const findOpenPark = (
+    sessionId: string,
+    requestId: string,
+  ): { readonly held: Held; readonly park: Park } | undefined => {
+    const held = sessions.get(sessionId);
+    const park = held?.open;
+    return held === undefined || park?.request.requestId !== requestId ? undefined : { held, park };
   };
 
   /**
@@ -900,27 +895,46 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return interruptTurn(held);
       }),
 
-    respondToRequest: (
+    respondToApprovalRequest: (
       sessionId: string,
       requestId: string,
-      response: RequestResponse,
+      decision: ApprovalDecision,
     ): Effect.Effect<void> =>
       Effect.suspend(() => {
-        const held = sessions.get(sessionId);
-        const park = held?.open;
-        if (held === undefined || park === undefined || park.request.requestId !== requestId) {
+        const found = findOpenPark(sessionId, requestId);
+        // A decision the approval did not offer is ignored: Codex would have
+        // to replace it with something else.
+        if (
+          found === undefined ||
+          found.park.request.kind === "question" ||
+          !found.park.request.decisions.includes(decision)
+        ) {
           return Effect.void;
         }
-        const reply = buildReply(park, response);
-        if (reply === undefined) return Effect.void;
+        const { held, park } = found;
         // A decision that ends the turn cancels every waiting request with it,
         // so none of them is shown to the user only to be cancelled at once.
-        const ending = "decision" in response && park.asked.endsTurn.includes(response.decision);
+        const ending = park.asked.endsTurn.includes(decision);
         if (ending) cancelWaiting(held);
-        resolvePark(held, park, reply, response);
+        resolvePark(held, park, park.asked.replies(decision, park.params), { decision });
         // Interrupt only when the reply cannot express the decision itself;
         // every other row tells Codex to stop through its own reply.
         return ending ? interruptTurn(held) : Effect.void;
+      }),
+
+    respondToQuestion: (
+      sessionId: string,
+      requestId: string,
+      answers: QuestionAnswers,
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const found = findOpenPark(sessionId, requestId);
+        const reply =
+          found?.park.request.kind === "question"
+            ? found.park.asked.answers?.(answers, found.park.params)
+            : undefined;
+        if (found === undefined || reply === undefined) return;
+        resolvePark(found.held, found.park, reply, { answers });
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>

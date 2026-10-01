@@ -63,6 +63,11 @@ export interface ApprovalQuestion {
   readonly multiSelect: boolean;
   /** A note shown when the question accepts more than one answer, else `null`. */
   readonly note: string | null;
+  /**
+   * A warning shown when the harness asked to keep the answer secret, else
+   * `null`. Nothing keeps it secret, so the user is told before they type it.
+   */
+  readonly secretWarning: string | null;
 }
 
 export interface ApprovalCard {
@@ -78,7 +83,11 @@ export interface ApprovalCard {
   readonly code: boolean;
   /** The questions of a `question` request; empty for every approval kind. */
   readonly questions: readonly ApprovalQuestion[];
-  /** One row per decision the request offers, in the request's order. */
+  /**
+   * One row per decision the approval offers, in the approval's order. Empty
+   * for a question, which takes answers only: to turn it down, the user stops
+   * the turn.
+   */
   readonly rows: readonly ApprovalRow[];
 }
 
@@ -115,6 +124,9 @@ const buildCardSubject = (request: OpenRequest): readonly string[] => {
 
 const MULTI = "More than one answer may be chosen.";
 
+const SECRET =
+  "The agent asked to keep this answer secret. It is stored in the thread like any other answer.";
+
 const buildCardQuestions = (request: OpenRequest): readonly ApprovalQuestion[] =>
   request.kind === "question"
     ? request.detail.questions.map((question) => ({
@@ -123,6 +135,7 @@ const buildCardQuestions = (request: OpenRequest): readonly ApprovalQuestion[] =
         options: question.options,
         multiSelect: question.multiSelect,
         note: question.multiSelect ? MULTI : null,
+        secretWarning: question.secret === true ? SECRET : null,
       }))
     : [];
 
@@ -132,10 +145,13 @@ export const buildApprovalCard = (request: OpenRequest): ApprovalCard => ({
   subject: buildCardSubject(request),
   code: request.kind !== "question",
   questions: buildCardQuestions(request),
-  rows: request.decisions.map((decision) => ({
-    id: decision,
-    label: APPROVAL_ANSWER_LABELS[decision],
-    primary: false,
-    describeLine: [{ kind: "text", text: describeApprovalAnswer(decision, request.kind) }],
-  })),
+  rows:
+    request.kind === "question"
+      ? []
+      : request.decisions.map((decision) => ({
+          id: decision,
+          label: APPROVAL_ANSWER_LABELS[decision],
+          primary: false,
+          describeLine: [{ kind: "text", text: describeApprovalAnswer(decision, request.kind) }],
+        })),
 });

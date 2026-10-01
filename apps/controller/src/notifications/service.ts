@@ -193,7 +193,7 @@ const make = Effect.gen(function* () {
    * with `InvalidState` if it was resolved any other way in the meantime.
    *
    * An operation may already have resolved the decision itself, with this
-   * same answer: `session.respond` resolves the approval decision about its
+   * same answer: `session.respondToApprovalRequest` resolves the approval decision about its
    * request with the answer that carries it. That counts as decided too.
    */
   const decideOrFail = (

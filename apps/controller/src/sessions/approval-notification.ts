@@ -2,7 +2,7 @@
  * Builds the approval notification the core raises when a session's harness
  * waits for an approval: a `core.approval` decision notification whose
  * answers are the decisions the request accepts, each bound to
- * `session.respond`.
+ * `session.respondToApprovalRequest`.
  *
  * The session service finds the notification again by the request subject
  * and the answer ids built here. When the user answers in the session view,
@@ -19,7 +19,7 @@ import {
   describeApprovalAnswer,
   type NotificationSubject,
 } from "@hercule/contract";
-import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
+import type { ApprovalDecision, ApprovalRequest, OpenRequest } from "@hercule/protocol";
 import type { CoreAction, CoreNotification } from "../notifications";
 import type { RequestEvent } from "./stream";
 
@@ -124,12 +124,11 @@ const formatPathList = (paths: ReadonlyArray<string>): string => {
 
 /**
  * Returns the title of an approval request, and the detail text that shows
- * exactly what the harness asks about. Returns `undefined` for a `question`
- * request, which raises no notification.
+ * exactly what the harness asks about.
  */
 const buildRequestTitleAndDetail = (
-  request: OpenRequest,
-): { readonly title: string; readonly detail: string | undefined } | undefined => {
+  request: ApprovalRequest,
+): { readonly title: string; readonly detail: string | undefined } => {
   switch (request.kind) {
     case "command_approval":
       return {
@@ -151,8 +150,6 @@ const buildRequestTitleAndDetail = (
     }
     case "tool_approval":
       return { title: `Run ${request.detail.toolName}?`, detail: undefined };
-    case "question":
-      return undefined;
   }
 };
 
@@ -171,8 +168,8 @@ export const buildApprovalNotification = (
   session: { readonly id: string; readonly title: string },
   request: OpenRequest,
 ): CoreNotification | undefined => {
+  if (request.kind === "question") return undefined;
   const described = buildRequestTitleAndDetail(request);
-  if (described === undefined) return undefined;
   const waiting =
     session.title === ""
       ? "A session is waiting for your answer."
@@ -182,7 +179,7 @@ export const buildApprovalNotification = (
     label: APPROVAL_ANSWER_LABELS[decision],
     description: describeApprovalAnswer(decision, request.kind),
     operation: {
-      op: "session.respond",
+      op: "session.respondToApprovalRequest",
       input: { sessionId: session.id, requestId: request.requestId, decision },
     },
   }));

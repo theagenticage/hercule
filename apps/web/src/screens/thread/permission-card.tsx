@@ -11,7 +11,7 @@ import {
   readErrorMessage,
   typeQuestionAnswer,
 } from "@hercule/client-core";
-import type { OpenRequest, QuestionAnswers, SessionRespondInput } from "@hercule/contract";
+import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
 import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@hercule/ui";
 
 /**
@@ -28,9 +28,10 @@ import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@her
  * what the dock is. Spec 14 §The thread surface and §Measurements own the
  * layout.
  *
- * A `question` request is not a permission request. Where a command or path
- * would otherwise go, it shows the question form, and the user answers there.
- * Deny and Cancel stay in the ledger below it.
+ * A `question` request is not an approval. Where a command or path would
+ * otherwise go, it shows the question form, and the user answers there. It
+ * has no ledger: a question offers no decision, and to turn it down the user
+ * stops the turn with the composer's Stop.
  *
  * The request's text, its questions and its answers come from
  * `buildApprovalCard`, so an answer is described the same way everywhere and
@@ -47,22 +48,30 @@ export function PermissionCard({
   readonly request: OpenRequest;
 }): JSX.Element {
   const card = buildApprovalCard(request);
-  const respond = useMutation({
-    mutationFn: (response: Omit<SessionRespondInput, "requestId">) =>
-      client.session.respond({
+  // Neither response is written into the cache. It is a snapshot of the
+  // session from when the controller received the answer, still parked on
+  // the request, so writing it would bring back a card the live `session`
+  // topic has already cleared. That topic is the source of truth; until it
+  // clears the request, the card stays locked through `isSuccess`.
+  const decide = useMutation({
+    mutationFn: (decision: ApprovalDecision) =>
+      client.session.respondToApprovalRequest({
         params: { id: sessionId },
-        payload: { requestId: request.requestId, ...response },
+        payload: { requestId: request.requestId, decision },
       }),
-    // The response is not written into the cache. It is a snapshot of the
-    // session from when the controller received the answer, still parked on
-    // the request, so writing it would bring back a card the live `session`
-    // topic has already cleared. That topic is the source of truth; until it
-    // clears the request, the card stays locked through `isSuccess`.
+  });
+  const answer = useMutation({
+    mutationFn: (answers: QuestionAnswers) =>
+      client.session.respondToQuestion({
+        params: { id: sessionId },
+        payload: { requestId: request.requestId, answers },
+      }),
   });
   // One answer per request. The card stays until the runner reports the
   // request resolved, and a second click in that time could send an answer
   // that contradicts the one already recorded.
-  const locked = respond.isPending || respond.isSuccess;
+  const locked = [decide, answer].some((sent) => sent.isPending || sent.isSuccess);
+  const error = decide.error ?? answer.error;
 
   return (
     // The dock sits behind the card: the card is `z-[1]`, so the 8px of the
@@ -90,23 +99,25 @@ export function PermissionCard({
           <QuestionForm
             questions={card.questions}
             locked={locked}
-            onSend={(answers) => respond.mutate({ answers })}
+            onSend={(answers) => answer.mutate(answers)}
           />
         )}
         {/* The ledger's rows extend 8px past this column on both sides, so
             the labels stay on the same left edge as the title. The dock's
             13px bottom padding keeps the last row clear of the card, which
             covers the dock's bottom 8px. */}
-        <div className="mt-1">
-          <AnswerLedger
-            rows={card.rows}
-            disabled={locked}
-            onSelect={(decision) => respond.mutate({ decision })}
-          />
-        </div>
-        {respond.error === null ? null : (
+        {card.rows.length === 0 ? null : (
+          <div className="mt-1">
+            <AnswerLedger
+              rows={card.rows}
+              disabled={locked}
+              onSelect={(decision) => decide.mutate(decision)}
+            />
+          </div>
+        )}
+        {error === null ? null : (
           <p className="mt-1 text-fail" role="alert">
-            {readErrorMessage(respond.error)}
+            {readErrorMessage(error)}
           </p>
         )}
       </div>
@@ -216,6 +227,9 @@ function QuestionForm({
           not look like another option. */}
       {question.note === null ? null : (
         <span className="mt-1 text-[11px] text-faint">{question.note}</span>
+      )}
+      {question.secretWarning === null ? null : (
+        <span className="mt-1 text-[11px] text-attn">{question.secretWarning}</span>
       )}
       <div className="mt-2 flex items-center gap-2">
         <Input

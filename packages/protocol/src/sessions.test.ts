@@ -5,7 +5,7 @@ import {
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
   SessionBinding,
-  SessionRespond,
+  SessionRespondToQuestion,
   SessionSpec,
   SessionStart,
   SessionStop,
@@ -120,12 +120,20 @@ const events: ReadonlyArray<Event> = [
   },
 ];
 
-/** One detail per request kind: five closed structs in one vocabulary. */
+/**
+ * One detail per request kind: five closed structs in one vocabulary. An
+ * approval lists the decisions it accepts; a question takes answers only.
+ */
+const DENY_OR_CANCEL = ["deny", "cancel"] as const;
 const requests = [
-  { kind: "command_approval", detail: { command: "ls -la" } },
-  { kind: "file_change_approval", detail: { paths: ["src/main.ts", "src/old.ts"] } },
-  { kind: "file_read_approval", detail: { paths: ["/etc/hosts"] } },
-  { kind: "tool_approval", detail: { toolName: "WebFetch" } },
+  { kind: "command_approval", decisions: DENY_OR_CANCEL, detail: { command: "ls -la" } },
+  {
+    kind: "file_change_approval",
+    decisions: DENY_OR_CANCEL,
+    detail: { paths: ["src/main.ts", "src/old.ts"] },
+  },
+  { kind: "file_read_approval", decisions: DENY_OR_CANCEL, detail: { paths: ["/etc/hosts"] } },
+  { kind: "tool_approval", decisions: DENY_OR_CANCEL, detail: { toolName: "WebFetch" } },
   {
     kind: "question",
     detail: {
@@ -161,7 +169,7 @@ describe("the normalized event taxonomy", () => {
     const opened = {
       _tag: "request.opened",
       ...baseFields,
-      request: { requestId: "r1", itemId: "i1", decisions: ["deny", "cancel"], ...request },
+      request: { requestId: "r1", itemId: "i1", ...request },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
   });
@@ -245,7 +253,6 @@ describe("the normalized event taxonomy", () => {
           requestId: "r1",
           itemId: "i1",
           kind: "question",
-          decisions: ["deny", "cancel"],
           detail: { questions },
         },
       })._tag;
@@ -271,7 +278,6 @@ describe("the normalized event taxonomy", () => {
         requestId: "r1",
         itemId: "i1",
         kind: "question",
-        decisions: ["deny", "cancel"],
         detail: {
           questions: [{ ...one, options: [{ label: "SQLite", description: "it", preview: "x" }] }],
         },
@@ -288,6 +294,23 @@ describe("the normalized event taxonomy", () => {
     });
     expect(decodeQuestionRequest([omitKey(one, "multiSelect")])).toBe("Failure");
     expect(decodeQuestionRequest([{ ...one, header: "" }])).toBe("Failure");
+  });
+
+  it("keeps the mark on a question whose answer the harness asked to keep secret", () => {
+    const secret = {
+      question: "Which token should this use?",
+      header: "Token",
+      options: [],
+      multiSelect: false,
+      secret: true,
+    };
+    const opened = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: { requestId: "r1", itemId: "i1", kind: "question", detail: { questions: [secret] } },
+    };
+
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
   });
 
   it("requires the turn id on both the start and the completion of a turn", () => {
@@ -414,39 +437,31 @@ describe("what the controller sends for a session", () => {
   });
 });
 
-describe("the answer the controller sends to a parked session", () => {
+describe("the frames that answer a parked session", () => {
   it("decodes a frame that answers a question with answers keyed by header", () => {
     // A single-select question is answered with one string, a multi-select
     // question with a list.
     const frame = {
-      _tag: "sessionRespond",
+      _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
       answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
     };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
-  });
-
-  it("still decodes a frame that answers with a decision", () => {
-    const frame = {
-      _tag: "sessionRespond",
-      sessionId: SESSION_ID,
-      requestId: "r1",
-      decision: "deny",
-    };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(
+      frame,
+    );
   });
 
   it("refuses an answer that is only spaces", () => {
     const frame = {
-      _tag: "sessionRespond",
+      _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
       answers: { Storage: "  " },
     };
-    expect(Effect.runSyncExit(Schema.decodeUnknownEffect(SessionRespond)(frame))._tag).toBe(
-      "Failure",
-    );
+    expect(
+      Effect.runSyncExit(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))._tag,
+    ).toBe("Failure");
   });
 
   it("refuses answers that together hold more characters than the limit, though each fits", () => {
@@ -454,7 +469,7 @@ describe("the answer the controller sends to a parked session", () => {
     // together, headers included, keeps the frame within what the socket carries.
     const full = "x".repeat(MAX_MESSAGE_LENGTH);
     const buildFrame = (lastLength: number) => ({
-      _tag: "sessionRespond",
+      _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
       answers: {
@@ -465,7 +480,9 @@ describe("the answer the controller sends to a parked session", () => {
       },
     });
     const decodeFrame = (lastLength: number) =>
-      Effect.runSyncExit(Schema.decodeUnknownEffect(SessionRespond)(buildFrame(lastLength)))._tag;
+      Effect.runSyncExit(
+        Schema.decodeUnknownEffect(SessionRespondToQuestion)(buildFrame(lastLength)),
+      )._tag;
     // The one-character header and the answers fill the limit exactly.
     expect(decodeFrame(MAX_MESSAGE_LENGTH - 1)).toBe("Success");
     expect(decodeFrame(MAX_MESSAGE_LENGTH)).toBe("Failure");
@@ -475,11 +492,13 @@ describe("the answer the controller sends to a parked session", () => {
     // A header that is empty or too long can match no question. Dropping it
     // here would accept the rest of the answers as if it had never been sent.
     const frame = {
-      _tag: "sessionRespond",
+      _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
       answers: { "": "x", ["h".repeat(600)]: "y", Storage: "localStorage" },
     };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespond)(frame))).toEqual(frame);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(
+      frame,
+    );
   });
 });

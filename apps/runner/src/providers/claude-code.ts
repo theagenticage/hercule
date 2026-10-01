@@ -36,7 +36,8 @@ import {
   type OpenRequest,
   type ProbeResult,
   type ProviderEvent,
-  type RequestResponse,
+  type QuestionAnswers,
+  type RequestResolution,
   type SendResult,
   type SessionBinding,
   type SessionSpec,
@@ -599,18 +600,13 @@ const resolveNativeSession = (
 /**
  * An open request the harness is waiting on for an answer. The promise the
  * harness awaits is hidden in the closures; everything else only needs the
- * request id, which responses the request takes, and a way to end the wait.
+ * request id, what the request takes, and a way to end the wait.
+ *
+ * An approval takes one of the decisions it offers; a question takes answers
+ * only.
  */
-interface Park {
+type Park = {
   readonly requestId: string;
-  readonly decisions: ReadonlyArray<ApprovalDecision>;
-  /** Whether the request is a question, the only kind that takes answers. */
-  readonly asksQuestions: boolean;
-  /**
-   * Sends the decision or the answers to the harness in the SDK's terms, and
-   * the harness continues.
-   */
-  readonly answer: (response: RequestResponse) => void;
   /**
    * Ends the request without an answer from the user. This happens when:
    *
@@ -624,7 +620,19 @@ interface Park {
    * to interrupt.
    */
   readonly withdraw: () => void;
-}
+} & (
+  | {
+      readonly kind: "approval";
+      readonly decisions: ReadonlyArray<ApprovalDecision>;
+      /** Sends the decision to the harness in the SDK's terms, and the harness continues. */
+      readonly decide: (decision: ApprovalDecision) => void;
+    }
+  | {
+      readonly kind: "question";
+      /** Sends the answers to the harness in the SDK's terms, and the harness continues. */
+      readonly answer: (answers: QuestionAnswers) => void;
+    }
+);
 
 /** One session this adapter is hosting. */
 interface Live {
@@ -739,7 +747,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           toolName === ASK_USER_QUESTION
             ? buildQuestionRequest({ requestId, itemId }, toolName, input["questions"], "question")
             : buildApprovalRequest(requestId, itemId, toolName, input, persists.length > 0);
-        const endPark = (response: RequestResponse, told: PermissionResult): void => {
+        const endPark = (resolution: RequestResolution, told: PermissionResult): void => {
           // End the park only if it is still this request's park, so a
           // second answer does nothing.
           if (held.park?.requestId !== requestId) return;
@@ -751,7 +759,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             sessionId,
             at: held.state.now(),
             requestId,
-            ...response,
+            ...resolution,
           });
           settle(told);
         };
@@ -761,22 +769,29 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const withdraw = (): void =>
           endPark({ decision: "cancel" }, buildPermissionResult("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
-        held.park = {
-          requestId,
-          decisions: request.decisions,
-          asksQuestions: request.kind === "question",
-          answer: (response) =>
-            endPark(
-              response,
-              "decision" in response
-                ? buildPermissionResult(response.decision, persists)
-                : buildAnsweredResult(
-                    input,
-                    keyAnswersForVendor(response.answers, input["questions"], "question"),
+        held.park =
+          request.kind === "question"
+            ? {
+                requestId,
+                withdraw,
+                kind: "question",
+                answer: (answers) =>
+                  endPark(
+                    { answers },
+                    buildAnsweredResult(
+                      input,
+                      keyAnswersForVendor(answers, input["questions"], "question"),
+                    ),
                   ),
-            ),
-          withdraw,
-        };
+              }
+            : {
+                requestId,
+                withdraw,
+                kind: "approval",
+                decisions: request.decisions,
+                decide: (decision) =>
+                  endPark({ decision }, buildPermissionResult(decision, persists)),
+              };
         emit({
           _tag: "request.opened",
           eventId: held.state.mint(),
@@ -1016,20 +1031,28 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         held.stream.close();
       }),
 
-    respondToRequest: (
+    respondToApprovalRequest: (
       sessionId: string,
       requestId: string,
-      response: RequestResponse,
+      decision: ApprovalDecision,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
         const park = live.get(sessionId)?.park;
-        if (park === undefined || park.requestId !== requestId) return;
-        // Ignore a decision the request did not offer, and answers to a
-        // request that is not a question: the harness would have to replace
-        // them with something else.
-        const fits =
-          "decision" in response ? park.decisions.includes(response.decision) : park.asksQuestions;
-        if (fits) park.answer(response);
+        if (park?.requestId !== requestId || park.kind !== "approval") return;
+        // Ignore a decision the request did not offer: the harness would have
+        // to replace it with something else.
+        if (park.decisions.includes(decision)) park.decide(decision);
+      }),
+
+    respondToQuestion: (
+      sessionId: string,
+      requestId: string,
+      answers: QuestionAnswers,
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        const park = live.get(sessionId)?.park;
+        if (park?.requestId !== requestId || park.kind !== "question") return;
+        park.answer(answers);
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

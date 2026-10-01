@@ -223,6 +223,15 @@
   color: var(--faint);
   font-size: var(--t-12);
 }
+/* Not in the book, which draws no secret question. The warning that its
+   answer is stored like any other is set like the note, in the attention ink
+   the composer's own notes use. */
+.dock-question-warning {
+  margin-top: 4px;
+  padding: 0 4px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+}
 .dock-own {
   display: flex;
   align-items: center;

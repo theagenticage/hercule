@@ -30,7 +30,11 @@ import type {
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
-import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
+import {
+  APPROVAL_ANSWER_LABELS,
+  buildSessionStreamTopic,
+  buildSessionTapTopic,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   fakeMainScrollGeometry,
@@ -2633,7 +2637,6 @@ describe("Thread: the permission card", () => {
     requestId: "req-2",
     itemId: "tool3",
     kind: "question",
-    decisions: ["deny", "cancel"],
     detail: {
       questions: [
         {
@@ -2758,7 +2761,7 @@ describe("Thread: the permission card", () => {
       // The response is held until the test releases it, and it still has
       // the open request. The response is a snapshot from when the request
       // was made; the card follows the live session instead.
-      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: () =>
+      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: () =>
         new Promise<{ readonly body: unknown }>((resolve) => {
           release = () => {
             resolve({ body: buildSession({ status: "busy", openRequest: REQUEST }) });
@@ -2776,9 +2779,13 @@ describe("Thread: the permission card", () => {
     );
 
     await waitFor(() => {
-      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+      expect(
+        api.calls.filter((call) => call.path.endsWith("/respond-to-approval-request")),
+      ).toHaveLength(1);
     });
-    expect(api.calls.find((call) => call.path.endsWith("/respond"))).toMatchObject({
+    expect(
+      api.calls.find((call) => call.path.endsWith("/respond-to-approval-request")),
+    ).toMatchObject({
       method: "POST",
       body: { requestId: REQUEST.requestId, decision: "allow" },
     });
@@ -2818,14 +2825,16 @@ describe("Thread: the permission card", () => {
     const current = buildSession({ status: "busy", openRequest: REQUEST });
     const api = stubApi({
       ...buildController(current, buildParkedRows()),
-      [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
+      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: { body: current },
     });
     await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
 
     const allow = await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") });
     await user.click(allow);
     await waitFor(() => {
-      expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+      expect(
+        api.calls.filter((call) => call.path.endsWith("/respond-to-approval-request")),
+      ).toHaveLength(1);
     });
 
     // The card is still shown, because only the runner clears it. But it
@@ -2834,7 +2843,9 @@ describe("Thread: the permission card", () => {
     await user.click(screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "deny") }));
     await user.click(allow);
 
-    expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
+    expect(
+      api.calls.filter((call) => call.path.endsWith("/respond-to-approval-request")),
+    ).toHaveLength(1);
   });
 
   it("shows the item the request is about as awaiting approval, in the attention color", async () => {
@@ -2858,17 +2869,14 @@ describe("Thread: the permission card", () => {
     expect(getComposerCard().className).toContain("rounded-[14px]");
   });
 
-  it("shows a question request's questions with only deny and cancel as decisions", async () => {
+  it("shows a question request's questions with no decision", async () => {
     await openApp(buildSession({ status: "busy", openRequest: QUESTIONS }), buildParkedRows());
 
-    await screen.findByRole("button", { name: buildAnswerMatcher(QUESTIONS, "deny") });
-    expect(
-      screen.getByRole("button", { name: buildAnswerMatcher(QUESTIONS, "cancel") }),
-    ).toBeDefined();
-    expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow_always") }),
-    ).toBeNull();
+    await screen.findByText("Which database should it use?");
+    // A question takes answers only; the user turns it down with Stop.
+    for (const label of Object.values(APPROVAL_ANSWER_LABELS)) {
+      expect(screen.queryByRole("button", { name: (name) => name.startsWith(label) })).toBeNull();
+    }
 
     // A question is not an approval. The card shows three separate blocks,
     // not one paragraph:
@@ -2887,7 +2895,8 @@ describe("Thread: the permission card", () => {
 /**
  * Tests for answering a `question` request in the permission card: one
  * question at a time, its options as choices, a field for an own answer, and
- * Next and Send. The answers go to `session.respond` as `{ requestId, answers }`.
+ * Next and Send. The answers go to `session.respondToQuestion` as
+ * `{ requestId, answers }`.
  */
 describe("Thread: answering the agent's questions", () => {
   /** One question of a `question` request, as the contract types it. */
@@ -2923,7 +2932,6 @@ describe("Thread: answering the agent's questions", () => {
     requestId: "req-2",
     itemId: "tool3",
     kind: "question",
-    decisions: ["deny", "cancel"],
     detail: { questions: [STORAGE, FEATURES] },
   };
 
@@ -2933,7 +2941,7 @@ describe("Thread: answering the agent's questions", () => {
     detail: { questions: [STORAGE] },
   };
 
-  const RESPOND = `POST /api/v1/sessions/${SESSION_ID}/respond`;
+  const RESPOND_TO_QUESTION = `POST /api/v1/sessions/${SESSION_ID}/respond-to-question`;
 
   /**
    * Opens the thread parked on `request`, with a controller that accepts
@@ -2941,12 +2949,25 @@ describe("Thread: answering the agent's questions", () => {
    */
   const openParked = (request: NonNullable<Session["openRequest"]>) => {
     const session = buildSession({ status: "busy", openRequest: request });
-    return openApp(session, [], { [RESPOND]: { body: session } });
+    return openApp(session, [], {
+      [RESPOND_TO_QUESTION]: { body: session },
+      [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: session },
+    });
   };
 
-  /** Returns the bodies the app sent with `session.respond`, oldest first. */
+  /**
+   * Returns the bodies the app sent with `session.respondToQuestion` and
+   * `session.respondToApprovalRequest`, oldest first, so a decision sent by
+   * mistake would show up too.
+   */
   const readBodies = (calls: readonly Call[]): readonly unknown[] =>
-    calls.filter((call) => call.path.endsWith("/respond")).map((call) => call.body);
+    calls
+      .filter(
+        (call) =>
+          call.path.endsWith("/respond-to-question") ||
+          call.path.endsWith("/respond-to-approval-request"),
+      )
+      .map((call) => call.body);
 
   /**
    * Returns the choice for the option `label`: a radio on a single-select
@@ -3004,6 +3025,17 @@ describe("Thread: answering the agent's questions", () => {
     expect(readSend()).toBeDefined();
   });
 
+  it("warns that an answer the agent asked to keep secret is stored like any other", async () => {
+    await openParked({ ...QUESTIONS, detail: { questions: [{ ...STORAGE, secret: true }] } });
+
+    await screen.findByText("Which storage should drafts use?");
+    expect(
+      screen.getByText(
+        "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
+      ),
+    ).toBeDefined();
+  });
+
   it("enables Send only once the question is answered with a pick or non-blank text", async () => {
     const user = userEvent.setup();
     await openParked(ONE_QUESTION);
@@ -3030,7 +3062,7 @@ describe("Thread: answering the agent's questions", () => {
     expect(isLocked(readSend())).toBe(false);
   });
 
-  it("sends the answers of every question with session.respond", async () => {
+  it("sends the answers of every question with session.respondToQuestion", async () => {
     const user = userEvent.setup();
     const { api } = await openParked(QUESTIONS);
 
@@ -3120,18 +3152,19 @@ describe("Thread: answering the agent's questions", () => {
     });
   });
 
-  it.each(["deny", "cancel"])("still answers %s with a decision", async (decision) => {
+  it("turns the question down with the composer's Stop, which sends no answer", async () => {
     const user = userEvent.setup();
     const { api } = await openParked(QUESTIONS);
 
-    const found = buildApprovalCard(QUESTIONS).rows.find((row) => row.id === decision)!;
-    await user.click(
-      await screen.findByRole("button", { name: (name) => name.includes(found.label) }),
-    );
+    await screen.findByText("Which storage should drafts use?");
+    await user.click(screen.getByRole("button", { name: /^stop$/i }));
 
     await waitFor(() => {
-      expect(readBodies(api.calls)).toEqual([{ requestId: "req-2", decision }]);
+      expect(
+        api.calls.filter((call) => call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`),
+      ).toHaveLength(1);
     });
+    expect(readBodies(api.calls)).toEqual([]);
   });
 });
 
@@ -3478,12 +3511,12 @@ describe("Thread: the session view of an assistant's session", () => {
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
   });
 
-  it("still shows the permission card for an open request, and sends its answer to session.respond", async () => {
+  it("still shows the permission card for an open request, and sends its answer to session.respondToApprovalRequest", async () => {
     const user = userEvent.setup();
     const fixture = buildAssistantSession({ status: "busy", openRequest: REQUEST });
     const api = stubApi({
       ...buildController(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
-      [`POST /api/v1/sessions/${fixture.id}/respond`]: { body: fixture },
+      [`POST /api/v1/sessions/${fixture.id}/respond-to-approval-request`]: { body: fixture },
     });
     await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
 
@@ -3496,9 +3529,11 @@ describe("Thread: the session view of an assistant's session", () => {
     );
 
     await waitFor(() => {
-      expect(api.calls.find((call) => call.path.endsWith("/respond"))).toMatchObject({
+      expect(
+        api.calls.find((call) => call.path.endsWith("/respond-to-approval-request")),
+      ).toMatchObject({
         method: "POST",
-        path: `/api/v1/sessions/${fixture.id}/respond`,
+        path: `/api/v1/sessions/${fixture.id}/respond-to-approval-request`,
         body: { requestId: REQUEST.requestId, decision: "allow" },
       });
     });

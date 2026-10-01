@@ -10,17 +10,22 @@
  *   exactly as the request was built, so building and answering share one
  *   parser;
  * - the fallback in `buildQuestionRequest` is the difference between a request
- *   the user can deny and a frame the controller drops.
+ *   the user can deny and a frame the controller drops;
+ * - the answers come back keyed by the headers the request showed, so the
+ *   headers must be unique, and only the adapter can make them unique: it is
+ *   the one place that knows each header's vendor key.
  *
  * Every field is read defensively. The input is whatever the vendor sent, and
  * one field of the wrong type would otherwise produce a frame the runner
  * drops. That loses the event and leaves the session parked with no way out.
  */
-import type { OpenRequest, QuestionAnswers } from "@hercule/protocol";
+import {
+  MAX_FACT_LENGTH,
+  type OpenRequest,
+  type Question,
+  type QuestionAnswers,
+} from "@hercule/protocol";
 import { truncateFact, truncateMessage } from "./text";
-
-/** One question as the protocol carries it, mapped from the vendor's shape. */
-type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
 
 /**
  * Parses the options of one question. The user picks from them, and the
@@ -63,21 +68,42 @@ interface KeyedQuestion {
 }
 
 /**
- * Parses each question of an ask, field by field, and drops a question that
+ * Returns `header`, truncated to fit the protocol, or, when an earlier
+ * question already shows that header, the header with the first free number
+ * after it: the second "Approach" becomes "Approach (2)". The answers come
+ * back keyed by header, so two questions showing one header could not both
+ * be answered. Claude Code checks only that question texts are unique, so two
+ * of its questions can share a header.
+ */
+const buildUniqueHeader = (header: string, taken: ReadonlySet<string>): string => {
+  const shown = truncateFact(header);
+  if (!taken.has(shown)) return shown;
+  for (let number = 2; ; number++) {
+    const suffix = ` (${String(number)})`;
+    const numbered = `${header.slice(0, MAX_FACT_LENGTH - suffix.length)}${suffix}`;
+    if (!taken.has(numbered)) return numbered;
+  }
+};
+
+/**
+ * Parses each question of an ask, field by field. Parsing the same input
+ * again gives the same questions with the same headers, which is what lets
+ * `keyAnswersForVendor` find each answer's question. It drops a question that
  * cannot be shown or answered:
  *
  * - one without its text or its header (the chip), because an invented header
  *   would show words the agent never wrote;
  * - one without the vendor's key for its answer, because its answer could not
  *   be sent back;
- * - one whose header or vendor key repeats an earlier question's, because
- *   answers are keyed by header on the way in and by vendor key on the way
- *   out, and two equal keys cannot both be answered;
- * - a secret one (Codex `isSecret`), because the protocol has no way to hide
- *   an answer, so it would be shown and stored in plain text.
+ * - one whose vendor key repeats an earlier question's, because the vendor
+ *   reads one answer per key, so the earlier question's answer is the only
+ *   one it can receive.
  *
- * A missing `multiSelect` means one answer, because a harness with no such
- * field always asks for one.
+ * A repeated header is numbered rather than dropped (see
+ * `buildUniqueHeader`). A missing `multiSelect` means one answer, because a
+ * harness with no such field always asks for one. A secret question (Codex
+ * `isSecret`) is kept and marked `secret`, so the surfaces can warn that its
+ * answer is stored like any other.
  */
 const parseQuestions = (given: unknown, keyField: AnswerKeyField): ReadonlyArray<KeyedQuestion> => {
   if (!Array.isArray(given)) return [];
@@ -98,9 +124,8 @@ const parseQuestions = (given: unknown, keyField: AnswerKeyField): ReadonlyArray
     if (typeof question !== "string" || question === "") return [];
     if (typeof header !== "string" || header === "") return [];
     if (typeof answerKey !== "string" || answerKey === "") return [];
-    if (isSecret === true) return [];
-    const shownHeader = truncateFact(header);
-    if (headers.has(shownHeader) || answerKeys.has(answerKey)) return [];
+    if (answerKeys.has(answerKey)) return [];
+    const shownHeader = buildUniqueHeader(header, headers);
     headers.add(shownHeader);
     answerKeys.add(answerKey);
     return [
@@ -110,6 +135,7 @@ const parseQuestions = (given: unknown, keyField: AnswerKeyField): ReadonlyArray
           header: shownHeader,
           options: parseOptions(options),
           multiSelect: multiSelect === true,
+          ...(isSecret === true ? { secret: true } : {}),
         },
         answerKey,
       },
@@ -118,14 +144,14 @@ const parseQuestions = (given: unknown, keyField: AnswerKeyField): ReadonlyArray
 };
 
 /**
- * Builds the open request for an ask. A question request offers only deny
- * and cancel as decisions: it is answered with answers, and an allow would run
- * the tool with no answer in it.
+ * Builds the open request for an ask: a `question` request, answered with
+ * answers only.
  *
  * When no question in the ask can be parsed, the request is a `tool_approval`
  * named after the tool instead. The controller rejects a `question` request
  * with no questions, and the runner would drop it, leaving the session parked.
- * A `tool_approval` request can still be denied.
+ * The `tool_approval` offers only deny and cancel, because an allow would run
+ * the tool with no answer in it.
  */
 export const buildQuestionRequest = (
   identity: { readonly requestId: string; readonly itemId: string },
@@ -133,11 +159,15 @@ export const buildQuestionRequest = (
   given: unknown,
   keyField: AnswerKeyField,
 ): OpenRequest => {
-  const common = { ...identity, decisions: ["deny", "cancel"] } as const;
   const [first, ...rest] = parseQuestions(given, keyField).map((keyed) => keyed.question);
   return first === undefined
-    ? { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } }
-    : { ...common, kind: "question", detail: { questions: [first, ...rest] } };
+    ? {
+        ...identity,
+        kind: "tool_approval",
+        decisions: ["deny", "cancel"],
+        detail: { toolName: truncateFact(toolName) },
+      }
+    : { ...identity, kind: "question", detail: { questions: [first, ...rest] } };
 };
 
 /**

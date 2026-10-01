@@ -12,7 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SessionInput, SessionRespond } from "@hercule/protocol";
+import type { SessionInput, SessionRespondToApprovalRequest } from "@hercule/protocol";
 import type { BoundAction, Notification, Session, Task } from "@hercule/contract";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import type { ServerHarness } from "../http/testing";
@@ -423,7 +423,11 @@ describe("an answer of the core's approval decision", () => {
 
       const returned = await actOrFail(harness.base, token, approval.id, "allow");
 
-      const [frame] = await waitForFrames<SessionRespond>(arranged.wire, "sessionRespond", 1);
+      const [frame] = await waitForFrames<SessionRespondToApprovalRequest>(
+        arranged.wire,
+        "sessionRespondToApprovalRequest",
+        1,
+      );
       expect(frame).toMatchObject({ sessionId: session.id, requestId: "req-1", decision: "allow" });
       expect(returned.resolution).toMatchObject({
         kind: "decided",

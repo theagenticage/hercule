@@ -200,7 +200,8 @@ const COMMANDS: Record<string, string> = {
   "session.update": "session update",
   "session.input": "session input",
   "session.interrupt": "session interrupt",
-  "session.respond": "session respond",
+  "session.respondToApprovalRequest": "session respond-to-approval-request",
+  "session.respondToQuestion": "session respond-to-question",
   "session.stop": "session stop",
   "session.continue": "session continue",
 
@@ -346,7 +347,8 @@ const RESOLVES: Record<string, string> = {
   "session.update id": "session.query",
   "session.input id": "session.query",
   "session.interrupt id": "session.query",
-  "session.respond id": "session.query",
+  "session.respondToApprovalRequest id": "session.query",
+  "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
   "session.continue id": "session.query",
 

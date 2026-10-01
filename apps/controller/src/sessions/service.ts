@@ -29,12 +29,13 @@ import {
   type ModelSelection,
   type OpenRequest,
   type ProviderEvent,
-  type RequestResponse,
+  type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
   type SessionInputResult,
   type SessionInterrupt,
-  type SessionRespond,
+  type SessionRespondToApprovalRequest,
+  type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
 } from "@hercule/protocol";
@@ -938,16 +939,36 @@ const make = Effect.gen(function* () {
     }),
 
     /**
-     * Builds the frame that answers the request a session's harness is
-     * waiting on, with a decision or with a question's answers. The result
-     * arrives in the session's stream as `request.resolved`, so the daemon
-     * sends this frame without waiting for a reply.
+     * Builds the frame that decides the approval a session's harness is
+     * waiting on. The result arrives in the session's stream as
+     * `request.resolved`, so the daemon sends this frame without waiting for
+     * a reply.
      */
-    responding: (
+    respondingToApprovalRequest: (
       sessionId: string,
       requestId: string,
-      response: RequestResponse,
-    ): SessionRespond => ({ _tag: "sessionRespond", sessionId, requestId, ...response }),
+      decision: ApprovalDecision,
+    ): SessionRespondToApprovalRequest => ({
+      _tag: "sessionRespondToApprovalRequest",
+      sessionId,
+      requestId,
+      decision,
+    }),
+
+    /**
+     * Builds the frame that answers the question a session's harness is
+     * waiting on, with the same report as `respondingToApprovalRequest`.
+     */
+    respondingToQuestion: (
+      sessionId: string,
+      requestId: string,
+      answers: QuestionAnswers,
+    ): SessionRespondToQuestion => ({
+      _tag: "sessionRespondToQuestion",
+      sessionId,
+      requestId,
+      answers,
+    }),
 
     /**
      * Resolves the approval notification about a session's request as

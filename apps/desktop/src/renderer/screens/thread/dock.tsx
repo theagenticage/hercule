@@ -12,7 +12,7 @@ import {
   readErrorMessage,
   typeQuestionAnswer,
 } from "@hercule/client-core";
-import type { ApprovalDecision, OpenRequest, SessionRespondInput } from "@hercule/contract";
+import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons";
 import { isSendKey } from "./send-key";
@@ -52,9 +52,10 @@ const DECISION_BUTTON_CLASSES: Readonly<Record<ApprovalDecision, string>> = {
  * - esc sends deny, wherever the focus is in the dock;
  * - ↩ sends allow only when the dock itself has focus. When an answer has
  *   focus, ↩ presses that answer, as it presses any button, so a focused
- *   Deny is never turned into Allow. A `question` request offers no allow,
- *   so there ↩ moves through the questions instead, which `RequestDock`
- *   handles before it asks for a decision.
+ *   Deny is never turned into Allow.
+ *
+ * Only an approval takes a decision, so `RequestDock` never asks for one on
+ * a `question` request.
  *
  * A key held with ⌘, ⌃ or ⇧ sends nothing, so those combinations keep any
  * meaning the app gives them.
@@ -79,8 +80,11 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  *   among the questions when there are several, its options as choices, a
  *   field for the user's own answer, and Next, or Send answers on the last
  *   question;
- * - the ledger: one answer per decision the request offers, in the
- *   request's order, each with what it does and its key.
+ * - for an approval, the ledger: one answer per decision the approval
+ *   offers, in the approval's order, each with what it does and its key.
+ *
+ * A question offers no decision. To turn it down, the user stops the turn
+ * with the composer's Stop, which resolves the question as cancelled.
  *
  * The request's text, its questions and its answers come from
  * `buildApprovalCard`, so an answer is described in the same words on every
@@ -88,23 +92,22 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  *
  * While the composer is shrunk, all of that gives way to `dock-mini`: the
  * face, the question in the one line the sidebar's Waiting on you row
- * shows, and the Allow once and Deny answers, when the request offers
+ * shows, and the Allow once and Deny answers, when the approval offers
  * them. These answer the request as the ledger's do, without expanding the
  * composer.
  *
  * The dock is a group named by its title, and it can take focus. While the
- * focus is inside it, the keys `findDecisionForKey` lists send their answer.
- * On a `question` request, ↩ on the dock itself, on a choice or in the
- * own-answer field, and ⌘↵ anywhere in the dock, do what Next or Send
- * answers does. A user who clicks a choice and presses ↩ moves on, while ↩
- * on a focused button still presses that button. Esc in the own-answer
- * field is left to the field, so a user editing their answer does not deny
- * by accident. The keys are read here rather than on the window, so nothing
- * outside the dock ever answers a Request, and the dock never takes the
- * focus when it opens.
+ * focus is inside an approval's dock, the keys `findDecisionForKey` lists
+ * send their answer. On a `question` request, ↩ on the dock itself, on a
+ * choice or in the own-answer field, and ⌘↵ anywhere in the dock, do what
+ * Next or Send answers does. A user who clicks a choice and presses ↩ moves
+ * on, while ↩ on a focused button still presses that button. The keys are
+ * read here rather than on the window, so nothing outside the dock ever
+ * answers a Request, and the dock never takes the focus when it opens.
  *
- * An answer is sent with `session.respond`. Mount one dock per request, keyed
- * by its id, so an answer given to one request never disables the next.
+ * A decision is sent with `session.respondToApprovalRequest`, and answers
+ * with `session.respondToQuestion`. Mount one dock per request, keyed by its
+ * id, so an answer given to one request never disables the next.
  */
 export function RequestDock({
   sessionId,
@@ -117,23 +120,31 @@ export function RequestDock({
   const { client } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
-  const respond = useMutation({
-    mutationFn: (response: Omit<SessionRespondInput, "requestId">) =>
-      client.session.respond({
+  // Neither response is written into the cache. It is the session as the
+  // controller held it when the answer arrived, still waiting on the
+  // request, so writing it could bring back a dock the live `session` push
+  // has already cleared. Until that push clears the request, the answers
+  // stay disabled through `isSuccess`.
+  const decide = useMutation({
+    mutationFn: (decision: ApprovalDecision) =>
+      client.session.respondToApprovalRequest({
         params: { id: sessionId },
-        payload: { requestId: request.requestId, ...response },
+        payload: { requestId: request.requestId, decision },
       }),
-    // The response is not written into the cache. It is the session as the
-    // controller held it when the answer arrived, still waiting on the
-    // request, so writing it could bring back a dock the live `session` push
-    // has already cleared. Until that push clears the request, the answers
-    // stay disabled through `isSuccess`.
+  });
+  const answer = useMutation({
+    mutationFn: (answers: QuestionAnswers) =>
+      client.session.respondToQuestion({
+        params: { id: sessionId },
+        payload: { requestId: request.requestId, answers },
+      }),
   });
   // One answer per request. The dock stays until the runner reports the
   // request resolved, and a second answer in that time could contradict the
   // one already sent. The keys obey this too, so the keyboard cannot answer
   // where a click cannot.
-  const locked = respond.isPending || respond.isSuccess;
+  const locked = [decide, answer].some((sent) => sent.isPending || sent.isSuccess);
+  const error = decide.error ?? answer.error;
   // The state of a `question` request: what the user has given so far, and
   // which question is shown. For every other kind the draft stays empty and
   // the index is not used.
@@ -151,7 +162,7 @@ export function RequestDock({
       return;
     }
     const answers = buildQuestionAnswers(draft, card.questions);
-    if (answers !== null) respond.mutate({ answers });
+    if (answers !== null) answer.mutate(answers);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -165,13 +176,13 @@ export function RequestDock({
       advanceQuestions();
       return;
     }
-    if (locked) return;
+    if (locked || request.kind === "question") return;
     const decision = findDecisionForKey(event);
     if (decision === null || !request.decisions.includes(decision)) return;
     // Without this, ↩ or ⌥↩ on a focused answer would also press that
     // answer, and send a second decision.
     event.preventDefault();
-    respond.mutate({ decision });
+    decide.mutate(decision);
   };
 
   return (
@@ -236,6 +247,9 @@ export function RequestDock({
             {question.note === null ? null : (
               <span className="dock-question-note">{question.note}</span>
             )}
+            {question.secretWarning === null ? null : (
+              <span className="dock-question-warning">{question.secretWarning}</span>
+            )}
             <div className="dock-own">
               <input
                 className="field"
@@ -247,11 +261,6 @@ export function RequestDock({
                 onChange={(event) =>
                   setDraft(typeQuestionAnswer(draft, question, event.target.value))
                 }
-                onKeyDown={(event) => {
-                  // In a text field, esc is a common way to give up an edit,
-                  // so it must not deny the whole request.
-                  if (event.key === "Escape") event.stopPropagation();
-                }}
               />
               {/* `aria-disabled` rather than `disabled`, so the button keeps
                   the focus when Next turns into Send answers on a question
@@ -270,35 +279,37 @@ export function RequestDock({
             </div>
           </div>
         )}
-        <div className="ledger">
-          {card.rows.map((row) => {
-            const key = DECISION_KEYS[row.id];
-            const describeId = `${titleId}-${row.id}`;
-            return (
-              <button
-                key={row.id}
-                type="button"
-                className="ans"
-                aria-label={row.label}
-                aria-describedby={describeId}
-                aria-keyshortcuts={key?.shortcut}
-                aria-disabled={locked || undefined}
-                onClick={() => {
-                  if (!locked) respond.mutate({ decision: row.id });
-                }}
-              >
-                <span className={DECISION_BUTTON_CLASSES[row.id]}>{row.label}</span>
-                <span className="ans-desc" id={describeId}>
-                  {formatDescribeLine(row.describeLine)}
-                </span>
-                {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
-              </button>
-            );
-          })}
-        </div>
-        {respond.error === null ? null : (
+        {card.rows.length === 0 ? null : (
+          <div className="ledger">
+            {card.rows.map((row) => {
+              const key = DECISION_KEYS[row.id];
+              const describeId = `${titleId}-${row.id}`;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="ans"
+                  aria-label={row.label}
+                  aria-describedby={describeId}
+                  aria-keyshortcuts={key?.shortcut}
+                  aria-disabled={locked || undefined}
+                  onClick={() => {
+                    if (!locked) decide.mutate(row.id);
+                  }}
+                >
+                  <span className={DECISION_BUTTON_CLASSES[row.id]}>{row.label}</span>
+                  <span className="ans-desc" id={describeId}>
+                    {formatDescribeLine(row.describeLine)}
+                  </span>
+                  {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {error === null ? null : (
           <p className="dock-error" role="alert">
-            {readErrorMessage(respond.error)}
+            {readErrorMessage(error)}
           </p>
         )}
       </div>
@@ -315,7 +326,7 @@ export function RequestDock({
               className={DECISION_BUTTON_CLASSES[row.id]}
               aria-disabled={locked || undefined}
               onClick={() => {
-                if (!locked) respond.mutate({ decision: row.id });
+                if (!locked) decide.mutate(row.id);
               }}
             >
               {row.label}

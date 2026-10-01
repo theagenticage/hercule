@@ -127,7 +127,6 @@ const PARKED_ON_QUESTION: Session = {
     requestId: "request-4",
     itemId: "tool-1",
     kind: "question",
-    decisions: ["deny", "cancel"],
     detail: {
       questions: [
         {

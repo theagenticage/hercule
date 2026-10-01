@@ -22,7 +22,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  ANSWERS_CAPABILITY,
   SessionSpec,
   type ControllerToRunner,
   type ModelSelection,
@@ -36,7 +35,8 @@ import {
   InvalidState,
   NotFound,
   SESSION_INPUT_FIELDS,
-  SESSION_RESPOND_FIELDS,
+  SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
+  SESSION_RESPOND_TO_QUESTION_FIELDS,
   SESSION_UPDATE_FIELDS,
   type Forbidden,
   type Session,
@@ -51,7 +51,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
 import { providerRepository, resolvedInstance } from "../../providers";
-import { RunnerConnections, runnerRepository } from "../../runners";
+import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   isResumeHeld,
@@ -60,7 +60,8 @@ import {
   SessionService,
   sessionRepository,
   validateOptions,
-  validateResponse,
+  validateAnswers,
+  validateDecision,
   type StoredInput,
   type StoredSession,
 } from "../../sessions";
@@ -78,13 +79,21 @@ const UpdateInput = Schema.Struct({ id: Id, ...SESSION_UPDATE_FIELDS });
 
 type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const RespondInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_FIELDS });
+const RespondToApprovalRequestInput = Schema.Struct({
+  id: Id,
+  ...SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
+});
 
-type RespondInput = Schema.Schema.Type<typeof RespondInput>;
+type RespondToApprovalRequestInput = Schema.Schema.Type<typeof RespondToApprovalRequestInput>;
+
+const RespondToQuestionInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_TO_QUESTION_FIELDS });
+
+type RespondToQuestionInput = Schema.Schema.Type<typeof RespondToQuestionInput>;
 
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeRespond = Schema.decodeUnknownEffect(RespondInput);
+const decodeRespondToApprovalRequest = Schema.decodeUnknownEffect(RespondToApprovalRequestInput);
+const decodeRespondToQuestion = Schema.decodeUnknownEffect(RespondToQuestionInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /**
@@ -130,14 +139,6 @@ const CONVERSATION_DELETED =
 const NO_OPEN_REQUEST = "that session is not waiting on a request";
 
 /**
- * Answers sent to a runner that cannot read them would close its connection,
- * so they are refused before they are sent.
- */
-const CANNOT_TAKE_ANSWERS =
-  "that session's runner could not take answers to a question when it last connected; " +
-  "update the runner to the controller's version, or deny or cancel the question";
-
-/**
  * The harness has moved on: the answer is for a request other than the one it
  * is waiting on now, so applying it would answer the wrong question.
  */
@@ -165,7 +166,6 @@ const make = Effect.gen(function* () {
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
   const connections = yield* RunnerConnections;
-  const runners = yield* runnerRepository;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
   const { dispatch } = yield* Dispatch;
@@ -505,16 +505,22 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks whether a runner listed `ANSWERS_CAPABILITY` at its last hello, so
-   * it can read a `sessionRespond` frame that carries answers. A runner that
-   * never said hello has listed nothing.
+   * Reads the session `id` and the request it is parked on, and checks that
+   * the request is `requestId`. Fails with `InvalidState` when the session
+   * has exited, waits on no request, or waits on a different one, and with
+   * `NotFound` when there is no such session.
    */
-  const takesAnswers = (runnerId: string): Effect.Effect<boolean, SqlError> =>
-    Effect.map(runners.read(runnerId), (found) =>
-      Option.exists(found, (runner) =>
-        (runner.negotiatedCapabilities ?? []).includes(ANSWERS_CAPABILITY),
-      ),
-    );
+  const readOpenRequest = (id: Id, requestId: string) =>
+    Effect.gen(function* () {
+      const session = yield* readSession(id);
+      if (session.status === "exited")
+        return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
+      const open = session.openRequest;
+      if (open === null) return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
+      if (open.requestId !== requestId)
+        return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
+      return { session, open };
+    });
 
   /**
    * Runs `writes` in a transaction, and sends `frame` to a runner once that
@@ -535,8 +541,8 @@ const make = Effect.gen(function* () {
    *   request, and a second decision is refused because the approval
    *   notification is already decided. The user interrupts or stops the
    *   session to end the wait;
-   * - a question raises no notification, so a lost decision or lost answers
-   *   to a question can simply be sent again.
+   * - a question raises no notification, so lost answers to a question can
+   *   simply be sent again.
    *
    * The runner's report of what the frame did is applied in a later
    * transaction, after this one commits, so that report always finds these
@@ -927,68 +933,99 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Answers the request the session's harness is waiting on. Returns the
+     * Decides the approval the session's harness is waiting on. Returns the
      * session.
      *
-     * Every check runs before anything is sent to the runner, because an
-     * answer applied to the wrong request is the one mistake this operation
+     * Every check runs before anything is sent to the runner, because a
+     * decision applied to the wrong request is the one mistake this operation
      * must never make. It fails when:
      *
      * - the session has exited;
      * - the session has no open request, or waits on a different request;
-     * - the decision or the answers do not fit the request (see
-     *   `validateResponse`);
-     * - answers are given, and the session's runner did not list
-     *   `ANSWERS_CAPABILITY` at its last hello;
-     * - a decision is given to an approval that was already decided, or
-     *   whose wait already ended.
+     * - the request is a question, or does not offer the decision (see
+     *   `validateDecision`);
+     * - the approval was already decided, or its wait already ended.
      *
-     * A decision also resolves the approval notification about the request
+     * The decision also resolves the approval notification about the request
      * as `decided`, in the same transaction, stamped with the caller. So the
      * notification shows the request as answered, whether the user answered
-     * it here or from the notification. A question raises no notification,
-     * so answers resolve none.
+     * it here or from the notification.
      *
-     * The runner is told the answer once the transaction commits, so an
-     * answer the database does not hold never reaches the harness.
+     * The runner is told the decision once the transaction commits, so a
+     * decision the database does not hold never reaches the harness.
      */
-    respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
+    respondToApprovalRequest: (
+      input: RespondToApprovalRequestInput,
+    ): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
-        yield* requireGrant("session.respond");
-        const { id, requestId, ...given } = yield* Effect.mapError(
-          decodeRespond(input),
+        yield* requireGrant("session.respondToApprovalRequest");
+        const { id, requestId, decision } = yield* Effect.mapError(
+          decodeRespondToApprovalRequest(input),
           createDecodeValidationError,
         );
-        const session = yield* readSession(id);
-        if (session.status === "exited")
-          return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-        const open = session.openRequest;
-        if (open === null) return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
-        if (open.requestId !== requestId)
-          return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
-        const response = yield* validateResponse(open, given);
-        if ("answers" in response && !(yield* takesAnswers(session.runnerId))) {
-          return yield* Effect.fail(createInvalidStateError(CANNOT_TAKE_ANSWERS));
-        }
+        const { session, open } = yield* readOpenRequest(id, requestId);
+        yield* validateDecision(open, decision);
         const actor = yield* currentStamp;
         yield* writeThenTellRunner(
           session.runnerId,
-          sessions.responding(id, requestId, response),
+          sessions.respondingToApprovalRequest(id, requestId, decision),
           Effect.gen(function* () {
             yield* audit.append({
               kind: "session.responded",
               actor,
-              payload: { sessionId: id, runnerId: session.runnerId, requestId, ...response },
+              payload: { sessionId: id, runnerId: session.runnerId, requestId, decision },
               at: yield* nowIso,
             });
             // Resolving the notification in this transaction also refuses a
             // second decision on the same request, wherever the first one
-            // came from. A question has no notification, so a second answer
-            // to it is sent on, and the harness ignores it because its wait
-            // has ended.
-            if ("decision" in response) {
-              yield* sessions.resolveApprovalNotification(id, requestId, response.decision);
-            }
+            // came from.
+            yield* sessions.resolveApprovalNotification(id, requestId, decision);
+          }),
+        );
+        return (yield* recordComposer)(session);
+      }),
+
+    /**
+     * Answers the question the session's harness is waiting on. Returns the
+     * session.
+     *
+     * Every check runs before anything is sent to the runner. It fails when:
+     *
+     * - the session has exited;
+     * - the session has no open request, or waits on a different request;
+     * - the request is an approval, or the answers do not fit its questions
+     *   (see `validateAnswers`).
+     *
+     * A question takes no decision. To turn it down, the user stops the turn
+     * with `interrupt`, and the adapter resolves the question as cancelled.
+     *
+     * A question raises no notification, so a second answer is not refused
+     * here: it is sent on, and the adapter ignores it because the harness's
+     * wait has ended. The runner is told once the transaction commits.
+     */
+    respondToQuestion: (input: RespondToQuestionInput): Effect.Effect<Session, InputError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.respondToQuestion");
+        const { id, requestId, answers } = yield* Effect.mapError(
+          decodeRespondToQuestion(input),
+          createDecodeValidationError,
+        );
+        const { session, open } = yield* readOpenRequest(id, requestId);
+        yield* validateAnswers(open, answers);
+        const actor = yield* currentStamp;
+        yield* writeThenTellRunner(
+          session.runnerId,
+          sessions.respondingToQuestion(id, requestId, answers),
+          Effect.gen(function* () {
+            yield* audit.append({
+              kind: "session.answered",
+              actor,
+              // The answers stay out of the audit log: `event.read` reaches it
+              // without `session.read`, and an answer can be one the agent
+              // asked to keep secret. The transcript holds them.
+              payload: { sessionId: id, runnerId: session.runnerId, requestId },
+              at: yield* nowIso,
+            });
           }),
         );
         return (yield* recordComposer)(session);
@@ -1023,8 +1060,8 @@ const make = Effect.gen(function* () {
  * The live session operations. The service has two kinds of method, and using
  * one where the other belongs is a mistake nothing else would catch:
  *
- * - `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are
- *   operations. Each checks its own grant and decodes its own input, and a
+ * - `update`, `input`, `steer`, `interrupt`, `respondToApprovalRequest`,
+ *   `respondToQuestion` and `stop` are operations. Each checks its own grant and decodes its own input, and a
  *   route handler calls it directly. `queueInput` checks its grant and
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.

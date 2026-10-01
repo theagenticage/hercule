@@ -1,7 +1,7 @@
 /**
  * The question draft: what the user has picked and typed for each question
  * of a `question` request before the answers are sent. Both apps' docks hold
- * a draft in state and build the `answers` of `session.respond` from it, so
+ * a draft in state and build the `answers` of `session.respondToQuestion` from it, so
  * the two apps agree on what counts as an answer.
  *
  * Every function returns a new draft rather than changing the one it gets,
@@ -77,7 +77,7 @@ export const isQuestionAnswered = (draft: QuestionDraft, question: ApprovalQuest
 };
 
 /**
- * Builds the `answers` of `session.respond` from `draft`, or returns `null`
+ * Builds the `answers` of `session.respondToQuestion` from `draft`, or returns `null`
  * while any of `questions` is unanswered, because the controller refuses
  * answers that leave a question out.
  *

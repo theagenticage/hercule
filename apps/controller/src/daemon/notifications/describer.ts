@@ -369,7 +369,7 @@ export const buildDescribe: Effect.Effect<
                 ]),
           ];
         }),
-      "session.respond": ({ sessionId, requestId, decision }) =>
+      "session.respondToApprovalRequest": ({ sessionId, requestId, decision }) =>
         Effect.map(readSessionNameAndRequest(sessionId), (session) =>
           describeDecision(
             decision,

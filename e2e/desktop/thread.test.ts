@@ -230,7 +230,7 @@ describe("the thread view", () => {
     await page.evaluate(recordLastMessage);
 
     const { openRequest } = await client.session.read({ params: { id: thread.id } });
-    await client.session.respond({
+    await client.session.respondToApprovalRequest({
       params: { id: thread.id },
       payload: { requestId: openRequest!.requestId, decision: "allow" },
     });
@@ -365,7 +365,7 @@ describe("the thread view", () => {
     await evaluateInPage(`(${recordLastMessage.toString()})()`);
 
     const { openRequest } = await client.session.read({ params: { id: thread.id } });
-    await client.session.respond({
+    await client.session.respondToApprovalRequest({
       params: { id: thread.id },
       payload: { requestId: openRequest!.requestId, decision: "allow" },
     });

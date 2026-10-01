@@ -37,7 +37,6 @@ import {
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
-  ANSWERS_CAPABILITY,
   MAX_FACT_LENGTH,
   type InstallRequest,
   type LoginStart,
@@ -72,18 +71,13 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 const NONCE_BYTES = 16;
 
 /**
- * The capabilities this runner offers at hello:
- *
- * - one for each workspace action its build implements. The controller pins a
- *   run only to a runner that lists every workspace action in the run's plan.
- * - answers to a question. The controller sends answers only to a runner that
- *   lists it, because an older runner cannot decode them and would drop its
- *   connection.
+ * The capabilities this runner offers at hello: one for each workspace action
+ * its build implements. The controller pins a run only to a runner that lists
+ * every workspace action in the run's plan.
  */
-const CAPABILITIES: ReadonlyArray<string> = [
-  ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
-  ANSWERS_CAPABILITY,
-];
+const CAPABILITIES: ReadonlyArray<string> = WORKSPACE_ACTION_IDS.map(
+  buildWorkspaceActionCapability,
+);
 
 const ED25519 = { name: "Ed25519" } as const;
 
@@ -575,8 +569,10 @@ export const connect = (
             return yield* supervisor.input(message);
           case "sessionInterrupt":
             return yield* supervisor.interrupt(message);
-          case "sessionRespond":
-            return yield* supervisor.respond(message);
+          case "sessionRespondToApprovalRequest":
+            return yield* supervisor.respondToApprovalRequest(message);
+          case "sessionRespondToQuestion":
+            return yield* supervisor.respondToQuestion(message);
           case "sessionStop":
             return yield* supervisor.stop(message);
           case "ack":

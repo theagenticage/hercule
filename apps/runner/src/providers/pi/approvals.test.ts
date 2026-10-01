@@ -140,7 +140,7 @@ describe("the request for a parked shell command", () => {
     expect(opened.request.requestId).not.toBe("");
     // The card is shown on the command it is about, so it carries that item's id.
     expect(opened.request.itemId).toBe(item?.itemId);
-    expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
     expect(opened.request.detail).toEqual({ command: COMMAND });
   });
 
@@ -162,7 +162,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "allow" }),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     const written = await awaitAnswer(run, UI);
@@ -179,7 +179,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "deny" }),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "deny"),
     );
     const written = await awaitAnswer(run, UI);
     run.child.push({
@@ -210,7 +210,7 @@ describe("what each decision does to the parked session", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "cancel" }),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "cancel"),
     );
 
     const written = await awaitAnswer(run, UI);

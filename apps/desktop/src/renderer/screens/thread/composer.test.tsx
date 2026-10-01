@@ -355,6 +355,29 @@ describe("the composer", () => {
     });
   });
 
+  it("draws Stop while the turn waits on a question, the one way to turn the question down", async () => {
+    const user = userEvent.setup();
+    const asked = changeSession(THREAD_FIXTURES.waiting, {
+      openRequest: {
+        requestId: "req-2",
+        itemId: "tool-2",
+        kind: "question",
+        detail: {
+          questions: [
+            { question: "Which storage?", header: "Storage", options: [], multiSelect: false },
+          ],
+        },
+      },
+    });
+    const { calls } = await renderComposer(asked);
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(countInterrupts(calls, asked)).toBe(1);
+    });
+  });
+
   it("shows why the controller refused to stop the turn", async () => {
     const user = userEvent.setup();
     await renderComposer(BUSY, {
@@ -559,7 +582,7 @@ describe("the shrunk composer", () => {
   const WAITING = THREAD_FIXTURES.waiting;
 
   /** The operation `dock-mini` answers the Request with. */
-  const RESPOND = `POST /api/v1/sessions/${WAITING.session.id}/respond`;
+  const RESPOND = `POST /api/v1/sessions/${WAITING.session.id}/respond-to-approval-request`;
 
   it("keeps only the field and the Request's one line, with its answers", async () => {
     await renderComposer(WAITING, {

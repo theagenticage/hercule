@@ -4,7 +4,8 @@
  * writes the describe line of one.
  *
  * It lives here because the operations belong to domains above the
- * notifications domain, and `session.input` and `session.respond` go through
+ * notifications domain, and `session.input` and
+ * `session.respondToApprovalRequest` go through
  * `Live`, which talks to runners.
  */
 import * as Effect from "effect/Effect";
@@ -24,12 +25,13 @@ const make = Effect.gen(function* () {
 
   // Each runs in the caller's transaction and sends nothing to a runner until
   // it commits: `queueInput` stores the input and delivers it afterwards, and
-  // `respond` sends its frame afterwards.
+  // `respondToApprovalRequest` sends its frame afterwards.
   const handlers: BindableOperationHandlers<Effect.Effect<unknown, BindableOperationError>> = {
     "task.update": ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
     "run.start": (input) => runs.start(input),
     "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
-    "session.respond": ({ sessionId, ...answer }) => live.respond({ id: sessionId, ...answer }),
+    "session.respondToApprovalRequest": ({ sessionId, ...decided }) =>
+      live.respondToApprovalRequest({ id: sessionId, ...decided }),
   };
 
   return BindableOperations.of({

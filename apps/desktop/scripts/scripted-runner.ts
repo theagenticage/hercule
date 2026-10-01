@@ -20,8 +20,8 @@
  * - a stop with `session.exited` for the reason `stopped`;
  * - an interrupt by withdrawing the open Request, if any, and ending the
  *   running turn as `interrupted`;
- * - a response to the open Request, a decision or answers to a question,
- *   with `request.resolved`.
+ * - a decision on the open approval, or answers to the open question, with
+ *   `request.resolved`.
  *
  * Nothing else happens until the caller calls a method. The simple methods
  * each report one change: a turn starts, a Request opens, the session exits.
@@ -42,7 +42,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
 import type {
-  ANSWERS_CAPABILITY,
   ControllerToRunner,
   ExitReason,
   ItemKind,
@@ -52,7 +51,7 @@ import type {
   PROTOCOL_VERSION,
   ProbeResult,
   ProviderEvent,
-  RequestResponse,
+  RequestResolution,
   RunnerFacts,
   RunnerToController,
   SessionBinding,
@@ -211,7 +210,7 @@ interface HostedSession {
   /** Stops the script playing into the running turn, if any. */
   script: AbortController | undefined;
   /** Resumes the script that opened the open Request, with the decision or answers that resolved it. */
-  resumeScript: ((response: RequestResponse) => void) | undefined;
+  resumeScript: ((response: RequestResolution) => void) | undefined;
 }
 
 /** A scripted runner, joined to a controller and connected to it. */
@@ -400,7 +399,7 @@ export async function enlistScriptedRunner(
   const reportRequestResolved = (
     sessionId: string,
     requestId: string,
-    response: RequestResponse,
+    response: RequestResolution,
   ): void => {
     const session = findSession(sessionId);
     const resumeScript = session.resumeScript;
@@ -518,7 +517,7 @@ export async function enlistScriptedRunner(
     });
     if (options.ask === true) {
       const request: OpenRequest = { ...call.approval, requestId: randomUUID(), itemId };
-      const answered = new Promise<RequestResponse>((resolve, reject) => {
+      const answered = new Promise<RequestResolution>((resolve, reject) => {
         session.resumeScript = resolve;
         signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
       });
@@ -671,14 +670,17 @@ export async function enlistScriptedRunner(
       case "sessionStop":
         if (!sessions.has(frame.sessionId)) return;
         return endSession(frame.sessionId, "stopped");
-      case "sessionRespond":
-        // A late answer to an earlier Request must not resolve the one open now.
+      // A late response to an earlier Request must not resolve the one open now.
+      case "sessionRespondToApprovalRequest":
         if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
-        return reportRequestResolved(
-          frame.sessionId,
-          frame.requestId,
-          "decision" in frame ? { decision: frame.decision } : { answers: frame.answers },
-        );
+        return reportRequestResolved(frame.sessionId, frame.requestId, {
+          decision: frame.decision,
+        });
+      case "sessionRespondToQuestion":
+        if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
+        return reportRequestResolved(frame.sessionId, frame.requestId, {
+          answers: frame.answers,
+        });
       case "sessionInterrupt": {
         const session = sessions.get(frame.sessionId);
         if (session?.turnId === undefined) return;
@@ -715,9 +717,7 @@ export async function enlistScriptedRunner(
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
             protocolVersion: 1 satisfies typeof PROTOCOL_VERSION,
-            // The controller sends answers to a question only to a runner
-            // that lists this capability.
-            capabilities: ["answers" satisfies typeof ANSWERS_CAPABILITY],
+            capabilities: [],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
             facts: { ...FACTS, identityPort },
@@ -799,8 +799,8 @@ export async function enlistScriptedRunner(
 
 /**
  * Builds a Request of the given kind, with the details a harness would send.
- * A question offers deny and cancel, like the real adapters: allowing it would
- * give the agent no answer, so a question is answered with answers instead.
+ * A question offers no decision, like the real adapters: it is answered with
+ * answers, or turned down by interrupting the turn.
  */
 function buildOpenRequest(kind: RequestKind): OpenRequest {
   const identity = { requestId: randomUUID(), itemId: randomUUID() };
@@ -822,7 +822,6 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
       return {
         ...identity,
         kind,
-        decisions: ["deny", "cancel"],
         detail: {
           questions: [
             {

@@ -5,15 +5,8 @@
  * mismatch is refused here instead.
  */
 import * as Effect from "effect/Effect";
-import type { OpenRequest, QuestionAnswers, RequestResponse } from "@hercule/protocol";
-import {
-  createValidationError,
-  type Issue,
-  type SessionRespondInput,
-  type Validation,
-} from "@hercule/contract";
-
-type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
+import type { ApprovalDecision, OpenRequest, Question, QuestionAnswers } from "@hercule/protocol";
+import { createValidationError, type Issue, type Validation } from "@hercule/contract";
 
 /**
  * Lists what is wrong with `answers` to `questions`, one issue per header:
@@ -48,52 +41,59 @@ const listAnswerIssues = (
 };
 
 /**
- * Checks that exactly one of `decision` and `answers` is given and that it
- * fits `open`, and returns it as the response to send. Fails with a
- * `Validation` error naming the field when:
- *
- * - both or neither are given;
- * - the decision is not one the request offers;
- * - answers are given to an approval;
- * - the answers name a header the question request does not have, leave a
- *   question out, or give several answers to a question that takes one.
+ * Checks that `decision` is one the approval `open` offers. Fails with a
+ * `Validation` error on `decision` when `open` is a question, which takes
+ * answers and no decision, or when the approval does not offer `decision`.
  */
-export const validateResponse = (
+export const validateDecision = (
   open: OpenRequest,
-  given: Omit<SessionRespondInput, "requestId">,
-): Effect.Effect<RequestResponse, Validation> => {
-  const { decision, answers } = given;
-  if (decision !== undefined && answers === undefined) {
-    return open.decisions.includes(decision)
-      ? Effect.succeed({ decision })
-      : Effect.fail(
-          createValidationError([
-            {
-              path: ["decision"],
-              message: `that request accepts only ${open.decisions.join(", ")}`,
-            },
-          ]),
-        );
-  }
-  if (answers === undefined || decision !== undefined) {
+  decision: ApprovalDecision,
+): Effect.Effect<void, Validation> => {
+  if (open.kind === "question") {
     return Effect.fail(
       createValidationError([
-        { path: ["decision"], message: "give either a decision or answers, not both or neither" },
+        {
+          path: ["decision"],
+          message:
+            "that request is a question, which takes answers and no decision; " +
+            "answer it with session.respondToQuestion, or stop the turn with session.interrupt",
+        },
       ]),
     );
   }
+  return open.decisions.includes(decision)
+    ? Effect.void
+    : Effect.fail(
+        createValidationError([
+          { path: ["decision"], message: `that request accepts only ${open.decisions.join(", ")}` },
+        ]),
+      );
+};
+
+/**
+ * Checks that `answers` fit the question `open`. Fails with a `Validation`
+ * error naming the field when:
+ *
+ * - `open` is an approval, which takes a decision and no answers;
+ * - the answers name a header the question does not have, leave a question
+ *   out, or give several answers to a question that takes one.
+ */
+export const validateAnswers = (
+  open: OpenRequest,
+  answers: QuestionAnswers,
+): Effect.Effect<void, Validation> => {
   if (open.kind !== "question") {
     return Effect.fail(
       createValidationError([
         {
           path: ["answers"],
-          message: "only a question takes answers; this request takes a decision",
+          message:
+            "that request is an approval, which takes a decision and no answers; " +
+            "decide it with session.respondToApprovalRequest",
         },
       ]),
     );
   }
   const issues = listAnswerIssues(open.detail.questions, answers);
-  return issues.length === 0
-    ? Effect.succeed({ answers })
-    : Effect.fail(createValidationError(issues));
+  return issues.length === 0 ? Effect.void : Effect.fail(createValidationError(issues));
 };

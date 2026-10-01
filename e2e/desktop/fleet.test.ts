@@ -92,24 +92,27 @@ describe("the scripted fleet", () => {
     for (const kind of REQUEST_KINDS) {
       const requestId = runner.openRequest(id, kind);
       await expect.poll(async () => (await readSession(id)).openRequest?.kind).toBe(kind);
-      const { openRequest } = await readSession(id);
-      await client.session.respond({
-        params: { id },
-        // A question is answered with answers, not a decision: allow is not
-        // among its decisions.
-        payload:
-          openRequest!.kind === "question"
-            ? {
-                requestId,
-                answers: Object.fromEntries(
-                  openRequest!.detail.questions.map((question) => [
-                    question.header,
-                    question.options[0]!.label,
-                  ]),
-                ),
-              }
-            : { requestId, decision: openRequest!.decisions[0] },
-      });
+      const openRequest = (await readSession(id)).openRequest!;
+      // A question is answered with answers, every approval with a decision.
+      if (openRequest.kind === "question") {
+        await client.session.respondToQuestion({
+          params: { id },
+          payload: {
+            requestId,
+            answers: Object.fromEntries(
+              openRequest.detail.questions.map((question) => [
+                question.header,
+                question.options[0]!.label,
+              ]),
+            ),
+          },
+        });
+      } else {
+        await client.session.respondToApprovalRequest({
+          params: { id },
+          payload: { requestId, decision: openRequest.decisions[0] },
+        });
+      }
       await expect.poll(async () => (await readSession(id)).openRequest).toBeNull();
     }
     expect((await readSession(id)).status).toBe("busy");

@@ -1,9 +1,10 @@
 /**
  * The requests the app-server sends to this client during a turn, mapped to
  * Hercule's requests: what the user is shown, and what each of the four
- * decisions, or the answers to a question, send back to Codex. The mapping is one table because getting it
- * right is the whole job here: a reply in a shape Codex does not accept leaves
- * the turn hanging forever, with no error anywhere.
+ * decisions, or the answers to a question, send back to Codex. The mapping is
+ * one table because getting it right is the whole job here: a reply in a shape
+ * Codex does not accept leaves the turn hanging forever, with no error
+ * anywhere.
  *
  * Three mappings are approximate, because Codex cannot express everything
  * Hercule offers:
@@ -11,10 +12,15 @@
  * - A permissions request has no decision enum, so a deny is an empty grant.
  * - An MCP elicitation has no "accept for this session", so `allow_always` is
  *   not offered.
- * - A question has no way to decline in its reply, so a decline is a
- *   JSON-RPC error reply.
+ * - A question's reply has no way to decline, so the cancel an interrupt
+ *   sends is a JSON-RPC error reply.
  */
-import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/protocol";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  OpenRequest,
+  QuestionAnswers,
+} from "@hercule/protocol";
 import { ensureId } from "../events";
 import { buildQuestionRequest, keyAnswersForVendor } from "../questions";
 import { truncateFact, truncateMessage } from "../text";
@@ -75,7 +81,7 @@ const buildAsked = <P>(row: {
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
 }): Asked => ({ endsTurn: [], ...row }) as Asked;
 
-type Decisions = OpenRequest["decisions"];
+type Decisions = ApprovalRequest["decisions"];
 
 const EVERY_ANSWER: Decisions = ["allow", "allow_always", "deny", "cancel"];
 
@@ -210,8 +216,10 @@ export const ASKED: Readonly<Record<string, Asked>> = {
         params.questions,
         "id",
       ),
-    // The reply has no way to decline, so a decision is replied to with an
-    // error, and a cancel also interrupts the turn.
+    // A question takes no decision, so only two decisions reach this: the
+    // cancel an interrupt sends, and a deny or cancel of the tool approval
+    // shown when no question could be parsed. The reply has no way to
+    // decline, so each is an error, and a cancel also interrupts the turn.
     replies: () => DECLINED,
     answers: (answers, params) => ({
       result: {

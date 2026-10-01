@@ -69,8 +69,6 @@ Delivery is idempotent by the step key, not sequenced. The controller sends a `W
 
 Versions are still not compared, and section 2.4 is unchanged: the only hard refusal at hello is an incompatible protocol version. A runner that lacks a workspace action stays online and takes every other placement.
 
-*(Amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309).)* **The capability `answers` gates answers to a question.** A runner that lists it can read a `SessionRespond` frame that carries `answers` in place of a `decision` ([./06-providers.md](./06-providers.md) section 6.5). The runner and the controller both list it, spelled once as `ANSWERS_CAPABILITY` in `@hercule/protocol`. `session.respond` with answers, for a session whose runner's negotiated list lacks it, is refused with `invalid_state` and nothing is sent: an older runner cannot decode the frame, and a runner that cannot decode a frame closes its connection, so the events of every session on it are lost until it dials again. Decisions are sent to every runner as before, so the user can still deny or cancel the question.
-
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.

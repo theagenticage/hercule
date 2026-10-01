@@ -245,47 +245,51 @@ export const ApprovalDecision = Schema.Literals(["allow", "allow_always", "deny"
 export type ApprovalDecision = Schema.Schema.Type<typeof ApprovalDecision>;
 
 /**
- * The answers this request accepts. When a request cannot keep a rule, or an
- * allow would have nothing to apply to, this list leaves those answers out.
- * Otherwise a surface could offer an answer the harness would silently
+ * The decisions an approval accepts. When a request cannot keep a rule, or an
+ * allow would have nothing to apply to, this list leaves those decisions out.
+ * Otherwise a surface could offer a decision the harness would silently
  * replace with another.
  */
 const Decisions = Schema.NonEmptyArray(ApprovalDecision);
 
 /**
- * One question a harness parked a session on, and the answers it accepts.
+ * The fields of every request a harness can park a session on.
  *
  * `detail` is a closed struct per `kind` rather than free Json: the surfaces
  * render the card from it, and a vendor-shaped payload there would make what
  * the user sees depend on which harness asked (ADR 0007).
  */
-const defineOpenRequest = <const K extends string, F extends Schema.Struct.Fields>(
+const defineOpenRequestFields = <const K extends string, F extends Schema.Struct.Fields>(
   kind: K,
   detail: F,
-) =>
-  Schema.Struct({
-    requestId: Fact,
-    /** The item the request is about, so a surface can overlay it in place. */
-    itemId: Fact,
-    kind: Schema.Literal(kind),
-    decisions: Decisions,
-    detail: Schema.Struct(detail),
-  });
+) => ({
+  requestId: Fact,
+  /** The item the request is about, so a surface can overlay it in place. */
+  itemId: Fact,
+  kind: Schema.Literal(kind),
+  detail: Schema.Struct(detail),
+});
+
+/** An approval a harness parked a session on, and the decisions it accepts. */
+const defineApprovalRequest = <const K extends string, F extends Schema.Struct.Fields>(
+  kind: K,
+  detail: F,
+) => Schema.Struct({ ...defineOpenRequestFields(kind, detail), decisions: Decisions });
 
 /** A rename has two paths and a multi-file edit more, so this is a list. */
 const Paths = Schema.Array(Fact);
 
-const CommandApproval = defineOpenRequest("command_approval", { command: Message });
+const CommandApproval = defineApprovalRequest("command_approval", { command: Message });
 
-const FileChangeApproval = defineOpenRequest("file_change_approval", { paths: Paths });
+const FileChangeApproval = defineApprovalRequest("file_change_approval", { paths: Paths });
 
-const FileReadApproval = defineOpenRequest("file_read_approval", { paths: Paths });
+const FileReadApproval = defineApprovalRequest("file_read_approval", { paths: Paths });
 
-const ToolApproval = defineOpenRequest("tool_approval", { toolName: Fact });
+const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
 
 /**
  * One question in a `question` request: the chip it is labelled with, the
- * prose the agent wrote, and the options it offers. A permission request and a
+ * prose the agent wrote, and the options it offers. An approval and a
  * question are different things sharing one request slot, so the question
  * keeps its own structure rather than being flattened to text: a surface that
  * reads only the text cannot show what the answers were.
@@ -300,12 +304,24 @@ const Question = Schema.Struct({
   options: Schema.Array(Schema.Struct({ label: Fact, description: Message })),
   /** Whether more than one option may be chosen. */
   multiSelect: Schema.Boolean,
+  /**
+   * Present, and true, when the harness asked to keep the answer secret, as a
+   * Codex `isSecret` question does. Nothing can keep it secret: the answer is
+   * shown, stored and sent like any other. So a surface warns the user
+   * instead. It is left out on every other question.
+   */
+  secret: Schema.optionalKey(Schema.Literal(true)),
 });
 
-/** A harness asks one to four questions at a time, so the request holds a list. */
-const QuestionRequest = defineOpenRequest("question", {
-  questions: Schema.NonEmptyArray(Question),
-});
+/**
+ * Questions a harness parked a session on. A harness asks one to four
+ * questions at a time, so the request holds a list. It accepts answers only,
+ * never a decision. To turn the questions down, the user stops the turn, and
+ * the request resolves as `cancel`.
+ */
+const QuestionRequest = Schema.Struct(
+  defineOpenRequestFields("question", { questions: Schema.NonEmptyArray(Question) }),
+);
 
 /**
  * One answer to a question: an option's label or text the user typed. Text
@@ -366,14 +382,6 @@ export const QuestionAnswers = Schema.Record(
 export type QuestionAnswers = Schema.Schema.Type<typeof QuestionAnswers>;
 
 /**
- * What resolves a request: a decision for an approval, or the answers for a
- * question. A question also accepts the decisions it offers, deny and
- * cancel.
- */
-export type RequestResponse =
-  { readonly decision: ApprovalDecision } | { readonly answers: QuestionAnswers };
-
-/**
  * The request a session is parked on, as the database row and the API hold it.
  * `request.opened` carries the same five shapes.
  */
@@ -386,6 +394,12 @@ export const OpenRequest = Schema.Union([
 ]);
 
 export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;
+
+/** An open request that is an approval: any kind but `question`. It takes a decision. */
+export type ApprovalRequest = Exclude<OpenRequest, { readonly kind: "question" }>;
+
+/** One question of a `question` request. */
+export type Question = Schema.Schema.Type<typeof Question>;
 
 /**
  * The three append-only text streams. When a vendor sends raw and summarized
@@ -554,6 +568,13 @@ const RequestResolvedWithAnswers = defineEvent("request.resolved", {
   answers: QuestionAnswers,
 });
 
+/**
+ * How a request ended, as `request.resolved` carries it beside the request's
+ * id: with a decision, or with the answers to its questions.
+ */
+export type RequestResolution =
+  { readonly decision: ApprovalDecision } | { readonly answers: QuestionAnswers };
+
 export const ProviderEvent = Schema.Union([
   SessionStarted,
   SessionExited,
@@ -654,33 +675,37 @@ export const SessionInterrupt = Schema.Struct({
 
 export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
 
-const SessionRespondTarget = {
-  _tag: Schema.Literal("sessionRespond"),
+/**
+ * Decides the approval the session is parked on. `requestId` is the adapter's
+ * own id, sent back: the controller does not create ids for requests it did
+ * not open. Like `SessionInterrupt`, there is no reply frame: the result
+ * arrives in the session's own stream as `request.resolved`.
+ */
+export const SessionRespondToApprovalRequest = Schema.Struct({
+  _tag: Schema.Literal("sessionRespondToApprovalRequest"),
   sessionId: SessionId,
   requestId: Fact,
-};
+  decision: ApprovalDecision,
+});
+
+export type SessionRespondToApprovalRequest = Schema.Schema.Type<
+  typeof SessionRespondToApprovalRequest
+>;
 
 /**
- * Answers the request the session is parked on, with a decision or, for a
- * question, with the answers. `requestId` is the adapter's own id, sent back:
- * the controller does not create ids for requests it did not open. Like
- * `SessionInterrupt`, there is no reply frame: the result arrives in the
- * session's own stream as `request.resolved`.
+ * Answers the questions the session is parked on. Like
+ * `SessionRespondToApprovalRequest`, there is no reply frame: the result
+ * arrives in the session's own stream as `request.resolved`, with the
+ * answers.
  */
-export const SessionRespond = Schema.Union([
-  Schema.Struct({ ...SessionRespondTarget, decision: ApprovalDecision }),
-  Schema.Struct({ ...SessionRespondTarget, answers: QuestionAnswers }),
-]);
+export const SessionRespondToQuestion = Schema.Struct({
+  _tag: Schema.Literal("sessionRespondToQuestion"),
+  sessionId: SessionId,
+  requestId: Fact,
+  answers: QuestionAnswers,
+});
 
-export type SessionRespond = Schema.Schema.Type<typeof SessionRespond>;
-
-/**
- * The hello capability of a runner that can resolve a question with answers.
- * A runner without it cannot decode a `sessionRespond` frame that carries
- * answers, and a frame it cannot decode closes its connection. So the
- * controller sends answers only to a runner that lists this capability.
- */
-export const ANSWERS_CAPABILITY = "answers";
+export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondToQuestion>;
 
 /**
  * What happened to one input, with the row id it was sent with. It has no turn

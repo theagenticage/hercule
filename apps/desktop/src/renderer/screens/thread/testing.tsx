@@ -57,7 +57,7 @@ export interface RenderedThreadPart {
  * The controller holds the sidebar fixture's records, with `thread.session`
  * in place of the fixture's thread of the same id, and answers the thread's
  * own reads from `thread`. `handlers` add or replace answers, such as the
- * answer to `session.respond`.
+ * answer to `session.respondToApprovalRequest`.
  *
  * The router has the app's `_connected` route id, so the part finds the
  * bridge and the controller in its route context, and the app's paths `/` and

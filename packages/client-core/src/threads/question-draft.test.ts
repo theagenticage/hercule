@@ -1,7 +1,7 @@
 /**
  * Tests the question draft: what the user has picked and typed for each
  * question of a `question` request, before the answers are sent. Both docks
- * hold a draft in state and build the `answers` record of `session.respond`
+ * hold a draft in state and build the `answers` record of `session.respondToQuestion`
  * from it, so the two apps agree on what an answer is.
  *
  * The questions come from `buildApprovalCard`, as the docks get them.
@@ -21,7 +21,6 @@ const REQUEST: OpenRequest = {
   requestId: "req-1",
   itemId: "tool-1",
   kind: "question",
-  decisions: ["deny", "cancel"],
   detail: {
     questions: [
       {

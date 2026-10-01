@@ -9,13 +9,9 @@
 import { arch, platform, totalmem } from "node:os";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import {
-  MAX_FACT_LENGTH,
-  type ProviderBinary,
-  type RunnerFacts,
-  type Toolchain,
-} from "@hercule/protocol";
+import type { ProviderBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
 import { ADAPTER_IDS } from "./providers";
+import { truncateFact } from "./providers/text";
 
 /** Only these two on purpose: any other tool is installed by hand and marked with a label. */
 const TOOLCHAINS = ["git", "gh"] as const;
@@ -60,13 +56,6 @@ export const thisMachine: Machine = {
       Effect.orElseSucceed(() => undefined),
     ),
 };
-
-/**
- * Truncates a value to the protocol's maximum fact length. A single value that
- * is too long would make the whole report fail to encode, and the runner would
- * then fail to connect.
- */
-const truncateFact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /**
  * Returns the semantic version in a binary's `--version` output. Each binary

@@ -20,7 +20,6 @@ import type {
   OpenRequest,
   ProbeResult,
   ProviderEvent,
-  RequestResponse,
   SendResult,
   SessionBinding,
   SessionSpec,
@@ -880,32 +879,29 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return held.state.turnId === undefined ? Effect.void : abortTurn(held, "interrupt");
       }),
 
-    respondToRequest: (
+    respondToApprovalRequest: (
       sessionId: string,
       requestId: string,
-      response: RequestResponse,
+      decision: ApprovalDecision,
     ): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
         const park = held?.park;
         // The approval was already answered, or its session is gone: there is
-        // nothing left to decide. pi parks only on a confirm dialog, never on
-        // a question, so it ignores answers.
-        if (
-          held === undefined ||
-          park === undefined ||
-          park.request.requestId !== requestId ||
-          !("decision" in response)
-        ) {
+        // nothing left to decide.
+        if (held === undefined || park === undefined || park.request.requestId !== requestId) {
           return Effect.void;
         }
-        const { decision } = response;
         resolvePark(held, decision);
         // A cancel blocks the call and also ends the turn. pi treats a blocked
         // call as one tool it may not run, and would otherwise carry on with
         // the rest of its plan.
         return decision === "cancel" ? abortTurn(held, "interrupt") : Effect.void;
       }),
+
+    // pi parks only on a confirm dialog, never on a question, so there is
+    // never a question here to answer.
+    respondToQuestion: (): Effect.Effect<void> => Effect.void,
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.gen(function* () {

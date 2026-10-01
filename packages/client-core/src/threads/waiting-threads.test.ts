@@ -46,7 +46,6 @@ describe("listWaitingThreads", () => {
     const question: OpenRequest = {
       requestId: "r-1",
       itemId: "tool-1",
-      decisions: ["deny", "cancel"],
       kind: "question",
       detail: {
         questions: [

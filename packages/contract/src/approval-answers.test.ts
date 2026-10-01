@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { APPROVAL_ANSWER_LABELS, describeApprovalAnswer } from "./approval-answers";
-import type { ApprovalDecision, OpenRequest } from "./groups/session";
+import type { ApprovalDecision, ApprovalRequest } from "./groups/session";
 
 const DECISIONS: ReadonlyArray<ApprovalDecision> = ["allow", "allow_always", "deny", "cancel"];
-const REQUEST_KINDS: ReadonlyArray<OpenRequest["kind"]> = [
+const REQUEST_KINDS: ReadonlyArray<ApprovalRequest["kind"]> = [
   "command_approval",
   "file_change_approval",
   "file_read_approval",
   "tool_approval",
-  "question",
 ];
 
 describe("APPROVAL_ANSWER_LABELS", () => {

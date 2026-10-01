@@ -28,7 +28,8 @@ import {
   type SessionInput,
   type SessionInputResult,
   type SessionInterrupt,
-  type SessionRespond,
+  type SessionRespondToApprovalRequest,
+  type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
 } from "@hercule/protocol";
@@ -112,7 +113,10 @@ export interface SessionSupervisor {
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
   readonly interrupt: (frame: SessionInterrupt) => Effect.Effect<void>;
-  readonly respond: (frame: SessionRespond) => Effect.Effect<void>;
+  readonly respondToApprovalRequest: (
+    frame: SessionRespondToApprovalRequest,
+  ) => Effect.Effect<void>;
+  readonly respondToQuestion: (frame: SessionRespondToQuestion) => Effect.Effect<void>;
   readonly stop: (frame: SessionStop) => Effect.Effect<void>;
 }
 
@@ -626,20 +630,26 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
 
       /**
-       * Passes the user's decision or answers on an open request to the
-       * adapter. Idempotent: the adapter ignores a request it does not hold,
-       * because it was already answered or never opened here. The outcome
-       * arrives as an event on the session's stream, not as a reply to this
-       * frame.
+       * Passes the user's decision on an open approval to the adapter.
+       * Idempotent: the adapter ignores a request it does not hold, because it
+       * was already answered or never opened here. The outcome arrives as an
+       * event on the session's stream, not as a reply to this frame.
        */
-      respond: (frame: SessionRespond): Effect.Effect<void> =>
+      respondToApprovalRequest: (frame: SessionRespondToApprovalRequest): Effect.Effect<void> =>
         live
           .get(frame.sessionId)
-          ?.adapter.respondToRequest(
-            frame.sessionId,
-            frame.requestId,
-            "decision" in frame ? { decision: frame.decision } : { answers: frame.answers },
-          ) ?? Effect.void,
+          ?.adapter.respondToApprovalRequest(frame.sessionId, frame.requestId, frame.decision) ??
+        Effect.void,
+
+      /**
+       * Passes the user's answers to an open question to the adapter, with the
+       * same idempotence and the same report as `respondToApprovalRequest`.
+       */
+      respondToQuestion: (frame: SessionRespondToQuestion): Effect.Effect<void> =>
+        live
+          .get(frame.sessionId)
+          ?.adapter.respondToQuestion(frame.sessionId, frame.requestId, frame.answers) ??
+        Effect.void,
 
       /** Idempotent: a session this runner does not hold is already stopped. */
       stop: (frame: SessionStop): Effect.Effect<void> => {

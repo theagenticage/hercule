@@ -9,8 +9,8 @@
  *
  * - `item/permissions/requestApproval` has no decision enum, so a deny is an
  *   empty grant and nothing else: no `turn/interrupt`.
- * - `item/tool/requestUserInput` has no way to decline in its reply, so a
- *   decline is a JSON-RPC error reply.
+ * - `item/tool/requestUserInput` has no way to decline in its reply, so the
+ *   cancel an interrupt sends is a JSON-RPC error reply.
  *
  * An `interrupt` on a session parked on a permissions request replies with
  * that row's deny mapping, because the row offers no `cancel`. The spec does
@@ -90,7 +90,7 @@ const openAndAnswer = async (
   const run = await pushServerRequest(method, params);
   const opened = await awaitOpenedRequest(run);
   await Effect.runPromise(
-    run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision }),
+    run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, decision),
   );
   return { run, answered: await awaitAnswer(run) };
 };
@@ -125,7 +125,9 @@ describe("a command Codex wants to run", () => {
     expect(opened.request.kind).toBe("command_approval");
     expect(opened.request.itemId).toBe(ITEM);
     expect(opened.request.detail).toEqual({ command: "rm -rf build" });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+    });
   });
 
   for (const [decision, mapped] of COMMAND_ANSWERS) {
@@ -194,7 +196,9 @@ describe("a file change Codex wants to write", () => {
     expect(opened.request.kind).toBe("file_change_approval");
     expect(opened.request.itemId).toBe(FILE_ITEM);
     expect(opened.request.detail).toEqual({ paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"] });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({
+      decisions: ["allow", "allow_always", "deny", "cancel"],
+    });
   });
 
   for (const [decision, mapped] of FILE_ANSWERS) {
@@ -233,7 +237,7 @@ describe("the permissions Codex asks to be granted", () => {
     const opened = await awaitOpenedRequest(run);
     expect(opened.request.kind).toBe("tool_approval");
     expect(opened.request.detail).toEqual({ toolName: "permissions" });
-    expect(opened.request.decisions).toEqual(["allow", "allow_always", "deny"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "allow_always", "deny"] });
   });
 
   it("grants the profile that was asked for, for this turn only", async () => {
@@ -287,7 +291,7 @@ describe("an MCP server asking its own question", () => {
     expect(opened.request.detail).toEqual({ toolName: "linear" });
     // The elicitation reply has no "accept for this session", so offering
     // allow_always would mean replacing it with something else.
-    expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
   for (const [decision, mapped] of ELICITATION_ANSWERS) {
@@ -326,7 +330,7 @@ const USER_INPUT_PARAMS = {
 const DECLINED = { code: -32603, message: "declined by the user" };
 
 describe("a question the agent asks the user", () => {
-  it("shows it as a question, offering only the two decisions Hercule can send", async () => {
+  it("shows it as a question, which takes answers and no decision", async () => {
     const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
@@ -345,35 +349,24 @@ describe("a question the agent asks the user", () => {
         },
       ],
     });
-    // The question is answered with answers; the only decisions it takes
-    // are the two that decline it.
-    expect(opened.request.decisions).toEqual(["deny", "cancel"]);
+    expect(opened.request).not.toHaveProperty("decisions");
   });
 
-  it("replies with an error on deny, because the reply has no way to decline", async () => {
-    const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "deny");
+  for (const decision of ["deny", "cancel"] as const) {
+    it(`ignores a ${decision}, because a question is turned down by stopping the turn`, async () => {
+      const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
+      const opened = await awaitOpenedRequest(run);
 
-    expect(answered.error).toEqual(DECLINED);
-    expect(answered.result).toBeUndefined();
-    await settle();
-    // A deny declines this question only; the turn goes on.
-    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
-    expect(listResolutions(run)).toEqual(["deny"]);
-  });
+      await Effect.runPromise(
+        run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, decision),
+      );
 
-  it("replies with an error and then interrupts the turn on cancel", async () => {
-    const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "cancel");
-
-    expect(answered.error).toEqual(DECLINED);
-    await waitUntil(
-      "ended the turn",
-      () => listSentParams(run.requests, "turn/interrupt").length === 1,
-    );
-    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
-      { threadId: THREAD, turnId: TURN },
-    ]);
-    expect(listResolutions(run)).toEqual(["cancel"]);
-  });
+      await settle();
+      expect(run.answered).toEqual([]);
+      expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+      expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    });
+  }
 });
 
 /** Sends a question, resolves it with `answers`, and returns the run and the adapter's reply. */
@@ -384,7 +377,7 @@ const openAndAnswerQuestion = async (
   const run = await pushServerRequest(USER_INPUT, params);
   const opened = await awaitOpenedRequest(run);
   await Effect.runPromise(
-    run.adapter.respondToRequest(SESSION, opened.request.requestId, { answers }),
+    run.adapter.respondToQuestion(SESSION, opened.request.requestId, answers),
   );
   return { run, answered: await awaitAnswer(run) };
 };
@@ -440,8 +433,8 @@ describe("answering a question the agent asks", () => {
     const question = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, question.request.requestId, {
-        answers: { "Deploy target": "production" },
+      run.adapter.respondToQuestion(SESSION, question.request.requestId, {
+        "Deploy target": "production",
       }),
     );
 
@@ -460,8 +453,8 @@ describe("answering a question the agent asks", () => {
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, {
-        answers: { "Deploy target": "staging" },
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+        "Deploy target": "staging",
       }),
     );
 
@@ -473,13 +466,13 @@ describe("answering a question the agent asks", () => {
   it("ignores answers to a question shown as a tool approval", async () => {
     const run = await pushServerRequest(USER_INPUT, {
       ...USER_INPUT_PARAMS,
-      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }],
     });
     const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, {
-        answers: { "Deploy target": "staging" },
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+        "Deploy target": "staging",
       }),
     );
 
@@ -490,22 +483,27 @@ describe("answering a question the agent asks", () => {
 });
 
 describe("the question request built from a Codex question", () => {
-  it("drops a secret question, because its answer would be shown and stored in plain text", async () => {
+  it("keeps a secret question and marks it secret, so the user is warned before answering", async () => {
     const run = await pushServerRequest(USER_INPUT, {
-      ...TWO_QUESTIONS_PARAMS,
-      questions: [
-        { ...USER_INPUT_PARAMS.questions[0], id: "q0", header: "Token", isSecret: true },
-        ...TWO_QUESTIONS_PARAMS.questions,
-      ],
+      ...USER_INPUT_PARAMS,
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
     });
 
     const opened = await awaitOpenedRequest(run);
-    expect(opened.request.kind).toBe("question");
-    expect(
-      opened.request.kind === "question"
-        ? opened.request.detail.questions.map((question) => question.header)
-        : [],
-    ).toEqual(["Deploy target", "Reason"]);
+    expect(opened.request.detail).toEqual({
+      questions: [
+        {
+          header: "Deploy target",
+          question: "Which environment should this go to?",
+          multiSelect: false,
+          options: [
+            { label: "staging", description: "the shared one" },
+            { label: "production", description: "the real one" },
+          ],
+          secret: true,
+        },
+      ],
+    });
   });
 
   it("shows a question with no options as a question with an empty option list", async () => {
@@ -522,21 +520,28 @@ describe("the question request built from a Codex question", () => {
     });
   });
 
-  it("drops a question whose header repeats an earlier question's header", async () => {
-    const run = await pushServerRequest(USER_INPUT, {
-      ...USER_INPUT_PARAMS,
-      questions: [
-        USER_INPUT_PARAMS.questions[0],
-        { ...TWO_QUESTIONS_PARAMS.questions[1], header: "Deploy target" },
-      ],
-    });
+  it("numbers a header that repeats an earlier question's, and sends each answer to its own question", async () => {
+    const answers: QuestionAnswers = { "Deploy target": "staging", "Deploy target (2)": "now" };
+    const { run, answered } = await openAndAnswerQuestion(
+      {
+        ...USER_INPUT_PARAMS,
+        questions: [
+          USER_INPUT_PARAMS.questions[0],
+          { ...TWO_QUESTIONS_PARAMS.questions[1], header: "Deploy target" },
+        ],
+      },
+      answers,
+    );
 
-    const opened = await awaitOpenedRequest(run);
+    const opened = filterByTag(run.seen, "request.opened")[0];
     expect(
-      opened.request.kind === "question"
-        ? opened.request.detail.questions.map((question) => question.question)
+      opened?.request.kind === "question"
+        ? opened.request.detail.questions.map((question) => question.header)
         : [],
-    ).toEqual(["Which environment should this go to?"]);
+    ).toEqual(["Deploy target", "Deploy target (2)"]);
+    expect(answered.result).toEqual({
+      answers: { q1: { answers: ["staging"] }, q2: { answers: ["now"] } },
+    });
   });
 
   it("drops a question whose id repeats an earlier question's id, so no answer is sent under another's id", async () => {
@@ -561,16 +566,30 @@ describe("the question request built from a Codex question", () => {
     expect(answered.result).toEqual({ answers: { q1: { answers: ["staging"] } } });
   });
 
-  it("falls back to a tool approval that can be denied when every question is secret", async () => {
+  it("falls back to a tool approval that can be denied when no question can be read", async () => {
     const run = await pushServerRequest(USER_INPUT, {
       ...USER_INPUT_PARAMS,
-      questions: [{ ...USER_INPUT_PARAMS.questions[0], isSecret: true }],
+      questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }],
     });
 
     const opened = await awaitOpenedRequest(run);
     expect(opened.request.kind).toBe("tool_approval");
     expect(opened.request.detail).toEqual({ toolName: "requestUserInput" });
-    expect(opened.request.decisions).toEqual(["deny", "cancel"]);
+    expect(opened.request).toMatchObject({ decisions: ["deny", "cancel"] });
+  });
+
+  it("replies with an error when that tool approval is denied, and lets the turn go on", async () => {
+    const { run, answered } = await openAndAnswer(
+      USER_INPUT,
+      { ...USER_INPUT_PARAMS, questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }] },
+      "deny",
+    );
+
+    // The reply has no way to decline, so the deny is an error reply.
+    expect(answered.error).toEqual(DECLINED);
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    expect(listResolutions(run)).toEqual(["deny"]);
   });
 });
 
@@ -671,7 +690,7 @@ describe("an approval resolved while the turn is still running", () => {
     ]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "allow" }),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     expect((await awaitAnswer(run)).result).toEqual({ decision: "accept" });
@@ -700,7 +719,7 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect(run.answered).toEqual([]);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, first.request.requestId, { decision: "allow" }),
+      run.adapter.respondToApprovalRequest(SESSION, first.request.requestId, "allow"),
     );
 
     await waitUntil(
@@ -712,7 +731,7 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "accept" });
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, second.request.requestId, { decision: "deny" }),
+      run.adapter.respondToApprovalRequest(SESSION, second.request.requestId, "deny"),
     );
 
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "decline" });
@@ -842,7 +861,7 @@ describe("a request whose turn ends before it is resolved", () => {
     await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
 
     await Effect.runPromise(
-      run.adapter.respondToRequest(SESSION, opened.request.requestId, { decision: "allow" }),
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
     );
 
     await settle();
