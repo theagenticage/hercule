@@ -69,10 +69,25 @@ const readFlagValue = (argv: ReadonlyArray<string>, flag: string): string | unde
   argv[argv.indexOf(flag) + 1];
 
 describe("launching pi for a session", () => {
-  it("turns off the user's own context files, extensions and pi's own approvals", async () => {
+  it("turns off context files, the user's own extensions and pi's own approvals for a workspace-less session", async () => {
     const run = await startTestSession();
 
     expect(run.child.command).toEqual([run.ctx.binary, ...buildFlags(run.ctx.home)]);
+  });
+
+  it("reads the workspace's own context files when the session has a workspace", async () => {
+    const run = await startTestSession(
+      {},
+      {
+        ...SPEC,
+        workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+      },
+    );
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home).filter((flag) => flag !== "--no-context-files"),
+    ]);
   });
 
   it("starts pi in the session's working directory", async () => {

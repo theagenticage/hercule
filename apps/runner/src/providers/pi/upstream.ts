@@ -17,6 +17,8 @@
  * The server listens on a random free port on the loopback interface. The test
  * that starts it also stops it.
  */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** Options for the first completion's tool calls, for tests that need more than the default. */
 export interface FakeModelFirstTurn {
@@ -31,6 +33,8 @@ export interface FakeModelServer {
   readonly baseUrl: string;
   /** Returns how many completions pi has requested so far. */
   readonly asked: () => number;
+  /** Returns the body of every completion request pi has sent so far, in order. */
+  readonly requests: () => ReadonlyArray<string>;
   readonly stop: () => void;
 }
 
@@ -89,6 +93,7 @@ const buildTextReply = (): string =>
 
 export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeModelServer => {
   let asked = 0;
+  const requests: Array<string> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -99,7 +104,7 @@ export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeMo
           headers: { "content-type": "application/json" },
         });
       }
-      await request.text();
+      requests.push(await request.text());
       asked += 1;
       return new Response(asked === 1 ? buildToolCallReply(firstTurn) : buildTextReply(), {
         headers: {
@@ -113,6 +118,38 @@ export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeMo
   return {
     baseUrl: `http://127.0.0.1:${server.port}/v1`,
     asked: () => asked,
+    requests: () => requests,
     stop: () => void server.stop(true),
   };
+};
+
+/**
+ * Writes a `models.json` that points the `zai` provider at the fake model
+ * server, so the adapter's `--model zai/<slug>` reaches it. The built-in
+ * models stay; `fake-model` is added beside them.
+ */
+export const pointAtFakeModel = (home: string, baseUrl: string): void => {
+  writeFileSync(
+    join(home, "models.json"),
+    JSON.stringify({
+      providers: {
+        zai: {
+          baseUrl,
+          api: "openai-completions",
+          apiKey: "not-a-real-key",
+          models: [
+            {
+              id: "fake-model",
+              name: "Fake model",
+              reasoning: true,
+              input: ["text"],
+              contextWindow: 100_000,
+              maxTokens: 4_096,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            },
+          ],
+        },
+      },
+    }),
+  );
 };
