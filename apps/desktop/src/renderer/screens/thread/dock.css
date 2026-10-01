@@ -100,23 +100,22 @@
   overflow-y: auto;
   overflow-wrap: anywhere;
 }
-/* Not in the book, which draws no `question` request. The questions sit
-   on the ledger's grid: the option labels in the buttons' column and what
-   they mean in the descriptions' column, so options and answers line up.
-   Each question's header is a label, in the sidebar headings' type. */
-.dock-questions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 192px;
-  margin-bottom: 8px;
-  padding: 0 4px;
-  overflow-y: auto;
-}
+/* Not in the book, which draws no `question` request. One question shows
+   at a time. Its options sit on the ledger's grid: each choice and its label
+   in the buttons' column and what it means in the descriptions' column, so
+   options and answers line up. The header is a label, in the sidebar
+   headings' type. */
 .dock-question {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  margin-bottom: 8px;
+}
+.dock-question-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
 }
 .dock-question-header {
   color: var(--faint);
@@ -125,25 +124,116 @@
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
+.dock-question-place {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.dock-question-text {
+  margin-top: 2px;
+  padding: 0 4px;
+}
+/* Options scroll within about six rows, rather than push the composer off
+   the screen. */
 .dock-options {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  margin-top: 6px;
+  overflow-y: auto;
+}
+.dock-option {
   display: grid;
   grid-template-columns: 156px 1fr;
   align-items: baseline;
-  gap: 2px 16px;
+  gap: 16px;
+  padding: 5px 12px 5px 4px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.dock-option:hover {
+  background: var(--hover);
+}
+.dock-option:has(input:disabled) {
+  pointer-events: none;
 }
 .dock-option-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--t-12);
   font-weight: var(--w-medium);
 }
-.dock-question .faint {
+/* The choice is drawn here: the book has none. A box for an option of
+   several, a round for one of one. A picked choice is in ink, not in the
+   accent, which the book keeps for the one suggested answer. The 14px box
+   would sit with its bottom on the label's baseline; lowered 2px, it looks
+   centred against the 12px label. */
+.dock-choice {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  translate: 0 2px;
+}
+.dock-choice input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--field);
+  /* A rim of --line all but vanishes on the dock's tint, so the rim is a
+     faded --faint, which reads as an empty box on every theme. */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.dock-choice input[type="radio"] {
+  border-radius: 50%;
+}
+.dock-choice input:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* A ring with a dot: the field colour between the rim and the dot. */
+.dock-choice input[type="radio"]:checked {
+  box-shadow:
+    inset 0 0 0 1px var(--ink),
+    inset 0 0 0 4px var(--field);
+}
+.dock-choice input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.dock-choice .ic {
+  position: absolute;
+  color: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.dock-choice input:checked + .ic {
+  opacity: 1;
+}
+.dock-question-note {
+  margin-top: 4px;
+  padding: 0 4px;
+  color: var(--faint);
   font-size: var(--t-12);
 }
-/* Not in the book. An instruction rather than an answer, in the ledger's
-   description type, on the ledger's left edge. */
-.dock-note {
-  margin: 0 0 8px;
+.dock-own {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
   padding: 0 4px;
-  color: var(--muted);
+}
+.dock-own .field {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
   font-size: var(--t-12);
 }
 /* Not in the book, which draws no failed answer. The error sits under the

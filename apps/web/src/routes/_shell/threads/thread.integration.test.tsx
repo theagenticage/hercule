@@ -38,6 +38,7 @@ import {
   readPageText,
   renderApp,
   stubApi,
+  type Call,
   type FakeScrollGeometry,
   type Handler,
   type LiveStub,
@@ -2857,7 +2858,7 @@ describe("Thread: the permission card", () => {
     expect(getComposerCard().className).toContain("rounded-[14px]");
   });
 
-  it("shows a question request's questions with only deny and cancel, and explains that answering is not built", async () => {
+  it("shows a question request's questions with only deny and cancel as decisions", async () => {
     await openApp(buildSession({ status: "busy", openRequest: QUESTIONS }), buildParkedRows());
 
     await screen.findByRole("button", { name: buildAnswerMatcher(QUESTIONS, "deny") });
@@ -2873,18 +2874,264 @@ describe("Thread: the permission card", () => {
     // not one paragraph:
     // - the header chip, styled as a lane label;
     // - the question text;
-    // - each option's label and description, as two elements in the answer
-    //   grid.
+    // - each option, with its description.
     expect(screen.getByText("Database").className).toContain("uppercase");
     expect(screen.getByText("Which database should it use?")).toBeDefined();
-    expect(screen.getByText("SQLite").className).toContain("font-emph");
     expect(screen.getByText("the one Hercule ships")).toBeDefined();
-    // The user must cancel first: a reply sent while the session waits for an
-    // answer is queued behind the turn, and never reaches the harness that
-    // asked.
-    expect(readPageText()).toContain(
-      "Answering here is not built yet. Cancel the turn, then reply in the thread.",
+    // The dock answers the question itself, so it no longer tells the user to
+    // cancel the turn and reply.
+    expect(readPageText()).not.toContain("not built yet");
+  });
+});
+
+/**
+ * Tests for answering a `question` request in the permission card: one
+ * question at a time, its options as choices, a field for an own answer, and
+ * Next and Send. The answers go to `session.respond` as `{ requestId, answers }`.
+ */
+describe("Thread: answering the agent's questions", () => {
+  /** One question of a `question` request, as the contract types it. */
+  type Question = Extract<
+    NonNullable<Session["openRequest"]>,
+    { kind: "question" }
+  >["detail"]["questions"][number];
+
+  /** A single-select question. */
+  const STORAGE: Question = {
+    question: "Which storage should drafts use?",
+    header: "Storage",
+    options: [
+      { label: "localStorage", description: "small and synchronous" },
+      { label: "IndexedDB", description: "large and asynchronous" },
+    ],
+    multiSelect: false,
+  };
+
+  /** A multiSelect question. */
+  const FEATURES: Question = {
+    question: "Which features should ship?",
+    header: "Features",
+    options: [
+      { label: "Sync", description: "" },
+      { label: "Search", description: "" },
+    ],
+    multiSelect: true,
+  };
+
+  /** A question request with a single-select question, then a multiSelect one. */
+  const QUESTIONS: NonNullable<Session["openRequest"]> = {
+    requestId: "req-2",
+    itemId: "tool3",
+    kind: "question",
+    decisions: ["deny", "cancel"],
+    detail: { questions: [STORAGE, FEATURES] },
+  };
+
+  /** A question request with only the single-select question. */
+  const ONE_QUESTION: NonNullable<Session["openRequest"]> = {
+    ...QUESTIONS,
+    detail: { questions: [STORAGE] },
+  };
+
+  const RESPOND = `POST /api/v1/sessions/${SESSION_ID}/respond`;
+
+  /**
+   * Opens the thread parked on `request`, with a controller that accepts
+   * every answer, and returns the app and its stubbed API.
+   */
+  const openParked = (request: NonNullable<Session["openRequest"]>) => {
+    const session = buildSession({ status: "busy", openRequest: request });
+    return openApp(session, [], { [RESPOND]: { body: session } });
+  };
+
+  /** Returns the bodies the app sent with `session.respond`, oldest first. */
+  const readBodies = (calls: readonly Call[]): readonly unknown[] =>
+    calls.filter((call) => call.path.endsWith("/respond")).map((call) => call.body);
+
+  /**
+   * Returns the choice for the option `label`: a radio on a single-select
+   * question, a checkbox on a multiSelect one. Its accessible name starts with
+   * the label and may go on with the option's description.
+   */
+  const findChoice = (role: "radio" | "checkbox", label: string): HTMLElement =>
+    screen.getByRole(role, { name: (name) => name.startsWith(label) });
+
+  /** Returns the field the user types their own answer in. */
+  const readOwnAnswer = (): HTMLElement => screen.getByRole("textbox", { name: "Your own answer" });
+
+  /** Returns the button that sends the answers, which the composer's Send is not. */
+  const readSend = (): HTMLElement => screen.getByRole("button", { name: "Send answers" });
+
+  /** Checks whether `element` takes no input, through `disabled` or `aria-disabled`. */
+  const isLocked = (element: HTMLElement): boolean =>
+    (element as HTMLInputElement | HTMLButtonElement).disabled === true ||
+    element.getAttribute("aria-disabled") === "true";
+
+  it("shows one question at a time with its place among them, its options as choices, and a field for an own answer", async () => {
+    const user = userEvent.setup();
+    await openParked(QUESTIONS);
+
+    await screen.findByText("Which storage should drafts use?");
+    expect(screen.queryByText("Which features should ship?")).toBeNull();
+    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(findChoice("radio", "localStorage")).toBeDefined();
+    expect(findChoice("radio", "IndexedDB")).toBeDefined();
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(readOwnAnswer()).toBeDefined();
+
+    await user.click(findChoice("radio", "localStorage"));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+    expect(screen.getByText("Which features should ship?")).toBeDefined();
+    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(findChoice("checkbox", "Sync")).toBeDefined();
+    expect(findChoice("checkbox", "Search")).toBeDefined();
+    // The shell's own segmented control is a radio group too, so only the
+    // question form is checked for radios.
+    const questionForm = screen.getByText("Which features should ship?").closest("form")!;
+    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
+    expect(readOwnAnswer()).toBeDefined();
+    expect(readSend()).toBeDefined();
+  });
+
+  it("shows a lone question without its place, and with Send rather than Next", async () => {
+    await openParked(ONE_QUESTION);
+
+    await screen.findByText("Which storage should drafts use?");
+    expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    expect(readSend()).toBeDefined();
+  });
+
+  it("enables Send only once the question is answered with a pick or non-blank text", async () => {
+    const user = userEvent.setup();
+    await openParked(ONE_QUESTION);
+
+    await screen.findByText("Which storage should drafts use?");
+    expect(isLocked(readSend())).toBe(true);
+    await user.type(readOwnAnswer(), "   ");
+    expect(isLocked(readSend())).toBe(true);
+    await user.click(findChoice("radio", "IndexedDB"));
+    expect(isLocked(readSend())).toBe(false);
+  });
+
+  it("keeps Send disabled on the last question until that question is answered", async () => {
+    const user = userEvent.setup();
+    await openParked(QUESTIONS);
+
+    await user.click(
+      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
     );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(isLocked(readSend())).toBe(true);
+    await user.click(findChoice("checkbox", "Search"));
+    expect(isLocked(readSend())).toBe(false);
+  });
+
+  it("sends the answers of every question with session.respond", async () => {
+    const user = userEvent.setup();
+    const { api } = await openParked(QUESTIONS);
+
+    await user.click(
+      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.click(findChoice("checkbox", "Search"));
+    await user.type(readOwnAnswer(), " Offline mode ");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(api.calls)).toEqual([
+        {
+          requestId: "req-2",
+          answers: { Storage: "localStorage", Features: ["Sync", "Search", "Offline mode"] },
+        },
+      ]);
+    });
+  });
+
+  it("locks the choices, the field and Send once the answers are sent", async () => {
+    const user = userEvent.setup();
+    const { api } = await openParked(ONE_QUESTION);
+
+    await user.click(
+      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+    );
+    await user.click(readSend());
+    await waitFor(() => {
+      expect(readBodies(api.calls)).toHaveLength(1);
+    });
+
+    await waitFor(() => {
+      expect(isLocked(readSend())).toBe(true);
+    });
+    expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
+    expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
+    expect(isLocked(readOwnAnswer())).toBe(true);
+    await user.click(readSend());
+    expect(readBodies(api.calls)).toEqual([
+      { requestId: "req-2", answers: { Storage: "IndexedDB" } },
+    ]);
+  });
+
+  it("goes to the next question on ↩ in the own-answer field", async () => {
+    const user = userEvent.setup();
+    const { api } = await openParked(QUESTIONS);
+
+    await screen.findByText("Which storage should drafts use?");
+    await user.type(readOwnAnswer(), "a sqlite file{Enter}");
+
+    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(readBodies(api.calls)).toEqual([]);
+  });
+
+  it("stays on the question on ↩ while it is unanswered", async () => {
+    const user = userEvent.setup();
+    const { api } = await openParked(QUESTIONS);
+
+    await screen.findByText("Which storage should drafts use?");
+    await user.type(readOwnAnswer(), "{Enter}");
+
+    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(readBodies(api.calls)).toEqual([]);
+  });
+
+  it("answers a question with no options with the user's own text", async () => {
+    const user = userEvent.setup();
+    const { api } = await openParked({
+      ...QUESTIONS,
+      detail: { questions: [{ ...STORAGE, options: [] }] },
+    });
+
+    const questionForm = (await screen.findByText("Which storage should drafts use?")).closest(
+      "form",
+    )!;
+    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(api.calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+      ]);
+    });
+  });
+
+  it.each(["deny", "cancel"])("still answers %s with a decision", async (decision) => {
+    const user = userEvent.setup();
+    const { api } = await openParked(QUESTIONS);
+
+    const found = buildApprovalCard(QUESTIONS).rows.find((row) => row.id === decision)!;
+    await user.click(
+      await screen.findByRole("button", { name: (name) => name.includes(found.label) }),
+    );
+
+    await waitFor(() => {
+      expect(readBodies(api.calls)).toEqual([{ requestId: "req-2", decision }]);
+    });
   });
 });
 

@@ -146,7 +146,7 @@ export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from ".
 export { resolveThreadRowsMode } from "./thread-rows";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
-export { buildApprovalCard } from "./threads/approval";
+export { buildApprovalCard, type ApprovalQuestion } from "./threads/approval";
 export {
   buildThreadBlocks,
   type AgentBlock,
@@ -215,6 +215,13 @@ export {
 } from "./threads/recent";
 export { decideRelatedReads } from "./threads/related-reads";
 export { formatRequestQuestion } from "./threads/request-question";
+export {
+  buildQuestionAnswers,
+  buildQuestionDraft,
+  isQuestionAnswered,
+  pickQuestionOption,
+  typeQuestionAnswer,
+} from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export { describeAgent } from "./threads/model-name";

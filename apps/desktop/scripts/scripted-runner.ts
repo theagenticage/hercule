@@ -20,7 +20,8 @@
  * - a stop with `session.exited` for the reason `stopped`;
  * - an interrupt by withdrawing the open Request, if any, and ending the
  *   running turn as `interrupted`;
- * - a response to the open Request with `request.resolved`.
+ * - a response to the open Request, a decision or answers to a question,
+ *   with `request.resolved`.
  *
  * Nothing else happens until the caller calls a method. The simple methods
  * each report one change: a turn starts, a Request opens, the session exits.
@@ -41,6 +42,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
 import type {
+  ANSWERS_CAPABILITY,
   ControllerToRunner,
   ExitReason,
   ItemKind,
@@ -713,7 +715,9 @@ export async function enlistScriptedRunner(
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
             protocolVersion: 1 satisfies typeof PROTOCOL_VERSION,
-            capabilities: [],
+            // The controller sends answers to a question only to a runner
+            // that lists this capability.
+            capabilities: ["answers" satisfies typeof ANSWERS_CAPABILITY],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
             facts: { ...FACTS, identityPort },
@@ -829,6 +833,16 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
                 { label: "Postgres", description: "A server, for many writers at once." },
               ],
               multiSelect: false,
+            },
+            {
+              question: "Which checks should run before each commit?",
+              header: "Checks",
+              options: [
+                { label: "Typecheck", description: "Catches type errors in seconds." },
+                { label: "Lint", description: "Keeps the style consistent." },
+                { label: "Tests", description: "Slower, but proves behaviour." },
+              ],
+              multiSelect: true,
             },
           ],
         },

@@ -130,50 +130,6 @@ describe("the dock", () => {
     ).toEqual(["Allow", "Allow always", "Deny", "Cancel"]);
   });
 
-  it("shows a question's questions and options read-only, with the note that answering is not built", async () => {
-    const question: OpenRequest = {
-      ...COMMAND,
-      kind: "question",
-      decisions: ["deny", "cancel"],
-      detail: {
-        questions: [
-          {
-            question: "Which database should it use?",
-            header: "Database",
-            options: [
-              { label: "SQLite", description: "the one Hercule ships" },
-              { label: "Postgres", description: "somebody else's server" },
-            ],
-            multiSelect: true,
-          },
-        ],
-      },
-    };
-    await renderDock(question);
-
-    const card = buildApprovalCard(question);
-    const dock = readDock("The agent needs answers.");
-    for (const text of [
-      "Database",
-      "Which database should it use?",
-      "SQLite",
-      "the one Hercule ships",
-      "Postgres",
-      "somebody else's server",
-      card.questions[0]!.note!,
-      card.note!,
-    ]) {
-      // `dock-mini` repeats the question on one line, and shows only while
-      // the composer is shrunk.
-      expect(within(dock).getByText(text, { ignore: ".dock-mini *" })).toBeTruthy();
-    }
-    expect(
-      within(dock)
-        .getAllByRole("button")
-        .map((answer) => answer.getAttribute("aria-label")),
-    ).toEqual(["Deny", "Cancel"]);
-  });
-
   it("allows on ↩ when the dock itself has the focus", async () => {
     const user = userEvent.setup();
     const { calls } = await renderDock(COMMAND);
@@ -341,5 +297,350 @@ describe("the dock", () => {
 
     expect(readDock()).toBeTruthy();
     expect(document.activeElement).toBe(document.body);
+  });
+});
+
+/** One question of a `question` request, as the contract types it. */
+type Question = Extract<OpenRequest, { kind: "question" }>["detail"]["questions"][number];
+
+/** A single-select question. */
+const STORAGE: Question = {
+  question: "Which storage should drafts use?",
+  header: "Storage",
+  options: [
+    { label: "localStorage", description: "small and synchronous" },
+    { label: "IndexedDB", description: "large and asynchronous" },
+  ],
+  multiSelect: false,
+};
+
+/** A multiSelect question. */
+const FEATURES: Question = {
+  question: "Which features should ship?",
+  header: "Features",
+  options: [
+    { label: "Sync", description: "" },
+    { label: "Search", description: "" },
+  ],
+  multiSelect: true,
+};
+
+/** A question request with a single-select question, then a multiSelect one. */
+const QUESTIONS: OpenRequest = {
+  requestId: "req-2",
+  itemId: "tool-2",
+  kind: "question",
+  decisions: ["deny", "cancel"],
+  detail: { questions: [STORAGE, FEATURES] },
+};
+
+/** A question request with only the single-select question. */
+const ONE_QUESTION: OpenRequest = { ...QUESTIONS, detail: { questions: [STORAGE] } };
+
+/** Returns the bodies the dock sent with `session.respond`, oldest first. */
+const readBodies = (calls: readonly Call[]): readonly unknown[] =>
+  calls.filter((call) => `${call.method} ${call.path}` === RESPOND).map((call) => call.body);
+
+/** Returns the dock of a question request, named by the card's title. */
+const readQuestionDock = (): HTMLElement => readDock(buildApprovalCard(QUESTIONS).title);
+
+/**
+ * Returns the choice for the option `label`: a radio on a single-select
+ * question, a checkbox on a multiSelect one. Its accessible name starts with
+ * the label and may go on with the option's description.
+ */
+const findChoice = (role: "radio" | "checkbox", label: string): HTMLElement =>
+  within(readQuestionDock()).getByRole(role, { name: (name) => name.startsWith(label) });
+
+/** Returns the field the user types their own answer in. */
+const readOwnAnswer = (): HTMLElement =>
+  within(readQuestionDock()).getByRole("textbox", { name: "Your own answer" });
+
+/** Returns the button that sends the answers. */
+const readSend = (): HTMLElement =>
+  within(readQuestionDock()).getByRole("button", { name: "Send answers" });
+
+/** Checks whether `element` takes no input, through `disabled` or `aria-disabled`. */
+const isLocked = (element: HTMLElement): boolean =>
+  (element as HTMLInputElement | HTMLButtonElement).disabled === true ||
+  element.getAttribute("aria-disabled") === "true";
+
+/**
+ * Finds `text` in the question dock, outside `dock-mini`, which repeats the
+ * first question on one line and shows only while the composer is shrunk.
+ */
+const queryDockText = (text: string | RegExp): HTMLElement | null =>
+  within(readQuestionDock()).queryByText(text, { ignore: ".dock-mini *" });
+
+describe("the dock for a question", () => {
+  it("shows one question at a time with its place among them, its options as single choices, and a field for an own answer", async () => {
+    const user = userEvent.setup();
+    await renderDock(QUESTIONS);
+
+    expect(queryDockText("Which storage should drafts use?")).not.toBeNull();
+    expect(queryDockText("Which features should ship?")).toBeNull();
+    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+    expect(findChoice("radio", "localStorage")).toBeTruthy();
+    expect(findChoice("radio", "IndexedDB")).toBeTruthy();
+    expect(within(readQuestionDock()).queryAllByRole("checkbox")).toEqual([]);
+    expect(readOwnAnswer()).toBeTruthy();
+
+    await user.click(findChoice("radio", "localStorage"));
+    await user.click(within(readQuestionDock()).getByRole("button", { name: "Next" }));
+
+    expect(queryDockText("Which storage should drafts use?")).toBeNull();
+    expect(queryDockText("Which features should ship?")).not.toBeNull();
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(findChoice("checkbox", "Sync")).toBeTruthy();
+    expect(findChoice("checkbox", "Search")).toBeTruthy();
+    expect(within(readQuestionDock()).queryAllByRole("radio")).toEqual([]);
+    expect(readOwnAnswer()).toBeTruthy();
+    expect(readSend()).toBeTruthy();
+  });
+
+  it("shows a lone question without its place, and with Send rather than Next", async () => {
+    await renderDock(ONE_QUESTION);
+
+    expect(queryDockText("Which storage should drafts use?")).not.toBeNull();
+    expect(queryDockText(/\b1 of 1\b/)).toBeNull();
+    expect(within(readQuestionDock()).queryByRole("button", { name: "Next" })).toBeNull();
+    expect(readSend()).toBeTruthy();
+  });
+
+  it("enables Send only once the question is answered with a pick or non-blank text", async () => {
+    const user = userEvent.setup();
+    await renderDock(ONE_QUESTION);
+
+    expect(isLocked(readSend())).toBe(true);
+    await user.type(readOwnAnswer(), "   ");
+    expect(isLocked(readSend())).toBe(true);
+    await user.click(findChoice("radio", "IndexedDB"));
+    expect(isLocked(readSend())).toBe(false);
+  });
+
+  it("keeps Send disabled on the last question until that question is answered", async () => {
+    const user = userEvent.setup();
+    await renderDock(QUESTIONS);
+
+    await user.click(findChoice("radio", "localStorage"));
+    await user.click(within(readQuestionDock()).getByRole("button", { name: "Next" }));
+
+    expect(isLocked(readSend())).toBe(true);
+    await user.click(findChoice("checkbox", "Search"));
+    expect(isLocked(readSend())).toBe(false);
+  });
+
+  it("sends the answers of every question with session.respond", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.click(findChoice("radio", "localStorage"));
+    await user.click(within(readQuestionDock()).getByRole("button", { name: "Next" }));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.click(findChoice("checkbox", "Search"));
+    await user.type(readOwnAnswer(), " Offline mode ");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([
+        {
+          requestId: "req-2",
+          answers: { Storage: "localStorage", Features: ["Sync", "Search", "Offline mode"] },
+        },
+      ]);
+    });
+  });
+
+  it("locks the choices, the field and Send once the answers are sent", async () => {
+    const user = userEvent.setup();
+    const { calls, queryClient } = await renderDock(ONE_QUESTION);
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(readSend());
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+
+    expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
+    expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
+    expect(isLocked(readOwnAnswer())).toBe(true);
+    expect(isLocked(readSend())).toBe(true);
+    await user.click(readSend());
+    expect(queryClient.isMutating()).toBe(0);
+    expect(readBodies(calls)).toEqual([{ requestId: "req-2", answers: { Storage: "IndexedDB" } }]);
+  });
+
+  it.each(["Deny", "Cancel"])("still answers %s with a decision", async (label) => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.click(within(readQuestionDock()).getByRole("button", { name: label }));
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", decision: label.toLowerCase() }]);
+    });
+  });
+
+  it("goes to the next question on ↩ from the dock once the shown question is answered", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    focus(readQuestionDock());
+    await user.keyboard("{Enter}");
+
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Which features should ship?")).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("goes to the next question on ↩ right after a choice is clicked", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    // The click leaves the focus on the choice, not on the dock.
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.keyboard("{Enter}");
+
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("does nothing on ↩ from the dock while the shown question is unanswered", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    focus(readQuestionDock());
+    await user.keyboard("{Enter}");
+    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+
+    // Esc sends a decision, so a stray answer sent by the ↩ above would show
+    // up before it.
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", decision: "deny" }]);
+    });
+  });
+
+  it("sends the answers on ↩ from the dock on the last question once it is answered", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(ONE_QUESTION);
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    focus(readQuestionDock());
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "IndexedDB" } },
+      ]);
+    });
+  });
+
+  it("denies on esc from a choice inside the dock", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    focus(findChoice("radio", "localStorage"));
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", decision: "deny" }]);
+    });
+  });
+
+  it("does not deny on esc in the own-answer field", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.keyboard("{Escape}");
+    focus(readQuestionDock());
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", decision: "deny" }]);
+    });
+  });
+
+  it("goes to the next question on ↩ in the own-answer field, as ↩ on the dock does", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.keyboard("{Enter}");
+
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("stays on the question on the ↩ that ends an IME composition in the own-answer field", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.type(readOwnAnswer(), "にほんご");
+    const pressed = fireEvent.keyDown(readOwnAnswer(), { key: "Enter", isComposing: true });
+
+    expect(pressed).toBe(true);
+    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("goes to the next question on ⌘↵ in the own-answer field, and keeps the key from the menu's Send", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    const pressed = fireEvent.keyDown(readOwnAnswer(), { key: "Enter", metaKey: true });
+
+    // A prevented key press is what keeps the menu's Send from firing.
+    expect(pressed).toBe(false);
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("keeps ⌘↵ on a focused button from the menu's Send, which would send the composer's message", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    const next = within(readQuestionDock()).getByRole("button", { name: "Next" });
+    const pressed = fireEvent.keyDown(next, { key: "Enter", metaKey: true });
+
+    expect(pressed).toBe(false);
+    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(readBodies(calls)).toEqual([]);
+  });
+
+  it("answers a question with no options with the user's own text", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock({
+      ...QUESTIONS,
+      detail: { questions: [{ ...STORAGE, options: [] }] },
+    });
+
+    expect(within(readQuestionDock()).queryAllByRole("radio")).toEqual([]);
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+      ]);
+    });
+  });
+
+  it("sends the trimmed own answer on ↩ in the field on the last question", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(ONE_QUESTION);
+
+    await user.type(readOwnAnswer(), "  a sqlite file ");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+      ]);
+    });
   });
 });

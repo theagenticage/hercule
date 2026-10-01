@@ -52,7 +52,7 @@ describe("buildApprovalCard", () => {
 
     expect(card.subject).toEqual(["ls -la"]);
     expect(card.code).toBe(true);
-    expect(card.note).toBeNull();
+    expect(card).not.toHaveProperty("note");
   });
 
   it("uses every path of a file_change_approval as its subject, in order, as code", () => {
@@ -90,7 +90,7 @@ describe("buildApprovalCard", () => {
     expect(card.subject).toEqual([]);
   });
 
-  it("shows a question request's questions with only deny and cancel, and a note that answering is not built yet", () => {
+  it("shows a question request's questions with only deny and cancel, and no note", () => {
     const request: OpenRequest = {
       ...COMMAND,
       kind: "question",
@@ -119,23 +119,19 @@ describe("buildApprovalCard", () => {
     // repeat, and a question is the agent's prose rather than code.
     expect(card.subject).toEqual([]);
     expect(card.code).toBe(false);
-    expect(card.questions).toEqual([
-      {
-        header: "Database",
-        question: "Which database should it use?",
-        options: [
-          { label: "SQLite", description: "the one Hercule ships" },
-          { label: "Postgres", description: "somebody else's server" },
-        ],
-        note: null,
-      },
-    ]);
-    // Allow could not send the answers, so the note explains why there is no
-    // Allow. It says to cancel first, because a reply sent while the session
-    // waits is queued behind the turn instead of reaching the harness.
-    expect(card.note).toBe(
-      "Answering here is not built yet. Cancel the turn, then reply in the thread.",
-    );
+    expect(card.questions).toHaveLength(1);
+    expect(card.questions[0]).toMatchObject({
+      header: "Database",
+      question: "Which database should it use?",
+      options: [
+        { label: "SQLite", description: "the one Hercule ships" },
+        { label: "Postgres", description: "somebody else's server" },
+      ],
+      multiSelect: false,
+    });
+    // The questions are answered in the dock itself, so nothing is missing
+    // that a note would have to explain.
+    expect(card).not.toHaveProperty("note");
   });
 
   it("keeps every question of a multi-question request, and notes which allow more than one answer", () => {
@@ -163,6 +159,8 @@ describe("buildApprovalCard", () => {
     const card = buildApprovalCard(request);
 
     expect(card.questions.map((one) => one.header)).toEqual(["Features", "Branch"]);
+    // The dock offers several choices or one, so each question says which.
+    expect(card.questions.map((one) => one.multiSelect)).toEqual([true, false]);
     // No description to show: the label is the whole option.
     expect(card.questions[0]?.options).toEqual([{ label: "Rules", description: "" }]);
     expect(card.questions[0]?.note).toMatch(/more than one/i);

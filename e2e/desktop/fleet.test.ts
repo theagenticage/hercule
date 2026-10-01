@@ -95,7 +95,20 @@ describe("the scripted fleet", () => {
       const { openRequest } = await readSession(id);
       await client.session.respond({
         params: { id },
-        payload: { requestId, decision: openRequest!.decisions[0] },
+        // A question is answered with answers, not a decision: allow is not
+        // among its decisions.
+        payload:
+          openRequest!.kind === "question"
+            ? {
+                requestId,
+                answers: Object.fromEntries(
+                  openRequest!.detail.questions.map((question) => [
+                    question.header,
+                    question.options[0]!.label,
+                  ]),
+                ),
+              }
+            : { requestId, decision: openRequest!.decisions[0] },
       });
       await expect.poll(async () => (await readSession(id)).openRequest).toBeNull();
     }

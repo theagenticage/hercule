@@ -1,14 +1,21 @@
-import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
+import { Fragment, useId, useState, type JSX, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildApprovalCard,
+  buildQuestionAnswers,
+  buildQuestionDraft,
   formatDescribeLine,
   formatRequestQuestion,
+  isQuestionAnswered,
+  pickQuestionOption,
   readErrorMessage,
+  typeQuestionAnswer,
 } from "@hercule/client-core";
-import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
+import type { ApprovalDecision, OpenRequest, SessionRespondInput } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
+import { CheckIcon } from "../../icons";
+import { isSendKey } from "./send-key";
 import "./dock.css";
 
 /**
@@ -45,7 +52,9 @@ const DECISION_BUTTON_CLASSES: Readonly<Record<ApprovalDecision, string>> = {
  * - esc sends deny, wherever the focus is in the dock;
  * - ↩ sends allow only when the dock itself has focus. When an answer has
  *   focus, ↩ presses that answer, as it presses any button, so a focused
- *   Deny is never turned into Allow.
+ *   Deny is never turned into Allow. A `question` request offers no allow,
+ *   so there ↩ moves through the questions instead, which `RequestDock`
+ *   handles before it asks for a decision.
  *
  * A key held with ⌘, ⌃ or ⇧ sends nothing, so those combinations keep any
  * meaning the app gives them.
@@ -66,13 +75,16 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  *
  * - the question: the thread's face in the waiting pose, then the card's
  *   title with what it asks about in `code`;
- * - for a `question` request, its questions and their options, read-only,
- *   and client-core's note that answering them here is not built yet;
+ * - for a `question` request, one question at a time: its header, its place
+ *   among the questions when there are several, its options as choices, a
+ *   field for the user's own answer, and Next, or Send answers on the last
+ *   question;
  * - the ledger: one answer per decision the request offers, in the
  *   request's order, each with what it does and its key.
  *
- * All the text comes from `buildApprovalCard`, so an answer is described in
- * the same words on every screen.
+ * The request's text, its questions and its answers come from
+ * `buildApprovalCard`, so an answer is described in the same words on every
+ * screen. Only the controls' own labels, such as Next, are written here.
  *
  * While the composer is shrunk, all of that gives way to `dock-mini`: the
  * face, the question in the one line the sidebar's Waiting on you row
@@ -82,9 +94,14 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  *
  * The dock is a group named by its title, and it can take focus. While the
  * focus is inside it, the keys `findDecisionForKey` lists send their answer.
- * The keys are read here rather than on the window, so nothing outside the
- * dock ever answers a Request, and the dock never takes the focus when it
- * opens.
+ * On a `question` request, ↩ on the dock itself, on a choice or in the
+ * own-answer field, and ⌘↵ anywhere in the dock, do what Next or Send
+ * answers does. A user who clicks a choice and presses ↩ moves on, while ↩
+ * on a focused button still presses that button. Esc in the own-answer
+ * field is left to the field, so a user editing their answer does not deny
+ * by accident. The keys are read here rather than on the window, so nothing
+ * outside the dock ever answers a Request, and the dock never takes the
+ * focus when it opens.
  *
  * An answer is sent with `session.respond`. Mount one dock per request, keyed
  * by its id, so an answer given to one request never disables the next.
@@ -101,10 +118,10 @@ export function RequestDock({
   const titleId = useId();
   const card = buildApprovalCard(request);
   const respond = useMutation({
-    mutationFn: (decision: ApprovalDecision) =>
+    mutationFn: (response: Omit<SessionRespondInput, "requestId">) =>
       client.session.respond({
         params: { id: sessionId },
-        payload: { requestId: request.requestId, decision },
+        payload: { requestId: request.requestId, ...response },
       }),
     // The response is not written into the cache. It is the session as the
     // controller held it when the answer arrived, still waiting on the
@@ -116,16 +133,45 @@ export function RequestDock({
   // request resolved, and a second answer in that time could contradict the
   // one already sent. The keys obey this too, so the keyboard cannot answer
   // where a click cannot.
-  const answered = respond.isPending || respond.isSuccess;
+  const locked = respond.isPending || respond.isSuccess;
+  // The state of a `question` request: what the user has given so far, and
+  // which question is shown. For every other kind the draft stays empty and
+  // the index is not used.
+  const [draft, setDraft] = useState(() => buildQuestionDraft(card.questions));
+  const [shownQuestionIndex, setShownQuestionIndex] = useState(0);
+  const question = card.questions[shownQuestionIndex];
+  const questionAnswered = question !== undefined && isQuestionAnswered(draft, question);
+  const isLastQuestion = shownQuestionIndex === card.questions.length - 1;
+
+  /** Shows the next question, or sends the answers from the last one, once the shown question is answered. */
+  const advanceQuestions = (): void => {
+    if (locked || !questionAnswered) return;
+    if (!isLastQuestion) {
+      setShownQuestionIndex(shownQuestionIndex + 1);
+      return;
+    }
+    const answers = buildQuestionAnswers(draft, card.questions);
+    if (answers !== null) respond.mutate({ answers });
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (answered) return;
+    if (question !== undefined && isSendKey(event) && !event.ctrlKey && !event.altKey) {
+      // ↩ on a button presses that button. ⌘↵ is the app's send key, and
+      // left alone it would reach the menu's Send and send the composer's
+      // message, so it is caught wherever the focus is in the dock, even
+      // once the answers are sent.
+      if (event.target instanceof HTMLButtonElement && !event.metaKey) return;
+      event.preventDefault();
+      advanceQuestions();
+      return;
+    }
+    if (locked) return;
     const decision = findDecisionForKey(event);
     if (decision === null || !request.decisions.includes(decision)) return;
     // Without this, ↩ or ⌥↩ on a focused answer would also press that
     // answer, and send a second decision.
     event.preventDefault();
-    respond.mutate(decision);
+    respond.mutate({ decision });
   };
 
   return (
@@ -146,26 +192,84 @@ export function RequestDock({
             ))}
           </span>
         </div>
-        {card.questions.length === 0 ? null : (
-          <div className="dock-questions">
-            {card.questions.map((question, index) => (
-              <div key={index} className="dock-question">
-                <span className="dock-question-header">{question.header}</span>
-                <span>{question.question}</span>
-                <div className="dock-options">
-                  {question.options.map((option, optionIndex) => (
-                    <Fragment key={optionIndex}>
-                      <span className="dock-option-label">{option.label}</span>
-                      <span className="ans-desc">{option.description}</span>
-                    </Fragment>
-                  ))}
-                </div>
-                {question.note === null ? null : <span className="faint">{question.note}</span>}
+        {question === undefined ? null : (
+          <div className="dock-question">
+            <div className="dock-question-top">
+              <span className="dock-question-header">{question.header}</span>
+              {card.questions.length === 1 ? null : (
+                <span className="dock-question-place">
+                  {shownQuestionIndex + 1} of {card.questions.length}
+                </span>
+              )}
+            </div>
+            <span className="dock-question-text">{question.question}</span>
+            {/* The choices sit on the ledger's grid: the choice and its label
+                in the buttons' column, what it means in the descriptions'
+                column, so options and answers line up. The whole row is the
+                click target. */}
+            {question.options.length === 0 ? null : (
+              <div className="dock-options">
+                {question.options.map((option, index) => (
+                  // Keyed by place, so a focused choice keeps the focus when
+                  // the next question has a choice in the same place.
+                  <label key={index} className="dock-option">
+                    <span className="dock-option-label">
+                      <span className="dock-choice">
+                        <input
+                          type={question.multiSelect ? "checkbox" : "radio"}
+                          name={titleId}
+                          checked={draft[question.header]!.picks.includes(option.label)}
+                          disabled={locked}
+                          onChange={() =>
+                            setDraft(pickQuestionOption(draft, question, option.label))
+                          }
+                        />
+                        {question.multiSelect ? <CheckIcon size={12} /> : null}
+                      </span>
+                      {option.label}
+                    </span>
+                    <span className="ans-desc">{option.description}</span>
+                  </label>
+                ))}
               </div>
-            ))}
+            )}
+            {question.note === null ? null : (
+              <span className="dock-question-note">{question.note}</span>
+            )}
+            <div className="dock-own">
+              <input
+                className="field"
+                type="text"
+                aria-label="Your own answer"
+                placeholder="Or type your own answer"
+                value={draft[question.header]!.text}
+                disabled={locked}
+                onChange={(event) =>
+                  setDraft(typeQuestionAnswer(draft, question, event.target.value))
+                }
+                onKeyDown={(event) => {
+                  // In a text field, esc is a common way to give up an edit,
+                  // so it must not deny the whole request.
+                  if (event.key === "Escape") event.stopPropagation();
+                }}
+              />
+              {/* `aria-disabled` rather than `disabled`, so the button keeps
+                  the focus when Next turns into Send answers on a question
+                  not yet answered. Until the shown question is answered, and
+                  once the answers are sent, it looks like a plain button with
+                  a faint label, as the locked choices and field do. */}
+              <button
+                type="button"
+                className="btn btn--accent btn--sm"
+                aria-disabled={locked || !questionAnswered}
+                data-unready={locked || !questionAnswered || undefined}
+                onClick={advanceQuestions}
+              >
+                {isLastQuestion ? "Send answers" : "Next"}
+              </button>
+            </div>
           </div>
         )}
-        {card.note === null ? null : <p className="dock-note">{card.note}</p>}
         <div className="ledger">
           {card.rows.map((row) => {
             const key = DECISION_KEYS[row.id];
@@ -178,9 +282,9 @@ export function RequestDock({
                 aria-label={row.label}
                 aria-describedby={describeId}
                 aria-keyshortcuts={key?.shortcut}
-                aria-disabled={answered || undefined}
+                aria-disabled={locked || undefined}
                 onClick={() => {
-                  if (!answered) respond.mutate(row.id);
+                  if (!locked) respond.mutate({ decision: row.id });
                 }}
               >
                 <span className={DECISION_BUTTON_CLASSES[row.id]}>{row.label}</span>
@@ -209,9 +313,9 @@ export function RequestDock({
               key={row.id}
               type="button"
               className={DECISION_BUTTON_CLASSES[row.id]}
-              aria-disabled={answered || undefined}
+              aria-disabled={locked || undefined}
               onClick={() => {
-                if (!answered) respond.mutate(row.id);
+                if (!locked) respond.mutate({ decision: row.id });
               }}
             >
               {row.label}

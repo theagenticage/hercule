@@ -1722,6 +1722,24 @@ describe("answering a question the harness asks", () => {
     ]);
   });
 
+  it("drops an option whose label repeats an earlier option's label", async () => {
+    const run = await startApprovalSession();
+
+    const { request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [
+        {
+          ...STORAGE_QUESTION,
+          options: [
+            ...STORAGE_QUESTION.options,
+            { label: STORAGE_QUESTION.options[0]!.label, description: "the same label again" },
+          ],
+        },
+      ],
+    });
+
+    expect(readQuestions(request)).toEqual([STORAGE_QUESTION]);
+  });
+
   /**
    * Answers are keyed by header, so two questions with one header could not
    * both be answered. The later one is dropped rather than renamed, because a

@@ -28,18 +28,24 @@ type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["q
  * question text cannot see what an option means.
  *
  * Fields the protocol has no place for, such as the Claude SDK's `preview`,
- * are dropped. So is an option with no label or with no description string.
+ * are dropped. So is an option with no label or with no description string,
+ * and an option whose label repeats an earlier option's: a picked option is
+ * sent back as its label, so two options with one label cannot be told apart.
  */
 const parseOptions = (given: unknown): ReadonlyArray<Question["options"][number]> => {
   if (!Array.isArray(given)) return [];
-  return given.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const { label, description } = one as {
+  const labels = new Set<string>();
+  return given.flatMap((option: unknown) => {
+    if (typeof option !== "object" || option === null) return [];
+    const { label, description } = option as {
       readonly label?: unknown;
       readonly description?: unknown;
     };
     if (typeof label !== "string" || label === "" || typeof description !== "string") return [];
-    return [{ label: truncateFact(label), description: truncateMessage(description) }];
+    const shownLabel = truncateFact(label);
+    if (labels.has(shownLabel)) return [];
+    labels.add(shownLabel);
+    return [{ label: shownLabel, description: truncateMessage(description) }];
   });
 };
 
@@ -77,9 +83,9 @@ const parseQuestions = (given: unknown, keyField: AnswerKeyField): ReadonlyArray
   if (!Array.isArray(given)) return [];
   const headers = new Set<string>();
   const answerKeys = new Set<string>();
-  return given.flatMap((one: unknown) => {
-    if (typeof one !== "object" || one === null) return [];
-    const fields = one as {
+  return given.flatMap((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const fields = entry as {
       readonly question?: unknown;
       readonly id?: unknown;
       readonly header?: unknown;
@@ -128,7 +134,7 @@ export const buildQuestionRequest = (
   keyField: AnswerKeyField,
 ): OpenRequest => {
   const common = { ...identity, decisions: ["deny", "cancel"] } as const;
-  const [first, ...rest] = parseQuestions(given, keyField).map((one) => one.question);
+  const [first, ...rest] = parseQuestions(given, keyField).map((keyed) => keyed.question);
   return first === undefined
     ? { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } }
     : { ...common, kind: "question", detail: { questions: [first, ...rest] } };
@@ -150,7 +156,7 @@ export const keyAnswersForVendor = (
   keyField: AnswerKeyField,
 ): ReadonlyMap<string, ReadonlyArray<string>> => {
   const answerKeys = new Map(
-    parseQuestions(given, keyField).map((one) => [one.question.header, one.answerKey]),
+    parseQuestions(given, keyField).map((keyed) => [keyed.question.header, keyed.answerKey]),
   );
   return new Map(
     Object.entries(answers).flatMap(([header, answer]) => {

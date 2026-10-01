@@ -48,9 +48,9 @@ export interface ApprovalOption {
 /**
  * One question of a `question` request, as the card shows it. A question is
  * not an approval: it has its own chip, text and answers. The two only share
- * the card's place on screen, not its layout. The options are shown read-only,
- * because they help explain the question, until answering with an option is
- * built.
+ * the card's place on screen, not its layout. The user answers it by picking
+ * options or typing their own answer, kept in the draft `buildQuestionDraft`
+ * starts.
  */
 export interface ApprovalQuestion {
   /** The short chip label the harness gave the question. */
@@ -59,6 +59,8 @@ export interface ApprovalQuestion {
   readonly question: string;
   /** The question's options, each with its label and what choosing it would mean. */
   readonly options: readonly ApprovalOption[];
+  /** Whether the user may pick more than one option. */
+  readonly multiSelect: boolean;
   /** A note shown when the question accepts more than one answer, else `null`. */
   readonly note: string | null;
 }
@@ -74,24 +76,11 @@ export interface ApprovalCard {
    * sentence and is shown as one (design language §Typography).
    */
   readonly code: boolean;
-  /** Why an answer the user expects is missing, or `null` when none is. */
-  readonly note: string | null;
   /** The questions of a `question` request; empty for every approval kind. */
   readonly questions: readonly ApprovalQuestion[];
   /** One row per decision the request offers, in the request's order. */
   readonly rows: readonly ApprovalRow[];
 }
-
-/**
- * The harness asks for answers, but `session.respond` can only send a
- * decision, not answers, so Allow would have nothing to run the tool with.
- * The card says so, so that the missing Allow does not look like a bug.
- *
- * The user must cancel first and then reply: a message sent while the session
- * waits for the answer is queued behind the turn, so it would not reach the
- * harness that is asking.
- */
-const NOT_BUILT = "Answering here is not built yet. Cancel the turn, then reply in the thread.";
 
 const buildCardTitle = (request: OpenRequest): string => {
   switch (request.kind) {
@@ -132,6 +121,7 @@ const buildCardQuestions = (request: OpenRequest): readonly ApprovalQuestion[] =
         header: question.header,
         question: question.question,
         options: question.options,
+        multiSelect: question.multiSelect,
         note: question.multiSelect ? MULTI : null,
       }))
     : [];
@@ -142,7 +132,6 @@ export const buildApprovalCard = (request: OpenRequest): ApprovalCard => ({
   subject: buildCardSubject(request),
   code: request.kind !== "question",
   questions: buildCardQuestions(request),
-  note: request.kind === "question" ? NOT_BUILT : null,
   rows: request.decisions.map((decision) => ({
     id: decision,
     label: APPROVAL_ANSWER_LABELS[decision],
