@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="system.css" />
     <link rel="stylesheet" href="../shared/frames.css" />
     <script src="../shared/book.js" defer></script>
-    <title>Crew Bureau · Hercule design system, round 2</title>
+    <title>Crew Bureau, second edition · Hercule design system</title>
     <style>
       /* The book scrolls; the screen pages do not. */
       html,
@@ -88,6 +88,7 @@
       }
       .bk-links a {
         padding: 5px 8px;
+        white-space: nowrap;
         border-radius: var(--r-sm);
         color: var(--muted);
         font-size: var(--t-13);
@@ -98,7 +99,7 @@
         background: var(--hover);
         color: var(--ink);
       }
-      @media (max-width: 1380px) {
+      @media (max-width: 1480px) {
         .bk-links {
           display: none;
         }
@@ -1673,9 +1674,9 @@
   </head>
   <body>
     <header class="bk-top">
-      <a class="bk-brand" href="#top"><i data-logo="26"></i><span class="wordmark">Crew Bureau</span><small>Hercule · round 2</small></a>
+      <a class="bk-brand" href="#top"><i data-logo="26"></i><span class="wordmark">Crew Bureau</span><small>Hercule · second edition</small></a>
       <nav class="bk-links">
-        <a href="#changed">Changed</a><a href="#why">Why</a><a href="#today">Today</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#ten">10x</a><a href="#adopt">Adopt</a><a href="#spec">Spec</a>
+        <a href="#changed">Changed</a><a href="#why">Why</a><a href="#today">Today</a><a href="#system">System</a><a href="#screens">Screens</a><a href="#office">Office</a><a href="#first-run">First run</a><a href="#ten">10x</a><a href="#adopt">Adopt</a><a href="#spec">Spec</a>
       </nav>
       <div class="bk-switch" role="group" aria-label="Theme">
         <button data-theme-option="whitehaven" title="Whitehaven, light"><i class="bk-sw" data-theme="whitehaven"></i><span>Whitehaven</span></button>
@@ -1697,7 +1698,7 @@
       <section class="bk-hero" id="top">
         <div>
           <span class="app-icon" style="--size: 84px"><i data-logo="60"></i></span>
-          <p class="bk-iter">Crew, iteration 1</p>
+          <p class="bk-iter">Second edition, with the first run</p>
           <h1 class="wordmark">Crew Bureau</h1>
           <p class="bk-thesis">Order and method: a detective bureau of small colleagues.</p>
           <p class="bk-brief">
@@ -1872,6 +1873,28 @@
               <td>"Too many icons."</td>
               <td>One outline family, used only where a word alone is slower. Six state marks; queued, cancelled and skipped are words.</td>
               <td class="bk-see"><a href="#marks">Marks</a></td>
+            </tr>
+
+            <tr class="bk-tg"><th colspan="3">Second edition: the first run (#313)</th></tr>
+            <tr>
+              <td>"A first run that needs no browser and no terminal."</td>
+              <td>Four steps in the desktop app, from finding Hercule on this Mac to your first thread: account, providers, GitHub, project.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"It must make you want to use it."</td>
+              <td>The office is on screen from the first moment, empty, and every finished step furnishes it. Three variants; B is recommended.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"The desktop app cannot log in or create a project."</td>
+              <td>The first run draws both: Log in for each provider found on this Mac, and a project from a folder whose origin fills in the repository.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"A fresh install has nothing to start from."</td>
+              <td>Until Triage first fills Intake, a new thread offers three starter threads and says when Intake fills.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
             </tr>
           </tbody>
         </table>
@@ -2536,7 +2559,100 @@
         </div>
       </section>
 
-      <!-- 8. At 10x -->
+      <!-- 8. The first run -->
+      <section class="bk-sec" id="first-run">
+        <header class="bk-h">
+          <span class="bk-kick"><i data-face="Hercule" data-pose="idle" data-size="22"></i>The first run</span>
+          <h2>Four steps, and the office opens around you.</h2>
+          <p class="bk-lede">
+            The first time the desktop app opens after Hercule is installed, it finds Hercule on this Mac and sets it up in four steps: your account, a provider login, GitHub, and a first project. No browser, no terminal, no pasted address. Each finished step furnishes the room, and the run
+            ends on your first thread. It is prototyped in three variants; the book recommends B.
+          </p>
+        </header>
+        <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done" data-caption="All set, in variant B" data-note="The camera pulls back on the furnished room: your desk, the six desks of studio-mac with the first thread at one, Triage wired to GitHub, and Hercule asleep in the lobby."></figure>
+
+        <h3 class="bk-group"><i data-i="sparkle" data-size="18"></i>Three ways to open it <small>pick one; the rest of the chapter shows B</small></h3>
+        <div class="bk-grid bk-grid--3">
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=a&amp;step=welcome&amp;state=found" data-caption="A · The bureau" data-note="A step column beside the room. The whole room is always in view, and fills as you go."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=found" data-caption="B · Grand opening" data-note="Recommended. The room fills the window under a glass card, and each step opens on what the last one added."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=c&amp;step=welcome&amp;state=found" data-caption="C · Letter of introduction" data-note="One engraved column and no room. The cheapest to build, because the office stays post-v1."></figure>
+        </div>
+        <ul class="bk-points">
+          <li><span class="icon"><i data-i="office" data-size="18"></i></span><span><b>The room is the promise</b>Before you type anything you see where your agents will work. Progress is furniture, not a counter.</span></li>
+          <li><span class="icon"><i data-i="crew" data-size="18"></i></span><span><b>Every step pays off on screen</b>Account: your desk, and Hercule asleep in the lobby. Providers: six free desks. GitHub: Triage and its tube. Project: your first thread.</span></li>
+          <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>The app reads the port and the setup token from the Hercule Home on this Mac. You never see either.</span></li>
+          <li><span class="icon"><i data-i="pause" data-size="18"></i></span><span><b>Skipping is said, not hidden</b>A step you put off keeps its number in the ladder instead of a tick, and the last screen says where to finish it.</span></li>
+          <li><span class="icon"><i data-i="branch" data-size="18"></i></span><span><b>Your folder stays as it is</b>Picking <code>~/Dev/webshop</code> reads its origin remote. Threads clone from the remote into worktrees of their own.</span></li>
+          <li><span class="icon"><i data-i="eye" data-size="18"></i></span><span><b>Why B over A</b>The same room and the same cost. B shows it at full size, and the close shot of what you just added is the reward for the step.</span></li>
+        </ul>
+
+        <h3 class="bk-group"><i data-i="list" data-size="18"></i>Variant B, step by step <small>1440 by 900, frozen at each step</small></h3>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=found" data-caption="Welcome" data-note="Hercule answers at 127.0.0.1:4937, so the lights are on. Three lines say what it is for."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=account" data-caption="1 · Account" data-note="One form. The timezone comes from the Mac, and setup creates Hercule, your assistant, asleep in the lobby."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=codex-device" data-caption="2 · Providers" data-note="Claude Code and Codex were found on this Mac. Claude Code takes a pasted code; Codex shows a device code."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github" data-caption="3 · GitHub" data-note="The link opens GitHub with the scopes already ticked. Skip for now is one click."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=picked" data-caption="4 · Project" data-note="Pick a folder, and its origin fills in the repository. The setup command is optional."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-state="first" data-caption="Your first thread" data-note="Intake is empty until Triage first runs, so three starter threads stand in for it, and one line says when it fills."></figure>
+        </div>
+
+        <h3 class="bk-group"><i data-i="question" data-size="18"></i>When something is off <small>every state is in the prototype's state menu</small></h3>
+        <div class="bk-grid bk-grid--3">
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=not-running" data-caption="Hercule isn't running" data-note="The room stays dark. One command to start it, and Try again. The app never starts Hercule itself."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote" data-caption="Hercule runs on another machine" data-note="Paste its setup address, which hercule setup-url prints there."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=none-found" data-caption="No coding tool on this Mac" data-note="Install one from here, or do it later."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=refused" data-caption="GitHub refused the token" data-note="GitHub's own reason, and what to do about it."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=private&amp;github=skipped" data-caption="A private repository, GitHub skipped" data-note="Runners need the Connection you skipped to clone it."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done&amp;github=skipped&amp;harness=later" data-caption="All set, with steps put off" data-note="No desks without a provider. The screen says what is missing and where to finish it."></figure>
+        </div>
+
+        <div class="bk-sub"><h3>What the room shows, and why</h3><p>Every piece stands for something the step created. Nothing is decoration.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th style="width: 300px">In the room</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>The lights come on</td><td>The app found Hercule. Before that the room shows, dimmed: the office is closed.</td></tr>
+            <tr><td>Your desk and a hat stand</td><td>Your account exists. Your desk is where colleagues will queue when they wait on you.</td></tr>
+            <tr><td>Hercule, asleep in the lobby chair</td><td>Setup creates the assistant. It has no chat channel yet, so it sleeps where the office keeps assistants.</td></tr>
+            <tr><td>Six free desks, lamps dark</td><td>A runner hosts one session per desk. Empty desks say "room for six" before any session exists.</td></tr>
+            <tr><td>Triage, and a brass tube from the GitHub plaque</td><td>The Connection exists and Triage will read it. The tube is fitted but still: capsules travel only with events.</td></tr>
+            <tr><td>The first thread, at a desk in webshop's tint</td><td>A project has no furniture of its own. Its first thread stands for it.</td></tr>
+            <tr><td>No filing cabinets</td><td>Cabinets are Tasks, and there are none yet.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bk-sub"><h3>Motion</h3><p>Something moves only when something arrives. Every move is under 320 ms.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th style="width: 300px">When</th><th style="width: 380px">What moves</th><th>How</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Hercule answers</td><td>The room's lights come on</td><td>A veil's opacity, <code>--dur-3</code></td></tr>
+            <tr><td>A step finishes, in B</td><td>The camera moves to the next step's shot</td><td>One layer's transform, <code>--dur-3</code></td></tr>
+            <tr><td>Then</td><td>The new pieces settle from 14 px above, characters with a spring</td><td>Transform and opacity, <code>--dur-3</code>, after the camera stops</td></tr>
+            <tr><td>A login is in progress</td><td>One spinner beside "Waiting for you to finish signing in"</td><td>Only while the login waits</td></tr>
+            <tr><td>Any other time</td><td>Nothing</td><td>No loop runs, and the tube stays still</td></tr>
+            <tr><td>Reduce motion is on</td><td>Nothing: the room is drawn again in place</td><td>No camera move, no settling</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bk-sub"><h3>What it costs</h3><p>The scope decision comes first; the rest is measured (ADR 0037).</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th style="width: 180px">Cost</th><th style="width: 500px">What</th><th>Measured how</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><b>Scope</b></td><td>A and B draw a still subset of the office in v1: the room, one wing, free desks, your desk, the lobby chair, Triage's desk and tube, a plaque. Spec 17 keeps the office post-v1. C draws none of it.</td><td>The variant decides it</td></tr>
+            <tr><td>Bundle bytes</td><td>The first run and its room load only on a first run, as a chunk of their own.</td><td>The bundle budget check lists the chunk on its own line</td></tr>
+            <tr><td>Processes</td><td>None added. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run</td></tr>
+            <tr><td>Work while idle</td><td>None. No animation repeats while a step waits for you.</td><td>The perf script's idle CPU, on each step</td></tr>
+            <tr><td>After the first run</td><td>Nothing: the chunk is never loaded again, and no timer is left.</td><td>A warm launch after the first run matches the baseline</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 9. At 10x -->
       <section class="bk-sec" id="ten">
         <header class="bk-h">
           <span class="bk-kick"><i data-face="Refactor cart totals" data-pose="working" data-size="22"></i>At 10x</span>
@@ -2566,7 +2682,7 @@
         </ul>
       </section>
 
-      <!-- 9. Adopting it -->
+      <!-- 10. Adopting it -->
       <section class="bk-sec" id="adopt">
         <header class="bk-h">
           <span class="bk-kick"><i data-face="Ship release" data-pose="idle" data-size="22"></i>Adopting it</span>
@@ -2716,11 +2832,11 @@
         </ol>
       </section>
 
-      <!-- 10. What this asks of the spec -->
+      <!-- 11. What this asks of the spec -->
       <section class="bk-sec" id="spec">
         <header class="bk-h">
           <span class="bk-kick"><i data-face="Label new issues" data-pose="idle" data-size="22"></i>What this design asks the spec to change</span>
-          <h2>Eight changes, none to the domain's meaning.</h2>
+          <h2>Fifteen changes, none to the domain's meaning.</h2>
         </header>
         <ul class="bk-asks">
           <li><span class="bk-qn">1</span><span><b>Waiting on you tops both faces</b>The section sits above the sidebar's two faces, Threads and Hercule, instead of inside one (spec 14, App shell).</span></li>
@@ -2732,7 +2848,17 @@
           <li><span class="bk-qn">7</span><span><b>Answered anywhere clears everywhere</b>ADR 0027 already resolves a decision wherever it is answered. The desktop app's notifications and dock badge must be withdrawn the same moment.</span></li>
           <li><span class="bk-qn">8</span><span><b>No monospace outside code, and six marks</b>The design language keeps monospace for code, commands and diffs. Queued, cancelled and skipped lose their marks and become words.</span></li>
         </ul>
-        <footer class="bk-foot"><i data-logo="20"></i>Crew Bureau · Hercule · prototype, not product code</footer>
+        <div class="bk-sub"><h3>Second edition: the first run</h3><p>What #313 changes. It is not the installer: #308 installs Hercule and starts it at login.</p></div>
+        <ul class="bk-asks">
+          <li><span class="bk-qn">9</span><span><b>The desktop app sets Hercule up</b>Spec 17 leaves onboarding to the browser and opens <code>&lt;url&gt;/setup</code> when setup is not complete. The first run replaces both. Spec 14 and spec 15 §7 expected the desktop to reuse the web's setup views; it draws its own, as spec 17 requires.</span></li>
+          <li><span class="bk-qn">10</span><span><b>Main reads two files in the Hercule Home</b>The port from <code>config.toml</code> and the token from <code>setup-url</code>, and nothing else. The token crosses the bridge once, is never stored, and is read again on Try again, because each start of Hercule mints a new one.</span></li>
+          <li><span class="bk-qn">11</span><span><b>On the desktop, the first run is a sequence</b>Spec 14 has no "get started" checklist and derives every step. The desktop runs four steps in order, with Skip. The app keeps its place in its own settings file, so the controller stores nothing new.</span></li>
+          <li><span class="bk-qn">12</span><span><b>The web's onboarding steps are marked done</b>After setup, the desktop records <code>"timezone"</code> and <code>"assistant"</code>, so the web app does not ask again. The assistant keeps the name Hercule: there is no rename step, and Settings renames it later.</span></li>
+          <li><span class="bk-qn">13</span><span><b>Log in and New project come into v1</b>Spec 17 draws no Log in button and no New project row. The first run builds both, and the draft's Log in and the project picker reuse them.</span></li>
+          <li><span class="bk-qn">14</span><span><b>A still office comes into v1</b>Spec 17 keeps the office post-v1. Variants A and B draw a still subset of it on the first run; the live office stays post-v1. Variant C needs no change here.</span></li>
+          <li><span class="bk-qn">15</span><span><b>Starter threads on an empty Intake</b>New: three prompts on the first New thread, until Intake has something. Keep them, or drop them and show only the line about Triage.</span></li>
+        </ul>
+        <footer class="bk-foot"><i data-logo="20"></i>Crew Bureau, second edition · Hercule · prototype, not product code</footer>
       </section>
     </main>
 
