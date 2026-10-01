@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -67,6 +75,33 @@ describe("openRotatingFile", () => {
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(`${path}.1`).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps appending past the limit when a rotation fails, and throws the rotation error", () => {
+    // A folder that is not empty cannot be renamed over, so shifting `.4` to
+    // `.5` fails.
+    writeFileSync(`${path}.4`, "old\n");
+    mkdirSync(join(`${path}.5`, "blocker"), { recursive: true });
+    const file = openRotatingFile(path, 7);
+    file.append("line 1\n");
+
+    expect(() => file.append("line 2\n")).toThrow();
+    expect(() => file.append("line 3\n")).toThrow();
+    file.close();
+
+    expect(read(path)).toBe("line 1\nline 2\nline 3\n");
+    expect(read(`${path}.4`)).toBe("old\n");
+  });
+
+  it("starts a new file at the next rotation when the file was deleted", () => {
+    const file = openRotatingFile(path, 7);
+    file.append("line 1\n");
+    rmSync(dir, { recursive: true });
+    file.append("line 2\n");
+    file.close();
+
+    expect(read(path)).toBe("line 2\n");
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
   it("restricts an existing file to mode 0600", () => {
