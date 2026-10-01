@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+    <style>
+      .bar .tabs {
+        margin-left: 8px;
+      }
+      .triage-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .triage-note b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .body {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+      }
+      .list {
+        min-height: 0;
+        overflow: auto;
+        padding: 20px 28px 40px;
+        scrollbar-width: thin;
+      }
+
+      /* Headline counts: numerals do the talking. */
+      .heads {
+        display: flex;
+        align-items: flex-end;
+        gap: 30px;
+        margin-bottom: 6px;
+      }
+      .head {
+        display: grid;
+        gap: 1px;
+      }
+      .head .deco-num {
+        margin-bottom: 2px;
+      }
+      .head span:last-child {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .head--burn span:last-child {
+        color: var(--fail-ink);
+        font-weight: var(--w-medium);
+      }
+      .head--you .deco-num {
+        color: var(--you-ink);
+      }
+      .head--quiet .deco-num {
+        color: var(--faint);
+      }
+      .receipt {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px 0 22px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .receipt b {
+        color: var(--muted);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .lane-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 26px 0 8px;
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+      }
+      .lane-h .faint {
+        font-weight: var(--w-regular);
+        font-size: var(--t-12);
+      }
+
+      /* The lead Proposal: the one card on the page. */
+      /* Burning is told by its word and its bars, never by a glow. */
+      .lead {
+        padding: 18px 20px 14px;
+      }
+      .lead-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .lead h2 {
+        margin: 8px 0 6px;
+        font-size: var(--t-18);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .gist {
+        margin: 0 0 14px;
+        max-width: 700px;
+        font-size: var(--t-14);
+        line-height: 1.55;
+        color: var(--ink);
+      }
+      .made {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0;
+        margin: 0 -20px 14px;
+        border-top: 1px solid var(--line-soft);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .fact {
+        display: grid;
+        gap: 3px;
+        padding: 11px 16px 12px 20px;
+        min-width: 0;
+      }
+      .fact + .fact {
+        box-shadow: inset 1px 0 0 var(--line-soft);
+      }
+      .fact-src {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .fact-num {
+        font-size: var(--t-16);
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+      }
+      .fact-num small {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .fact-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lead-act {
+        display: grid;
+        grid-template-columns: 188px 1fr;
+        gap: 18px;
+        align-items: start;
+      }
+      .taker {
+        display: grid;
+        grid-template-columns: 44px 1fr;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 0 0;
+      }
+      .taker b {
+        display: block;
+        color: var(--who-ink);
+        font-weight: var(--w-bold);
+      }
+      .taker span {
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.35;
+      }
+      .lead .ledger {
+        gap: 2px;
+      }
+      .ans-desc .face {
+        vertical-align: -5px;
+        margin-right: 6px;
+      }
+      .offer-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px 0 0;
+        padding-top: 10px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+
+      /* Rows: marks · what · where · priority · who would take it · the answers. */
+      .rows {
+        display: flex;
+        flex-direction: column;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) 22px auto;
+        gap: 14px;
+        align-items: center;
+        min-height: 56px;
+        padding: 7px 8px 7px 6px;
+        border-radius: var(--r-md);
+      }
+      .row + .row {
+        box-shadow: 0 -1px 0 var(--line-soft);
+      }
+      .row:hover {
+        background: var(--hover);
+        box-shadow: none;
+      }
+      .row:hover + .row {
+        box-shadow: none;
+      }
+      .marks {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        width: 36px;
+        height: 36px;
+        border-radius: 11px;
+        background: var(--sunken);
+        color: var(--ink);
+      }
+      .marks .br,
+      .marks .ic {
+        opacity: 0.78;
+      }
+      .what {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+      .what b {
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .what span {
+        color: var(--faint);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kind {
+        color: var(--muted);
+        font-weight: var(--w-medium);
+      }
+      .kind--you {
+        color: var(--you-ink);
+      }
+      .by {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--who-ink);
+        font-weight: var(--w-medium);
+        font-size: var(--t-12);
+        white-space: nowrap;
+      }
+      /* A call has no suggested answer, so its choices sit under the question, starting where the
+         text starts, in equal slots. */
+      .row--call {
+        grid-template-columns: 40px minmax(0, 1fr);
+        row-gap: 8px;
+        align-items: start;
+        padding-top: 10px;
+        padding-bottom: 12px;
+      }
+      .row--call .marks {
+        grid-row: span 2;
+      }
+      .row--call .what span {
+        white-space: normal;
+      }
+      .choices {
+        grid-template-columns: repeat(4, 140px);
+      }
+      .what .proj {
+        font-size: inherit;
+      }
+      .attached {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 6px 6px 0;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .attached b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .fyi {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .fyi > div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--bg);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .fyi b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+
+      /* The rail: what came in, per Connection. */
+      .rail {
+        min-height: 0;
+        overflow: auto;
+        padding: 20px 22px;
+        border-left: 1px solid var(--line-soft);
+        background: var(--bg);
+      }
+      .rail .section-h {
+        margin-bottom: 12px;
+      }
+      .inflow {
+        display: grid;
+        gap: 12px;
+      }
+      .in-row {
+        display: grid;
+        grid-template-columns: 18px 1fr auto;
+        gap: 4px 9px;
+        align-items: center;
+      }
+      .in-row .br {
+        opacity: 0.8;
+      }
+      .in-name {
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .in-n {
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--w-bold);
+      }
+      .in-bar {
+        grid-column: 2 / 4;
+        display: flex;
+        height: 6px;
+        gap: 2px;
+      }
+      .in-bar i {
+        border-radius: 3px;
+        background: var(--line);
+      }
+      .in-bar i.t {
+        background: var(--you);
+      }
+      .in-to {
+        grid-column: 2 / 4;
+        color: var(--faint);
+        font-size: var(--t-11);
+        margin-top: -1px;
+      }
+      .rail-foot {
+        margin-top: 22px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-soft);
+        display: grid;
+        gap: 10px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .legend {
+        display: flex;
+        gap: 14px;
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend i {
+        width: 10px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--line);
+      }
+      .legend i.t {
+        background: var(--you);
+      }
+
+      /* ---------- At 10x: piles by Topic instead of a longer list ---------- */
+      html:not([data-state="swarm"]) .swarm-only,
+      html[data-state="swarm"] .today-only,
+      html[data-state="swarm"] .lead .made,
+      html[data-state="swarm"] .lead .offer-note {
+        display: none;
+      }
+      .piles {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .pile {
+        padding: 14px 16px 12px;
+      }
+      .pile-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .pile-h b {
+        font-size: var(--t-14);
+      }
+      .pile-bar {
+        display: flex;
+        height: 8px;
+        gap: 2px;
+        margin-bottom: 10px;
+      }
+      .pile-bar i {
+        border-radius: 3px;
+      }
+      .pile-bar .p4 {
+        background: var(--fail);
+      }
+      .pile-bar .p3 {
+        background: color-mix(in oklab, var(--ink) 70%, transparent);
+      }
+      .pile-bar .p2 {
+        background: color-mix(in oklab, var(--ink) 38%, transparent);
+      }
+      .pile-bar .p1 {
+        background: var(--line);
+      }
+      .pile-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+        border-top: 1px solid var(--line-soft);
+        font-size: var(--t-12);
+      }
+      .pile-row .grow {
+        flex: 1;
+        min-width: 0;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .pile-row .grow b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .pile-row .btn {
+        width: 156px;
+      }
+      .pile-h .deco-num {
+        margin-left: auto;
+        font-size: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="intake"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs">
+            <a class="tab is-on" href="#">All</a>
+            <a class="tab" href="#">Checkout <small class="today-only">3</small><small class="swarm-only">19</small></a>
+            <a class="tab" href="#">Infrastructure <small class="today-only">2</small><small class="swarm-only">14</small></a>
+            <a class="tab" href="#">Customers <small class="today-only">3</small><small class="swarm-only">17</small></a>
+            <a class="tab" href="#">Releases <small class="today-only">1</small><small class="swarm-only">7</small></a>
+          </nav>
+          <span class="spacer"></span>
+          <span class="triage-note"><i data-face="Triage" data-pose="idle" data-size="26"></i><span>Triage sorted at <b>09:00</b> in 42s · next <b>11:00</b></span></span>
+          <button class="btn btn--sm">Triage now</button>
+        </header>
+
+        <div class="body">
+          <div class="list">
+            <div class="heads today-only">
+              <div class="head head--you"><span class="deco-num">5</span><span>proposals</span></div>
+              <div class="head head--burn"><span class="deco-num">1</span><span>burning</span></div>
+              <div class="head head--you"><span class="deco-num">2</span><span>offers</span></div>
+              <div class="head head--you"><span class="deco-num">2</span><span>need a call</span></div>
+              <div class="head"><span class="deco-num">3</span><span>FYI</span></div>
+              <div class="head head--quiet"><span class="deco-num">167</span><span>handled quietly</span></div>
+            </div>
+            <div class="receipt today-only">
+              <i data-i="clock" data-size="13"></i>Since yesterday 18:20:
+              <b>212 events → 5 proposals · 1 attached · 2 offers · 3 FYI · 1 unsure · 34 held · 166 no action</b>
+            </div>
+
+            <div class="heads swarm-only">
+              <div class="head head--you"><span class="deco-num">60</span><span>proposals</span></div>
+              <div class="head head--burn"><span class="deco-num">3</span><span>burning</span></div>
+              <div class="head head--you"><span class="deco-num">18</span><span>offers</span></div>
+              <div class="head head--you"><span class="deco-num">9</span><span>need a call</span></div>
+              <div class="head"><span class="deco-num">41</span><span>FYI</span></div>
+              <div class="head head--quiet"><span class="deco-num">30.7k</span><span>handled quietly</span></div>
+            </div>
+            <div class="receipt swarm-only">
+              <i data-i="clock" data-size="13"></i>Last 24 hours:
+              <b>31,000 events → 60 proposals · 212 attached · 18 offers · 41 FYI · 9 unsure · 610 held · 30,050 no action</b>
+            </div>
+
+            <h2 class="lane-h"><i data-i="bolt" data-size="14"></i>Now</h2>
+            <article class="card lead">
+              <div class="lead-top">
+                <span class="chip chip--fail">Urgent</span>
+                <span class="bars" data-p="4" title="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                <span class="proj proj--webshop">webshop</span>
+                <span>· Checkout</span>
+                <span>· first seen 08:52</span>
+                <span class="spacer"></span>
+                <span class="swarm-only faint">1 of 3 burning</span>
+              </div>
+              <h2>Checkout fails for EU cards with 3&#8209;D Secure</h2>
+              <p class="gist">Since deploy #1289, card payments that need 3&#8209;D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+              <div class="made" aria-label="Made from">
+                <div class="fact">
+                  <span class="fact-src"><i data-brand="sentry" data-size="12"></i>Sentry · webshop-prod</span>
+                  <span class="fact-num">412 <small>events · 188 users</small></span>
+                  <span class="fact-line"><code style="font-size: 11px">authentication_required</code></span>
+                </div>
+                <div class="fact">
+                  <span class="fact-src"><i data-brand="gmail" data-size="12"></i>Gmail · rogier@personal</span>
+                  <span class="fact-num">3 <small>customer emails</small></span>
+                  <span class="fact-line">"Can't pay with my Rabobank card"</span>
+                </div>
+                <div class="fact">
+                  <span class="fact-src"><i data-brand="posthog" data-size="12"></i>PostHog · webshop</span>
+                  <span class="fact-num">-18% <small>conversion, EU</small></span>
+                  <span class="fact-line">since 14:10 yesterday</span>
+                </div>
+                <div class="fact">
+                  <span class="fact-src"><i data-brand="github" data-size="12"></i>GitHub · rogier/webshop</span>
+                  <span class="fact-num">#1289 <small>deploy 14:02</small></span>
+                  <span class="fact-line">"Upgrade Stripe SDK to v14"</span>
+                </div>
+              </div>
+              <div class="ledger">
+                <button class="ans"><span class="btn btn--accent btn--sm">Start "Fix bug"</span><span class="ans-desc"><i data-face="Fix bug" data-pose="idle" data-size="20"></i>Starts Fix bug on webshop in a new worktree <span class="faint">· Claude Code · Opus 5.5 · studio-mac</span></span><kbd>↩</kbd></button>
+                <button class="ans"><span class="btn btn--sm">Accept</span><span class="ans-desc">Adds it to the backlog as a Task</span><kbd>A</kbd></button>
+                <button class="ans"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="ans-desc">Closes the Proposal</span><kbd>D</kbd></button>
+              </div>
+              <div class="offer-note"><i data-face="Triage" data-pose="idle" data-size="20"></i>I can also draft a reply to the 3 customers once the fix ships.<span class="spacer"></span><button class="btn btn--sm">Yes, after the fix</button></div>
+            </article>
+
+            <div class="today-only">
+              <h2 class="lane-h">Needs a call <b class="count count--you">2</b><span class="faint">Triage could not decide</span></h2>
+              <div class="rows">
+                <div class="row row--call">
+                  <span class="marks"><i data-brand="intercom" data-size="16"></i></span>
+                  <span class="what"><b>App is slow on Android</b><span><span class="kind kind--you">Unsure</span> · 7 conversations since Sunday · "I can't tell which project this belongs to."</span></span>
+                  <span class="choices">
+                    <button class="btn btn--sm">webshop</button>
+                    <button class="btn btn--sm">payments-api</button>
+                    <button class="btn btn--sm">Both</button>
+                    <button class="btn btn--quiet btn--sm">Not work</button>
+                  </span>
+                </div>
+                <div class="row row--call">
+                  <span class="marks"><i data-face="Label new issues" data-pose="paused" data-size="30"></i></span>
+                  <span class="what"><b>Label new issues held 34 events</b><span><span class="kind kind--you">Breaker tripped</span> · Spawn Bound 20 per hour, tripped 08:14 · a bot opened 34 issues</span></span>
+                  <span class="choices">
+                    <button class="btn btn--sm">Keep held</button>
+                    <button class="btn btn--sm">Release all 34</button>
+                    <button class="btn btn--sm">Raise bound to 50/h</button>
+                  </span>
+                </div>
+              </div>
+
+              <h2 class="lane-h">Today <b class="count">4</b></h2>
+              <div class="rows">
+                <div class="row">
+                  <span class="marks"><i data-brand="grafana" data-size="14"></i><i data-i="clock" data-size="13"></i></span>
+                  <span class="what"><b>Nightly backup job timing out on ops-db</b><span><span class="kind">Proposal</span> · <span class="proj proj--ops">ops</span> · 3 nights in a row; the job hits its 2h limit at 04:00</span></span>
+                  <span class="bars" data-p="3"><i></i><i></i><i></i><i></i></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Start "Investigate"</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button></span>
+                </div>
+                <div class="row">
+                  <span class="marks"><i data-brand="gmail" data-size="15"></i></span>
+                  <span class="what"><b>Draft a reply to Marta at Brightline</b><span><span class="kind">Offer</span> · Customers · Asks for invoice INV-2291 in the company name, not hers</span></span>
+                  <span></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Draft reply</button><button class="btn btn--quiet btn--sm">Not now</button></span>
+                </div>
+                <div class="row">
+                  <span class="marks"><i data-brand="stripe" data-size="14"></i><i data-brand="sentry" data-size="13"></i></span>
+                  <span class="what"><b>Stripe webhook retries rising</b><span><span class="kind">Proposal</span> · <span class="proj proj--payments">payments-api</span> · retries up 4x since Sunday on /webhooks/stripe</span></span>
+                  <span class="bars" data-p="2"><i></i><i></i><i></i><i></i></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Start "Investigate"</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button></span>
+                </div>
+                <div class="row">
+                  <span class="marks"><i data-brand="github" data-size="15"></i></span>
+                  <span class="what"><b>Merge 4 dependency bumps</b><span><span class="kind">Offer</span> · <span class="proj proj--webshop">webshop</span> · All green, patch versions only</span></span>
+                  <span></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Merge all 4</button><button class="btn btn--sm">Review first</button></span>
+                </div>
+              </div>
+
+              <h2 class="lane-h">When you can <b class="count">2</b></h2>
+              <div class="rows">
+                <div class="row">
+                  <span class="marks"><i data-i="clock" data-size="15"></i></span>
+                  <span class="what"><b>SSL certificate for status.acme.dev expires in 12 days</b><span><span class="kind">Proposal</span> · <span class="proj proj--ops">ops</span> · Cron · schedules</span></span>
+                  <span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Start "Fix bug"</button><button class="btn btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button></span>
+                </div>
+                <div class="row">
+                  <span class="marks"><i data-brand="intercom" data-size="15"></i></span>
+                  <span class="what"><b>Add iDEAL as a payment method</b><span><span class="kind">Proposal</span> · <span class="proj proj--webshop">webshop</span> · 5 customer requests on Intercom</span></span>
+                  <span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span>
+                  <span class="answers"><button class="btn btn--accent btn--sm">Accept</button><button class="btn btn--quiet btn--sm">Dismiss</button></span>
+                </div>
+              </div>
+              <div class="attached"><i data-i="link" data-size="14"></i><span><b>2 new Sentry events</b> attached to the Task "Cart total rounding on discounts"</span></div>
+
+              <h2 class="lane-h">FYI <b class="count">3</b></h2>
+              <div class="fyi">
+                <div><i data-brand="github" data-size="15"></i><span>payments-api <b>v2.14.0</b> published</span></div>
+                <div><i data-brand="posthog" data-size="15"></i><span>Sign-ups <b>+9%</b> week over week</span></div>
+                <div><i data-brand="stripe" data-size="15"></i><span>Payout of <b>€18,240</b> arrives Thursday</span></div>
+              </div>
+            </div>
+
+            <!-- At 10x: the same morning, sixty Proposals, shown as piles by Topic. -->
+            <div class="swarm-only">
+              <h2 class="lane-h">By Topic <span class="faint">57 more Proposals, grouped; answer a pile or open it</span></h2>
+              <div class="piles">
+                <section class="card pile">
+                  <div class="pile-h"><b>Checkout</b><span class="stack"><i data-face="Fix bug" data-pose="idle" data-size="24"></i><i data-face="Investigate" data-pose="idle" data-size="24"></i></span><span class="deco-num">19</span></div>
+                  <div class="pile-bar"><i class="p4" style="flex: 2"></i><i class="p3" style="flex: 5"></i><i class="p2" style="flex: 7"></i><i class="p1" style="flex: 5"></i></div>
+                  <div class="pile-row"><span class="grow"><b>9 alike</b> · Sentry errors in checkout, one cause each</span><button class="btn btn--accent btn--sm">Start "Fix bug" on 9</button></div>
+                  <div class="pile-row"><span class="grow"><b>10 others</b> · 4 Stripe, 6 PostHog</span><button class="btn btn--sm">Open</button></div>
+                </section>
+                <section class="card pile">
+                  <div class="pile-h"><b>Infrastructure</b><span class="stack"><i data-face="Investigate" data-pose="idle" data-size="24"></i><i data-face="Nightly backup check" data-pose="idle" data-size="24"></i></span><span class="deco-num">14</span></div>
+                  <div class="pile-bar"><i class="p4" style="flex: 1"></i><i class="p3" style="flex: 3"></i><i class="p2" style="flex: 4"></i><i class="p1" style="flex: 6"></i></div>
+                  <div class="pile-row"><span class="grow"><b>6 low</b> · cert renewals and disk warnings</span><button class="btn btn--accent btn--sm">Accept 6 as Tasks</button></div>
+                  <div class="pile-row"><span class="grow"><b>8 others</b> · Grafana, Cron</span><button class="btn btn--sm">Open</button></div>
+                </section>
+                <section class="card pile">
+                  <div class="pile-h"><b>Customers</b><span class="stack"><i data-face="Draft reply" data-pose="idle" data-size="24"></i></span><span class="deco-num">17</span></div>
+                  <div class="pile-bar"><i class="p3" style="flex: 3"></i><i class="p2" style="flex: 8"></i><i class="p1" style="flex: 6"></i></div>
+                  <div class="pile-row"><span class="grow"><b>12 Offers</b> · replies Draft reply can write</span><button class="btn btn--accent btn--sm">Draft 12 replies</button></div>
+                  <div class="pile-row"><span class="grow"><b>5 others</b> · Intercom, Gmail</span><button class="btn btn--sm">Open</button></div>
+                </section>
+                <section class="card pile">
+                  <div class="pile-h"><b>Releases</b><span class="stack"><i data-face="Ship release" data-pose="idle" data-size="24"></i><i data-face="Dependency bumps" data-pose="idle" data-size="24"></i></span><span class="deco-num">7</span></div>
+                  <div class="pile-bar"><i class="p2" style="flex: 2"></i><i class="p1" style="flex: 5"></i></div>
+                  <div class="pile-row"><span class="grow"><b>5 Offers</b> · 23 dependency bumps, all green</span><button class="btn btn--accent btn--sm">Merge all 23</button></div>
+                  <div class="pile-row"><span class="grow"><b>2 others</b> · GitHub</span><button class="btn btn--sm">Open</button></div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rail">
+            <h2 class="section-h"><span class="today-only">What came in since 18:20</span><span class="swarm-only">What came in, 24 hours</span></h2>
+            <div class="inflow today-only">
+              <div class="in-row"><i data-brand="sentry" data-size="15"></i><span class="in-name">Sentry · webshop-prod</span><span class="in-n">130</span><span class="in-bar"><i class="t" style="flex: 2"></i><i style="flex: 128"></i></span><span class="in-to">the lead proposal, 1 attached</span></div>
+              <div class="in-row"><i data-brand="github" data-size="15"></i><span class="in-name">GitHub · rogier</span><span class="in-n">38</span><span class="in-bar" style="width: 29%"><i class="t" style="flex: 2"></i><i style="flex: 36"></i></span><span class="in-to">1 offer, 1 FYI, 34 held</span></div>
+              <div class="in-row"><i data-brand="gmail" data-size="15"></i><span class="in-name">Gmail · rogier@personal</span><span class="in-n">17</span><span class="in-bar" style="width: 13%"><i class="t" style="flex: 4"></i><i style="flex: 13"></i></span><span class="in-to">part of the lead proposal, 1 offer</span></div>
+              <div class="in-row"><i data-brand="stripe" data-size="15"></i><span class="in-name">Stripe · live</span><span class="in-n">12</span><span class="in-bar" style="width: 9%"><i class="t" style="flex: 2"></i><i style="flex: 10"></i></span><span class="in-to">1 proposal, 1 FYI</span></div>
+              <div class="in-row"><i data-brand="intercom" data-size="15"></i><span class="in-name">Intercom · support</span><span class="in-n">9</span><span class="in-bar" style="width: 7%"><i class="t" style="flex: 2"></i><i style="flex: 7"></i></span><span class="in-to">1 unsure, 1 proposal</span></div>
+              <div class="in-row"><i data-brand="posthog" data-size="15"></i><span class="in-name">PostHog · webshop</span><span class="in-n">3</span><span class="in-bar" style="width: 3%"><i class="t" style="flex: 2"></i><i style="flex: 1"></i></span><span class="in-to">part of the lead proposal, 1 FYI</span></div>
+              <div class="in-row"><i data-brand="grafana" data-size="15"></i><span class="in-name">Grafana · ops</span><span class="in-n">2</span><span class="in-bar" style="width: 2%"><i class="t" style="flex: 1"></i></span><span class="in-to">1 proposal, with Cron</span></div>
+            </div>
+            <div class="inflow swarm-only">
+              <div class="in-row"><i data-brand="sentry" data-size="15"></i><span class="in-name">Sentry · 4 projects</span><span class="in-n">17.9k</span><span class="in-bar"><i class="t" style="flex: 3"></i><i style="flex: 97"></i></span><span class="in-to">22 proposals, 180 attached</span></div>
+              <div class="in-row"><i data-brand="github" data-size="15"></i><span class="in-name">GitHub · 3 orgs</span><span class="in-n">4.1k</span><span class="in-bar" style="width: 23%"><i class="t" style="flex: 1"></i><i style="flex: 30"></i></span><span class="in-to">12 offers, 610 held</span></div>
+              <div class="in-row"><i data-brand="stripe" data-size="15"></i><span class="in-name">Stripe · live</span><span class="in-n">2.6k</span><span class="in-bar" style="width: 15%"><i class="t" style="flex: 1"></i><i style="flex: 20"></i></span><span class="in-to">8 proposals, 14 FYI</span></div>
+              <div class="in-row"><i data-brand="gmail" data-size="15"></i><span class="in-name">Gmail · 2 accounts</span><span class="in-n">2.2k</span><span class="in-bar" style="width: 12%"><i class="t" style="flex: 2"></i><i style="flex: 18"></i></span><span class="in-to">9 proposals, 12 offers</span></div>
+              <div class="in-row"><i data-brand="intercom" data-size="15"></i><span class="in-name">Intercom · support</span><span class="in-n">1.8k</span><span class="in-bar" style="width: 10%"><i class="t" style="flex: 2"></i><i style="flex: 14"></i></span><span class="in-to">6 proposals, 9 unsure</span></div>
+              <div class="in-row"><i data-i="more" data-size="15"></i><span class="in-name">6 more Connections</span><span class="in-n">2.4k</span><span class="in-bar" style="width: 13%"><i class="t" style="flex: 1"></i><i style="flex: 16"></i></span><span class="in-to">15 proposals, 27 FYI</span></div>
+            </div>
+            <div class="rail-foot">
+              <div class="legend"><span><i class="t"></i>became something for you</span><span><i></i>no action</span></div>
+              <a class="btn btn--quiet btn--sm" href="settings-connections.html" style="justify-self: start; margin-left: -8px">All Connections<i data-i="arrow" data-size="13"></i></a>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

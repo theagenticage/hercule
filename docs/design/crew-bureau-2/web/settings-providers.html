@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>(3) Providers · Settings · Hercule</title>
+    <style>
+      .web .settings {
+        flex: 1;
+        min-height: 0;
+      }
+      .set-body {
+        padding-top: 22px;
+      }
+      .set-col {
+        width: min(1000px, 100%);
+        gap: 0;
+      }
+      .set-top {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .set-top h1 {
+        margin: 0;
+        font-size: var(--t-18);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .set-top p {
+        margin: 0;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+
+      /* Machines: the columns every provider lines up against. */
+      .fleet {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .mach {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 4px 8px;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--bg);
+      }
+      .mach b {
+        font-weight: var(--w-medium);
+      }
+      .mach .n {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-variant-numeric: tabular-nums;
+      }
+      .mach .meter {
+        grid-column: 1 / 4;
+      }
+      .mach .ic {
+        color: var(--muted);
+      }
+
+      /* One provider instance per block; hairlines between, no boxes inside boxes. */
+      .prov {
+        padding: 18px 0 20px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .prov:first-of-type {
+        border-top: 0;
+      }
+      .prov-h {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) 280px 28px;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      .mk {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: var(--sunken);
+      }
+      .id {
+        display: grid;
+        gap: 1px;
+      }
+      .id b {
+        font-size: var(--t-14);
+        font-weight: var(--w-bold);
+      }
+      .id span {
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .use {
+        display: grid;
+        gap: 6px;
+      }
+      .use-top {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .use-top b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+      .use .meter i {
+        background: var(--ink);
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 256px 318px;
+        gap: 18px;
+        padding-left: 52px;
+      }
+      .fact {
+        display: grid;
+        gap: 7px;
+        align-content: start;
+        min-width: 0;
+      }
+      .fact > small {
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .models {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .model {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: var(--r-pill);
+        box-shadow: inset 0 0 0 1px var(--line);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+      }
+      .model.is-default {
+        background: var(--ink);
+        box-shadow: none;
+        color: var(--surface);
+      }
+      .pair {
+        display: flex;
+        gap: 6px;
+      }
+      .pair .field {
+        height: 30px;
+        font-size: var(--t-12);
+      }
+      .pair .field:first-child {
+        flex: 1;
+        min-width: 0;
+      }
+      .field.is-off {
+        color: var(--faint);
+        background: none;
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .note {
+        color: var(--you-ink);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .on {
+        display: flex;
+        gap: 6px;
+      }
+      .on span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 26px;
+        padding: 0 9px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        font-size: var(--t-12);
+        white-space: nowrap;
+      }
+      .on span.off {
+        background: none;
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        color: var(--faint);
+      }
+      .foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 0 0;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="settings"></header>
+      <div class="settings">
+        <nav data-setnav="providers"></nav>
+        <div class="set-body">
+          <div class="set-col">
+            <div class="set-top">
+              <div>
+                <h1>Providers</h1>
+                <p>The agents your threads, workflows and assistants run on, and where each is installed.</p>
+              </div>
+              <span class="spacer"></span>
+              <button class="btn btn--sm"><i data-i="plus" data-size="14"></i>Add a provider instance</button>
+            </div>
+
+            <div class="fleet" aria-label="Machines">
+              <div class="mach"><i data-i="laptop" data-size="15"></i><b>studio-mac</b><span class="n">5 of 6</span><span class="meter"><i style="width: 83%"></i></span></div>
+              <div class="mach"><i data-i="server" data-size="15"></i><b>build-box-1</b><span class="n">8 of 8 · at cap</span><span class="meter"><i style="width: 100%"></i></span></div>
+              <div class="mach"><i data-i="server" data-size="15"></i><b>build-box-2</b><span class="n">3 of 8</span><span class="meter"><i style="width: 37.5%"></i></span></div>
+            </div>
+
+            <section class="prov">
+              <div class="prov-h">
+                <span class="mk"><i data-brand="claude" data-size="20"></i></span>
+                <span class="id"><b>Claude Code</b><span>Anthropic · rogier@personal</span></span>
+                <span class="use"><span class="use-top"><span><b>61%</b> of the 5-hour window</span><span>resets 11:00</span></span><span class="meter"><i style="width: 61%"></i></span></span>
+                <button class="icon-btn" title="More"><i data-i="more"></i></button>
+              </div>
+              <div class="facts">
+                <div class="fact"><small>Models</small><div class="models"><span class="model is-default">Opus 5.5 · default</span><span class="model">Sonnet 5</span><span class="model">Haiku 4.5</span></div></div>
+                <div class="fact"><small>Default access mode and effort</small><div class="pair"><span class="field field--select">Auto-accept edits</span><span class="field field--select">High</span></div></div>
+                <div class="fact"><small>Installed on</small><div class="on"><span><i data-i="check" data-size="12"></i>studio-mac</span><span><i data-i="check" data-size="12"></i>build-box-1</span><span><i data-i="check" data-size="12"></i>build-box-2</span></div></div>
+              </div>
+            </section>
+
+            <section class="prov">
+              <div class="prov-h">
+                <span class="mk"><i data-brand="openai" data-size="20"></i></span>
+                <span class="id"><b>Codex</b><span>OpenAI · work</span></span>
+                <span class="use"><span class="use-top"><span><b>18%</b> of the 5-hour window</span><span>resets 12:40</span></span><span class="meter"><i style="width: 18%"></i></span></span>
+                <button class="icon-btn" title="More"><i data-i="more"></i></button>
+              </div>
+              <div class="facts">
+                <div class="fact"><small>Models</small><div class="models"><span class="model is-default">gpt-5.4 · default</span><span class="model">gpt-5.4-mini</span></div></div>
+                <div class="fact"><small>Default access mode and effort</small><div class="pair"><span class="field field--select">Approval required</span><span class="field field--select">Medium</span></div></div>
+                <div class="fact"><small>Installed on</small><div class="on"><span class="off">studio-mac</span><span><i data-i="check" data-size="12"></i>build-box-1</span><span><i data-i="check" data-size="12"></i>build-box-2</span></div></div>
+              </div>
+            </section>
+
+            <section class="prov">
+              <div class="prov-h">
+                <span class="mk"><i data-brand="pi" data-size="20"></i></span>
+                <span class="id"><b>pi</b><span>Local · llama.cpp on studio-mac</span></span>
+                <span class="use"><span class="use-top"><span><b>1</b> session running</span><span>local, no usage limit</span></span></span>
+                <button class="icon-btn" title="More"><i data-i="more"></i></button>
+              </div>
+              <div class="facts">
+                <div class="fact"><small>Models</small><div class="models"><span class="model is-default">qwen3-coder 30b · default</span></div></div>
+                <div class="fact"><small>Default access mode and effort</small><div class="pair"><span class="field field--select">Auto</span><span class="field is-off">No effort levels</span></div><span class="note">pi has no Auto; it runs as Auto-accept edits</span></div>
+                <div class="fact"><small>Installed on</small><div class="on"><span><i data-i="check" data-size="12"></i>studio-mac</span><span class="off">build-box-1</span><span class="off">build-box-2</span></div></div>
+              </div>
+            </section>
+
+            <div class="foot"><i data-i="shield" data-size="14"></i>Hercule never reads your provider logins; each machine keeps its own.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

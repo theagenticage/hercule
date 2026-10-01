@@ -1,0 +1,393 @@
+/* PROTOTYPE - the Office's scene: how office.js draws the bureau's floor, walls, furniture and the
+   labels over it. Shared by the Office page and the first run, which furnishes the same room one
+   step at a time. A page puts the scene in a positioned host; this file styles what is drawn in it. */
+
+.floor {
+  position: absolute;
+  inset: 0;
+  /* the green glass of a lit banker's lamp */
+  --lamp-on: color-mix(in oklab, var(--room-lamp) 70%, oklch(0.86 0.13 150));
+}
+html[data-flow="off"] .flow,
+html[data-flow="off"] .tag--flow {
+  display: none;
+}
+
+/* Furniture: every box shades its sides toward the room's shade color. */
+.bx .t {
+  fill: var(--c);
+}
+.bx .l {
+  fill: color-mix(in oklab, var(--c) 84%, var(--room-shade));
+}
+.bx .r {
+  fill: color-mix(in oklab, var(--c) 68%, var(--room-shade));
+}
+.bx polygon {
+  stroke: color-mix(in oklab, var(--c) 78%, var(--room-shade));
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+.brass .t {
+  fill: color-mix(in oklab, var(--c) 80%, white);
+}
+.shade .t {
+  fill: color-mix(in oklab, var(--c) 82%, white);
+}
+.slab polygon {
+  stroke: none;
+}
+.slab .l {
+  fill: color-mix(in oklab, var(--room-floor) 74%, var(--room-shade));
+}
+.slab .r {
+  fill: color-mix(in oklab, var(--room-floor) 60%, var(--room-shade));
+}
+
+/* the floor: a two-tone parquet, a field of inlay per runner, a sunburst in the lobby */
+.floor > g > rect {
+  fill: var(--room-floor);
+}
+.pq {
+  fill: color-mix(in oklab, var(--room-floor) 93%, var(--room-inlay));
+}
+.field {
+  fill: color-mix(in oklab, var(--room-floor) 78%, var(--room-inlay));
+}
+.field-line {
+  fill: none;
+  stroke: var(--room-inlay-2);
+  stroke-opacity: 0.34;
+  stroke-width: 1.4;
+}
+.field-line--thin {
+  stroke-width: 0.8;
+  stroke-opacity: 0.24;
+}
+.field-corner {
+  fill: var(--room-inlay-2);
+  fill-opacity: 0.3;
+}
+.engrave {
+  font-family: var(--font-ui);
+  font-weight: var(--w-medium);
+  /* mixed from a text colour so the engraving reads on a pale floor and a dark one alike */
+  fill: color-mix(in oklab, var(--muted) 78%, var(--room-inlay-2));
+  white-space: pre;
+}
+.engrave-name {
+  font-weight: var(--w-bold);
+}
+.med {
+  fill: color-mix(in oklab, var(--room-floor) 70%, var(--room-inlay));
+}
+.med-line {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.4;
+}
+.med-ray {
+  fill: var(--room-inlay-2);
+  fill-opacity: 0.32;
+}
+.med-core {
+  fill: var(--brass);
+}
+.shadow {
+  fill: var(--room-shade);
+  opacity: 0.13;
+}
+/* a free slot on a runner: the outline of a desk not yet placed */
+.free {
+  fill: none;
+  stroke: var(--room-inlay-2);
+  stroke-opacity: 0.32;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.ao {
+  fill: var(--room-shade);
+  opacity: 0.05;
+}
+
+/* the walls: plaster above a wood wainscot and a brass rail */
+.wall-in--b {
+  fill: var(--room-wall);
+}
+.wall-in--s {
+  fill: color-mix(in oklab, var(--room-wall) 93%, var(--room-shade));
+}
+.wall-top {
+  fill: color-mix(in oklab, var(--room-wall) 72%, var(--room-shade));
+}
+.wall-end {
+  fill: color-mix(in oklab, var(--room-wall) 82%, var(--room-shade));
+}
+.wainscot {
+  fill: var(--room-panel);
+}
+.wainscot--s {
+  fill: color-mix(in oklab, var(--room-panel) 90%, var(--room-shade));
+}
+.rail {
+  fill: var(--brass);
+}
+.rail--s {
+  fill: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+}
+.seams {
+  stroke: color-mix(in oklab, var(--room-panel) 76%, var(--room-shade));
+  stroke-width: 1;
+}
+.window {
+  fill: color-mix(in oklab, var(--room-lamp) 14%, var(--room-sun));
+}
+.window-frame {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 3;
+}
+.mullion {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.6;
+}
+.sill {
+  fill: var(--room-panel);
+}
+.sun {
+  fill: var(--room-sun);
+  opacity: 0.5;
+}
+.wall-word {
+  font-family: var(--font-deco);
+  letter-spacing: 0.04em;
+  fill: color-mix(in oklab, var(--ink) 50%, var(--room-inlay-2));
+}
+.brass-rule {
+  stroke: var(--brass);
+  stroke-width: 1.4;
+}
+.clock {
+  fill: var(--room-paper);
+  stroke: var(--brass);
+  stroke-width: 2.5;
+}
+.clock-rays {
+  stroke: var(--brass);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.hand {
+  stroke: var(--room-inlay-2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.hand--h {
+  stroke-width: 2.4;
+}
+.hand-dot {
+  fill: var(--brass);
+}
+
+/* the case board: cork in a wood frame, cards pinned, threads from sources to cases */
+.board-frame {
+  fill: var(--room-wood);
+}
+.cork {
+  fill: var(--room-cork);
+}
+.bcard {
+  fill: var(--room-paper);
+  filter: drop-shadow(0 1px 0 oklch(0 0 0 / 0.12));
+}
+.bcard--case {
+  fill: color-mix(in oklab, var(--room-paper) 90%, var(--room-sun));
+}
+.bmark {
+  color: color-mix(in oklab, var(--room-inlay-2) 80%, transparent);
+}
+.bline {
+  stroke: color-mix(in oklab, var(--room-inlay-2) 30%, transparent);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+.bline--title {
+  stroke: color-mix(in oklab, var(--room-inlay-2) 60%, transparent);
+  stroke-width: 2;
+}
+.bthread {
+  fill: none;
+  stroke: oklch(0.55 0.15 25);
+  stroke-width: 0.9;
+  stroke-opacity: 0.8;
+}
+.bpin {
+  fill: var(--brass);
+  stroke: color-mix(in oklab, var(--brass) 60%, var(--room-shade));
+  stroke-width: 0.5;
+}
+
+/* the filing cabinets for Tasks */
+.drawer {
+  fill: color-mix(in oklab, var(--room-wood) 90%, white);
+  stroke: color-mix(in oklab, var(--room-wood) 70%, var(--room-shade));
+  stroke-width: 0.6;
+}
+.drawer-label {
+  fill: var(--room-paper);
+}
+.drawer-pull {
+  fill: var(--brass);
+}
+
+/* desks, lamps and things on desks */
+.desk-top {
+  fill: var(--room-wood);
+}
+.desk-top--you {
+  fill: var(--room-inlay-2);
+}
+.blotter {
+  fill: color-mix(in oklab, var(--room-desk) 70%, var(--room-inlay));
+}
+.lamp-foot {
+  fill: color-mix(in oklab, var(--brass) 80%, var(--room-shade));
+}
+.saucer {
+  fill: var(--room-paper);
+  stroke: color-mix(in oklab, var(--room-paper) 70%, var(--room-shade));
+  stroke-width: 0.5;
+}
+.cushion {
+  fill: var(--room-fabric);
+}
+.cushion--side {
+  fill: color-mix(in oklab, var(--room-fabric) 70%, var(--room-shade));
+}
+.leaf {
+  fill: var(--room-plant);
+}
+.leaf--1 {
+  fill: color-mix(in oklab, var(--room-plant) 80%, var(--room-shade));
+}
+.leaf--2 {
+  fill: color-mix(in oklab, var(--room-plant) 84%, white);
+}
+.hat {
+  fill: var(--room-inlay-2);
+}
+.hat--crown {
+  fill: color-mix(in oklab, var(--room-inlay-2) 86%, white);
+}
+.hat-band {
+  stroke: var(--brass);
+  stroke-width: 1.6;
+}
+.table-side {
+  fill: color-mix(in oklab, var(--brass) 70%, var(--room-shade));
+}
+.table-top {
+  fill: var(--room-inlay-2);
+}
+
+/* the event flow: thin brass tubes, small capsules, a mouth per Connection */
+.plaque-rail {
+  fill: color-mix(in oklab, var(--room-wall) 80%, var(--room-panel));
+  stroke: var(--brass);
+  stroke-width: 1;
+}
+.mouth {
+  fill: var(--brass);
+}
+.mouth-in {
+  fill: color-mix(in oklab, var(--brass) 40%, var(--room-shade));
+}
+.plaque-mark {
+  color: color-mix(in oklab, var(--room-inlay-2) 76%, transparent);
+}
+.tube {
+  fill: none;
+  stroke: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-opacity: 0.85;
+}
+.tube--main {
+  stroke-width: 4;
+}
+.collar {
+  fill: var(--brass);
+}
+.capsule rect {
+  fill: var(--room-paper);
+  stroke: color-mix(in oklab, var(--brass) 60%, var(--room-shade));
+  stroke-width: 0.8;
+}
+
+/* ---------- labels over the floor ---------- */
+.tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tag {
+  position: absolute;
+  /* Off-centre to the right: the colleague up and to the left sits closer than the one
+     down and to the right, so a centred label would clip the neighbour's face. */
+  transform: translate(-38%, -100%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px 3px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 90%, transparent);
+  box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.tag b {
+  font-weight: var(--w-bold);
+}
+.tag span {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.tag--quiet {
+  background: color-mix(in oklab, var(--raised) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.tag--you {
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+}
+/* a queued colleague's question, speaking up and to the right so no bubble covers a face */
+.tag--ask {
+  transform: translate(-18px, -100%);
+  margin-top: -6px;
+  padding: 5px 11px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--raised);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--you);
+}
+.tag--ask.is-first {
+  background: var(--you);
+  color: var(--face-ink);
+  box-shadow: var(--shadow-2);
+}
+.tag--wait {
+  min-width: 24px;
+  justify-content: center;
+  padding: 3px 7px;
+  color: var(--you-ink);
+}
+.tag--more {
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+}
