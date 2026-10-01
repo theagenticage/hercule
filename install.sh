@@ -190,22 +190,30 @@ main() {
   hercule_command=hercule
   $bin_dir_on_path || hercule_command="$bin_dir/hercule"
   if [ "$hercule_home" != "$HOME/.hercule" ]; then
-    hercule_command="HERCULE_HOME=$hercule_home $hercule_command"
+    # Single-quoted, so a Home with a space or a `$` in its path pastes as
+    # one word; a single quote inside it is written '\''.
+    quoted_home=$(printf '%s' "$hercule_home" | sed "s/'/'\\\\''/g")
+    hercule_command="HERCULE_HOME='$quoted_home' $hercule_command"
   fi
 
   # The new binary rewrites the unit, so it runs the new binary, and restarts
   # it. It decides again whether this Mac runs the controller or a runner, from
-  # what the Home holds, and waits until Hercule has started and stays up. Its
-  # own output says what went wrong when it fails.
+  # what the Home holds, and waits until Hercule has started and stays up. When
+  # it fails, its own output explains what went wrong.
+  service_updated=true
   if $is_update; then
     printf '\nUpdating the service\n'
-    HERCULE_HOME=$hercule_home "$bin_dir/hercule" service install ||
-      fail "the binary and the app are updated, but the service was not. The lines above say why. Fix that and run \`$hercule_command service install\`."
+    HERCULE_HOME=$hercule_home "$bin_dir/hercule" service install || service_updated=false
   fi
 
+  # Reopened before a failed update is reported, so the app this script quit
+  # is back either way.
   if $app_was_running; then
     open "$app"
   fi
+
+  $service_updated ||
+    fail "the binary and the app are updated, but the service was not. The lines above explain why. Fix that and run \`$hercule_command service install\`."
 
   printf '\nHercule %s is installed.\n' "$("$bin_dir/hercule" --version)"
 

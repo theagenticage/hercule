@@ -47,12 +47,8 @@ interface InstallResult {
  * run never quits or replaces the app of the person running the tests.
  */
 function runInstall(releaseDir: string, setup: InstallSetup = {}): InstallResult {
-  const home = mkdtempSync(join(tmpdir(), "hercule-install-home-"));
-  const applicationsDir = mkdtempSync(join(tmpdir(), "hercule-install-applications-"));
-  onTestFinished(() => {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(applicationsDir, { recursive: true, force: true });
-  });
+  const home = makeTemporaryDir("hercule-install-home-");
+  const applicationsDir = makeTemporaryDir("hercule-install-applications-");
   if (setup.launchAgent !== undefined) {
     mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
     writeFileSync(join(home, launchAgentPath), setup.launchAgent);
@@ -210,7 +206,7 @@ describe("install.sh", () => {
       expect(existsSync(join(home, "Library"))).toBe(false);
       // The next steps carry the Home this run was given.
       expect(stdout).toContain("Nothing is running yet");
-      expect(stdout).toContain(`HERCULE_HOME=${join(home, "scratch-home")} `);
+      expect(stdout).toContain(`HERCULE_HOME='${join(home, "scratch-home")}' `);
       expect(stdout).toMatch(/hercule service install\n/);
       expect(stdout).toContain('"Add machine"');
     },
@@ -244,7 +240,7 @@ describe("install.sh", () => {
     });
 
     expect(status).toBe(1);
-    // The service's own output stays visible: it says what went wrong.
+    // The service's own output stays visible: it explains what went wrong.
     expect(stdout).toContain("fake hercule service output");
     expect(stderr).toContain("the binary and the app are updated, but the service was not");
   });
