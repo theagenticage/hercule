@@ -15,22 +15,23 @@ import { Effect, Layer } from "effect";
 import {
   BOOTSTRAP_KEYS,
   buildEnvName,
+  holdsControllerDatabase,
   locateCompiledBinary,
   locateConfigFile,
   locateLogsDir,
   type ConfigFileError,
+  type ConfigOverrides,
   type ConfigValueError,
+  type Env,
 } from "@hercule/home";
 import { createLaunchdSupervisor } from "./launchd";
-import { chooseServiceRole, holdsControllerDatabase } from "./role";
+import { chooseServiceRole } from "./role";
 import { ServiceError, Supervisor, runCommand, type ServiceStatus } from "./supervisor";
 import { createSystemdSupervisor } from "./systemd";
 import { buildServicePath, buildServiceUnit, type ServiceRole } from "./unit";
 
 export { ServiceError, Supervisor, type ServiceStatus } from "./supervisor";
 export type { ServiceRole } from "./unit";
-
-type Env = Readonly<Record<string, string | undefined>>;
 
 /**
  * Returns the Supervisor of this machine, given the environment of the
@@ -80,9 +81,6 @@ export const makeSupervisorLayer = (env: Env): Layer.Layer<Supervisor, ServiceEr
       }
     }),
   );
-
-/** The `-c key=value` flags on a command line, in the order given. */
-type ConfigOverrides = ReadonlyArray<readonly [key: string, value: string]>;
 
 /** What `installService` installs, and the command line it was asked from. */
 export interface ServiceInstallRequest {

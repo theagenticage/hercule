@@ -6,13 +6,13 @@
  * `buildServiceUnit`, checks which folders on the caller's PATH exist.
  */
 import { statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import {
   BOOTSTRAP_KEYS,
   buildEnvName,
-  locateLogsDir,
   locateProcessLogFile,
-  type ProcessLogName,
+  locateStderrLogFile,
+  type DaemonRole,
 } from "@hercule/home";
 
 /** The role a unit runs: `hercule serve` on the controller machine, `hercule runner` elsewhere. */
@@ -53,10 +53,10 @@ export const locateServiceLogs = (
   home: string,
   role: ServiceRole,
 ): { readonly log: string; readonly stderrLog: string } => {
-  const name: ProcessLogName = role === "serve" ? "controller" : "runner";
+  const daemon: DaemonRole = role === "serve" ? "controller" : "runner";
   return {
-    log: locateProcessLogFile(home, name),
-    stderrLog: join(locateLogsDir(home), `${name}.stderr.log`),
+    log: locateProcessLogFile(home, daemon),
+    stderrLog: locateStderrLogFile(home, daemon),
   };
 };
 

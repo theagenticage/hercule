@@ -8,8 +8,7 @@
 import { existsSync } from "node:fs";
 import { Effect } from "effect";
 import {
-  buildHomePaths,
-  loadBootstrapConfig,
+  holdsControllerDatabase,
   locateRunnerFile,
   type ConfigFileError,
   type ConfigValueError,
@@ -21,21 +20,6 @@ export interface ChosenRole {
   readonly role: ServiceRole;
   readonly reason: string;
 }
-
-/**
- * Checks whether a Hercule Home holds a controller database. Fails with
- * `ConfigFileError` or `ConfigValueError` when the Home's `config.toml`
- * cannot be used.
- *
- * The database is located with `config.toml` alone, without `-c` flags or
- * environment variables, because a unit sees only `config.toml`.
- */
-export const holdsControllerDatabase = (
-  home: string,
-): Effect.Effect<boolean, ConfigFileError | ConfigValueError> =>
-  Effect.map(loadBootstrapConfig({ home, overrides: [], env: {} }), (config) =>
-    existsSync(buildHomePaths(home, config.dataDir).databaseFile),
-  );
 
 /**
  * Returns the role a unit should run for a Hercule Home, and why. Fails with
@@ -55,8 +39,8 @@ export const holdsControllerDatabase = (
 export const chooseServiceRole = (
   home: string,
 ): Effect.Effect<ChosenRole, ConfigFileError | ConfigValueError> =>
-  Effect.map(holdsControllerDatabase(home), (controller): ChosenRole => {
-    if (controller) {
+  Effect.map(holdsControllerDatabase(home), (hasControllerDatabase): ChosenRole => {
+    if (hasControllerDatabase) {
       return { role: "serve", reason: "this Home holds a controller database" };
     }
     if (existsSync(locateRunnerFile(home))) {

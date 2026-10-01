@@ -13,7 +13,7 @@
  * missing or expired fails instead of silently acting as the user.
  */
 import { readFileSync } from "node:fs";
-import { locateCredentialsFile } from "@hercule/home";
+import { locateCredentialsFile, type Env } from "@hercule/home";
 
 /** The contents of `<home>/credentials.json`, exactly as `hercule login` writes it. */
 export interface CredentialFile {
@@ -34,8 +34,6 @@ export interface Credential {
 export class CredentialError extends Error {
   override readonly name = "CredentialError";
 }
-
-export type Env = Readonly<Record<string, string | undefined>>;
 
 /** Returns true when the runner started this process inside a session. */
 export const isInSession = (env: Env): boolean => env["HERCULE_SESSION"] === "1";

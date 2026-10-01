@@ -6,7 +6,8 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Context, Effect, Schema } from "effect";
-import { locateConfigFile } from "./paths";
+import type { ConfigOverrides, Env } from "./args";
+import { buildHomePaths, locateConfigFile } from "./paths";
 import { formatToml, parseToml, type TomlScalar } from "./toml";
 
 /**
@@ -24,7 +25,7 @@ export class ConfigValueError extends Schema.TaggedError<ConfigValueError>()("Co
 }) {}
 
 /** The log levels `log.level` accepts, ordered most to least severe. */
-export const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
+const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -49,7 +50,7 @@ export class BootstrapConfig extends Context.Service<
 /** The four bootstrap keys, in dotted TOML form. Nothing else may be added (spec 15 section 6). */
 export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"] as const;
 
-export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
+type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
 /**
  * Returns the env var name for a bootstrap key: uppercase, dots to
@@ -64,7 +65,7 @@ export function buildEnvName(key: BootstrapKey): string {
  * `data.dir` is relative on purpose: the file must not be tied to the home it
  * was written in.
  */
-export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
+const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
   "data.dir": "data",
   "bind.host": "127.0.0.1",
   "bind.port": 4937,
@@ -147,7 +148,7 @@ export const writeDefaultConfigFile = Effect.fn("writeDefaultConfigFile")(functi
  * when the file is absent. Fails with `ConfigFileError` when the file cannot be
  * read or parsed, or holds an unknown key.
  */
-export const readConfigFile = Effect.fn("readConfigFile")(function* (configFile: string) {
+const readConfigFile = Effect.fn("readConfigFile")(function* (configFile: string) {
   const createConfigFileError = (reason: string) =>
     new ConfigFileError({ message: `${configFile} ${reason}` });
 
@@ -185,9 +186,9 @@ export const readConfigFile = Effect.fn("readConfigFile")(function* (configFile:
  *   ignoring the flag;
  * - a value is invalid, and the error message includes the source that set it.
  */
-export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
-  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
-  readonly env: Readonly<Record<string, string | undefined>>;
+const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
+  readonly overrides: ConfigOverrides;
+  readonly env: Env;
   readonly file: Partial<Record<BootstrapKey, string>>;
   readonly configFile: string;
 }) {
@@ -242,8 +243,8 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
  */
 export const loadBootstrapConfig = Effect.fn("loadBootstrapConfig")(function* (options: {
   readonly home: string;
-  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
-  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly overrides: ConfigOverrides;
+  readonly env: Env;
 }) {
   const configFile = locateConfigFile(options.home);
   const file = yield* readConfigFile(configFile);
@@ -254,3 +255,18 @@ export const loadBootstrapConfig = Effect.fn("loadBootstrapConfig")(function* (o
     configFile,
   });
 });
+
+/**
+ * Checks whether a Hercule Home holds a controller database. Fails with
+ * `ConfigFileError` or `ConfigValueError` when the Home's `config.toml`
+ * cannot be used.
+ *
+ * The database is located with `config.toml` alone, without `-c` flags or
+ * environment variables, because a service unit sees only `config.toml`.
+ */
+export const holdsControllerDatabase = (
+  home: string,
+): Effect.Effect<boolean, ConfigFileError | ConfigValueError> =>
+  Effect.map(loadBootstrapConfig({ home, overrides: [], env: {} }), (config) =>
+    existsSync(buildHomePaths(home, config.dataDir).databaseFile),
+  );

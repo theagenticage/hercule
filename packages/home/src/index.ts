@@ -8,7 +8,13 @@
  * the controller's state to do it.
  */
 export { locateCompiledBinary } from "./binary";
-export { InvalidOptionError, parseGlobalOptions, type GlobalOptions } from "./args";
+export {
+  InvalidOptionError,
+  parseGlobalOptions,
+  type ConfigOverrides,
+  type Env,
+  type GlobalOptions,
+} from "./args";
 export {
   locateConfigFile,
   locateCredentialsFile,
@@ -21,8 +27,9 @@ export {
   locateRunnerDir,
   locateRunnerFile,
   locateSetupUrlFile,
+  locateStderrLogFile,
+  type DaemonRole,
   type HomePaths,
-  type ProcessLogName,
 } from "./paths";
 export {
   BOOTSTRAP_KEYS,
@@ -30,6 +37,7 @@ export {
   ConfigFileError,
   ConfigValueError,
   buildEnvName,
+  holdsControllerDatabase,
   loadBootstrapConfig,
   writeDefaultConfigFile,
   type LogLevel,

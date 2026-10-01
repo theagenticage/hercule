@@ -24,6 +24,7 @@ import {
   locateCompiledBinary,
   parseGlobalOptions,
   resolveHomePath,
+  type ConfigOverrides,
 } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
 import {
@@ -84,7 +85,7 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
 const runUntilStopped = async (
   options: {
     readonly home: string;
-    readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+    readonly overrides: ConfigOverrides;
   },
   work: Effect.Effect<void, { readonly message: string }>,
 ): Promise<void> => {

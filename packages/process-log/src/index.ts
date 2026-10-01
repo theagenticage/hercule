@@ -19,12 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import type * as EffectLogLevel from "effect/LogLevel";
 import * as References from "effect/References";
-import {
-  locateLogsDir,
-  locateProcessLogFile,
-  type LogLevel,
-  type ProcessLogName,
-} from "@hercule/home";
+import { locateLogsDir, locateProcessLogFile, type DaemonRole, type LogLevel } from "@hercule/home";
 import { openRotatingFile } from "./rotating-file";
 
 /** The size at which a log file is rotated: 10 MiB. */
@@ -61,7 +56,7 @@ const EFFECT_LOG_LEVELS = {
  */
 export function makeProcessLogLayer(options: {
   readonly home: string;
-  readonly role: ProcessLogName;
+  readonly role: DaemonRole;
   readonly level: LogLevel;
 }): Layer.Layer<never> {
   const logsDir = locateLogsDir(options.home);
