@@ -131,7 +131,7 @@ describe("the config layer", () => {
 
     const error = await loadAndReadFailure();
     expect(error._tag).toBe("ConfigFileError");
-    expect(error).toMatchObject({ path: join(home, "config.toml") });
+    expect(error.message.startsWith(`${join(home, "config.toml")} `)).toBe(true);
     expect(error.message).toContain("Expected a value");
   });
 

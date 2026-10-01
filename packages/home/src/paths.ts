@@ -7,7 +7,8 @@
  *
  * - the dispatcher routes on `--home`;
  * - the CLI reads `<home>/setup-url`;
- * - the runner reads `<home>/runner/`;
+ * - the runner reads `<home>/runner/`, and `hercule service install` checks
+ *   it for a `runner.json`;
  * - the controller and the runner write their logs into `<home>/logs/`;
  * - the controller opens the database.
  */
@@ -70,9 +71,22 @@ export function locateRunnerDir(home: string): string {
   return join(home, "runner");
 }
 
+/** Returns the path of `runner.json`, the credential a runner receives when it joins. */
+export function locateRunnerFile(home: string): string {
+  return join(locateRunnerDir(home), "runner.json");
+}
+
 /** Returns the directory where the controller and the runner write their rotated process logs. */
 export function locateLogsDir(home: string): string {
   return join(home, "logs");
+}
+
+/** The process that writes a process log: the controller, or a runner. */
+export type ProcessLogName = "controller" | "runner";
+
+/** Returns the path of the log file the controller or a runner writes: `<home>/logs/<name>.log`. */
+export function locateProcessLogFile(home: string, name: ProcessLogName): string {
+  return join(locateLogsDir(home), `${name}.log`);
 }
 
 /** Returns the path of `setup-url`, which is known without reading any config. */

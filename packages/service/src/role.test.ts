@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { locateConfigFile, locateRunnerDir } from "@hercule/home";
+import { locateConfigFile, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { chooseServiceRole } from "./role";
 
 let home: string;
 
 const writeRunnerJson = (): void => {
   mkdirSync(locateRunnerDir(home), { recursive: true });
-  writeFileSync(join(locateRunnerDir(home), "runner.json"), "{}");
+  writeFileSync(locateRunnerFile(home), "{}");
 };
 
 const writeDatabase = (dataDir: string): void => {

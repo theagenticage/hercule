@@ -6,12 +6,11 @@
  * `hercule runner join` does not ask: it installs the runner role itself.
  */
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { Effect } from "effect";
 import {
   buildHomePaths,
   loadBootstrapConfig,
-  locateRunnerDir,
+  locateRunnerFile,
   type ConfigFileError,
   type ConfigValueError,
 } from "@hercule/home";
@@ -22,6 +21,21 @@ export interface ChosenRole {
   readonly role: ServiceRole;
   readonly reason: string;
 }
+
+/**
+ * Checks whether a Hercule Home holds a controller database. Fails with
+ * `ConfigFileError` or `ConfigValueError` when the Home's `config.toml`
+ * cannot be used.
+ *
+ * The database is located with `config.toml` alone, without `-c` flags or
+ * environment variables, because a unit sees only `config.toml`.
+ */
+export const holdsControllerDatabase = (
+  home: string,
+): Effect.Effect<boolean, ConfigFileError | ConfigValueError> =>
+  Effect.map(loadBootstrapConfig({ home, overrides: [], env: {} }), (config) =>
+    existsSync(buildHomePaths(home, config.dataDir).databaseFile),
+  );
 
 /**
  * Returns the role a unit should run for a Hercule Home, and why. Fails with
@@ -35,19 +49,17 @@ export interface ChosenRole {
  * - Anything else is a machine that has not run Hercule yet, and `serve`
  *   starts a controller there.
  *
- * The database is located with `config.toml` alone, without `-c` flags or
- * environment variables, because the unit sees only `config.toml`. The
- * controller URL in `runner.json` is never consulted: a runner may well dial
- * a controller on its own machine.
+ * The controller URL in `runner.json` is never consulted: a runner may well
+ * dial a controller on its own machine.
  */
 export const chooseServiceRole = (
   home: string,
 ): Effect.Effect<ChosenRole, ConfigFileError | ConfigValueError> =>
-  Effect.map(loadBootstrapConfig({ home, overrides: [], env: {} }), (config): ChosenRole => {
-    if (existsSync(buildHomePaths(home, config.dataDir).databaseFile)) {
+  Effect.map(holdsControllerDatabase(home), (controller): ChosenRole => {
+    if (controller) {
       return { role: "serve", reason: "this Home holds a controller database" };
     }
-    if (existsSync(join(locateRunnerDir(home), "runner.json"))) {
+    if (existsSync(locateRunnerFile(home))) {
       return { role: "runner", reason: "this Home holds a runner.json and no controller database" };
     }
     return { role: "serve", reason: "this Home holds no runner.json" };

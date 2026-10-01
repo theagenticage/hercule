@@ -93,7 +93,10 @@ The compiled artifact still contains all three graphs. Isolation is a property o
 **One unit per machine.** `install` refuses when the installed unit names another Home, and says what to run to move it. It also refuses:
 
 - when it runs from a checkout rather than a compiled binary, because the unit would point at a Bun binary and a source file;
-- when `-c key=value` is given, or a `HERCULE_<key>` variable for a bootstrap key is set (section 6). The unit reads only `config.toml`, so an override would hold for this command and not for the service; the message names the key and the config file to put it in. `HERCULE_HOME` is not a bootstrap key, and is honoured;
+- when `-c key=value` is given, or a `HERCULE_<key>` variable for a bootstrap key is set (section 6). The unit reads only `config.toml`, so an override would hold for this command and not for the service; the message names the key and the config file to put it in. `HERCULE_HOME` is not a bootstrap key, and is honoured. Every other verb refuses `-c` as well, for the same reason;
+- when the binary's path, the Home or a folder on the `PATH` holds a control character, which a unit file cannot hold;
+- when the binary, or a folder on the `PATH` the unit would carry, can be written by every user on the machine, because anyone could then replace a program the service runs;
+- for the runner role, when the Home holds a controller database, because that Home's unit runs `hercule serve`, which starts a runner of its own. `hercule runner join` makes this check, like the others, before it spends the token;
 - on macOS, when the user is not logged in to the Mac's desktop (`launchctl print gui/<uid>` fails), because launchd then has nowhere to run Hercule;
 - on Linux, when `loginctl enable-linger` fails. Nothing is written, and the message gives the command to run (`sudo loginctl enable-linger <user>`).
 
@@ -102,7 +105,7 @@ Any other platform is refused with a clear error.
 **The unit on each platform.**
 
 - macOS: a launchd LaunchAgent with the label `sh.hercule.service`, in the file `~/Library/LaunchAgents/sh.hercule.service.plist`, in the domain `gui/<uid>`. It sets `RunAtLoad` and `KeepAlive`. When the job is loaded and the plist is unchanged, `install` restarts it with `launchctl kickstart -k`; otherwise it boots the job out, waits up to 30 seconds for it to unload, writes the plist and loads it with `launchctl bootstrap`. The status comes from `launchctl print gui/<uid>/sh.hercule.service`.
-- Linux: a systemd user unit, `hercule.service`, in `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`, with `Restart=always`, `RestartSec=10` and `WantedBy=default.target`. `install` turns linger on first when it is off (`loginctl enable-linger`), so the unit runs without a login session, then writes the unit and runs `systemctl --user daemon-reload`, `enable` and `restart`. Values in the unit are quoted and escaped for systemd.
+- Linux: a systemd user unit, `hercule.service`, in `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`, with `Restart=always`, `RestartSec=10` and `WantedBy=default.target`. `install` turns linger on first when it is off (`loginctl enable-linger`), so the unit runs without a login session, then writes the unit and runs `systemctl --user daemon-reload`, `enable` and `restart`. Values in the unit are quoted and escaped for systemd. The unit unsets the `HERCULE_<key>` variables of the bootstrap keys, so a variable set in the user's systemd manager (`systemctl --user set-environment`) cannot override `config.toml` behind the service's back.
 
 **What the unit runs.** Both platforms write the same content:
 
@@ -173,7 +176,7 @@ Process logs are rotated files under `logs/`, outside the database ([./04](./04-
 
 - The controller writes `logs/controller.log`. A runner writes `logs/runner.log`, both a remote runner and the controller's local runner child, which shares its Home with the controller.
 - One entry per line, in Effect's logfmt format.
-- The level is `log.level` from the bootstrap config (section 6). Entries below it are not written.
+- The level is `log.level` from the bootstrap config (section 6). Entries below it are not written. The controller passes its level to its local runner child as `-c log.level=<level>`, so a `-c` or `HERCULE_LOG_LEVEL` given to the controller reaches both logs.
 - The process rotates its own file by size: at 10 MiB, `<name>.log` becomes `<name>.log.1`, the older copies each move up one number, the copy that was `<name>.log.5` is deleted, and a new file is opened. So a role keeps at most six files.
 - The process creates `logs/` (mode 0700) when it is missing, and every log file with mode 0600.
 - On a terminal, the process also prints its entries, formatted for reading, to standard error. Under a unit standard error is not a terminal, so nothing is printed twice. Nothing is logged to standard output: the local runner's standard output carries its first line to the controller (section 4), and the controller's carries the first-run lines (section 7).

@@ -6,8 +6,11 @@ import { Clock, Duration, Effect, Fiber, Result } from "effect";
 import { TestClock } from "effect/testing";
 import type { CommandResult } from "./supervisor";
 
-/** Returns a command result. */
-export const answer = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
+/** How many half-second steps `runOnTestClock` takes before it gives up. */
+const MAX_STEPS = 1000;
+
+/** Builds the result of one run of a fake command. */
+export const buildCommandResult = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   exitCode,
   stdout,
   stderr,
@@ -17,7 +20,8 @@ export const answer = (exitCode: number, stdout = "", stderr = ""): CommandResul
  * Runs an effect on a `TestClock`, moving the clock half a second at a time
  * until the effect is done, and returns its result and how many seconds of
  * clock time it took. The waits poll every half second, so each step lets
- * exactly one poll run.
+ * exactly one poll run. Throws when the effect is still running after
+ * `MAX_STEPS`, so a wait that never ends fails the test instead of hanging it.
  */
 export const runOnTestClock = <A, E>(
   effect: Effect.Effect<A, E>,
@@ -29,7 +33,12 @@ export const runOnTestClock = <A, E>(
         const fiber = yield* Effect.forkChild(Effect.result(effect));
         // Lets the effect run up to its first sleep before the clock moves at all.
         yield* Effect.yieldNow;
-        for (let step = 0; step < 1000 && fiber.pollUnsafe() === undefined; step += 1) {
+        for (let step = 0; fiber.pollUnsafe() === undefined; step += 1) {
+          if (step >= MAX_STEPS) {
+            return yield* Effect.die(
+              new Error(`The effect still runs after ${MAX_STEPS / 2} seconds of clock time.`),
+            );
+          }
           yield* TestClock.adjust(Duration.millis(500));
         }
         const result = yield* Fiber.join(fiber);

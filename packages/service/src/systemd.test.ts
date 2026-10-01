@@ -18,10 +18,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { RunCommand } from "./supervisor";
 import { createSystemdSupervisor, parseSystemdPid } from "./systemd";
-import { answer, expectSuccess, readFailureMessage, runOnTestClock } from "./testing";
+import { buildCommandResult, expectSuccess, readFailureMessage, runOnTestClock } from "./testing";
 import { renderSystemdUnit, type ServiceUnit } from "./unit";
 
-const SHOW = "systemctl --user show hercule.service -p LoadState,ActiveState,MainPID";
+const SHOW = "systemctl --user show hercule.service -p MainPID";
 
 /** What the fake service manager holds, and how it behaves. Tests change it to set up a case. */
 interface SystemdState {
@@ -51,31 +51,31 @@ const fakeRun: RunCommand = (argv) =>
   Effect.sync(() => {
     calls.push(argv.join(" "));
     if (argv[0] === "loginctl") {
-      if (argv[1] === "show-user") return answer(0, `Linger=${state.linger ? "yes" : "no"}\n`);
-      if (state.lingerRefused) return answer(1, "", "Could not enable linger: Access denied");
+      if (argv[1] === "show-user")
+        return buildCommandResult(0, `Linger=${state.linger ? "yes" : "no"}\n`);
+      if (state.lingerRefused)
+        return buildCommandResult(1, "", "Could not enable linger: Access denied");
       state.linger = true;
-      return answer(0);
+      return buildCommandResult(0);
     }
-    if (argv[0] !== "systemctl" || argv[1] !== "--user") return answer(127);
+    if (argv[0] !== "systemctl" || argv[1] !== "--user") return buildCommandResult(127);
     switch (argv[2]) {
       case "show": {
         if (state.crashLoop && state.pid !== null) startProcess();
-        const loaded = existsSync(unitFile) ? "loaded" : "not-found";
-        const active = state.pid === null ? "inactive" : "active";
-        return answer(0, `LoadState=${loaded}\nActiveState=${active}\nMainPID=${state.pid ?? 0}\n`);
+        return buildCommandResult(0, `MainPID=${state.pid ?? 0}\n`);
       }
       case "start":
         if (state.pid === null) startProcess();
-        return answer(0);
+        return buildCommandResult(0);
       case "restart":
         startProcess();
-        return answer(0);
+        return buildCommandResult(0);
       case "stop":
       case "disable":
         state.pid = null;
-        return answer(0);
+        return buildCommandResult(0);
       default:
-        return answer(0);
+        return buildCommandResult(0);
     }
   });
 
@@ -114,9 +114,9 @@ afterEach(() => {
 
 describe("parseSystemdPid", () => {
   it("reads MainPID, and returns null for 0 or no MainPID line", () => {
-    expect(parseSystemdPid("LoadState=loaded\nActiveState=active\nMainPID=4242\n")).toBe(4242);
-    expect(parseSystemdPid("LoadState=loaded\nActiveState=inactive\nMainPID=0\n")).toBeNull();
-    expect(parseSystemdPid("LoadState=not-found\n")).toBeNull();
+    expect(parseSystemdPid("MainPID=4242\n")).toBe(4242);
+    expect(parseSystemdPid("MainPID=0\n")).toBeNull();
+    expect(parseSystemdPid("")).toBeNull();
   });
 });
 
@@ -218,7 +218,7 @@ describe("install", () => {
   it("fails with systemd's own words when a command fails", async () => {
     const failing: RunCommand = (argv) =>
       argv.includes("enable")
-        ? Effect.succeed(answer(1, "", "Failed to enable unit: Unit file is masked.\n"))
+        ? Effect.succeed(buildCommandResult(1, "", "Failed to enable unit: Unit file is masked.\n"))
         : fakeRun(argv);
     const { result } = await runOnTestClock(
       createSystemdSupervisor({ run: failing, unitDir, uid: 1000, userName: "ada" }).install(

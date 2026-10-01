@@ -2,14 +2,19 @@
  * `runServiceCommand` against a fake Supervisor: the command line, the
  * refusals before anything reaches the Supervisor, and what each verb prints.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
-import { locateRunnerDir } from "@hercule/home";
-import { describeStatus, runServiceCommand, type ServiceCommandRequest } from "./index";
-import { Supervisor, type ServiceStatus } from "./supervisor";
+import { Effect, Layer, Result } from "effect";
+import { locateRunnerDir, locateRunnerFile } from "@hercule/home";
+import {
+  checkServiceCanBeInstalled,
+  describeStatus,
+  runServiceCommand,
+  type ServiceCommandRequest,
+} from "./index";
+import { ServiceError, Supervisor, type ServiceStatus } from "./supervisor";
 import type { ServiceUnit } from "./unit";
 
 const UNIT_FILE = "/Users/ada/Library/LaunchAgents/sh.hercule.service.plist";
@@ -32,7 +37,6 @@ const NOT_INSTALLED: Omit<ServiceStatus, "unitFile"> = {
 
 const FakeSupervisor = Layer.sync(Supervisor, () =>
   Supervisor.of({
-    unitFile: UNIT_FILE,
     uninstallNote: "A note about what uninstall leaves.",
     install: (unit) =>
       Effect.sync(() => {
@@ -127,7 +131,7 @@ describe("the command line", () => {
 describe("install", () => {
   it("says which role it installs and why, then prints the status", async () => {
     mkdirSync(locateRunnerDir(home), { recursive: true });
-    writeFileSync(join(locateRunnerDir(home), "runner.json"), "{}");
+    writeFileSync(locateRunnerFile(home), "{}");
     expect(await run(["install"])).toBe(0);
     expect(out).toEqual([
       "Installing the unit for `hercule runner`: this Home holds a runner.json and no controller database.",
@@ -171,17 +175,66 @@ describe("install", () => {
     expect(actions).toEqual([]);
   });
 
-  it.each(["install", "status"])(
+  it.each(["install", "restart", "status"])(
     "refuses a -c flag on %s, which the unit would not see",
     async (verb) => {
-      expect(await run([verb], { overrides: [["bind.port", "5000"]] })).toBe(2);
+      expect(await run([verb], { overrides: [["bind.port", "5000"]] })).toBe(1);
       expect(err).toEqual([
-        `hercule: -c bind.port=5000 does not reach the service, which reads only ${join(home, "config.toml")}. Put bind.port in that file instead.`,
-        "run `hercule service --help`",
+        `hercule: -c bind.port=5000 applies only to this command, and the service reads only ${join(home, "config.toml")}. Put bind.port in that file instead, then run this again without -c.`,
       ]);
       expect(actions).toEqual([]);
     },
   );
+
+  it("refuses a PATH folder every user can write to", async () => {
+    const shared = join(home, "shared-bin");
+    mkdirSync(shared);
+    chmodSync(shared, 0o777);
+    expect(await run(["install"], { env: { PATH: `/usr/bin:${shared}` } })).toBe(1);
+    expect(err).toEqual([
+      `hercule: ${shared} is on the PATH the service runs with, and every user on this machine can write to it, so anyone could put a program there that the service runs. Remove ${shared} from PATH, or run \`chmod o-w ${shared}\`, then run this again.`,
+    ]);
+    expect(actions).toEqual([]);
+  });
+
+  it("refuses a Hercule Home with a line break in its path", async () => {
+    const odd = join(home, "odd\nExecStartPre=/bin/sh");
+    mkdirSync(odd, { recursive: true });
+    expect(await run(["install"], { home: odd })).toBe(1);
+    expect(err).toEqual([
+      `hercule: The Hercule Home ${JSON.stringify(odd)} has a control character, which a unit file cannot hold. Use a path without one.`,
+    ]);
+    expect(actions).toEqual([]);
+  });
+
+  it("exits 1 with the Supervisor's message when the verb fails", async () => {
+    const failing = Layer.succeed(
+      Supervisor,
+      Supervisor.of({
+        uninstallNote: undefined,
+        install: () => Effect.fail(new ServiceError({ message: "launchd said no." })),
+        uninstall: Effect.fail(new ServiceError({ message: "launchd said no." })),
+        start: Effect.fail(new ServiceError({ message: "launchd said no." })),
+        stop: Effect.fail(new ServiceError({ message: "launchd said no." })),
+        restart: Effect.fail(new ServiceError({ message: "launchd said no." })),
+        readStatus: Effect.fail(new ServiceError({ message: "launchd said no." })),
+      }),
+    );
+    const code = await runServiceCommand(
+      {
+        args: ["start"],
+        home,
+        overrides: [],
+        env: {},
+        out: (line) => out.push(line),
+        err: (line) => err.push(line),
+      },
+      { supervisor: failing, program: PROGRAM },
+    );
+    expect(code).toBe(1);
+    expect(err).toEqual(["hercule: launchd said no."]);
+    expect(out).toEqual([]);
+  });
 
   it("refuses a HERCULE_* bootstrap variable, and honours HERCULE_HOME", async () => {
     expect(
@@ -197,6 +250,27 @@ describe("install", () => {
     writeFileSync(join(home, "config.toml"), "[data\n");
     expect(await run(["install"])).toBe(1);
     expect(err[0]).toMatch(new RegExp(`^hercule: ${join(home, "config.toml")} `));
+  });
+});
+
+describe("checkServiceCanBeInstalled", () => {
+  it("refuses a runner unit for a Home that holds a controller database", async () => {
+    mkdirSync(join(home, "data"));
+    writeFileSync(join(home, "data", "hercule.db"), "");
+    const result = await Effect.runPromise(
+      Effect.result(
+        checkServiceCanBeInstalled({
+          role: "runner",
+          home,
+          overrides: [],
+          env: { PATH: "/usr/bin" },
+          program: PROGRAM,
+        }),
+      ),
+    );
+    expect(Result.isFailure(result) && result.failure.message).toBe(
+      `The Hercule Home ${home} holds a controller database, so its service runs \`hercule serve\`, which starts a runner of its own. To make this machine a separate runner, give it its own Home with --home.`,
+    );
   });
 });
 

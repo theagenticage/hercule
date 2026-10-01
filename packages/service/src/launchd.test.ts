@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { createLaunchdSupervisor, parseLaunchdPid } from "./launchd";
 import { runCommand, type RunCommand } from "./supervisor";
-import { answer, expectSuccess, readFailureMessage, runOnTestClock } from "./testing";
+import { buildCommandResult, expectSuccess, readFailureMessage, runOnTestClock } from "./testing";
 import { renderLaunchdPlist, type ServiceUnit } from "./unit";
 
 const UID = 501;
@@ -108,41 +108,45 @@ const fakeRun: RunCommand = (argv) =>
     const [command, verb] = argv;
     if (command === "plutil") {
       const path = argv.at(-1)!;
-      return existsSync(path) ? answer(0, convertPlist(readFileSync(path, "utf8"))) : answer(1);
+      return existsSync(path)
+        ? buildCommandResult(0, convertPlist(readFileSync(path, "utf8")))
+        : buildCommandResult(1);
     }
-    if (command !== "launchctl") return answer(127, "", `${command}: not found`);
+    if (command !== "launchctl") return buildCommandResult(127, "", `${command}: not found`);
     switch (verb) {
       case "print":
         if (argv[2] === `gui/${UID}`)
-          return state.session ? answer(0, "domain = gui") : answer(113);
+          return state.session ? buildCommandResult(0, "domain = gui") : buildCommandResult(113);
         if (state.unloading > 0) {
           state.unloading -= 1;
           if (state.unloading === 0) state.loaded = false;
-          return answer(0, `${TARGET} = {\n\tstate = exiting\n}`);
+          return buildCommandResult(0, `${TARGET} = {\n\tstate = exiting\n}`);
         }
-        if (!state.loaded) return answer(113, "", `Could not find service "sh.hercule.service"`);
+        if (!state.loaded)
+          return buildCommandResult(113, "", `Could not find service "sh.hercule.service"`);
         if (state.crashLoop) startProcess();
-        return answer(
+        return buildCommandResult(
           0,
           `${TARGET} = {\n\tactive count = 1\n\tstate = running\n${state.pid === null ? "" : `\tpid = ${state.pid}\n`}\tlast exit code = 0\n}`,
         );
       case "bootstrap":
-        if (state.loaded) return answer(5, "", "Bootstrap failed: 5: Input/output error");
+        if (state.loaded)
+          return buildCommandResult(5, "", "Bootstrap failed: 5: Input/output error");
         state.loaded = true;
         startProcess();
-        return answer(0);
+        return buildCommandResult(0);
       case "bootout":
-        if (!state.loaded) return answer(3, "", "Boot-out failed: 3: No such process");
+        if (!state.loaded) return buildCommandResult(3, "", "Boot-out failed: 3: No such process");
         state.pid = null;
         state.unloading = state.slowUnload;
         if (state.unloading === 0) state.loaded = false;
-        return answer(0);
+        return buildCommandResult(0);
       case "kickstart":
-        if (!state.loaded) return answer(113);
+        if (!state.loaded) return buildCommandResult(113);
         if (argv.includes("-k") || state.pid === null) startProcess();
-        return answer(0);
+        return buildCommandResult(0);
       default:
-        return answer(1);
+        return buildCommandResult(1);
     }
   });
 
@@ -373,6 +377,16 @@ describe("stop", () => {
     expect(existsSync(unitFile)).toBe(true);
   });
 
+  it("fails after 30 seconds when launchd still holds the job", async () => {
+    installBefore(renderLaunchdPlist(buildUnit()), 100);
+    state.slowUnload = 1000;
+    const { result, seconds } = await runOnTestClock(supervisor().stop);
+    expect(readFailureMessage(result)).toBe(
+      "launchd did not stop the Hercule service within 30 seconds. Run `hercule service stop` again.",
+    );
+    expect(seconds).toBe(30);
+  });
+
   it("fails when no unit is installed", async () => {
     const { result } = await runOnTestClock(supervisor().stop);
     expect(readFailureMessage(result)).toContain("No Hercule service is installed");
@@ -446,7 +460,7 @@ describe("readStatus", () => {
   it("fails with what to do when plutil cannot read the plist", async () => {
     writeFileSync(unitFile, "not a plist");
     const failing: RunCommand = (argv) =>
-      argv[0] === "plutil" ? Effect.succeed(answer(1, "not a plist")) : fakeRun(argv);
+      argv[0] === "plutil" ? Effect.succeed(buildCommandResult(1, "not a plist")) : fakeRun(argv);
     const { result } = await runOnTestClock(
       createLaunchdSupervisor({ run: failing, unitDir, uid: UID, userName: "ada" }).readStatus,
     );

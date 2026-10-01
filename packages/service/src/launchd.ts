@@ -5,7 +5,8 @@
  * A LaunchAgent, not a system daemon, because the controller reads the master
  * key from the user's login keychain, which a system daemon cannot reach.
  *
- * The mechanics are the ones `install.sh` proved: `launchctl bootstrap` loads
+ * The mechanics are the ones the edge `install.sh` used before this package
+ * existed: `launchctl bootstrap` loads
  * the plist, `launchctl kickstart -k` restarts the job launchd already holds,
  * and a changed plist needs `launchctl bootout` first, because launchd reads
  * the plist only when it loads the job.
@@ -18,8 +19,8 @@ import {
   Supervisor,
   createLogFiles,
   createNotInstalledError,
-  pointAtLogs,
   deleteUnitFile,
+  describeLogLocation,
   refuseOtherHome,
   runOrFail,
   waitForStablePid,
@@ -84,8 +85,9 @@ export const createLaunchdSupervisor = (
 
   /**
    * Reads the role and the Hercule Home the installed plist runs, or returns
-   * `undefined` when there is no plist. A plist that `install.sh` wrote reads
-   * the same way: it runs `[<binary>, "serve"]` with `HERCULE_HOME` set.
+   * `undefined` when there is no plist. A plist an older edge `install.sh`
+   * wrote reads the same way: it runs `[<binary>, "serve"]` with
+   * `HERCULE_HOME` set.
    */
   const readInstalledUnit = Effect.gen(function* () {
     if (!existsSync(unitFile)) return undefined;
@@ -125,13 +127,10 @@ export const createLaunchdSupervisor = (
    * `bootout` is not an error on its own: the job may have gone away in the
    * meantime, and the wait is what checks the outcome.
    */
-  const unload = (logs: string) =>
+  const unload = (nextStep: string) =>
     Effect.andThen(
       run(["launchctl", "bootout", target]),
-      waitUntilUnloaded(
-        isLoaded,
-        `launchd did not stop the Hercule service within 30 seconds. ${logs}`,
-      ),
+      waitUntilUnloaded(isLoaded, "launchd did not stop the Hercule service", nextStep),
     );
 
   const load = runOrFail(
@@ -144,7 +143,12 @@ export const createLaunchdSupervisor = (
   const waitForStart = (
     installed: { readonly role: ServiceRole | null; readonly home: string | null },
     previousPid: number | null,
-  ) => waitForStablePid({ readPid, previousPid, logs: pointAtLogs(installed, unitFile) });
+  ) =>
+    waitForStablePid({
+      readPid,
+      previousPid,
+      nextStep: describeLogLocation(installed, unitFile),
+    });
 
   const install = (unit: ServiceUnit): Effect.Effect<ServiceStatus, ServiceError> =>
     Effect.gen(function* () {
@@ -172,7 +176,7 @@ export const createLaunchdSupervisor = (
           "launchd did not restart the Hercule service",
         );
       } else {
-        if (job.loaded) yield* unload(pointAtLogs(unit, unitFile));
+        if (job.loaded) yield* unload(describeLogLocation(unit, unitFile));
         yield* writeUnitFile(unitFile, text);
         yield* load;
       }
@@ -229,7 +233,6 @@ export const createLaunchdSupervisor = (
   });
 
   return Supervisor.of({
-    unitFile,
     uninstallNote: undefined,
     install,
     uninstall,

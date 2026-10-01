@@ -141,6 +141,7 @@ Description=Hercule (hercule serve)
 ExecStart="/Users/ada/.local/bin/hercule" serve
 Environment="PATH=/Users/ada/.local/bin:/usr/bin:/bin"
 Environment="HERCULE_HOME=/Users/ada/.hercule"
+UnsetEnvironment=HERCULE_DATA_DIR HERCULE_BIND_HOST HERCULE_BIND_PORT HERCULE_LOG_LEVEL
 Restart=always
 RestartSec=10
 StandardOutput=null

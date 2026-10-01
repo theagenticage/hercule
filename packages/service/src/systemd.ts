@@ -17,7 +17,7 @@ import {
   createLogFiles,
   createNotInstalledError,
   deleteUnitFile,
-  pointAtLogs,
+  describeLogLocation,
   refuseOtherHome,
   runOrFail,
   waitForStablePid,
@@ -55,15 +55,15 @@ export const createSystemdSupervisor = (
 ): Supervisor["Service"] => {
   const { run } = dependencies;
   // `loginctl` takes a uid wherever it takes a user name.
-  const user = dependencies.userName ?? String(dependencies.uid);
-  const who = dependencies.userName ?? "this user";
+  const lingerUser = dependencies.userName ?? String(dependencies.uid);
+  const userLabel = dependencies.userName ?? "this user";
   const unitFile = join(dependencies.unitDir, SYSTEMD_UNIT_NAME);
   const systemctl = (...args: ReadonlyArray<string>) => ["systemctl", "--user", ...args];
 
   const readPid = Effect.map(
     runOrFail(
       run,
-      systemctl("show", SYSTEMD_UNIT_NAME, "-p", "LoadState,ActiveState,MainPID"),
+      systemctl("show", SYSTEMD_UNIT_NAME, "-p", "MainPID"),
       "systemd did not report the Hercule service",
     ),
     (result) => parseSystemdPid(result.stdout),
@@ -101,7 +101,7 @@ export const createSystemdSupervisor = (
     const enabled = yield* run(["loginctl", "enable-linger", String(dependencies.uid)]);
     if (enabled.exitCode !== 0) {
       return yield* new ServiceError({
-        message: `Could not turn on lingering for ${who}, so systemd would stop Hercule when ${who} logs out. Run \`sudo loginctl enable-linger ${user}\`, then run this again.`,
+        message: `Could not turn on lingering for ${userLabel}, so systemd would stop Hercule when ${userLabel} logs out. Run \`sudo loginctl enable-linger ${lingerUser}\`, then run this again.`,
       });
     }
   });
@@ -125,7 +125,11 @@ export const createSystemdSupervisor = (
         systemctl("restart", SYSTEMD_UNIT_NAME),
         "systemd did not start the Hercule service",
       );
-      yield* waitForStablePid({ readPid, previousPid, logs: pointAtLogs(unit, unitFile) });
+      yield* waitForStablePid({
+        readPid,
+        previousPid,
+        nextStep: describeLogLocation(unit, unitFile),
+      });
       return yield* readStatus;
     });
 
@@ -150,7 +154,11 @@ export const createSystemdSupervisor = (
       systemctl("start", SYSTEMD_UNIT_NAME),
       "systemd did not start the Hercule service",
     );
-    yield* waitForStablePid({ readPid, previousPid: null, logs: pointAtLogs(installed, unitFile) });
+    yield* waitForStablePid({
+      readPid,
+      previousPid: null,
+      nextStep: describeLogLocation(installed, unitFile),
+    });
     return yield* readStatus;
   });
 
@@ -172,13 +180,16 @@ export const createSystemdSupervisor = (
       systemctl("restart", SYSTEMD_UNIT_NAME),
       "systemd did not restart the Hercule service",
     );
-    yield* waitForStablePid({ readPid, previousPid, logs: pointAtLogs(installed, unitFile) });
+    yield* waitForStablePid({
+      readPid,
+      previousPid,
+      nextStep: describeLogLocation(installed, unitFile),
+    });
     return yield* readStatus;
   });
 
   return Supervisor.of({
-    unitFile,
-    uninstallNote: `Lingering stays on for ${who}. To turn it off, run \`sudo loginctl disable-linger ${user}\`.`,
+    uninstallNote: `Lingering stays on for ${userLabel}. To turn it off, run \`sudo loginctl disable-linger ${lingerUser}\`.`,
     install,
     uninstall,
     start,

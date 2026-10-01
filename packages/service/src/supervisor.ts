@@ -38,25 +38,19 @@ export interface ServiceStatus {
   readonly unitFile: string;
 }
 
-/** A verb that needs an installed unit found none. */
-export class ServiceNotInstalledError extends Schema.TaggedError<ServiceNotInstalledError>()(
-  "ServiceNotInstalledError",
-  { message: Schema.String },
-) {}
-
-/** Returns the error `start`, `stop` and `restart` fail with when no unit is installed. */
-export const createNotInstalledError = (): ServiceNotInstalledError =>
-  new ServiceNotInstalledError({
-    message: "No Hercule service is installed on this machine. Run `hercule service install`.",
-  });
-
 /**
- * A service verb failed or was refused. The message is one or two sentences
- * that say what went wrong and what to do about it.
+ * A service verb failed or was refused. The message is one or two sentences:
+ * what went wrong, and what to do about it.
  */
 export class ServiceError extends Schema.TaggedError<ServiceError>()("ServiceError", {
   message: Schema.String,
 }) {}
+
+/** Returns the error `start`, `stop` and `restart` fail with when no unit is installed. */
+export const createNotInstalledError = (): ServiceError =>
+  new ServiceError({
+    message: "No Hercule service is installed on this machine. Run `hercule service install`.",
+  });
 
 /** What one run of a command returned. */
 export interface CommandResult {
@@ -90,14 +84,12 @@ export const runCommand: RunCommand = (argv) =>
  * The OS service manager, for the one Hercule unit of this machine and user.
  *
  * Every verb returns the status after it is done. `install` and the verbs that
- * start the process return only once the process has started and is still
- * running three seconds later.
+ * start the process return only once the process has started and still runs
+ * under the same pid `STABLE_PID_DURATION` later.
  */
 export class Supervisor extends Context.Service<
   Supervisor,
   {
-    /** The path of the unit file. */
-    readonly unitFile: string;
     /**
      * A sentence `uninstall` adds to its output about what it leaves behind
      * on purpose, or `undefined` when it leaves nothing.
@@ -113,11 +105,11 @@ export class Supervisor extends Context.Service<
     /** Stops and removes the unit. Succeeds when there is none. Leaves the logs. */
     readonly uninstall: Effect.Effect<ServiceStatus, ServiceError>;
     /** Starts the installed unit when it is not running. */
-    readonly start: Effect.Effect<ServiceStatus, ServiceError | ServiceNotInstalledError>;
+    readonly start: Effect.Effect<ServiceStatus, ServiceError>;
     /** Stops the installed unit's process. The unit stays installed. */
-    readonly stop: Effect.Effect<ServiceStatus, ServiceError | ServiceNotInstalledError>;
+    readonly stop: Effect.Effect<ServiceStatus, ServiceError>;
     /** Stops the installed unit's process, if it runs, and starts it again. */
-    readonly restart: Effect.Effect<ServiceStatus, ServiceError | ServiceNotInstalledError>;
+    readonly restart: Effect.Effect<ServiceStatus, ServiceError>;
     /** Reads the status of the unit. */
     readonly readStatus: Effect.Effect<ServiceStatus, ServiceError>;
   }
@@ -127,23 +119,26 @@ export class Supervisor extends Context.Service<
 const POLL_INTERVAL = Duration.millis(500);
 
 /**
- * How long a wait lasts. A supervisor waits ten seconds before it restarts a
- * process that exited, and launchd may wait those ten seconds before the
- * first start too, when the previous process ran for less than ten seconds.
+ * How long a wait lasts, in seconds. A supervisor waits ten seconds before it
+ * restarts a process that exited, and launchd may wait those ten seconds
+ * before the first start too, when the previous process ran for less than ten
+ * seconds.
  */
-const WAIT_LIMIT = Duration.seconds(30);
+const WAIT_LIMIT_SECONDS = 30;
+
+/** How many times a wait asks the supervisor before it gives up. */
+const MAX_POLLS =
+  Duration.toMillis(Duration.seconds(WAIT_LIMIT_SECONDS)) / Duration.toMillis(POLL_INTERVAL);
 
 /** How long a new process must keep its pid to count as started. */
-const STABLE_FOR = Duration.seconds(3);
-
-const pollCount = Duration.toMillis(WAIT_LIMIT) / Duration.toMillis(POLL_INTERVAL);
+const STABLE_PID_DURATION = Duration.seconds(3);
 
 /**
  * Returns the sentence of a failure message that points at the log files of
  * the installed unit. A unit edited by hand may name no Hercule Home or no
  * role, and then the unit file is where the logs are named.
  */
-export const pointAtLogs = (
+export const describeLogLocation = (
   installed: { readonly home: string | null; readonly role: ServiceRole | null },
   unitFile: string,
 ): string => {
@@ -156,8 +151,8 @@ export const pointAtLogs = (
 
 /**
  * Waits until the supervisor runs the unit under a pid other than
- * `previousPid`, and that pid is still the one three seconds later. Fails
- * with a message that points at the log files otherwise.
+ * `previousPid`, and that pid is still the one `STABLE_PID_DURATION` later.
+ * Fails otherwise, with a message that ends with `nextStep`.
  *
  * A process that fails at boot, for example because another controller holds
  * its port, exits at once, and the supervisor starts it again later under a
@@ -166,8 +161,8 @@ export const pointAtLogs = (
 export const waitForStablePid = (options: {
   readonly readPid: Effect.Effect<number | null, ServiceError>;
   readonly previousPid: number | null;
-  /** The sentence that points at the log files, from `pointAtLogs`. */
-  readonly logs: string;
+  /** The sentence that ends a failure message, usually from `describeLogLocation`. */
+  readonly nextStep: string;
 }): Effect.Effect<number, ServiceError> =>
   Effect.gen(function* () {
     let startedPid: number | null = null;
@@ -175,34 +170,40 @@ export const waitForStablePid = (options: {
       const pid = yield* options.readPid;
       if (pid !== null && pid !== options.previousPid) {
         startedPid = pid;
-      } else if (poll >= pollCount) {
+      } else if (poll >= MAX_POLLS) {
         return yield* new ServiceError({
-          message: `The Hercule service did not start within 30 seconds. ${options.logs}`,
+          message: `The Hercule service did not start within ${WAIT_LIMIT_SECONDS} seconds. ${options.nextStep}`,
         });
       } else {
         yield* Effect.sleep(POLL_INTERVAL);
       }
     }
-    yield* Effect.sleep(STABLE_FOR);
+    yield* Effect.sleep(STABLE_PID_DURATION);
     if ((yield* options.readPid) !== startedPid) {
       return yield* new ServiceError({
-        message: `The Hercule service stopped right after it started. ${options.logs}`,
+        message: `The Hercule service stopped right after it started. ${options.nextStep}`,
       });
     }
     return startedPid;
   });
 
 /**
- * Waits until `isLoaded` returns false. Fails with `failure` when it still
- * returns true after 30 seconds.
+ * Waits until `isLoaded` returns false. Fails when it still returns true
+ * after `WAIT_LIMIT_SECONDS`, with a message that starts with `failure`, adds
+ * the limit and ends with `nextStep`.
  */
 export const waitUntilUnloaded = (
   isLoaded: Effect.Effect<boolean, ServiceError>,
   failure: string,
+  nextStep: string,
 ): Effect.Effect<void, ServiceError> =>
   Effect.gen(function* () {
     for (let poll = 0; yield* isLoaded; poll += 1) {
-      if (poll >= pollCount) return yield* new ServiceError({ message: failure });
+      if (poll >= MAX_POLLS) {
+        return yield* new ServiceError({
+          message: `${failure} within ${WAIT_LIMIT_SECONDS} seconds. ${nextStep}`,
+        });
+      }
       yield* Effect.sleep(POLL_INTERVAL);
     }
   });
@@ -238,6 +239,8 @@ export const createLogFiles = (unit: ServiceUnit): Effect.Effect<void, ServiceEr
   Effect.try({
     try: () => {
       mkdirSync(locateLogsDir(unit.home), { recursive: true, mode: 0o700 });
+      // `mode` applies only when the folder is created.
+      chmodSync(locateLogsDir(unit.home), 0o700);
       closeSync(openSync(unit.stderrLog, "a", 0o600));
       chmodSync(unit.stderrLog, 0o600);
     },
@@ -295,6 +298,6 @@ export const runOrFail = (
 
 /** Returns a command's error output as the end of a sentence, or a full stop when it printed none. */
 const describeOutput = (result: CommandResult): string => {
-  const said = (result.stderr.trim() || result.stdout.trim()).replaceAll(/\s*\n\s*/g, " ");
-  return said === "" ? "." : `: ${said}`;
+  const output = (result.stderr.trim() || result.stdout.trim()).replaceAll(/\s*\n\s*/g, " ");
+  return output === "" ? "." : `: ${output}`;
 };

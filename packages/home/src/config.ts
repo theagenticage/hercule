@@ -9,9 +9,12 @@ import { Context, Effect, Schema } from "effect";
 import { locateConfigFile } from "./paths";
 import { formatToml, parseToml, type TomlScalar } from "./toml";
 
-/** `config.toml` could not be read, or is not the TOML subset Hercule writes. */
+/**
+ * `config.toml` could not be read, or is not the TOML subset Hercule writes.
+ * The message starts with the path of the file, so every role prints it as it
+ * is.
+ */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {
-  path: Schema.String,
   message: Schema.String,
 }) {}
 
@@ -135,7 +138,7 @@ export const writeDefaultConfigFile = Effect.fn("writeDefaultConfigFile")(functi
   if (existsSync(configFile)) return;
   yield* Effect.try({
     try: () => writeFileSync(configFile, formatToml(DEFAULTS)),
-    catch: () => new ConfigFileError({ path: configFile, message: "could not be written" }),
+    catch: () => new ConfigFileError({ message: `${configFile} could not be written` }),
   });
 });
 
@@ -145,8 +148,8 @@ export const writeDefaultConfigFile = Effect.fn("writeDefaultConfigFile")(functi
  * read or parsed, or holds an unknown key.
  */
 export const readConfigFile = Effect.fn("readConfigFile")(function* (configFile: string) {
-  const createConfigFileError = (message: string) =>
-    new ConfigFileError({ path: configFile, message });
+  const createConfigFileError = (reason: string) =>
+    new ConfigFileError({ message: `${configFile} ${reason}` });
 
   if (!existsSync(configFile)) return {};
 

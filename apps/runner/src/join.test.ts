@@ -210,4 +210,24 @@ describe("hercule runner join --reserved", () => {
       ]),
     ).toEqual({ reserved: false });
   });
+
+  it("refuses to install the service before it joins, so the token stays unused", async () => {
+    const home = createTemporaryHome();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetched = vi.spyOn(globalThis, "fetch");
+    try {
+      process.exitCode = 0;
+      // A test runs from the source checkout, which a service cannot run.
+      await runArgv(["--home", home, "join", "http://127.0.0.1:4937", "--token", "a-join-token"]);
+      expect(process.exitCode).toBe(1);
+      expect(fetched).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        "hercule: A service runs the compiled hercule binary, and this Hercule runs from a source checkout. Build the binary with `pnpm build:binary` and run `./hercule service install`. To join without installing the service, add --no-service.",
+      );
+    } finally {
+      error.mockRestore();
+      fetched.mockRestore();
+      process.exitCode = 0;
+    }
+  });
 });

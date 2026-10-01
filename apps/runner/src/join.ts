@@ -11,9 +11,9 @@ import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { locateRunnerDir } from "@hercule/home";
+import { locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { JoinAnswer } from "@hercule/protocol";
-import { buildRunnerFilePath, writeRunnerFile, type RunnerFile } from "./runner-file";
+import { writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** The join route is not in the operation table, so its path is written out here. */
 const JOIN_PATH = "/api/v1/runners/join";
@@ -132,7 +132,7 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
       crypto.getRandomValues(new Uint8Array(STORAGE_NAME_BYTES)),
     ).toString("hex");
     const storageDirectory = joinPath(runnerDir, storageName);
-    const configPath = buildRunnerFilePath(options.home);
+    const configPath = locateRunnerFile(options.home);
     const contents: RunnerFile = {
       runnerId: answer.runnerId,
       credential: answer.credential,

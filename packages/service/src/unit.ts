@@ -2,12 +2,18 @@
  * The service unit: what the OS supervisor runs to keep Hercule up, and the
  * text of the two unit files that describe it (spec 15 section 4).
  *
- * Everything here is pure except `buildServiceUnit`, which checks which
- * folders on the caller's PATH exist.
+ * The renderers and the parser are pure. `buildServicePath`, and with it
+ * `buildServiceUnit`, checks which folders on the caller's PATH exist.
  */
 import { statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { locateLogsDir } from "@hercule/home";
+import {
+  BOOTSTRAP_KEYS,
+  buildEnvName,
+  locateLogsDir,
+  locateProcessLogFile,
+  type ProcessLogName,
+} from "@hercule/home";
 
 /** The role a unit runs: `hercule serve` on the controller machine, `hercule runner` elsewhere. */
 export type ServiceRole = "serve" | "runner";
@@ -30,9 +36,9 @@ export interface ServiceUnit {
 }
 
 /**
- * The launchd label. `install.sh` writes its LaunchAgent under the same label,
- * so installing the service replaces that LaunchAgent instead of adding a
- * second one.
+ * The launchd label. An older edge `install.sh` wrote its LaunchAgent under
+ * the same label, so installing the service replaces that LaunchAgent instead
+ * of adding a second one.
  */
 export const LAUNCHD_LABEL = "sh.hercule.service";
 
@@ -47,9 +53,9 @@ export const locateServiceLogs = (
   home: string,
   role: ServiceRole,
 ): { readonly log: string; readonly stderrLog: string } => {
-  const name = role === "serve" ? "controller" : "runner";
+  const name: ProcessLogName = role === "serve" ? "controller" : "runner";
   return {
-    log: join(locateLogsDir(home), `${name}.log`),
+    log: locateProcessLogFile(home, name),
     stderrLog: join(locateLogsDir(home), `${name}.stderr.log`),
   };
 };
@@ -176,6 +182,11 @@ const quoteAssignment = (name: string, value: string): string =>
  * seconds after it exits, discards its stdout, and appends its stderr to
  * `stderrLog`. `WantedBy=default.target` starts it when the user's service
  * manager starts, which with lingering on is at boot.
+ *
+ * `UnsetEnvironment=` removes every `HERCULE_*` bootstrap variable the user's
+ * service manager may hold, for example from `systemctl --user
+ * set-environment`, so the process reads its settings from `config.toml`
+ * alone, like the unit promises.
  */
 export const renderSystemdUnit = (unit: ServiceUnit): string =>
   [
@@ -186,6 +197,7 @@ export const renderSystemdUnit = (unit: ServiceUnit): string =>
     `ExecStart=${quoteCommandWord(unit.program)} ${unit.role}`,
     `Environment=${quoteAssignment("PATH", unit.path)}`,
     `Environment=${quoteAssignment("HERCULE_HOME", unit.home)}`,
+    `UnsetEnvironment=${BOOTSTRAP_KEYS.map(buildEnvName).join(" ")}`,
     "Restart=always",
     "RestartSec=10",
     "StandardOutput=null",

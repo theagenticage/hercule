@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
 import { CLI, NOUNS, OPERATIONS, type OperationId } from "@hercule/contract";
+import { SERVICE_VERBS } from "@hercule/service";
 import { main, readSetupUrl } from "./index";
 import { buildErrorEnvelope, buildId, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -330,7 +331,7 @@ describe("hercule service", () => {
   it("prints its help with one line per verb", async () => {
     const out = await runHelp("service");
     expect(out[0]).toBe("usage: hercule service <verb> [--json]");
-    for (const verb of ["install", "uninstall", "start", "stop", "restart", "status"]) {
+    for (const verb of SERVICE_VERBS) {
       expect(
         out.filter((line) => new RegExp(`^  ${verb}\\s`).test(line)),
         `${verb} has one line`,

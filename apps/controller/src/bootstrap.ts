@@ -24,7 +24,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { Plugin } from "@hercule/plugin-host";
 import type { HomePaths } from "@hercule/home";
-import { processLogLayer } from "@hercule/process-log";
+import { makeProcessLogLayer } from "@hercule/process-log";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
 import { AssistantSessionObserverLayer } from "./assistants";
@@ -392,11 +392,11 @@ export const bootWith = <A, E>(
       const localRunner =
         options.localRunner === undefined
           ? undefined
-          : yield* startLocalRunner(
-              options.localRunner,
-              buildControllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
-              paths.home,
-            );
+          : yield* startLocalRunner(options.localRunner, {
+              controllerUrl: buildControllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
+              home: paths.home,
+              logLevel: bootstrap.logLevel,
+            });
 
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
@@ -417,18 +417,18 @@ export const bootWith = <A, E>(
   // there as well as printed, because a service unit keeps only the log; a
   // failure before it, such as a `config.toml` that does not parse, reaches
   // only stderr.
-  const logged = Effect.gen(function* () {
+  const sequenceWithProcessLog = Effect.gen(function* () {
     const paths = yield* HerculeHome;
     const bootstrap = yield* BootstrapConfig;
     return yield* Effect.provide(
       sequence.pipe(
         Effect.tapCause((cause) => Effect.logError("The controller stopped on a failure", cause)),
       ),
-      processLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+      makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
     );
   });
 
-  return logged.pipe(
+  return sequenceWithProcessLog.pipe(
     Effect.provide(Layer.mergeAll(config.layer(options.argv, options.env), BunFileSystem.layer)),
   );
 };

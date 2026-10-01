@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { processLogLayer } from "./index";
+import { makeProcessLogLayer } from "./index";
 
 let home: string;
 let wasTTY: boolean | undefined;
@@ -29,10 +29,10 @@ const logFile = (): string => join(home, "logs", "controller.log");
 /** Runs `program` with the controller's process log at `level`. */
 const runLogged = (program: Effect.Effect<void>, level: "warn" | "info" = "info"): Promise<void> =>
   Effect.runPromise(
-    program.pipe(Effect.provide(processLogLayer({ home, role: "controller", level }))),
+    program.pipe(Effect.provide(makeProcessLogLayer({ home, role: "controller", level }))),
   );
 
-describe("processLogLayer", () => {
+describe("makeProcessLogLayer", () => {
   it("writes one logfmt line per entry into <home>/logs/<role>.log", async () => {
     await runLogged(
       Effect.andThen(Effect.logInfo("first entry"), Effect.logWarning("second\nentry")),

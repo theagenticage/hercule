@@ -8,160 +8,243 @@
  * links only `@hercule/home` and `effect`, because the runner's import graph
  * reaches it.
  */
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { Effect, Layer } from "effect";
 import {
   BOOTSTRAP_KEYS,
-  ConfigFileError,
   buildEnvName,
+  locateCompiledBinary,
   locateConfigFile,
   locateLogsDir,
+  type ConfigFileError,
+  type ConfigValueError,
 } from "@hercule/home";
 import { createLaunchdSupervisor } from "./launchd";
-import { chooseServiceRole } from "./role";
+import { chooseServiceRole, holdsControllerDatabase } from "./role";
 import { ServiceError, Supervisor, runCommand, type ServiceStatus } from "./supervisor";
 import { createSystemdSupervisor } from "./systemd";
-import { buildServiceUnit, type ServiceRole } from "./unit";
+import { buildServicePath, buildServiceUnit, type ServiceRole } from "./unit";
 
-export {
-  ServiceError,
-  ServiceNotInstalledError,
-  Supervisor,
-  type ServiceStatus,
-} from "./supervisor";
+export { ServiceError, Supervisor, type ServiceStatus } from "./supervisor";
 export type { ServiceRole } from "./unit";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** The path prefix Bun gives the entry script inside a compiled binary. */
-const EMBEDDED = "/$bunfs/";
-
 /**
- * Returns the path of the compiled `hercule` binary this process runs, or
- * `undefined` when Hercule runs from a source checkout. From a checkout the
- * executable is Bun itself, and a unit that ran it would run no Hercule.
+ * Returns the Supervisor of this machine, given the environment of the
+ * command that asks for it: launchd on macOS, systemd on Linux. The layer
+ * fails with `ServiceError` on any other platform.
  */
-export const locateCompiledBinary = (): string | undefined =>
-  Bun.main.startsWith(EMBEDDED) ? process.execPath : undefined;
-
-/**
- * The Supervisor of this machine: launchd on macOS, systemd on Linux. Fails
- * with `ServiceError` on any other platform.
- */
-export const SupervisorLayer: Layer.Layer<Supervisor, ServiceError> = Layer.effect(
-  Supervisor,
-  Effect.suspend(() => {
-    const uid = process.getuid?.() ?? 0;
-    // Only for messages. Bun's `userInfo()` reads `$USER` too, and reports
-    // "unknown" where it is unset, as under `sudo -u` or in a container.
-    const userName = process.env["USER"] ?? process.env["LOGNAME"];
-    switch (process.platform) {
-      case "darwin":
-        return Effect.succeed(
-          createLaunchdSupervisor({
-            run: runCommand,
-            unitDir: join(homedir(), "Library", "LaunchAgents"),
-            uid,
-            userName,
-          }),
-        );
-      case "linux": {
-        // The XDG spec says to ignore a relative XDG_CONFIG_HOME.
-        const configured = process.env["XDG_CONFIG_HOME"];
-        const configHome =
-          configured !== undefined && isAbsolute(configured)
-            ? configured
-            : join(homedir(), ".config");
-        return Effect.succeed(
-          createSystemdSupervisor({
-            run: runCommand,
-            unitDir: join(configHome, "systemd", "user"),
-            uid,
-            userName,
-          }),
-        );
+export const makeSupervisorLayer = (env: Env): Layer.Layer<Supervisor, ServiceError> =>
+  Layer.effect(
+    Supervisor,
+    Effect.suspend(() => {
+      const uid = process.getuid?.() ?? 0;
+      // Only for messages. Bun's `userInfo()` reads `$USER` too, and reports
+      // "unknown" where it is unset, as under `sudo -u` or in a container.
+      const userName = env["USER"] ?? env["LOGNAME"];
+      switch (process.platform) {
+        case "darwin":
+          return Effect.succeed(
+            createLaunchdSupervisor({
+              run: runCommand,
+              unitDir: join(homedir(), "Library", "LaunchAgents"),
+              uid,
+              userName,
+            }),
+          );
+        case "linux": {
+          // The XDG Base Directory spec has a relative XDG_CONFIG_HOME ignored.
+          const configured = env["XDG_CONFIG_HOME"];
+          const configHome =
+            configured !== undefined && isAbsolute(configured)
+              ? configured
+              : join(homedir(), ".config");
+          return Effect.succeed(
+            createSystemdSupervisor({
+              run: runCommand,
+              unitDir: join(configHome, "systemd", "user"),
+              uid,
+              userName,
+            }),
+          );
+        }
+        default:
+          return Effect.fail(
+            new ServiceError({
+              message: `Hercule installs a service on macOS and Linux only, and this machine runs ${process.platform}. Start \`hercule serve\` or \`hercule runner\` by hand instead.`,
+            }),
+          );
       }
-      default:
-        return Effect.fail(
-          new ServiceError({
-            message: `Hercule installs a service on macOS and Linux only, and this machine runs ${process.platform}. Start \`hercule serve\` or \`hercule runner\` by hand instead.`,
-          }),
-        );
-    }
-  }),
-);
+    }),
+  );
+
+/** The `-c key=value` flags on a command line, in the order given. */
+type ConfigOverrides = ReadonlyArray<readonly [key: string, value: string]>;
 
 /** What `installService` installs, and the command line it was asked from. */
-export interface InstallRequest {
+export interface ServiceInstallRequest {
   readonly role: ServiceRole;
   /** The absolute Hercule Home the unit runs. */
   readonly home: string;
-  /** The `-c key=value` flags on the command line. */
-  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+  readonly overrides: ConfigOverrides;
   readonly env: Env;
   /** The compiled binary the unit runs, from `locateCompiledBinary`. */
   readonly program: string | undefined;
 }
 
 /**
- * Fails when the command line or the environment sets a bootstrap key. The
- * unit runs with none of them, so the service would quietly run with other
- * settings than the ones the user just gave.
+ * Fails when the command line has a `-c` flag. A flag changes only the
+ * process it is given to, and the service process reads only `config.toml`,
+ * so the user would not get the setting they asked for.
+ */
+const refuseConfigFlags = (
+  home: string,
+  overrides: ConfigOverrides,
+): Effect.Effect<void, ServiceError> => {
+  const flag = overrides[0];
+  if (flag === undefined) return Effect.void;
+  const [key, value] = flag;
+  return Effect.fail(
+    new ServiceError({
+      message: `-c ${key}=${value} applies only to this command, and the service reads only ${locateConfigFile(home)}. Put ${key} in that file instead, then run this again without -c.`,
+    }),
+  );
+};
+
+/**
+ * Fails when the environment sets a bootstrap key. The unit runs with none of
+ * them, so the service would quietly run with other settings than the ones
+ * the user has.
  *
  * `HERCULE_HOME` is not a bootstrap key: it chooses the Home, and the unit
  * carries the Home it was installed for.
  */
-const refuseConfigOutsideFile = (request: InstallRequest): Effect.Effect<void, ServiceError> => {
-  const configFile = locateConfigFile(request.home);
-  const flag = request.overrides[0];
-  if (flag !== undefined) {
-    const [key, value] = flag;
-    return Effect.fail(
-      new ServiceError({
-        message: `-c ${key}=${value} applies only to this command, and the service reads only ${configFile}. Put ${key} in that file instead, then run this again without -c.`,
-      }),
-    );
-  }
-  for (const key of BOOTSTRAP_KEYS) {
-    const name = buildEnvName(key);
-    if (request.env[name] !== undefined) {
-      return Effect.fail(
-        new ServiceError({
-          message: `${name} is set, and the service reads only ${configFile}. Put ${key} in that file instead, then unset ${name} and run this again.`,
-        }),
-      );
-    }
-  }
-  return Effect.void;
+const refuseConfigVariables = (home: string, env: Env): Effect.Effect<void, ServiceError> => {
+  const key = BOOTSTRAP_KEYS.find((each) => env[buildEnvName(each)] !== undefined);
+  if (key === undefined) return Effect.void;
+  const name = buildEnvName(key);
+  return Effect.fail(
+    new ServiceError({
+      message: `${name} is set, and the service reads only ${locateConfigFile(home)}. Put ${key} in that file instead, then unset ${name} and run this again.`,
+    }),
+  );
 };
 
 /**
- * Installs and (re)starts the unit that runs `request.role` for
- * `request.home`, and returns the status once the process runs. Fails with
- * `ServiceError` when:
+ * Fails when a path has a control character. A line break in a path would
+ * end the line of a systemd unit early and let the rest of the path add a
+ * setting of its own.
+ */
+const refuseControlCharacters = (what: string, path: string): Effect.Effect<void, ServiceError> =>
+  [...path].some((character) => character < " " || character === "\x7f")
+    ? Effect.fail(
+        new ServiceError({
+          message: `${what} ${JSON.stringify(path)} has a control character, which a unit file cannot hold. Use a path without one.`,
+        }),
+      )
+    : Effect.void;
+
+/**
+ * Checks whether every user of this machine can write to a path. A path that
+ * cannot be read is not, because it holds no program the service could run.
+ */
+const isWorldWritable = (path: string): boolean => {
+  try {
+    return (statSync(path).mode & 0o002) !== 0;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Fails when other users of this machine could change what the service runs:
+ * when they can write to the binary, or to a folder on the PATH the service
+ * runs with. The service runs as this user, so a program another user put on
+ * that PATH would run with this user's credentials.
+ *
+ * A folder that only a group can write to passes, because Homebrew's
+ * `/usr/local/bin` is writable by the `admin` group.
+ */
+const refuseWorldWritablePaths = (
+  program: string,
+  servicePath: string,
+): Effect.Effect<void, ServiceError> =>
+  Effect.gen(function* () {
+    if (isWorldWritable(program)) {
+      return yield* new ServiceError({
+        message: `Every user on this machine can write to ${program}, so anyone could change the program the service runs. Run \`chmod o-w ${program}\`, then run this again.`,
+      });
+    }
+    const folder = servicePath.split(":").find(isWorldWritable);
+    if (folder !== undefined) {
+      return yield* new ServiceError({
+        message: `${folder} is on the PATH the service runs with, and every user on this machine can write to it, so anyone could put a program there that the service runs. Remove ${folder} from PATH, or run \`chmod o-w ${folder}\`, then run this again.`,
+      });
+    }
+  });
+
+/**
+ * Checks everything `installService` checks before it changes anything, and
+ * returns the compiled binary the unit will run. `hercule runner join` calls
+ * this before it spends its join token, so a refusal leaves the token unused.
+ * Fails with `ServiceError` when:
  *
  * - Hercule runs from a source checkout rather than the compiled binary;
  * - a `-c` flag or a `HERCULE_*` bootstrap variable is set;
- * - the Supervisor refuses or fails, for example because the installed unit
- *   runs another Hercule Home.
+ * - the binary, the Home or the PATH has a control character;
+ * - other users can write to the binary or to a folder on the PATH;
+ * - the role is `runner` and the Home holds a controller database, whose
+ *   unit runs `hercule serve`.
+ *
+ * Fails with `ConfigFileError` or `ConfigValueError` when the Home's
+ * `config.toml` cannot be used.
  */
-export const installService = (
-  request: InstallRequest,
-): Effect.Effect<ServiceStatus, ServiceError, Supervisor> =>
+export const checkServiceCanBeInstalled = (
+  request: ServiceInstallRequest,
+): Effect.Effect<string, ServiceError | ConfigFileError | ConfigValueError> =>
   Effect.gen(function* () {
-    if (request.program === undefined) {
+    const program = request.program;
+    if (program === undefined) {
       return yield* new ServiceError({
         message:
           "A service runs the compiled hercule binary, and this Hercule runs from a source checkout. Build the binary with `pnpm build:binary` and run `./hercule service install`.",
       });
     }
-    yield* refuseConfigOutsideFile(request);
+    yield* refuseConfigFlags(request.home, request.overrides);
+    yield* refuseConfigVariables(request.home, request.env);
+    const servicePath = buildServicePath(program, request.env["PATH"]);
+    yield* refuseControlCharacters("The binary", program);
+    yield* refuseControlCharacters("The Hercule Home", request.home);
+    yield* refuseControlCharacters("The PATH", servicePath);
+    yield* refuseWorldWritablePaths(program, servicePath);
+    if (request.role === "runner" && (yield* holdsControllerDatabase(request.home))) {
+      return yield* new ServiceError({
+        message: `The Hercule Home ${request.home} holds a controller database, so its service runs \`hercule serve\`, which starts a runner of its own. To make this machine a separate runner, give it its own Home with --home.`,
+      });
+    }
+    return program;
+  });
+
+/**
+ * Installs and (re)starts the unit that runs `request.role` for
+ * `request.home`, and returns the status once the process runs. Fails with
+ * the errors of `checkServiceCanBeInstalled`, and with `ServiceError` when
+ * the Supervisor refuses or fails, for example because the installed unit
+ * runs another Hercule Home.
+ */
+export const installService = (
+  request: ServiceInstallRequest,
+): Effect.Effect<ServiceStatus, ServiceError | ConfigFileError | ConfigValueError, Supervisor> =>
+  Effect.gen(function* () {
+    const program = yield* checkServiceCanBeInstalled(request);
     const supervisor = yield* Supervisor;
     return yield* supervisor.install(
       buildServiceUnit({
         role: request.role,
-        program: request.program,
+        program,
         home: request.home,
         callerPath: request.env["PATH"],
       }),
@@ -178,13 +261,20 @@ export const describeStatus = (status: ServiceStatus): string => {
     : `The Hercule service runs ${runs}, as pid ${status.pid}.`;
 };
 
-/** The verbs of `hercule service`. */
-const VERBS = ["install", "uninstall", "start", "stop", "restart", "status"] as const;
+/** The verbs of `hercule service`, in the order the help lists them. */
+export const SERVICE_VERBS = [
+  "install",
+  "uninstall",
+  "start",
+  "stop",
+  "restart",
+  "status",
+] as const;
 
-type Verb = (typeof VERBS)[number];
+type ServiceVerb = (typeof SERVICE_VERBS)[number];
 
-const isVerb = (word: string | undefined): word is Verb =>
-  (VERBS as ReadonlyArray<string | undefined>).includes(word);
+const isServiceVerb = (word: string | undefined): word is ServiceVerb =>
+  (SERVICE_VERBS as ReadonlyArray<string | undefined>).includes(word);
 
 /** The exit codes of `hercule service`, the same ones the rest of the CLI uses. */
 const EXIT = { ok: 0, failed: 1, usage: 2 } as const;
@@ -195,8 +285,7 @@ export interface ServiceCommandRequest {
   readonly args: ReadonlyArray<string>;
   /** The absolute Hercule Home, from `--home` or `HERCULE_HOME`. */
   readonly home: string;
-  /** The `-c key=value` flags on the command line. */
-  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+  readonly overrides: ConfigOverrides;
   readonly env: Env;
   /** Writes one line to stdout. */
   readonly out: (line: string) => void;
@@ -216,11 +305,14 @@ export interface ServiceCommandDependencies {
  *
  * The CLI prints `--help` itself. The command line is checked before the
  * Supervisor is created, so a usage error never reaches launchd or systemd.
+ *
+ * Every verb refuses a `-c` flag, because no verb starts Hercule in this
+ * process: the unit runs it, and reads only `config.toml`.
  */
 export const runServiceCommand = async (
   request: ServiceCommandRequest,
   dependencies: ServiceCommandDependencies = {
-    supervisor: SupervisorLayer,
+    supervisor: makeSupervisorLayer(request.env),
     program: locateCompiledBinary(),
   },
 ): Promise<number> => {
@@ -230,33 +322,26 @@ export const runServiceCommand = async (
     request.err("run `hercule service --help`");
     return EXIT.usage;
   };
-  if (!isVerb(verb)) {
+  if (!isServiceVerb(verb)) {
     return reportMisuse(
       verb === undefined
-        ? `service needs a verb: ${VERBS.join(", ")}`
-        : `unknown command \`${verb}\`; the service verbs are ${VERBS.join(", ")}`,
+        ? `service needs a verb: ${SERVICE_VERBS.join(", ")}`
+        : `unknown command \`${verb}\`; the service verbs are ${SERVICE_VERBS.join(", ")}`,
     );
   }
   const unknown = flags.find((flag) => flag !== "--json");
   if (unknown !== undefined) return reportMisuse(`service ${verb} takes no \`${unknown}\``);
-  // A `-c` flag changes only the process it is given to, and no verb starts
-  // Hercule in this process: the unit runs it, and reads only config.toml.
-  const flag = request.overrides[0];
-  if (flag !== undefined) {
-    return reportMisuse(
-      `-c ${flag[0]}=${flag[1]} does not reach the service, which reads only ${locateConfigFile(request.home)}. Put ${flag[0]} in that file instead.`,
-    );
-  }
   const json = flags.includes("--json");
   // With --json, stdout carries only the status, so the lines for a person go to stderr.
-  const say = json ? request.err : request.out;
+  const printForPerson = json ? request.err : request.out;
 
   const runVerb = Effect.gen(function* () {
+    yield* refuseConfigFlags(request.home, request.overrides);
     const supervisor = yield* Supervisor;
     switch (verb) {
       case "install": {
         const chosen = yield* chooseServiceRole(request.home);
-        say(`Installing the unit for \`hercule ${chosen.role}\`: ${chosen.reason}.`);
+        printForPerson(`Installing the unit for \`hercule ${chosen.role}\`: ${chosen.reason}.`);
         return yield* installService({
           role: chosen.role,
           home: request.home,
@@ -269,11 +354,14 @@ export const runServiceCommand = async (
         const before = yield* supervisor.readStatus;
         const after = yield* supervisor.uninstall;
         if (!before.installed) {
-          say("No Hercule service is installed on this machine, so there is nothing to uninstall.");
+          printForPerson(
+            "No Hercule service is installed on this machine, so there is nothing to uninstall.",
+          );
         } else {
-          say(`Uninstalled the Hercule service and deleted ${before.unitFile}.`);
-          if (before.home !== null) say(`The logs in ${locateLogsDir(before.home)} stay.`);
-          if (supervisor.uninstallNote !== undefined) say(supervisor.uninstallNote);
+          printForPerson(`Uninstalled the Hercule service and deleted ${before.unitFile}.`);
+          if (before.home !== null)
+            printForPerson(`The logs in ${locateLogsDir(before.home)} stay.`);
+          if (supervisor.uninstallNote !== undefined) printForPerson(supervisor.uninstallNote);
         }
         return after;
       }
@@ -292,12 +380,7 @@ export const runServiceCommand = async (
     Effect.result(Effect.provide(runVerb, dependencies.supervisor)),
   );
   if (outcome._tag === "Failure") {
-    const error = outcome.failure;
-    request.err(
-      error instanceof ConfigFileError
-        ? `hercule: ${error.path} ${error.message}`
-        : `hercule: ${error.message}`,
-    );
+    request.err(`hercule: ${outcome.failure.message}`);
     return EXIT.failed;
   }
   const status = outcome.success;

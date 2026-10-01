@@ -13,14 +13,18 @@
  * stdout. When stderr is a terminal, every line is also shown there, so
  * `hercule serve` in a terminal still shows what it logs.
  */
-import { chmodSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import type * as EffectLogLevel from "effect/LogLevel";
 import * as References from "effect/References";
-import { locateLogsDir, type LogLevel } from "@hercule/home";
+import {
+  locateLogsDir,
+  locateProcessLogFile,
+  type LogLevel,
+  type ProcessLogName,
+} from "@hercule/home";
 import { openRotatingFile } from "./rotating-file";
 
 /** The size at which a log file is rotated: 10 MiB. */
@@ -55,21 +59,21 @@ const EFFECT_LOG_LEVELS = {
  * Opening the folder or the file can fail, and the process cannot run without
  * its log, so that failure is a defect with the filesystem error in it.
  */
-export function processLogLayer(options: {
+export function makeProcessLogLayer(options: {
   readonly home: string;
-  readonly role: "controller" | "runner";
+  readonly role: ProcessLogName;
   readonly level: LogLevel;
 }): Layer.Layer<never> {
   const logsDir = locateLogsDir(options.home);
-  const path = join(logsDir, `${options.role}.log`);
+  const path = locateProcessLogFile(options.home, options.role);
 
   const fileLogger = Effect.acquireRelease(
     Effect.sync(() => {
-      mkdirSync(logsDir, { recursive: true, mode: 0o700 });
-      // `mode` applies only when the folder is created, and the edge installer
-      // creates it with the default mode.
+      const file = openRotatingFile(path, MAX_LOG_FILE_BYTES);
+      // The folder is created with mode 0700, but an older edge installer
+      // created it with the default mode.
       chmodSync(logsDir, 0o700);
-      return openRotatingFile(path, MAX_LOG_FILE_BYTES);
+      return file;
     }),
     (file) => Effect.sync(() => file.close()),
   ).pipe(
@@ -80,8 +84,8 @@ export function processLogLayer(options: {
         } catch (error) {
           // A logger that throws fails whichever operation logged, so a full
           // disk would break requests that have nothing to do with logging.
-          // The line is reported on stderr instead, which a service unit
-          // keeps in `<role>.stderr.log`.
+          // The error goes to stderr instead, which a service unit keeps in
+          // `<role>.stderr.log`.
           process.stderr.write(`hercule: cannot write to ${path}: ${String(error)}\n`);
         }
       }),

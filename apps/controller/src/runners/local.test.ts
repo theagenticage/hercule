@@ -205,7 +205,16 @@ const bootAndHold = <A>(
   Effect.runPromise(
     bootWith(
       {
-        argv: ["--home", home, "-c", "bind.host=127.0.0.1", "-c", `bind.port=${String(port)}`],
+        argv: [
+          "--home",
+          home,
+          "-c",
+          "bind.host=127.0.0.1",
+          "-c",
+          `bind.port=${String(port)}`,
+          "-c",
+          "log.level=debug",
+        ],
         env: {},
         masterKeyBackend: "file",
         localRunner: local,
@@ -305,6 +314,9 @@ describe("the first boot of an empty home", () => {
     // The token is never in argv, which `ps` shows, and never in the
     // environment, which every grandchild inherits.
     const spawned = notes.find((note) => note.what === "spawned")!;
+    // The child logs at the controller's level, which came from a `-c` flag
+    // the child would not see otherwise.
+    expect(spawned.argv?.slice(-2)).toEqual(["-c", "log.level=debug"]);
     for (const argument of spawned.argv ?? []) expect(argument).not.toContain(handed.token);
     for (const value of Object.values(spawned.env ?? {})) {
       expect(value).not.toContain(handed.token);

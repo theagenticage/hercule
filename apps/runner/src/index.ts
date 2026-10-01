@@ -21,17 +21,17 @@ import type * as Scope from "effect/Scope";
 import { Result } from "effect";
 import {
   loadBootstrapConfig,
+  locateCompiledBinary,
   parseGlobalOptions,
   resolveHomePath,
-  type ConfigFileError,
-  type ConfigValueError,
 } from "@hercule/home";
-import { processLogLayer } from "@hercule/process-log";
+import { makeProcessLogLayer } from "@hercule/process-log";
 import {
-  SupervisorLayer,
+  checkServiceCanBeInstalled,
   describeStatus,
   installService,
-  locateCompiledBinary,
+  makeSupervisorLayer,
+  type ServiceInstallRequest,
 } from "@hercule/service";
 import { runCredentialAction } from "./credentials";
 import { runDaemon } from "./daemon";
@@ -74,12 +74,6 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
     }),
 ).pipe(Effect.map(({ stopped }) => stopped.await));
 
-/** Returns the one line that explains a config error, with the path of the file when there is one. */
-const describeConfigError = (error: ConfigFileError | ConfigValueError): string =>
-  error._tag === "ConfigFileError"
-    ? `hercule: ${error.path} ${error.message}`
-    : `hercule: ${error.message}`;
-
 /**
  * Runs a daemon until it fails or a stop signal arrives, with its log lines
  * going to `<home>/logs/runner.log` at the configured `log.level`. On failure,
@@ -100,7 +94,7 @@ const runUntilStopped = async (
     ),
   );
   if (Result.isFailure(config)) {
-    console.error(describeConfigError(config.failure));
+    console.error(`hercule: ${config.failure.message}`);
     process.exitCode = EXIT.failed;
     return;
   }
@@ -119,7 +113,11 @@ const runUntilStopped = async (
         // credential.
         Effect.ensuring(providerLogins.stopAll),
         Effect.provide(
-          processLogLayer({ home: options.home, role: "runner", level: config.success.logLevel }),
+          makeProcessLogLayer({
+            home: options.home,
+            role: "runner",
+            level: config.success.logLevel,
+          }),
         ),
       ),
     ),
@@ -209,6 +207,28 @@ export async function run(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  const installRequest: ServiceInstallRequest = {
+    role: "runner",
+    home,
+    overrides: options.success.overrides,
+    env: process.env,
+    program: locateCompiledBinary(),
+  };
+  if (!noService) {
+    // Checked before the join, which spends the token: a refusal afterwards
+    // would leave a joined machine that needs a new token to try again.
+    const checked = await Effect.runPromise(
+      Effect.result(checkServiceCanBeInstalled(installRequest)),
+    );
+    if (checked._tag === "Failure") {
+      console.error(
+        `hercule: ${checked.failure.message} To join without installing the service, add --no-service.`,
+      );
+      process.exitCode = EXIT.failed;
+      return;
+    }
+  }
+
   const outcome = await Effect.runPromise(
     Effect.result(join({ controllerUrl, token, home, reserved })),
   );
@@ -226,18 +246,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   console.log("Installing the service unit for `hercule runner`.");
 
   const installed = await Effect.runPromise(
-    Effect.result(
-      Effect.provide(
-        installService({
-          role: "runner",
-          home,
-          overrides: options.success.overrides,
-          env: process.env,
-          program: locateCompiledBinary(),
-        }),
-        SupervisorLayer,
-      ),
-    ),
+    Effect.result(Effect.provide(installService(installRequest), makeSupervisorLayer(process.env))),
   );
   if (installed._tag === "Failure") {
     // The join token is spent, so the way forward is to install the unit, not to join again.

@@ -43,8 +43,6 @@ export function explain(error: BootError): string {
   switch (error._tag) {
     case "InvalidOptionError":
       return `${error.option}: ${error.message}`;
-    case "ConfigFileError":
-      return `${error.path} ${error.message}`;
     case "HerculeHomeError":
       return `Cannot ${error.action} ${error.path}: ${String(error.cause)}`;
     default:
@@ -151,11 +149,11 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     const warning = buildPerimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
     if (warning !== undefined) console.warn(`hercule: ${warning}`);
-    const listening = `Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`;
-    console.log(listening);
+    const listeningLine = `Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`;
+    console.log(listeningLine);
     // The process log gets the same line, but not the report: the setup URL
     // in it carries the setup token.
-    yield* Effect.logInfo(listening);
+    yield* Effect.logInfo(listeningLine);
     report(outcome, bundle !== undefined);
 
     yield* stopped;
