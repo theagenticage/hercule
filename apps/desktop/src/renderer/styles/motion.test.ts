@@ -14,7 +14,8 @@ import { describe, expect, it } from "vitest";
  * It also checks that:
  *
  * - Reduce motion can stop every animation;
- * - only one animation may run forever: the working pose's paws;
+ * - only two animations may run forever: the working pose's paws and the
+ *   spinner;
  * - no rule for every element (`*`) sets a transition, because an element
  *   transitions every property by default, layout included.
  *
@@ -52,10 +53,17 @@ const NO_PREFERENCE = "@media (prefers-reduced-motion: no-preference)";
 const REDUCE = "@media (prefers-reduced-motion: reduce)";
 
 /**
- * The rules allowed to run an animation forever. There is one: the working
- * pose's paws, which tap only beside the open thread's running turn.
+ * The rules allowed to run an animation forever:
+ *
+ * - the working pose's paws, which tap only beside the open thread's running
+ *   turn;
+ * - the spinner, which turns only while Hercule starts or a provider login
+ *   waits for the browser. Both waits end.
  */
-const ENDLESS_ANIMATIONS = [{ file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" }];
+const ENDLESS_ANIMATIONS = [
+  { file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" },
+  { file: "styles/controls.css", rule: ".spin" },
+];
 
 /** One declaration of a stylesheet, with the blocks it sits in. */
 interface Declaration {
