@@ -157,7 +157,7 @@ export {
   buildRoomContents,
   decideFirstRunStep,
   FIRST_RUN_STEPS,
-  TRIAGE_READING,
+  TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
   type FirstRunReads,

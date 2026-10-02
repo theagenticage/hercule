@@ -1,10 +1,10 @@
-import { GITHUB_CONNECTION_TYPE, type Connection } from "@hercule/contract";
+import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildFirstRunFacts,
   buildRoomContents,
   decideFirstRunStep,
-  TRIAGE_READING,
+  TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
   type FirstRunReads,
@@ -116,40 +116,84 @@ describe("decideFirstRunStep", () => {
 });
 
 describe("buildRoomContents", () => {
-  const ROOM = { answered: true, controllerOnThisMac: true, putOff: [] } as const;
+  const HERCULE: Assistant = {
+    id: "01a06d02-a000-7000-8000-000000000001",
+    name: "Hercule",
+    systemPrompt: "You are Hercule.",
+    instanceId: "01a06d02-1000-7000-8000-000000000001",
+    permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
+    accessMode: "auto-accept-edits",
+    model: null,
+    disallowedTools: [],
+    unenforced: [],
+    heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
+    rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
+    reply: "turn-end",
+    createdAt: "2026-09-05T09:00:00.000Z",
+    updatedAt: "2026-09-05T09:00:00.000Z",
+  };
+  const ROOM = {
+    answered: true,
+    controllerOnThisMac: true,
+    assistants: [HERCULE],
+    putOff: [],
+  } as const;
 
-  it("draws a dark, empty room until Hercule answers", () => {
+  it("draws a dimmed, empty room until Hercule answers", () => {
     expect(buildRoomContents({ ...NOTHING, ...ROOM, answered: false })).toEqual({
-      lights: false,
-      yourDesk: false,
+      lightsOn: false,
       wing: null,
+      yourDesk: false,
+      assistant: null,
       triage: null,
-      github: null,
-      firstThread: null,
+      gitHubAccount: null,
     });
   });
 
-  it("puts your desk in the room once the account exists", () => {
+  it("stands the wing, with no desks, as soon as the local runner is known", () => {
+    const room = buildRoomContents({ ...NOTHING, ...ROOM, localRunner: BARE });
+
+    expect(room.wing).toEqual({
+      runnerName: "moss",
+      note: "this Mac",
+      deskCount: 0,
+      firstThread: null,
+    });
+    expect(
+      buildRoomContents({ ...NOTHING, ...ROOM, localRunner: BARE, controllerOnThisMac: false }).wing
+        ?.note,
+    ).toBe("");
+  });
+
+  it("puts your desk and the assistant in the room once the account exists", () => {
     const room = buildRoomContents({ ...NOTHING, ...ROOM, setupComplete: true });
 
-    expect(room.lights).toBe(true);
+    expect(room.lightsOn).toBe(true);
     expect(room.yourDesk).toBe(true);
-    expect(room.wing).toBeNull();
+    expect(room.assistant).toEqual({ name: "Hercule" });
   });
 
   it("draws everything once every step is done", () => {
     expect(buildRoomContents({ ...EVERYTHING, ...ROOM })).toEqual({
-      lights: true,
+      lightsOn: true,
+      wing: {
+        runnerName: "moss",
+        note: "this Mac · 6 desks",
+        deskCount: 6,
+        firstThread: {
+          projectId: "01a06d02-7000-7000-8000-000000000001",
+          projectName: "webshop",
+        },
+      },
       yourDesk: true,
-      wing: { runnerName: "moss", desks: 6, note: "this Mac · 6 desks" },
-      triage: { label: TRIAGE_READING },
-      github: { account: "rogier" },
-      firstThread: { projectId: "01a06d02-7000-7000-8000-000000000001", projectName: "webshop" },
+      assistant: { name: "Hercule" },
+      triage: { note: TRIAGE_READING_GITHUB },
+      gitHubAccount: "rogier",
     });
   });
 
-  it("names no time in Triage's line", () => {
-    expect(TRIAGE_READING).not.toMatch(/\d/);
+  it("names no time in Triage's note", () => {
+    expect(TRIAGE_READING_GITHUB).not.toMatch(/\d/);
     expect(TRIAGE_WITHOUT_CONNECTIONS).not.toMatch(/\d/);
   });
 
@@ -161,7 +205,7 @@ describe("buildRoomContents", () => {
       localRunner: { ...BARE, maxConcurrentSessions: 12 },
     });
 
-    expect(room.wing).toEqual({ runnerName: "moss", desks: 8, note: "8 desks" });
+    expect(room.wing).toMatchObject({ deskCount: 8, note: "8 desks" });
   });
 
   it("writes one desk in the singular", () => {
@@ -182,8 +226,8 @@ describe("buildRoomContents", () => {
       putOff: ["github"],
     });
 
-    expect(room.triage).toEqual({ label: TRIAGE_WITHOUT_CONNECTIONS });
-    expect(room.github).toBeNull();
+    expect(room.triage).toEqual({ note: TRIAGE_WITHOUT_CONNECTIONS });
+    expect(room.gitHubAccount).toBeNull();
   });
 
   it("names the plaque after the Connection when its account has no name", () => {
@@ -193,7 +237,14 @@ describe("buildRoomContents", () => {
       connections: [{ ...GITHUB, label: "GitHub", displayName: " " }],
     });
 
-    expect(room.github).toEqual({ account: "GitHub" });
+    expect(room.gitHubAccount).toBe("GitHub");
+  });
+
+  it("seats the oldest assistant", () => {
+    const newer = { ...HERCULE, name: "Ada", createdAt: "2026-09-06T09:00:00.000Z" };
+    const room = buildRoomContents({ ...EVERYTHING, ...ROOM, assistants: [newer, HERCULE] });
+
+    expect(room.assistant).toEqual({ name: "Hercule" });
   });
 
   it("draws the first thread only when a provider is logged in, in the oldest project", () => {
@@ -207,7 +258,9 @@ describe("buildRoomContents", () => {
       projects: [...EVERYTHING.projects, older],
     });
 
-    expect(room.firstThread?.projectName).toBe("ops");
-    expect(buildRoomContents({ ...EVERYTHING, ...ROOM, instances: [] }).firstThread).toBeNull();
+    expect(room.wing?.firstThread?.projectName).toBe("ops");
+    expect(
+      buildRoomContents({ ...EVERYTHING, ...ROOM, instances: [] }).wing?.firstThread,
+    ).toBeNull();
   });
 });

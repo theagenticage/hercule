@@ -6,7 +6,7 @@
  * draws the same room and resumes at the same step. The only state of the
  * first run's own is the list of steps the user put off.
  */
-import type { Connection, ProviderInstance, Project, Runner } from "@hercule/contract";
+import type { Assistant, Connection, ProviderInstance, Project, Runner } from "@hercule/contract";
 import { filterGitHubConnections } from "./connections";
 import { buildProviderRows } from "./provider-rows";
 
@@ -58,54 +58,104 @@ export const decideFirstRunStep = (
 ): FirstRunStep | "done" =>
   FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "done";
 
-/** Triage's line in the room when no Connection brings it anything to read. */
+/** Triage's note in the room when no Connection brings it anything to read. */
 export const TRIAGE_WITHOUT_CONNECTIONS = "no Connections yet";
 
 /**
- * Triage's line in the room once GitHub is connected. It names no time:
+ * Triage's note in the room once GitHub is connected. It names no time:
  * Triage does not run on a schedule yet, so a time would be a promise
  * nothing keeps.
  */
-export const TRIAGE_READING = "reads it a few times a day";
+export const TRIAGE_READING_GITHUB = "reads GitHub";
 
 /** How many desks a wing seats. A runner that hosts more sessions still gets this many. */
 const WING_DESKS = 8;
 
-/** The local runner's wing in the Office: one desk per session it can host. */
+/**
+ * The local runner's wing in the Office. It stands once the runner is known;
+ * its desks come in once a provider is logged in there.
+ */
 export interface RoomWing {
-  /** The runner's name, which labels the wing. */
+  /** The runner's name, engraved on the wing's plate. */
   readonly runnerName: string;
-  readonly desks: number;
-  /** The wing's plate: "this Mac · 6 desks" for a controller on this Mac, "6 desks" otherwise. */
+  /**
+   * What the plate says after the name: "this Mac · 6 desks", "this Mac",
+   * "6 desks", or "" when there is nothing to add.
+   */
   readonly note: string;
+  /** One desk per session the runner can host, at most eight; 0 until a provider is logged in. */
+  readonly deskCount: number;
+  /**
+   * The first thread, at a desk in the oldest project's tint. The screen
+   * reads the tint from `projectId`, because the palette belongs to each app.
+   */
+  readonly firstThread: { readonly projectId: string; readonly projectName: string } | null;
 }
 
 /** What stands in the Office room. Each piece is null, or false, until its step adds it. */
 export interface RoomContents {
-  /** On once Hercule answers. */
-  readonly lights: boolean;
-  /** The user's desk and hat stand, and the assistant asleep in the club chair. */
-  readonly yourDesk: boolean;
+  /** False until Hercule answers; the room is drawn dimmed until then. */
+  readonly lightsOn: boolean;
   readonly wing: RoomWing | null;
-  /** Triage at its desk, with the line under its name. */
-  readonly triage: { readonly label: string } | null;
-  /** The tube to Triage's desk and the plaque "GitHub / <account>". */
-  readonly github: { readonly account: string } | null;
-  /** The first thread's desk, drawn in its project's tint. */
-  readonly firstThread: { readonly projectId: string; readonly projectName: string } | null;
+  /** The user's desk and hat stand. */
+  readonly yourDesk: boolean;
+  /** The oldest assistant, asleep in the club chair. */
+  readonly assistant: { readonly name: string } | null;
+  /** Triage at its desk, with the note under its name. */
+  readonly triage: { readonly note: string } | null;
+  /** The GitHub account on the plaque, which also draws the tube to Triage's desk. */
+  readonly gitHubAccount: string | null;
 }
+
+/** Returns the item created first, or undefined when there is none. */
+const findOldest = <Item extends { readonly createdAt: string }>(
+  items: readonly Item[],
+): Item | undefined =>
+  items.reduce<Item | undefined>(
+    (oldest, item) => (oldest === undefined || item.createdAt < oldest.createdAt ? item : oldest),
+    undefined,
+  );
+
+/**
+ * Builds `runner`'s wing. Its desks, and the first thread in `project`, come
+ * in only when `providersDone` is true.
+ */
+const buildWing = (
+  runner: Runner,
+  controllerOnThisMac: boolean,
+  providersDone: boolean,
+  project: Project | undefined,
+): RoomWing => {
+  const deskCount = providersDone ? Math.min(runner.maxConcurrentSessions, WING_DESKS) : 0;
+  return {
+    runnerName: runner.name,
+    note: [
+      controllerOnThisMac ? "this Mac" : null,
+      deskCount === 0 ? null : `${deskCount} ${deskCount === 1 ? "desk" : "desks"}`,
+    ]
+      .filter((part) => part !== null)
+      .join(" · "),
+    deskCount,
+    firstThread:
+      providersDone && project !== undefined
+        ? { projectId: project.id, projectName: project.name }
+        : null,
+  };
+};
 
 /**
  * Returns what stands in the Office room, from the first run's reads:
  *
  * - the lights, once Hercule answers;
+ * - the local runner's wing as soon as that runner is known, with "this Mac"
+ *   on its plate when the controller runs on this Mac;
  * - after `account`: your desk, the hat stand, and the assistant;
- * - after `providers`: the local runner's wing, with one desk per session it
- *   can host, at most eight;
- * - once `github` is done or put off: Triage at its desk; the tube and the
- *   plaque only when GitHub is connected;
- * - after `project`, with a provider logged in: the first thread's desk, in
- *   the oldest project.
+ * - after `providers`: the wing's desks, one per session the runner can host,
+ *   at most eight;
+ * - once `github` is done or put off: Triage at its desk; the GitHub plaque
+ *   and the tube only when GitHub is connected;
+ * - after `project`, with a provider logged in: the first thread, in the
+ *   oldest project.
  *
  * Each piece follows its step's fact rather than the step the user is on, so
  * a step done outside the first run, in the web app or the CLI, shows too.
@@ -116,42 +166,33 @@ export const buildRoomContents = (
     readonly answered: boolean;
     /** Whether the controller runs on this Mac, which the wing's plate says. */
     readonly controllerOnThisMac: boolean;
+    readonly assistants: readonly Assistant[];
     readonly putOff: readonly FirstRunStep[];
   },
 ): RoomContents => {
   const done = buildFirstRunFacts(reads);
-  const desks = Math.min(reads.localRunner?.maxConcurrentSessions ?? 0, WING_DESKS);
   const gitHub = filterGitHubConnections(reads.connections)[0];
-  const project = [...reads.projects].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  const project = findOldest(reads.projects);
+  const assistant = findOldest(reads.assistants);
   return {
-    lights: reads.answered,
-    yourDesk: done.account,
+    lightsOn: reads.answered,
     wing:
-      done.providers && reads.localRunner !== null
-        ? {
-            runnerName: reads.localRunner.name,
-            desks,
-            note: [
-              reads.controllerOnThisMac ? "this Mac" : null,
-              `${desks} ${desks === 1 ? "desk" : "desks"}`,
-            ]
-              .filter((part) => part !== null)
-              .join(" · "),
-          }
-        : null,
+      reads.localRunner === null
+        ? null
+        : buildWing(reads.localRunner, reads.controllerOnThisMac, done.providers, project),
+    yourDesk: done.account,
+    assistant: done.account && assistant !== undefined ? { name: assistant.name } : null,
     triage:
       done.github || reads.putOff.includes("github")
-        ? { label: gitHub === undefined ? TRIAGE_WITHOUT_CONNECTIONS : TRIAGE_READING }
+        ? { note: gitHub === undefined ? TRIAGE_WITHOUT_CONNECTIONS : TRIAGE_READING_GITHUB }
         : null,
     // A Connection with no account name is named after its type, so the
     // label stands in for the account.
-    github:
+    gitHubAccount:
       gitHub === undefined
         ? null
-        : { account: gitHub.displayName.trim() === "" ? gitHub.label : gitHub.displayName },
-    firstThread:
-      project !== undefined && done.providers
-        ? { projectId: project.id, projectName: project.name }
-        : null,
+        : gitHub.displayName.trim() === ""
+          ? gitHub.label
+          : gitHub.displayName,
   };
 };
