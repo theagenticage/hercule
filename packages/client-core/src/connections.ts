@@ -240,7 +240,7 @@ export const describeDeviceFlowWait = (
 ): string => {
   switch (status) {
     case "pending":
-      return `Waiting for you to approve the code at ${providerName}.`;
+      return `Waiting for you to approve Hercule on ${providerName}.`;
     case "slow-down":
       return `${providerName} asked for slower checks. Still waiting for you to approve the code.`;
     case "unreachable":

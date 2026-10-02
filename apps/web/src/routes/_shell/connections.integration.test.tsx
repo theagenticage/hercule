@@ -994,7 +994,9 @@ describe("Connections > a device flow", () => {
     expect(open.getAttribute("target")).toBe("_blank");
     expect(open.getAttribute("rel")).toBe("noopener noreferrer");
     expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), open]);
-    expect(readPageText(screen.getByRole("status"))).toContain("Waiting for you to approve");
+    expect(readPageText(screen.getByRole("status"))).toContain(
+      "Waiting for you to approve Hercule on Glasshouse.",
+    );
 
     // The first poll waits for the interval the start returned.
     await advanceClock(4000);

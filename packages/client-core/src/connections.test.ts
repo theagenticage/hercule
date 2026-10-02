@@ -296,7 +296,7 @@ describe("listCredentialFields", () => {
 describe("describeDeviceFlowWait", () => {
   it("names the provider while the flow waits, and says a failed check is retried", () => {
     expect(describeDeviceFlowWait("pending", "GitHub")).toBe(
-      "Waiting for you to approve the code at GitHub.",
+      "Waiting for you to approve Hercule on GitHub.",
     );
     expect(describeDeviceFlowWait("slow-down", "GitHub")).toBe(
       "GitHub asked for slower checks. Still waiting for you to approve the code.",
