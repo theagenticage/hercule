@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, ConnectionError, isLoginCodeRejected } from "@hercule/client-core";
+import { ApiError, ConnectionError } from "./errors";
+import { isLoginCodeRejected } from "./login-code";
 
 describe("isLoginCodeRejected", () => {
   it("returns true for a validation error whose issue points at the code", () => {

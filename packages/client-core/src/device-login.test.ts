@@ -94,13 +94,13 @@ describe("decideDeviceLoginStep", () => {
     });
   });
 
-  it("waits while a fresh snapshot still says the harness is logged out", () => {
+  it("waits while a fresh snapshot still shows the harness logged out", () => {
     const fresh = buildSnapshot({ probedAt: LATER, auth: { status: "unauthenticated" } });
     const instances = [buildInstance("codex", "Codex", [fresh])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toMatchObject({ kind: "waiting" });
   });
 
-  it("is done once a fresh snapshot says the harness is logged in", () => {
+  it("is done once a fresh snapshot shows the harness logged in", () => {
     const instances = [buildInstance("codex", "Codex", [buildSnapshot({ probedAt: LATER })])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toEqual({ kind: "done" });
   });
@@ -151,7 +151,7 @@ describe("decideDeviceLoginStep", () => {
 });
 
 describe("describeDeviceLoginWait", () => {
-  it("says how many minutes the code still works, in the singular for one", () => {
+  it("names how many minutes the code still works, in the singular for one", () => {
     expect(describeDeviceLoginWait({ kind: "waiting", minutesLeft: 12, endsByItself: true })).toBe(
       "Waiting for you to finish signing in. The code expires in 12 minutes.",
     );
@@ -166,7 +166,7 @@ describe("describeDeviceLoginWait", () => {
     ).toBe("Waiting for you to finish signing in.");
   });
 
-  it("says why a login that started logged in cannot end by itself", () => {
+  it("explains why a login that started logged in cannot end by itself", () => {
     expect(
       describeDeviceLoginWait({ kind: "waiting", minutesLeft: null, endsByItself: false }),
     ).toBe(

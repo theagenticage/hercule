@@ -9,6 +9,7 @@ import {
   buildProvidersStepText,
   buildRoomContents,
   decideFirstRunStep,
+  findGitHubAccount,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunDoneSteps,
@@ -414,7 +415,18 @@ describe("buildAllSetRecap", () => {
     });
   });
 
-  it("says when nothing is logged in and the project has no repository", () => {
+  it("names a repository whose remote has no owner/name by its label", () => {
+    const recap = buildAllSetRecap({
+      ...EVERYTHING,
+      resources: [
+        { ...buildRepo("r1", "/srv/git/webshop", null, [PROJECT_ID]), label: "webshop on the NAS" },
+      ],
+    });
+
+    expect(recap.project?.repository).toBe("webshop on the NAS");
+  });
+
+  it("leaves everything empty when nothing is logged in and the project has no repository", () => {
     const recap = buildAllSetRecap({
       ...EVERYTHING,
       instances: [buildInstance("claude-code", "Claude Code")],
@@ -427,5 +439,28 @@ describe("buildAllSetRecap", () => {
     expect(recap.providerId).toBe("claude-code");
     expect(recap.gitHubAccount).toBeNull();
     expect(recap.project?.repository).toBeNull();
+  });
+});
+
+describe("findGitHubAccount", () => {
+  // The New project form clones through the first GitHub Connection in the
+  // list, so All set names that one, not the oldest.
+  it("returns the account of the first GitHub Connection in the list", () => {
+    const older = {
+      ...GITHUB,
+      id: "c2",
+      displayName: "older",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(findGitHubAccount([GITHUB, older])).toBe("rogier");
+  });
+
+  it("returns the label of a Connection with no account name", () => {
+    expect(findGitHubAccount([{ ...GITHUB, displayName: " ", label: "GitHub" }])).toBe("GitHub");
+  });
+
+  it("returns null without a GitHub Connection", () => {
+    expect(findGitHubAccount([{ ...GITHUB, type: "gmail" }])).toBeNull();
   });
 });
