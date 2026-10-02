@@ -1,4 +1,5 @@
 export {
+  CopyButton,
   DeviceCodeSteps,
   DoneMark,
   FormField,

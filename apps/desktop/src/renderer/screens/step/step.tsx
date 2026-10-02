@@ -5,7 +5,7 @@
  * first run's card and in their dialogs in New thread. Every part is
  * presentational: it takes values and callbacks and reads nothing.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import { CheckIcon, ExternalIcon } from "../../icons";
 import "./step.css";
 
@@ -131,14 +131,32 @@ function copyElementText(element: HTMLElement | null): boolean {
 }
 
 /**
+ * Renders a Copy button that puts the text of the element in `targetRef` on
+ * the clipboard. Its label then reads "Copied", or "Copy failed" when the
+ * copy did not happen, so the user knows to select the text by hand.
+ */
+export function CopyButton({
+  targetRef,
+}: {
+  readonly targetRef: RefObject<HTMLElement | null>;
+}): JSX.Element {
+  const [label, setLabel] = useState<"Copy" | "Copied" | "Copy failed">("Copy");
+  return (
+    <button
+      type="button"
+      className="btn btn--sm btn--quiet"
+      onClick={() => setLabel(copyElementText(targetRef.current) ? "Copied" : "Copy failed")}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
  * Renders the two steps of a device-code sign-in: copy `code`, then open the
  * sign-in page. `openText` is the second step's text and `openLabel` its
  * button's label; `onOpen` runs when that button is pressed. `end` goes under
  * the two steps, such as a `WaitLine`.
- *
- * Copy puts the code on the clipboard. Its label then reads "Copied", or
- * "Copy failed" when the copy did not happen, so the user knows to select the
- * code by hand.
  */
 export function DeviceCodeSteps({
   code,
@@ -153,20 +171,14 @@ export function DeviceCodeSteps({
   readonly onOpen: () => void;
   readonly end?: ReactNode;
 }): JSX.Element {
-  const [copy, setCopy] = useState<"Copy" | "Copied" | "Copy failed">("Copy");
   const codeRef = useRef<HTMLElement>(null);
-  const copyCode = (): void => {
-    setCopy(copyElementText(codeRef.current) ? "Copied" : "Copy failed");
-  };
   return (
     <>
       <NumberedStep n={1}>
         Copy this code.
         <span className="code">
           <b ref={codeRef}>{code}</b>
-          <button type="button" className="btn btn--sm btn--quiet" onClick={copyCode}>
-            {copy}
-          </button>
+          <CopyButton targetRef={codeRef} />
         </span>
       </NumberedStep>
       <NumberedStep n={2}>
