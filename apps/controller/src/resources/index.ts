@@ -2,7 +2,7 @@
  * Resources: the durable external things - repos, folders, mailboxes - that
  * projects work with and workspaces are checked out from.
  */
-export { canonicalRemoteOf, isClonableRemote, extractRepoName } from "./remote";
+export { canonicalizeRemote, isClonableRemote, extractRepoName } from "./remote";
 export {
   isCheckedOut,
   NOT_CHECKED_OUT,

@@ -7,9 +7,7 @@
  * rule. This module holds the narrower check only the controller needs:
  * whether Hercule will pass this remote to git at all.
  */
-import { canonicalizeRemote } from "@hercule/protocol";
-
-export { canonicalizeRemote as canonicalRemoteOf };
+export { canonicalizeRemote } from "@hercule/protocol";
 
 /** A leading dash, which git reads as an option rather than as a remote. */
 const OPTION = /^-/;

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalRemoteOf, isClonableRemote, extractRepoName } from "./remote";
+import { canonicalizeRemote, isClonableRemote, extractRepoName } from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like user@host:owner/repo", () => {
@@ -40,11 +40,11 @@ describe("isClonableRemote", () => {
 
   it("rejects the host/path form a runner reports, which still canonicalizes", () => {
     expect(isClonableRemote("github.com/acme/web")).toBe(false);
-    expect(canonicalRemoteOf("github.com/acme/web")).toBe("github.com/acme/web");
+    expect(canonicalizeRemote("github.com/acme/web")).toBe("github.com/acme/web");
   });
 
   it("canonicalizes a file URL to its path, but rejects it as a resource remote", () => {
-    expect(canonicalRemoteOf("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
+    expect(canonicalizeRemote("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
     expect(isClonableRemote("file:///Users/rogier/code/web")).toBe(false);
   });
 });
