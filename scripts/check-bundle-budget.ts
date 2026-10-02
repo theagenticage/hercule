@@ -28,10 +28,13 @@
  * both slower and far larger - a difference the budget alone might absorb
  * rather than report.
  *
- * Main's startup budget is on the one file Electron reads and compiles before
- * the app is ready. Main imports what the first window does not need with a
- * dynamic `import()`, which the build writes to a chunk of its own beside the
- * startup file, so those chunks cost nothing here. The budget counts minified
+ * Main's startup budget is on the files Electron reads and compiles before
+ * the app is ready: the startup file, and every chunk it imports statically.
+ * Main imports what the first window does not need with a dynamic
+ * `import()`, which the build writes to a chunk of its own beside the
+ * startup file, so those chunks cost nothing here. Code the startup file
+ * shares with such a chunk is split into a third chunk, which the startup
+ * file imports statically, so that chunk is counted. The budget counts minified
  * bytes rather than gzipped ones, because main loads from disk and what it
  * pays for is parsing the file.
  *
@@ -51,7 +54,7 @@
  *   budget still fails the build.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -80,9 +83,38 @@ const reportOverBudget = (message: string, guide: boolean): void => {
 };
 
 /**
- * Checks the size of the desktop main process's startup file against its
- * budget and prints the result. Exits the process with code 1 when the file
- * does not exist, or is over the budget and `guide` is not set.
+ * A static import or re-export in a built chunk, as the minifier writes it:
+ * `import"./a.js"`, `import{b}from"./a.js"` or `export{b}from"./a.js"`. The
+ * capture is the relative path. A dynamic `import("./a.js")` does not match,
+ * because a parenthesis sits between `import` and the quote.
+ */
+const STATIC_IMPORT = /\b(?:import|from)\s*"(\.{1,2}\/[^"]+\.js)"/g;
+
+/**
+ * Returns the files Node loads with the startup file `file` before main runs:
+ * `file` itself, every chunk it imports statically, and every chunk those
+ * import in turn, in the order they are first found. Chunks that are only
+ * imported with a dynamic `import()` are left out, because they load when
+ * main first uses them.
+ */
+const findStartupFiles = (file: string): string[] => {
+  const found = new Set<string>();
+  const addFile = (path: string): void => {
+    if (found.has(path)) return;
+    found.add(path);
+    for (const match of readFileSync(path, "utf8").matchAll(STATIC_IMPORT)) {
+      addFile(resolve(dirname(path), match[1]!));
+    }
+  };
+  addFile(file);
+  return [...found];
+};
+
+/**
+ * Checks the size of the desktop main process's startup file, with the
+ * chunks it imports statically, against its budget, and prints the result.
+ * Exits the process with code 1 when the file does not exist, or is over the
+ * budget and `guide` is not set.
  */
 const checkMainStartup = (file: string, guide: boolean): void => {
   const shown = relative(root, file);
@@ -94,14 +126,33 @@ const checkMainStartup = (file: string, guide: boolean): void => {
     process.exit(1);
   }
 
-  const bytes = statSync(file).size;
+  // The build splits code that main's startup file shares with a lazy chunk
+  // into a chunk of its own, which the startup file then imports statically.
+  // That chunk loads at startup too, so it is counted.
+  const startupFiles = findStartupFiles(file).map((path) => ({
+    path,
+    bytes: statSync(path).size,
+  }));
+  const bytes = startupFiles.reduce((sum, startupFile) => sum + startupFile.bytes, 0);
+  for (const startupFile of startupFiles) {
+    console.log(
+      `${formatKilobytes(startupFile.bytes).padStart(9)}  ${relative(root, startupFile.path)}`,
+    );
+  }
+  const importedCount = startupFiles.length - 1;
+  const withImports =
+    importedCount === 0
+      ? ""
+      : importedCount === 1
+        ? ", with the chunk it imports statically,"
+        : `, with the ${String(importedCount)} chunks it imports statically,`;
   console.log(
-    `check-bundle-budget: main's startup file ${shown} is ${formatKilobytes(bytes)} minified; ` +
+    `check-bundle-budget: main's startup file ${shown}${withImports} is ${formatKilobytes(bytes)} minified; ` +
       `the budget is ${formatKilobytes(MAIN_STARTUP_BUDGET_BYTES)}.`,
   );
   if (bytes > MAIN_STARTUP_BUDGET_BYTES) {
     reportOverBudget(
-      `check-bundle-budget: ${shown} is ${formatKilobytes(bytes)} minified, over main's startup ` +
+      `check-bundle-budget: ${shown}${withImports} is ${formatKilobytes(bytes)} minified, over main's startup ` +
         `budget of ${formatKilobytes(MAIN_STARTUP_BUDGET_BYTES)} by ` +
         `${formatKilobytes(bytes - MAIN_STARTUP_BUDGET_BYTES)}. Spec 17 §Performance owns the ` +
         `number, in the "Main's startup" row of its budgets. Import what the first window does ` +
