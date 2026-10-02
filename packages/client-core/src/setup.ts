@@ -3,7 +3,7 @@
  * desktop app both call `completeSetup`, so the rule about the one-time setup
  * token is written once.
  */
-import type { SetupPayload, SetupResult } from "@hercule/contract";
+import { MIN_PASSWORD_LENGTH, type SetupPayload, type SetupResult } from "@hercule/contract";
 import type { HerculeClient } from "./client";
 
 /**
@@ -31,3 +31,16 @@ export const completeSetup = async (
     throw error;
   }
 };
+
+/**
+ * Validates the length of a new account's password. Returns the error the
+ * password field shows when `password` is shorter than the contract allows,
+ * or `null` when it is long enough.
+ *
+ * The form checks this before it sends anything, so the user sees the error
+ * under the field rather than as the controller's refusal of the whole form.
+ */
+export const validatePasswordLength = (password: string): string | null =>
+  password.length < MIN_PASSWORD_LENGTH
+    ? `Use at least ${String(MIN_PASSWORD_LENGTH)} characters.`
+    : null;

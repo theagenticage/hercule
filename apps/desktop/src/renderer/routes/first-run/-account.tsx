@@ -8,9 +8,9 @@ import {
   ONBOARDING_STEPS,
   readErrorMessage,
   resolveBrowserTimezone,
+  validatePasswordLength,
   type HerculeClient,
 } from "@hercule/client-core";
-import { MIN_PASSWORD_LENGTH } from "@hercule/contract";
 import type { FirstRunProgress } from "../../../ipc/contract";
 import {
   ensureFirstRunData,
@@ -20,9 +20,6 @@ import {
   setupTokenQuery,
 } from "../../app/queries";
 import { AccountStep, type AccountError, type AccountForm } from "../../screens/first-run";
-
-/** The password's error when it is shorter than the contract allows. */
-const TOO_SHORT = `Use at least ${String(MIN_PASSWORD_LENGTH)} characters.`;
 
 /** The line for a setup token the controller refused, which Create account then reads again. */
 const TOKEN_REFUSED =
@@ -66,7 +63,7 @@ export function AccountCard({
     password: "",
     timezone: resolveBrowserTimezone(),
   }));
-  const [tooShort, setTooShort] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const createAccount = useMutation({
     mutationFn: async (values: AccountForm) => {
       if (!(await client.setup.read()).complete) {
@@ -98,7 +95,7 @@ export function AccountCard({
   });
 
   let error: AccountError | null = null;
-  if (tooShort) error = { field: "password", message: TOO_SHORT };
+  if (passwordError !== null) error = { field: "password", message: passwordError };
   else if (createAccount.isError) {
     error = {
       field: null,
@@ -116,12 +113,12 @@ export function AccountCard({
       submitting={createAccount.isPending}
       onChange={(next) => {
         setForm(next);
-        if (next.password !== form.password) setTooShort(false);
+        if (next.password !== form.password) setPasswordError(null);
       }}
       onSubmit={() => {
-        const short = form.password.length < MIN_PASSWORD_LENGTH;
-        setTooShort(short);
-        if (!short) createAccount.mutate({ ...form, username: form.username.trim() });
+        const invalid = validatePasswordLength(form.password);
+        setPasswordError(invalid);
+        if (invalid === null) createAccount.mutate({ ...form, username: form.username.trim() });
       }}
     />
   );

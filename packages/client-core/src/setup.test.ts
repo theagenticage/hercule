@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildErrorBody, createApiStub, type Answer } from "./api-stub";
 import { createClient } from "./client";
-import { completeSetup } from "./setup";
+import { MIN_PASSWORD_LENGTH } from "@hercule/contract";
+import { completeSetup, validatePasswordLength } from "./setup";
 
 const PAYLOAD = { username: "rogier", password: "hunter2hunter2", timezone: "Europe/Amsterdam" };
 
@@ -42,5 +43,14 @@ describe("completeSetup", () => {
 
     expect(client.getToken()).toBeNull();
     expect(stored).not.toContain("stale");
+  });
+});
+
+describe("validatePasswordLength", () => {
+  it("refuses a password shorter than the contract allows, and accepts one that is long enough", () => {
+    expect(validatePasswordLength("x".repeat(MIN_PASSWORD_LENGTH - 1))).toBe(
+      `Use at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+    );
+    expect(validatePasswordLength("x".repeat(MIN_PASSWORD_LENGTH))).toBeNull();
   });
 });

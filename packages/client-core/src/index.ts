@@ -169,7 +169,7 @@ export {
   type NewProjectDraft,
   type RepositoryDraft,
 } from "./new-project";
-export { completeSetup } from "./setup";
+export { completeSetup, validatePasswordLength } from "./setup";
 export {
   addPutOffStep,
   buildAllSetRecap,
