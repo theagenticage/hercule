@@ -77,7 +77,7 @@ jobs:
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
       - run: pnpm build:desktop
-      # Compares the app with the Crew Bureau book in docs/design/crew-bureau,
+      # Compares the app with the Crew Bureau book in docs/design/crew-bureau-2,
       # pixel for pixel: its faces, icons and marks; its sidebar; its thread
       # screen, at rest and scrolled; and its draft screen.
       - run: pnpm compare:bureau

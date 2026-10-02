@@ -1,8 +1,9 @@
 /**
  * Compares the app's faces, icons and marks with the Bureau book's, pixel for
- * pixel, in both themes: `pnpm compare:bureau`. The book is the copy in
- * docs/design/crew-bureau, which is kept byte for byte as the design
- * prototype made it (spec 17).
+ * pixel, in both themes: `pnpm compare:bureau`. The book is its second
+ * edition, in docs/design/crew-bureau-2. The first edition stays beside it in
+ * docs/design/crew-bureau, byte for byte as the design prototype made it
+ * (spec 17), but the app follows the second.
  *
  * It also compares regions of the book's pages with the app's: the sidebar
  * of session-active.html; its main pane with the thread screen, once as it
@@ -28,7 +29,7 @@ import { designDir, runAndSetExitCode, runSheetCapture } from "./sheet-server.ts
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 
 /** The folder of the Bureau book the app is compared with. */
-const bookDir = join(designDir, "crew-bureau");
+const bookDir = join(designDir, "crew-bureau-2");
 
 /**
  * Checks that the app's tokens.css and font files are byte-identical to the

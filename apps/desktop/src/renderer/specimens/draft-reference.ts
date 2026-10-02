@@ -52,7 +52,10 @@ stillBookPage();
 
 const main = findElement(document, "main.main");
 const composer = findElement(main, ".composer");
-const starts = findElements(main, ".start", cards.length);
+// The book's page also holds the starter cards of a fresh install
+// (?state=first and ?state=first-no-repo), hidden in this state. Only the
+// cards that start from Intake are compared.
+const starts = findElements(main, ".when-busy .start", cards.length);
 
 // 1. The model pill.
 replaceTextAfterIcon(findElement(composer, ".pick--pill"), CLAUDE_OPUS.name);

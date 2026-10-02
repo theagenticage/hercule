@@ -88,7 +88,7 @@ interface PageItem {
 interface RegionPair {
   /** The region's name in the report and in its images' file names. */
   readonly name: string;
-  /** The book's page, under /design/crew-bureau/desktop/. */
+  /** The book's page, under /design/crew-bureau-2/desktop/. */
   readonly bookPage: string;
   /** The module that edits the book's page to show the fixture's data, under /specimens/. */
   readonly referenceModule: string;
@@ -478,7 +478,7 @@ async function compareRegion(
   const query = `?theme=${theme}${state === undefined ? "" : `&state=${state}`}`;
   const [reference, specimen] = await Promise.all([
     openSheet(
-      new URL(`/design/crew-bureau/desktop/${bookPage}${query}`, sheetsUrl).href,
+      new URL(`/design/crew-bureau-2/desktop/${bookPage}${query}`, sheetsUrl).href,
       new URL(referenceModule, sheetsUrl).href,
     ),
     openSheet(`${sheetsUrl}${specimenPage}${query}`),
