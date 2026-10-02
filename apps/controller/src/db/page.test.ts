@@ -575,6 +575,33 @@ const walkAll = (
   }).pipe(Effect.provide(TestDatabase), Effect.runPromise);
 
 describe("keyset paging", () => {
+  it.each([
+    ["asc", "(name,id)>(?,?)"],
+    ["desc", "(name,id)<(?,?)"],
+  ] as const)(
+    "starts a later %s page with one seek to the row after the cursor",
+    async (direction, seek) => {
+      const plan = await Effect.gen(function* () {
+        const sql = yield* seed;
+        yield* sql`CREATE INDEX walked_name ON walked (name, id)`;
+        const { keyset, order } = buildKeyset(
+          sql,
+          [{ column: "name", direction }],
+          ["id"],
+          ["n", uuidFromString(ID)],
+        );
+        const rows = yield* sql<{ readonly detail: string }>`
+          EXPLAIN QUERY PLAN SELECT id FROM walked WHERE ${keyset} ${order} LIMIT 3
+        `;
+        return rows.map((row) => row.detail).join(" / ");
+      }).pipe(Effect.provide(TestDatabase), Effect.runPromise);
+      // The seek must use the name and the id together. A seek on the name
+      // alone reads every row before the cursor that shares its name, so paging
+      // through many rows with one name would grow slower page by page.
+      expect(plan).toContain(`SEARCH walked USING COVERING INDEX walked_name (${seek})`);
+    },
+  );
+
   it("reads every row exactly once, in the direction it was given", async () => {
     expect(await walkAll([{ field: "label", direction: "asc" }], 2)).toEqual({
       labels: ["a", "b", "c", "d", "e", "f"],
@@ -675,9 +702,7 @@ describe("buildKeyset", () => {
     ]);
   });
 
-  it("compares a row value after a range on the first key when every key has the same direction", async () => {
-    // The range on the first key lets SQLite start an index seek there, even
-    // when that key is an expression such as a rank.
+  it("compares one row value when every key has the same direction", async () => {
     expect(
       await compileKeyset(
         [
@@ -688,9 +713,8 @@ describe("buildKeyset", () => {
         [2, "n", ID],
       ),
     ).toEqual([
-      "SELECT id FROM t WHERE rank <= ? AND (rank, name, id) < (?,?,?) " +
-        "ORDER BY rank DESC, name DESC, id DESC",
-      [2, 2, "n", ID],
+      "SELECT id FROM t WHERE (rank, name, id) < (?,?,?) ORDER BY rank DESC, name DESC, id DESC",
+      [2, "n", ID],
     ]);
   });
 
@@ -713,8 +737,8 @@ describe("buildKeyset", () => {
 
   it("takes no tie-break when the key is already unique", async () => {
     expect(await compileKeyset([{ column: "position", direction: "desc" }], [], [7])).toEqual([
-      "SELECT id FROM t WHERE position <= ? AND (position) < (?) ORDER BY position DESC",
-      [7, 7],
+      "SELECT id FROM t WHERE (position) < (?) ORDER BY position DESC",
+      [7],
     ]);
   });
 
@@ -726,9 +750,9 @@ describe("buildKeyset", () => {
         [CREATED_AT, ID, "nightly"],
       ),
     ).toEqual([
-      "SELECT id FROM t WHERE created_at <= ? AND (created_at, workflow_id, trigger_id) < (?,?,?) " +
+      "SELECT id FROM t WHERE (created_at, workflow_id, trigger_id) < (?,?,?) " +
         "ORDER BY created_at DESC, workflow_id DESC, trigger_id DESC",
-      [CREATED_AT, CREATED_AT, ID, "nightly"],
+      [CREATED_AT, ID, "nightly"],
     ]);
   });
 });

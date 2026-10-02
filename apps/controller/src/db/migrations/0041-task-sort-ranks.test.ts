@@ -1,15 +1,12 @@
 /**
  * Tests that the two rank indexes of migration 0041 serve a sort on priority
  * and a sort on status, in both directions, without a temporary b-tree, and
- * that a later page starts with a seek into the index rather than reading it
- * from the start.
+ * that a later page starts with one seek to the row after the cursor rather
+ * than reading the rows before it.
  *
  * The query is the one the task repository writes: its sort columns are read
  * from the repository's own table, and its `ORDER BY` and boundary are built by
- * the same `buildKeyset`. SQLite uses an expression index only for the
- * identical expression, so a repository expression that drifts from the
- * migration's index fails here rather than quietly sorting every page in
- * memory.
+ * the same `buildKeyset`.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -50,10 +47,10 @@ const explainTaskSort = (
 const ID = "0192ce07-8c4f-7d66-afec-2482b5c9b03c";
 
 const CASES = [
-  ["priority", "asc", "tasks_priority"],
-  ["priority", "desc", "tasks_priority"],
-  ["status", "asc", "tasks_status"],
-  ["status", "desc", "tasks_status"],
+  ["priority", "asc", "tasks_priority", "(priority_rank,id)>(?,?)"],
+  ["priority", "desc", "tasks_priority", "(priority_rank,id)<(?,?)"],
+  ["status", "asc", "tasks_status", "(status_rank,id)>(?,?)"],
+  ["status", "desc", "tasks_status", "(status_rank,id)<(?,?)"],
 ] as const;
 
 describe("the task sort ranks", () => {
@@ -72,12 +69,13 @@ describe("the task sort ranks", () => {
   );
 
   it.each(CASES)(
-    "start a later page of a %s %s sort with a seek into %s",
-    async (field, direction, index) => {
+    "start a later page of a %s %s sort with a seek into %s on %s",
+    async (field, direction, index, seek) => {
       const plan = await explainTaskSort(field, direction, [1, ID]);
-      // A `SCAN` would read the index from its start and skip every row of the
-      // earlier pages, so each page would cost more than the one before it.
-      expect(plan).toContain(`SEARCH tasks USING INDEX ${index} (`);
+      // The seek must use the rank and the id together. A seek on the rank
+      // alone, or a `SCAN`, reads every row before the cursor, so each page
+      // would cost more than the one before it.
+      expect(plan).toContain(`SEARCH tasks USING INDEX ${index} (${seek})`);
       expect(plan).not.toContain(`${index}_`);
       expect(plan).not.toContain("TEMP B-TREE");
     },

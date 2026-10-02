@@ -142,16 +142,15 @@ const COLUMNS =
   "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, tasks.deleted_at";
 
 /**
- * The rank of each priority, lowest first. It matches the `CASE` expression
- * the `tasks_priority` index is built on, so a cursor resumes on the value the
- * index holds.
+ * The rank of each priority, lowest first. It matches the `priority_rank`
+ * column, so a cursor resumes on the value the `tasks_priority` index holds.
  */
 const PRIORITY_RANK: Record<TaskPriority, number> = { low: 0, normal: 1, high: 2, urgent: 3 };
 
 /**
  * The rank of each status, in the order work moves through them. It matches
- * the `CASE` expression the `tasks_status` index is built on, so a cursor
- * resumes on the value the index holds.
+ * the `status_rank` column, so a cursor resumes on the value the
+ * `tasks_status` index holds.
  */
 const STATUS_RANK: Record<TaskStatus, number> = {
   open: 0,
@@ -162,14 +161,11 @@ const STATUS_RANK: Record<TaskStatus, number> = {
 
 /**
  * The sortable fields of a task listing, and how each one sorts. Priority and
- * status order by their rank rather than alphabetically, so their column is a
- * `CASE` expression, written exactly as the index in migration 0041 writes it;
- * any other expression would sort every page in memory, with no error. The
- * ranks read from a task match the ranks the expressions compute, so a cursor
- * resumes on the same value the index holds.
+ * status order by their rank rather than alphabetically, through the rank
+ * columns migration 0041 adds.
  *
- * It is exported for the test of migration 0041, which checks that these
- * expressions are served by that migration's indexes.
+ * It is exported for the test of migration 0041, which checks that a sort on
+ * these columns seeks that migration's indexes.
  */
 export const TASK_SORT_COLUMNS: Record<TaskSortField, SortColumn<Task>> = {
   updatedAt: {
@@ -183,13 +179,12 @@ export const TASK_SORT_COLUMNS: Record<TaskSortField, SortColumn<Task>> = {
     readValue: (task) => task.createdAt,
   },
   priority: {
-    column: "CASE priority WHEN 'low' THEN 0 WHEN 'normal' THEN 1 WHEN 'high' THEN 2 ELSE 3 END",
+    column: "tasks.priority_rank",
     valueType: "number",
     readValue: (task) => PRIORITY_RANK[task.priority],
   },
   status: {
-    column:
-      "CASE status WHEN 'open' THEN 0 WHEN 'in-progress' THEN 1 WHEN 'done' THEN 2 ELSE 3 END",
+    column: "tasks.status_rank",
     valueType: "number",
     readValue: (task) => STATUS_RANK[task.status],
   },

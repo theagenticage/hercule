@@ -137,9 +137,8 @@ export type SortValueType = "string" | "number";
  */
 export interface SortColumn<Item> {
   /**
-   * The SQL the listing orders by: a column, or an expression such as a rank.
-   * An expression is written exactly as the index that serves it, because
-   * SQLite uses an expression index only for the same expression.
+   * The column the listing orders by. It is a plain column, never an
+   * expression, so that `buildKeyset` can seek the index that serves it.
    */
   readonly column: string;
   /** The type of the value in a cursor, which `decodeCursor` checks. */
@@ -336,10 +335,8 @@ export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =
   sealCursor(scope, ["offset", offset]);
 
 /**
- * One column a keyset query sorts by, with its direction. `column` is SQL text
- * rather than an identifier because a sort column can be an expression, such
- * as the priority rank, and it has to be written exactly the way the index
- * that serves it was built.
+ * One column a keyset query sorts by, with its direction. `column` is the
+ * column's name, qualified with its table where the query joins another.
  */
 export interface KeysetColumn {
   readonly column: string;
@@ -360,12 +357,12 @@ export interface KeysetColumn {
  *   key, then one per tie-break column. It is `undefined` on the first page.
  *
  * When every key has the same direction, the boundary is a row-value
- * comparison, `(a, b) > (x, y)`, preceded by a plain range on the first
- * column, `a >= x`. The range is what lets SQLite resume with an index seek
- * when the first column is an expression, such as the rank of a priority or a
- * status: SQLite seeks an expression index from a plain range, but not from a
- * row-value comparison. Without the range, each page would read the index
- * from the start and skip every row before the boundary.
+ * comparison, `(a, b) > (x, y)`, so SQLite can resume with one index seek to
+ * the exact row after the cursor, rather than reading every row before it.
+ * SQLite seeks this way only on an index over plain columns: on an index over
+ * an expression it reads the whole index. That is why every sort column is a
+ * plain column, and a computed sort value, such as the rank of a task's
+ * priority, is a generated column.
  *
  * With mixed directions no single comparison fits, so the boundary is written
  * out column by column, each in its own direction. For `p desc, c asc` and the
@@ -399,12 +396,9 @@ export const buildKeyset = (
   const chooseComparison = (direction: SortDirection) =>
     sql.literal(direction === "asc" ? ">" : "<");
   if (columns.every(({ direction }) => direction === lastDirection)) {
-    const first = sql.literal(Arr.headNonEmpty(columns).column);
-    const range = sql`${first} ${sql.literal(lastDirection === "asc" ? ">=" : "<=")} ${after[0]}`;
     const key = sql.literal(columns.map(({ column }) => column).join(", "));
     const values = sql.csv(after.map((value) => sql`${value}`));
-    const rowValue = sql`(${key}) ${chooseComparison(lastDirection)} (${values})`;
-    return { keyset: sql`${range} AND ${rowValue}`, order };
+    return { keyset: sql`(${key}) ${chooseComparison(lastDirection)} (${values})`, order };
   }
   // Built from the last column outwards: each column's condition wraps the
   // conditions of the columns after it in parentheses. The outermost
