@@ -150,6 +150,78 @@ export const ConnectionOAuthStart = Schema.Struct({ authorizationUrl: Schema.Str
 
 export type ConnectionOAuthStart = Schema.Schema.Type<typeof ConnectionOAuthStart>;
 
+/**
+ * The payload for starting a device flow. It names the connection to create,
+ * or the one to reconnect, exactly as `ConnectionOAuthStartInput` does. A
+ * device flow needs no origin: the provider never sends a browser back.
+ */
+export const ConnectionDeviceStartInput = Schema.Struct({
+  type: Schema.String,
+  label: Schema.optionalKey(ConnectionLabel),
+  labels: Schema.optionalKey(Topics),
+  config: Schema.optionalKey(Config),
+  /** Set on a reconnect: the connection whose credentials this flow replaces. */
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type ConnectionDeviceStartInput = Schema.Schema.Type<typeof ConnectionDeviceStartInput>;
+
+/** The shortest pause between two polls, in whole seconds, that a provider can ask for. */
+const PollInterval = Schema.Int.check(Schema.isGreaterThan(0));
+
+/**
+ * What the user needs to finish a device flow at the provider: the code to
+ * enter and the page to enter it on. `setupId` names the flow when it is
+ * polled. The provider's own device code stays on the controller, because
+ * anyone holding it could collect the token once the user approves.
+ */
+export const ConnectionDeviceStart = Schema.Struct({
+  setupId: Schema.String,
+  userCode: Schema.String,
+  verificationUri: Schema.String,
+  expiresAt: Timestamp,
+  /** Seconds to wait before the first poll, and between polls after it. */
+  interval: PollInterval,
+});
+
+export type ConnectionDeviceStart = Schema.Schema.Type<typeof ConnectionDeviceStart>;
+
+export const ConnectionDevicePollInput = Schema.Struct({ setupId: Schema.String });
+
+export type ConnectionDevicePollInput = Schema.Schema.Type<typeof ConnectionDevicePollInput>;
+
+/**
+ * The state of a device flow after one poll.
+ *
+ * - `pending`: the user has not approved yet. Poll again after `interval`.
+ * - `slow-down`: the provider asked for slower polling. `interval` is the new,
+ *   longer pause.
+ * - `unreachable`: the provider could not be reached this time. The flow is
+ *   still open, so poll again after `interval`.
+ * - `done`: the connection is written, and is returned.
+ * - `expired`: the code ran out, or the flow is unknown or already finished.
+ * - `denied`: the user declined at the provider.
+ * - `rejected`: the provider issued a token, but the type's own check refused
+ *   the account it belongs to.
+ * - `failed`: the provider refused the flow for another reason, such as device
+ *   flow being disabled on its app.
+ *
+ * The last four end the flow: polling again answers `expired`.
+ */
+export const ConnectionDevicePoll = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literals(["pending", "slow-down", "unreachable"]),
+    interval: PollInterval,
+  }),
+  Schema.Struct({ status: Schema.Literal("done"), connection: Connection }),
+  Schema.Struct({
+    status: Schema.Literals(["expired", "denied", "rejected", "failed"]),
+    message: Schema.String,
+  }),
+]);
+
+export type ConnectionDevicePoll = Schema.Schema.Type<typeof ConnectionDevicePoll>;
+
 export const connection = HttpApiGroup.make("connection")
   .add(
     HttpApiEndpoint.get("query", "/connections", {
@@ -203,6 +275,22 @@ export const connection = HttpApiGroup.make("connection")
       // credentials. The user fixes that in Settings; a different request
       // cannot.
       error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+    }),
+    // Beside the redirect flow's start, for the same reason: a device flow is
+    // a setup, not a connection, until the user approves at the provider.
+    HttpApiEndpoint.post("startDevice", "/oauth/device/start", {
+      payload: ConnectionDeviceStartInput,
+      success: ConnectionDeviceStart,
+      // `invalid_state`: the provider refused to start a device flow, or could
+      // not be reached. The message says which.
+      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
+    }),
+    // Every way the flow can end is a status in the success body rather than
+    // an error, because each is an ordinary answer the screen shows.
+    HttpApiEndpoint.post("pollDevice", "/oauth/device/poll", {
+      payload: ConnectionDevicePollInput,
+      success: ConnectionDevicePoll,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
   )
   .middleware(Authenticated);

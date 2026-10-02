@@ -29,6 +29,7 @@ export {
   ConnectionUnavailable,
   ConnectionValidationFailed,
   CredentialField,
+  DeviceDeclaration,
   OAuthDeclaration,
   SetupStep,
   type ConnectionRegistration,

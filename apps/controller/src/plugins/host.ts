@@ -197,6 +197,35 @@ const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
 
 /**
+ * Checks that a connection type declares what each of its token flows needs,
+ * and nothing it has no step for. Returns the reason the type is refused, or
+ * `undefined` when it is accepted.
+ *
+ * - An `oauth` step needs the `oauth` declaration, and a `device` step needs
+ *   the `device` declaration. Without it the flow has nowhere to go.
+ * - A declaration with no step for it is refused too, because nothing could
+ *   ever use it.
+ * - A type cannot offer both: a refresh would not know which client issued
+ *   the tokens it holds.
+ */
+const checkFlowDeclarations = (type: ConnectionType): string | undefined => {
+  const hasStep = (kind: "oauth" | "device"): boolean =>
+    type.setup.some((step) => step.kind === kind);
+  for (const kind of ["oauth", "device"] as const) {
+    if (hasStep(kind) && type[kind] === undefined) {
+      return `the ${kind} step needs the ${kind} declaration`;
+    }
+    if (!hasStep(kind) && type[kind] !== undefined) {
+      return `the ${kind} declaration needs a ${kind} step to use it`;
+    }
+  }
+  if (hasStep("oauth") && hasStep("device")) {
+    return "a type offers a redirect flow or a device flow, not both";
+  }
+  return undefined;
+};
+
+/**
  * Checks what can be decided from the manifest alone, before any plugin code
  * runs. Returns the config's JSON Schema, or the reason the plugin is
  * `refused`.
@@ -304,6 +333,14 @@ const buildRegistrationHost = (
                 return yield* Effect.fail(
                   new PluginError({
                     message: `the ${CONNECTION_TYPE} contribution ${type} is registered twice`,
+                  }),
+                );
+              }
+              const declarationFailure = checkFlowDeclarations(decoded);
+              if (declarationFailure !== undefined) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${type}: ${declarationFailure}`,
                   }),
                 );
               }

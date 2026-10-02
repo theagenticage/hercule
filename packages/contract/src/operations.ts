@@ -353,6 +353,16 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/oauth/start",
   },
+  "connection.startDevice": {
+    requires: "connection.manage",
+    method: "POST",
+    path: "/api/v1/oauth/device/start",
+  },
+  "connection.pollDevice": {
+    requires: "connection.manage",
+    method: "POST",
+    path: "/api/v1/oauth/device/poll",
+  },
 
   "agent.query": { requires: "agent.read", method: "GET", path: "/api/v1/agents" },
   "agent.read": { requires: "agent.read", method: "GET", path: "/api/v1/agents/:id" },
