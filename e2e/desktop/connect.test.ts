@@ -1,7 +1,9 @@
 /**
  * Tests connecting the desktop app to a controller (spec 17, §Reaching the
- * controller): the connect screen's check and each of its outcomes, and the
- * connect screen the app opens on when the saved controller is down.
+ * controller): main's connect check and each of its outcomes, and the connect
+ * screen the app opens on when the saved controller is down. An app with no
+ * saved controller opens on the first run's welcome, so the tests connect
+ * through the first run's remote screen, which runs the same check.
  *
  * Each test starts the packaged test package with a fresh user data
  * directory. A controller is the compiled binary in a scratch Hercule Home;

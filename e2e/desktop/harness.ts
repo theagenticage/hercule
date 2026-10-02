@@ -166,18 +166,25 @@ export async function launchWithSavedController(url: string): Promise<LaunchedAp
 }
 
 /**
- * Types `url` into the connect screen's address field and presses Connect.
- * Returns once the button is pressed; the caller waits for the outcome it
- * expects. On success main saves the URL and reloads the window.
+ * Connects an app with no saved controller to `url`, as a user on a fresh Mac
+ * does: on the first run's welcome it presses Connect to it, types `url` into
+ * the remote screen's address field and presses Continue. Returns once the
+ * button is pressed; the caller waits for the outcome it expects. On success
+ * main saves the URL and reloads the window.
+ *
+ * The remote screen runs the same check in main as the connect screen, which
+ * an app with a saved controller opens on when that controller is down.
  */
 export async function connectTo(page: Page, url: string): Promise<void> {
-  await page.getByRole("textbox", { name: "Controller address" }).fill(url);
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Connect to it" }).click();
+  await page.getByRole("textbox", { name: "Address", exact: true }).fill(url);
+  await page.getByRole("button", { name: "Continue" }).click();
 }
 
 /**
- * Waits for the line the connect or sign-in screen shows under its form, and
- * returns its text. Fails when no line shows within Playwright's timeout.
+ * Waits for the line the connect screen, the first run's remote screen or the
+ * sign-in screen shows under its form, and returns its text. Fails when no
+ * line shows within Playwright's timeout.
  */
 export async function readAlertText(page: Page): Promise<string | null> {
   const alert = page.getByRole("alert");

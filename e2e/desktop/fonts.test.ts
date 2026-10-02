@@ -4,8 +4,8 @@
  * that its request starts while the HTML parses. Every other face loads only
  * when text first needs it.
  *
- * The test starts the packaged test package on the connect screen, whose field
- * and button use Bricolage and whose wordmark uses Limelight. Run
+ * The test starts the packaged test package on the first run's welcome, whose
+ * text and buttons use Bricolage and whose wordmark uses Limelight. Run
  * `pnpm build:desktop` first.
  */
 import type { Request } from "playwright";
@@ -31,7 +31,7 @@ describe("the fonts at launch", () => {
     const requests: Request[] = [];
     page.on("request", (request) => requests.push(request));
     await page.reload();
-    await page.getByRole("button", { name: "Connect" }).waitFor();
+    await page.getByRole("button", { name: "Open the office" }).waitFor();
 
     const faces = await page.evaluate(async () => {
       await document.fonts.ready;
@@ -48,7 +48,7 @@ describe("the fonts at launch", () => {
       { family: "Limelight", firstRange: "U+0-10FFFF", status: "loaded" },
       { family: "Recursive", firstRange: "U+0-10FFFF", status: "unloaded" },
       // The password field's bullet, drawn from Geneva, a system font; see
-      // controls.css. The connect screen has no password field.
+      // controls.css. The welcome has no password field.
       { family: "Password bullet", firstRange: "U+2022", status: "unloaded" },
     ]);
 
