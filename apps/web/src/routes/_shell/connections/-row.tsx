@@ -2,8 +2,9 @@ import { Fragment, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
 import {
-  isNamedAfterAccount,
   queryKeys,
+  showsAccountBesideLabel,
+  showsPluginName,
   type ConnectionType,
   type HerculeClient,
   readErrorMessage,
@@ -49,18 +50,25 @@ export function ConnectionRow({
 
   /**
    * The parts of the secondary line: the plugin that declares the type, the
-   * account, and the connection's topic. The plugin comes first, because two
-   * plugins may declare the same type name and the name above does not show
-   * which one this is. The account is left out when the connection is named
-   * after it, because the name above already shows it. The line is built from
-   * parts so that each separator is its own element, spaced by the row's gap
-   * rather than by spaces in the text.
+   * account, and the connection's topic. Each part is left out when it adds
+   * nothing:
+   *
+   * - The plugin tells apart two plugins that declare the same type name, so
+   *   it is left out when it is named like the type above.
+   * - The account is left out when the name above already shows it, or when
+   *   the account has no name.
+   * - The topic is left out when the connection has none.
+   *
+   * The line is built from parts so that each separator is its own element,
+   * spaced by the row's gap rather than by spaces in the text.
    */
   const facts = [
-    ...(type === undefined ? [] : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
-    ...(isNamedAfterAccount(connection)
+    ...(type === undefined || !showsPluginName(type)
       ? []
-      : [{ key: "account", text: connection.displayName, tone: "text-muted" }]),
+      : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
+    ...(showsAccountBesideLabel(connection)
+      ? [{ key: "account", text: connection.displayName, tone: "text-muted" }]
+      : []),
     ...(connection.labels[0] === undefined
       ? []
       : [{ key: "topic", text: connection.labels[0], tone: "text-faint" }]),
@@ -112,8 +120,8 @@ export function ConnectionRow({
         </div>
       </div>
 
-      {/* With no plugin, no topic, and the account shown as the name, there
-          are no facts, and an empty line would leave a gap. */}
+      {/* With every part left out there are no facts, and an empty line
+          would leave a gap. */}
       {facts.length === 0 ? null : (
         <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
           {facts.map((fact, index) => (

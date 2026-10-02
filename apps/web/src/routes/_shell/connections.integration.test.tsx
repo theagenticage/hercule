@@ -119,8 +119,9 @@ const GLASS_TYPE = {
 
 const buildPlugin = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
-  // The plugin's name differs from its type's name, because a row shows both:
-  // the type's display name, and the plugin under it.
+  // The plugin's name differs from its type's name, so a row shows both: the
+  // type's display name, and the plugin under it. A plugin named like its type
+  // is left out, which one test below checks.
   displayName: `${id} plugin`,
   hostApi: 1,
   capabilities: ["connections"],
@@ -412,6 +413,37 @@ describe("Connections", () => {
     // The line under the name holds only the plugin: no account, no topic, no separator.
     expect(readPageText(row)).toContain("glasshouse plugin");
     expect(readPageText(row)).not.toContain("·");
+  });
+
+  it("shows no account for an account with no name, which the type's name stands in for", async () => {
+    await openApp([{ ...UNNAMED, label: "Glasshouse", displayName: "" }]);
+
+    // The row has no account text to find it by, and it is the only row.
+    const row = (await screen.findByRole("button", { name: "Configure" })).closest("li");
+    if (row === null) throw new Error("Configure is in no row");
+    // The line under the name holds only the plugin: no empty account after a separator.
+    expect(readPageText(row)).toContain("glasshouse plugin");
+    expect(readPageText(row)).not.toContain("·");
+  });
+
+  it("leaves out a plugin named like its type, on its row and on its offer", async () => {
+    const api = stubApi({
+      ...buildController(() => [UNNAMED]),
+      "GET /api/v1/plugins": {
+        body: [{ ...buildPlugin("glasshouse", GLASS_TYPE), displayName: "Glasshouse" }],
+      },
+    });
+    await renderApp({ path: "/connections", api: api.fetch, token: "held" });
+
+    // The row shows the type's name once, and has no line under it.
+    const row = await findConnectionRow(UNNAMED);
+    expect(within(row).getAllByText("Glasshouse")).toHaveLength(1);
+    expect(readPageText(row)).not.toContain("·");
+    // The offer's line under the name holds only what setting the type up takes.
+    const offer = findGroupOffering(screen.getByRole("button", { name: "Connect" }), "Connect");
+    expect(readPageText(offer.querySelector<HTMLElement>("small"))).toBe(
+      "sign in with Glasshouse or paste a token",
+    );
   });
 
   it("shows both the name and the account once the connection is renamed", async () => {
@@ -727,9 +759,8 @@ describe("Connections > configuring a connection", () => {
       method: "PATCH",
       path: `/api/v1/connections/${PAPER.id}`,
     });
-    // The topic was not touched, so the connection keeps all its topics: the
-    // form shows only the first of `Code` and `Ops`, and sending it alone
-    // would drop the other.
+    // The topic was not touched, so no topics are sent, and the connection
+    // keeps both `Code` and `Ops`.
     expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({
       label: "work",
       config: { folder: "archive" },
@@ -763,7 +794,7 @@ describe("Connections > configuring a connection", () => {
     });
   });
 
-  it("keeps every topic when only the name changes", async () => {
+  it("keeps the other topics when the first one changes", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([PAPER], {
       [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
@@ -772,24 +803,29 @@ describe("Connections > configuring a connection", () => {
     await user.click(
       within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
     );
-    await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "office");
+    await user.clear(screen.getByLabelText("Topic"));
+    await user.type(screen.getByLabelText("Topic"), "Business");
     await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
     });
-    expect(listWrites(api)[0]?.body).toEqual({ label: "office", config: { folder: "inbox" } });
+    // The form shows only `Code`; `Ops` was set elsewhere and stays.
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "work",
+      labels: ["Business", "Ops"],
+      config: { folder: "inbox" },
+    });
   });
 
-  it("sends no topics once the user clears the topic", async () => {
+  it("removes only the first topic once the user clears it", async () => {
     const user = userEvent.setup();
-    const { api } = await openApp([SKY], {
-      [`PATCH /api/v1/connections/${SKY.id}`]: { body: SKY },
+    const { api } = await openApp([PAPER], {
+      [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
     });
 
     await user.click(
-      within(await findConnectionRow(SKY)).getByRole("button", { name: "Configure" }),
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
     );
     await user.clear(screen.getByLabelText("Topic"));
     await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
@@ -797,7 +833,11 @@ describe("Connections > configuring a connection", () => {
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
     });
-    expect(listWrites(api)[0]?.body).toEqual({ label: "personal", labels: [], config: {} });
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "work",
+      labels: ["Ops"],
+      config: { folder: "inbox" },
+    });
   });
 
   it("shows a rejected setting's error under that setting", async () => {
@@ -882,8 +922,9 @@ describe("Connections > a device flow", () => {
   const isCodeShown = (code: string) => () => screen.queryByText(code) !== null;
 
   /**
-   * Opens the Glasshouse setup and starts the device flow under a fake clock. The clock is faked only now, because
-   * user-event waits on timers that a fake clock never fires.
+   * Opens the Glasshouse setup and starts the device flow under a fake clock.
+   * The clock is faked only now, because user-event waits on timers that a
+   * fake clock never fires.
    */
   const startSignIn = async (extra: Readonly<Record<string, Handler>>) => {
     const user = userEvent.setup();

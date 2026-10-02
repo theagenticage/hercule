@@ -4,6 +4,7 @@ import { Button, Field, Input } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigFields,
+  buildTopicsUpdate,
   readConfigIssues,
   buildConfigPayload,
   queryKeys,
@@ -46,26 +47,26 @@ export function ConfigureConnection({
     buildConfigDraft(fields, connection.config),
   );
   const [label, setLabel] = useState(connection.label);
-  // The form edits only the first topic. A connection can have more, set
-  // through the CLI, and sending `labels` replaces them all, so `labels` is
-  // sent only when the user changed this one.
-  const loadedTopic = connection.labels[0] ?? "";
-  const [topic, setTopic] = useState(loadedTopic);
+  // The form shows only the first topic. Any topics after it, set through the
+  // CLI or the API, are kept when the user saves.
+  const [topic, setTopic] = useState(connection.labels[0] ?? "");
 
   const save = useMutation({
-    mutationFn: () =>
-      client.connection.update({
+    mutationFn: () => {
+      const labels = buildTopicsUpdate(connection.labels, topic);
+      return client.connection.update({
         params: { id: connection.id },
         payload: {
           label,
-          ...(topic === loadedTopic ? {} : { labels: topic === "" ? [] : [topic] }),
+          ...(labels === undefined ? {} : { labels }),
           // A type no longer in the binary has no schema to read its settings
           // against, so they are left exactly as they are stored.
           ...(type === undefined
             ? {}
             : { config: buildConfigPayload(fields, draft, connection.config) }),
         },
-      }),
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
@@ -92,7 +93,8 @@ export function ConfigureConnection({
       <Field id={`${connection.id}-label`} label="Name">
         <Input
           id={`${connection.id}-label`}
-          // The name is the only thing that tells two accounts of one type apart.
+          // The controller refuses an empty name, so the browser stops the
+          // save before it sends a request that would fail.
           required
           placeholder="work"
           value={label}
