@@ -191,9 +191,9 @@ const REFUSING_BRIDGE: Bridge = {
   folder: {
     pick: () => Promise.reject(buildBridgeCallError("folder.pick")),
   },
-  firstRun: {
-    read: () => Promise.reject(buildBridgeCallError("firstRun.read")),
-    write: () => Promise.reject(buildBridgeCallError("firstRun.write")),
+  firstRunProgress: {
+    read: () => Promise.reject(buildBridgeCallError("firstRunProgress.read")),
+    save: () => Promise.reject(buildBridgeCallError("firstRunProgress.save")),
   },
   link: {
     open: () => Promise.reject(buildBridgeCallError("link.open")),

@@ -267,7 +267,7 @@ const make = (file: string) =>
        * `null` when it keeps nothing for that controller: nothing was saved,
        * or it was saved for another controller URL.
        */
-      readFirstRun: Effect.sync((): FirstRunProgress | null =>
+      readFirstRunProgress: Effect.sync((): FirstRunProgress | null =>
         firstRun !== null && firstRun.controllerUrl === controllerUrl
           ? { putOff: firstRun.putOff }
           : null,
@@ -281,7 +281,7 @@ const make = (file: string) =>
        * controller URL is saved. Fails when the file cannot be written, and
        * then keeps what was saved before.
        */
-      saveFirstRun: (progress: FirstRunProgress | null) =>
+      saveFirstRunProgress: (progress: FirstRunProgress | null) =>
         runSave(
           Effect.gen(function* () {
             if (progress === null) {

@@ -161,26 +161,26 @@ describe("LocalController.find", () => {
     { _tag: "Unreachable" },
     { _tag: "NotController" },
     { _tag: "Redirected", targetOrigin: "http://127.0.0.1:5000" },
-  ])("returns Fresh, and saves nothing, when the check finds %j", async (outcome) => {
+  ])("returns NotFound, and saves nothing, when the check finds %j", async (outcome) => {
     fakes.check = () => outcome;
-    expect(await run(find)).toEqual({ _tag: "Fresh", problem: null });
+    expect(await run(find)).toEqual({ _tag: "NotFound", line: null });
     expect(calls).toEqual(["status", `check ${ORIGIN}`]);
   });
 
-  it("returns Fresh, and checks nothing, when the Home names no address", async () => {
+  it("returns NotFound, and checks nothing, when the Home names no address", async () => {
     fakes.status = Effect.succeed({ ...FRESH_REPORT, controllerUrl: null });
-    expect(await run(find)).toEqual({ _tag: "Fresh", problem: null });
+    expect(await run(find)).toEqual({ _tag: "NotFound", line: null });
     expect(calls).toEqual(["status"]);
   });
 
-  it("returns Fresh when there is no binary", async () => {
+  it("returns NotFound when there is no binary", async () => {
     fakes.status = Effect.fail(new BinaryNotFound({ message: "none" }));
-    expect(await run(find)).toEqual({ _tag: "Fresh", problem: null });
+    expect(await run(find)).toEqual({ _tag: "NotFound", line: null });
   });
 
-  it("returns Fresh with the line the status failed with", async () => {
+  it("returns NotFound with the line the status failed with", async () => {
     fakes.status = Effect.fail(new BinaryCommandFailed({ line: "launchctl failed." }));
-    expect(await run(find)).toEqual({ _tag: "Fresh", problem: "launchctl failed." });
+    expect(await run(find)).toEqual({ _tag: "NotFound", line: "launchctl failed." });
   });
 
   it("returns Runner, and checks nothing, when the Service Unit runs a runner", async () => {
@@ -227,8 +227,8 @@ describe("LocalController.start", () => {
     fakes.check = () => ({ _tag: "Unreachable" });
     expect(await run(start, "31 seconds")).toEqual({
       _tag: "NoAnswer",
-      address: ORIGIN,
-      logsDir: LOGS,
+      origin: ORIGIN,
+      logsFolder: LOGS,
     });
     // A check at the start, then one each half second until 30 seconds.
     expect(calls.filter((call) => call.startsWith("check"))).toHaveLength(60);
@@ -273,28 +273,28 @@ describe("LocalController.start", () => {
     expect(await run(start)).toEqual({ _tag: "NotInstalled" });
   });
 
-  it("returns StartError with the line the status failed with", async () => {
+  it("returns StartFailed with the line the status failed with", async () => {
     fakes.status = Effect.fail(new BinaryCommandFailed({ line: "launchctl failed." }));
-    expect(await run(start)).toEqual({ _tag: "StartError", line: "launchctl failed." });
+    expect(await run(start)).toEqual({ _tag: "StartFailed", line: "launchctl failed." });
   });
 
-  it("returns StartError, and installs nothing, when the login shell's PATH cannot be read", async () => {
+  it("returns StartFailed, and installs nothing, when the login shell's PATH cannot be read", async () => {
     fakes.loginShellPath = Effect.fail(
       new LoginShellPathError({ reason: "Your login shell hangs." }),
     );
-    expect(await run(start)).toEqual({ _tag: "StartError", line: "Your login shell hangs." });
+    expect(await run(start)).toEqual({ _tag: "StartFailed", line: "Your login shell hangs." });
     expect(calls).toEqual(["status", "readPath"]);
   });
 
-  it("returns StartError with the line the install failed with", async () => {
+  it("returns StartFailed with the line the install failed with", async () => {
     fakes.install = Effect.fail(new BinaryCommandFailed({ line: "Port 4937 is in use." }));
-    expect(await run(start)).toEqual({ _tag: "StartError", line: "Port 4937 is in use." });
+    expect(await run(start)).toEqual({ _tag: "StartFailed", line: "Port 4937 is in use." });
   });
 
-  it("returns StartError, and checks nothing, when the install reports no address", async () => {
+  it("returns StartFailed, and checks nothing, when the install reports no address", async () => {
     fakes.install = Effect.succeed({ ...CONTROLLER_REPORT, controllerUrl: null });
     expect(await run(start)).toEqual({
-      _tag: "StartError",
+      _tag: "StartFailed",
       line: "Hercule was started, but its config.toml names no address the app can open. Run `hercule service status` in Terminal to see why.",
     });
     expect(calls).not.toContain(`check ${ORIGIN}`);
@@ -304,16 +304,16 @@ describe("LocalController.start", () => {
     fakes.install = Effect.never;
     expect(await run(start, "90 seconds")).toEqual({
       _tag: "NoAnswer",
-      address: ORIGIN,
-      logsDir: LOGS,
+      origin: ORIGIN,
+      logsFolder: LOGS,
     });
   });
 
-  it("stops an install that runs for 90 seconds, and returns StartError with no address known", async () => {
+  it("stops an install that runs for 90 seconds, and returns StartFailed with no address known", async () => {
     fakes.status = Effect.succeed({ ...FRESH_REPORT, controllerUrl: null });
     fakes.install = Effect.never;
     expect(await run(start, "90 seconds")).toEqual({
-      _tag: "StartError",
+      _tag: "StartFailed",
       line: "`hercule service install` did not finish within 90 seconds, so the app stopped it.",
     });
   });

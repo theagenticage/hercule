@@ -11,7 +11,7 @@ import { InstalledBinary } from "./installed-binary";
 /**
  * Returns the setup token of the saved controller, from the first of:
  *
- * - the setup address the user pasted for it, returned once;
+ * - the setup URL the user pasted for it, returned once;
  * - `hercule setup-url` on this Mac, when the address it prints is the saved
  *   controller's.
  *

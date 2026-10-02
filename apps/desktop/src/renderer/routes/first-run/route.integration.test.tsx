@@ -161,12 +161,12 @@ describe("the welcome, with no controller saved", () => {
   it.each<[string, () => Promise<LocalControllerStartOutcome>, string]>([
     [
       "NoAnswer",
-      () => Promise.resolve({ _tag: "NoAnswer", address: LOCAL_URL, logsDir: "~/.hercule/logs" }),
+      () => Promise.resolve({ _tag: "NoAnswer", origin: LOCAL_URL, logsFolder: "~/.hercule/logs" }),
       "The app started Hercule in the background, but it never answered.",
     ],
     [
-      "StartError",
-      () => Promise.resolve({ _tag: "StartError", line: "launchctl: service not found" }),
+      "StartFailed",
+      () => Promise.resolve({ _tag: "StartFailed", line: "launchctl: service not found" }),
       "launchctl: service not found",
     ],
     [
@@ -199,7 +199,7 @@ describe("the welcome, with no controller saved", () => {
     const user = userEvent.setup();
     const fake = createFakeBridge({
       start: () =>
-        Promise.resolve({ _tag: "NoAnswer", address: LOCAL_URL, logsDir: "~/.hercule/logs" }),
+        Promise.resolve({ _tag: "NoAnswer", origin: LOCAL_URL, logsFolder: "~/.hercule/logs" }),
     });
     await renderApp(fake);
     await user.click(await screen.findByRole("button", { name: "Open the office" }));

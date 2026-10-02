@@ -87,9 +87,9 @@ const bridge: Bridge = {
   folder: {
     pick: () => invokeChannel("folder.pick"),
   },
-  firstRun: {
-    read: () => invokeChannel("firstRun.read"),
-    write: (progress) => invokeChannel("firstRun.write", progress),
+  firstRunProgress: {
+    read: () => invokeChannel("firstRunProgress.read"),
+    save: (progress) => invokeChannel("firstRunProgress.save", progress),
   },
   link: {
     open: (request) => invokeChannel("link.open", request),

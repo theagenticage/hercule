@@ -42,8 +42,8 @@ describe("the connect screen", () => {
 
   it.each<[string, ControllerUrlSaveOutcome, string]>([
     [
-      "InvalidUrl",
-      { _tag: "InvalidUrl" },
+      "InvalidAddress",
+      { _tag: "InvalidAddress" },
       "Enter the controller's address, such as http://127.0.0.1:4937.",
     ],
     [

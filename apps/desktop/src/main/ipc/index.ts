@@ -68,11 +68,11 @@ const IPC_HANDLERS: {
   "setupToken.read": () => FirstRun.use((firstRun) => firstRun.readSetupToken),
   "macUser.read": () => Effect.sync(() => ({ username: userInfo().username })),
   "folder.pick": () => FirstRun.use((firstRun) => firstRun.pickFolder),
-  "firstRun.read": () => AppSettings.use((settings) => settings.readFirstRun),
+  "firstRunProgress.read": () => AppSettings.use((settings) => settings.readFirstRunProgress),
   // The settings file is in the app's own folder, so a write that fails is a
   // defect.
-  "firstRun.write": (progress) =>
-    AppSettings.use((settings) => settings.saveFirstRun(progress)).pipe(
+  "firstRunProgress.save": (progress) =>
+    AppSettings.use((settings) => settings.saveFirstRunProgress(progress)).pipe(
       Effect.catchTag("PlatformError", Effect.die),
     ),
   "link.open": ({ url }) => openInBrowser(url),

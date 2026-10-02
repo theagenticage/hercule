@@ -53,7 +53,7 @@ const KEPT_BRIDGE_READ_OPTIONS = {
 export const firstRunQuery = (bridge: Bridge) =>
   queryOptions({
     queryKey: ["first-run"],
-    queryFn: () => bridge.firstRun.read(),
+    queryFn: () => bridge.firstRunProgress.read(),
     ...KEPT_BRIDGE_READ_OPTIONS,
   });
 

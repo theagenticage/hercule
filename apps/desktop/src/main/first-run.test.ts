@@ -52,7 +52,7 @@ describe("FirstRun", () => {
       ),
     );
     expect(outcomes).toEqual({
-      found: { _tag: "Fresh", problem: null },
+      found: { _tag: "NotFound", line: null },
       started: { _tag: "NotInstalled" },
       picked: { _tag: "Cancelled" },
     });

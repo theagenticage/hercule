@@ -89,7 +89,7 @@ const decideFindState = (find: UseQueryResult<LocalControllerFindOutcome>): Welc
       return { kind: "searching" };
     case "Runner":
       return { kind: "runner", running: find.data.running };
-    case "Fresh":
+    case "NotFound":
       return { kind: "fresh" };
   }
 };
@@ -115,10 +115,10 @@ const decideStartState = (
       return { kind: "runner", running: outcome.running };
     case "NotInstalled":
       return { kind: "not-installed" };
-    case "StartError":
+    case "StartFailed":
       return { kind: "start-error", line: outcome.line };
     case "NoAnswer":
-      return { kind: "start-failed", address: outcome.address, logsDir: outcome.logsDir };
+      return { kind: "start-failed", address: outcome.origin, logsDir: outcome.logsFolder };
     // Something answered at Hercule's address but the connect check refused
     // it, so the line is the one the connect screen shows for the same check.
     case "Redirected":

@@ -37,7 +37,7 @@ export function DoneCard({
   const { project } = recap;
 
   const finish = useMutation({
-    mutationFn: () => bridge.firstRun.write(null),
+    mutationFn: () => bridge.firstRunProgress.save(null),
     onSuccess: async () => {
       // The entry guard reads the record from the cache, and must find the first run over.
       queryClient.setQueryData(firstRunQuery(bridge).queryKey, null);

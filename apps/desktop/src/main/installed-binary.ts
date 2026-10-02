@@ -12,6 +12,7 @@
  */
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -66,7 +67,7 @@ export class BinaryCommandFailed extends Data.TaggedError("BinaryCommandFailed")
 }> {}
 
 /** How long `status` and `setup-url` may run: each reads a few files and asks launchd once. */
-const QUICK_COMMAND_LIMIT = "10 seconds";
+const QUICK_COMMAND_TIME_LIMIT = "10 seconds";
 
 /** The exit code of `hercule setup-url` when the Hercule Home holds no setup URL. */
 const NO_SETUP_URL_EXIT_CODE = 3;
@@ -169,14 +170,19 @@ export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<Instal
       return report.value;
     });
 
-  /** Fails with BinaryCommandFailed when `command` runs longer than 10 seconds, and stops it. */
+  /**
+   * Fails with BinaryCommandFailed when `command` runs longer than
+   * QUICK_COMMAND_TIME_LIMIT, and stops it.
+   */
   const limitQuickCommand = <A, E>(name: string, command: Effect.Effect<A, E>) =>
     command.pipe(
       Effect.timeoutOrElse({
-        duration: QUICK_COMMAND_LIMIT,
+        duration: QUICK_COMMAND_TIME_LIMIT,
         orElse: () =>
           Effect.fail(
-            new BinaryCommandFailed({ line: `\`${name}\` did not finish within 10 seconds.` }),
+            new BinaryCommandFailed({
+              line: `\`${name}\` did not finish within ${String(Duration.toSeconds(QUICK_COMMAND_TIME_LIMIT))} seconds.`,
+            }),
           ),
       }),
     );

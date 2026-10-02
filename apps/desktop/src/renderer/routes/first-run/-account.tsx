@@ -37,7 +37,7 @@ const TOKEN_REFUSED =
  *    keeps the login token from the reply, so the user is signed in.
  * 2. `settings.update`, which marks the web app's onboarding steps done, so
  *    the web app never asks for them again.
- * 3. `firstRun.write`, which tells main a first run is in progress, so a
+ * 3. `firstRunProgress.save`, which tells main a first run is in progress, so a
  *    relaunch resumes it.
  *
  * Then it reads everything the next steps show, and only then marks setup
@@ -73,7 +73,7 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
         payload: { user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] } },
       });
       const progress: FirstRunProgress = { putOff: [] };
-      await bridge.firstRun.write(progress);
+      await bridge.firstRunProgress.save(progress);
       queryClient.setQueryData(firstRunQuery(bridge).queryKey, progress);
       await ensureFirstRunData(queryClient, client, bridge);
     },

@@ -42,7 +42,7 @@ export const parseControllerUrl = (text: string): string | null => {
 
 /**
  * A controller address the user typed: the controller's origin, and the
- * setup token when the address is a setup address.
+ * setup token when the address is a setup URL.
  */
 export interface ControllerAddress {
   readonly origin: string;
@@ -54,11 +54,11 @@ export interface ControllerAddress {
  *
  * - a controller's origin, as parseControllerUrl accepts it. Its setup token
  *   is null;
- * - a setup address, as `hercule setup-url` prints it: such an origin
+ * - a setup URL, as `hercule setup-url` prints it: such an origin
  *   followed by `/setup?token=<token>`, with nothing else and a token that
  *   is not empty.
  *
- * Returns null for any other text. The setup address is the one exception to
+ * Returns null for any other text. The setup URL is the one exception to
  * the rule that a controller is typed as its origin, because it is what the
  * user copies from the controller's machine to set it up from this one.
  */
@@ -70,12 +70,12 @@ export const parseControllerAddress = (text: string): ControllerAddress | null =
   const setupToken = url.searchParams.get("token");
   // The full URL is the origin, the path and the query exactly when it has no
   // user name, password or fragment, not even an empty one, "#".
-  const isSetupAddress =
+  const isSetupUrl =
     url.href === `${url.origin}/setup${url.search}` &&
     [...url.searchParams.keys()].join() === "token" &&
     setupToken !== null &&
     setupToken !== "";
-  return isSetupAddress ? { origin: url.origin, setupToken } : null;
+  return isSetupUrl ? { origin: url.origin, setupToken } : null;
 };
 
 /**
@@ -94,13 +94,13 @@ export class ControllerConnection extends Context.Service<
     /**
      * Checks the controller at the address the user typed, `input`, and
      * returns the outcome, with the origin parsed from `input` in every
-     * outcome but `InvalidUrl`:
+     * outcome but `InvalidAddress`:
      *
-     * - `InvalidUrl` when `input` is not a controller address; see
+     * - `InvalidAddress` when `input` is not a controller address; see
      *   parseControllerAddress. Nothing is requested;
      * - `Saved` when a controller answered, set up or not. The URL is saved
      *   as `saveAndReload` saves it. When the controller is not set up and
-     *   `input` is a setup address, its token is kept in memory, for
+     *   `input` is a setup URL, its token is kept in memory, for
      *   `takePastedSetupToken`;
      * - the check's outcome otherwise; see ControllerCheckOutcome.
      *
@@ -127,7 +127,7 @@ export class ControllerConnection extends Context.Service<
     readonly saveAndReload: (origin: string) => Effect.Effect<void>;
 
     /**
-     * Returns the token of the setup address the user pasted for `origin`,
+     * Returns the token of the setup URL the user pasted for `origin`,
      * and forgets it, so that it is returned once. Returns null when the
      * user has pasted none for `origin` since main started.
      */
@@ -147,9 +147,9 @@ export const makeControllerConnectionLayer = (
       const settings = yield* AppSettings;
       const storedToken = yield* StoredToken;
       const window = yield* MainWindow;
-      // The setup address the user pasted last. It is kept in memory only,
+      // The setup URL the user pasted last. It is kept in memory only,
       // so it outlives the window's reload, and is gone when main quits.
-      let pastedSetupAddress: { readonly origin: string; readonly token: string } | null = null;
+      let pastedSetupUrl: { readonly origin: string; readonly token: string } | null = null;
 
       /** Runs the connect check on `origin`, with the check imported when it is first needed. */
       const check = (origin: string): Effect.Effect<ControllerCheckOutcome> =>
@@ -183,12 +183,12 @@ export const makeControllerConnectionLayer = (
         save: (input) =>
           Effect.gen(function* () {
             const address = parseControllerAddress(input);
-            if (address === null) return { _tag: "InvalidUrl" } as const;
+            if (address === null) return { _tag: "InvalidAddress" } as const;
             const { origin, setupToken } = address;
             const outcome = yield* check(origin);
             if (!isAnswering(outcome)) return { ...outcome, origin };
             if (outcome._tag === "SetupIncomplete" && setupToken !== null) {
-              pastedSetupAddress = { origin, token: setupToken };
+              pastedSetupUrl = { origin, token: setupToken };
             }
             yield* saveAndReload(origin);
             return { _tag: "Saved", origin } as const;
@@ -197,9 +197,9 @@ export const makeControllerConnectionLayer = (
         saveAndReload,
         takePastedSetupToken: (origin) =>
           Effect.sync(() => {
-            if (pastedSetupAddress?.origin !== origin) return null;
-            const { token } = pastedSetupAddress;
-            pastedSetupAddress = null;
+            if (pastedSetupUrl?.origin !== origin) return null;
+            const { token } = pastedSetupUrl;
+            pastedSetupUrl = null;
             return token;
           }),
       });

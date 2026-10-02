@@ -33,11 +33,11 @@ describe("the requests of the renderer-to-main channels", () => {
     { name: "localController.find", valid: undefined, invalid: "now" },
     { name: "localController.start", valid: undefined, invalid: "now" },
     {
-      name: "firstRun.write",
+      name: "firstRunProgress.save",
       valid: { putOff: ["providers", "github"] },
       invalid: { putOff: ["tour"] },
     },
-    { name: "firstRun.write", valid: null, invalid: { putOff: "github" } },
+    { name: "firstRunProgress.save", valid: null, invalid: { putOff: "github" } },
     // Only a web page opens in the browser.
     {
       name: "link.open",

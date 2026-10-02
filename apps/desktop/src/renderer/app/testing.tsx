@@ -99,7 +99,7 @@ export const createFakeBridge = ({
   token = null,
   save = (url) => Promise.resolve({ _tag: "Saved", origin: url }),
   runnerIdentities = {},
-  find = () => Promise.resolve({ _tag: "Fresh", problem: null }),
+  find = () => Promise.resolve({ _tag: "NotFound", line: null }),
   start = () => Promise.resolve({ _tag: "NotInstalled" }),
   setupToken = { _tag: "PasteNeeded" },
   pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
@@ -182,9 +182,9 @@ export const createFakeBridge = ({
       folder: {
         pick: pickFolder,
       },
-      firstRun: {
+      firstRunProgress: {
         read: () => Promise.resolve(keptFirstRun),
-        write: (next) => {
+        save: (next) => {
           firstRunWrites.push(next);
           keptFirstRun = next;
           return Promise.resolve(undefined);

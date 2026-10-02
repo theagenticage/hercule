@@ -178,7 +178,7 @@ describe("ControllerConnection", () => {
 
     it("refuses an invalid URL without a request, and saves nothing", async () => {
       expect(await save(`${origin}/api`)).toEqual({
-        outcome: { _tag: "InvalidUrl" },
+        outcome: { _tag: "InvalidAddress" },
         tokenWrites: [],
         reloads: 0,
       });
@@ -199,7 +199,7 @@ describe("ControllerConnection", () => {
       expect(readFileObject()).toEqual({ controllerUrl: origin });
     });
 
-    it("saves the setup address of a controller that is not set up, and keeps its token once", async () => {
+    it("saves the setup URL of a controller that is not set up, and keeps its token once", async () => {
       setUp = false;
       const { outcome, reloads } = await runOnConnection((connection) =>
         Effect.gen(function* () {
@@ -217,7 +217,7 @@ describe("ControllerConnection", () => {
       expect(readFileObject()).toEqual({ controllerUrl: origin });
     });
 
-    it("saves the setup address of a controller that is set up, without its token", async () => {
+    it("saves the setup URL of a controller that is set up, without its token", async () => {
       const { outcome } = await runOnConnection((connection) =>
         Effect.gen(function* () {
           const saved = yield* connection.save(`${origin}/setup?token=abc`);

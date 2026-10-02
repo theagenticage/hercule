@@ -87,7 +87,7 @@ export function ControllerFirstRun({
   const putOff = useMutation({
     mutationFn: async (step: FirstRunStep) => {
       const progress = { putOff: [...new Set([...data.putOff, step])] };
-      await bridge.firstRun.write(progress);
+      await bridge.firstRunProgress.save(progress);
       return progress;
     },
     onSuccess: (progress) => {

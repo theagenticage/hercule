@@ -112,11 +112,11 @@ export const makeLocalControllerLayer = (
       const loginShell = yield* LoginShell;
       const oneAtATime = yield* Semaphore.make(1);
       // The logs folder the binary reported last, from any command.
-      let logsDir: string | null = null;
+      let logsFolder: string | null = null;
 
       /** Remembers the logs folder `report` names, and returns `report`. */
       const rememberLogsFolder = (report: ServiceReport): ServiceReport => {
-        logsDir = report.logsDir;
+        logsFolder = report.logsDir;
         return report;
       };
 
@@ -138,16 +138,16 @@ export const makeLocalControllerLayer = (
         const status = yield* binary.readStatus.pipe(Effect.map(rememberLogsFolder), Effect.result);
         if (status._tag === "Failure") {
           return {
-            _tag: "Fresh",
-            problem: status.failure._tag === "BinaryNotFound" ? null : status.failure.line,
+            _tag: "NotFound",
+            line: status.failure._tag === "BinaryNotFound" ? null : status.failure.line,
           } as const;
         }
         const { role, running, controllerUrl } = status.success;
         if (role === "runner") return { _tag: "Runner", running } as const;
-        if (controllerUrl === null) return { _tag: "Fresh", problem: null } as const;
+        if (controllerUrl === null) return { _tag: "NotFound", line: null } as const;
         return isAnswering(yield* connection.check(controllerUrl))
           ? ({ _tag: "Answering", origin: controllerUrl } as const)
-          : ({ _tag: "Fresh", problem: null } as const);
+          : ({ _tag: "NotFound", line: null } as const);
       });
 
       /**
@@ -155,7 +155,7 @@ export const makeLocalControllerLayer = (
        * nothing answers, for up to 30 seconds, and saves its URL once it
        * answers. Returns `Saved`; `NoAnswer` when nothing answered in time;
        * the check's outcome when something answered that is not a
-       * controller the app can connect to; or `StartError` when `report`
+       * controller the app can connect to; or `StartFailed` when `report`
        * names no controller.
        */
       const saveWhenAnswering = (
@@ -165,7 +165,7 @@ export const makeLocalControllerLayer = (
           const origin = report.controllerUrl;
           if (origin === null) {
             return {
-              _tag: "StartError",
+              _tag: "StartFailed",
               line: "Hercule was started, but its config.toml names no address the app can open. Run `hercule service status` in Terminal to see why.",
             } as const;
           }
@@ -180,7 +180,7 @@ export const makeLocalControllerLayer = (
             }),
           );
           if (outcome._tag === "Unreachable") {
-            return { _tag: "NoAnswer", address: origin, logsDir: report.logsDir } as const;
+            return { _tag: "NoAnswer", origin, logsFolder: report.logsDir } as const;
           }
           if (!isAnswering(outcome)) return { ...outcome, origin };
           yield* connection.saveAndReload(origin);
@@ -193,7 +193,7 @@ export const makeLocalControllerLayer = (
         if (status._tag === "Failure") {
           return status.failure._tag === "BinaryNotFound"
             ? ({ _tag: "NotInstalled" } as const)
-            : ({ _tag: "StartError", line: status.failure.line } as const);
+            : ({ _tag: "StartFailed", line: status.failure.line } as const);
         }
         const { role, running } = status.success;
         // Installing over a runner would restart it and end its sessions.
@@ -204,7 +204,7 @@ export const makeLocalControllerLayer = (
 
         const path = yield* loginShell.readPath.pipe(Effect.result);
         if (path._tag === "Failure") {
-          return { _tag: "StartError", line: path.failure.reason } as const;
+          return { _tag: "StartFailed", line: path.failure.reason } as const;
         }
         const installed = yield* binary
           .install(path.success)
@@ -216,18 +216,18 @@ export const makeLocalControllerLayer = (
         if (installed._tag === "Failure") {
           return installed.failure._tag === "BinaryNotFound"
             ? ({ _tag: "NotInstalled" } as const)
-            : ({ _tag: "StartError", line: installed.failure.line } as const);
+            : ({ _tag: "StartFailed", line: installed.failure.line } as const);
         }
         if (Option.isNone(installed.success)) {
           // The command hung and was stopped, so it reported nothing; the
           // Home's address is the one the status reported before.
-          const address = status.success.controllerUrl;
-          return address === null
+          const origin = status.success.controllerUrl;
+          return origin === null
             ? ({
-                _tag: "StartError",
+                _tag: "StartFailed",
                 line: `\`hercule service install\` did not finish within ${String(Duration.toSeconds(INSTALL_TIME_LIMIT))} seconds, so the app stopped it.`,
               } as const)
-            : ({ _tag: "NoAnswer", address, logsDir: status.success.logsDir } as const);
+            : ({ _tag: "NoAnswer", origin, logsFolder: status.success.logsDir } as const);
         }
         const report = installed.success.value;
         if (report.role === "runner") return { _tag: "Runner", running: report.running } as const;
@@ -246,7 +246,7 @@ export const makeLocalControllerLayer = (
         ),
         start: oneAtATime.withPermit(Effect.andThen(refuseWhenControllerSaved, startController)),
         showLogsFolder: Effect.suspend(() =>
-          logsDir === null ? Effect.fail(new NoLogsFolderSeen()) : openFolder(logsDir),
+          logsFolder === null ? Effect.fail(new NoLogsFolderSeen()) : openFolder(logsFolder),
         ),
       });
     }),

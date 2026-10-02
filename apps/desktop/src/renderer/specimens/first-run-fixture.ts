@@ -254,7 +254,7 @@ interface MainAnswers {
 const createScriptedBridge = ({
   controllerUrl = null,
   token = null,
-  find = () => Promise.resolve({ _tag: "Fresh", problem: null }),
+  find = () => Promise.resolve({ _tag: "NotFound", line: null }),
   start = () => hang(),
   setupToken = { _tag: "Token", token: "setup-token" },
   pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
@@ -277,9 +277,9 @@ const createScriptedBridge = ({
     setupToken: { read: () => Promise.resolve(setupToken) },
     macUser: { read: () => Promise.resolve({ username: "rogier" }) },
     folder: { pick: pickFolder },
-    firstRun: {
+    firstRunProgress: {
       read: () => Promise.resolve(kept),
-      write: (next) => {
+      save: (next) => {
         kept = next;
         return done();
       },
@@ -506,13 +506,13 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
     buildWelcomeScene(
       {
         start: () =>
-          Promise.resolve({ _tag: "NoAnswer", address: LOCAL_URL, logsDir: "~/.hercule/logs" }),
+          Promise.resolve({ _tag: "NoAnswer", origin: LOCAL_URL, logsFolder: "~/.hercule/logs" }),
       },
       () => clickButton("Open the office"),
     ),
   "welcome-start-error": () =>
     buildWelcomeScene(
-      { start: () => Promise.resolve({ _tag: "StartError", line: START_ERROR_LINE }) },
+      { start: () => Promise.resolve({ _tag: "StartFailed", line: START_ERROR_LINE }) },
       () => clickButton("Open the office"),
     ),
   "welcome-not-installed": () =>

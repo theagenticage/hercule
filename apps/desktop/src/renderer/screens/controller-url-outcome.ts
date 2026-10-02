@@ -15,7 +15,7 @@ export const describeControllerUrlOutcome = (outcome: ControllerUrlSaveOutcome):
   switch (outcome._tag) {
     case "Saved":
       return null;
-    case "InvalidUrl":
+    case "InvalidAddress":
       return `Enter the controller's address, such as ${LOCAL_CONTROLLER_URL}.`;
     case "Unreachable":
       return `Could not reach ${outcome.origin}. Check that the controller is running.`;
