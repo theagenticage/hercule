@@ -152,6 +152,19 @@ export {
   type RepositoryDraft,
 } from "./new-project";
 export { completeSetup } from "./setup";
+export {
+  buildFirstRunFacts,
+  buildRoomContents,
+  decideFirstRunStep,
+  FIRST_RUN_STEPS,
+  TRIAGE_READING,
+  TRIAGE_WITHOUT_CONNECTIONS,
+  type FirstRunFacts,
+  type FirstRunReads,
+  type FirstRunStep,
+  type RoomContents,
+  type RoomWing,
+} from "./first-run";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
@@ -286,6 +299,11 @@ export {
 } from "./threads/workspaces";
 export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
+export {
+  chooseStarterThreads,
+  STARTER_THREADS,
+  type StarterThread,
+} from "./threads/starter-threads";
 export {
   buildDraftConfig,
   computeInstanceDefaults,
